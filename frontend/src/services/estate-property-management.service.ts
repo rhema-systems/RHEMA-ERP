@@ -65,20 +65,32 @@ export interface EstateSaleCompletionResult {
   assetId: string;
   assetCode: string;
   purchaserCustomerId: string;
-  invoiceId: string;
-  invoiceNumber: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
   message: string;
 }
 
 export interface EstateSalePaymentStatusResult {
-  invoiceId: string;
-  invoiceNumber: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
   invoiceStatus: string;
   totalAmount: number;
   paidAmount: number;
   balanceAmount: number;
   paymentStatus: string;
   ownershipTransferStatus: string;
+  message: string;
+}
+
+export interface EstatePremiumChargeInvoiceResult {
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  invoiceStatus: string;
+  amount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  currencyCode: string;
+  paymentStatus: string;
   message: string;
 }
 
@@ -196,6 +208,24 @@ class EstatePropertyManagementService {
   ): Promise<EstateSalePaymentStatusResult> {
     return apiService.post<EstateSalePaymentStatusResult>(
       `/estate/property-management/ar-billing/sale/${encodeURIComponent(procedureCaseId)}/sync-payment-status`,
+      {},
+    );
+  }
+
+  async createPremiumChargeInvoice(
+    procedureCaseId: string,
+  ): Promise<EstatePremiumChargeInvoiceResult> {
+    return apiService.post<EstatePremiumChargeInvoiceResult>(
+      `/estate/property-management/ar-billing/premium/${encodeURIComponent(procedureCaseId)}/invoice`,
+      {},
+    );
+  }
+
+  async syncPremiumChargePaymentStatus(
+    procedureCaseId: string,
+  ): Promise<EstatePremiumChargeInvoiceResult> {
+    return apiService.post<EstatePremiumChargeInvoiceResult>(
+      `/estate/property-management/ar-billing/premium/${encodeURIComponent(procedureCaseId)}/sync-payment-status`,
       {},
     );
   }

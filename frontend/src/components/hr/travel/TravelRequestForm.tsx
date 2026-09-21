@@ -22,9 +22,9 @@ import {
 } from '@/components/hr/employee/tabs/fields';
 import { countryService } from '@/services/hr/country.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { travelService } from '@/services/hr/travel.service';
 import type { StaffTravelRequest } from '@/types/hr/travel';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 /**
  * ⚠ All ten, not the four this list used to carry. `StaffTravelType` in C# has ten members and
@@ -136,11 +136,6 @@ export function TravelRequestForm({
   });
 
   // Only the desk chooses a unit — an employee's own trip is charged to their own unit server-side.
-  const { data: units } = useQuery({
-    queryKey: ['organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-    enabled: isDesk,
-  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -191,10 +186,6 @@ export function TravelRequestForm({
         label: `${c.currencyCode} — ${c.currencyName}`,
       })),
     [currencies],
-  );
-  const unitOptions = useMemo(
-    () => (units ?? []).map((u) => ({ value: u.id, label: u.name })),
-    [units],
   );
 
   const onSubmit = async (values: FormValues) => {
@@ -385,14 +376,7 @@ export function TravelRequestForm({
           </FieldRow>
 
           {isDesk && (
-            <SelectField
-              form={form}
-              name="organizationUnitId"
-              label="Organisation unit"
-              options={unitOptions}
-              allowEmpty
-              emptyLabel="Not specified"
-            />
+            <OrganizationUnitPickerField form={form} name="organizationUnitId" label="Organisation unit" allowEmpty emptyLabel="Not specified" />
           )}
 
           <SwitchField

@@ -23,7 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { CalendarPlus, CalendarRange, Coins, TreePalm } from 'lucide-react';
+import {
+  CalendarDays,
+  CalendarPlus,
+  CalendarRange,
+  Coins,
+  TreePalm,
+} from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { leaveService } from '@/services/hr/leave.service';
 import { LEAVE_STATUS_BADGE } from '@/components/me/leave/leave-status';
@@ -60,6 +66,11 @@ export default function MyLeavePage() {
         backHref="/me"
         actions={
           <>
+            <Button variant="outline" asChild>
+              <Link href="/me/leave/calendar">
+                <CalendarDays className="mr-2 h-4 w-4" /> Calendar
+              </Link>
+            </Button>
             <Button variant="outline" asChild>
               <Link href="/me/leave/planner">
                 <CalendarRange className="mr-2 h-4 w-4" /> Planner

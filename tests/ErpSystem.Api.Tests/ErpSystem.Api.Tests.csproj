@@ -348,6 +348,11 @@
     <Compile Include="Services\Finance\ExchangeRateScheduleLifecycleTests.cs" />
     <Compile Include="Services\Finance\FinanceAdHocReportBuilderTests.cs" />
     <Compile Include="Services\HR\PayrollJournalPostingTransactionTests.cs" />
+    <!-- HR -> Finance posting (HR finish plan lane 8): the HR consumer contract on FIN-INT-001. Both
+         classes are in the Finance integration gate's api_filter; this project disables implicit
+         compile items, so a file that is not listed here silently vanishes from the gate. -->
+    <Compile Include="Services\HR\HrFinancePostingAdapterTests.cs" />
+    <Compile Include="Services\HR\HrFinancePostingCatalogueTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />
     <Compile Include="Services\Finance\AllocationRunBatchServiceTests.cs" />

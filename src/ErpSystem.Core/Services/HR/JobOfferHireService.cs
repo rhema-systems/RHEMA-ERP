@@ -1,4 +1,5 @@
 using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR;
@@ -7,6 +8,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.HR.Recruitment;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -29,6 +31,7 @@ public class JobOfferService : IJobOfferService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly ILogger<JobOfferService> _logger;
     private readonly IEmailService _email;
     private readonly ITemplatedEmailService _templatedEmail;
@@ -44,6 +47,7 @@ public class JobOfferService : IJobOfferService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IPositionNamedSetService namedSets,
         ILogger<JobOfferService> logger,
         IEmailService email,
         ITemplatedEmailService templatedEmail,
@@ -58,6 +62,7 @@ public class JobOfferService : IJobOfferService
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider     = currentUserProvider;
         _unitOfWork              = unitOfWork;
+        _namedSets               = namedSets;
         _logger                  = logger;
         _email                   = email;
         _templatedEmail          = templatedEmail;
@@ -188,6 +193,35 @@ public class JobOfferService : IJobOfferService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <inheritdoc />
+    public async Task<PagedResult<JobOfferSummaryDto>> GetPagedSummaryAsync(
+        int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    {
+        (pageNumber, pageSize) = PagingGuard.Clamp(pageNumber, pageSize);
+
+        var tenantId = GetTenantId();
+        var query = _offerRepository.GetQueryable().Where(o => o.TenantId == tenantId);
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .Include(o => o.Application).ThenInclude(a => a.JobCandidate)
+            .Include(o => o.Application).ThenInclude(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(o => o.PreparedBy)
+            .Include(o => o.ApprovedBy)
+            .OrderByDescending(o => o.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<JobOfferSummaryDto>
+        {
+            Items = items.ToSummaryDtoList().ToList(),
+            TotalCount = totalCount,
+            Page = pageNumber,
+            PageSize = pageSize,
+        };
+    }
+
     public async Task<IEnumerable<JobOfferSummaryDto>> GetByStatusAsync(JobOfferStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -212,6 +246,25 @@ public class JobOfferService : IJobOfferService
         var application = await _applicationRepository.GetForOfferSeedingAsync(createDto.JobApplicationId);
         if (application == null || application.TenantId != current)
             throw new ArgumentException($"Application '{createDto.JobApplicationId}' not found.");
+
+        // ── G-8.4 (2026-09-15): the one step that did not gate on the step before ──────────────
+        // Offer creation validated only that the application resolved to a vacancy and a position —
+        // not its status. So *Extend an offer* appeared on a brand-new, unscored, un-interviewed
+        // application, and raising one there succeeded. The system guide records this as a business
+        // question rather than a plain defect, and it is: a senior hire brought in through a search
+        // firm legitimately skips the funnel, and a rule requiring Shortlisted-then-Interviewed
+        // would refuse real work.
+        //
+        // So the flexibility is KEPT, and only the unambiguous case is refused: an application that
+        // has been rejected or withdrawn. Offering terms to somebody you have turned down, or who
+        // has walked away, is not flexibility — it is a mistake, and it was silently accepted.
+        // A Hired application is refused too: they already have terms.
+        if (application.Status is ApplicationStatus.Rejected
+                               or ApplicationStatus.Withdrawn
+                               or ApplicationStatus.Hired)
+            throw new InvalidOperationException(
+                $"This application is {application.Status}, so an offer cannot be raised against it. " +
+                "Reopen it from the decision bar first if that was recorded in error.");
 
         var vacancy  = application.JobVacancy;
         var position = vacancy?.Position;
@@ -260,18 +313,27 @@ public class JobOfferService : IJobOfferService
 
         await _offerRepository.AddAsync(entity);
 
-        // --- Seed JobOfferBenefit records from position benefits ---
-        if (position?.PositionBenefits != null)
+        // --- Seed JobOfferBenefit records from the position's EFFECTIVE benefits ---
+        // ⚠ Round 2, lane C3. This read the position's individual rows directly, so an offer for a
+        // post whose benefits came through a BENEFIT GROUP would have listed none of them — the
+        // candidate would have been sent an offer letter missing most of the package.
+        if (position != null)
         {
             var order = 1;
-            var seededBenefits = position.PositionBenefits
-                .Where(pb => !pb.IsDeleted && pb.BenefitPolicy != null)
+            var effective = await _namedSets.GetEffectiveBenefitsAsync(position.Id, current, cancellationToken);
+            var descriptions = await _unitOfWork.Repository<BenefitPolicy>().GetQueryable()
+                .Where(p => p.TenantId == current && !p.IsDeleted)
+                .Select(p => new { p.Id, p.Description })
+                .ToDictionaryAsync(p => p.Id, p => p.Description, cancellationToken);
+
+            var seededBenefits = effective
+                .Where(pb => pb.PolicyIsActive)
                 .Select(pb => new JobOfferBenefit
                 {
                     TenantId      = current,
                     JobOfferId    = entity.Id,
-                    BenefitName   = pb.BenefitPolicy.PolicyName,
-                    Description   = pb.BenefitPolicy.Description,
+                    BenefitName   = pb.PolicyName,
+                    Description   = descriptions.TryGetValue(pb.PolicyId, out var d) ? d : null,
                     MonetaryValue = pb.PositionAmount,
                     CurrencyCode  = entity.CurrencyCode,
                     IsMonetary    = pb.PositionAmount.HasValue,
@@ -336,9 +398,14 @@ public class JobOfferService : IJobOfferService
     // whatever the engine decided. That is what makes routing — who approves an offer above the
     // band midpoint, say — a published policy rather than a hard-coded branch.
     //
-    // ⚠ Until a JobOffer workflow definition is published and `POST api/Workflow/entity-types/seed`
-    // has been re-run, submit/approve/reject are inoperable BY DESIGN — authority comes from the
-    // definition, not from a role attribute.
+    // ⚠ This comment used to say that without a published JobOffer definition, submit/approve/
+    // reject are "inoperable BY DESIGN". That was wrong and it was the dangerous direction to be
+    // wrong in (G-10.1, corrected 2026-09-15): submit auto-approved. Each of the four methods
+    // below now takes a no-workflow branch — see RecruitmentApprovalAuthority for who rules on
+    // that path, and why the segregation-of-duties checks are the stronger half of the gate.
+    //
+    // The sentence's second half still holds, and is the point of the engine: when a definition IS
+    // published, authority comes from the definition and not from a role attribute.
 
     private const string EntityType = "JobOffer";
 
@@ -356,13 +423,30 @@ public class JobOfferService : IJobOfferService
         // enforcement in its service rather than in a definition.
         EnsureSalaryWithinBand(entity);
 
+        // ── G-10.1 (2026-09-15): submitting must never approve ─────────────────────────────────
+        // The same mechanism as G-4.1 on the requisition, and it matters more here.
+        // WorkflowIntegrationService.SubmitAsync returns WorkflowOutcome.Approved whenever no
+        // active definition exists, and JobOfferWorkflowStatusAdapter maps Approved to
+        // OfferStatus.Approved *and stamps ApprovedDate*. No JobOffer definition is seeded
+        // anywhere in the solution, so Submit took an offer Draft → Approved in one step, with no
+        // approver — and Approved is what unlocks "Issue to candidate". Approval is what
+        // authorises sending salary, start date, notice and probation terms to a person outside
+        // the organisation, so a one-click path to it is the sharpest instance of this defect.
+        //
+        // With no definition the offer now lands at PendingApproval and waits. That also makes
+        // ApproveAsync reachable for the first time: it requires PendingApproval, which nothing
+        // could previously produce.
+        var hasWorkflow = await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType);
+
         var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(
                 workflowResult.ExecutionResult.Message ?? "Failed to start the offer approval workflow.");
 
+        var submitOutcome = hasWorkflow ? workflowResult.Outcome : WorkflowOutcome.Pending;
+
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _offerRepository.UpdateAsync(entity);
@@ -384,18 +468,45 @@ public class JobOfferService : IJobOfferService
         // The engine resolves approvers by ApplicationUser, so it gets UserId; everything the entity
         // stores (PreparedById, ApprovedById) is an Employee FK and gets the id the controller
         // passed. See hr-attendance-actor-conventions.
-        var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        // Segregation of duties, added with G-10.1. The requisition has had this rule since it was
+        // written — "you cannot approve a requisition you raised yourself" — and the offer, which
+        // binds the organisation to terms, had none at all. PreparedById and approvedByUserId are
+        // both Employee ids (see the note below on the two id spaces), so this compares like with
+        // like. It runs on both paths: a published definition's preventInitiatorApproval covers
+        // the same ground by ApplicationUser, and this one still catches a preparer approving
+        // through a second login.
+        if (entity.PreparedById.HasValue && entity.PreparedById.Value == approvedByUserId)
+            throw new InvalidOperationException("You cannot approve an offer that you prepared yourself.");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Approve", dto.Comments);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        // The engine resolves approvers by ApplicationUser, so it gets UserId; everything the entity
+        // stores is an Employee FK. With no definition published the engine has no instance to
+        // answer about, so authority falls to the recruitment administer tier — see
+        // RecruitmentApprovalAuthority.
+        var actingUserId = _currentUserProvider.UserId;
+
+        WorkflowOutcome approvalOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Approve", dto.Comments);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+            approvalOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            RecruitmentApprovalAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "approve a job offer");
+            approvalOutcome = WorkflowOutcome.Approved;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, actingUserId);
 
         // ⚠ ApprovedDate is the server's clock, not `dto.ApprovedDate`. It used to be taken from the
         // request body, so an approver could date their own approval to whenever suited them.
@@ -420,17 +531,32 @@ public class JobOfferService : IJobOfferService
                 $"Only offers in PendingApproval can be rejected (current: {entity.OfferStatus}).");
 
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Reject", dto.RejectionReason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+        // Same two paths as ApproveAsync — an offer that can be submitted but neither approved nor
+        // rejected nor recalled would be a worse dead end than the auto-approve it replaced.
+        WorkflowOutcome rejectionOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Reject", dto.RejectionReason);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+            rejectionOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            RecruitmentApprovalAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "reject a job offer");
+            rejectionOutcome = WorkflowOutcome.Rejected;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId, dto.RejectionReason);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, actingUserId, dto.RejectionReason);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = rejectedByUserId.ToString();
 
@@ -448,7 +574,7 @@ public class JobOfferService : IJobOfferService
     /// The preparer withdrawing an offer before anyone has ruled on it. Returns it to Draft so it
     /// can be reworked and resubmitted.
     /// </summary>
-    public async Task<bool> RecallApprovalAsync(Guid offerId, CancellationToken cancellationToken = default)
+    public async Task<bool> RecallApprovalAsync(Guid offerId, Guid recalledByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedOfferAsync(offerId);
 
@@ -456,11 +582,25 @@ public class JobOfferService : IJobOfferService
             throw new InvalidOperationException(
                 $"Only an offer awaiting approval can be recalled (current: {entity.OfferStatus}).");
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(
-            EntityType, entity.Id, _currentUserProvider.UserId);
-        if (!workflowResult.ExecutionResult.Success)
+        // Skipped when nothing is published: RecallWorkflowAsync answers "No active workflow found"
+        // without an instance, so the recall would fail. The engine's own requester-only rule is
+        // what enforces "the preparer withdrawing" on the configured path; on the unconfigured one
+        // the preparer check below stands in for it.
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            var workflowResult = await _workflowIntegrationService.RecallAsync(
+                EntityType, entity.Id, _currentUserProvider.UserId);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to recall the offer.");
+        }
+        else if (entity.PreparedById.HasValue &&
+                 entity.PreparedById.Value != recalledByEmployeeId &&
+                 !RecruitmentApprovalAuthority.CanRuleWithoutWorkflow(_currentUserProvider))
+        {
             throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to recall the offer.");
+                "Only the person who prepared an offer can recall it.");
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyRecallOutcome(entity, _currentUserProvider.UserId);
@@ -598,6 +738,35 @@ public class JobOfferService : IJobOfferService
             throw new InvalidOperationException(
                 $"Only sent or negotiating offers can be conditionally accepted (current: {entity.OfferStatus}).");
 
+        // ── G-11.2 (2026-09-15): a silent dead end, made loud ──────────────────────────────────
+        // This method sets IsConditional = true whatever it was before, and did NOT require a
+        // PreEmploymentCheck to exist — and one is never created automatically. Combined with two
+        // gates documented elsewhere, that was a permanent trap:
+        //
+        //   • ChecksCleared is written ONLY by PreEmploymentCheckService.CompleteAsync, against a
+        //     check set anchored to this offer; and
+        //   • the hire gate refuses a conditional offer that is not at ChecksCleared.
+        //
+        // So an offer accepted conditionally with no check set was stuck at ConditionallyAccepted
+        // for ever and **no hire record could ever be created for it** — until somebody worked out
+        // they had to open the checks tab, create a set, add items, record every result and
+        // complete it. Nothing on the offer screen said a check set was required, that one was
+        // missing, or that this was why *Create hire record* had not appeared.
+        //
+        // Refusing up front is the honest answer: the condition in "conditionally accepted" is the
+        // check set, so accepting on that basis without one is not a state worth recording. The
+        // message names the way out, which is what the screen never did.
+        var checkSet = await _unitOfWork.Repository<PreEmploymentCheck>().GetQueryable()
+            .FirstOrDefaultAsync(c => c.JobOfferId == entity.Id && c.TenantId == entity.TenantId && !c.IsDeleted,
+                cancellationToken);
+
+        if (checkSet is null)
+            throw new InvalidOperationException(
+                "A conditional acceptance needs the checks it is conditional on. Create the " +
+                "pre-employment check set for this offer first — on the Pre-employment checks tab — " +
+                "then record the conditional acceptance. Without one the offer cannot reach " +
+                "ChecksCleared, and no hire record could ever be created from it.");
+
         entity.OfferStatus = JobOfferStatus.ConditionallyAccepted;
         entity.IsConditional = true;
         entity.AcceptedDate = DateTime.UtcNow;
@@ -607,8 +776,8 @@ public class JobOfferService : IJobOfferService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Offer {OfferNumber} conditionally accepted — pre-employment checks pending.",
-            entity.OfferNumber);
+            "Offer {OfferNumber} conditionally accepted — pre-employment check {CheckId} pending.",
+            entity.OfferNumber, checkSet.Id);
 
         return entity.ToDto();
     }
@@ -837,8 +1006,17 @@ public class JobOfferService : IJobOfferService
             throw new InvalidOperationException(
                 "A revised offer can only be issued against a Sent or Negotiating offer.");
 
-        // Mark the old offer as superseded
+        // Mark the old offer as superseded.
+        //
+        // ⚠ G-10.2 (2026-09-15): this used to set IsLatestVersion = false and leave OfferStatus
+        // alone, so v1 stayed Sent or Negotiating for ever. Nothing filtered on IsLatestVersion, so
+        // the superseded version went on being listed by GET /offers/status/Sent, counted as
+        // chasable by GET /offers/expiring, and added to the landing tile and the dashboard's
+        // "offers pending response" — permanently, one more row per revision. The flag said the
+        // offer was history; the status said it was live, and every reader read the status.
         original.IsLatestVersion = false;
+        original.OfferStatus = JobOfferStatus.Superseded;
+        original.UpdatedAt = DateTime.UtcNow;
         await _offerRepository.UpdateAsync(original);
 
         // Clone terms, apply overrides from the dto
@@ -1177,6 +1355,7 @@ public class JobHireService : IJobHireService
     // Enrols the new employee in payroll once the hire has committed — the same create-only bridge
     // the employee master uses, so a hire and a direct create arrive in payroll the same way.
     private readonly IPayrollMembershipService _payrollMembership;
+    private readonly IEmployeeService _employees;
 
     public JobHireService(
         IJobHireRecordRepository hireRepository,
@@ -1195,10 +1374,12 @@ public class JobHireService : IJobHireService
         IUnitOfWork unitOfWork,
         IStaffNumberService staffNumbers,
         IPayrollMembershipService payrollMembership,
+        IEmployeeService employees,
         ILogger<JobHireService> logger)
     {
         _staffNumbers             = staffNumbers;
         _payrollMembership        = payrollMembership;
+        _employees                = employees;
         _hireRepository           = hireRepository;
         _offerRepository          = offerRepository;
         _pipelineService          = pipelineService;
@@ -1420,6 +1601,18 @@ public class JobHireService : IJobHireService
             throw new InvalidOperationException(
                 $"Hire '{entity.HireNumber}' has already been confirmed and is linked to an employee record.");
 
+        // ⚠ G-12.2 (2026-09-15): Cancelled was not checked. The guard above asks "already done?" and
+        // nothing asked "called off?" — so a hire cancelled during onboarding still showed **Confirm
+        // start**, and pressing it created the employee, the contract, the probation period and the
+        // position history, and burned an employee number. All of it irreversible, on a hire someone
+        // had explicitly called off. Every other terminal state in this module is guarded; this one
+        // was not. The client's `canConfirmStart = !isActive && !hire.employeeId` let it through too,
+        // and has been corrected alongside this.
+        if (entity.Status == JobHireStatus.Cancelled)
+            throw new InvalidOperationException(
+                $"Hire '{entity.HireNumber}' was cancelled, so a start cannot be confirmed against it. " +
+                "Raise a new hire record if the candidate is joining after all.");
+
         entity.ActualStartDate = DateOnly.FromDateTime(actualStartDate);
         entity.ConfirmedById   = confirmedByUserId;
         entity.ConfirmedDate   = DateTime.UtcNow;
@@ -1506,6 +1699,27 @@ public class JobHireService : IJobHireService
             await _employeeRepository.AddAsync(employee);
             entity.EmployeeId = employee.Id;
 
+            // Round 3, lane C1 (D-15): the identity document the candidate gave becomes the new
+            // employee's first identification card — the employee record keeps its documents as
+            // child rows, not as columns. A type without a number is nothing to file, so it is
+            // skipped; the card stays unverified until HR sights the original.
+            if (candidate.NationalIdTypeId is { } nationalIdTypeId
+                && !string.IsNullOrWhiteSpace(candidate.NationalIdNumber))
+            {
+                await _unitOfWork.Repository<EmployeeIdentificationCard>().AddAsync(new EmployeeIdentificationCard
+                {
+                    TenantId             = entity.TenantId,
+                    CreatedById          = confirmedByUserId,
+                    EmployeeId           = employee.Id,
+                    IdentificationTypeId = nationalIdTypeId,
+                    DocumentNumber       = candidate.NationalIdNumber.Trim(),
+                    ExpiryDate           = candidate.NationalIdExpiryDate is { } nationalIdExpiry
+                                            ? DateOnly.FromDateTime(nationalIdExpiry) : null,
+                    IsVerified           = false,
+                    Notes                = "Carried from the candidate record at hire.",
+                });
+            }
+
             // 2 — EmployeeContractDetail
             var startDate       = DateOnly.FromDateTime(actualStartDate);
             var contractEndDate = offer.ContractDurationMonths.HasValue
@@ -1581,13 +1795,19 @@ public class JobHireService : IJobHireService
             var gradeId = offer.SalaryLevel?.SalaryGradeId ?? offer.Position?.SalaryGradeId;
             if (gradeId.HasValue && employee.IsOnPayroll)
             {
+                // Round 3, lane H: the level resolves the way every other placement's does (a
+                // two-tier structure's implicit level is filled; a notch of another grade is
+                // refused). The row is still written here rather than through AssignSalaryAsync
+                // because the employee is not yet saved at this point of the hire transaction.
+                var resolvedLevelId = await _employees.ResolvePlacementLevelAsync(
+                    gradeId.Value, offer.SalaryLevelId, offer.SalaryNotchId, cancellationToken);
                 var salaryAssignment = new EmployeeSalaryAssignment
                 {
                     TenantId         = entity.TenantId,
                     CreatedById      = confirmedByUserId,
                     EmployeeId       = employee.Id,
                     GradeId          = gradeId.Value,
-                    LevelId          = offer.SalaryLevelId,
+                    LevelId          = resolvedLevelId,
                     NotchId          = offer.SalaryNotchId,
                     EffectiveDate    = actualStartDate,
                     AssignmentReason = "Initial hire assignment",
@@ -1678,6 +1898,23 @@ public class JobHireService : IJobHireService
         // so requisition progress silently drifts from the number of people actually hired.
         await IncrementRequisitionFillAsync(entity, cancellationToken);
 
+        // ── G-12.1: tell the front of the funnel that the back of it finished ──────────────────
+        // ApplicationStatus.Hired was written in exactly ONE place in the solution —
+        // MapStageTypeToStatus, when somebody moved an application into a Hired-type pipeline stage
+        // by hand — and ConfirmStartAsync never touched the application at all. So at the moment a
+        // candidate became an employee (contract written, probation started, employee number burned)
+        // their application still read OfferExtended or OfferAccepted, and JobVacancy.HireCount had
+        // not moved either. The vacancy's *Hired* tile and the application register both understated
+        // what had actually happened, until somebody separately walked the application into a Hired
+        // stage.
+        //
+        // This is the module's own idiom for handing over: booking an interviewee and issuing an
+        // offer both call AutoAdvanceToStageTypeAsync, and are the two counter-examples the system
+        // guide credits. Confirming a start is the most consequential step in the chain and was the
+        // one that did not.
+        await MarkApplicationHiredAsync(entity, confirmedByUserId, cancellationToken);
+        await MarkCandidateConvertedAsync(entity, confirmedByUserId, cancellationToken);
+
         await _hireRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1695,6 +1932,126 @@ public class JobHireService : IJobHireService
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Marks the application behind a confirmed hire as <c>Hired</c> (G-12.1).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Two steps, because the pipeline cannot be relied on.</b>
+    /// <c>AutoAdvanceToStageTypeAsync</c> is the right first move: it walks the application into
+    /// the Hired-type stage, which writes the status <i>and</i> advances
+    /// <c>JobVacancy.HireCount</c> through <c>AdjustVacancyCounters</c>, so the board and the
+    /// counters stay consistent. But it is a deliberate no-op in three cases — the vacancy has no
+    /// pipeline (G-5.1's worst consequence, and possible on any vacancy created before the edit
+    /// page existed), the pipeline has no active Hired stage, or the application is already
+    /// terminal.</para>
+    ///
+    /// <para>On a pipeline-less vacancy the register would therefore still understate reality,
+    /// which is the whole defect. So the status is checked afterwards and set directly if the
+    /// advance did not take. That second write deliberately does <b>not</b> touch
+    /// <c>HireCount</c>: that counter is maintained by stage movement and double-counting it here
+    /// would be G-4.5's mistake in a new place.</para>
+    ///
+    /// <para>Failures are logged, not thrown. The employee exists and is committed by this point;
+    /// refusing the whole hire because a status could not be advanced would be a worse outcome
+    /// than a register that needs one correction.</para>
+    /// </remarks>
+    private async Task MarkApplicationHiredAsync(
+        JobHireRecord hire, Guid confirmedByEmployeeId, CancellationToken cancellationToken)
+    {
+        // ⚠ JobHireRecord spells it ApplicationId; JobOffer spells the same link JobApplicationId.
+        var id = hire.ApplicationId != Guid.Empty
+            ? hire.ApplicationId
+            : hire.Offer?.JobApplicationId ?? Guid.Empty;
+
+        if (id == Guid.Empty) return;
+
+        try
+        {
+            await _pipelineService.AutoAdvanceToStageTypeAsync(
+                id, RecruitmentPipelineStageType.Hired, confirmedByEmployeeId, cancellationToken);
+
+            // Over the unit of work rather than an injected repository: JobHireService has no
+            // IJobApplicationRepository, and JobOfferService's one is a different class in this
+            // same file — an easy thing to grep and mistake for this class's.
+            var applications = _unitOfWork.Repository<JobApplication>();
+            var application = await applications.GetByIdAsync(id);
+            if (application is null || application.TenantId != hire.TenantId) return;
+
+            if (application.Status == ApplicationStatus.Hired) return;
+
+            application.Status    = ApplicationStatus.Hired;
+            application.UpdatedAt = DateTime.UtcNow;
+            await applications.UpdateAsync(application);
+
+            _logger.LogInformation(
+                "Application {ApplicationId} marked Hired directly for hire {HireNumber} — the vacancy " +
+                "has no Hired pipeline stage to advance into.",
+                id, hire.HireNumber);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not mark application {ApplicationId} as Hired for hire {HireNumber}. The employee " +
+                "was still created; the application register will understate this hire until corrected.",
+                id, hire.HireNumber);
+        }
+    }
+
+    /// <summary>
+    /// Converts the candidate out of the talent pool when a pooled candidate is hired (G-13.1).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Nothing set <c>Converted</c> automatically.</b> <c>TalentPoolStatus</c> was written
+    /// on entry (<c>Active</c>), on removal (<c>Expired</c>), and otherwise only by a human
+    /// choosing a value in a dropdown — <c>ConfirmStartAsync</c> never touched it. So a pooled
+    /// candidate who was genuinely hired stayed <c>Active</c> in the pool unless a recruiter
+    /// remembered to change it, and conversion is the <b>only</b> measure the module has of whether
+    /// the talent pool produces hires.</para>
+    ///
+    /// <para>Written inline over the unit of work rather than through <c>IJobCandidateService</c>:
+    /// that service reads employees and applications, and injecting it into the hire service —
+    /// which those read paths can reach — invites a dependency cycle for two field writes. The exit
+    /// rule is deliberately identical to <c>JobCandidateService.ApplyPoolExit</c>; if that changes,
+    /// change this with it.</para>
+    ///
+    /// <para>A no-op for a candidate who was never pooled, which is most of them. Failures are
+    /// logged rather than thrown — the employee exists by this point.</para>
+    /// </remarks>
+    private async Task MarkCandidateConvertedAsync(
+        JobHireRecord hire, Guid confirmedByEmployeeId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var candidateId = hire.Offer?.Application?.JobCandidateId
+                              ?? hire.Application?.JobCandidateId;
+
+            if (candidateId is not { } id || id == Guid.Empty) return;
+
+            var candidate = await _unitOfWork.Repository<JobCandidate>().GetByIdAsync(id);
+            if (candidate is null || candidate.TenantId != hire.TenantId) return;
+            if (!candidate.IsInTalentPool) return;
+
+            candidate.IsInTalentPool          = false;
+            candidate.TalentPoolStatus        = TalentPoolCandidateStatus.Converted;
+            candidate.TalentPoolRemovedDate   = DateTime.UtcNow;
+            candidate.TalentPoolRemovalReason = $"Hired — converted from the talent pool ({hire.HireNumber}).";
+            candidate.UpdatedAt               = DateTime.UtcNow;
+            candidate.UpdatedBy               = confirmedByEmployeeId.ToString();
+
+            await _unitOfWork.Repository<JobCandidate>().UpdateAsync(candidate);
+
+            _logger.LogInformation(
+                "Candidate {CandidateNumber} converted from the talent pool by hire {HireNumber}.",
+                candidate.CandidateNumber, hire.HireNumber);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not mark the candidate behind hire {HireNumber} as converted from the talent pool.",
+                hire.HireNumber);
+        }
     }
 
     /// <summary>
@@ -1722,7 +2079,35 @@ public class JobHireService : IJobHireService
         if (requisition.PositionsFilled >= requisition.NumberOfPositions)
             return;
 
-        requisition.PositionsFilled++;
+        // ── G-4.5 (2026-09-15): count the hires, do not increment the counter ──────────────────
+        // There are two writers of PositionsFilled and they used to disagree. FulfillAsync sets an
+        // ABSOLUTE running total from a number a user types into *Record a hire*; this path
+        // INCREMENTED whatever it found. So a recruiter who recorded "2 filled" by hand and then
+        // confirmed a start got 3 — the manual path had set a total, and this one added to it.
+        // Neither screen mentioned the other, and *Record a hire* still described itself as "the
+        // running total, not an increment" without saying that confirming a start would also move
+        // it. Bounded by NumberOfPositions, so never absurd; silently wrong in between.
+        //
+        // The fix is the one the analytics service already demonstrates and that this system guide
+        // ends up recommending: **derive from records rather than advancing a status.** The number
+        // of confirmed hires against this requisition is a fact that can be counted, so it is
+        // counted. A manual entry is still honoured where it is HIGHER — a seat filled by a
+        // transfer or a secondment that never produced a hire record is real, and this must not
+        // erase it — which makes the two writers reconcilable instead of additive.
+        var confirmedHires = await _hireRepository.GetQueryable()
+            .Where(h => h.TenantId == hire.TenantId
+                     && !h.IsDeleted
+                     && h.Status == JobHireStatus.Active
+                     && h.Application != null
+                     && h.Application.JobVacancy != null
+                     && h.Application.JobVacancy.StaffRequisitionId == requisition.Id)
+            .CountAsync(cancellationToken);
+
+        var derived = Math.Min(Math.Max(confirmedHires, requisition.PositionsFilled), requisition.NumberOfPositions);
+        if (derived == requisition.PositionsFilled)
+            return;
+
+        requisition.PositionsFilled = derived;
 
         var fullyFilled = requisition.PositionsFilled >= requisition.NumberOfPositions;
         if (requisition.Status is StaffRequisitionStatus.Approved or StaffRequisitionStatus.PartiallyFulfilled)

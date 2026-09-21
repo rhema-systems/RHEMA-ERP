@@ -21,8 +21,8 @@ import {
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import { safetyRiskAssessmentService } from '@/services/hr/safety-risk-assessment.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { SHE_RISK_ASSESSMENT_TYPE_OPTIONS } from '@/types/hr/safety-hazards';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 /**
  * Prepare a new risk assessment. It lands in Draft with a server-generated RA-YYYY-NNNN number;
@@ -70,10 +70,6 @@ export default function NewRiskAssessmentPage() {
     queryFn: () => locationService.getAll(),
   });
 
-  const { data: orgUnits = [] } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
 
   const form = useForm<CreateForm>({
     resolver: zodResolver(createSchema) as any,
@@ -159,13 +155,7 @@ export default function NewRiskAssessmentPage() {
               />
               <TextField form={form} name="specificActivity" label="Specific activity" />
             </FieldRow>
-            <SelectField
-              form={form}
-              name="organizationUnitId"
-              label="Organization unit"
-              allowEmpty
-              options={orgUnits.map((u) => ({ value: u.id, label: u.name }))}
-            />
+            <OrganizationUnitPickerField form={form} name="organizationUnitId" label="Organization unit" allowEmpty />
           </CardContent>
         </Card>
 

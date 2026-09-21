@@ -102,6 +102,23 @@ export default function LeaveTypeDetailPage() {
             <InfoRow label="Min service to access (months)" value={t.minServiceMonthsToAccess} />
             <InfoRow label="Paid" value={yn(t.isPaid)} />
             <InfoRow label="Mandatory annual leave" value={yn(t.mandatoryAnnualLeave)} />
+            <InfoRow label="Requires excuse duty" value={yn(t.requiresMedicalCertificate)} />
+            {t.requiresMedicalCertificate && (
+              <>
+                <InfoRow
+                  label="Self-certification"
+                  value={`${t.selfCertificationDays} day(s) on the employee’s own word`}
+                />
+                <InfoRow
+                  label="Medical board threshold"
+                  value={
+                    t.medicalBoardThresholdDays
+                      ? `${t.medicalBoardThresholdDays} day(s) cumulative in a year`
+                      : "No board required"
+                  }
+                />
+              </>
+            )}
           </InfoCard>
 
           <InfoCard title="Counting & workflow">
@@ -117,6 +134,18 @@ export default function LeaveTypeDetailPage() {
             <InfoRow label="Max carry-over days" value={t.maxCarryOverDays} />
             <InfoRow label="Carry-over expires (months)" value={t.carryOverExpiryMonths} />
             <InfoRow label="Forfeit unused after (months)" value={t.forfeitUnusedAfterMonths} />
+            <InfoRow
+              label="Carry-over and forfeiture count"
+              value={
+                t.yearEndBasis === 'Earned'
+                  ? "What they actually earned"
+                  : "What the year granted them"
+              }
+            />
+            <InfoRow
+              label="Pro-rate the first year"
+              value={t.proRateFirstYearEntitlement ? 'Yes' : 'No'}
+            />
           </InfoCard>
 
           <InfoCard title="Encashment">

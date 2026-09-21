@@ -374,16 +374,33 @@ public class JobInterviewService : IJobInterviewService
     // previously allowed — is far too wide.
     //
     // The rule, applied in the service so it holds whichever route reaches it:
-    //   • HR / SuperAdmin           — everything, including recording on an external panelist's behalf.
+    //   • A recruitment desk user   — everything, including recording on an external panelist's behalf.
     //   • A panelist on THAT interview — read it, and score as themselves.
     //   • Everyone else             — 403.
     //
     // External panelists have no login at all; they confirm by emailed token and HR enters their scores,
     // which is why an external scorecard is an HR-only write.
+    //
+    // ⚠ 2026-09-15 (G-9.1): this used to read HasRole("HR") || HasRole("SuperAdmin"), and it was the
+    // only place in recruitment that authorised on a role. Every other controller in the module gates
+    // on HR.Recruitment.Read/Write/Admin, which SuperAdmin, TenantAdmin, Admin, HR *and* the legacy
+    // "HR User" role all hold. So a TenantAdmin could raise a requisition, open a vacancy, shortlist
+    // and reject — and then be refused when they tried to schedule the interview, or even to read one,
+    // because EnsureCanReadInterviewAsync fell through to the panelist check. It now asks the same
+    // question the rest of the module asks. The gate is unchanged in strength: no role gains
+    // recruitment permissions here that it did not already hold everywhere else.
 
+    /// <summary>
+    /// The recruitment desk: anyone whose roles carry <c>HR.Recruitment.Write</c> or
+    /// <c>HR.Recruitment.Admin</c>. Read alone is not enough — every caller of this holds an
+    /// interview record open for writing, or is reading panel-private material.
+    /// </summary>
     private bool IsHr =>
-        _currentUserProvider.HasRole(Constants.Roles.Hr) ||
-        _currentUserProvider.HasRole(Constants.Roles.SuperAdmin);
+        _currentUserProvider.HasRole(Constants.Roles.SuperAdmin) ||
+        HrPermissions.RolesGrantAny(
+            _currentUserProvider.Roles,
+            HrPermissions.MaintainRecruitment,
+            HrPermissions.AdministerRecruitment);
 
     private Guid? CallerEmployeeId => _currentUser.EmployeeId;
 
@@ -958,8 +975,88 @@ public class JobInterviewService : IJobInterviewService
         entity.Status = JobInterviewStatus.Completed;
 
         await _interviewRepository.UpdateAsync(entity);
+        await AdvanceApplicationsOnCompletionAsync(entity, updatedByUserId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// Moves each interviewee's application on when the session closes (G-9.4, G-9.2).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>G-9.4: closing an interview used to have no downstream effect at all.</b>
+    /// <c>CompleteAsync</c> set <c>Status = Completed</c> and saved. Nothing else happened — no
+    /// application status moved, no pipeline stage advanced, no notification went out, no scorecard
+    /// was chased. So the session ended and its applications sat wherever booking had left them, at
+    /// <c>InterviewScheduled</c>, until somebody moved each one by hand. Contrast with *booking* a
+    /// candidate, which does auto-advance the pipeline — the module knows how to hand over, it just
+    /// did not do it here.</para>
+    ///
+    /// <para><b>G-9.2: the panel's verdict had no reader.</b> <c>JobInterviewee.Outcome</c> was set
+    /// by <c>RecordOutcomeAsync</c> and rendered on screen, and <b>no service read it</b> — it
+    /// changed no status, gated no offer, fed no analytics and reached no hire decision. The
+    /// question "did this candidate pass their interview?" was answered on the interview screen and
+    /// nowhere else in the system. It is now what decides where the application goes, which is the
+    /// natural consumer and makes recording it worth doing.</para>
+    ///
+    /// <para><b>What each verdict does — and what it deliberately does not.</b> A positive verdict
+    /// advances the application to the Offer stage. <b>Nothing here rejects anybody.</b> That is a
+    /// deliberate limit, not an omission: rejecting an application records a reason and feeds the
+    /// candidate-notification flow, and a status change that happens as a side effect of closing a
+    /// session would produce rejections with no reason attached and no one who decided them. A
+    /// <c>NotRecommended</c> verdict is the panel's advice; acting on it is HR's act, through the
+    /// decision bar, where the reason is captured.</para>
+    ///
+    /// <para><c>ProceedToNextRound</c> moves nothing — it is a decision about interviewing, not
+    /// about offering, so the application stays in the interview stage for the next round to be
+    /// booked into. <c>OnHold</c> and a <b>missing</b> verdict also move nothing: a panel that has
+    /// not decided must not have a decision inferred for it, and the commonest reason a verdict is
+    /// missing is that scorecards are still outstanding.</para>
+    ///
+    /// <para>A no-show is skipped: there is nothing to judge, and their application is handled by
+    /// whoever chases the reschedule.</para>
+    ///
+    /// <para>Failures are logged per interviewee rather than thrown. The session really is complete
+    /// by this point, and refusing to record that because one application could not be moved would
+    /// leave the interview open — the worse of the two states.</para>
+    /// </remarks>
+    private async Task AdvanceApplicationsOnCompletionAsync(
+        JobInterview interview, Guid actingEmployeeId, CancellationToken cancellationToken)
+    {
+        var interviewees = await _intervieweeRepository.GetByInterviewIdAsync(interview.Id);
+
+        foreach (var interviewee in interviewees.Where(i => i.TenantId == interview.TenantId))
+        {
+            if (interviewee.CandidateAttended == false) continue;
+            if (interviewee.Outcome is not { } outcome) continue;
+
+            var stageType = outcome switch
+            {
+                JobInterviewOutcome.HighlyRecommended
+                or JobInterviewOutcome.Recommended
+                or JobInterviewOutcome.Acceptable
+                    => (RecruitmentPipelineStageType?)RecruitmentPipelineStageType.Offer,
+
+                // Rejected / NotRecommended / ProceedToNextRound / OnHold all move nothing — see
+                // the remarks above for why a rejection in particular is not made here.
+                _ => null,
+            };
+
+            if (stageType is not { } target) continue;
+
+            try
+            {
+                await _pipelineService.AutoAdvanceToStageTypeAsync(
+                    interviewee.JobApplicationId, target, actingEmployeeId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Interview {InterviewNumber} closed, but application {ApplicationId} could not be " +
+                    "advanced on the panel's verdict of {Outcome}.",
+                    interview.InterviewNumber, interviewee.JobApplicationId, outcome);
+            }
+        }
     }
 
     // ── Internal panelists ────────────────────────────────────────────────────
@@ -1470,10 +1567,19 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> RecordOutcomeAsync(RecordIntervieweeOutcomeDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedIntervieweeAsync(dto.IntervieweeId);
-        await EnsureCanReadInterviewAsync(entity.JobInterviewId);
 
-        // The outcome is the panel's verdict on this candidate, so it should not be recorded before the
-        // candidate has been seen. A no-show has no verdict to give.
+        // ⚠ G-9.3 (2026-09-15): this guarded with EnsureCanReadInterviewAsync — **read** access —
+        // not EnsureHr. So one member of a five-person panel could set the panel's verdict on a
+        // candidate, overwrite another member's, and do so without having signed off their own
+        // scorecard. Every other write on the interview record itself is HR-only; this one, the
+        // hire/no-hire recommendation, was the exception.
+        //
+        // It is now the recruitment desk's to record — the panel scores, the desk records what the
+        // panel concluded — which is also what makes the outcome safe to act on downstream (G-9.2).
+        // The genuine guard that was already here stays: a no-show has no verdict to give.
+        await GetOwnedInterviewAsync(entity.JobInterviewId);
+        EnsureHr("record the panel's verdict on a candidate");
+
         if (entity.CandidateAttended == false)
             throw new InvalidOperationException(
                 "This candidate was recorded as a no-show, so there is no interview outcome to record.");

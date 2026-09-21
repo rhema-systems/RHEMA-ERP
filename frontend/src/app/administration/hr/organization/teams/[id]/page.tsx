@@ -37,8 +37,13 @@ import {
 } from '@/components/hr/organization/TeamForm';
 import { AddTeamMemberDialog } from '@/components/hr/organization/AddTeamMemberDialog';
 import { EditTeamMemberDialog } from '@/components/hr/organization/EditTeamMemberDialog';
+import { TeamTermsTab } from '@/components/hr/teams/TeamTermsTab';
+import { TeamObjectivesTab } from '@/components/hr/teams/TeamObjectivesTab';
+import { TeamTasksTab } from '@/components/hr/teams/TeamTasksTab';
+import { TeamDashboardTab } from '@/components/hr/teams/TeamDashboardTab';
+import { TeamMeetingsTab } from '@/components/hr/teams/TeamMeetingsTab';
+import { TeamReviewsTab } from '@/components/hr/teams/TeamReviewsTab';
 import { teamService } from '@/services/hr/team.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import {
   type TeamMember,
   teamMemberRoleLabel,
@@ -59,6 +64,7 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const [tab, setTab] = useState('dashboard');
   const [submitting, setSubmitting] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<TeamMember | null>(null);
@@ -68,11 +74,6 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
   const teamQuery = useQuery({
     queryKey: ['hr', 'teams', id, 'detail'],
     queryFn: () => teamService.getDetail(id),
-  });
-
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
   });
 
   const { data: allTeams } = useQuery({
@@ -194,12 +195,51 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
         </Alert>
       )}
 
-      <Tabs defaultValue="members">
+      {/*
+        Round 2, lanes F1 and F2: what the team is chartered to do, what it has undertaken, who is
+        doing it, what it met about and how it has been reviewed.
+
+        ⚠ The dashboard opens first, and the tab is CONTROLLED for that reason. Whoever opens a team
+        wants "how is this going" before "who is on it", and the dashboard's own charter warning has
+        to be able to send the reader to the Terms tab — a `#terms` anchor would have looked like a
+        link and done nothing.
+      */}
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
+          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="members">Members ({current.length})</TabsTrigger>
+          <TabsTrigger value="terms">Terms of Reference</TabsTrigger>
+          <TabsTrigger value="objectives">Objectives</TabsTrigger>
+          <TabsTrigger value="tasks">Tasks</TabsTrigger>
+          <TabsTrigger value="meetings">Meetings</TabsTrigger>
+          <TabsTrigger value="reviews">Reviews</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="dashboard" className="pt-4">
+          <TeamDashboardTab teamId={id} onGoToTerms={() => setTab('terms')} />
+        </TabsContent>
+
+        <TabsContent value="meetings" className="pt-4">
+          <TeamMeetingsTab teamId={id} />
+        </TabsContent>
+
+        <TabsContent value="reviews" className="pt-4">
+          <TeamReviewsTab teamId={id} />
+        </TabsContent>
+
+        <TabsContent value="terms" className="pt-4">
+          <TeamTermsTab teamId={id} />
+        </TabsContent>
+
+        <TabsContent value="objectives" className="pt-4">
+          <TeamObjectivesTab teamId={id} />
+        </TabsContent>
+
+        <TabsContent value="tasks" className="pt-4">
+          <TeamTasksTab teamId={id} />
+        </TabsContent>
 
         <TabsContent value="members" className="space-y-4 pt-4">
           <Card>
@@ -258,7 +298,6 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
 
         <TabsContent value="details" className="pt-4">
           <TeamForm
-            units={units ?? []}
             parentCandidates={parentCandidates}
             defaultValues={toFormValues(team)}
             onSubmit={handleSave}

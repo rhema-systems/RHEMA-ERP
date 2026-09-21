@@ -16,6 +16,15 @@ export interface WorkflowRecordCommands {
   submit?: () => Promise<unknown>;
   approve?: (context: WorkflowRecordCommandContext) => Promise<unknown>;
   reject?: (context: WorkflowRecordCommandContext) => Promise<unknown>;
+  /**
+   * Withdraws a submitted record back to draft.
+   *
+   * Wire this when the entity has its own recall endpoint; screens that leave it undefined fall
+   * back to the generic workflow recall. Without it a requester who submitted prematurely has to
+   * ask an approver to reject instead, which leaves a rejection on the record for something
+   * nobody actually ruled against.
+   */
+  recall?: (reason: string) => Promise<unknown>;
   afterAction?: () => Promise<unknown>;
 }
 
@@ -28,6 +37,10 @@ export interface UseWorkflowRecordOptions {
   currentStepName?: string;
   canSubmit?: boolean;
   canApproveReject?: boolean;
+  /** Whether the current user may withdraw this record from approval. See {@link WorkflowRecordCommands.recall}. */
+  canRecall?: boolean;
+  /** Opts this screen into the recall dialog's optional reason box. See `recallPrompt` on the actions component. */
+  recallPrompt?: 'confirm' | 'reason';
   enabled?: boolean;
   commands: WorkflowRecordCommands;
   onOpenWorkflows?: () => void;
@@ -53,6 +66,8 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
     currentStepName,
     canSubmit,
     canApproveReject,
+    canRecall,
+    recallPrompt,
     enabled = true,
     commands,
     onOpenWorkflows,
@@ -81,6 +96,11 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
     loadWorkflowSummary: false,
     canSubmit,
     canApproveReject,
+    canRecall,
+    recallPrompt,
+    onRecall: commands.recall
+      ? async (reason: string) => { await commands.recall?.(reason); }
+      : undefined,
     onSubmit: commands.submit ? async () => { await commands.submit?.(); } : undefined,
     onApprove: commands.approve
       ? async (comments, checklistResponses, signature) => {
@@ -97,8 +117,10 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
   }), [
     afterAction,
     canApproveReject,
+    canRecall,
     canSubmit,
     commands.approve,
+    commands.recall,
     commands.reject,
     commands.submit,
     currentStepName,
@@ -109,6 +131,7 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
     error,
     loading,
     onOpenWorkflows,
+    recallPrompt,
     status,
     summary,
   ]);

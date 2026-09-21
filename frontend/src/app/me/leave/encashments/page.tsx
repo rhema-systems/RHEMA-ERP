@@ -193,6 +193,32 @@ export default function MyLeaveEncashmentsPage() {
                     {e.paymentReference ? ` · ref ${e.paymentReference}` : ''}
                     {e.notes ? ` · ${e.notes}` : ''}
                   </div>
+                  {/*
+                    ⚠ L-20 said plainly: anybody disputing the figure has nothing to read. The
+                    likeliest disputant is the employee looking at their own payout, which is THIS
+                    screen — so the basis is spelled out here in full, not hidden in a `title`
+                    tooltip the way the desk register can afford to. A tooltip is unreachable on a
+                    phone, and this is the page most likely to be read on one.
+
+                    ⚠ Shown only once the amount exists. On a pending request there is no payout to
+                    explain yet, and an empty "how this was worked out" invites the reading that
+                    somebody failed to record it.
+                  */}
+                  {e.amountPaid ? (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {e.rateBasis ? (
+                        <>
+                          <span className="font-medium">How this was worked out: </span>
+                          {e.rateBasis}
+                        </>
+                      ) : (
+                        <span className="italic">
+                          The basis for this figure was not recorded — it was paid before the
+                          system kept one. Ask HR if you want it explained.
+                        </span>
+                      )}
+                    </div>
+                  ) : null}
                   {e.status === 'Rejected' && e.rejectionReason && (
                     <div className="mt-1 text-xs text-red-600">“{e.rejectionReason}”</div>
                   )}

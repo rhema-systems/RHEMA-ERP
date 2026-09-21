@@ -28,8 +28,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { successionSearchService } from '@/services/hr/succession.service';
 import { competencyService } from '@/services/hr/competency.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import type { SuccessionCandidateSearchResult } from '@/types/hr/succession';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 const NONE = '__none__';
 
@@ -116,10 +116,6 @@ export function CandidateSearchPanel({
     queryFn: () => employeePositionService.getAll(),
     enabled: !lockedPositionId,
   });
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'org-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-  });
   const { data: competencies } = useQuery({
     queryKey: ['hr', 'competencies', 'lookup'],
     queryFn: () => competencyService.getLookup(),
@@ -196,20 +192,13 @@ export function CandidateSearchPanel({
               />
             </div>
             <div className="space-y-2">
-              <Label>Organisation unit</Label>
-              <Select value={unitId} onValueChange={setUnitId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>Any unit</SelectItem>
-                  {(units ?? []).map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <OrganizationUnitPicker
+                value={unitId === NONE ? '' : unitId}
+                onChange={(id) => setUnitId(id || NONE)}
+                allowNone="Any unit"
+                unitLabel="Organisation unit"
+                idPrefix="candidate-search-unit"
+              />
             </div>
             <div className="space-y-2">
               <Label>Min. years of service</Label>

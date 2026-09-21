@@ -1,6 +1,10 @@
 ﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
+// For JobVacancyService.AllowedNextStatuses (G-5.7). ⚠ The folder is Services/HR/Extensions but the
+// namespace is ErpSystem.Application.HR.Extensions, so nothing under Core.Services.HR resolves here
+// implicitly — the path does not imply the namespace in this file.
+using ErpSystem.Core.Services.HR;
 
 namespace ErpSystem.Application.HR.Extensions;
 
@@ -71,6 +75,8 @@ public static class RecruitmentMappingExtensions
             TestScoreWeight = entity.TestScoreWeight,
             InternalCandidateBoostPoints = entity.InternalCandidateBoostPoints,
             IsBlindScreeningEnabled = entity.IsBlindScreeningEnabled,
+            // G-5.7: the picker asks the server what is legal rather than guessing.
+            AllowedNextStatuses = JobVacancyService.AllowedNextStatuses(entity.VacancyStatus).ToList(),
             WorkflowInstanceId = entity.WorkflowInstanceId,
             ShortlistApprovalStatus  = entity.ShortlistApprovalStatus,
             ShortlistSubmittedAt     = entity.ShortlistSubmittedAt,
@@ -106,6 +112,8 @@ public static class RecruitmentMappingExtensions
             AllowExternalCandidates = entity.AllowExternalCandidates,
             ApplicationCount = entity.ApplicationCount,
             ShortlistedCount = entity.ShortlistedCount,
+            // G-15.1: the dashboard's funnel needs a people-count for the interview stage.
+            InterviewCount = entity.InterviewCount,
             OfferCount = entity.OfferCount,
             CreatedAt = entity.CreatedAt,
         };
@@ -169,6 +177,8 @@ public static class RecruitmentMappingExtensions
             TestScoreWeight = entity.TestScoreWeight,
             InternalCandidateBoostPoints = entity.InternalCandidateBoostPoints,
             IsBlindScreeningEnabled = entity.IsBlindScreeningEnabled,
+            // G-5.7: the picker asks the server what is legal rather than guessing.
+            AllowedNextStatuses = JobVacancyService.AllowedNextStatuses(entity.VacancyStatus).ToList(),
             WorkflowInstanceId = entity.WorkflowInstanceId,
             Attachments = entity.Attachments?.Select(a => a.ToDto()).ToList() ?? new(),
             JobPostings = entity.JobPostings?.Select(p => p.ToSummaryDto()).ToList() ?? new(),
@@ -205,6 +215,10 @@ public static class RecruitmentMappingExtensions
             RequiresWrittenTest = dto.RequiresWrittenTest,
             RequiresPracticalTest = dto.RequiresPracticalTest,
             IsBlindScreeningEnabled = dto.IsBlindScreeningEnabled,
+            // G-5.2: carried on the write DTOs since 2026-09-15. Before that these two lived on the
+            // read DTO alone, so both scoring branches were permanently switched off at 0.
+            TestScoreWeight = dto.TestScoreWeight,
+            InternalCandidateBoostPoints = dto.InternalCandidateBoostPoints,
             RecruitmentPipelineId = dto.RecruitmentPipelineId,
             AutoShortlistMinScore            = dto.AutoShortlistMinScore,
             AutoShortlistRequireAllMandatory = dto.AutoShortlistRequireAllMandatory,
@@ -214,6 +228,9 @@ public static class RecruitmentMappingExtensions
 
     public static void UpdateEntity(this JobVacancy entity, UpdateJobVacancyDto dto, Guid userId)
     {
+        // G-5.2: see the note in the create mapping above.
+        entity.TestScoreWeight = dto.TestScoreWeight;
+        entity.InternalCandidateBoostPoints = dto.InternalCandidateBoostPoints;
         entity.CustomAdvertTitle = dto.CustomAdvertTitle;
         entity.NumberOfPositions = dto.NumberOfPositions;
         entity.HiringManagerId = dto.HiringManagerId;
@@ -247,6 +264,9 @@ public static class RecruitmentMappingExtensions
     /// </summary>
     public static void UpdateEntity(this JobVacancy entity, TransitionJobVacancyDto dto, Guid userId)
     {
+        // G-5.2: see the note in the create mapping above.
+        entity.TestScoreWeight = dto.TestScoreWeight;
+        entity.InternalCandidateBoostPoints = dto.InternalCandidateBoostPoints;
         entity.CustomAdvertTitle = dto.CustomAdvertTitle;
         entity.NumberOfPositions = dto.NumberOfPositions;
         entity.HiringManagerId = dto.HiringManagerId;
@@ -307,6 +327,13 @@ public static class RecruitmentMappingExtensions
             RequiresWrittenTest        = entity.RequiresWrittenTest,
             RequiresPracticalTest      = entity.RequiresPracticalTest,
             JobDescription             = entity.Requisition?.JobDescription?.JobSummary,
+            // Round 3, lane A: the live adverts, so a posting link can name one. Only what an
+            // applicant may come through — published, not removed or expired.
+            Postings                   = (entity.JobPostings ?? Array.Empty<JobPosting>())
+                .Where(p => !p.IsDeleted && p.Status == JobPostingStatus.Published)
+                .OrderBy(p => p.Channel)
+                .Select(p => new PublicVacancyPostingDto { Id = p.Id, Channel = p.Channel, Title = p.Title })
+                .ToList(),
         };
     }
 
@@ -463,6 +490,8 @@ public static class RecruitmentMappingExtensions
         return new JobPostingSummaryDto
         {
             Id = entity.Id,
+            JobVacancyId = entity.JobVacancyId,
+            VacancyNumber = entity.JobVacancy?.VacancyNumber,
             Channel = entity.Channel,
             Title = entity.Title,
             Status = entity.Status,
@@ -659,7 +688,8 @@ public static class RecruitmentMappingExtensions
             StageType = dto.StageType,
             IsFinalStage = dto.IsFinalStage,
             IsActive = dto.IsActive,
-            IsRequired = dto.IsRequired,
+            // Round 3, lane G (D-13): one switch — a stage is required exactly when it cannot be skipped.
+            IsRequired = !dto.CanSkip,
             DefaultTimeToCompleteDays = dto.DefaultTimeToCompleteDays,
             CanSkip = dto.CanSkip,
             CanRepeat = dto.CanRepeat,
@@ -677,7 +707,7 @@ public static class RecruitmentMappingExtensions
         entity.StageType = dto.StageType;
         entity.IsActive = dto.IsActive;
         entity.IsFinalStage = dto.IsFinalStage;
-        entity.IsRequired = dto.IsRequired;
+        entity.IsRequired = !dto.CanSkip; // D-13: derived, never typed
         entity.DefaultTimeToCompleteDays = dto.DefaultTimeToCompleteDays;
         entity.CanSkip = dto.CanSkip;
         entity.CanRepeat = dto.CanRepeat;
@@ -719,6 +749,17 @@ public static class RecruitmentMappingExtensions
             RequiredQualificationId = entity.RequiredQualificationId,
             Weight = entity.Weight,
             ComparisonOperator = entity.ComparisonOperator,
+            // Filtered here as well as on the read: a replace-set save retires rows in the SAME
+            // context it then maps, and fixup re-attaches the just-retired children (the candidate
+            // profile lesson).
+            Values = entity.Values
+                .Where(v => !v.IsDeleted)
+                .OrderBy(v => v.SortOrder)
+                .Select(v => new JobShortlistingCriteriaValueDto
+                {
+                    Id = v.Id, Kind = v.Kind, ReferenceId = v.ReferenceId, Label = v.Label, SortOrder = v.SortOrder,
+                })
+                .ToList(),
         };
     }
 
@@ -819,8 +860,13 @@ public static class RecruitmentMappingExtensions
             ExpectedSalaryMax = entity.ExpectedSalaryMax,
             ExpectedSalaryCurrency = entity.ExpectedSalaryCurrency,
             WorkAuthorizationStatus = entity.WorkAuthorizationStatus,
+            NationalIdTypeId = entity.NationalIdTypeId,
+            NationalIdTypeName = entity.NationalIdTypeRef?.Name,
+            NationalIdNumber = entity.NationalIdNumber,
+            NationalIdExpiryDate = entity.NationalIdExpiryDate,
             CvFilePath = entity.CvFilePath,
             ProfilePhotoUrl = entity.ProfilePhotoUrl,
+            HasPhoto = entity.HasPhotoOnFile(),
             ApplicationCount = entity.Applications?.Count ?? 0,
         };
     }
@@ -837,9 +883,19 @@ public static class RecruitmentMappingExtensions
             City = entity.City,
             CountryName = entity.Country?.Name ?? string.Empty,
             IsInTalentPool = entity.IsInTalentPool,
+            HasPhoto = entity.HasPhotoOnFile(),
             ApplicationCount = entity.Applications?.Count ?? 0,
         };
     }
+
+    /// <summary>
+    /// Round 3, lane C2: one answer to "is there a photograph" for every candidate DTO. The gated
+    /// upload record is the live column; the legacy public URL still counts for rows written before
+    /// photos went private (the download endpoint serves neither, but the flag must not lie about
+    /// what the record holds).
+    /// </summary>
+    public static bool HasPhotoOnFile(this JobCandidate entity)
+        => entity.ProfilePhotoFileUploadRecordId != null || !string.IsNullOrWhiteSpace(entity.ProfilePhotoUrl);
 
     public static JobCandidateDetailDto ToDetailDto(this JobCandidate entity)
     {
@@ -883,21 +939,19 @@ public static class RecruitmentMappingExtensions
             ExpectedSalaryMax = entity.ExpectedSalaryMax,
             ExpectedSalaryCurrency = entity.ExpectedSalaryCurrency,
             WorkAuthorizationStatus = entity.WorkAuthorizationStatus,
+            NationalIdTypeId = entity.NationalIdTypeId,
+            NationalIdTypeName = entity.NationalIdTypeRef?.Name,
+            NationalIdNumber = entity.NationalIdNumber,
+            NationalIdExpiryDate = entity.NationalIdExpiryDate,
             CvFilePath = entity.CvFilePath,
             ProfilePhotoUrl = entity.ProfilePhotoUrl,
+            HasPhoto = entity.HasPhotoOnFile(),
             ApplicationCount = entity.Applications?.Count ?? 0,
             Qualifications = entity.Qualifications.Select(q => q.ToDto()).ToList(),
             WorkHistories = entity.WorkHistories.Select(w => w.ToDto()).ToList(),
             Referees = entity.Referees.Select(r => r.ToDto()).ToList(),
             Skills = entity.Skills.Select(s => s.ToDto()).ToList(),
-            Languages = entity.Languages.Select(l => new JobCandidateLanguageDto
-            {
-                Id             = l.Id,
-                TenantId       = l.TenantId,
-                JobCandidateId = l.JobCandidateId,
-                LanguageName   = l.LanguageName,
-                Proficiency    = l.Proficiency,
-            }).ToList(),
+            Languages = entity.Languages.Select(l => l.ToDto()).ToList(),
             Interests = entity.Interests.Select(i => i.ToDto()).ToList(),
             Documents = entity.Documents.Select(d => d.ToDto()).ToList(),
             Notes = entity.Notes.Select(n => n.ToDto()).ToList(),
@@ -922,10 +976,17 @@ public static class RecruitmentMappingExtensions
             PostalAddress = dto.PostalAddress,
             DigitalAddress = dto.DigitalAddress,
             City = dto.City,
-            CountryId = dto.CountryId,
+            // G-7.3: settable since 2026-09-15. Before that the demo seeder was its only writer.
+            Nationality = string.IsNullOrWhiteSpace(dto.Nationality) ? null : dto.Nationality.Trim(),
+            // Guid.Empty is read as "no country", not refused: a client written against the old
+            // [Required] Guid contract sent it, and that used to be an FK 547 / 500.
+            CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId,
             LinkedInProfile = dto.LinkedInProfile,
             PortfolioUrl = dto.PortfolioUrl,
             GitHubUrl = dto.GitHubUrl,
+            NationalIdTypeId = dto.NationalIdTypeId,
+            NationalIdNumber = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim(),
+            NationalIdExpiryDate = dto.NationalIdExpiryDate,
             IsInTalentPool = dto.IsInTalentPool,
             TalentPoolAddedDate = dto.IsInTalentPool ? DateTime.UtcNow : null,
             CreatedBy = userId.ToString(),
@@ -945,7 +1006,12 @@ public static class RecruitmentMappingExtensions
         entity.PostalAddress = dto.PostalAddress;
         entity.DigitalAddress = dto.DigitalAddress;
         entity.City = dto.City;
-        entity.CountryId = dto.CountryId;
+        // G-7.3: settable since 2026-09-15. Before that the demo seeder was its only writer.
+        entity.Nationality = string.IsNullOrWhiteSpace(dto.Nationality) ? null : dto.Nationality.Trim();
+        entity.CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId;
+        entity.NationalIdTypeId = dto.NationalIdTypeId;
+        entity.NationalIdNumber = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim();
+        entity.NationalIdExpiryDate = dto.NationalIdExpiryDate;
         entity.LinkedInProfile = dto.LinkedInProfile;
         entity.PortfolioUrl = dto.PortfolioUrl;
         entity.GitHubUrl = dto.GitHubUrl;
@@ -1096,6 +1162,7 @@ public static class RecruitmentMappingExtensions
             Email = entity.Email,
             Phone = entity.Phone,
             Relationship = entity.Relationship,
+            RelationshipTypeId = entity.RelationshipTypeId,
             YearsKnown = entity.YearsKnown,
         };
     }
@@ -1112,6 +1179,7 @@ public static class RecruitmentMappingExtensions
             Email = dto.Email,
             Phone = dto.Phone,
             Relationship = dto.Relationship,
+            RelationshipTypeId = dto.RelationshipTypeId,
             YearsKnown = dto.YearsKnown,
             CreatedBy = userId.ToString(),
         };
@@ -1125,6 +1193,8 @@ public static class RecruitmentMappingExtensions
         entity.Email = dto.Email;
         entity.Phone = dto.Phone;
         entity.Relationship = dto.Relationship;
+        // Full replace, like every other field on this DTO: null clears the catalogue link.
+        entity.RelationshipTypeId = dto.RelationshipTypeId;
         entity.YearsKnown = dto.YearsKnown;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -1156,6 +1226,9 @@ public static class RecruitmentMappingExtensions
             YearsOfExperience = entity.YearsOfExperience,
             IsCertified = entity.IsCertified,
             CertificationName = entity.CertificationName,
+            CertificationNumber = entity.CertificationNumber,
+            CertifyingBody = entity.CertifyingBody,
+            CertificationExpiryDate = entity.CertificationExpiryDate,
         };
     }
 
@@ -1170,7 +1243,10 @@ public static class RecruitmentMappingExtensions
             Proficiency = dto.Proficiency,
             YearsOfExperience = dto.YearsOfExperience,
             IsCertified = dto.IsCertified,
-            CertificationName = dto.CertificationName,
+            CertificationName = dto.IsCertified ? dto.CertificationName : null,
+            CertificationNumber = dto.IsCertified ? dto.CertificationNumber : null,
+            CertifyingBody = dto.IsCertified ? dto.CertifyingBody : null,
+            CertificationExpiryDate = dto.IsCertified ? dto.CertificationExpiryDate : null,
             CreatedBy = userId.ToString(),
         };
     }
@@ -1182,7 +1258,11 @@ public static class RecruitmentMappingExtensions
         entity.Proficiency = dto.Proficiency;
         entity.YearsOfExperience = dto.YearsOfExperience;
         entity.IsCertified = dto.IsCertified;
-        entity.CertificationName = dto.CertificationName;
+        // An unticked skill carries no certificate: the four fields are cleared together.
+        entity.CertificationName = dto.IsCertified ? dto.CertificationName : null;
+        entity.CertificationNumber = dto.IsCertified ? dto.CertificationNumber : null;
+        entity.CertifyingBody = dto.IsCertified ? dto.CertifyingBody : null;
+        entity.CertificationExpiryDate = dto.IsCertified ? dto.CertificationExpiryDate : null;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1236,6 +1316,25 @@ public static class RecruitmentMappingExtensions
 
     #region JobCandidateDocument
 
+    /// <summary>Round 3, lane C1: the catalogue link and code ride beside the mirrored name.</summary>
+    public static JobCandidateLanguageDto ToDto(this JobCandidateLanguage l)
+    {
+        return new JobCandidateLanguageDto
+        {
+            Id             = l.Id,
+            TenantId       = l.TenantId,
+            CreatedAt      = l.CreatedAt,
+            CreatedBy      = l.CreatedBy ?? string.Empty,
+            UpdatedAt      = l.UpdatedAt,
+            UpdatedBy      = l.UpdatedBy,
+            JobCandidateId = l.JobCandidateId,
+            LanguageId     = l.LanguageId,
+            LanguageCode   = l.Language?.Code,
+            LanguageName   = l.LanguageName,
+            Proficiency    = l.Proficiency,
+        };
+    }
+
     public static JobCandidateDocumentDto ToDto(this JobCandidateDocument entity)
     {
         return new JobCandidateDocumentDto
@@ -1251,6 +1350,7 @@ public static class RecruitmentMappingExtensions
             FileName = entity.FileName,
             FilePath = entity.FilePath,
             UploadDate = entity.UploadDate,
+            Description = entity.Description,
         };
     }
 
@@ -1361,6 +1461,7 @@ public static class RecruitmentMappingExtensions
             WorkAuthorizationStatus = entity.WorkAuthorizationStatus,
             CvFilePath = entity.CvFilePath,
             ProfilePhotoUrl = entity.ProfilePhotoUrl,
+            HasPhoto = entity.HasPhotoOnFile(),
             ApplicationCount = entity.Applications?.Count ?? 0,
             IsInTalentPool = entity.IsInTalentPool,
             TalentPoolAddedDate = entity.TalentPoolAddedDate,
@@ -1372,8 +1473,10 @@ public static class RecruitmentMappingExtensions
             LastEngagedDate = entity.LastEngagedDate,
             DaysInPool = daysInPool,
             EngagementCount = entity.EngagementEvents?.Count(e => !e.IsDeleted) ?? 0,
+            // ⚠ The segment's own deletion is checked too: a soft-deleted segment left its
+            // membership rows live, so a retired grouping kept showing on the candidate (lane V).
             Segments = entity.SegmentMemberships?
-                .Where(m => !m.IsDeleted)
+                .Where(m => !m.IsDeleted && m.Segment?.IsDeleted != true)
                 .Select(m => m.ToDto())
                 .ToList() ?? new()
         };
@@ -1393,7 +1496,16 @@ public static class RecruitmentMappingExtensions
             Description = entity.Description,
             Color = entity.Color,
             IsActive = entity.IsActive,
-            MemberCount = entity.Memberships?.Count(m => !m.IsDeleted) ?? 0
+            // ⚠ 0 unless the caller included Memberships — the segment repository's reads do
+            // since lane V; a bare GetByIdAsync still would not.
+            MemberCount = entity.Memberships?.Count(m => !m.IsDeleted) ?? 0,
+            OwnerEmployeeId = entity.OwnerEmployeeId,
+            OwnerEmployeeName = entity.OwnerEmployee?.FullName,
+            Purpose = entity.Purpose,
+            TargetPositionId = entity.TargetPositionId,
+            TargetPositionTitle = entity.TargetPosition?.Title,
+            JobFamilyId = entity.JobFamilyId,
+            JobFamilyName = entity.JobFamily?.Name
         };
     }
 
@@ -1450,6 +1562,10 @@ public static class RecruitmentMappingExtensions
             Description = dto.Description,
             Color = dto.Color,
             IsActive = true,
+            OwnerEmployeeId = dto.OwnerEmployeeId,
+            Purpose = string.IsNullOrWhiteSpace(dto.Purpose) ? null : dto.Purpose.Trim(),
+            TargetPositionId = dto.TargetPositionId,
+            JobFamilyId = dto.JobFamilyId,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = userId.ToString()
         };
@@ -1461,6 +1577,11 @@ public static class RecruitmentMappingExtensions
         entity.Description = dto.Description;
         entity.Color = dto.Color;
         entity.IsActive = dto.IsActive;
+        // Lane V: the four are replaced, not merged — a cleared owner on the form clears the column.
+        entity.OwnerEmployeeId = dto.OwnerEmployeeId;
+        entity.Purpose = string.IsNullOrWhiteSpace(dto.Purpose) ? null : dto.Purpose.Trim();
+        entity.TargetPositionId = dto.TargetPositionId;
+        entity.JobFamilyId = dto.JobFamilyId;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1519,6 +1640,7 @@ public static class RecruitmentMappingExtensions
             Source = entity.Source,
             JobPostingId = entity.JobPostingId,
             JobPostingChannel = entity.JobPosting?.Channel.ToString(),
+            JobPostingTitle = entity.JobPosting?.Title,
             YearsOfExperience = entity.YearsOfExperience,
             AvailableFrom = entity.AvailableFrom,
             CoverLetter = entity.CoverLetter,
@@ -1609,6 +1731,7 @@ public static class RecruitmentMappingExtensions
             Source = entity.Source,
             JobPostingId = entity.JobPostingId,
             JobPostingChannel = entity.JobPosting?.Channel.ToString(),
+            JobPostingTitle = entity.JobPosting?.Title,
             YearsOfExperience = entity.YearsOfExperience,
             AvailableFrom = entity.AvailableFrom,
             CoverLetter = entity.CoverLetter,
@@ -2695,6 +2818,7 @@ public static class RecruitmentMappingExtensions
             OfferDate = entity.OfferDate,
             ExpiryDate = entity.ExpiryDate,
             Version = entity.Version,
+            IsLatestVersion = entity.IsLatestVersion,
             CreatedAt = entity.CreatedAt,
         };
     }
@@ -2967,6 +3091,7 @@ public static class RecruitmentMappingExtensions
             CheckType = entity.CheckType,
             Name = entity.Name,
             ServiceProviderName = entity.ServiceProviderName,
+            ServiceProviderSupplierId = entity.ServiceProviderSupplierId,
             Status = entity.Status,
             RequestedDate = entity.RequestedDate,
             ReceivedDate = entity.ReceivedDate,
@@ -2996,6 +3121,7 @@ public static class RecruitmentMappingExtensions
             CheckType = dto.CheckType,
             Name = dto.Name,
             ServiceProviderName = dto.ServiceProviderName,
+            ServiceProviderSupplierId = dto.ServiceProviderSupplierId,
             Instructions = dto.Instructions,
             Status = CheckItemStatus.Pending,
             IsMandatory = dto.IsMandatory,
@@ -3009,6 +3135,7 @@ public static class RecruitmentMappingExtensions
     {
         entity.Name = dto.Name;
         entity.ServiceProviderName = dto.ServiceProviderName;
+        entity.ServiceProviderSupplierId = dto.ServiceProviderSupplierId;
         entity.Status = dto.Status;
         entity.RequestedDate = dto.RequestedDate;
         entity.ReceivedDate = dto.ReceivedDate;
@@ -3161,6 +3288,7 @@ public static class RecruitmentMappingExtensions
             TemplateId = entity.TemplateId,
             CheckType = entity.CheckType,
             DefaultServiceProvider = entity.DefaultServiceProvider,
+            DefaultServiceProviderSupplierId = entity.DefaultServiceProviderSupplierId,
             Instructions = entity.Instructions,
             IsMandatory = entity.IsMandatory,
             IsBlockingOnFail = entity.IsBlockingOnFail,
@@ -3188,6 +3316,7 @@ public static class RecruitmentMappingExtensions
             TemplateId = dto.TemplateId,
             CheckType = dto.CheckType,
             DefaultServiceProvider = dto.DefaultServiceProvider,
+            DefaultServiceProviderSupplierId = dto.DefaultServiceProviderSupplierId,
             Instructions = dto.Instructions,
             IsMandatory = dto.IsMandatory,
             IsBlockingOnFail = dto.IsBlockingOnFail,
@@ -3208,6 +3337,7 @@ public static class RecruitmentMappingExtensions
     public static void UpdateEntity(this PreEmploymentCheckTemplateItem entity, UpdatePreEmploymentCheckTemplateItemDto dto, Guid userId)
     {
         entity.DefaultServiceProvider = dto.DefaultServiceProvider;
+        entity.DefaultServiceProviderSupplierId = dto.DefaultServiceProviderSupplierId;
         entity.Instructions = dto.Instructions;
         entity.IsMandatory = dto.IsMandatory;
         entity.IsBlockingOnFail = dto.IsBlockingOnFail;

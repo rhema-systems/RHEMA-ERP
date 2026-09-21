@@ -4,6 +4,7 @@ import type {
   EmployeeDocument,
   EmployeeDocumentCompliance,
   EmployeeDocumentType,
+  EmployeeGuarantorDocument,
   PositionDocumentRequirement,
 } from '@/types/hr/employee-documents';
 
@@ -98,6 +99,83 @@ class EmployeeDocumentService {
    */
   downloadUrl(id: string) {
     return `${this.baseUrl}/${id}/download`;
+  }
+
+  // ── files that belong to a ROW rather than to the employee's general file ──
+  //
+  // ⚠ Four of these routes existed on the backend since lane 3a with NO caller anywhere in the
+  // frontend (found by the round-2 survey, 2026-09-08). The photograph endpoints answer inline;
+  // the letter answers as a download. All go through the gate, all take the file only — the
+  // row they belong to is in the URL, the uploader comes from the token.
+
+  uploadEmployeePhoto(employeeId: string, file: File) {
+    return hrDocumentService.upload<unknown>(`${this.baseUrl}/employee/${employeeId}/photo`, file);
+  }
+
+  employeePhotoUrl(employeeId: string) {
+    return `${this.baseUrl}/employee/${employeeId}/photo`;
+  }
+
+  uploadDependentPhoto(dependentId: string, file: File) {
+    return hrDocumentService.upload<unknown>(`${this.baseUrl}/dependants/${dependentId}/photo`, file);
+  }
+
+  dependentPhotoUrl(dependentId: string) {
+    return `${this.baseUrl}/dependants/${dependentId}/photo`;
+  }
+
+  uploadGuarantorPhoto(guarantorId: string, file: File) {
+    return hrDocumentService.upload<unknown>(`${this.baseUrl}/guarantors/${guarantorId}/photo`, file);
+  }
+
+  guarantorPhotoUrl(guarantorId: string) {
+    return `${this.baseUrl}/guarantors/${guarantorId}/photo`;
+  }
+
+  // ── evidence for a credential on the certification tab (round 2, lane C2) ──
+
+  uploadCertificationEvidence(employeeCertificationId: string, file: File) {
+    return hrDocumentService.upload<unknown>(
+      `${this.baseUrl}/employee-certifications/${employeeCertificationId}/evidence`, file);
+  }
+
+  certificationEvidenceUrl(employeeCertificationId: string) {
+    return `${this.baseUrl}/employee-certifications/${employeeCertificationId}/evidence`;
+  }
+
+  uploadRefereeLetter(refereeId: string, file: File) {
+    return hrDocumentService.upload<unknown>(`${this.baseUrl}/referees/${refereeId}/letter`, file);
+  }
+
+  refereeLetterUrl(refereeId: string) {
+    return `${this.baseUrl}/referees/${refereeId}/letter`;
+  }
+
+  // ── documents that pertain to a guarantor (round 2, lane A-6) ──────────────
+
+  getGuarantorDocuments(guarantorId: string) {
+    return apiService.get<EmployeeGuarantorDocument[]>(
+      `${this.baseUrl}/guarantors/${guarantorId}/documents`);
+  }
+
+  uploadGuarantorDocument(guarantorId: string, file: File, fields: {
+    documentTypeId: string;
+    title?: string | null;
+    description?: string | null;
+    issuedOn?: string | null;
+    expiresOn?: string | null;
+  }) {
+    return hrDocumentService.upload<EmployeeGuarantorDocument>(
+      `${this.baseUrl}/guarantors/${guarantorId}/documents`, file, fields);
+  }
+
+  guarantorDocumentDownloadUrl(id: string) {
+    return `${this.baseUrl}/guarantor-documents/${id}/download`;
+  }
+
+  /** ⚠ Admin tier — the same bar as removing an employee document. */
+  deleteGuarantorDocument(id: string) {
+    return apiService.delete(`${this.baseUrl}/guarantor-documents/${id}`);
   }
 
   // ── requirements and compliance ────────────────────────────────────────────

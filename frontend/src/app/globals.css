@@ -401,6 +401,36 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
     background: white !important;
     color: black !important;
   }
+
+  /* SHE inspection checklist — the completed form printed as the paper it replaces
+     (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.10). Same body-class pattern as the
+     asset report: everything hides, the print root is lifted to the page origin. */
+  body.printing-she-inspection > * {
+    visibility: hidden;
+  }
+
+  body.printing-she-inspection .she-inspection-print-root,
+  body.printing-she-inspection .she-inspection-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-she-inspection .she-inspection-no-print {
+    display: none !important;
+  }
+
+  body.printing-she-inspection .she-inspection-print-root {
+    position: absolute;
+    inset: 0;
+    display: block !important;
+    box-sizing: border-box;
+    width: 210mm;
+    min-height: 297mm;
+    max-width: none;
+    padding: 10mm !important;
+    overflow: visible;
+    background: white !important;
+    color: black !important;
+  }
 }
 @keyframes mobile-scanner-sweep {
   0%, 100% {

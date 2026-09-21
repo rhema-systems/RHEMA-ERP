@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
 import {
@@ -83,6 +84,12 @@ const ACTION_COPY: Record<Action, { title: string; description: string; label: s
  * refusals — a passed shortlisting deadline, an already-shortlisted application, a stage at its
  * attempt limit — come back as 422 with the rule's own sentence, which is what gets shown. Nothing
  * is mirrored client-side.
+ *
+ * ⚠ **Permission gate added 2026-09-15 (G-8.2).** Every button here used to render for any viewer
+ * who could load the page. Nothing unsafe happened — the server refuses with 403 for anyone
+ * lacking `HR.Recruitment.Write` — but the same page gates *Record an application* on
+ * `hasAnyPermission`, and so does the list page, so the inconsistency sat inside one feature. A
+ * read-only viewer now sees the record without a row of buttons that would all fail.
  */
 export function ApplicationDecisionBar({
   application,
@@ -92,6 +99,8 @@ export function ApplicationDecisionBar({
   onChanged: () => Promise<unknown>;
 }) {
   const { toast } = useToast();
+  const { hasAnyPermission } = useAuth();
+  const canDecide = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
   const [action, setAction] = useState<Action | null>(null);
   const [text, setText] = useState('');
   const [stageId, setStageId] = useState('');
@@ -157,6 +166,8 @@ export function ApplicationDecisionBar({
       : copy
         ? !copy.required || text.trim().length > 0
         : false;
+
+  if (!canDecide) return null;
 
   return (
     <>

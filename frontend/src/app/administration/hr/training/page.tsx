@@ -1,99 +1,55 @@
 'use client';
 
-import {
-  Tag,
-  Layers,
-  Building2,
-  GraduationCap,
-  BookOpen,
-  ClipboardPen,
-  CalendarRange,
-  Coins,
-  ShieldAlert,
-  Route,
-  Handshake,
-} from 'lucide-react';
+import Link from 'next/link';
+import { ArrowRight } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
+import { hrOperationalTrainingLinks, hrSetupGroup } from '@/config/hr-setup-nav';
+
+/**
+ * The training catalogue: what can be delivered, by whom, and what it must renew.
+ *
+ * ⚠ Needs Assessments, Training Plans and Training Budgets are no longer cards here. They are
+ * per-employee, per-cycle casework — the front of the same chain whose every later step
+ * (Requests, Nomination Approvals, Enrollments, Completions) already lived under `/hr/training`
+ * — so both the screens and their routes moved there. The pointers below are for anyone who
+ * still comes to this page looking for them.
+ *
+ * Cards come from `config/hr-setup-nav.ts` — see the note on the HR hub page.
+ */
+const group = hrSetupGroup('Training & Learning');
 
 export default function TrainingSetupPage() {
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title="Training & Learning"
-        description="Catalog and providers behind the training lifecycle — planning, scheduling and delivery live under HR."
+        description={group.description}
+        backHref="/administration/hr"
       />
 
-      <NavCardGrid
-        items={[
-          {
-            title: 'Categories',
-            description: 'Classification used to group training programs.',
-            href: '/administration/hr/training/categories',
-            icon: Tag,
-          },
-          {
-            title: 'Program Groups',
-            description: 'Optional curriculum clusters above the individual program.',
-            href: '/administration/hr/training/program-groups',
-            icon: Layers,
-          },
-          {
-            title: 'Vendors',
-            description: 'External training firms, consultants and institutions.',
-            href: '/administration/hr/training/vendors',
-            icon: Building2,
-          },
-          {
-            title: 'Trainers',
-            description: 'Internal and external trainers, their skills and availability.',
-            href: '/administration/hr/training/trainers',
-            icon: GraduationCap,
-          },
-          {
-            title: 'Programs',
-            description: 'The training program catalog — materials, competencies and skills.',
-            href: '/administration/hr/training/programs',
-            icon: BookOpen,
-          },
-          {
-            title: 'Needs Assessments',
-            description: 'Training gaps identified for individual employees, with recommendations.',
-            href: '/administration/hr/training/needs-assessments',
-            icon: ClipboardPen,
-          },
-          {
-            title: 'Training Plans',
-            description: 'Annual or quarterly plans by organization scope, with items and budget lines.',
-            href: '/administration/hr/training/plans',
-            icon: CalendarRange,
-          },
-          {
-            title: 'Training Budgets',
-            description: 'Allocated training spend, approvals and spend transactions.',
-            href: '/administration/hr/training/budgets',
-            icon: Coins,
-          },
-          {
-            title: 'Compliance Requirements',
-            description: 'Training a population must hold, and how often it renews.',
-            href: '/administration/hr/training/compliance',
-            icon: ShieldAlert,
-          },
-          {
-            title: 'Learning Paths',
-            description: 'Ordered curricula, their target skills, and who is enrolled on them.',
-            href: '/administration/hr/training/learning-paths',
-            icon: Route,
-          },
-          {
-            title: 'Mentoring Programmes',
-            description: 'Mentoring schemes and the mentor/mentee pairs inside them.',
-            href: '/administration/hr/training/mentoring',
-            icon: Handshake,
-          },
-        ]}
-      />
+      <NavCardGrid items={group.links} />
+
+      <div className="rounded-lg border border-dashed p-4">
+        <h2 className="text-sm font-medium">Moved to HR → Training &amp; Development</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          These are run per cycle rather than configured once, so they sit with the rest of the
+          training desk.
+        </p>
+        <ul className="mt-3 space-y-1">
+          {hrOperationalTrainingLinks.map(link => (
+            <li key={link.href}>
+              <Link
+                href={link.href}
+                className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+              >
+                {link.title}
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

@@ -140,7 +140,11 @@ export default function StaffRequisitionsPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((r) => (
-                  <TableRow key={r.id} className="cursor-pointer">
+                  <TableRow
+                    key={r.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/requisitions/${r.id}`)}
+                  >
                     <TableCell className="font-medium">
                       <Link href={`/hr/recruitment/requisitions/${r.id}`} className="hover:underline">
                         {r.requisitionNumber}
@@ -189,6 +193,16 @@ export default function StaffRequisitionsPage() {
             Next
           </Button>
         </div>
+      )}
+
+      {/* G-4.6 / G-5.8: choosing a status switches to a dedicated endpoint that is not paged and
+          returns every matching row. The applications list already disclosed this; copying the
+          disclosure beats pretending the view is bounded when it is not. */}
+      {status !== ALL && rows.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Filtering by status uses an unpaged endpoint — all {rows.length} matching requisitions are
+          shown.
+        </p>
       )}
     </div>
   );

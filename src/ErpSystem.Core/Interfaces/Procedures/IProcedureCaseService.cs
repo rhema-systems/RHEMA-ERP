@@ -1,10 +1,12 @@
 using ErpSystem.Core.DTOs.Procedures;
+using ErpSystem.Core.DTOs.Common;
 
 namespace ErpSystem.Core.Interfaces.Procedures;
 
 public interface IProcedureCaseService
 {
     Task<IReadOnlyList<ProcedureCaseSummaryDto>> GetCasesAsync(string? module, string? entityType, bool mineOnly);
+    Task<PagedResult<ProcedureCaseSummaryDto>> GetCasesPageAsync(string? module, string? entityType, bool mineOnly, int page, int pageSize);
     Task<IReadOnlyList<ProcedureCaseSubmissionDocumentRequirementDto>> GetSubmissionDocumentRequirementsAsync(string module, string entityType);
     Task<ProcedureCaseDetailDto?> GetCaseAsync(Guid id);
     Task<ProcedureCaseDetailDto> CreateCaseAsync(CreateProcedureCaseRequest request);

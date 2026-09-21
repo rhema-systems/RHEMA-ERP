@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.Recruitment;
+﻿using ErpSystem.Core.Entities.HR.Recruitment;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -82,9 +82,22 @@ public interface IJobCandidateRepository : IGenericRepository<JobCandidate>
 
 public interface ICandidateTalentSegmentRepository : IGenericRepository<CandidateTalentSegment>
 {
+    /// <summary>
+    /// The tenant's segments, owner / target / job family and live memberships included, name
+    /// order. Round 3 lane V: the read every list and detail goes through, so <c>MemberCount</c>
+    /// and the three mirrored names are populated — before it, none of them were.
+    /// </summary>
+    Task<IEnumerable<CandidateTalentSegment>> GetForTenantAsync(Guid tenantId, bool activeOnly);
+
+    /// <summary>One segment with the same graph as <see cref="GetForTenantAsync"/>.</summary>
+    Task<CandidateTalentSegment?> GetDetailAsync(Guid segmentId);
+
     Task<IEnumerable<CandidateTalentSegment>> GetActiveByTenantAsync(Guid tenantId);
     Task<CandidateTalentSegment?> GetWithMembersAsync(Guid segmentId);
     Task<bool> NameExistsAsync(Guid tenantId, string name, Guid? excludeId = null);
+
+    /// <summary>Live memberships on a segment — what a delete has to refuse over.</summary>
+    Task<int> CountLiveMembersAsync(Guid segmentId);
 }
 
 #endregion

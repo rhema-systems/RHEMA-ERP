@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/components/hr/safety/**/*.tsx",
+    "src/components/hr/safety/**/*.ts",
+    "src/app/administration/safety/**/*.tsx",
+    "src/app/hr/safety/**/*.tsx"
+  ]
+}

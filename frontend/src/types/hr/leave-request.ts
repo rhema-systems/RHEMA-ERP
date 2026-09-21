@@ -20,7 +20,9 @@ export type LeaveStatus =
   | 'Rejected'
   | 'Cancelled'
   | 'InProgress'
-  | 'Completed';
+  | 'Completed'
+  /** The approver sent it back with dates of their own; it is with the employee to answer. */
+  | 'ChangesSuggested';
 
 export type LeavePlanStatus =
   | 'Draft'
@@ -47,6 +49,7 @@ export const LEAVE_STATUS_OPTIONS: { value: LeaveStatus; label: string }[] = [
   { value: 'Cancelled', label: 'Cancelled' },
   { value: 'InProgress', label: 'In progress' },
   { value: 'Completed', label: 'Completed' },
+  { value: 'ChangesSuggested', label: 'Changes suggested' },
 ];
 
 // ── Leave requests ──────────────────────────────────────────────────────────────
@@ -77,11 +80,93 @@ export interface LeaveRequest {
   secondRelieverEmployeeName?: string | null;
   relieverNotes?: string | null;
   leavePlanId?: string | null;
+  /** The plan this came from, named rather than shown as a Guid. Single-request read only. */
+  leavePlanReference?: string | null;
+
+  /**
+   * Attendance days recorded as OnLeave against this request. Single-request read only. It should
+   * equal `totalDays` once approved; fewer means some days already had attendance recorded and were
+   * left alone, and those will not reach the payroll export as leave (closure plan L-27).
+   */
+  attendanceDaysRecorded?: number;
+
+  /** Dates the approver sent back instead. Set while the status is ChangesSuggested. */
+  suggestedStartDate?: string | null;
+  suggestedEndDate?: string | null;
+  managerSuggestionNotes?: string | null;
+
+  /** Set once an approved request has been moved: what it used to say, who moved it, and why. */
+  originalStartDate?: string | null;
+  originalEndDate?: string | null;
+  rescheduledDate?: string | null;
+  rescheduledById?: string | null;
+  rescheduledByName?: string | null;
+  rescheduleReason?: string | null;
+  rescheduleCount: number;
+
+  /** Set when somebody answered "yes, this is still going ahead". */
+  observanceConfirmedDate?: string | null;
+  observanceConfirmedById?: string | null;
+  observanceConfirmedByName?: string | null;
+
+  /**
+   * Set when the employee was called back before their end date (R-14). The request keeps its
+   * number, its status and its approval — `endDate` is simply earlier than it was, and
+   * `preRecallEndDate` is what it used to be.
+   *
+   * ⚠ A screen showing a recalled request must show both dates, or the leave reads as though it
+   * was always this short and the recall becomes invisible.
+   */
+  /**
+   * The medical board that ruled on this absence, when one sat (G4).
+   *
+   * ⚠ A bare id across a module boundary. Leave READS the board — it never writes one — and a
+   * board only satisfies the evidence rule once it has CONCLUDED.
+   */
+  medicalBoardId?: string | null;
+
+  recallEffectiveDate?: string | null;
+  preRecallEndDate?: string | null;
+  recalledDate?: string | null;
+  recalledById?: string | null;
+  recalledByName?: string | null;
+  recallReason?: string | null;
+  daysRestored?: number | null;
+
   closureDate?: string | null;
   closureNotes?: string | null;
   cancellationDate?: string | null;
   cancellationReason?: string | null;
   createdAt: string;
+}
+
+/** An approver sending a request back with dates of their own. */
+export interface SuggestLeaveRequestChanges {
+  suggestedStartDate: string;
+  suggestedEndDate: string;
+  notes?: string | null;
+}
+
+/**
+ * Moving an approved request. A reason is required: the point of this path over cancel-and-re-key
+ * is that the record says why it moved.
+ */
+export interface RescheduleLeaveRequest {
+  startDate: string;
+  endDate: string;
+  reason: string;
+}
+
+/**
+ * Calling an employee back before their leave ends.
+ *
+ * ⚠ `effectiveDate` is **the first day the employee is back at work**, not the last day of their
+ * leave — that is what a recall notice states, and the server takes the day before it as the new
+ * end date. Reading it the other way round is a one-day error no screen would catch.
+ */
+export interface RecallLeaveRequest {
+  effectiveDate: string;
+  reason: string;
 }
 
 export interface CreateLeaveRequest {
@@ -135,7 +220,10 @@ export interface LeaveBalance {
   carriedOverDays: number;
   adjustmentDays: number;
   encashedDays: number;
+  /** Policy figure: entitled + carried + adjustments − used − pending − encashed. */
   availableDays: number;
+  /** What the server's create check actually enforces — accrued replaces entitled for accruing types. */
+  accruedAvailableDays: number;
 }
 
 export interface LeaveBalanceDetail extends LeaveBalance {
@@ -199,6 +287,15 @@ export interface UpdateLeaveAdjustmentRequest {
 export interface MandatoryLeaveCompliance {
   employeeId: string;
   employeeName: string;
+  employeeNumber: string;
+
+  /**
+   * ⚠ Added for L-22. Outstanding mandatory leave is something a DEPARTMENT acts on — it is
+   * the head who has to release people, not HR one name at a time — and the register had no way
+   * to narrow to one.
+   */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
   leaveTypeId: string;
   leaveTypeName: string;
   year: number;
@@ -209,7 +306,26 @@ export interface MandatoryLeaveCompliance {
   status: string;
 }
 
-// ── Attachments (through the controlled upload gate) ────────────────────────────
+// ── Attachments (through the controlled upload gate) ──────────────────────────
+
+/**
+ * What a document attached to a leave request actually is (R-15a).
+ *
+ * ⚠ `ExcuseDuty` and "medical certificate" are the same document under two names — the local
+ * term and the generic one. The leave type's setting says `requiresMedicalCertificate`; the
+ * thing an employee is holding is excuse duty.
+ *
+ * ⚠ Typing them is what makes the evidence gate possible at all. A rule saying "a certificate
+ * must be attached" cannot be checked against file names: `scan.pdf` is a medical certificate
+ * or a holiday photograph with equal probability.
+ */
+export type LeaveEvidenceKind = 'Other' | 'ExcuseDuty' | 'MedicalBoardRecommendation';
+
+export const LEAVE_EVIDENCE_KIND_LABEL: Record<LeaveEvidenceKind, string> = {
+  Other: 'Supporting document',
+  ExcuseDuty: 'Excuse duty (medical certificate)',
+  MedicalBoardRecommendation: 'Medical board recommendation',
+};
 
 export interface LeaveRequestAttachment {
   id: string;
@@ -222,6 +338,9 @@ export interface LeaveRequestAttachment {
   uploadedDate: string;
   uploadedBy: string;
   uploadedByName: string;
+
+  /** What the document is — read by the evidence gate, not inferred from the file name. */
+  evidenceKind: LeaveEvidenceKind;
 }
 
 // ── Leave plans ─────────────────────────────────────────────────────────────────
@@ -259,6 +378,12 @@ export interface LeavePlan {
   approvedDate?: string | null;
   rejectionReason?: string | null;
   /**
+   * The live leave request already raised from this plan, if any. A cancelled or rejected request
+   * does not count — the plan becomes raiseable again. (Closure plan L-9.)
+   */
+  raisedLeaveRequestId?: string | null;
+  raisedLeaveRequestNumber?: string | null;
+  /**
    * Why the named reliever(s) may not be free over the plan's dates — their own plans, their own
    * live leave requests, or another plan in the window that already names them. Empty when clear.
    * Advisory: the plan can still be saved and approved. (Finish-plan lane 4.)
@@ -292,7 +417,10 @@ export interface CreateLeavePlanRequest {
   notes?: string | null;
   // plannedBy is stamped server-side from the token (finish-plan lane 4); it is an Employee
   // foreign key and both screens used to send the login's user id.
-  year: number;
+  //
+  // `year` is likewise NOT sent: the server derives it from startDate. The desk screen used to send
+  // the list filter's year, so a January plan raised from the December list was filed under the
+  // wrong one and shown by neither (closure plan L-17).
 }
 
 export interface SuggestLeavePlanChangesRequest {
@@ -320,6 +448,17 @@ export interface LeaveEncashment {
   year: number;
   daysEncashed: number;
   amountPaid: number;
+
+  /**
+   * How the amount was arrived at, in words — the monthly figure, the divisor, the resulting
+   * daily rate, and where that divisor came from.
+   *
+   * ⚠ **Recorded at payout time, not recomputed.** The divisor behind it is a setting, so a
+   * figure that cannot name its own basis stops reconciling the moment somebody edits it. This
+   * is what finding L-20 was missing: the row showed an amount and nothing to check it against.
+   */
+  rateBasis?: string | null;
+
   status: LeaveEncashmentStatus;
   processedDate?: string | null;
   processedByEmployeeId?: string | null;
@@ -342,17 +481,142 @@ export interface CreateLeaveEncashmentRequest {
   notes?: string | null;
 }
 
+/** The processor is stamped server-side from the caller's employee id, never sent. */
 export interface ProcessLeaveEncashmentRequest {
-  processedByEmployeeId: string;
   paymentReference: string;
 }
 
 // ── Year-end ────────────────────────────────────────────────────────────────────
 
+/** What a tenant-wide recalculation did (L-19). */
+export interface LeaveBulkRecalculationResult {
+  year: number;
+  leaveTypeId?: string | null;
+  /** Employees whose balances were recomputed. */
+  employeesProcessed: number;
+  /**
+   * ⚠ Employees the run could not finish. Non-zero is a BUG SIGNAL, not routine — the whole
+   * point of a derived figure is that deriving it cannot fail.
+   */
+  employeesFailed: number;
+  notes: string[];
+}
+
+/**
+ * What an entitlement repair pass found, and what it changed (entitlement plan A3).
+ *
+ * ⚠ **Not the same kind of operation as the recalculation above**, which DERIVES counters from rows
+ * that exist and cannot restate anything. This one OVERWRITES a stored figure from configuration
+ * that may have moved since — which is why it has a dry run and that one does not.
+ */
+export interface LeaveEntitlementRepairResult {
+  year: number;
+  /** ⚠ True when NOTHING WAS WRITTEN. */
+  isDryRun: boolean;
+  /** Balances looked at. ⚠ Not the number changed. */
+  balancesExamined: number;
+  /** Balances whose stored entitlement disagreed with the rulebook. */
+  balancesChanged: number;
+  balancesAlreadyCorrect: number;
+  /** ⚠ Could not be resolved — a missing leave type, or an employee with no staff level. */
+  balancesFailed: number;
+  /**
+   * ⚠ Of the changed rows, how many already carried days into the next year. Those carry-overs came
+   * from the OLD figure and this pass does not revisit them.
+   */
+  changedWithCarryOverAlreadyRun: number;
+  /** A summary first, then one line per row it changed, naming both figures. */
+  notes: string[];
+}
+
 export interface LeaveYearEndResult {
+  /**
+   * How many balances the run LOOKED AT. ⚠ Not how many it changed.
+   *
+   * The name reads as "did something to", which is finding L-26: a run that examined 900 and
+   * changed 12 reported "900 processed". `balancesSkipped` sits beside it so the two cannot be
+   * confused.
+   */
   balancesProcessed: number;
   balancesAffected: number;
+  /** Examined and left alone. Always `balancesProcessed - balancesAffected`. */
+  balancesSkipped: number;
+
+  /**
+   * ⚠ True when NOTHING WAS WRITTEN — the run computed exactly what it would have done and rolled
+   * nothing into the database (L-24). A preview must never be mistaken for a run.
+   */
+  isDryRun: boolean;
+
   totalDaysCarriedOver: number;
   totalDaysForfeited: number;
   notes: string[];
+}
+
+// ── Leave calendar (closure plan wave E, slice E1) ──────────────────────────────
+
+export type LeaveCalendarScope = 'Mine' | 'Team' | 'Organisation';
+
+/**
+ * One person's leave, as a band on a calendar.
+ *
+ * ⚠ It carries no reason and no balance — a calendar is read by colleagues, and "Ama is on annual
+ * leave" is what a calendar is for.
+ */
+export interface LeaveCalendarEntry {
+  id: string;
+  requestNumber: string;
+  employeeId: string;
+  employeeName: string;
+  organizationUnitName?: string | null;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  /** The leave type's own colour; null when the tenant never set one. */
+  calendarColor?: string | null;
+  /** DateOnly */
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  status: LeaveStatus;
+  /** Approved (or beyond). A pending band is drawn as an outline. */
+  isConfirmed: boolean;
+}
+
+export interface LeaveCalendarHoliday {
+  date: string;
+  name: string;
+}
+
+export interface LeaveCalendarData {
+  from: string;
+  to: string;
+  scope: LeaveCalendarScope;
+  entries: LeaveCalendarEntry[];
+  holidays: LeaveCalendarHoliday[];
+}
+
+// ── Leave register and bulk decisions (closure plan wave E, slices E3/E4) ───────
+
+export interface LeaveRegisterFilter {
+  from?: string;
+  to?: string;
+  status?: LeaveStatus;
+  leaveTypeId?: string;
+  employeeId?: string;
+  organizationUnitId?: string;
+  search?: string;
+}
+
+export interface BulkLeaveDecision {
+  leaveRequestIds: string[];
+  comments?: string | null;
+  /** Required when rejecting. */
+  rejectionReason?: string | null;
+}
+
+/** The house bulk-result shape: a per-item reason, so the few that failed say why. */
+export interface HrBulkActionResult {
+  requestedCount: number;
+  succeededCount: number;
+  results: { id: string; success: boolean; reason?: string | null }[];
 }

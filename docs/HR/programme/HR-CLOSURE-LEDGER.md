@@ -1,0 +1,2203 @@
+# HR Closure Programme — master ledger
+
+> ⚠ **This file is hand-curated. It is no longer overwritten by its generator.**
+> `scripts/hr-coverage/04_build_ledger.py` writes a companion to
+> `scripts/hr-coverage/out/HR-CLOSURE-LEDGER.generated.md`; diff the two and merge the fresh
+> machine numbers by hand. Re-running the three instruments first is what refreshes them.
+>
+> **Corrected 2026-09-01.** The banner used to read "dispositions live in the generator, not in
+> this file". That stopped being true long ago: every session since has edited this file instead,
+> and a regeneration would now **delete ~700 lines** of curated content — the C2 build checklists,
+> section E2's classification pass, and the ⛔ reserved-contract-columns decision that is the only
+> thing standing between a future session and dropping three live columns. The generator was
+> changed to write a companion rather than this file. Keep `DISPOSITIONS` / `DEMO_FEEDBACK` in the
+> generator in step with this file where you can, so the companion stays a useful diff — today's
+> section A, F and D-40 changes were ported back into it.
+
+**Disposition key** — `BUILD` real gap · `DONE` built and verified · `INTENTIONAL` correct
+as-is, never report again · `FALSE` instrument artefact · `DECIDE` needs a call · `REVIEW` not
+yet classified.
+
+## Position
+
+| Measure | Count |
+| --- | ---: |
+| HR write endpoints | 2157 |
+| Wired to a screen | 1908 |
+| No caller found (instrument 01) | 249 |
+| Confirmed unreachable (01 ∩ 02) | 6 |
+| Write-DTO fields no form can set | 24 across 13 DTOs |
+
+*Instruments re-run 2026-09-01 after lanes 3a-ii, 6 and 4. The write-DTO gap fell from **69 across
+27 DTOs to 24 across 13** — lane 5b's 47 section-E fields leaving the count on their own, which is
+the check that the wiring is real. Endpoints rose 2124 → 2157 because those lanes added routes;
+"no caller" rose with them and is a hand-review queue, not a defect count.*
+
+⚠ **"Wired to a screen" over-counts, and by construction rather than by accident.**
+Instrument 01 matches the frontend SERVICE layer, so an endpoint whose client method exists
+counts as wired even when no screen calls that method. The five travel policy-rule and
+exception endpoints are the known instance — withheld from the UI on purpose (D-29), still
+counted here as reached. Any endpoint withheld the same way will read the same way, so this
+row is a ceiling on coverage, never a measurement of it. **The check that sees through it is
+the two greps** — every service method against the screens that call it, and every non-GET
+route template against the service.
+
+## A. Decisions taken
+
+| Date | Decision |
+| --- | --- |
+| 2026-08-28 | Build the Company Schedule UI in full. |
+| 2026-08-28 | Salary grades, levels and notches are read-only **by intent** — payroll owns the grade master. Closed; do not re-raise. |
+| 2026-08-28 | Employee career paths are **not** server-write-only and should get a UI. |
+| 2026-08-28 | Company Schedule station FKs repointed from `WorkStation` to `Location`. `WorkStation` has an empty table, no repository implementation and no endpoint, so a required station made the meeting-room form unfillable. **Needs a migration.** |
+| 2026-08-29 | Job Analysis: the twelve child collections are now authored from the job-description detail screen. Panels go read-only outside `Draft`/`UnderRevision`, and the delete affordance is hidden below Admin — both mirror what the API does, except the status rule, which the API does **not** enforce (see D-03). |
+| 2026-08-29 | Four TypeScript enum unions in `job-architecture.ts` were fiction and are corrected: `PhysicalDemandFrequency` ended in `Constantly` (it is `Continuously`), `WorkEnvironmentType` carried `Warehouse` and `Site` (neither exists) and lacked `Hybrid`/`FieldBased`/`Other`, `CompetencyType` carried `Functional` (that is `CompetencyCategory`, a different enum), and `QualificationType` was missing `TechnicalSkills` and `Language`. Each is now proven against the running API. |
+| 2026-08-29 | Discipline: the procedure steps, legal reviews and corrective action plan are now authorable from the case screen. The **sanctions stay read-only** — warning, suspension, fine and termination are blocked on FR-HR-080's issuing-authority rule, which is the original and still-valid reason. Investigation and hearing are read-only only because nobody has built their editors. |
+| 2026-08-29 | Legal-review `referredById` is now stamped from the token and removed from the create DTO (D-05). |
+| 2026-08-29 | The discipline case file is complete: witnesses, documents, notes and notices are authorable alongside the procedure steps, legal reviews and corrective action plan. Documents go through the controlled upload gate only. |
+| 2026-08-29 | **A per-case read returns the record; a cross-case read returns a summary.** Four per-case reads were returning projections that dropped the very fields their panels had to edit — the note one truncated at 100 characters. Eight reads converted (D-09). |
+| 2026-08-29 | Notices are issue-and-chase only, and carry **no acknowledge control on the HR screen**: the API refuses anyone but the employee the notice was issued to. |
+| 2026-08-29 | Two Discipline boxes stay unticked **by explanation, not omission**. `POST cases/{}/documents` is deliberately unwired — it rejects every file-location field, so through the API it can only mint a row naming a file that does not exist; it survives for the legacy migration utility. `POST cases/{}/documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — instrument 01 cannot resolve a path passed to a helper, the same artefact that makes EmployeesController read 73/81. |
+| 2026-08-29 | Medical insurance: network facilities, provider documents and premium records are administered from the provider screen; insurance claims are filed from the medical expense claim they belong to. |
+| 2026-08-29 | Provider documents now go through the controlled upload gate (D-10). The metadata route survives for the legacy migration utility and refuses every file-location field. |
+| 2026-08-29 | **HR still has no employee-policy screen.** `policies`, `dependents` and their seven write endpoints have no UI at all — only the employee self-service surface reads them. Deferred by decision, not overlooked: whether HR administers enrolment is a product call. Slice 4 demonstrates the consequence rather than arguing it — its insurance-claims section cannot run, because no policy exists to claim against. |
+| 2026-08-29 | Medical insurance reads 15 of 24, and the nine remaining are **accounted for, not outstanding**: seven are the deferred policy/dependent family (D-13); `POST provider-documents` is deliberately unwired (it refuses every file-location field, so it can only mint a row naming a file that does not exist); and `POST provider-documents/upload` **is** wired, through `hrDocumentService.upload(endpoint, file, fields)` — the path-builder artefact instrument 01 cannot resolve. |
+| 2026-08-30 | **The investigation and the hearing are recordable** (area 9 slice 11, 29 assertions). Both were read-only for no reason beyond nobody having built the editors — neither imposes a penalty, so FR-HR-080 never governed them. Five endpoints, and the panel is built around three traps: `complete` takes a bare JSON string, recording findings does NOT complete the investigation, and clearing the accompaniment must clear every representative field with it. |
+| 2026-08-30 | **A control that cannot enforce does not get an editor.** Travel policy RULES are read by nothing — the booking guard uses the policy's own scalar caps — so the rules register ships read-only and the policy-exception flow does not ship at all. An editable control that enforces nothing creates false assurance, which is worse than no control: a rule set to `Block` is a promise to whoever configures it, and hand-raised exceptions would manufacture audit records implying a control was in force and waived. The write paths exist and stay harness-covered, so enforcement is a screen change. |
+| 2026-08-30 | **Succession documents get one panel, not three.** A `SuccessionDocument` hangs off a plan, a plan candidate or a talent-pool member, and one table, one DTO and one upload route already served all three — so one frontend component takes the owner as a discriminated union and is mounted from the plan detail, the successors tab and the pool members table. The alternative was three near-identical panels drifting apart. |
+| 2026-08-30 | **The sanctions stay read-only, and D-18 restates why.** ⚠ **This row was superseded on 2026-08-31 and is kept because it was acted on for a day.** It said no actor reaches the authority rule and a warning can be recorded against an undecided case. The second half was right and understated; the first was wrong — it rested on two probe assertions that expected a **401** where a permission refusal is a 403, and passed against tokens that had gone stale. See D-18. |
+| 2026-08-31 | **The authority rule works, and three of the four sanctions were unfounded.** Re-run with a fresh login per actor, a capped-authority caller is refused a Management-level sanction BY THE RULE and accepted for a head-of-department one — it discriminates rather than merely refusing. Separately, warning, suspension and fine were all accepted on a case with no decision; only termination was guarded. The guard is now shared by all four. The ten sanction endpoints are unblocked; what FR-HR-080 still wants is a head-of-department ROLE to hold the capped authority. |
+| 2026-08-30 | **Stale-navigation-on-a-write-response, fourth instance.** `investigatorName`, `hearingOfficerName` and `representativeEmployeeName` all came back null from the create and update responses while the detail and queue reads resolved them. Four writers now re-read before mapping, the same fix the succession document uploader got. Every instance so far has been found by a harness assertion, never by reading the code. |
+| 2026-08-30 | **The discipline catalogue is authorable** (area 9 slice 10, 43 assertions). Offences, their procedure ladders and the sanction catalogue can all be created, corrected, reordered and retired from `/administration/hr/discipline/catalogue`. A client was previously stuck with whatever the seed shipped — unable to name an offence it had not anticipated, or fix a typo in one it had. |
+| 2026-08-30 | ⚠ **Instrument 01 invented a phantom route for every real one in a file holding two controllers.** It crossed every `[Route]` in a FILE with every `[Http*]` in it, so `StaffDisciplineLookup` read as 20 writes when it has 10, and `Competency` as 12 when it has 6. `api/discipline/action-types/{}/procedures` was reported for months and answers 404 — slice 10 proves it. **Fixed at the instrument**: routes are now attributed per class. 16 phantom endpoints left the backend count (2151 → 2135). |
+| 2026-08-30 | **A TypeScript type can be fiction nothing has caught yet.** `StaffOffense.offenseProcedures` never existed — the DTO field is `Procedures` — but no screen had read it, so nothing failed. The first screen to use it would have rendered an empty ladder with no error and no clue. Corrected, and the harness now pins the real name. Fourth instance of this shape. |
+| 2026-08-30 | **The Assets missing-edit family is built** (slice 18, 43 assertions). All eight endpoints wired; eight left the coverage queue on their own. Unlike medical this needed **no backend change** — every endpoint already stamped its actor (five through `UpdateEntity(dto, userId)`, surcharges through a `Stamp(entity)` helper) and every screen already fetched its record by id, so both standing checks passed before any UI was written. |
+| 2026-08-30 | **A wired endpoint can still be unreachable through a misspelled payload key.** `submitSurcharge` sent `proceededWithoutResponseReason` while the DTO declares `ProceedWithoutResponseReason` — "proceeded" against "proceed" — so a submit without an employee response was refused however carefully the reason was typed. Instrument 01 counts the endpoint as wired, because it is: the ROUTE matched and the BODY did not. Slice 18 asserts both spellings. |
+| 2026-08-30 | ⚠ **A full-project `tsc --noEmit` crashes on this repo** (TypeScript 5.9.2, "Debug Failure. No error for last overload signature"), and `incremental: true` with a stale `tsconfig.tsbuildinfo` had been hiding it — earlier clean runs were partial, checking only changed files. Reproduced on a clean tree with no local changes, so it predates this work. Slices are type-checked against a scoped `tsconfig` until someone finds the offending file. |
+| 2026-08-30 | **The recruitment block's portal decisions, all three settled by the user at kickoff.** The candidate portal (own `PortalBearer` auth) is retired — code AND schema, the table held zero rows; candidates self-register on the main JWT scheme under a **separate `Candidate` role**, never `ExternalUser`, because that role's middleware allowlist carries `/api/procurement` wholesale (live cross-module hole #11a) plus the projects/estate/support portals; and the flow is **browse public, apply logged-in** — the anonymous apply/track/cv-upload endpoints retired with the portal while the board and catalogues stay anonymous. |
+| 2026-08-30 | **`InternalOnly` is a blocklist, not an allowlist.** The policy refused exactly one role by name, so a new self-registered public role would have satisfied it on every internal endpoint it guards. `Candidate` is now named alongside `ExternalUser`, and the policy's comment says the rule out loud so the next public role names itself too. `CandidateAccessMiddleware` is a deliberate SIBLING of the ExternalUser fence — strict-subset allowlist, no admin bypass. |
+| 2026-08-30 | **Adopting an existing candidate row requires a confirmed mailbox.** Registration activates by SMS OTP, but linking an account to a pre-existing `JobCandidate` with the same email hands over that candidate's application history — and anyone can type someone else's address at registration. `SaveProfileAsync` refuses adoption until Identity's `EmailConfirmed` is true (`api/candidate/confirm-email` pair); a fresh email just creates a fresh candidate. |
+| 2026-08-31 | **EF relationship fixup resurrects soft-deleted children on a same-context response read.** The profile's replace-set save soft-deleted an omitted interest and the response served it straight back: `GetWithFullDetailsAsync` gained filtered includes (it was echoing deleted children to HR's `/details` too), but the save builds its response in the SAME DbContext, and fixup re-attaches the tracked, just-deleted rows regardless of the SQL. The mapper now filters `IsDeleted` as well, with a comment so the 'redundant' second filter survives review. Found by slice-f's replace-set assertion, not by reading. |
+| 2026-08-31 | **The tokenised offer-response page lives at the path already in people's inboxes.** Offer emails link to `{PortalUrl}/careers/portal/offer-response?token=…`; the retired Blazor page was the old target, so the Next page was built at that exact route rather than a cleaner one — changing the URL format would have dead-linked every offer already sent. |
+| 2026-08-29 | **The medical missing-edit family is built** (slice 6, 41 assertions). Pre-authorisations, referrals, appointments, expense claims and claim lines can all be corrected and removed; eleven endpoints left the coverage queue on their own, which is the check that the wiring is real. The claim edit also closes section E's `AdmissionStart`/`AdmissionEnd`. |
+| 2026-08-29 | **An edit dialog loads its record by id — never from the list row.** The appointment row carries 7 fields against the record's 32; the pre-authorisation row 9 against 34. Neither carries `purpose`, `serviceType`, `diagnosis` or `proposedTreatment`, all of which the update writes, so a row-bound dialog would have rendered them blank and blanked them on save — D-09 and D-12 one layer further out. Proved by `probe-clinical-byid.mjs` before any TypeScript was written, and now held by a standing assertion. |
+| 2026-08-29 | **D-16's sweep finished: eleven more transitions stamp their actor.** The blocker named the eight clinical ones; checking every `ApplyTo` helper in the medical mappers found eleven more with no actor at all — four of them moving money, and payment, flag and unflag wired and shipped. A claim being paid recorded the amount, the method and the reference, but not who did it. |
+| 2026-08-29 | **The D-14/D-15/D-16 slice is harness-verified, not merely built.** `hr-succession/run-slice13.mjs` (36 assertions) and `hr-medical/run-slice5-actors-and-nhis-documents.mjs` (34) are both green. The run found one defect a code read had missed — a blank `uploadedByName` on the create response — which is the reason the harness runs before the hand-over rather than after it. |
+| 2026-08-29 | **The succession, talent-pool and NHIS document families now go through the controlled upload gate** (D-14). The succession half is served by one new controller, `api/succession-documents`, rather than three copies of the same transport: one table and one DTO serve the plan, the candidate and the pool member, so the upload takes the owner as a parameter — the same shape `api/succession-development` already uses for development activities. All four metadata routes survive for the legacy migration utility and refuse every file-location field. |
+| 2026-08-29 | **Succession document uploaders are stamped from the token** (D-15). `UploadedById` is an explicit service parameter, not a DTO field, so it cannot be asserted by a caller. Fifth instance of the D-05 shape. |
+| 2026-08-29 | **Medical clinical transitions stamp an actor** (D-16). Eight helpers now set `UpdatedAt`/`UpdatedBy`. Not just a blocker — cancel, check-in and check-out were wired and shipped, so the defect was live. Neither the appointment nor the referral carries a domain actor FK, so the audit column is the only place an actor can go without a schema change. |
+| 2026-08-29 | **The section D hand-review queue is classified per endpoint, not per controller.** A controller is rarely one verdict: `Assets` is two path-builder artefacts, two employee-portal duplicates and eight genuine gaps. `ENDPOINT_DISPOSITIONS` in the generator keys on `(file, VERB, route)` so the mix survives a regeneration, and section D2 carries the reason for every line. |
+| 2026-08-29 | **Of the 149 endpoints that were `REVIEW`, 65 are real.** 46 are instrument artefacts — the endpoint is wired and 01 could not see it (31 through `hrDocumentService.upload`, 4 through `DocumentUploadField`, 18 through the `api/Pip` second-`[Route]` alias, 2 through the two-controllers-in-one-file bug fixed on 2026-08-30, 1 through an interpolated query string). 38 are `INTENTIONAL`: a duplicate route onto an operation that is already reachable, a raw-CRUD escape hatch superseded by a workflow, a replace-set parent that owns its children, or a boundary held on purpose. The remaining 65 are gaps with a screen to build. |
+| 2026-08-29 | **The dominant real gap is the missing edit.** Assets, medical clinical records, medical expense claims and their items, travel policy rules, travel groups, and the four movement sub-types all wire create and (mostly) delete, and not the correction. A record raised wrongly can be destroyed but not fixed — which is the worse of the two on anything a person is charged, paid or moved by. |
+| 2026-08-29 | **Two wired approval queues can never have anything in them.** `CreateExceptionAsync` (travel policy exceptions) and `CreateAlertNotificationAsync` (travel compliance alerts) each have exactly one caller — their own endpoint — and no screen calls either, while the pending-queue read and the decide/acknowledge action on both are wired. Nothing raises the thing the queue exists to work through. |
+| 2026-08-29 | **The employee-portal principle decides four of the queue rows.** `POST api/Assets/assignments/{}/acknowledge`, `POST api/Assets/surcharges/{}/respond` and `POST api/AppraisalNotifications/mark-all-read/{employeeId}` stay unwired because the same operation is served by a route that takes the employee from the token instead of the URL. `POST api/staff-demotions/{}/respond` is the exception that proves it: no portal route exists, so the employee surface has to be built. ⚠ The reason given here — that HR's `pending-appeals` queue was unfillable — was wrong, and corrected on 2026-08-30: that queue lists demotions awaiting an answer, so it was always full and nothing could leave it. The conclusion stands; the reasoning did not. |
+| 2026-08-29 | **Manpower budgets can be created and approved but not edited or deleted.** `PUT`/`DELETE api/JobAnalysis/budgets/{}` and `PUT`/`DELETE api/JobAnalysis/lines/{}` have no caller — surfaced when the whole JobAnalysis controller was enumerated, and outside that slice's scope (its disposition named the twelve job-description child collections). Area 18, unscheduled. **⚠ STALE — struck 2026-09-01 (lane 4):** all four were wired in 2efd553c (`updateBudget`, `deleteBudget`, `updateBudgetLine`, `deleteBudgetLine` on the budget detail page) and this ledger's own C2 checklist had already ticked them. Two dispositions on one endpoint disagreeing, again. |
+| 2026-09-17 | **The leave module's eleven decisions are taken, and six are built to the recommendation rather than waiting.** Logged for TDC as **L-D1 … L-D8** in `HR-OPEN-QUESTIONS-FOR-TDC.md`; the three marked *recommend* needed no TDC answer. Leaving the module half-finished while waiting was the worse trade — TDC can still overturn any of the six, and each is small to reverse. **L-D7 (the daily-rate basis) and L-D8 (whether in-service encashment is permitted at all) are deliberately NOT built**, because both readings are live in the product at once and guessing would ship a third. |
+| 2026-09-17 | **⚠ `PreventInitiatorApproval` is the WRONG control for leave, and the plan's own D-3 was overridden.** The engine flag guards the *initiator*; a leave record's conflicted party is its *subject*, and HR raises leave for other people from the desk. On a tenant with one HR user — the demo tenant is exactly that — the flag strands every desk-raised request at the HR stage with nobody able to clear it, which is the area-9b mistake repeated. All three leave services instead refuse an approval by the employee the record is about. Second instance of trap 7 in `HR-WORKFLOW-ENGINE-INTEGRATION.md` biting a real build. |
+| 2026-09-17 | **Leave approval is TWO stages from now on: line manager, then HR confirmation.** Seeded by `EnsureLeaveWorkflowsSeededAsync`, which supersedes the single-stage rows rather than sitting beside them. **Consequence worth knowing before any demo or harness: one approve call no longer finishes a request**, and the entity stays `Pending` between the two stages. |
+| 2026-09-17 | **A sub-type cap is enforced ANNUALLY, not per request** — against the plan's own D-2 wording. A per-request check is defeated by splitting one request into two, and *"caps days for this subtype"* plainly means the year. Still one balance pot per leave type, which is what D-2 actually decided; the cap is a query at request time rather than a second balance row. |
+| 2026-09-17 | **An approval is an approval OF DATES.** Rescheduling an approved leave request re-opens its approval rather than carrying it across, and a reason is mandatory. Anything else lets the record claim an authority nobody gave, which is the whole reason this path exists instead of cancel-and-re-key. |
+| 2026-09-17 | **Attendance posting is expressed as an invariant with a convergent reconciler, not as hooks.** `OnLeave` days exist for a request iff its status is Approved/InProgress/Completed. Leave's own transitions call `ReconcileAttendanceAsync`, and the nightly sweep calls `ReconcileRecentAttendanceAsync` over recently-changed requests. ⚠ The reason is that a leave status can change through doors this module does not own — the generic workflow recall calls the status adapter directly and never touches `LeaveService` — and a hook per door is a list somebody eventually forgets to extend. **Drift repaired by the sweep is logged as a WARNING: it means a real bug upstream, not routine housekeeping.** |
+| 2026-09-17 | **⚠ A soft delete does not release the attendance unique index.** `IX` on `(TenantId, EmployeeId, AttendanceDate)` is not filtered on `IsDeleted`, while `GetQueryable()` hides soft-deleted rows — so reversing leave with the repository's ordinary `DeleteAsync` would leave an invisible row holding that employee's slot for that date, and the next post or punch would fail against a row nothing can see. The reversal uses `HardDeleteAsync` and carries a comment saying it must stay one. Same shape as the succession-area finding. |
+| 2026-09-17 | **The leave approvals queue reads the workflow assignee, not `Employee.ManagerId`** (L-10). The old query answered "this manager's direct reports' Pending requests", which under the two-stage ladder is wrong in both directions: it kept showing a manager what they had already approved, and never showed HR the confirmation step, because HR is nobody's manager. The screen's manager picker is gone with it — the answer is only ever about the caller, so there was nothing there but a way to read somebody else's queue. ⚠ The queue asks the engine per candidate and therefore scans a capped 300 Pending requests. |
+| 2026-09-17 | **An approver's suggested dates are validated when they are proposed, not when the employee accepts them.** Otherwise an approver could propose a window the employee's balance would not carry and the *employee* took the refusal — the consequence landing on the person without the authority. The accept path still re-checks, because time passes in between and another request can consume the balance meanwhile. |
+| 2026-09-17 | **CSV exports escape formula-leading cells.** A cell starting `=`, `+`, `-` or `@` gets a leading apostrophe, because an exported name or note beginning with one of those is executed by Excel on open. Applies to all three leave exports and is the pattern any future HR export should copy. |
+| 2026-09-01 | **Lane 4, "Training Activities grouped screen" — interpreted as the DESK twin of My Training:** one employee's nominations, requests, completions, certificates and mandatory compliance on one screen (`/hr/training/activities`). The five pre-port feedback documents section F cites are not on disk, so this is an assumption to confirm with TDC; every read it makes is a per-employee endpoint that already existed. |
+| 2026-09-01 | **Lane 4, "Certificate does not gate completion — per-program flag" — interpreted as:** a PASSED completion of a programme flagged `ProvidesCertificate` (the per-programme flag, which nothing had read) cannot be VERIFIED until an active certificate exists for the nomination. Failed completions and programmes without a certificate are not held; a revoked certificate does not count. Assumption to confirm with TDC. |
+| 2026-09-01 | **Seats are taken at approval, not at nomination — on the bulk path as on the single one.** `EnforceScheduleCapacityAsync` runs on the approve paths only. The bulk-nomination dialog must not invent a stricter rule; a full schedule refuses the approval and the overflow goes to the waitlist. |
+| 2026-09-01 | **Leave request numbers come from `INumberSequenceService`** (`LEAVE-REQ`, year-bucketed, format `LV{year}{seq:D6}` preserved), seeded once per tenant-year from the highest number on record **including deleted rows**. The max+1 scan is gone. |
+
+## B. Blockers — must clear before the dependent build starts
+
+- [x] **D-01 — Company Schedule actor ids are client-supplied** · `DONE 2026-08-28`
+
+  organizerId, approvedById, markedById, bookedById and announcedById arrived as query parameters. Opening a UI over them unchanged would have shipped an act-as-anyone surface — the controller's own W3 remarks said so. All six now derive the actor from the token via HrControllerBase.TryGetEmployeeWriteContext and no longer accept it from the client. Safe to change signatures because no caller existed. **Needs a backend rebuild.**
+
+  _Was blocking the Company Schedule build — cleared_
+
+- [x] **D-03 — A child write on an approved job description is accepted by the API** · `DONE 2026-08-31`
+
+  None of the twelve child-collection writes checks status. `AddPhysicalDemandAsync` and its eleven siblings call `GetOwnedJobDescriptionAsync`, which verifies the tenant and stops — so the duties of an approved, in-force job description can be rewritten with no new version and no trace. Proven against the running API by slice 13, which records it as a passing assertion so the day it starts failing is the day the server grew a gate. The authoring panels refuse it client-side (`AUTHORABLE_JOB_DESCRIPTION_STATUSES`) and that is the only thing stopping it. A server-side guard belongs on the service, not the screen.
+
+  **Fixed 2026-08-31 (closure lane 1).** `RequireAuthorableJobDescriptionAsync` gates all twelve collections — 36 write paths, since the updates and deletes never called `GetOwnedJobDescriptionAsync` at all: they loaded the child by id, checked its tenant and wrote. Two of the twelve reach their description through a parent (a KPI through its responsibility, equipment training through its tool) and have their own helper. Deletes are gated too: removing a duty from a signed document is the same act as rewriting one, and the message names the way forward — raise a new version — rather than just refusing. `run-slice7-closure-lane1.mjs` §2 proves the draft surface still works first, then the refusals, then that the record is unchanged by them.
+
+  _Cleared. The UI's client-side refusal now compensates for nothing, which is the correct state for it_
+
+- [x] **D-04 — `JobEquipmentTool.LinkedQualificationId` points at a JobQualification, not the catalogue** · `DONE 2026-08-29`
+
+  The field is called `LinkedQualificationId`, the DTO types it `Guid?`, and the obvious reading — the `Qualifications` reference catalogue — is wrong. The constraint is `FK_JobEquipmentTools_JobQualifications_LinkedQualificationId`: it targets one of the SAME job description's qualification rows. A catalogue id fails the FK and the request 500s with the generic handler's message, naming nothing. The equipment panel was built on the wrong reading and slice 13 caught it; the picker now reads the job description's own qualifications and hides itself until there are some.
+
+  _Was breaking every equipment-tool save — cleared_
+
+- [x] **D-05 — Legal-review referrer was assertable by the request body** · `DONE 2026-08-29`
+
+  `CreateStaffDisciplineLegalReviewDto.ReferredById` was accepted from the client and copied straight onto the entity by the mapper, while the token's employee id went only to `CreatedBy`. So any HR user could record a colleague as the person who referred a case to legal — a falsifiable audit record on exactly the kind of document a case turns on later. The same defect class as D-01, and cleared the same way: the field is gone from the create DTO and `ReferAsync` stamps the actor. Nothing had ever sent it (it was in section E's "no form can set" table), so no caller broke. **Needs a backend rebuild.**
+
+  _Was blocking the discipline legal-review build — cleared_
+
+- [x] **D-07 — Action-step complete and skip never stamped the step's actor** · `DONE 2026-08-29`
+
+  `CompleteStepAsync` and `SkipStepAsync` set only `UpdatedBy` — the string audit column — and never `ActionedById`, the Employee FK the DTO exposes and the case screen renders as "By". So that column was permanently blank for every step closed through the supported route, and the ONLY path that ever filled it was the plain update, which takes the id from the request body. Found by running the new panel's own payloads, not by reading the code: three assertions failed on the first run of slice 9. Both transitions now stamp the actor; skip deliberately still sets no completion date. **Needs a backend rebuild.** ⚠ Residue: `UpdateActionStepDto.ActionedById` is still client-supplied. Left alone rather than removed, unlike the legal-review referrer, because correcting a mis-attributed step is a legitimate HR act and no screen exposes it — but it is an act-as-anyone vector on paper.
+
+  _Was making the panel's "By" column permanently empty — cleared_
+
+- [x] **D-10 — Provider documents took a caller-supplied file path with no gate and no download** · `DONE 2026-08-29`
+
+  `POST provider-documents` REQUIRED a `FilePath` and stored it verbatim, so any HR user could point a document row at arbitrary bytes on disk. There was no upload endpoint and no download route either, so the row was unreadable even when the path was honest. This was the **third** instance of that defect in the medical module — `MedicalExpenseDocument` and `EmployeeMedicalExamDocument` were each fixed for it, and provider documents were missed. There was no safe way to build a UI over it, which is why the collection stayed unreachable. Now: three nullable DMS columns (migration `AddMedicalInsuranceProviderDocumentDmsColumns`, hand-guarded on COL_LENGTH because rebuild-db builds from the EF model), a multipart upload through the scanning + DMS gate, a token-bearing download, and the metadata route refusing every file-location field. **Needs a backend rebuild.**
+
+  _Was blocking the provider-documents build — cleared_
+
+- [x] **D-11 — A declared upload category is not a registered one** · `DONE 2026-08-29`
+
+  Adding `HrMedicalInsuranceProviderDocuments` to `ControlledFileUploadCategories` was only half the job. Membership of `SystemCleanScanRequired` is the ONLY thing that turns scanning on — a category absent from it is silently SKIPPED, and `CentralDocumentRepositoryFileService.RegisterAsync` then rejects `Skipped` as firmly as `Infected`. The upload passed the gate and failed one layer later with an `InvalidOperationException` naming neither the category nor the scan. The property's own remarks predict this exactly; it was still missed. Registered, with a comment at the point of use. **Any future upload category must be added in both places.**
+
+  _Was making every provider-document upload fail — cleared_
+
+- [x] **D-12 — The per-provider premium read returned a summary its panel could not render** · `DONE 2026-08-29`
+
+  `providers/{id}/premium-records` returned `MedicalInsurancePremiumRecordSummaryDto` — total and status only, nothing about contributions, covered lives, due date or payment. Nine probe assertions failed and the panel would have shown blank columns. **Third occurrence of the D-09 shape**, and again the pattern already existed beside it: network facilities and provider documents on the SAME controller returned full DTOs. Converted; `premium-records/overdue` stays a summary. The rule, now stated three times: a per-parent read feeds a panel that must show detail; a cross-record read feeds a list.
+
+  _Was making the premium panel render blank columns — cleared_
+
+- [ ] **D-13 — HR cannot administer employee insurance policies** · `OPEN`
+
+  `policies` (create, update, cancel, delete) and `dependents` (add, update, remove) — seven write endpoints — have no HR screen at all; only the employee's own self-service surface reads policies. Deferred by decision on 2026-08-29 rather than overlooked: whether HR administers enrolment, or it arrives from payroll or the insurer, is a product call and not a coverage gap. Recorded because slice 4 made the consequence concrete — its insurance-claims section cannot execute at all, since no policy exists to claim against.
+
+  _Blocks nothing built so far, and blocks any test of insurance claims_
+
+- [x] **D-06 — Four discipline case-file collections were displayed but unrecordable** · `DONE 2026-08-29`
+
+  `StaffDisciplineCaseDetailDto` carries six collections; only two were built out in the first pass. Witnesses, documents, notes and notifications are now authorable too, so the case file is complete. Documents go through the controlled upload gate only — the metadata-only route is left unwired because it rejects every file-location field and can therefore only mint a row naming a file that does not exist.
+
+  _Was leaving the case file half-authorable — cleared_
+
+- [x] **D-09 — Four per-case reads returned summaries a panel could not edit from** · `DONE 2026-08-29`
+
+  `cases/{id}/witnesses`, `/notes`, `/documents` and `/notifications` returned `...SummaryDto` projections. The witness summary has no `ContactInfo`; the note summary carries a **100-character excerpt** instead of the note; documents drop `Description` and `ActionStepName`; notifications drop `SentByName` and `FollowupDate`. Every panel built on them rendered permanently blank columns, and the witness edit form would have wiped `ContactInfo` on every save. Legal reviews already returned the full DTO from their per-case read — the pattern existed and four collections had not followed it. The eight per-case reads now return the record; the cross-case reads (by-author, pending-followup, by-scope, by-category, by-employee) stay on summaries because they feed lists and the reminder sweep. The rule: **a per-case read feeds a panel that must edit; a cross-case read feeds a list.** **Needs a backend rebuild.**
+
+  _Was making four new panels render blank columns — cleared_
+
+- [x] **D-08 — Note author and document uploader were assertable by the request body** · `DONE 2026-08-29`
+
+  Third and fourth instances of the D-05 shape, found by checking every create mapper in the family rather than waiting for a probe to fail. `StaffDisciplineNote.CreatedByEmployeeId` and `StaffDisciplineDocument.UploadedById` were copied from the DTO while the token's employee id went only to `CreatedBy`. Notifications were **already correct** — `SentById` is server-stamped and the DTO says why — which is what showed the other two were not. Both fields are now stamped from the token and removed from their create DTOs.
+
+  _Was letting a case note be attributed to a colleague — cleared_
+
+- [x] **D-14 — The succession, talent-pool and NHIS document families were on a caller-supplied file path** · `DONE 2026-08-29`
+
+  The fourth and fifth instances of the sink D-10 closed for provider documents. `CreateSuccessionDocumentDto.DocumentUrl` is `[Required]`, 1000 characters, and copied verbatim onto the entity by the mapper; `CreateNHISClaimDocumentDto.FilePath` is the same shape. Neither family has an upload route, a download route or a single DMS column, so a row can only ever name a file the server never received — unreadable even when the path is honest. One DTO serves all three succession doors (`succession-plans/{}/documents`, `succession-candidates/{}/documents`, `talent-pools/members/{}/documents`), which is why eight endpoints are blocked by one defect. The fix is the D-10 recipe: nullable DMS columns behind a COL_LENGTH-guarded migration, a multipart upload through the scanning + DMS gate, a token-bearing download, and the metadata route refusing every file-location field. ⚠ Register the new upload categories in **both** `ControlledFileUploadCategories` **and** `SystemCleanScanRequired` — that is D-11, and it is the step that gets missed.
+
+  **Done 2026-08-29.** Six nullable DMS columns across the two tables (migration `AddSuccessionAndNhisDocumentDmsColumns`, hand-guarded on `COL_LENGTH` and listed in `FastBuildMigrationMetadata`), `HrSuccessionDocuments` declared **and** registered as scan-mandatory in the same edit, and all four metadata routes now refuse every file-location field. The succession transport went into ONE new controller, `api/succession-documents`, rather than three copies: one table and one DTO serve all three owners, so the upload takes the owner as a parameter and refuses anything but exactly one of them — none writes a row invisible to every read, two puts it in two collections. NHIS reuses `HrMedicalClaimDocuments`: same artefact, same person, same permission family. Two things the work turned up on the way — the confidential-document download is gated to Succession.Admin, because the confidential list is a separate read rather than a filter and a blind download would hand back through one door what the other withholds; and the NHIS upload checks the claim's tenant before storing bytes, because `AddClaimDocumentAsync` checks the tenant but never the claim, so the FK alone was deciding.
+
+  **Verified against the running API, 2026-08-29** — `hr-succession/run-slice13.mjs` (36 assertions) and `hr-medical/run-slice5-actors-and-nhis-documents.mjs` (34), both green. The run earned its keep: **`uploadedByName` came back empty on the create response** while every per-parent read resolved it. All three writers mapped a freshly-added entity whose `UploadedBy` navigation had never been loaded — the stale-nav-on-a-write-response shape — so a panel binding "Uploaded by" would have shown blank on the row it had just created and correct after a refetch. Reading the code did not find it; the assertion did. Fixed with `ISuccessionDocumentRepository.GetByIdWithUploaderAsync`, re-read in all three writers before mapping.
+
+  _Was blocking 8 of the queue's BUILD endpoints — cleared_
+
+- [x] **D-15 — Succession document uploader was assertable by the request body** · `DONE 2026-08-29`
+
+  The fifth instance of the D-05 shape, and it travels with D-14. `CreateSuccessionDocumentDto.UploadedById` is `[Required]` and the mapper writes `UploadedById = dto.UploadedById` while the token's employee id goes only to `CreatedBy` — so on a succession plan, a candidate file or a talent-pool member's file, the person recorded as having produced a document is whoever the client says. Both controllers already resolve `_currentUser.EmployeeId` and hand it to the service; it simply never reaches the field. Fix it in the same commit as D-14: nothing has ever sent the field, so no caller breaks.
+
+  **Done 2026-08-29.** The field is gone from the create DTO and the uploader is now an explicit `uploadedByEmployeeId` parameter on all three writers — a parameter rather than a DTO field precisely so it cannot be asserted by a caller. Nothing had ever sent it, and no caller broke. **Needs a backend rebuild.**
+
+  _Was blocking the same 8 endpoints as D-14 — cleared_
+
+- [x] **D-16 — Medical clinical status transitions recorded no actor at all** · `DONE 2026-08-29`
+
+  `UpdateAppointmentStatusAsync`, `CancelAppointmentAsync`, `CheckIn`, `CheckOut`, `UpdateReferralStatusAsync`, `CompleteReferralAsync` and `RejectPreAuthorizationAsync` are declared without a `userId` parameter, their DTOs carry no actor field, and the service sets no `UpdatedBy` — so the row after the transition is indistinguishable from the row before it as to who moved it. Worse than D-07, where the audit string at least survived: here there is no actor anywhere on the path to stamp. This is **not** only a blocker for the new work — cancel, check-in and check-out are wired today and shipped, so the defect is live. The sibling writes on the same controller (`CreatePreAuthorization`, `UpdateReferral`, `UpdateAppointment`) all take a userId through `TryGetWriteContext`; the pattern exists beside them and the transitions did not follow it.
+
+  **Done 2026-08-29.** All eight transition helpers take the actor and stamp `UpdatedAt`/`UpdatedBy`, the same two lines their `UpdateEntity` siblings in the same file already used. Two calls recorded rather than assumed: **neither `MedicalAppointment` nor `MedicalReferral` carries a domain actor FK at all** — no `CancelledById`, no `CheckedInById` — so `UpdatedBy` is the only place an actor can go without a schema change; and pre-authorization **reject** sets `UpdatedBy` but deliberately NOT `ApprovedBy`, because writing the approver's field on a rejection would make a rejected authorization read as approved-by-that-person on every screen that binds it. A dedicated rejector column needs a migration and belongs with the pre-authorization edit build. ⚠ Residue: `CancelPolicyAsync`, `UpdateInsuranceClaimStatusAsync` and NHIS `UpdateClaimStatusAsync` have the identical defect — same file, different families, all three wired and shipped. Left alone rather than widening a scoped slice; three lines when someone wants them.
+
+  **Verified against the running API, 2026-08-29** by `hr-medical/run-slice5-actors-and-nhis-documents.mjs`. ⚠ Note how the actor is pinned, because "UpdatedBy is non-blank" would also pass on a hardcoded constant: each transition is compared against the `CreatedBy` of a record the SAME actor created, and then a SECOND actor moves the row and `UpdatedBy` is asserted to have changed to theirs. Non-blank proves the line runs; changing with the caller proves it is the caller.
+
+  _Was blocking the MedicalClinical edit/delete build, and was already wrong on three shipped actions — cleared_
+
+- [x] **D-17 — `POST api/talent-pools` 500s when ownerId is omitted** · `DONE 2026-08-31`
+
+  `CreateTalentPoolDto.OwnerId` is `[Required]` but typed as a non-nullable `Guid`, and `[Required]` does not reject `Guid.Empty` — so an omitted owner passes model validation intact and dies at the database on `FK_TalentPools_Employees_OwnerId` with error 547, surfacing as the generic handler's 500 that names neither the field nor the constraint. The same shape as D-04, where a wrong-catalogue qualification id 500'd naming nothing. Found by slice 13 tripping over it while building a talent-pool fixture, not by looking for it. The fix is a validation guard that rejects `Guid.Empty` with a message naming the field; sending the id is the workaround, not the fix. Worth a sweep rather than a one-line patch — `[Required]` on a non-nullable `Guid` is inert everywhere it appears, and this DTO family uses it heavily.
+
+  **Fixed 2026-08-31 (closure lane 1), and the sweep it was supposed to be is NOT what shipped.** `HrRequiredGuidActionFilter` rejects an empty `Guid` on a `[Required]` property with a message naming the field, but only for a DTO carrying `[CallerSuppliesIdentifiers]`. Opt-in, after the blanket version over the `ErpSystem.Core.DTOs.HR` namespace was written and then withdrawn.
+
+  ⚠ **Twice it refused correct requests, and neither case is visible from the DTO.** An empty required Guid at validation time is often a field the CONTROLLER is about to fill: from the route (`dto.JobDescriptionId = jobDescriptionId` on `POST descriptions/{}/duty-items`) or from the token (`dto.ReportedById`, `dto.EmployeeId`, `dto.InitiatedById`, deliberately, so a caller cannot assert who acted). Matching the property against the route key does not rescue it either: `POST responsibilities/{responsibilityId}/kpis` fills `JobResponsibilityId`, and the only thing connecting those names is an assignment statement no reflection can see. Both were found by `hr-jobarch/run-slice13` refusing its own correct payloads, one after the other — not by reading the code.
+
+  So breadth is now a per-DTO claim rather than a namespace rule: two DTOs carry the attribute today (`CreateTalentPoolDto`, the reported instance, and `CreateJobDescriptionDto`), each checked to confirm its controller fills nothing in. **The remaining ~900 properties are unchanged and an omitted foreign key still 500s there**; adding a DTO is one line plus that check. Recorded plainly because the entry above asked for a sweep and this is narrower than it sounds.
+
+  Worth knowing: it began as an `IValidationMetadataProvider`, the tidier hook, which did not compile — the namespace resolves but `IValidationMetadataProvider` and `ValidationMetadataProviderContext` do not, in a project whose controllers use `Microsoft.AspNetCore.Mvc.Filters` happily. An action filter reaches the same result through an API this solution already builds against.
+
+  _Cleared for the endpoint that exposed it. The class is addressable now, not addressed_
+
+- [x] **D-18 — The sanctions were blocked on two findings, and one of them was wrong** · `DONE 2026-08-31`
+
+  The sanctions stayed read-only until the issuing-authority rule was in place, and `probe-authority-gate.mjs` held two findings as passing assertions:
+
+  **A — "no actor reaches the authority rule". FALSE.** The probe asserted that a head of department and a TenantAdmin are both stopped at the endpoint gate, expecting **401**. A 401 is *not authenticated*; a permission refusal is 403. Both were addressed with tokens minted at the top of the run, and this API invalidates tokens well before their `exp` — so those assertions passed against expired credentials and proved nothing about permissions. Re-run with a fresh login per actor: a plain employee IS refused at the gate (403, naming the permission), a TenantAdmin PASSES it, and the rule then governs them — refused 403 for a Management-authority action, accepted for a HeadOfDepartment one. **The rule works end to end and discriminates correctly.**
+
+  **B — the sanctions were not uniformly founded on a decision. TRUE, and understated.** The entry said "a warning is not" gated; running it found **warning, suspension AND fine** all accepted against a case in `UnderReview` with no decision at all. Only termination was guarded. Each of those entities says in its own summary that it is "created when the decision includes" that penalty, so an ungated sanction contradicted the model as designed.
+
+  **Fixed 2026-08-31.** `EnsureTerminationIsFoundedAsync` became `DisciplineSanctionGuard.EnsureFoundedAsync(case, appealRepository, tenantId, noun)` and all four sanctions call it. ⚠ It had to be lifted out of the termination service to a shared helper because the four sanctions are four SEPARATE classes in one file and the guard was private to one of them — which is exactly how the other three came to be unguarded. The warning, suspension and fine services each gained `IStaffDisciplineAppealRepository`; none had it, so none could have enforced the appeal half even if someone had tried. Separation needs no guard: it already requires a termination record, so it is transitively founded.
+
+  Proven by the rewritten `probe-authority-gate.mjs`, **22 assertions**, which now proves the gate WORKS rather than that it does not — including the positive control that a warning IS accepted once the decision is confirmed, without which the four refusals would also pass against an endpoint that refuses everything. ⚠ That control also established that proposing a decision is not deciding: it leaves the case `AwaitingDecision`, and the guard correctly refuses a sanction there too.
+
+  _Cleared. The ten sanction endpoints are unblocked; what FR-HR-080 still wants is a head-of-department ROLE to hold the capped authority the rule already enforces_
+
+- [x] **D-19 — The per-plan actions read was a summary its panel could not edit from** · `DONE 2026-08-30`
+
+  `GET succession-plans/{id}/actions` returned `SuccessionActionSummaryDto` — id, description, type, priority, status, due date and the responsible person's NAME. `UpdateSuccessionActionDto` sends thirteen fields, so an edit form built on that read would have blanked the candidate, the assigner, the start and completion dates, both note fields, the dependency and the success flag on every save — and the plan's own detail read nests the same summary, so there was nowhere else to get them. **Sixth occurrence of the D-09 shape** and the third in this module after the four discipline reads and the per-provider premium read. The rule holds and is now stated in the interface: a per-parent read feeds a panel that must edit; a cross-record read (by status, by priority, overdue) feeds a list and stays a summary. Converted, with `DependsOnAction` and `SuccessionPlan` added to the repository's includes so `dependsOnActionDescription` and `planNumber` are not blank on the new shape. **Needs a backend rebuild.**
+
+  ⚠ Two write responses were wrong the same way and for a different reason: `AddActionAsync` and `AddCompetencyRequirementAsync` mapped a freshly-added entity whose navigations had never been loaded, so `planNumber`, `candidateEmployeeName`, `responsiblePersonName`, `assignedByName` and the competency's own code, name, category and scale maximum all came back empty on the row the panel had just created and correct after a refetch. Identical to the `uploadedByName` defect the slice-13 RUN found and a code read had missed. Both writers now re-read by id with their includes.
+
+  **Verified against the running API, 2026-08-30** — `hr-succession/run-slice14.mjs`, 74 assertions, green. The read assertion is written as *every field the update payload sends comes back on the read*, field by field, rather than "the read is not empty" — the second would have passed on the summary, which is how the defect survived a whole area being marked complete.
+
+  _Was going to make the actions panel wipe nine fields per save — cleared_
+
+- [x] **D-20 — The succession action's assigner was assertable by the request body** · `DONE 2026-08-30`
+
+  `CreateSuccessionActionDto.AssignedById` and its update twin were copied straight onto the entity's `Employee` FK while the token's id went only to `CreatedBy`, so any HR user could record a colleague as the person who assigned an action. **Sixth instance of the D-05 shape** — after the legal-review referrer, the case note author, the document uploader, the succession document uploader and the pool nominator. It survived area 13's own actor sweep because that sweep worked from the fields screens were binding, and no screen touched this one. Raising an action IS the caller assigning it, so it is stamped from the token; the field is gone from both DTOs and the update deliberately does not touch it, so the original assigner survives every later edit. Nothing had ever sent it, so no caller broke. **Needs a backend rebuild.**
+
+  **Verified against the running API, 2026-08-30.** The forged id goes over the wire under the name the DTO used to expose and is asserted to land in no field at all; then a SECOND actor raises their own action and the stamp is asserted to have followed the caller. Non-blank proves the line runs; changing with the caller proves it is the caller.
+
+  _Was an act-as-anyone field on the panel about to be built — cleared_
+
+- [x] **D-21 — Removing a competency requirement made it permanently unrequirable** · `DONE 2026-08-30`
+
+  `IX_SuccessionCompetencyReq_Tenant_Plan_Competency` is unique on (TenantId, SuccessionPlanId, CompetencyId) **with no filter**, and `DeleteCompetencyRequirementAsync` goes through the generic soft delete. So a removed row kept occupying the slot and requiring the same competency again hit the index and 500'd naming nothing: **once a competency was removed from a plan it could never be required again.** Unreachable before this slice because nothing could delete one; the delete affordance is what turns it into a one-click path, which is the recurring lesson that giving a dormant field teeth turns its neighbours into defects.
+
+  **Sixth face of the area-13 soft-delete/unique-index defect**, and fixed the way the fifth was rather than with a migration: re-requiring a competency revives the removed row, exactly as re-joining a talent pool revives a membership. `AddCompetencyRequirementAsync` looks the row up with `IgnoreQueryFilters` (re-applying the tenant by hand, because that call drops the tenant filter too), revives it at the level given on the re-add, and refuses a duplicate of a LIVE row with a 400 rather than merging it silently. Reviving is also the better record — it keeps the original `CreatedAt` instead of pretending this is the first time. **Needs a backend rebuild, but no migration.**
+
+  **Verified against the running API, 2026-08-30**: remove, re-require, and the row that comes back carries the SAME id at the NEW level, with exactly one row for that competency on the plan rather than two.
+
+  ⚠ The run also turned up a stale assertion three files away. `audit-content.mjs` asserted the competency lookup was **empty**, "until area 17 lands" — and area 17 landed on 2026-08-19, so the assertion was demanding the wrong thing and went red the moment anything created a competency. Replaced with a shape assertion (every row carries a code and its own `proficiencyScaleMax`), and the slice now deletes the catalogue rows it mints, because a competency is shared reference data rather than one run's fixture.
+
+  _Was going to make the competency panel's own delete/re-add path 500 — cleared_
+
+- [x] **D-22 — `MedicalExpenseClaim`'s TypeScript type is five fields short of what the API returns** · `DONE 2026-08-31`
+
+  `ClaimEditDialogs.tsx` binds `claim.admissionStart`, `admissionEnd`, `preAuthorizationId`, `referralId` and `leaveRequestId`; the `MedicalExpenseClaim` interface declares none of them, though `MedicalExpenseClaimDto` returns all five and `MedicalExpenseClaimUpdateRequest` sends all five. So the dialog works at runtime and fails `tsc` — five of the 36 type errors the HR subtree currently carries. Found in passing while type-checking slice 19, not by looking for it; recorded rather than fixed because fixing five of 36 in another slice's area is arbitrary.
+
+  ⚠ Worth knowing separately: **`tsc` over the whole frontend does not merely fail, it crashes** — "Debug Failure. No error for last overload signature" out of `resolveJsxOpeningLikeElement` — on the clean tree as well as a dirty one. So `npm run type-check` reports nothing at all and every type error in the repo is currently invisible. A scoped `tsconfig` over the HR subtree gets round it and is how this slice was checked.
+
+  **Fixed 2026-08-31 (closure lane 1).** All five are declared, plus the three display companions the DTO returns beside them (`preAuthorizationNumber`, `referralNumber`, `leaveRequestNumber`) so a panel can name what it links to rather than showing a Guid. Checked with a scoped `tsconfig.hr-slice.json`: the touched files are clean and the 31 errors that remain in that scope are all in `ClinicalRecordActions.tsx`, which this slice did not touch and which does not reference the claim type.
+
+  ⚠ The crash below is unchanged and still hides every other type error in the repo. It belongs to shared reporting (cross-module #20), and the decision on 2026-08-31 was to keep working around it rather than edit another team's file.
+
+  _Cleared for this type. The project-wide type-check is still silently dead_
+
+- [x] **D-23 — A travel policy could be DELETED after approval, though it could not be edited** · `DONE 2026-08-30`
+
+  `UpdatePolicyAsync` refuses to edit an approved policy, and says why: it would change what everyone may spend with nobody approving the change. `DeletePolicyAsync` did the same thing more completely and was unguarded — and it also erases the record of a rule that really did govern spending for a period, which is the opposite of what an audit trail is for. `WithdrawPolicyAsync` already existed as the correct verb for standing a policy down. The guard was on the sibling and not on this one, which is the recurring shape: **audit the neighbourhood, not just the field.** Delete now refuses an approved policy and names withdraw in the message. ⚠ It reads the APPROVAL, not the in-force flag, so a withdrawn policy is still undeletable — withdrawing does not turn it back into a draft.
+
+  _Was letting an Admin silently un-cap everyone's travel — cleared_
+
+- [x] **D-24 — A travel policy rule code could be used once per policy, ever** · `DONE 2026-08-30`
+
+  `IX_StaffTravelPolicyRules_TenantId_PolicyId_RuleCode` is unique with no `IsDeleted` filter while `DeleteRuleAsync` is a soft delete, so a removed rule went on occupying its code and re-adding it hit the index and 500'd naming nothing. **Seventh face** of the soft-delete/unique-index defect across HR, one week after the sixth (D-21, competency requirements). Unreachable until a screen could delete a rule — the recurring lesson that giving a dormant path teeth turns its neighbours into defects. Fixed the way the fifth and sixth were: re-using a removed code revives that row and overwrites its fields, while re-using a LIVE code is refused with a message naming the code.
+
+  _Was going to make the rules panel's own delete/re-add path 500 — cleared_
+
+- [x] **D-25 — A travel policy exception validated neither of its parents** · `DONE 2026-08-30`
+
+  `CreateExceptionAsync` copied `StaffTravelRequestId` and `PolicyRuleId` from the body onto the row without checking either existed or belonged to the tenant, so an exception could be attached to **another tenant's travel request** — the foreign key accepts the id because it is perfectly valid, it simply is not yours — and it would then appear on this tenant's pending queue. `CreateAlertNotificationAsync` in the sibling service checks both of its parents and carries a comment saying why; this one had not followed it. Both are checked now and answer 404 naming the id. The create response also re-reads the rule, because the panel binds `policyRuleName` and a freshly added entity has no `PolicyRule` loaded.
+
+  _Was a cross-tenant write on the endpoint this slice was about to give a caller — cleared_
+
+- [x] **D-26 — The exception decision's reasoning was discarded by the model binder** · `DONE 2026-08-30`
+
+  `decidePolicyException` posted a `notes` field for as long as it has existed and `DecideStaffTravelPolicyExceptionDto` had no such property, so every explanation was dropped while the screen reported success. Granting an exception authorises spend above a cap — an authority HR deliberately does not hold — so *why* is exactly what an auditor asks, and the row could not answer. **The shape a matched route cannot reveal**: the path resolves either way, instrument 01 counts the endpoint wired, and only reading the DTO or running the call finds it. `DecisionNotes` added (migration `AddTravelPolicyExceptionDecisionNotes`, COL_LENGTH-guarded and listed in `FastBuildMigrationMetadata`), and the client now sends `decisionNotes`.
+
+  _Was losing the justification for every travel-policy exception ever granted — cleared_
+
+- [x] **D-27 — Deleting one travel request breaks every later create, permanently** · `DONE 2026-08-30`
+
+  `GenerateRequestNumberAsync` counted LIVE rows and formatted `TR-{year}-{count+1:D5}`, while `IX_StaffTravelRequests_TenantId_RequestNumber` is unique with **no `IsDeleted` filter** and the delete is soft. So deleting `TR-2026-00001` drops the live count to zero, the next create mints `TR-2026-00001` again, and it collides with the row still sitting there — every subsequent travel request in that tenant fails with the generic handler's 500, naming nothing.
+
+  **The first face of this defect found LIVE on a shipped path** — and by no means the eighth, which is what this entry first claimed. D-28 establishes that HR had already fixed it at least seven times (overtime, letter requests, SHE, movements, grievance, discipline, profile changes) with the same idiom. This is the same shape area 13 recorded as its worst instance — a document-number generator counting rows the schema does not agree are gone. Any tenant that has ever deleted a travel request is already in this state. Found on 2026-08-30 because a harness cleanup deleted its own fixture and the next run could not create one; confirmed in SQL (one row, `IsDeleted=1`, live count 0, unfiltered unique index) rather than inferred.
+
+  Fixed by reading the highest number ever issued, deleted rows included, instead of counting — a count is also wrong the moment the sequence has a gap, and the maximum is the only value the unique index cares about. ⚠ Still not atomic under concurrent creates; see D-28 for the mechanism that is.
+
+  _Was breaking travel request creation outright for any tenant that had deleted one — cleared_
+
+- [x] **D-28 — Count-based document numbers: three more fixed, and my own first list was wrong** · `DONE 2026-08-30`
+
+  D-27 was not a one-off. **Twelve tables carry an unfiltered unique index on a number column AND a soft delete**, established from `sys.indexes` rather than by grep.
+
+  ⚠ **The first pass at classifying them was wrong, and wrong in the predicted way.** I sorted the generators by whether their FILE imports `INumberSequenceService` and named five HR tables as latent. Reading each generator instead: `StaffOvertimeRequests` and `HrLetterRequests` were **already fixed** — and their own remarks name the SHE, movement, grievance, disciplinary and profile-change generators as earlier fixes for the identical shape, with `GetQueryableIncludingDeleted` and a prefix scan. So this defect has been found and fixed at least seven times across HR before travel, the established idiom was already in the codebase, and the count of "faces" in D-27 understated it. **Every static instrument in this programme has cried wolf on its first pass, including this one, including when the instrument was my own reasoning.**
+
+  **Three were genuinely live, and all three are fixed 2026-08-30**: `RemoteWorkRequests` (`RWR-`), `ConsultantTimesheets` (`TS-`) and `TimesheetInvoices` (`INV-`) — each counted live rows against an unfiltered unique index, so one delete would have broken every later create in that tenant, silently and permanently. All three now read the highest number issued, deleted rows included.
+
+  **Confirmed harmless, so a future sweep does not spend time on them**: the appraisal `APR-`, company-schedule `EVT-` and `BK-`, job-analysis `MPB-` and consultant-engagement `ENG-` generators all count live rows, and none of their number columns carries a unique index. Counting is only a defect where the schema disagrees.
+
+  **Not ours**: `ProcurementMasterDataChangeRequests`, `ProjectInvoiceRequests` and `QuantitySurveyJointMeasurementRequests` have the index shape; whether their generators count was not checked, because that is the owning teams' code. Recorded as cross-module #22.
+
+  ⚠ **None of these is atomic under concurrent creates**, including the fixes. `INumberSequenceService` is the platform's answer and the training area uses it; moving the rest across needs each sequence seeded from its table's current maximum so it keeps issuing after the numbers already in the wild. That is the real end state, and it is not done.
+
+  _Was three silent, permanent breakages waiting on the first delete — cleared_
+
+- [ ] **D-29 — Travel policy rules are enforced by nothing, so their editor and the exception flow are withheld** · `OPEN`
+
+  `StaffTravelPolicyService` is the only consumer of the rules table anywhere in the codebase. `StaffTravelPolicyGuard` refuses a booking on the policy's own scalar caps — `MaxFlightClass*`, `MaxHotelRate*` — and never reads a rule, so `RuleType`, `LimitValue`, `ViolationAction`, `ExceptionAllowed` and `ExceptionRequiresApproval` describe a mechanism that does not run. **And that is why nothing raises a policy exception**: its producer was never built, so the queue was unreachable and unfillable at the same time.
+
+  **Decided 2026-08-30, after first building the editor and then withdrawing it.** The rules register ships **read-only** and the exception flow does **not ship**. An editable control that enforces nothing creates false assurance, and that is worse than no control: a rule set to `Block` is a promise to the person configuring it, a warning banner is a weak defence to an auditor looking at a screenshot, and hand-raised exceptions would manufacture audit records implying a control was in force and consciously waived. Checked before deciding: **every rule and exception row in the database was created by the harness** — there is no ported or seeded data, so a read-only register has no existing data to expose either.
+
+  `POST policies/{}/rules`, `PUT policies/rules/{}`, `DELETE policies/rules/{}`, `POST policies/exceptions` and `POST policies/exceptions/{}/decide` are therefore **INTENTIONAL, not gaps** — all five are implemented, harness-covered by `run-slice12-policy-authoring.mjs`, and waiting on enforcement rather than on a screen.
+
+  ⚠ **The queue cannot show this, and that is the blind spot itself.** The client methods stay in `travel-compliance.service.ts` so enforcement is a screen change — and instrument 01 matches the service layer, so it now counts all five as *wired to a screen* and `StaffTravelPolicies` has dropped out of section D altogether. The Position table above therefore over-counts by at least these five. This entry is where they are recorded, because the machine-derived sections structurally cannot hold them.
+
+  **Three things belong in the enforcement change**, recorded so they are not rediscovered: rule writes need the approval guard `UpdatePolicyAsync` has, because an approved policy's rules are part of the approved document; `(TenantId, PolicyId, RuleCode)` uniqueness should become a filtered index rather than the revive-on-re-add the service does today, because a rule code is a label rather than an identity and reviving keeps the previous rule's `CreatedAt`/`CreatedBy`; and mapping `RuleType` × `ExpenseCategory` onto real booking and claim fields is a product decision, not a coding one — what exactly does "Meals / HardLimit / 50 per day" compare against?
+
+  _Blocks nothing. It withholds 5 endpoints from the UI on purpose, and they will not re-read as gaps_
+
+- [ ] **D-30 — Authorising a booking above a travel cap records no reason** · `FALSE — corrected 2026-08-31`
+
+  Found while deciding D-29, and it is the real version of the gap the exception flow was pretending to fill. A booking that breaches the policy's cap is refused unless the caller holds `HR.Travel.Admin` and sets the exception flag — which makes Travel.Admin a financial authority — and **nothing anywhere records why they allowed it**. The booking carries the flag and no justification field. So the one spend-authorisation that genuinely happens in this module is the one with no audit reasoning, while the elaborate exception entity that does have `ExceptionReason` and now `DecisionNotes` governs a mechanism nobody runs.
+
+  A reason column on the breach flag would be a small change and worth more than the whole rules subsystem in its current state.
+
+  ⚠ **This entry was wrong, and it was checked before it was acted on.** The reason column exists and always has: `ClassExceptionReason` on `StaffTravelFlightBooking` and `RateExceptionReason` on `StaffTravelHotelBooking`, both on the create and update DTOs, both mapped in and out — and `StaffTravelBookingService` **refuses** an approved exception without one ("A booking above the policy cap must record why the exception was granted"), a guard that landed with the caps themselves in area 12 slice 8. `TravelBookingsPanel.tsx` carries both fields in its form schema. So the audit reasoning this entry called absent is recorded, enforced and enterable.
+
+  The lesson is the entry itself: it was written while deciding D-29, from the shape of the exception entity rather than from the booking service, and it read plausibly enough to be scheduled as work. **A ledger entry is a claim, not a finding, until something has run.**
+
+  _Nothing. Every cap breach ever authorised carries a reason — the entry was mistaken_
+
+- [x] **D-31 — Every traveller has been shown a destination alert with no text** · `DONE 2026-08-30`
+
+  `alerts/country/{id}/current` returned `StaffTravelAlertSummaryDto`, which has no `Body` — and **the body is the alert**. The travel request's compliance strip renders the title, the severity and then `{a.body && …}`, so since the day it shipped a traveller has seen "Civil unrest · High" and never a word about what is happening, where, or what to do. A severity with no text is not a security briefing.
+
+  **TypeScript said this was fine**, because the client typed all three alert list reads as the full record while the API returned summaries — the same fiction-that-type-checks shape as the travel-type union and the group-travel summary. Only reading the DTO or running the call finds it.
+
+  The read now returns the full record and the repository includes the country. **The D-09 rule is unchanged and this is not an exception to it**: `alerts/active` and `alerts/country/{id}` are cross-record lists and stay summaries, asserted as such by the harness so a later "consistency" change does not quietly widen them. This read is not a list — its only job is to carry an alert's content to the person going there. **Needs a backend rebuild.**
+
+  _Was the whole point of the destination-alert feature, silently missing — cleared_
+
+- [x] **D-32 — The travel-alert acknowledgement was unreachable by anyone** · `DONE 2026-08-30`
+
+  `POST compliance/alert-notifications/{id}/acknowledge` sits on `HR.Travel.Write`, and `AcknowledgeNotificationAsync` refuses anyone but the employee the alert was addressed to. Those two rules do not overlap: `HrStaffGrants` gives Travel.Write to HR staff and **never to the `Employee` role** — the map's own remarks state the rule — so a traveller is refused at the endpoint gate and an HR officer who passes it is refused by the service. The only actor who could ever use it was a travel-desk officer acknowledging an alert about their own trip.
+
+  **The same shape as D-18**, where no actor reaches the discipline authority rule: a rule nobody can reach is not a rule. Building the desk's "send this alert to the traveller" action without fixing it would have shipped another queue that can never be worked.
+
+  Cleared with three token-scoped routes on `StaffTravelMeController` — read, unread and acknowledge — which is the answer this codebase already uses for the asset acknowledgement and the probation review: no employee id is accepted anywhere, so there is nothing to forge. The desk route is kept and documented as deliberately unwired. **Needs a backend rebuild.**
+
+  ⚠ Proven both ways by `hr-travel/run-slice13-groups-and-alerts.mjs`: the HR officer is refused (403), the traveller is refused on the desk route (403), the traveller succeeds on `/me`, and a traveller acknowledging someone ELSE's notification gets 404 — not 403, which would confirm the notification exists.
+
+  _Was making 'confirm you have read this security briefing' impossible for anyone — cleared_
+
+- [x] **D-33 — The travel content audit was reporting six findings from a dead fixture id** · `DONE 2026-08-30`
+
+  `audit-content.mjs` hard-coded a Procurement `Supplier` id seeded in SQL during area 12. The row is gone — the database has been rebuilt since — so all three booking creates failed the foreign key with the generic 500, and the three booking reads then reported "0 rows despite a fixture". **Six findings that read as a travel regression and were a stale fixture**, which is worse than none: red findings nobody trusts are how a real one gets missed.
+
+  It cannot be resolved at runtime either, because `api/Suppliers` answers 400 — cross-module defect #1, Procurement's dead `SuppliersController`. `VendorId` is nullable on all three booking DTOs, so the audit now sends none and drops the two `vendorName` assertions that depended on it. **38 fields resolved, 0 findings.** Restore the vendor the day Procurement's supplier list works.
+
+  The transferable point: a harness fixture pinned to an id from another module ages badly, and it fails in a direction that blames the module under test.
+
+  _Was hiding whether travel bookings work behind six false findings — cleared_
+
+- [x] **D-34 — Deleting a movement's detail made that movement unable to carry one ever again** · `DONE 2026-08-30`
+
+  All four movement sub-types — `StaffPromotion`, `StaffTransfer`, `StaffDemotion`, `StaffSecondment` — carry `HasIndex(MovementId).IsUnique()` with **no `IsDeleted` filter**, while the delete is the generic soft delete. So a removed detail kept its movement's slot and re-adding one violated the index, 500ing with a message naming neither the column nor the constraint.
+
+  ⚠ **The create guard knew about the case and handled it backwards.** `GetOwnedParentMovementAsync(..., requireNoExistingDetail: true)` checks `existing != null && !existing.IsDeleted` — it explicitly TOLERATES a tombstone and lets the insert proceed into an index that counts it. Tolerating it is precisely what the index does not do.
+
+  Faces nine through twelve of this defect, all unreachable until this slice added the delete affordance — the recurring lesson that giving a dormant path teeth turns its neighbours into defects.
+
+  **Fixed by HARD-deleting the tombstone on re-create, not by reviving it**, and the divergence from D-21 and D-24 is deliberate. Those keep an identity across the gap — the plan still requires that competency. A movement detail is 1:1 with its movement, invisible to every read once soft-deleted, referenced by no foreign key anywhere, and removed *because it was recorded in error*; the replacement is a different assertion and should not inherit the old row's id or `CreatedAt`. The movement's own status history is the audit trail.
+
+  ⚠ **The first attempt at the fix was itself broken, and only the run found it.** `HardDeleteAsync` removes the row with raw SQL and does NOT detach the tracked entity, so the tombstone stayed in the change tracker, the insert gave the movement a second detail as far as EF was concerned, and — the relationship being a required 1:1 — `SaveChanges` threw *"the association has been severed"* rather than anything about an index. `AsNoTracking()` on the tombstone lookup; `HardDeleteAsync` only ever reads the id. **Needs a backend rebuild.**
+
+  _Was making the delete this slice adds a one-way door — cleared_
+
+- [x] **D-35 — Four movement sub-type write responses named neither the movement nor the employee** · `DONE 2026-08-30`
+
+  `StaffTransfer`, `StaffSecondment`, `StaffDemotion` and `StaffActingAppointment` all mapped the entity returned by their include-less `GetOwnedAsync`, so `movementNumber`, `employeeName` and the position titles came back empty on both create and update — while `GetByMovementIdAsync` (and `GetWithDetailsAsync` for acting) sat on the same repositories with the full include graph, and the **promotion service two methods away already re-read for exactly this reason**. Seventh occurrence of the stale-nav-on-a-write-response shape.
+
+  Fixed in all four, on the creates as well as the updates, since those are the same methods. **Needs a backend rebuild.**
+
+  _Was going to blank three columns on every panel this slice touches — cleared_
+
+- [x] **D-36 — A movement needing employee acceptance never records who authorised it** · `DONE 2026-08-30`
+
+  `ApproveAsync` stamps `AuthorizedById` inside `if (entity.Status == Approved)`. A movement with `RequiresEmployeeAcceptance` does not reach `Approved` at final approval — the workflow adapter puts it in `EmployeeAcceptancePending` — and `RespondAsync`, which later moves it to `Approved`, stamps the acceptance flags and the status and **not this field**. So for that entire class of movement the authoriser stayed null forever, on a field the DTO exposes and the screens render.
+
+  The condition now covers both statuses. ⚠ It stamps the approver who cleared the last step, **not** the employee who subsequently accepted: accepting is not authorising, and stamping the subject would make the record say the person being moved approved their own move. **Needs a backend rebuild.**
+
+  ⚠ **How it was nearly missed, which is the transferable part.** It surfaced as a failing assertion in `hr-movements/run-slice2.mjs` during a no-regression run — alongside three OTHER failures in the same suite that were all genuinely stale (deletes tightened to `HR.Movements.Admin` by the W3 sweep after the file was written, and a refusal message reworded). Three stale assertions in a row is exactly the conditioning that makes the fourth look like more of the same. It was checked against the service rather than adjusted to match observed behaviour, which is the only reason it was found.
+
+  _Was leaving the authoriser blank on every movement that needs accepting — cleared_
+
+- [x] **D-37 — A filed demotion appeal appears in no list** · `DONE 2026-08-31`
+
+  `staff-demotions/pending-appeals` filters `EmployeeResponse == null` — it lists demotions still AWAITING an answer, not ones that have been appealed. So responding REMOVES a demotion from it, and the controller's other four reads are by id, by movement, disciplinary and performance-related. **There is no aggregated read of demotions that have actually been appealed.** HR sees an appeal only by opening that demotion's own movement, where the sub-type panel does render `employeeResponse`.
+
+  ⚠ **This corrects the queue's entry in D2**, which said HR's queue "can only ever be empty" for want of an employee surface. The opposite was true: it filled automatically with every demotion granting a right of appeal, and nothing could ever leave it. Giving employees a surface (slice 22) is what lets demotions leave — and is also what makes this gap start to matter, because appeals can now actually be filed.
+
+  A `filed-appeals` read would be a small addition. Not built here because it is a new endpoint rather than a caller for an existing one, and the appeal is visible on the record meanwhile.
+
+  **Built 2026-08-31 (closure lane 1)** — repository, service, `GET api/staff-demotions/filed-appeals`, a client method and a screen. ⚠ The screen was not optional: `getPendingAppeals` **had no caller either**, so HR had no appeals surface at all, and a second uncalled client method would have been one more of exactly what the coverage instruments keep finding. `/hr/movements/appeals` carries both queues side by side with their counts, because they are disjoint and neither alone is the picture. `StaffDemotionDto` gained `EmployeeName` and `EmployeeNumber` at the same time — a worklist keyed by movement number is not a worklist of people.
+
+  _Cleared. Both queues are reachable, which neither was_
+
+- [x] **D-38 — Two nightly HR sweeps failed every night, and two were never scheduled at all** · `DONE 2026-08-31`
+
+  Found while acting on the demo-feedback row above, which claimed HR had no hosted services at all. It had six. **Two of them threw on every scheduled run.**
+
+  `ProbationReminderService.BuildCandidatesAsync` and `DisciplineReminderService.CollectPendingAsync` read the tenant's policy settings through `ICompanyHrPolicyProvider.GetAsync()` and `ICompanyHrPolicySettingsService.GetAsync()`, both of which resolve the tenant **from the current user**. A background service has no current user, so the read threw "No tenant is associated with the current user" and the sweep aborted — while the run-now button worked perfectly, because a button always has a token behind it. **The condition that triggers the bug is the absence of the thing an HTTP harness always supplies**, which is why 274 movement assertions and 415 discipline ones never saw it.
+
+  ⚠ **Proven in the API's own log, not inferred.** From one uptime window on 2026-08-31: SHE swept at 03:04, movements at 03:06, travel at 03:12, assets at 03:14 — and at 03:08 both `Probation reminder sweep failed for tenant` (`ProbationReminderService.cs:152`) and `Discipline reminder sweep failed for tenant` (`DisciplineReminderService.cs:238`): the exact two lines that read policy. So FR-HR-032's confirmation reminders, FR-HR-140's expiry notices, the 48-hour written query, the four-week investigation, both appeal windows and every grievance clock had never once fired on the timer.
+
+  **Fixed** by giving both providers a `GetForTenantAsync(tenantId)` and pointing the two collectors at it — the tenant was already a parameter of both methods; only the settings read reached round it. `SeparationReminderService` gained the `RunSweepForTenantAsync(tenantId, trigger, userId)` the other five engines already had, along with tenant-explicit retirement and contract-expiry reads, and `SeparationReminderBackgroundService` hosts it at a 17-minute stagger. `check-reminder-hosts.mjs` reads the log and asserts seven hosts, seven scheduled sweeps and no failures.
+
+  **`LeaveYearEndService` is deliberately NOT hosted.** Carry-over and forfeiture move people's balances; the other seven engines only raise reminders. Putting them on a timer is a policy decision for TDC, not a defect to fix.
+
+  _Cleared. Two engines that had never run now do, and a third is scheduled for the first time_
+
+- [x] **D-39 — The awards attachment family is on a caller-supplied file path** · `DONE 2026-08-31`
+
+  Found by the lane-2 triage of the `Awards` queue rows, 2026-08-31. `CreateAwardAttachmentDto` and `CreateAwardNominationAttachmentDto` take **`FileName` and `FilePath` as JSON** and store them: the sixth instance of the path sink, and the exact shape area 16 replaced — where the "attachment" is a string somebody typed and the list renders it beautifully.
+
+  ⚠ It is untouched rather than in use: `grep -ri attachment` over the awards screens and the awards service returns **nothing at all**. So five endpoints have no caller because the area has no upload surface, and building one over the DTO as it stands would ship the sink rather than close it. The evidence a nomination is meant to carry — the citation, the supporting letter — has never been attachable.
+
+  The fix is the established one and is mechanical: `HrAttachmentUpload.ExecuteAsync` on the way in, `HrDocumentDownload.ServeAsync` on the way out, a category constant registered in `SystemCleanScanRequired` (a declared category is not a registered one — D-11), then `DocumentUploadField` and `hrDocumentService` on the screens.
+
+  **Done 2026-08-31.** Migration `20260831135847_AddAwardAttachmentDmsColumns` (eight nullable columns, guarded on `COL_LENGTH` like its three siblings, because `rebuild-db` builds from the model and a bare AddColumn fails on a database that already has them). `FileName` and `FilePath` are GONE from both create DTOs: the file arrives as multipart through `HrAttachmentUpload`, and the gate's facts reach the service as PARAMETERS rather than DTO fields, so a caller may describe what a file is and may not say where it lives. Both families gained a token-bearing download through `HrDocumentDownload`. Category `hr-award-attachments` declared AND registered in `SystemCleanScanRequired` in the same commit, so the D-11 half-job cannot recur.
+
+  ⚠ **Proven by `hr-awards/probe-d39-attachments.mjs`, 16 assertions — the first time an award attachment has ever existed.** Upload, then: the stored name is the FILE's and the size is what the gate measured (not what a caller claimed); the download returns the same bytes, which a caller-supplied path could never promise; a JSON body naming `C:\Windows\System32\config\SAM` is refused with 415; and the delete is Admin-tier while the desk gets 403.
+
+  Two rules refused shortcuts on the way and named themselves: a CommitteeScore award cannot be conferred directly (AWD-07) and a draft nomination cannot be conferred at all.
+
+  _Cleared. Four of the five endpoints are wired; the attachment EDIT is still open (see D2)_
+
+- [ ] **D-02 — Self-service invitation response still act-as-anyone** · `OPEN`
+
+  events/{id}/participants/respond takes a ParticipantId and sits on the HR-desk Write policy, so today it means 'HR records the response'. That is correct for the HR screens being built now. Before any /me surface offers 'accept this invitation', it needs a self-or-permission check against the participant's own employee id.
+
+  _Blocks a future self-service calendar only_
+
+- [x] **D-40 — Two Employee-FK actor columns were fed the login's user id by the screens** · `DONE 2026-09-01`
+
+  Found by lane 4's harness, 2026-09-01, while building the adjustment form's balance preview. `LeaveAdjustment.PerformedBy` and `LeavePlan.PlannedBy` are **required foreign keys to `Employees`**. The adjustments screen, the leave-plans screen and the self-service planner all sent `user.id` in the payload — a login id, never an employee id — and the services stored what they were sent (`AddAdjustmentAsync` verbatim; the standalone create fell back to `GetCurrentUserId()`, also a user id, when the payload was empty). Every adjustment and every plan raised from a screen had therefore failed on the constraint: the old build returned **500** to both creates in the harness, and `LeaveAdjustments` was empty.
+
+  ⚠ A third writer had the same column: `LeaveYearEndService.ProcessForfeitureAsync` posted `PerformedBy = Guid.Empty // system-posted`. No employee has the empty id, so the forfeiture endpoint had never once succeeded — and its only harness evidence was a 403 check, so the insert had never run.
+
+  ⚠ Why nothing static saw it: the write compiled, the payload validated, the DTO had a `Guid` where a `Guid` was expected. Only the database said no, and only a write that actually executed could ask it. Same family as the discipline lesson (the token's id reaching the service is not the actor being stored) — here the actor never reached the service at all.
+
+  Fixed: both columns stamped from `ICurrentUserService.EmployeeId` on every write path (create, balance-nested create, forfeiture; an edit keeps the original planner); `PerformedBy`/`PlannedBy` removed from the create DTOs; an unlinked account is refused with "requires your user account to be linked to an employee record" (400) rather than 500. Screens no longer send either. Harness: `dev-harness/hr-finish-lane4/run-lane4-leave.mjs`.
+
+## C. Confirmed unreachable endpoints (01 ∩ 02)
+
+Both instruments agree, and each was hand-verified in source. This is the trustworthy list.
+
+### SalaryNotches — `INTENTIONAL`
+
+Decided 2026-08-28: read-only by intent — payroll owns the grade master.
+
+- [ ] `POST   api/hr/salary-notches`
+- [ ] `PUT    api/hr/salary-notches/{}`
+- [ ] `DELETE api/hr/salary-notches/{}`
+
+### PerformanceAppraisals — `BUILD`
+
+Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2.
+
+- [ ] `POST   api/PerformanceAppraisals/{}/calculate-score`
+
+### SalaryGrades — `INTENTIONAL`
+
+Decided 2026-08-28: read-only by intent — payroll owns the grade master.
+
+- [ ] `PUT    api/hr/salary-grades/{}/levels/resequence`
+
+### StaffMovements — `INTENTIONAL`
+
+Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap.
+
+- [ ] `POST   api/staff-movements/summaries/by-ids`
+
+## C2. Build checklists — committed work, every endpoint enumerated
+
+**Write boxes tick themselves.** A write box is checked when instrument 01 finds a frontend
+call for that exact verb and path, so the write lists cannot drift from the code.
+
+⚠ **READ boxes never tick, and an unticked GET means nothing.** Instrument 01 skips GETs
+outright (`if r["verb"] == "Get": continue`), so every read below is unchecked whether or
+not a screen calls it — Company Schedule shows 40 of 40 writes wired and zero reads. Reads are
+listed only so the surface is visible. Do not read an unticked GET as a gap; this line used to
+claim reads were "checked the same way", which was false and would have sent someone hunting
+for hundreds of gaps that do not exist.
+
+### Company Schedule — 40 of 40 writes wired
+
+**Writes**
+
+- [x] `DELETE api/CompanySchedule/attachments/{}`
+- [x] `POST   api/CompanySchedule/attendance/{}/checkout`
+- [x] `POST   api/CompanySchedule/bookings`
+- [x] `DELETE api/CompanySchedule/bookings/{}`
+- [x] `PUT    api/CompanySchedule/bookings/{}`
+- [x] `POST   api/CompanySchedule/bookings/{}/approve`
+- [x] `POST   api/CompanySchedule/bookings/{}/cancel`
+- [x] `POST   api/CompanySchedule/closures`
+- [x] `DELETE api/CompanySchedule/closures/{}`
+- [x] `PUT    api/CompanySchedule/closures/{}`
+- [x] `POST   api/CompanySchedule/events`
+- [x] `POST   api/CompanySchedule/events/{}/attachments`
+- [x] `POST   api/CompanySchedule/events/{}/attendance`
+- [x] `POST   api/CompanySchedule/events/{}/participants`
+- [x] `POST   api/CompanySchedule/events/{}/participants/respond`
+- [x] `POST   api/CompanySchedule/events/{}/tasks`
+- [x] `DELETE api/CompanySchedule/events/{}`
+- [x] `PUT    api/CompanySchedule/events/{}`
+- [x] `POST   api/CompanySchedule/events/{}/approve`
+- [x] `POST   api/CompanySchedule/events/{}/cancel`
+- [x] `POST   api/CompanySchedule/events/{}/complete`
+- [x] `POST   api/CompanySchedule/events/{}/reschedule`
+- [x] `POST   api/CompanySchedule/fiscal-years`
+- [x] `POST   api/CompanySchedule/fiscal-years/{}/periods`
+- [x] `DELETE api/CompanySchedule/fiscal-years/{}`
+- [x] `PUT    api/CompanySchedule/fiscal-years/{}`
+- [x] `POST   api/CompanySchedule/fiscal-years/{}/set-current`
+- [x] `POST   api/CompanySchedule/milestones`
+- [x] `DELETE api/CompanySchedule/milestones/{}`
+- [x] `PUT    api/CompanySchedule/milestones/{}`
+- [x] `DELETE api/CompanySchedule/participants/{}`
+- [x] `DELETE api/CompanySchedule/periods/{}`
+- [x] `PUT    api/CompanySchedule/periods/{}`
+- [x] `POST   api/CompanySchedule/periods/{}/close`
+- [x] `POST   api/CompanySchedule/rooms`
+- [x] `DELETE api/CompanySchedule/rooms/{}`
+- [x] `PUT    api/CompanySchedule/rooms/{}`
+- [x] `DELETE api/CompanySchedule/tasks/{}`
+- [x] `PUT    api/CompanySchedule/tasks/{}`
+- [x] `POST   api/CompanySchedule/tasks/{}/complete`
+
+**Reads**
+
+- [ ] `GET    api/CompanySchedule/bookings`
+- [ ] `GET    api/CompanySchedule/bookings/booker/{}`
+- [ ] `GET    api/CompanySchedule/bookings/paged`
+- [ ] `GET    api/CompanySchedule/bookings/pending-approvals`
+- [ ] `GET    api/CompanySchedule/bookings/range`
+- [ ] `GET    api/CompanySchedule/bookings/room/{}`
+- [ ] `GET    api/CompanySchedule/bookings/status/{}`
+- [ ] `GET    api/CompanySchedule/bookings/{}`
+- [ ] `GET    api/CompanySchedule/closures`
+- [ ] `GET    api/CompanySchedule/closures/is-closure-date`
+- [ ] `GET    api/CompanySchedule/closures/location/{}`
+- [ ] `GET    api/CompanySchedule/closures/paged`
+- [ ] `GET    api/CompanySchedule/closures/range`
+- [ ] `GET    api/CompanySchedule/closures/type/{}`
+- [ ] `GET    api/CompanySchedule/closures/upcoming`
+- [ ] `GET    api/CompanySchedule/closures/{}`
+- [ ] `GET    api/CompanySchedule/events`
+- [ ] `GET    api/CompanySchedule/events/category/{}`
+- [ ] `GET    api/CompanySchedule/events/department/{}`
+- [ ] `GET    api/CompanySchedule/events/organizer/{}`
+- [ ] `GET    api/CompanySchedule/events/paged`
+- [ ] `GET    api/CompanySchedule/events/range`
+- [ ] `GET    api/CompanySchedule/events/status/{}`
+- [ ] `GET    api/CompanySchedule/events/upcoming`
+- [ ] `GET    api/CompanySchedule/events/{}/attachments`
+- [ ] `GET    api/CompanySchedule/events/{}/attendance`
+- [ ] `GET    api/CompanySchedule/events/{}/participants`
+- [ ] `GET    api/CompanySchedule/events/{}/tasks`
+- [ ] `GET    api/CompanySchedule/events/{}`
+- [ ] `GET    api/CompanySchedule/events/{}/details`
+- [ ] `GET    api/CompanySchedule/fiscal-years`
+- [ ] `GET    api/CompanySchedule/fiscal-years/by-year/{}`
+- [ ] `GET    api/CompanySchedule/fiscal-years/current`
+- [ ] `GET    api/CompanySchedule/fiscal-years/paged`
+- [ ] `GET    api/CompanySchedule/fiscal-years/status/{}`
+- [ ] `GET    api/CompanySchedule/fiscal-years/{}/periods`
+- [ ] `GET    api/CompanySchedule/fiscal-years/{}`
+- [ ] `GET    api/CompanySchedule/fiscal-years/{}/details`
+- [ ] `GET    api/CompanySchedule/milestones`
+- [ ] `GET    api/CompanySchedule/milestones/category/{}`
+- [ ] `GET    api/CompanySchedule/milestones/paged`
+- [ ] `GET    api/CompanySchedule/milestones/range`
+- [ ] `GET    api/CompanySchedule/milestones/upcoming`
+- [ ] `GET    api/CompanySchedule/milestones/{}`
+- [ ] `GET    api/CompanySchedule/rooms`
+- [ ] `GET    api/CompanySchedule/rooms/active`
+- [ ] `GET    api/CompanySchedule/rooms/available`
+- [ ] `GET    api/CompanySchedule/rooms/location/{}`
+- [ ] `GET    api/CompanySchedule/rooms/paged`
+- [ ] `GET    api/CompanySchedule/rooms/{}`
+
+### Job Analysis — 59 of 59 writes wired
+
+**Writes**
+
+- [x] `POST   api/JobAnalysis/budgets`
+- [x] `POST   api/JobAnalysis/budgets/{}/lines`
+- [x] `DELETE api/JobAnalysis/budgets/{}`
+- [x] `PUT    api/JobAnalysis/budgets/{}`
+- [x] `POST   api/JobAnalysis/budgets/{}/approve`
+- [x] `POST   api/JobAnalysis/budgets/{}/reject`
+- [x] `POST   api/JobAnalysis/budgets/{}/submit`
+- [x] `POST   api/JobAnalysis/budgets/{}/workflow/approve`
+- [x] `POST   api/JobAnalysis/budgets/{}/workflow/reject`
+- [x] `DELETE api/JobAnalysis/competencies/{}`
+- [x] `PUT    api/JobAnalysis/competencies/{}`
+- [x] `POST   api/JobAnalysis/descriptions`
+- [x] `DELETE api/JobAnalysis/descriptions/{}`
+- [x] `PUT    api/JobAnalysis/descriptions/{}`
+- [x] `POST   api/JobAnalysis/descriptions/{}/approve`
+- [x] `POST   api/JobAnalysis/descriptions/{}/clone`
+- [x] `POST   api/JobAnalysis/descriptions/{}/review`
+- [x] `POST   api/JobAnalysis/descriptions/{}/submit`
+- [x] `POST   api/JobAnalysis/descriptions/{}/version`
+- [x] `POST   api/JobAnalysis/descriptions/{}/workflow/approve`
+- [x] `POST   api/JobAnalysis/descriptions/{}/workflow/reject`
+- [x] `POST   api/JobAnalysis/descriptions/{}/competencies`
+- [x] `POST   api/JobAnalysis/descriptions/{}/duty-items`
+- [x] `POST   api/JobAnalysis/descriptions/{}/equipment-tools`
+- [x] `POST   api/JobAnalysis/descriptions/{}/medical-requirements`
+- [x] `POST   api/JobAnalysis/descriptions/{}/physical-demands`
+- [x] `POST   api/JobAnalysis/descriptions/{}/ppe-requirements`
+- [x] `POST   api/JobAnalysis/descriptions/{}/qualifications`
+- [x] `POST   api/JobAnalysis/descriptions/{}/reporting-relationships`
+- [x] `POST   api/JobAnalysis/descriptions/{}/responsibilities`
+- [x] `POST   api/JobAnalysis/descriptions/{}/working-conditions`
+- [x] `DELETE api/JobAnalysis/duty-items/{}`
+- [x] `PUT    api/JobAnalysis/duty-items/{}`
+- [x] `POST   api/JobAnalysis/equipment-tools/{}/training`
+- [x] `DELETE api/JobAnalysis/equipment-tools/{}`
+- [x] `PUT    api/JobAnalysis/equipment-tools/{}`
+- [x] `DELETE api/JobAnalysis/equipment-training/{}`
+- [x] `PUT    api/JobAnalysis/equipment-training/{}`
+- [x] `DELETE api/JobAnalysis/establishment/position/{}`
+- [x] `PUT    api/JobAnalysis/establishment/position/{}`
+- [x] `DELETE api/JobAnalysis/kpis/{}`
+- [x] `PUT    api/JobAnalysis/kpis/{}`
+- [x] `DELETE api/JobAnalysis/lines/{}`
+- [x] `PUT    api/JobAnalysis/lines/{}`
+- [x] `DELETE api/JobAnalysis/medical-requirements/{}`
+- [x] `PUT    api/JobAnalysis/medical-requirements/{}`
+- [x] `DELETE api/JobAnalysis/physical-demands/{}`
+- [x] `PUT    api/JobAnalysis/physical-demands/{}`
+- [x] `DELETE api/JobAnalysis/ppe-requirements/{}`
+- [x] `PUT    api/JobAnalysis/ppe-requirements/{}`
+- [x] `DELETE api/JobAnalysis/qualifications/{}`
+- [x] `PUT    api/JobAnalysis/qualifications/{}`
+- [x] `DELETE api/JobAnalysis/reporting-relationships/{}`
+- [x] `PUT    api/JobAnalysis/reporting-relationships/{}`
+- [x] `DELETE api/JobAnalysis/responsibilities/{}`
+- [x] `PUT    api/JobAnalysis/responsibilities/{}`
+- [x] `POST   api/JobAnalysis/responsibilities/{}/kpis`
+- [x] `DELETE api/JobAnalysis/working-conditions/{}`
+- [x] `PUT    api/JobAnalysis/working-conditions/{}`
+
+**Reads**
+
+- [ ] `GET    api/JobAnalysis/analytics`
+- [ ] `GET    api/JobAnalysis/budgets`
+- [ ] `GET    api/JobAnalysis/budgets/organization-level/{}`
+- [ ] `GET    api/JobAnalysis/budgets/organization-unit/{}`
+- [ ] `GET    api/JobAnalysis/budgets/organization-unit/{}/current`
+- [ ] `GET    api/JobAnalysis/budgets/paged`
+- [ ] `GET    api/JobAnalysis/budgets/pending-approvals`
+- [ ] `GET    api/JobAnalysis/budgets/status/{}`
+- [ ] `GET    api/JobAnalysis/budgets/year/{}`
+- [ ] `GET    api/JobAnalysis/budgets/{}/critical-positions`
+- [ ] `GET    api/JobAnalysis/budgets/{}/lines`
+- [ ] `GET    api/JobAnalysis/budgets/{}`
+- [ ] `GET    api/JobAnalysis/budgets/{}/details`
+- [ ] `GET    api/JobAnalysis/descriptions`
+- [ ] `GET    api/JobAnalysis/descriptions/due-review`
+- [ ] `GET    api/JobAnalysis/descriptions/paged`
+- [ ] `GET    api/JobAnalysis/descriptions/position/{}`
+- [ ] `GET    api/JobAnalysis/descriptions/position/{}/current`
+- [ ] `GET    api/JobAnalysis/descriptions/position/{}/history`
+- [ ] `GET    api/JobAnalysis/descriptions/status/{}`
+- [ ] `GET    api/JobAnalysis/descriptions/{}`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/details`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/competencies`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/duty-items`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/equipment-tools`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/medical-requirements`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/physical-demands`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/ppe-requirements`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/qualifications`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/reporting-relationships`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/responsibilities`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/valuation`
+- [ ] `GET    api/JobAnalysis/descriptions/{}/working-conditions`
+- [ ] `GET    api/JobAnalysis/equipment-tools/{}/training`
+- [ ] `GET    api/JobAnalysis/establishment/position/{}`
+- [ ] `GET    api/JobAnalysis/positions/uncovered`
+- [ ] `GET    api/JobAnalysis/responsibilities/{}/kpis`
+
+### Discipline — case file support — 18 of 20 writes wired
+
+**Writes**
+
+- [x] `PUT    api/discipline/action-steps/{}`
+- [x] `POST   api/discipline/action-steps/{}/complete`
+- [x] `POST   api/discipline/action-steps/{}/skip`
+- [x] `POST   api/discipline/cases/{}/action-steps/initialise`
+- [ ] `POST   api/discipline/cases/{}/documents`
+- [ ] `POST   api/discipline/cases/{}/documents/upload`
+- [x] `POST   api/discipline/cases/{}/legal-reviews`
+- [x] `POST   api/discipline/cases/{}/notes`
+- [x] `POST   api/discipline/cases/{}/notifications`
+- [x] `POST   api/discipline/cases/{}/witnesses`
+- [x] `DELETE api/discipline/documents/{}`
+- [x] `DELETE api/discipline/legal-reviews/{}`
+- [x] `PUT    api/discipline/legal-reviews/{}`
+- [x] `POST   api/discipline/legal-reviews/{}/complete`
+- [x] `DELETE api/discipline/notes/{}`
+- [x] `PUT    api/discipline/notes/{}`
+- [x] `POST   api/discipline/notifications/{}/acknowledge`
+- [x] `POST   api/discipline/notifications/{}/followup`
+- [x] `DELETE api/discipline/witnesses/{}`
+- [x] `PUT    api/discipline/witnesses/{}`
+
+**Reads**
+
+- [ ] `GET    api/discipline/action-steps/by-actioned-by/{}`
+- [ ] `GET    api/discipline/action-steps/overdue`
+- [ ] `GET    api/discipline/action-steps/{}/documents`
+- [ ] `GET    api/discipline/action-steps/{}`
+- [ ] `GET    api/discipline/appeals/{}/documents`
+- [ ] `GET    api/discipline/cases/{}/action-steps`
+- [ ] `GET    api/discipline/cases/{}/action-steps/pending`
+- [ ] `GET    api/discipline/cases/{}/documents`
+- [ ] `GET    api/discipline/cases/{}/documents/category/{}`
+- [ ] `GET    api/discipline/cases/{}/documents/scope/{}`
+- [ ] `GET    api/discipline/cases/{}/legal-reviews`
+- [ ] `GET    api/discipline/cases/{}/legal-reviews/total-costs`
+- [ ] `GET    api/discipline/cases/{}/notes`
+- [ ] `GET    api/discipline/cases/{}/notifications`
+- [ ] `GET    api/discipline/cases/{}/notifications/unacknowledged`
+- [ ] `GET    api/discipline/cases/{}/witnesses`
+- [ ] `GET    api/discipline/cases/{}/witnesses/without-statement`
+- [ ] `GET    api/discipline/documents/{}`
+- [ ] `GET    api/discipline/documents/{}/download`
+- [ ] `GET    api/discipline/legal-reviews/open`
+- [ ] `GET    api/discipline/legal-reviews/requiring-external-counsel`
+- [ ] `GET    api/discipline/legal-reviews/risk/{}`
+- [ ] `GET    api/discipline/legal-reviews/{}`
+- [ ] `GET    api/discipline/notes/by-author/{}`
+- [ ] `GET    api/discipline/notes/{}`
+- [ ] `GET    api/discipline/notifications/pending-followup`
+- [ ] `GET    api/discipline/notifications/{}`
+- [ ] `GET    api/discipline/witnesses/employee/{}`
+- [ ] `GET    api/discipline/witnesses/{}`
+
+### Discipline — case sub-entities — 26 of 26 writes wired
+
+**Writes**
+
+- [x] `POST   api/discipline/cases/{}/appeal`
+- [x] `POST   api/discipline/cases/{}/appeal/outcome`
+- [x] `POST   api/discipline/cases/{}/appeal/schedule-hearing`
+- [x] `POST   api/discipline/cases/{}/corrective-action`
+- [x] `POST   api/discipline/cases/{}/fine`
+- [x] `POST   api/discipline/cases/{}/fine/payment`
+- [x] `POST   api/discipline/cases/{}/hearing`
+- [x] `PUT    api/discipline/cases/{}/hearing/outcome`
+- [x] `POST   api/discipline/cases/{}/investigation`
+- [x] `PUT    api/discipline/cases/{}/investigation`
+- [x] `POST   api/discipline/cases/{}/investigation/complete`
+- [x] `POST   api/discipline/cases/{}/separation`
+- [x] `PUT    api/discipline/cases/{}/separation`
+- [x] `POST   api/discipline/cases/{}/suspension`
+- [x] `PUT    api/discipline/cases/{}/suspension`
+- [x] `POST   api/discipline/cases/{}/termination`
+- [x] `PUT    api/discipline/cases/{}/termination`
+- [x] `POST   api/discipline/cases/{}/warning`
+- [x] `PUT    api/discipline/cases/{}/warning`
+- [x] `DELETE api/discipline/corrective-action-items/{}`
+- [x] `PUT    api/discipline/corrective-action-items/{}`
+- [x] `POST   api/discipline/corrective-action-items/{}/complete`
+- [x] `POST   api/discipline/corrective-actions/{}/items`
+- [x] `DELETE api/discipline/corrective-actions/{}`
+- [x] `PUT    api/discipline/corrective-actions/{}`
+- [x] `POST   api/discipline/corrective-actions/{}/complete`
+
+**Reads**
+
+- [ ] `GET    api/discipline/appeals/awaiting-outcome`
+- [ ] `GET    api/discipline/appeals/employee/{}`
+- [ ] `GET    api/discipline/appeals/mine`
+- [ ] `GET    api/discipline/appeals/pending-hearing`
+- [ ] `GET    api/discipline/appeals/status/{}`
+- [ ] `GET    api/discipline/appeals/{}`
+- [ ] `GET    api/discipline/cases/{}/appeal`
+- [ ] `GET    api/discipline/cases/{}/corrective-action`
+- [ ] `GET    api/discipline/cases/{}/fine`
+- [ ] `GET    api/discipline/cases/{}/hearing`
+- [ ] `GET    api/discipline/cases/{}/investigation`
+- [ ] `GET    api/discipline/cases/{}/separation`
+- [ ] `GET    api/discipline/cases/{}/suspension`
+- [ ] `GET    api/discipline/cases/{}/termination`
+- [ ] `GET    api/discipline/cases/{}/warning`
+- [ ] `GET    api/discipline/corrective-actions/due-for-review`
+- [ ] `GET    api/discipline/corrective-actions/employee/{}`
+- [ ] `GET    api/discipline/corrective-actions/overdue`
+- [ ] `GET    api/discipline/corrective-actions/status/{}`
+- [ ] `GET    api/discipline/corrective-actions/supervisor/{}`
+- [ ] `GET    api/discipline/corrective-actions/{}`
+- [ ] `GET    api/discipline/fines/employee/{}`
+- [ ] `GET    api/discipline/fines/employee/{}/outstanding-balance`
+- [ ] `GET    api/discipline/fines/outstanding`
+- [ ] `GET    api/discipline/fines/overdue`
+- [ ] `GET    api/discipline/hearings/awaiting-outcome`
+- [ ] `GET    api/discipline/hearings/by-officer/{}`
+- [ ] `GET    api/discipline/hearings/upcoming`
+- [ ] `GET    api/discipline/investigations/by-investigator/{}`
+- [ ] `GET    api/discipline/investigations/open`
+- [ ] `GET    api/discipline/investigations/overdue`
+- [ ] `GET    api/discipline/separations/incomplete`
+- [ ] `GET    api/discipline/suspensions/active`
+- [ ] `GET    api/discipline/suspensions/employee/{}`
+- [ ] `GET    api/discipline/suspensions/upcoming`
+- [ ] `GET    api/discipline/terminations/eligible-for-rehire`
+- [ ] `GET    api/discipline/terminations/pending-paycheck`
+- [ ] `GET    api/discipline/terminations/type/{}`
+- [ ] `GET    api/discipline/warnings/employee/{}`
+- [ ] `GET    api/discipline/warnings/employee/{}/active`
+- [ ] `GET    api/discipline/warnings/expiring`
+- [ ] `GET    api/discipline/warnings/type/{}`
+
+### Medical insurance — 15 of 24 writes wired
+
+**Writes**
+
+- [ ] `DELETE api/medical-insurance/dependents/{}`
+- [ ] `PUT    api/medical-insurance/dependents/{}`
+- [x] `POST   api/medical-insurance/insurance-claims`
+- [x] `POST   api/medical-insurance/insurance-claims/{}/payment`
+- [x] `PUT    api/medical-insurance/insurance-claims/{}/status`
+- [x] `POST   api/medical-insurance/network-facilities`
+- [x] `DELETE api/medical-insurance/network-facilities/{}`
+- [x] `PUT    api/medical-insurance/network-facilities/{}`
+- [x] `POST   api/medical-insurance/plans`
+- [x] `DELETE api/medical-insurance/plans/{}`
+- [x] `PUT    api/medical-insurance/plans/{}`
+- [ ] `POST   api/medical-insurance/policies`
+- [ ] `DELETE api/medical-insurance/policies/{}`
+- [ ] `PUT    api/medical-insurance/policies/{}`
+- [ ] `POST   api/medical-insurance/policies/{}/cancel`
+- [ ] `POST   api/medical-insurance/policies/{}/dependents`
+- [x] `POST   api/medical-insurance/premium-records`
+- [x] `POST   api/medical-insurance/premium-records/{}/payment`
+- [ ] `POST   api/medical-insurance/provider-documents`
+- [ ] `POST   api/medical-insurance/provider-documents/upload`
+- [x] `DELETE api/medical-insurance/provider-documents/{}`
+- [x] `POST   api/medical-insurance/providers`
+- [x] `DELETE api/medical-insurance/providers/{}`
+- [x] `PUT    api/medical-insurance/providers/{}`
+
+**Reads**
+
+- [ ] `GET    api/medical-insurance/employees/{}/policies`
+- [ ] `GET    api/medical-insurance/employees/{}/policies/active`
+- [ ] `GET    api/medical-insurance/expense-claims/{}/insurance-claims`
+- [ ] `GET    api/medical-insurance/insurance-claims/{}`
+- [ ] `GET    api/medical-insurance/plans/{}`
+- [ ] `GET    api/medical-insurance/policies`
+- [ ] `GET    api/medical-insurance/policies/expiring`
+- [ ] `GET    api/medical-insurance/policies/{}`
+- [ ] `GET    api/medical-insurance/policies/{}/details`
+- [ ] `GET    api/medical-insurance/policies/{}/dependents`
+- [ ] `GET    api/medical-insurance/policies/{}/insurance-claims`
+- [ ] `GET    api/medical-insurance/premium-records/overdue`
+- [ ] `GET    api/medical-insurance/premium-records/{}`
+- [ ] `GET    api/medical-insurance/provider-documents/{}/download`
+- [ ] `GET    api/medical-insurance/providers`
+- [ ] `GET    api/medical-insurance/providers/code/{}`
+- [ ] `GET    api/medical-insurance/providers/search`
+- [ ] `GET    api/medical-insurance/providers/{}`
+- [ ] `GET    api/medical-insurance/providers/{}/details`
+- [ ] `GET    api/medical-insurance/providers/{}/documents`
+- [ ] `GET    api/medical-insurance/providers/{}/facilities/{}/in-network`
+- [ ] `GET    api/medical-insurance/providers/{}/network-facilities`
+- [ ] `GET    api/medical-insurance/providers/{}/plans`
+- [ ] `GET    api/medical-insurance/providers/{}/premium-records`
+
+### Employee career paths — 3 of 3 writes wired
+
+**Writes**
+
+- [x] `POST   api/employee-career-paths`
+- [x] `DELETE api/employee-career-paths/{}`
+- [x] `PUT    api/employee-career-paths/{}`
+
+**Reads**
+
+- [ ] `GET    api/employee-career-paths/employee/{}`
+- [ ] `GET    api/employee-career-paths/employee/{}/current`
+- [ ] `GET    api/employee-career-paths/movement/{}`
+- [ ] `GET    api/employee-career-paths/org-unit/{}`
+- [ ] `GET    api/employee-career-paths/org-unit/{}/current-occupants`
+- [ ] `GET    api/employee-career-paths/salary-grade/{}`
+- [ ] `GET    api/employee-career-paths/{}`
+- [ ] `GET    api/employee-career-paths/{}/details`
+
+### Separations — the two manual sweeps — 29 of 31 writes wired
+
+**Writes**
+
+- [x] `POST   api/hr/separations`
+- [x] `POST   api/hr/separations/clearance-items/{}`
+- [x] `POST   api/hr/separations/clearance-templates`
+- [x] `POST   api/hr/separations/clearance-templates/seed-defaults`
+- [x] `DELETE api/hr/separations/clearance-templates/{}`
+- [x] `PUT    api/hr/separations/clearance-templates/{}`
+- [ ] `POST   api/hr/separations/contract-expiries/sweep`
+- [x] `DELETE api/hr/separations/documents/{}`
+- [x] `POST   api/hr/separations/reminders/run`
+- [x] `POST   api/hr/separations/repair/disciplinary-orphans`
+- [ ] `POST   api/hr/separations/retirements/sweep`
+- [x] `DELETE api/hr/separations/settlement-lines/{}`
+- [x] `PUT    api/hr/separations/settlement-lines/{}`
+- [x] `DELETE api/hr/separations/{}`
+- [x] `PUT    api/hr/separations/{}`
+- [x] `POST   api/hr/separations/{}/approve`
+- [x] `POST   api/hr/separations/{}/cancel`
+- [x] `POST   api/hr/separations/{}/clearance/complete`
+- [x] `POST   api/hr/separations/{}/clearance/refresh-assets`
+- [x] `POST   api/hr/separations/{}/clearance/start`
+- [x] `POST   api/hr/separations/{}/complete`
+- [x] `POST   api/hr/separations/{}/documents`
+- [x] `PUT    api/hr/separations/{}/exit-interview`
+- [x] `POST   api/hr/separations/{}/notice-decision`
+- [x] `POST   api/hr/separations/{}/reject`
+- [x] `POST   api/hr/separations/{}/settlement/finalise`
+- [x] `POST   api/hr/separations/{}/settlement/lines`
+- [x] `POST   api/hr/separations/{}/settlement/prepare`
+- [x] `POST   api/hr/separations/{}/settlement/review/approve`
+- [x] `POST   api/hr/separations/{}/settlement/review/return`
+- [x] `POST   api/hr/separations/{}/submit`
+
+**Reads**
+
+- [ ] `GET    api/hr/separations`
+- [ ] `GET    api/hr/separations/analytics`
+- [ ] `GET    api/hr/separations/analytics/exit-interviews`
+- [ ] `GET    api/hr/separations/clearance-templates`
+- [ ] `GET    api/hr/separations/contract-expiries/upcoming`
+- [ ] `GET    api/hr/separations/documents/{}/download`
+- [ ] `GET    api/hr/separations/employee/{}`
+- [ ] `GET    api/hr/separations/reminders/preview`
+- [ ] `GET    api/hr/separations/retirements/upcoming`
+- [ ] `GET    api/hr/separations/{}`
+- [ ] `GET    api/hr/separations/{}/clearance`
+- [ ] `GET    api/hr/separations/{}/documents`
+- [ ] `GET    api/hr/separations/{}/exit-interview`
+- [ ] `GET    api/hr/separations/{}/settlement`
+
+### Employee competencies — the missing delete — 4 of 4 writes wired
+
+**Writes**
+
+- [x] `POST   api/employee-competencies`
+- [x] `POST   api/employee-competencies/batch-assess`
+- [x] `DELETE api/employee-competencies/{}`
+- [x] `PUT    api/employee-competencies/{}`
+
+**Reads**
+
+- [ ] `GET    api/employee-competencies/competency/{}`
+- [ ] `GET    api/employee-competencies/competency/{}/history`
+- [ ] `GET    api/employee-competencies/employee/{}`
+- [ ] `GET    api/employee-competencies/employee/{}/competency/{}`
+- [ ] `GET    api/employee-competencies/employee/{}/gaps`
+- [ ] `GET    api/employee-competencies/employee/{}/history`
+- [ ] `GET    api/employee-competencies/employee/{}/profile`
+- [ ] `GET    api/employee-competencies/gaps/organisation`
+- [ ] `GET    api/employee-competencies/me/gaps`
+- [ ] `GET    api/employee-competencies/me/profile`
+- [ ] `GET    api/employee-competencies/qualified-for-position/{}`
+- [ ] `GET    api/employee-competencies/stale`
+- [ ] `GET    api/employee-competencies/{}`
+- [ ] `GET    api/employee-competencies/{}/detail`
+- [ ] `GET    api/employee-competencies/{}/history`
+- [ ] `GET    api/employee-competencies/{}/history/latest`
+
+### Job shortlisting criteria — 3 of 3 writes wired · lane 5b, 2026-09-01
+
+The first row of § E2's class 4, and the only one where a **live screen was producing records that
+silently passed every candidate**. `dev-harness/hr-recruitment/run-lane5b.mjs`, 34 assertions,
+green twice.
+
+| Route | Client method | Screen |
+| --- | --- | --- |
+| `POST   api/job-vacancies/{}/criteria` | `addCriteria` | `VacancyCriteriaPanel` |
+| `PUT    api/job-vacancies/criteria/{}` | `updateCriteria` | `VacancyCriteriaPanel` — **new**; the panel had no edit path at all, so a criterion could only be deleted and retyped |
+| `DELETE api/job-vacancies/criteria/{}` | `deleteCriteria` | `VacancyCriteriaPanel`, behind `canRemove` |
+| `GET    api/job-vacancies/{}/criteria/mandatory` | — | **INTENTIONAL.** A filtered subset of the full read the panel already makes, which returns `isMandatory` on every row |
+
+**Two backend defects, both found by the probe and neither visible in the source.**
+
+1. **`ToEntity` never assigned `ComparisonOperator`.** `ToDto` returned it and `UpdateEntity`
+   assigned it, so the omission read as complete in every direction except the one that mattered:
+   a criterion created with `Equals` came back `null`, and `EvaluateNumericCriterion` fell to its
+   `?? Between` default. The create path had never carried the operator.
+2. **A `[Required]` non-nullable enum does not require anything.** `RequiredAttribute` sees `0` and
+   passes it; `JobShortlistingCriteriaType` starts at `1`. `RequireScorableCriterion` now refuses
+   an undefined value on **create and update both** — a screen-only fix would leave the hole open
+   to every other caller — and `CriterionRuleRejected` carries the message out, because
+   `GlobalExceptionHandlingMiddleware` maps `InvalidOperationException` to a fixed string and
+   discards it. Same shape as lane 3c's three mute refusals.
+
+**And one gate mismatch.** DELETE is on `RecruitmentAdminPolicy` while POST and PUT beside it take
+Write, so the Remove button answered an HR user **403** with a toast that explained nothing. The
+panel now takes `canRemove` separately from `canManage`, fed by `hasPermission('HR.Recruitment.Admin')`.
+
+⚠ **Blast radius nil, and that is the tell.** Ten vacancies, **zero criteria** in the entire
+tenant. Nobody had ever created one — the Add button 400'd whenever the weight was left blank,
+because `weight: null` cannot convert to a non-nullable `int` and the JSON reader rejects the
+request before any handler runs. **A feature with no rows is not evidence that it works**; here it
+was evidence of the opposite, and the endpoint audit counted the panel as wired throughout.
+
+⚠ **`SplitValues` splits on a COMMA.** Any other separator becomes one long value that matches
+nothing. The form says so; the first probe used `|` and would have shipped a lie.
+
+### Section E class 3 — the fields a live form omitted · lane 5b, 2026-09-01
+
+`dev-harness/hr-medical/run-lane5b-class3.mjs`, **69 assertions, green twice**, residue sweep clean.
+Four families, **20 fields**.
+
+| Screen | Fields added | Note |
+| --- | ---: | --- |
+| `hr/medical/insurance` — provider | 6 | `hasOnlinePortal`, `claimsPortalUrl`, `preferredPaymentMethod` on create and update |
+| `hr/medical/insurance/[id]` — plan | 8 | `lifetimeLimit`, `maxChildAge`, `employerContributionPercent`, `employeeContributionPercent` |
+| `hr/medical/facilities` (shared form) | 4 + 3 | `accreditationDate`, `operatingDays` — **plus the rest of the accreditation block** |
+| `administration/hr/separation/clearance-form` | 2 + 4 | `sourcesFromAssetRegister` — **plus the four other fields the add strip never sent** |
+
+⚠ **The count that mattered was wrong, and it was mine.** § E2 put **24** fields in this class. Four
+of them — `BenefitTierId` on the employee medical policy pair, `LinkedMedicalClaimId` on the NHIS
+claim pair — are **not** "a live screen omits an input", because **neither write has a form at
+all**:
+
+- `medical-reference.service.ts` has **no policy writer of any kind**; its own comment says
+  *"⚠ HR has no policy EDITOR yet"*. That is **D-13**, an open deferral, not a form gap.
+- `hr/medical/nhis/page.tsx` lists claims, submits them and records payment. It **never calls
+  `nhisClaimService.create`**. The client method exists and no screen uses it.
+
+I had checked that a *page* existed for each and stopped there. That is the ledger's own
+**"coverage of the API is not coverage of the product"** lesson arriving one level further in: a
+screen that reads a collection is not a screen that writes it. **Class 3 is 20 fields, not 24**;
+the other 4 move to class 4 and are listed in the plan as needing screens.
+
+⚠ **Three TypeScript unions were short of the C# enum**, all found by sending the missing member
+and watching it come back:
+
+- `MedicalInsuranceProviderType` was missing `Other` (99).
+- `HealthFacilityType` was missing `MentalHealthFacility` (17) and `Other` (99).
+
+A row stored as any of these failed the form's own zod schema, so it could not be edited at all —
+the same shape as the four invented enum unions area 17's closure slice found, in the opposite
+direction: not fiction, but truth left out.
+
+⚠ **A summary list plus an edit dialog silently blanks optional fields, and this slice was about to
+add three of them.** `ResourceCollectionTab.toForm` receives a **list row**; the provider list is a
+projection that carries neither the portal fields nor the payment method. Opening a provider and
+pressing Save would have written the form's defaults over all three — silently, because they are
+optional (the *required* fields it already omitted merely forced re-typing). Fixed with an opt-in
+`loadForEdit` that fetches the record when the dialog opens, seeds from the row first so the dialog
+is never blank, and disables Save while loading. **Assertion A8 holds the thin projection in place**,
+so the reason the hook exists stays visible. The per-provider plan list, by contrast, returns full
+records — asserted at B6/B7 rather than assumed.
+
+⚠ **A premium split could add up to 180%, and the first fix for it was too small.**
+`EmployerContributionPercent` and `EmployeeContributionPercent` each carry `Range(0, 100)` and
+nothing validated the pair — a plan with 90/90 was accepted with a 201.
+
+This was first recorded as *"not fixed, because whether a split must total exactly 100 is a policy
+question"* — and **that reasoning covered only half of it.** Two different questions had been
+collapsed into one. *Must a split total exactly 100?* is genuinely a policy question: a scheme can
+be part-funded by a third party, so refusing 80/10 would invent a rule TDC has not asked for. *May a
+split total MORE than 100?* is not a policy question at all. It is arithmetic. The uncertainty about
+the first was used to justify leaving the second alone, and a screen-side warning was called
+sufficient — three hours after this same session wrote, for the criteria guard, that **a screen-only
+fix leaves the hole open to every other caller**.
+
+`RequireCoherentContributionSplit` now refuses a sum over 100 in the SERVICE, on create and update
+both, and leaves an under-100 split accepted. Four assertions pin the distinction, including the
+exact-100 boundary so a `>` / `>=` slip is caught, and one on the update path — guarding only create
+is the same mistake one layer down.
+
+**Two instrument-03 blind spots confirmed in the same slice.** Both the facility accreditation block
+and the clearance add strip were flagged at two fields and one field respectively, while five and
+four more were unreachable — because those identifiers occur elsewhere in `frontend/src` (the
+training-vendor screens use the same accreditation names). **The flagged count is a floor.** Rebuild
+the form from the DTO, as § E2 said, rather than patching in the fields the instrument named.
+
+⚠ **The clearance rule reports itself well and the form now repeats it.** Only one line may be fed by
+the HR Assets register; the server refuses a second with a message naming the line that holds it
+(assertion D7 checks the name is in the message). The checkbox is disabled with that line named,
+rather than offering an option that answers 400.
+
+### Staff-travel visa requirements — 3 of 3 writes wired · lane 5b, 2026-09-01
+
+§ E2's class-4 second row: **a client, a type and no screen**. `dev-harness/hr-travel/run-lane5b-visa.mjs`,
+**41 assertions, green twice**.
+
+| Route | Client method | Screen |
+| --- | --- | --- |
+| `POST   api/staff-travel/compliance/visa-requirements` | `createVisaRequirement` | `hr/travel/visa-requirements` |
+| `PUT    …/visa-requirements/{}` | `updateVisaRequirement` | same |
+| `DELETE …/visa-requirements/{}` | `deleteVisaRequirement` | same, behind `canDelete` |
+| `GET    …/visa-requirements/destination/{}` | `getVisaRequirementsForDestination` | same — the only real list |
+| `GET    …/visa-requirements?passport&destination` | `getVisaRequirement` | `TravelCompliancePanel` — the Visas card on a travel request |
+
+**The screen is read one destination at a time**, because that is the only list the API offers and
+it is also how the travel desk asks the question. Linked from the sidebar — a page nothing links to
+is the same gap in a new place.
+
+⚠ **`getVisaRequirements()` returned `null` cast as an array on every call.** It hit the two-parameter
+lookup route with no parameters; the route answers `204 No Content` without them. It had **no screen
+caller**, which is exactly why nothing ever noticed. Replaced with a correctly-shaped
+`getVisaRequirement(passport, destination)`.
+
+**Three backend defects the probe found that reading had not.**
+
+1. ⚠ **A country pair could be recorded TWICE, with contradictory answers.** Ghana → United Kingdom
+   was saved as `EmbassyVisa` and again as `VisaFree`; both were accepted, and
+   `GetRequirementAsync` resolves the pair with `FirstOrDefaultAsync` — so it returns whichever the
+   database hands back first. **A traveller could be told no visa is required by a register that
+   also says an embassy visa is.** `RequireUnclaimedCountryPairAsync` now refuses the second, naming
+   both countries and pointing at the existing row.
+   <br>Enforced in the service, **not** by a unique index: the delete is a SOFT delete and this
+   module has met *"a soft delete does not release a unique index"* **nine times**. Querying the
+   repository excludes tombstones by construction, so a retired pair can be entered again — asserted
+   at D6/D7, which is also what lets the suite run twice.
+2. ⚠ **Create and update returned both country names as `null`.** `ToDto` reads
+   `entity.PassportCountry?.Name`, and a just-constructed entity has no navigation loaded — while
+   the lookup beside them answered "Ghana" and "United Kingdom". A screen rendering the write
+   response shows a row naming nobody, which is what area 13's `DevelopmentPanel` shipped as
+   *"undefined — undefined"*. Both writes now read back through the include-carrying lookup.
+3. ⚠ **The by-destination list included `PassportCountry` and not `DestinationCountry`** — so it
+   resolved the passport name and returned `null` for the destination name the DTO declares. The
+   uneven `.Include` shape, from the ported list-read bugs. One line.
+
+⚠ **The TypeScript was fiction in six of nine fields**, rewritten from a live response:
+`originCountryId`, `visaRequired`, `visaOnArrival`, `eVisaAvailable`, `validityDays` and `isActive`
+exist on neither the entity nor either DTO. Only `destinationCountryId`, `processingDays` and
+`notes` were real. It type-checked for as long as it did because **no screen ever called these
+methods** — instrument 01 matches the frontend SERVICE layer, so a client method with no screen
+caller looks identical to one with ten.
+
+⚠ **The update DTO carries no country fields, deliberately** — a requirement cannot be moved onto a
+different pair. Assertions B8/B9 send country ids on an update and prove they are ignored; the
+dialog says so in words rather than showing a disabled picker.
+
+⚠ **DELETE is on `TravelAdminPolicy` while POST and PUT take `TravelWritePolicy`** — the same tier
+split as the shortlisting criteria, and the screen takes `canDelete` separately for the same reason.
+
+⚠ **The register is CONSULTED, not just fillable — and that was nearly left undone.** The pair
+lookup was first shipped with no screen caller and a written disposition naming its future consumer.
+That was the wrong call: **reference data nobody reads does not get maintained**, so a register with
+a data-entry screen and no reader is the same failure this lane exists to fix, one step along. The
+`TravelCompliancePanel`'s Visas card now answers *"what does this traveller's passport need here?"*
+at the moment a visa is about to be recorded.
+
+The chain, and why each link needed checking:
+
+- The **passport country is not on the employee record.** It is the `IssuingCountryId` of the
+  traveller's `Passport` travel document, so a traveller with no passport on file cannot be looked
+  up at all — the panel says exactly that rather than showing an empty answer.
+- ⚠ **The travel-request LIST carries `destinationCountryName` and NOT `destinationCountryId`**
+  (assertion E2). The panel is fed the DETAIL record, which carries both. A panel keyed off a list
+  row would have been keyed off nothing — the D-09/D-12 shape, met for the third time in this lane.
+- An entry that has **never been verified** is rendered as such in amber rather than presented as
+  fact. Visa rules change without notice, so how stale the entry is matters as much as what it says.
+
+Assertions E1–E10 hold the chain rather than the screen: list vs detail projection, the passport's
+issuing country, and the exact lookup the panel makes returning both country names and the
+processing time.
+
+### NHIS claims — the form the screen never had · lane 5b, 2026-09-01
+
+Reclassified out of class 3 while building it: `LinkedMedicalClaimId` was **not** "a live form omits
+an input". The screen listed, submitted and settled claims and **never called its own `create`**, so
+the field had no writer at all — and `IMedicalRepositories.GetByLinkedMedicalClaimIdAsync`, a
+reverse read that already existed, could only ever return empty. Covered by
+`hr-medical/run-lane5b-class3.mjs` sections E and F (the suite is now **69 assertions, green
+twice**).
+
+| Client method | Before | Now |
+| --- | --- | --- |
+| `create` | no caller | the Record-a-claim dialog |
+| `update` | no caller | Edit, on a draft or rejected claim only |
+| `getClaim` | no caller | hydrates the edit dialog |
+| `updateStatus` | **no caller** | Record decision |
+| `recordPayment` | wired, but **unreachable** | reachable now that a claim can be approved |
+
+⚠ **The lifecycle had no middle, and the settlement half had never run.** `updateStatus` had no
+screen caller, so nothing could leave `Submitted`; "Record payment" is offered only on `Approved`
+or `PartiallyApproved`, so it sat on a branch nothing could reach. **Measured: all five NHIS claims
+in the tenant were `Draft`** — the same tell as the shortlisting criteria, where an empty table was
+evidence the feature had never worked rather than evidence it was merely unused. Assertions F1–F6
+now walk Draft → Submitted → PartiallyApproved → Paid.
+
+⚠ **`UpdateClaimAsync` had no state guard.** A claim already submitted to the scheme — or approved,
+or paid — could have its amounts, service date and facility rewritten, leaving the record
+disagreeing with what was actually claimed and settled. Found while building the screen's first
+edit path; the same shape as **D-03**, where probation dates stayed editable after confirmation.
+`Draft` and `Rejected` remain editable (correcting and resubmitting is what a rejection is *for*);
+everything from `Submitted` onward is a statement already made to NHIS and is amended through the
+status and payment paths. The Edit button appears on exactly those two statuses — matching the
+guard rather than substituting for it — and F6 proves a settled claim still refuses an edit.
+
+⚠ **Two more types short of the wire**, both the floor pattern: `NHISClaimCreateRequest` was missing
+**five** DTO fields where instrument 03 flagged one (`isForDependent`, `dependentId`, `icdCode`,
+`linkedMedicalClaimId`, `notes` — the other four occur as identifiers elsewhere in the frontend),
+and `MedicalExpenseClaimSummary` omitted the two enum name companions the server sends.
+`MedicalServiceType` was checked member-by-member against its C# enum and **is** complete — worth
+confirming rather than assuming, given the three unions that were not.
+
+⚠ **The edit dialog reads the DETAIL, not the list row.** The summary carries five fields; the form
+needs seventeen. Binding a form to a projection and then saving it blanks everything the projection
+omits — the D-09/D-12 shape, met four times in this lane. Assertion E3 holds the projection thin
+(the expense-claim list carries `employeeName` and not `employeeId`), which is also why the link
+picker has to scope itself from the detail.
+
+### `EmployeeContractDetail` — the four twin columns · ⛔ **THREE RESERVED BY DECISION, DO NOT DROP** · 2026-09-01
+
+> ✅ **CLOSED 2026-09-13 (round 3, lane P3; decision D-5).** `AnnualLeaveEntitlementDays`,
+> `VacationDaysPerYear` and `SickDaysPerYear` were dropped by migration
+> `DropContractLeaveColumns` — entitlement is the leave module's, and the probe below had found
+> 0 of 24 rows off the defaults. The reserved trio (`EffectiveDate`, `ContractEndDate`,
+> `IsCurrent`) is **untouched**; the banner beneath still stands for those three.
+
+> ⛔ **DECISION 2026-09-01 — read this before acting on anything below.** The user has reserved
+> `EffectiveDate`, `ContractEndDate` and `IsCurrent` **because contract versioning is coming soon**.
+> **Do not drop them.** The analysis that follows concluded they were droppable and it is still
+> factually correct — which is exactly why this banner exists: a future session running the same
+> sweep will reach the same conclusion and must not act on it. `AnnualLeaveEntitlementDays` is
+> **not** covered by that decision and is still open (see § "What the reservation does not cover").
+
+Eight fields sat on the entity and on none of its three DTOs. Four were exposed (lane 3d). The other
+four are **twins of fields that are already live** — they were assessed for removal, and three are
+now reserved instead.
+
+| Column | Live twin | Written by | Read by |
+| --- | --- | --- | --- |
+| `AnnualLeaveEntitlementDays` (default **20**) | `VacationDaysPerYear` (default **15**) | **nothing** | **nothing** |
+| `ContractEndDate` | `EndDate` | `JobOfferHireService` only, to the same value | **nothing** |
+| `EffectiveDate` | `StartDate` | `JobOfferHireService` only, to the same value | **nothing** |
+| `IsCurrent` | `IsActive` | `JobOfferHireService` only, hardcoded `true` | **nothing** |
+
+`GetActiveContractAsync` and the termination sweep both read `IsActive`. The contract-expiry sweep
+reads `EndDate` — `SeparationService:1700` is `ContractEndDate = c.EndDate.Value`, a **DTO property
+populated from the live column**, which is the clearest proof of which twin is which.
+
+⚠ **A first pass concluded all four were written by nothing. That was wrong**, and wrong in a way
+worth recording: the grep that produced it was piped through `head -4`, and hits from Procurement,
+DocumentManagement, Estate and Workflow — all of which have fields with these exact names — crowded
+the real `JobOfferHireService` line out of the visible output. **A truncated grep is not evidence of
+absence.** The corrected sweep scoped to the entity's own reference surface instead of the names.
+
+#### The data says the drop is safe — measured, not assumed
+
+| Check | Result |
+| --- | --- |
+| `AnnualLeaveEntitlementDays <> 20` | **0 of 24 rows** |
+| `EffectiveDate` | **all 24 rows are `0001-01-01`**, the CLR zero default — never written on the manual path |
+| `ContractEndDate` null while `EndDate` set | 10 rows · **set while `EndDate` null: 0** — it holds strictly less |
+| `IsCurrent <> IsActive` among **live** rows | **0** (the 2 differing rows are tombstoned test fixtures) |
+
+None of the four holds information its twin does not.
+
+#### "Three of them ARE written" — why that does not change the answer
+
+`JobOfferHireService` assigns each twin pair **the same local variable, on adjacent lines of one
+object initialiser** (lines 1484-1496):
+
+```
+StartDate       = startDate,        EndDate         = contractEndDate,     IsActive  = true,
+EffectiveDate   = startDate,        ContractEndDate = contractEndDate,     IsCurrent = true,
+```
+
+So `EffectiveDate` can only ever equal `StartDate`, `ContractEndDate` can only ever equal `EndDate`,
+and `IsCurrent` is `true` on every row ever created. **No code path anywhere makes a pair diverge**,
+and the manual create/update path never touched them at all — which is why every row in the database
+carries `EffectiveDate = 0001-01-01`. "Written" here means *written as a copy*; the live twin already
+holds the value, one line above.
+
+⚠ **The one thing worth a decision, not a sweep.** `EffectiveDate` + `ContractEndDate` + `IsCurrent`
+together are the classic shape of a **versioned contract table**: many rows per employee, each
+effective from a date, exactly one flagged current. That is a coherent design — contract amendments
+with history — and these columns look like scaffolding for it.
+
+**It was never built.** Measured: **19 live contracts across 19 distinct employees**; no employee
+holds more than one, and nothing reads any of the three. So the choice is:
+
+- **Drop** (recommended). They are half-built scaffolding that today only duplicates. If TDC later
+  wants contract-amendment history it should be designed deliberately — semantics decided,
+  `IsCurrent` actually maintained when a contract is superseded, a real version chain — not
+  inherited from three columns nobody has ever maintained. Rebuilding them then is a small
+  migration; keeping them now means every future reader must work out which of two end dates to
+  trust.
+- **Keep** only if contract versioning is known to be coming soon and the columns are being reserved.
+
+⚠ **`IsCurrent` is the one to drop hardest.** It is hardcoded `true` at creation and **never updated
+by anything** — so on a terminated contract it still reads `true`. It is not merely redundant, it is
+wrong, and versioning built on it as-is would start from a false premise.
+
+`AnnualLeaveEntitlementDays` is not part of that story. It is a stray second leave field with a
+different default (20 against `VacationDaysPerYear`'s 15), written by nothing and read by nothing.
+
+⚠ **The same initialiser also sets `WorkSchedule` and `CurrencyCode`** — two of the four fields lane
+3d exposed. The hire path had been populating contract fields the manual form could neither set nor
+display, which is independent confirmation that those four were real gaps rather than dead columns.
+
+
+#### What the reservation costs — three obligations it does not discharge
+
+Reserving is a legitimate call, and it removes the destructive migration entirely. But "keep" is not
+a no-op: all three columns are **currently carrying values that a versioning feature would inherit**,
+and two of those values are wrong.
+
+**1. ⚠ `IsCurrent` is presently a lie, and versioning would start from it.** It is hardcoded `true`
+at creation and updated by **nothing** — so a terminated contract still reads `IsCurrent = true`.
+Four sites flip a contract's `IsActive` (`EmployeeService` 452, 1566, 1581, and
+`TerminateContractAsync`) and not one of them touches `IsCurrent`. Today it is uniformly `true` on
+every row in the database. If versioning is built on it as-is, its first act is a backfill of a
+column that never meant anything.
+<br>⚠ **Not fixed here, deliberately.** Under versioning, `IsCurrent` and `IsActive` are *meant* to
+diverge — several inactive historical versions and one current, or a future-dated version that is
+current but not yet active. Coupling them now would encode a semantic the versioning design may
+want to break. The defensible minimum, if it is wanted before then, is one-directional: **a
+terminated or expired contract is not the current one**, so set `IsCurrent = false` on the
+terminate and deactivate paths and leave the `true` side to the design. Reactivation is the
+genuinely ambiguous case and belongs to whoever designs the version chain.
+
+**2. `EffectiveDate` is `0001-01-01` on all 24 rows** and `ContractEndDate` is null on 10 rows where
+`EndDate` is set. Whatever versioning does, it will need a **backfill** —
+`EffectiveDate = StartDate`, `ContractEndDate = EndDate` — for every row that predates it. Recording
+that obligation now is far cheaper than discovering it when the ordering comes out wrong.
+
+**3. The hire path writes them as copies, and that becomes a bug the day versioning ships.**
+`JobOfferHireService` sets `EffectiveDate = startDate` and `ContractEndDate = contractEndDate`, the
+same locals as their twins. For version 1 of a contract that is correct by coincidence. For version
+2 it is wrong: `EffectiveDate` should be when *that amendment* takes effect. **The versioning slice
+must change those two assignments**, not merely add to them.
+
+**The invariant already exists, which is a point in the reservation's favour.**
+`HasActiveContractAsync` refuses a second active contract for one employee, and the data agrees —
+19 live contracts across 19 distinct employees. So the "exactly one current row per employee" rule
+that versioning needs is already enforced; what is missing is the history, not the constraint.
+
+#### What the reservation does not cover
+
+⚠ **`AnnualLeaveEntitlementDays` has nothing to do with contract versioning** and is still open. It
+is a second leave field with a **different default** (20, against `VacationDaysPerYear`'s 15),
+written by nothing, read by nothing, and set on no DTO. Neither it nor its twin feeds any leave
+calculation — entitlement comes from `ILeaveEntitlementService` and `LeaveBalance`. It is a
+duplicate column with a conflicting default sitting next to the field the form actually uses, and
+it should be decided on its own merits rather than inheriting a reservation made for three other
+columns.
+
+#### ~~When~~ — superseded by the reservation. Kept for the day versioning lands and the question returns.
+
+**Not in the same batch as the work that just landed.** In order:
+
+1. **Commit what is green first.** Lane 3d has just changed this entity, its three DTOs, its mapper
+   and its service. Stacking a destructive column drop on top means a single revert cannot separate
+   them.
+2. **Its own single-purpose slice.** It is the only destructive change on the table and should be
+   revertible alone.
+3. ⚠ **One code change must go in the SAME slice, before the properties are removed**:
+   `JobOfferHireService` writes three of the four in one object initialiser (lines 1485–1495). The
+   solution will not compile with the properties gone and those assignments still there.
+4. Then the standard migration dance: **the user scaffolds, I edit, the user updates.** The
+   schema change has **three homes** — entity, migration, snapshot. ⚠ **Superseded 2026-09-19:**
+   the `FastBuildMigrationMetadata` listing step no longer exists and the file must not be
+   re-created; see `docs/LOCAL-FAST-EF-BUILD.md`.
+
+#### How to know nothing is broken afterwards
+
+⚠ **A name grep cannot answer this and should not be used.** `EffectiveDate` matches **592** lines
+across `src/`, `IsCurrent` 179, almost all of them other entities. The checks that do work:
+
+1. **The entity's reference surface**, not the field names — 14 files mention `EmployeeContractDetail`
+   at all, and that is the whole blast radius: `EmployeesController`, `HrModuleServiceRegistration`,
+   `HRDTOs`, `HREntities`, `RecruitmentEntities`, `IHRRepositories`, `IHRServices`, `EmployeeService`,
+   `EmployeeMappingExtensions`, `JobOfferHireService`, `SeparationService`, `ApplicationDbContext`,
+   `ApplicationDbContext.HR`, `EmployeeRepository`. **No payroll file is among them** — payroll is
+   another team's module and does not touch this entity.
+2. **The compiler is the real check.** These columns are reached only through EF-mapped properties,
+   so removing them breaks every remaining reference at build time. There is no dynamic access to
+   fall through: the only raw SQL naming any of them is `src/ErpSystem.Api/full_database.sql`, a
+   generated provisioning script (⚠ it carries
+   `ALTER TABLE [EmployeeContractDetails] ADD [AnnualLeaveEntitlementDays] int NOT NULL DEFAULT 0;`
+   at line 29407 and needs regenerating, or it will recreate a column the migration just dropped).
+3. **The snapshot regenerated** — the third home, and the one that silently rots.
+4. **Re-run `hr-probation/run-lane3d.mjs`** (31 assertions), which exercises contract create, update,
+   the probation guard and all four newly-exposed fields. If a drop disturbs the contract surface,
+   it fails there.
+5. ⚠ **`rebuild-db` builds from the EF model, not from migrations.** Removing the properties is what
+   a rebuilt database sees; the migration exists for databases that already have the columns. Both
+   are needed, and neither substitutes for the other.
+
+### Contract versioning — design note · 2026-09-01
+
+Written when `EffectiveDate`, `ContractEndDate` and `IsCurrent` were reserved for a versioning
+feature that is coming. This is what the codebase says about how to build it.
+
+#### 1. The idiom already exists. Copy it rather than inventing a second one.
+
+`EmployeeSalaryAssignment` (`HREntities.cs:1562`, `EmployeeService.AssignSalaryAsync`) is already a
+working temporal table in the same service:
+
+```
+EffectiveDate            when this row's terms start
+EffectiveTo   (nullable) when they stop; NULL = open-ended, i.e. current
+AssignmentReason         why this version exists — "Promotion", "Annual Review"
+```
+
+`AssignSalaryAsync` finds the row whose window covers the new `EffectiveDate`, closes it at
+`newEffectiveDate - 1 day`, and inserts. Reads order by `EffectiveDate DESC`.
+
+⚠ **It has no `IsCurrent` flag.** Currency is *derived* from `EffectiveTo == null`, not stored. That
+is the more robust choice and it is already the house pattern — one source of truth that cannot
+drift. A module with two temporal idioms is a module where nobody knows which to trust.
+
+#### 2. What that means for the three reserved columns
+
+| Column | Verdict under versioning |
+| --- | --- |
+| `EffectiveDate` | ✅ **Keep, exactly as reserved.** The version's start. |
+| **`EffectiveTo`** | ⚠ **MISSING — the reservation is one column short.** Without it a version cannot be closed, which is what forces a flag back into the design. Add it with the versioning migration. |
+| `IsCurrent` | ⚠ **The house pattern does not use a flag.** It is a second source of truth beside the window, and it has *already* drifted: hardcoded `true` at creation, updated by nothing, therefore `true` on every terminated contract in the database today. Recommend deriving currency from `EffectiveTo == null`. Keep the column only as a deliberate query shortcut — and if so it must be written in the **same transaction** as the window it mirrors, with a filtered unique index enforcing one `true` per chain. |
+| `ContractEndDate` | ⚠ **Still has no job, even under versioning.** `EndDate` is when the employment contract ends; `EffectiveTo` is when *this version* stops. A third date is the same ambiguity the twins already caused. |
+
+#### 3. ⛔ Two existing methods will actively fight versioning
+
+`HasActiveContractAsync` refuses a second active contract for an employee, and
+`ActivateContractAsync` throws *"Employee already has an active contract."* **Versioning is
+precisely the act of inserting a second row.** Both must become chain-aware — "one *current version*
+per contract chain" rather than "one active contract per employee" — **before** any versioning code
+lands, or the first amendment fails with a business-rule refusal that reads like a bug.
+
+The invariant itself is right and worth keeping; only its grain is wrong.
+
+#### 4. The gap versioning is actually for — and the decision only TDC can make
+
+Today `UpdateContractAsync` **mutates in place**. A pay rise overwrites the previous salary, so the
+system cannot answer *"what was this person paid in March"*. That is what versioning buys, and it is
+a real hole rather than a tidiness concern.
+
+Which means the design must first decide **which fields are versioned and which are corrected**:
+
+- **Amendment → new version:** salary, currency, working hours, leave days, employment type, work
+  schedule, probation terms.
+- **Correction → edit in place:** notes, contract path, a typo in the terms text, contract number.
+
+Every other question follows from that line, and nobody but the business can draw it. Getting it
+wrong in the permissive direction floods the chain with versions for typo fixes; wrong in the strict
+direction silently destroys history exactly as today.
+
+#### 5. Copy the pattern, not its two bugs
+
+`AssignSalaryAsync` has two weaknesses worth fixing *while* copying, not afterwards:
+
+1. It closes **one** overlapping row (`FirstOrDefaultAsync`). A back-dated insert spanning several
+   existing windows leaves the rest overlapping, and nothing detects it.
+2. It never validates `EffectiveTo >= EffectiveDate`, so an inverted window is storable.
+
+#### 6. Sequencing
+
+1. Add `EffectiveTo` and the chain key (`ContractNumber` is already human-readable and shared across
+   a chain — `CTR-{empNumber}` from the hire path — so it is the natural candidate, plus a version
+   ordinal).
+2. **Backfill inside the versioning migration, not before**, so there is one truth and one commit:
+   `EffectiveDate = StartDate` for all 24 rows currently `0001-01-01`; `EffectiveTo = NULL` for the
+   live row of each chain; `IsCurrent` set to match, or dropped if currency is derived.
+3. Make `HasActiveContractAsync` / `ActivateContractAsync` chain-aware.
+4. Change `UpdateContractAsync` to supersede for versioned fields and edit in place for corrections.
+5. Fix `JobOfferHireService`: it currently writes `EffectiveDate = startDate` and
+   `ContractEndDate = contractEndDate`, copies of their twins. Version 1 makes that true by
+   coincidence; version 2 makes it wrong.
+6. Audit the readers. `GetActiveContractAsync` uses `IsActive`; the separation expiry sweep uses
+   `EndDate` (chain-level, so it stays correct); `RequireUnconfirmedProbationAsync` — added
+   2026-09-01 — reads *a* contract and must read the **current version**.
+
+### Harness hygiene — a suite that THROWS dies before its cleanup · 2026-09-01
+
+Three live fixture employees and two contracts were found in the tenant after lane 3d, and they were
+not a cleanup bug — they were runs that **crashed**. The new generator assertions called
+`admin.post(...)` without `raw`, so a 500 threw, the process died, and the cleanup block at the
+bottom never executed. Every crashed run left its fixtures behind as live rows, indistinguishable
+from real employees to every other reader.
+
+Two rules, both already paid for elsewhere in this module and both worth restating:
+
+1. **An assertion that can meet a real defect must use `raw` and REPORT.** A crashed run is not a
+   failing run, it is an absent one: no count, no failure list, and no cleanup. Making the two
+   creates report turned a process death into `31/35` with four failures naming the cause — which is
+   what a red test is for.
+2. **Verify the tenant is clean by QUERYING it, not by trusting the cleanup block.** The suite's own
+   `Z1` passed throughout, because it only checks the fixture *it* created on the run that reached
+   the end. The litter was found by counting `L3D%` rows in SQL, not by any assertion.
+
+⚠ And the reason it mattered here specifically: the litter was **soft-deleted employees holding
+generated employee numbers**, which is the exact input to the defect being fixed. Harness litter and
+the bug under test were the same rows.
+
+## D. Hand-review queue (flagged by 01 only)
+
+Instrument 01 found no caller but instrument 02 still sees the path segment in the frontend, so
+each of these is *either* a real gap *or* one of the three documented artefacts.
+
+**A controller is rarely one verdict.** `Assets` mixes two path-builder artefacts, two
+employee-portal duplicates and eight genuine gaps. So the queue is classified per endpoint in
+`ENDPOINT_DISPOSITIONS`, and the Disposition column below is the *mix* — the per-endpoint
+verdicts and their reasons are in **D2**. A row still reading plain `REVIEW` has not been
+looked at; a row with a mix has been looked at endpoint by endpoint.
+
+| Controller | Flagged | Total writes | Disposition | Note |
+| --- | ---: | ---: | --- | --- |
+| Employees | 73 | 81 | `FALSE` | Fully wired through the path-builder helper employeeService.sub(id, 'contacts'). Instrument 01 cannot resolve a method call. |
+| Payroll | 28 | 58 | `INTENTIONAL` | Another team's module; HR integrates read-only. |
+| PerformanceImprovementPlans | 22 | 36 | `INTENTIONAL` 3 · `FALSE` 19 | Classified 2026-08-29: nothing here is real. 18 flags are the api/PerformanceImprovementPlans alias of api/Pip and 1 is the DocumentUploadField artefact; complete duplicates outcome, and the two review-meeting writes duplicate api/PipMeeting. See D2. |
+| PerformanceAppraisals | 13 | 29 | `INTENTIONAL` 11 · `FALSE` 2 | Classified 2026-08-29: 10 of 15 are raw model CRUD superseded by the workflow routes the screens drive. The 5 real ones are the appraisal header edit and delete, the attachment pair (the gated upload was purpose-built here and nothing calls it) and the employee response, whose cycle setting therefore does nothing. See D2. |
+| Awards | 9 | 56 | `INTENTIONAL` 3 · `FALSE` 1 · `DONE` 5 | ⚠ The note here read "nomination attachments — edit and delete", which the 15 flagged routes contradict: they include the nomination create, update and submit, the target, team-nominee, contribution and committee-member edits, and the long-service create, update and sweep. Area 14 shipped 17 screens and 618 assertions, so most of these are probably helper-upload artefacts or wired through a path builder — but that is a guess, and a controller is rarely one verdict. **Classify endpoint by endpoint before treating this as a build block.** |
+| MedicalInsurance | 9 | 24 | `INTENTIONAL` | ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here. |
+| Assets | 4 | 63 | `INTENTIONAL` 2 · `FALSE` 2 | Built 2026-08-30 (slice 18, 43 assertions). Assignments, attribute definitions, maintenance records, requisitions, transfers and surcharges are all correctable now, and the surcharge gained the delete and the recall it never had. No backend change was needed: every one of the eight already stamped its actor and every screen already fetched by id, so both standing checks passed before any UI. The 4 remaining flags are 2 upload artefacts and the 2 employee-portal duplicates. |
+| SalaryGrades | 4 | 6 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
+| SalaryLevels | 4 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
+| SuccessionCandidates | 4 | 17 | `INTENTIONAL` | Built 2026-08-30 (slice 19). A candidate's own files hang off a Documents dialog on the successors tab, sharing the one panel the plan and the talent-pool member use — one table and one DTO serve all three owners, so one component does. The remaining flags are the metadata-only POST and the development-activity trio that duplicates api/succession-development. |
+| AppraisalCycleTarget | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: all 3 duplicate the cycle-nested api/AppraisalCycle/{}/targets routes, which are wired. |
+| InterviewQuestionPreset | 3 | 6 | `INTENTIONAL` | Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows. |
+| PositionCompetency | 3 | 4 | `INTENTIONAL` | Classified 2026-08-29: superseded by the wired position/{}/bulk-set replace-set. |
+| Candidate | 2 | 11 | `FALSE` |  |
+| CheckIns | 2 | 9 | `FALSE` | Built 2026-08-31 (lane 2). An attachments card on the check-in detail, sharing one panel with the appraisal family — the two are the same four routes with a different prefix. No backend change: the endpoint was already IFormFile through the controlled gate, so the FilePath DTO beside it is a leftover. |
+| ClientTimesheetConfirmation | 2 | 2 | `DONE` | Built 2026-08-31 (consultant-client closure). The page now exists at the exact path the confirmation emails have always carried, {PortalUrl}/client-timesheet/confirm/{token}: validate (stamps Viewed), review the entries, confirm or reject with notes; expired and already-responded links render read-only. Kept by decision alongside the logged-in portal — the door for the contact who has not completed an invite. Verified by dev-harness/hr-consulting (78 assertions ×2). |
+| ConsultantClients | 2 | 8 | `INTENTIONAL` | Classified 2026-08-29: api/client-engagements is the flat controller for the same entity and its PUT and DELETE are wired. |
+| HrLegacyFileMigration | 2 | 2 | `INTENTIONAL` | One-off ops tool, invoked by script. |
+| JobOffer | 2 | 19 | `FALSE` | hrDocumentService.upload artefact (both letter uploads). |
+| Leaves | 2 | 14 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the attachment POST is the helper artefact and the balance-scoped adjustment is superseded by the flat standalone route. |
+| NHISClaims | 2 | 9 | `INTENTIONAL` 1 · `DONE` 1 | Built 2026-08-30 (slice 19). The claims list gained a Documents dialog at every status - the scheme's rejection letter arrives after the decision and the attendance record before it - driving the gated upload, the download and the Admin-tier delete. No backend change was needed: D-14 had already built and harness-verified the whole transport in the medical slice-5 run, and it had simply never had a caller. The one remaining flag is the metadata-only POST. |
+| PeerNomination | 2 | 4 | `INTENTIONAL` | Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation. |
+| PreEmploymentCheck | 2 | 11 | `FALSE` | hrDocumentService.upload artefact (both document routes). |
+| Separations | 2 | 31 | `DONE` | Clearance — refresh assets. |
+| StaffDisciplineSupport | 2 | 20 | `INTENTIONAL` 1 · `FALSE` 1 | Action steps and legal reviews are displayed but can never be recorded. |
+| StaffMovements | 2 | 19 | `INTENTIONAL` 1 · `FALSE` 1 | Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap. |
+| StaffTravelRequests | 2 | 18 | `FALSE` | Built 2026-08-30 (slice 21). ⚠ The queue said a group 'cannot be edited, deleted, or have a participant removed'; in fact group travel had NO screen of any kind - it could not be created, listed or opened either, and the reads are invisible to instrument 01 while the writes had client methods. /hr/travel/groups and /[id] exist now. One defect cleared first: UpdateGroupTravelAsync mapped an include-less entity, so the edit response reported ZERO participants on a group that has them. |
+| TalentPools | 2 | 9 | `INTENTIONAL` | Built 2026-08-30 (slice 19). A pool member's documents open from the members table on /hr/succession/pools/{id}, on the shared succession-document panel. The remaining flags are the metadata-only POST and the development-activity duplicate. |
+| AppraisalNotifications | 1 | 3 | `INTENTIONAL` | Classified 2026-08-29: /me wires the token-scoped mark-all-read; this is the employee-id-keyed variant. |
+| AppraisalReviewEvents | 1 | 9 | `FALSE` | hrDocumentService.upload artefact. |
+| AppraisalWorkflow | 1 | 1 | `INTENTIONAL` | Checked 2026-08-29: they do. The appraisal screens move status through the named transitions on api/PerformanceAppraisals, each with its own preconditions. |
+| CalibrationSessions | 1 | 15 | `FALSE` | hrDocumentService.upload artefact. |
+| EmployeeHealth | 1 | 14 | `FALSE` | hrDocumentService.upload artefact. |
+| HrAnnouncements | 1 | 7 | `FALSE` | DocumentUploadField artefact. |
+| HrLetterRequests | 1 | 3 | `FALSE` | DocumentUploadField artefact. |
+| HrPolicies | 1 | 6 | `FALSE` | DocumentUploadField artefact. |
+| JobCandidate | 1 | 25 | `FALSE` | The interest edit was built 2026-08-30 (recruitment closure, slice 1 — the UI comment claiming 'no update endpoint' was false) and left the queue. The remaining flag is the documents POST, the hrDocumentService.upload artefact. |
+| JobPosting | 1 | 7 | `FALSE` | hrDocumentService.upload artefact. |
+| JobVacancy | 1 | 17 | `FALSE` | Stage assignments were built 2026-08-30 (recruitment closure, slice 1 — the Stage owners tab on vacancy detail; the eighth soft-delete/unique-index face was fixed with revive-on-upsert first) and left the queue on their own. The one remaining flag is the attachments POST, wired through hrDocumentService.upload — the helper artefact instrument 01 cannot resolve. |
+| Location | 1 | 4 | `INTENTIONAL` | Classified 2026-08-29: the wired PUT reparents with the identical guards, verified line by line against MoveLocationAsync. |
+| MedicalClinical | 1 | 17 | `INTENTIONAL` | Built 2026-08-29 (slice 6). All three clinical entities are now correctable and removable from the clinical screen; the one remaining flag is the free status set, which the screen deliberately does not call. D-16 was cleared first. |
+| MedicalExpenseClaims | 1 | 13 | `FALSE` | Built 2026-08-29 (slice 6). The claim, its lines and its documents are all correctable and removable; the one remaining flag is the upload artefact. The edit form also closes section E's AdmissionStart/AdmissionEnd pair. |
+| MedicalSelfService | 1 | 3 | `FALSE` | hrDocumentService.upload artefact. |
+| MyProfile | 1 | 4 | `FALSE` | DocumentUploadField artefact. |
+| OfferResponse | 1 | 1 | `DONE` | Built 2026-08-31 (recruitment closure). Kept by decision — offer emails link to it — and the page now exists at the exact path those emails carry, /careers/portal/offer-response?token=…: validate, respond once, token consumed. A registered candidate sees the same offer in their portal; this is the door for the one who has not signed up. |
+| PayComponents | 1 | 5 | `INTENTIONAL` | The endpoint's own summary says it: create the component in Payroll, then sync. |
+| SalaryNotches | 1 | 4 | `INTENTIONAL` | Decided 2026-08-28: read-only by intent — payroll owns the grade master. |
+| SheControlledDocument | 1 | 7 | `FALSE` | hrDocumentService.upload artefact. |
+| SheEnvironmentalCompliance | 1 | 20 | `FALSE` | hrDocumentService.upload artefact. |
+| StaffRequisitions | 1 | 19 | `FALSE` | hrDocumentService.upload artefact. |
+| SuccessionDocuments | 1 | 1 | `DONE` | Built 2026-08-29 to clear D-14; wired 2026-08-30 by slice 19. It still reads as flagged because the client calls it through hrDocumentService.upload(endpoint, file, fields) - the helper-indirection artefact, the single largest false-positive source in this queue - and its download sibling is a GET, which instrument 01 skips outright. |
+| SuccessionPlan | 1 | 14 | `INTENTIONAL` | Built 2026-08-30 (slice 19). The plan's actions and competency requirements are authorable from the detail screen, and the documents tab drives the gated upload, the token-bearing download and the Admin-tier delete. Three backend defects had to clear first, all found by the standing checks and none by a probe failing: the per-plan actions read was a summary missing nine of the update payload's thirteen fields (D-19), the assigner was assertable by the request body (D-20), and removing a competency requirement made it permanently unrequirable (D-21). The one remaining flag is the metadata-only document POST, deliberately unwired. |
+| UnitGoals | 1 | 5 | `FALSE` | hrDocumentService.upload artefact. |
+
+## D2. Hand-review dispositions, endpoint by endpoint
+
+Each line was hand-verified in source: the controller, the write DTO and the frontend service
+that would call it. `FALSE` means the endpoint **is** wired and the instrument could not see it;
+`INTENTIONAL` means the operation is reachable another way, or is a boundary we hold on purpose;
+`BUILD` means nothing reaches it and something should.
+
+**109 of the 234 queued endpoints are classified here — 48 INTENTIONAL, 52 FALSE, 9 DONE.** The remaining 125 were already carried by a controller-level disposition in section C's map and are not re-argued.
+
+### PerformanceImprovementPlans — 3 INTENTIONAL · 19 FALSE
+
+- `POST   api/PerformanceImprovementPlans` — **FALSE**
+  <br>Alias route. The controller carries two `[Route]` attributes, so every action yields two rows; the frontend calls `api/Pip`.
+- `DELETE api/PerformanceImprovementPlans/attachments/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `DELETE api/PerformanceImprovementPlans/goals/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `PUT    api/PerformanceImprovementPlans/goals/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `DELETE api/PerformanceImprovementPlans/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `PUT    api/PerformanceImprovementPlans/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/approve` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/complete` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/recall` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/reject` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `PATCH  api/PerformanceImprovementPlans/{}/status` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/submit` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/attachments` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/goals` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/outcome` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/PerformanceImprovementPlans/{}/review-meetings` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `DELETE api/PerformanceImprovementPlans/{}/review-meetings/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `PUT    api/PerformanceImprovementPlans/{}/review-meetings/{}` — **FALSE**
+  <br>_As `POST api/PerformanceImprovementPlans`._
+- `POST   api/Pip/{}/attachments` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+- `POST   api/Pip/{}/complete` — **INTENTIONAL**
+  <br>`POST {}/outcome` is wired and both call the same `CompletePipAsync(CompletePipDto)` — the outcome route just builds the DTO from its own request shape. One operation, two doors.
+- `POST   api/Pip/{}/review-meetings` — **INTENTIONAL**
+  <br>`POST api/PipMeeting` is wired and calls the same `AddReviewMeetingAsync`, plus it applies the form's goal updates. The meeting form is the supported way in.
+- `PUT    api/Pip/{}/review-meetings/{}` — **INTENTIONAL**
+  <br>`PUT api/PipMeeting/{}` is wired onto the same `UpdateReviewMeetingAsync`.
+
+### PerformanceAppraisals — 11 INTENTIONAL · 2 FALSE
+
+- `POST   api/PerformanceAppraisals/{}/attachments` — **FALSE**
+  <br>Built 2026-08-31 (lane 2) via the shared `PerformanceAttachmentsPanel`, which assembles `{base}/{owner}/attachments` from props — the path-builder artefact. Wired, not missing.
+- `DELETE api/PerformanceAppraisals/{}/attachments/{}` — **FALSE**
+  <br>As the upload above: wired through the shared panel, invisible to instrument 01.
+- `POST   api/PerformanceAppraisals` — **INTENTIONAL**
+  <br>Appraisals are generated in bulk from the cycle — `POST api/AppraisalCycle/{}/generate-appraisals` is wired and is how every appraisal in the model comes to exist. A hand-made appraisal outside a cycle has no template, no settings profile and no roll-up.
+- `POST   api/PerformanceAppraisals/appeal/{}/resolve` — **INTENTIONAL**
+  <br>Superseded by `POST {}/resolve-appeal`, wired, which also handles Remanded (snapshot, rollback, re-evaluation deadline) and the score-modification gate.
+- `POST   api/PerformanceAppraisals/evaluations/{}/scores` — **INTENTIONAL**
+  <br>Raw model CRUD, superseded by the workflow routes the screens drive: self-evaluation, manager-evaluation, the peer draft/submit pair, progress-to-hr-review, approve, return-to-manager and acknowledge. Writing an evaluation or a score directly would bypass every one of the cycle's gates.
+- `DELETE api/PerformanceAppraisals/evaluations/{}/scores/{}` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `PUT    api/PerformanceAppraisals/evaluations/{}/scores/{}` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `POST   api/PerformanceAppraisals/{}/evaluations` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `DELETE api/PerformanceAppraisals/{}/evaluations/{}` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `PUT    api/PerformanceAppraisals/{}/evaluations/{}` — **INTENTIONAL**
+  <br>_As `POST api/PerformanceAppraisals/evaluations/{}/scores`._
+- `POST   api/PerformanceAppraisals/{}/responses` — **INTENTIONAL**
+  <br>Deliberately unwired as of lane 3, and that IS the fix. ⚠ The entry here used to say the `AllowEmployeeResponse` setting 'therefore does nothing' — wrong: the service enforces it at PerformanceAppraisalService.cs:1003. What was missing was any way to write a response. `AppraisalEmployeeResponse` has NO author column, and this route sits on the HR-desk policy, so through it 'the employee's response' was whatever HR typed. Lane 3 added `POST api/performance-appraisals/me/{}/responses`, which refuses anyone but the appraisal's own employee (404, never 403) — with no field to check, the ROUTE is the author. This one survives for HR transcribing a paper response, the disposition D-32 gave the travel desk's acknowledge.
+- `POST   api/PerformanceAppraisals/{}/appeal` — **INTENTIONAL**
+  <br>Superseded by `POST {}/submit-appeal`, which is wired and enforces the at-least-one-appealed-item rule.
+- `PATCH  api/PerformanceAppraisals/{}/status` — **INTENTIONAL**
+  <br>Raw status set. Status is moved by the named workflow transitions, each of which enforces its own preconditions.
+
+### Awards — 3 INTENTIONAL · 1 FALSE · 5 DONE
+
+- `DELETE api/Awards/attachments/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39, with the POST it belongs to.
+- `DELETE api/Awards/nomination-attachments/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39.
+- `PUT    api/Awards/nomination-attachments/{}` — **DONE**
+  <br>Built 2026-08-31 (lane 3). The shared attachments panel gained a correction dialog, enabled only for a family whose API has an update route — today this one alone. It changes what an attachment IS (type, description) and never where it lives: the update DTO carries no file fields, and `hr-awards/probe-lane3-awards.mjs` sends a Windows SAM path through this route to assert the stored file is untouched. ⚠ Still flagged because the caller builds the path (`editPath={(id) => ...}`) — the path-builder artefact, not a gap.
+- `POST   api/Awards/nominations/{}/attachments` — **DONE**
+  <br>Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39. `grep -ri attachment` over the awards screens and service returns nothing at all: the evidence a nomination is supposed to carry has never been uploadable.
+- `POST   api/Awards/{}/attachments` — **DONE**
+  <br>Built 2026-08-31 (lane 2), D-39 cleared first. WAS: Blocked on D-39: the DTO takes `FileName` and `FilePath` as JSON, so a screen over it would ship the caller-supplied path sink area 16 replaced.
+- `POST   api/Awards/types/{}/long-service/sweep` — **FALSE**
+  <br>Wired as `runLongServiceSweep`, which appends `?asOf=` — the interpolated query-string artefact: instrument 01 folds the `${query}` into the path segment instead of dropping it. The preview beside it is a GET, which 01 skips outright.
+- `POST   api/Awards/nominations` — **INTENTIONAL**
+  <br>Nominating is the nominator's act, not the desk's: the frontend calls `POST api/awards/me/nominations`, which takes no employee id and so cannot nominate in someone else's name. Same shape as the employee-portal principle recorded for Assets.
+- `PUT    api/Awards/nominations/{}` — **INTENTIONAL**
+  <br>Served by `PUT api/awards/me/nominations/{}` for the same reason.
+- `POST   api/Awards/nominations/{}/submit` — **INTENTIONAL**
+  <br>Served by `POST api/awards/me/nominations/{}/submit` for the same reason.
+
+### Assets — 2 INTENTIONAL · 2 FALSE
+
+- `POST   api/Assets/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/Assets/{}/images` — **FALSE**
+  <br>_As `POST api/Assets/{}/attachments`._
+- `POST   api/Assets/assignments/{}/acknowledge` — **INTENTIONAL**
+  <br>The assignee's own signature, and `InternalOnly` refuses HR by name (AssetActor.EnsureIsSubject). It is served by the employee's own route, `POST api/employee-portal/assets/{}/acknowledge`, which /me/assets calls - a portal route takes no employee id, so there is nothing to get wrong.
+- `POST   api/Assets/surcharges/{}/respond` — **INTENTIONAL**
+  <br>Same shape and same reason as acknowledge: the employee's right of reply, refused for HR. Served by `POST api/employee-portal/asset-surcharges/{}/respond`, wired from /me/assets.
+
+### SuccessionCandidates — 4 INTENTIONAL
+
+- `DELETE api/succession-candidates/development-activities/{}` — **INTENTIONAL**
+  <br>Duplicate of `api/succession-development`, which is wired for create, update and delete and takes the same `Create/UpdateSuccessionDevelopmentActivityDto`. The candidate-scoped trio is a second door onto the same entity.
+- `PUT    api/succession-candidates/development-activities/{}` — **INTENTIONAL**
+  <br>_As `DELETE api/succession-candidates/development-activities/{}`._
+- `POST   api/succession-candidates/{}/development-activities` — **INTENTIONAL**
+  <br>_As `DELETE api/succession-candidates/development-activities/{}`._
+- `POST   api/succession-candidates/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
+
+### AppraisalCycleTarget — 3 INTENTIONAL
+
+- `POST   api/AppraisalCycleTarget` — **INTENTIONAL**
+  <br>Duplicate. Target CRUD goes through the cycle-nested `api/AppraisalCycle/{}/targets` routes, which are wired and validate the cycle with the target; the frontend service says so at the point of use. Only this controller's exclusion routes are called.
+- `DELETE api/AppraisalCycleTarget/{}` — **INTENTIONAL**
+  <br>_As `POST api/AppraisalCycleTarget`._
+- `PUT    api/AppraisalCycleTarget/{}` — **INTENTIONAL**
+  <br>_As `POST api/AppraisalCycleTarget`._
+
+### InterviewQuestionPreset — 3 INTENTIONAL
+
+- `DELETE api/interview-question-presets/items/{}` — **INTENTIONAL**
+  <br>`PUT api/interview-question-presets/{}` is wired and its `items` is a replace-set: the service deletes every existing item absent from the payload, updates the ones present and adds the new ones. The preset form authors the whole list, so a per-item route would be a second writer over the same rows.
+- `POST   api/interview-question-presets/{}/items` — **INTENTIONAL**
+  <br>_As `DELETE api/interview-question-presets/items/{}`._
+- `PUT    api/interview-question-presets/{}/items/{}` — **INTENTIONAL**
+  <br>_As `DELETE api/interview-question-presets/items/{}`._
+
+### PositionCompetency — 3 INTENTIONAL
+
+- `POST   api/position-competencies` — **INTENTIONAL**
+  <br>`PUT api/position-competencies/position/{}/bulk-set` is wired and calls `BulkReplaceForPositionAsync` — the position's whole competency set is authored in one write. Single-row CRUD over the same rows would race it.
+- `DELETE api/position-competencies/{}` — **INTENTIONAL**
+  <br>_As `POST api/position-competencies`._
+- `PUT    api/position-competencies/{}` — **INTENTIONAL**
+  <br>_As `POST api/position-competencies`._
+
+### Candidate — 2 FALSE
+
+- `POST   api/candidate/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/candidate/profile/photo` — **FALSE**
+  <br>_As `POST api/candidate/documents`._
+
+### CheckIns — 2 FALSE
+
+- `POST   api/CheckIns/{}/attachments` — **FALSE**
+  <br>Built 2026-08-31 (lane 2) via the shared `PerformanceAttachmentsPanel` — check-ins and appraisals are the same four routes with a different prefix, so one panel serves both. It assembles `{base}/{owner}/attachments` from props, which is the path-builder artefact instrument 01 cannot resolve. Wired.
+- `DELETE api/CheckIns/{}/attachments/{}` — **FALSE**
+  <br>_As `POST api/CheckIns/{}/attachments`._
+
+### ConsultantClients — 2 INTENTIONAL
+
+- `DELETE api/consultant-clients/engagements/{}` — **INTENTIONAL**
+  <br>Duplicate. `api/client-engagements/{}` is the flat controller for the same entity and its PUT and DELETE are both wired.
+- `PUT    api/consultant-clients/engagements/{}` — **INTENTIONAL**
+  <br>_As `DELETE api/consultant-clients/engagements/{}`._
+
+### JobOffer — 2 FALSE
+
+- `POST   api/job-offers/{}/upload-letter` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/job-offers/{}/upload-signed-letter` — **FALSE**
+  <br>_As `POST api/job-offers/{}/upload-letter`._
+
+### Leaves — 1 INTENTIONAL · 1 FALSE
+
+- `POST   api/Leaves/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/Leaves/balances/{}/adjustments` — **INTENTIONAL**
+  <br>Superseded by the flat `POST api/Leaves/adjustments`, which is wired and looks the balance up or creates it, so the caller does not need a balance id it may not have.
+
+### NHISClaims — 1 INTENTIONAL · 1 DONE
+
+- `POST   api/nhis-claims/documents/upload` — **DONE**
+  <br>Built 2026-08-30 (slice 19). D-14 had already built the gated upload and the token-bearing download and hr-medical slice 5 had verified both against the running API; the collection simply had no screen. It has one now, on the NHIS claims list.
+- `POST   api/nhis-claims/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `FilePath` and the three DMS ids outright, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST nhis-claims/documents/upload` is the supported way in.
+
+### PeerNomination — 2 INTENTIONAL
+
+- `POST   api/PeerNomination` — **INTENTIONAL**
+  <br>Batch nomination lives on the appraisal — `POST api/PerformanceAppraisals/{}/peer-nominations` is wired — and nominating peers one at a time is not how the screen works.
+- `PUT    api/PeerNomination/{}` — **INTENTIONAL**
+  <br>The client deliberately exposes only read, remove and send-invitation for single rows; changing who a peer is means removing the nomination and nominating again, and remove is refused once the invitation has gone out.
+
+### PreEmploymentCheck — 2 FALSE
+
+- `POST   api/pre-employment-checks/items/{}/document` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/pre-employment-checks/reference-responses/{}/document` — **FALSE**
+  <br>_As `POST api/pre-employment-checks/items/{}/document`._
+
+### Separations — 2 DONE
+
+- `POST   api/hr/separations/contract-expiries/sweep` — **DONE**
+  <br>_As the retirement sweep above_, on the same screen and with the same confirmation. ⚠ **Both sweeps RAISE separation records against named people — they are not previews**, which the old entry never said and which cost a live record while probing them: a 10-year horizon raised one immediately (against a harness fixture employee, soft-deleted after). The screen therefore shows the upcoming lists first, marks who already has a separation, states how many are genuinely new, and puts each sweep behind a confirmation naming the horizon.
+- `POST   api/hr/separations/retirements/sweep` — **DONE**
+  <br>Built 2026-08-31 (finish plan, lane 1) — and the gap was FOUR TIMES bigger than this queue could show. The entry said 'a client method with no screen caller'; in fact the **entire separation reminder surface had no screen at all**. All six endpoints — `reminders/preview`, `reminders/run`, `retirements/upcoming`, `retirements/sweep`, `contract-expiries/upcoming`, `contract-expiries/sweep` — were mentioned by exactly one file in the whole frontend: the service that defines them. Three of the six are GETs, which instrument 01 skips outright; `reminders/run` matched its own service definition and counted as wired; only the two sweeps surfaced, and only because of the query-string artefact. **Three separate blind spots hiding one missing screen.** `/administration/hr/separation/reminders` now serves all six. ⚠ It stays flagged: the matcher needs a literal first argument and the query has to be interpolated, so a computed URL is invisible to it — the EmployeesController 73/81 blind spot. Splitting the path from the query was tried and changed nothing.
+
+### StaffDisciplineSupport — 1 INTENTIONAL · 1 FALSE
+
+- `POST   api/discipline/cases/{}/documents/upload` — **FALSE**
+  <br>Wired through `hrDocumentService.upload(endpoint, file, fields)` — the helper indirection, the single largest false-positive source in this queue.
+- `POST   api/discipline/cases/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired: it rejects every file-location field, so through the API it can only mint a row naming a file that does not exist. Kept for the legacy migration utility. Same split as the succession and staff-movement document routes.
+
+### StaffMovements — 1 INTENTIONAL · 1 FALSE
+
+- `POST   api/staff-movements/{}/attachments/upload` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+- `POST   api/staff-movements/{}/attachments` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired. It rejects FilePath, FileUploadRecordId, DocumentRecordId and DocumentVersionId outright and says so in its 400, exactly as the discipline document route does, so through the API it can only mint a row naming no file. The upload route beside it is the supported way in.
+
+### StaffTravelRequests — 2 FALSE
+
+- `POST   api/staff-travel/requests/{}/reject` — **FALSE**
+  <br>Wired at travel.service.ts `reject()`. The reason is a query parameter, so the call site reads `${baseUrl}/${id}/reject${query}` and instrument 01 folds the interpolation into the path segment instead of dropping it.
+- `POST   api/staff-travel/requests/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### TalentPools — 2 INTENTIONAL
+
+- `POST   api/talent-pools/members/{}/development-activities` — **INTENTIONAL**
+  <br>Duplicate of `api/succession-development`, which is wired for create, update and delete and takes the same `Create/UpdateSuccessionDevelopmentActivityDto`. The candidate-scoped trio is a second door onto the same entity.
+- `POST   api/talent-pools/members/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
+
+### AppraisalNotifications — 1 INTENTIONAL
+
+- `POST   api/AppraisalNotifications/mark-all-read/{}` — **INTENTIONAL**
+  <br>The employee-id-keyed variant. /me wires `POST api/AppraisalNotifications/me/mark-all-read`, which takes the employee from the token — the same principle the asset portal is built on, and the reason not to wire this one.
+
+### AppraisalReviewEvents — 1 FALSE
+
+- `POST   api/AppraisalReviewEvents/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### AppraisalWorkflow — 1 INTENTIONAL
+
+- `POST   api/AppraisalWorkflow/{}/transition` — **INTENTIONAL**
+  <br>The generic transition. The appraisal screens drive status through the named transitions on `api/PerformanceAppraisals`, each carrying its own preconditions and its own actor rule.
+
+### CalibrationSessions — 1 FALSE
+
+- `POST   api/CalibrationSessions/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### EmployeeHealth — 1 FALSE
+
+- `POST   api/employee-health/exam-documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### HrAnnouncements — 1 FALSE
+
+- `POST   api/hr/announcements/{}/attachment` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+
+### HrLetterRequests — 1 FALSE
+
+- `POST   api/hr/letter-requests/{}/upload` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+
+### HrPolicies — 1 FALSE
+
+- `POST   api/hr/policies/{}/document` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+
+### JobCandidate — 1 FALSE
+
+- `POST   api/job-candidates/{}/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### JobPosting — 1 FALSE
+
+- `POST   api/job-postings/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### Location — 1 INTENTIONAL
+
+- `POST   api/Location/{}/move` — **INTENTIONAL**
+  <br>`PUT api/Location/{}` is wired, carries `ParentLocationId`, and applies the identical guards — self-parent, cycle, same structure, exactly-one-level-below, single root. Verified line by line against `MoveLocationAsync`.
+
+### MedicalClinical — 1 INTENTIONAL
+
+- `PUT    api/medical-clinical/appointments/{}/status` — **INTENTIONAL**
+  <br>The free status set, deliberately unwired. The screen moves an appointment through check-in, check-out and cancel — each carrying its own preconditions and its own fields — and a control assigning any status at will would let a visit be marked Completed with no check-out time. Same call as `PATCH PerformanceAppraisals/{}/status`.
+
+### MedicalExpenseClaims — 1 FALSE
+
+- `POST   api/medical-expense-claims/{}/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### MedicalSelfService — 1 FALSE
+
+- `POST   api/medical/me/expense-claims/{}/documents` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### MyProfile — 1 FALSE
+
+- `POST   api/employee-portal/profile/change-requests/{}/evidence` — **FALSE**
+  <br>Wired through the shared `DocumentUploadField` component's `endpoint` prop; the apiService.post call is inside the component, not at the call site.
+
+### PayComponents — 1 INTENTIONAL
+
+- `POST   api/hr/pay-components` — **INTENTIONAL**
+  <br>The endpoint's own summary reads 'Not supported — create the component in Payroll, then sync.' Payroll owns the component master.
+
+### SheControlledDocument — 1 FALSE
+
+- `POST   api/safety/documents/{}/versions` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### SheEnvironmentalCompliance — 1 FALSE
+
+- `POST   api/safety/environmental/permits/{}/document` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### StaffRequisitions — 1 FALSE
+
+- `POST   api/StaffRequisitions/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+### SuccessionDocuments — 1 DONE
+
+- `POST   api/succession-documents/upload` — **DONE**
+  <br>Built 2026-08-29 to clear D-14; wired 2026-08-30 by slice 19. The one gated upload for all three owners — succession plan, plan candidate and talent-pool member — since one table and one DTO serve all three, and for the same reason one frontend panel drives it from three places rather than three panels being written. Its download sibling is a GET and so is invisible to instrument 01.
+
+### SuccessionPlan — 1 INTENTIONAL
+
+- `POST   api/succession-plans/{}/documents` — **INTENTIONAL**
+  <br>The metadata-only route, deliberately unwired since D-14 was cleared on 2026-08-29. It refuses `DocumentUrl` and the three DMS ids outright and says so in its 400, so through the API it can only mint a row naming no file; it survives for the legacy migration utility. `POST api/succession-documents/upload` is the supported way in.
+
+### UnitGoals — 1 FALSE
+
+- `POST   api/UnitGoals/{}/attachments` — **FALSE**
+  <br>Wired through hrDocumentService.upload(endpoint, file, fields); instrument 01 cannot resolve a path passed to a helper.
+
+## E. Fields no form can set (instrument 03)
+
+These endpoints *are* wired. The form omits fields, so the feature is degraded rather than
+missing — the class an endpoint audit cannot see.
+
+| DTO | Unreachable | Fields |
+| --- | ---: | --- |
+| `UpdateAppraisalHRReviewDto` | 6 of 8 | ReviewedByHRId, ReviewStartedDate, ReviewCompletedDate, HRNotes, AdjustedOverallScore, AdjustmentReason |
+| `CreateJobShortlistingCriteriaDto` | 6 of 14 | RequiredValue, MatchMode, MatchStrategy, RequiredSkillId, RequiredQualificationId, ComparisonOperator |
+| `UpdateJobShortlistingCriteriaDto` | 6 of 13 | RequiredValue, MatchMode, MatchStrategy, RequiredSkillId, RequiredQualificationId, ComparisonOperator |
+| `CreateStaffTravelVisaRequirementDto` | 6 of 9 | PassportCountryId, VisaRequirementType, VisaCategory, MaxStayDays, OfficialSourceUrl, LastVerifiedAt |
+| `UpdateStaffTravelVisaRequirementDto` | 5 of 7 | VisaRequirementType, VisaCategory, MaxStayDays, OfficialSourceUrl, LastVerifiedAt |
+| `UpdateEmployeeAwardDto` | 4 of 12 | TrophyIssued, PublishToIntranet, PublishToWebsite, PublicationNotes |
+| `CreateMedicalInsurancePlanDto` | 4 of 25 | LifetimeLimit, MaxChildAge, EmployerContributionPercent, EmployeeContributionPercent |
+| `UpdateMedicalInsurancePlanDto` | 4 of 24 | LifetimeLimit, MaxChildAge, EmployerContributionPercent, EmployeeContributionPercent |
+| `CreateMedicalInsuranceProviderDto` | 3 of 28 | HasOnlinePortal, ClaimsPortalUrl, PreferredPaymentMethod |
+| `UpdateMedicalInsuranceProviderDto` | 3 of 28 | HasOnlinePortal, ClaimsPortalUrl, PreferredPaymentMethod |
+| `UpdateAppraisalAppealItemDto` | 2 of 6 | ScoreAdjusted, RevisedScore |
+| `CreateAppraisalHRReviewDto` | 2 of 3 | ReviewedByHRId, ReviewStartedDate |
+| `CreateEmployeeDependentDto` | 2 of 16 | IsStudentDependent, IsEmergencyContact |
+| `CreateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
+| `UpdateHealthcareFacilityDto` | 2 of 39 | AccreditationDate, OperatingDays |
+| `CreateEvaluatorEvaluationDto` | 1 of 7 | IsAuthoritative |
+| `UpdateEvaluatorEvaluationDto` | 1 of 7 | IsAuthoritative |
+| `UpdateEmployeeDto` | 1 of 55 | LastPromotionDate |
+| `CreateSectionDto` | 1 of 5 | SectionHeadId |
+| `CreateEmployeeMedicalInsurancePolicyDto` | 1 of 11 | BenefitTierId |
+| `UpdateEmployeeMedicalInsurancePolicyDto` | 1 of 10 | BenefitTierId |
+| `CreateEmployeeMedicalExamDto` | 1 of 17 | BMIRecorded |
+| `UpdateEmployeeMedicalExamDto` | 1 of 16 | BMIRecorded |
+| `CreateNHISClaimDto` | 1 of 16 | LinkedMedicalClaimId |
+| `UpdateNHISClaimDto` | 1 of 13 | LinkedMedicalClaimId |
+| `CreateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
+| `UpdateSeparationClearanceTemplateDto` | 1 of 8 | SourcesFromAssetRegister |
+
+### E2. Classification pass — 2026-09-01 · 49 `BUILD` · 20 `INTENTIONAL`
+
+Lane 5's first bullet: *"produce a `BUILD` / `INTENTIONAL` verdict per field **before** any screen
+work."* Done — all 69 fields, each read against its mapper, its service and its screen. Section D's
+lesson held: **20 of the 69 (29%) are correctly omitted**, and building a form control for any of
+them would have produced an input that does nothing or one that fights a transition.
+
+⚠ **Four things the table above could not tell you.** Each was found by reading the code the
+instrument only counted, and each changes what slice 2 builds.
+
+1. ⚠ **`VacancyCriteriaPanel` cannot create a working criterion — the six flagged fields are the
+   smaller half of it.** The panel sends `minimumScore` and `displayOrder`, **neither of which
+   exists on the DTO** (`UnmappedMemberHandling` is the default `Skip`, so both are silently
+   discarded), and it omits `Type`, which is `[Required]` but is a non-nullable enum and so binds
+   to `0`. `JobShortlistingCriteriaType` starts at `1`. Every criterion the only screen can create
+   therefore reaches `JobApplicationService`'s scoring switch as `default:` — *"Unknown / Other —
+   default pass with neutral score"*. **The shortlisting engine is fully implemented and reads
+   every one of the six fields**; it is the form that renders it inert. `ShortlistingCriteria` and
+   `ShortlistingCriteriaForm` in `frontend/src/types/hr/recruitment.ts:439` are the
+   fiction-that-type-checks shape again.
+   <br>`<unverified>` — one claim in this row still needs a run: the panel sends `weight: null`
+   against `public int Weight`, which `System.Text.Json` should reject with a 400, meaning **Add
+   fails outright unless a weight is typed**. Nothing was executed, so it stays a claim.
+2. ⚠ **`StaffTravelVisaRequirement` has a client, a type and no screen — and the type is invented.**
+   `travel-compliance.service.ts` exposes five visa-requirement methods and **no `.tsx` calls any of
+   them**. The TS interface declares `originCountryId`, `visaRequired`, `visaOnArrival`,
+   `eVisaAvailable`, `validityDays` and `isActive`; **not one of those exists** on the entity or the
+   DTO, whose real shape is `passportCountryId` / `visaRequirementType` / `visaCategory` /
+   `maxStayDays` / `officialSourceUrl` / `lastVerifiedAt`. Only `destinationCountryId`,
+   `processingDays` and `notes` are real. That is why instrument 03 sees eleven missing fields —
+   the identifiers exist nowhere because the type was written from the endpoint name.
+   <br>⚠ **Instrument 01 is structurally blind to this**: it matches the frontend *service* layer,
+   so a client method with no screen caller counts as wired. The two greps are what see it.
+3. ⚠ **`AdjustedOverallScore` / `AdjustmentReason` reach no endpoint at all** — and lane 5's
+   "highest severity" line is wrong in the other direction. `Create`/`UpdateAppraisalHRReviewDto`
+   are consumed by **nothing but two mapper methods that nothing calls**; no controller accepts
+   either. So it is not that *"HR can adjust a score and cannot say why"* — **HR cannot adjust the
+   score at sign-off at all.** `ApproveAppraisalDto` carries only `HRRemarks`, and
+   `ApproveAndFinalizeAsync` recalculates `OverallScore` instead. The live adjustment path is the
+   appeal: `ResolveAppealDto.AdjustedScore` writes `PerformanceAppraisal.AdjustedScore`, with
+   `ResolutionNotes` as its reason. Both columns on `AppraisalHRReview` are dead, and whether HR
+   should be able to adjust *outside* an appeal is a product question, not a form gap.
+4. ⚠ **Five flagged fields cannot be persisted by any code path, and one belongs to a service that
+   does not exist.** `UpdateEmployeeAwardDto.PublishToIntranet` has no entity column at all — the
+   mapper hardcodes `PublishToIntranet = false, // Not in entity`.
+   `CreateEmployeeDependentDto.IsStudentDependent` and `.IsEmergencyContact` exist **only** on the
+   DTO — no column, no mapper, no service — so a caller may send them and they vanish.
+   `AppraisalAppealItem.RevisedScore` is written by nothing, read by nothing, and is not even
+   returned by `ToDto`. And `CreateSectionDto.SectionHeadId` sits on a DTO whose only consumer is
+   `ISectionService`, **which has no implementation and no registration anywhere in the solution** —
+   the whole `Section` family is dead, superseded by `OrganizationUnit`.
+
+#### Class 1 — `INTENTIONAL`: a transition owns the field · 12 fields
+
+A form must not set these; something already does, and a plain edit would walk around it.
+
+| DTO | Field | The writer of record |
+| --- | --- | --- |
+| `Create`/`UpdateAppraisalHRReviewDto` | `ReviewedByHRId`, `ReviewStartedDate` | `EnsureHRReviewRecordAsync` stamps both when HR review opens |
+| `UpdateAppraisalHRReviewDto` | `ReviewCompletedDate`, `HRNotes` | `ApproveAndFinalizeAsync` / `ReturnToManagerAsync`, from `ApproveAppraisalDto.HRRemarks` |
+| `UpdateAppraisalAppealItemDto` | `ScoreAdjusted` | `ResolveAppealAsync`, per item via `ItemResolutions[]` |
+| `Create`/`UpdateEvaluatorEvaluationDto` | `IsAuthoritative` | `AppraisalCycleService` from `settings.IsManagerAuthoritative`; hard `false` for peers. It is a property of the evaluator's ROLE, never a per-evaluation choice |
+| `UpdateEmployeeDto` | `LastPromotionDate` | `StaffMovementService` on a promotion's implement step. A typed date contradicting the movement history is exactly what area 8 fixed |
+| `UpdateEmployeeAwardDto` | `TrophyIssued`, `PublicationNotes` | `RecordPresentationAsync` — the presentation is the event that issues a trophy |
+
+⚠ **One hazard recorded, not fixed.** `UpdateEmployeeAwardDto.PublicationNotes` and
+`RecordAwardPresentationDto.PresentationNotes` write the **same column**
+(`entity.PublicationNotes = dto.PresentationNotes; // Store presentation notes in PublicationNotes`).
+Editing an award through the plain update path would silently overwrite what the presentation
+recorded. Keeping the field off the edit form is what prevents that today.
+
+#### Class 2 — `INTENTIONAL`: unpersistable, superseded, or consumed by nothing · 8 fields
+
+Not omissions. An input for any of these would do nothing.
+
+| DTO | Field | Why |
+| --- | --- | --- |
+| `UpdateEmployeeAwardDto` | `PublishToIntranet` | **No entity column.** The mapper returns a hardcoded `false` and never assigns |
+| `UpdateEmployeeAwardDto` | `PublishToWebsite` | Column exists and round-trips, but **nothing publishes anything** — no consumer reads it. A consent flag with no mechanism; revisit if a website feed is ever built |
+| `UpdateAppraisalAppealItemDto` | `RevisedScore` | No writer, no reader, absent from `ToDto`. `PerformanceAppraisal.AdjustedScore` is the live adjustment |
+| `CreateEmployeeDependentDto` | `IsStudentDependent` | DTO-only; no column. ⚠ A real product need though — it is how `MaxChildAge` dependant eligibility actually works. Recorded in F, not here |
+| `CreateEmployeeDependentDto` | `IsEmergencyContact` | DTO-only; no column. **Superseded** — `EmployeeEmergencyContact` is the dedicated store, with its own `EmergencyContactType` |
+| `CreateSectionDto` | `SectionHeadId` | `ISectionService` is declared and **implemented by nothing**. No controller, no registration. `OrganizationUnit` is the live org structure, and lane 7 populated its heads |
+| `Create`/`UpdateEmployeeMedicalExamDto` | `BMIRecorded` | The form already collects `heightCm` and `weightKg`. A caller-supplied BMI that disagrees with them is a defect waiting to happen — **compute it on save, do not ask for it** |
+
+#### Class 3 — `BUILD`: real column, real screen, the form omits the input · ~~24~~ **20 fields**
+
+⚠ **Corrected 2026-09-01 while building it.** Four of the 24 do not belong here: `BenefitTierId`
+(×2) and `LinkedMedicalClaimId` (×2) have **no create form at all** — HR has no employee-policy
+editor (D-13), and the NHIS screen never calls its own `create` client method. I had checked that a
+page existed for each and stopped there; a screen that READS a collection is not a screen that
+WRITES it. Both pairs move to class 4. The remaining 20 are built — see the C2 checklist above.
+
+The straightforward half. Each has a working endpoint, a live screen and a mapper that persists it.
+
+| Screen | DTO pair | Fields | Note |
+| --- | --- | ---: | --- |
+| `hr/medical/insurance/[id]` | `Create`/`UpdateMedicalInsurancePlanDto` | 8 | `LifetimeLimit`, `MaxChildAge`, `EmployerContributionPercent`, `EmployeeContributionPercent`. ⚠ The two percentages decide **what the employee pays**; the form sets premiums but not the split |
+| `hr/medical/insurance` | `Create`/`UpdateMedicalInsuranceProviderDto` | 6 | `HasOnlinePortal`, `ClaimsPortalUrl`, `PreferredPaymentMethod` |
+| `hr/medical/facilities/[id]` | `Create`/`UpdateHealthcareFacilityDto` | 4 | `AccreditationDate`, `OperatingDays` — the form binds `accreditationBody`, `accreditationNumber`, `accreditationExpiryDate` and `operatingHours`, so both are plain oversights beside fields already there |
+| `administration/hr/separation/clearance-form` | `Create`/`UpdateSeparationClearanceTemplateDto` | 2 | `SourcesFromAssetRegister`, guarded server-side by `RequireSoleAssetSourceAsync` (exactly one template may source assets). A tenant that builds its own catalogue instead of seeding the default **can never turn asset sourcing on** |
+
+⚠ **The clearance form is worse than its one flagged field**, and this is instrument 03's stated
+blind spot ("fields present in a type but never bound to an input"). `createClearanceTemplate({
+name, kind })` is the entire payload — `description`, `owningOrganizationUnitId`, `isMandatory`,
+`isActive` and `sortOrder` are omitted too and were **not** flagged, because those identifiers occur
+elsewhere in `frontend/src`. Slice 2 should rebuild that form from the DTO, not patch one checkbox
+onto it.
+
+#### Class 4 — `BUILD`: the field *is* the mechanism · 23 fields
+
+Not "a degraded form". In both cases the feature does not work at all, and the fix is larger than
+adding inputs. See findings 1 and 2 above.
+
+| Family | DTO pair | Fields | What slice 2 owes |
+| --- | --- | ---: | --- |
+| Job shortlisting criteria | `Create`/`UpdateJobShortlistingCriteriaDto` | 12 | ✅ **DONE 2026-09-01**, 34 assertions ×2 — see the C2 checklist above. Every claim probed and all four held, including `weight: null`, which **400s**. Two backend defects came out of the probe that reading had missed: the create mapper never assigned `ComparisonOperator`, and `[Required]` on a non-nullable enum requires nothing |
+| Staff travel visa requirements | `Create`/`UpdateStaffTravelVisaRequirementDto` | 11 | ✅ **DONE 2026-09-01**, 31 assertions ×2 — see the C2 checklist above. The register screen is built and linked. **Three backend defects came out of the probe**: a country pair could be recorded twice with contradictory answers, both writes returned null country names, and the by-destination list had an uneven `.Include` |
+| Employee medical insurance policy | `Create`/`UpdateEmployeeMedicalInsurancePolicyDto` | 2 | **Moved here from class 3, 2026-09-01.** `BenefitTierId` cannot be set because **there is no policy editor** — `medical-reference.service.ts` has no policy writer and says so. This is **D-13**, an open deferral. ⚠ `MedicalBenefitScheme` also has **0 rows** in this tenant, so even the picker's catalogue is unseeded |
+| NHIS claim | `Create`/`UpdateNHISClaimDto` | 2 | ✅ **DONE 2026-09-01** — see the C2 checklist above. Create and edit forms built; the edit path exposed that `UpdateClaimAsync` had **no state guard** (a paid claim could be rewritten), and the two greps then found the lifecycle had **no middle** — `updateStatus` had no caller, so nothing could leave `Submitted` and "Record payment" was unreachable UI |
+
+#### Class 5 — `BUILD`, backend first: no writer exists anywhere · 2 fields
+
+| DTO | Fields | What is actually missing |
+| --- | ---: | --- |
+| `UpdateAppraisalHRReviewDto` | `AdjustedOverallScore`, `AdjustmentReason` | An endpoint. See finding 3 — the DTO reaches no controller, so there is nothing for a form to call. ⚠ **Ask before building**: today HR's only route to a score change is resolving an appeal, which is arguably correct. Do not add an unappealed adjustment path on the strength of two dead columns |
+
+#### What slice 2 should build, in order
+
+1. ~~**Job shortlisting criteria**~~ — ✅ **DONE 2026-09-01**, 34 assertions ×2. It was the only row
+   where a live screen produced records that silently passed every candidate. See its C2 checklist
+   for the two backend defects and the permission-tier mismatch this pass could not see from source.
+2. ~~**Class 3's 24 fields**~~ — ✅ **20 of them DONE 2026-09-01**, 40 assertions ×2. The other four
+   were misclassified by this pass and are now in class 4: they need a form, not a field.
+3. **Staff travel visa requirements** — a new screen plus an honest type.
+4. **Class 5** — a question for the user before any code.
+
+Classes 1 and 2 are closed by this pass and need no build. `BMIRecorded` leaves one recommendation
+behind (compute on save), and `IsStudentDependent` leaves one product gap in section F.
+
+## F. Demo-feedback backlog
+
+From the five pre-port feedback documents. No static instrument can find these — they are
+things absent from *both* sides, or present but wrong.
+
+| Area | Item | Disposition | Note |
+| --- | --- | --- | --- |
+| Employee Master | Disability tick and description sit on EmployeeDependent, not Employee | `DONE 2026-09-01` | Lane 3a. `HasDisability`/`DisabilityDescription` now sit on **both** `Employee` (`HREntities.cs:89`) and `EmployeeDependent` (`:1117`) — duplicated by decision, not moved: a disabled dependant is a separate fact from a disabled employee. ⚠ **Round 2 (2026-09-09):** the form collected the employee's pair and the mapper dropped it — fixed, lane A-1. |
+| Employee Master | Probation dates stay editable after confirmation | `DONE 2026-09-01` | Lane 3d, 35 assertions ×2. `EmployeeService.RequireUnconfirmedProbationAsync` (`:1525`, called at `:1566`), keyed off `Employee.ConfirmationDate` — the field the probation service actually writes. Only the two probation fields are gated. |
+| Employee Master | Manager picker ignores ReportsToPosition | `DONE 2026-09-01` | Lane 3d. `EmployeeForm.tsx:285-289` offers the holders of the position this one reports to, and keeps the free search — a manager is not always the post-holder. A vacant supervising post says so in words. |
+| Employee Master | Gender 'Other' has no description field | `DONE 2026-09-01` | Lane 3a. `GenderDescription` on the employee DTOs and on `EmployeeGuarantor`. ⚠ **Round 2 (2026-09-09):** the mapper dropped it and the box sat two rows from the dropdown — fixed, lane A-1/A-3. |
+| Employee Master | Hometown absent from the employee record | `DONE 2026-09-01` | Lane 3a. `Employee.Hometown` (`HREntities.cs:75`) and all three DTOs. ⚠ Nullable-means-not-supplied: sending `hometown: null` leaves the old value, the house convention. ⚠ **Round 2 (2026-09-09):** the mapper dropped it — fixed, lane A-1. |
+| Employee Master | Guarantor has no guaranteed amount and no photograph | `DONE 2026-09-01` | Lane 3a. `AmountGuaranteed` + `AmountGuaranteedCurrencyCode` (validated against Finance's currency master) and the photograph through the controlled upload gate. The position carries the requirement; guarantors **sum** against it. ⚠ **Round 2 (2026-09-09):** the photo route had NO frontend caller; screen built, plus a guarantor documents table — lane A-5/A-6. |
+| Employee Master | Referees cannot carry a reference letter | `DONE 2026-09-01` | Lane 3a. `EmployeeReferee.Letter{FileUploadRecordId,DocumentRecordId,DocumentVersionId,FileName,MimeType,FileSizeBytes}` — the controlled upload gate, not a path string. ⚠ **Round 2 (2026-09-09):** the letter route had NO frontend caller; screen built and the letter is on the LIST projection — lane A-4. |
+| Employee Master | Expatriate: no issue dates, no resident permit, no family members | `DONE 2026-09-01` | Lane 3a. `WorkPermitIssueDate` and the permit dates on the expatriate record, plus a real `ExpatriateFamilyMember` entity with its own resident-permit number and dates. `FamilyAccompanying` now says who. |
+| Employee Master | IdentificationType has no expiry notification lead days | `DONE 2026-09-01` | Lane 3b. `IdentificationType.ExpiryNotificationLeadDays`, with the expiry sweep and its screen. |
+| Employee Master | Certification bodies are free text, not a lookup | `DONE 2026-09-01` | Lane 3b, 40 assertions ×2. `CertifyingBodyId` on the skill DTOs with an admin catalogue behind it; the free-text column is **kept alongside**, not replaced, because existing rows hold text nobody has mapped. ⚠ The column had existed with an FK and no DTO — settable and readable nowhere. |
+| Employee Master | No mandatory documents against a position | `DONE 2026-09-01` | Lane 3c, 47 assertions ×2. `PositionDocumentRequirement` (`EmployeeDocuments.cs:153`) with a requirements panel on the position edit screen. |
+| Employee Master | No employee document attachments | `DONE 2026-09-01` | Lane 3c, 47 assertions ×2. `EmployeeDocumentType` and `EmployeeDocument` (`EmployeeDocuments.cs:22`, `:74`) on the controlled upload gate. |
+| Employee Master | Qualification level is not a dimension | `DONE 2026-09-01` | Lane 3b, 40 assertions ×2. `QualificationLevelId` on the qualification DTOs with an admin ladder behind it. ⚠ The level lives on the `Qualification` MASTER, not on `EmployeeQualification`. Same unreachable-column shape as the certifying body. |
+| Employee Master | Staff number auto/manual is behaviour, not configuration | `DONE 2026-09-01` | Lane 3b, 49 assertions ×2. `StaffNumberFormat` per employment type, issued through `INumberSequenceService`, with a settings screen, a counter panel and the import door that advances the counter past loaded numbers. |
+| Employee Master | Exit interview questions are fixed fields | `BUILD` | Not a configurable question set; no attachments. ⚠ **Re-verified 2026-09-01: still true** — no `ExitInterviewQuestion` entity anywhere. Needs schema. |
+| Employee Master | No appointment letter templates | `BUILD` | ⚠ **Re-verified 2026-09-01: still true, and the reason is sharper than "only email templates exist".** There is no `LetterTemplate` entity anywhere in the solution. Letters ARE produced — `HrLetterRequest` issues three kinds (employment confirmation, introduction, service certificate) and `IOfferLetterService` generates an offer letter — but every one of those templates is **built into code**, so HR cannot author or vary an appointment letter. Lane 3a-ii's seal renders into those same built-in templates. Needs a template store before it needs a screen. |
+| Employee Master | No labour-law checklist | `BUILD` | ⚠ **Re-verified 2026-09-01: still true** — nothing matching `labour`/`labor` law anywhere. **This is the one lane-3 row that genuinely needs TDC first**: the checklist's content is a legal question, not a design one. |
+| Employee Master | No mass application of benefits to dependents | `BUILD` | ⚠ **Re-verified 2026-09-01: still true.** This is a **bulk operation**, which is the excluded `docs/HR/` programme. Build the single-record path here and record the bulk need there rather than inventing a second bulk pattern. |
+| Employee Master | Workflow step checklists unused by any HR process | `DECIDE` | Candidates: onboarding, separation clearance, probation |
+| Leave | Compassionate leave cannot be set off against annual leave | `DECIDE` | No offset/advance concept anywhere; needs a design call |
+| Leave | Adjustment form does not show the employee's balance | `DONE 2026-09-01` | Balance preview inside the form from `GET employee/{id}/balances`, with the after-adjustment figure. ⚠ Found D-40 while building it. |
+| Leave | Reliever clashes are not visible on the plan | `DONE 2026-09-01` | `relieverClashes` on every plan read from three sources (own plan, own live request, reliever on another plan) + `GET hr/leave-plans/reliever-clashes` for the form. Advisory. Second reliever now editable on the desk (it was nulled on every edit). |
+| Leave | Free-text field still labelled 'Reason', not 'Remarks' | `DONE 2026-09-01` | Adjustment form, column and search placeholder. |
+| Leave | Leave request numbering still uses a max+1 scan | `DONE 2026-09-01` | `INumberSequenceService` (`LEAVE-REQ`), seeded past the highest number on record including deleted rows; asserted create → soft-delete → create. |
+| Succession | Criteria candidate search has no screen | `DONE 2026-09-01` | `CandidateSearchPanel`: standalone (Find Candidates) and inside a plan's Candidates tab locked to the post; a result pre-fills the nominate form. 33 assertions on the payloads first. |
+| Succession | Candidate age and service-years-left not displayed | `DONE 2026-09-01` | Two columns on the plan's candidate table. |
+| Training | Bulk nomination has no UI | `DONE 2026-09-01` | "Nominate several" dialog on the schedule's Nominees tab; the client method `bulkCreate` DID exist (the 2026-08-31 note below was wrong on that half). Seats are taken at approval, not nomination — the dialog says so. ⚠ Earlier note: Re-verified 2026-08-31 and the row was UNDERSTATED, not wrong. `setBulkResult` is declared at NomineesPanel.tsx:63 and has no call site anywhere in the frontend, and there is no `bulkNominate` client method at all — but `bulkResult` IS rendered at lines 158-166, listing the created count and every skipped row. So the RESULT DISPLAY for a bulk nomination was built and the action never was: the panel is waiting for a batch that nothing can start. |
+| Training | Bulk completion has no UI and no client method | `DONE` | ⚠ **The row was false on both halves, re-verified 2026-08-31.** `BulkCompletionPanel.tsx` exists, calls `trainingCompletionService.bulkRecord` at line 89, and is mounted on the schedule detail screen at `schedules/[id]/page.tsx:364` with a readOnly guard for cancelled schedules. The endpoint is `TrainingCompletionsController.BulkRecordCompletion`. |
+| Training | Nominee availability check never shown | `DONE` | ⚠ **The row was false, re-verified 2026-08-31.** A 'Check availability' control is wired at NomineesPanel.tsx:314 onto `checkAvailability` (lines 93-97), which calls `trainingNominationService.checkAvailability` and renders the conflicts. Closure lane 2 built it and this row was never updated — the generator already carried a DONE for the controller while this row and the endpoint disposition beside it both still said BUILD. |
+| Training | No 'Training Activities' grouped screen | `DONE 2026-09-01` | Interpreted as the desk twin of My Training (`/hr/training/activities`) — see section A. Assumption to confirm with TDC. |
+| Training | Mentoring still inside the Training menu | `DONE 2026-09-01` | Own top-level nav section (pairs + programmes); routes unchanged. |
+| Training | Certificate does not gate completion | `DONE 2026-09-01` | Verification of a PASSED completion of a `ProvidesCertificate` programme is refused (422) until an active certificate exists — see section A. Assumption to confirm with TDC. |
+| Training | Menu order differs from TDC's suggestion | `DECIDE` | Setup/operations split may be deliberate |
+| Recruitment | Menu still reads 'Manpower Budgets' | `DONE 2026-09-01` | "Manpower Recruitment Budgets" — sidebar, HR landing, list and new-page titles. |
+| Appraisal | Check-in link to company objectives | `DECIDE` | Confirm with TDC that it matches intent |
+| Employee Master | Dependants carry no student-status flag | `BUILD` | ⚠ Found by lane 5a, 2026-09-01. `CreateEmployeeDependentDto.IsStudentDependent` exists on the DTO and **nowhere else** — no column, no mapper, no service — so it is a field a caller may send that vanishes. It matters: student status is how `MedicalInsurancePlan.MaxChildAge` dependant eligibility actually works, so cover for an adult child in full-time education cannot be represented today. Needs a column before it needs a form. |
+| Medical | Recorded BMI is caller-supplied beside the height and weight it should come from | `BUILD` | ⚠ Found by lane 5a, 2026-09-01. The exam form collects `heightCm` and `weightKg`; `BMIRecorded` is a third, independent number that nothing computes or checks. Compute it on save rather than adding an input — a stored BMI that disagrees with the two measurements beside it is a defect waiting. |
+| Platform | Scheduled HR sweeps: two failed nightly, two were never hosted | `DONE 2026-08-31` | ⚠ This row read "No AddHostedService registration for HR", which had been false for weeks — six HR engines were hosted. What was true was worse and invisible: see D-38. Retirement and contract-expiry alerts (FR-HR-093) now run on a timer. Leave year-end is deliberately NOT scheduled: carry-over and forfeiture move balances rather than raise reminders, so automating them is a policy decision for TDC. |
+
+## G. Out of scope
+
+Closed decisions. Listed so a future sweep does not re-open them.
+
+- **AppraisalCycleTarget** — Classified 2026-08-29: all 3 duplicate the cycle-nested api/AppraisalCycle/{}/targets routes, which are wired.
+- **AppraisalNotifications** — Classified 2026-08-29: /me wires the token-scoped mark-all-read; this is the employee-id-keyed variant.
+- **AppraisalWorkflow** — Checked 2026-08-29: they do. The appraisal screens move status through the named transitions on api/PerformanceAppraisals, each with its own preconditions.
+- **ConsultantClients** — Classified 2026-08-29: api/client-engagements is the flat controller for the same entity and its PUT and DELETE are wired.
+- **HrLegacyFileMigration** — One-off ops tool, invoked by script.
+- **InterviewQuestionPreset** — Classified 2026-08-29: the preset PUT is a replace-set over its items, so the per-item routes are a second writer over the same rows.
+- **Leaves** — Classified 2026-08-29: the attachment POST is the helper artefact and the balance-scoped adjustment is superseded by the flat standalone route.
+- **Location** — Classified 2026-08-29: the wired PUT reparents with the identical guards, verified line by line against MoveLocationAsync.
+- **MedicalInsurance** — ⚠ This row read `BUILD` with a note naming four collections that slice 4 built on 2026-08-29; the note was never updated and would have sent someone to build them twice. Corrected 2026-08-30 by reading the 9 flags rather than the note: SEVEN are the employee-policy and dependent family, which is D-13 — deferred by decision, not a coverage gap — and the other two are the provider-document pair, one the deliberately-unwired metadata route and one the hrDocumentService.upload artefact. There is no work here.
+- **PayComponents** — The endpoint's own summary says it: create the component in Payroll, then sync.
+- **Payroll** — Another team's module; HR integrates read-only.
+- **PeerNomination** — Classified 2026-08-29: batch nomination lives on the appraisal and the single-row client deliberately offers only read, remove and send-invitation.
+- **PositionCompetency** — Classified 2026-08-29: superseded by the wired position/{}/bulk-set replace-set.
+- **SalaryGrades** — Decided 2026-08-28: read-only by intent — payroll owns the grade master.
+- **SalaryLevels** — Decided 2026-08-28: read-only by intent — payroll owns the grade master.
+- **SalaryNotches** — Decided 2026-08-28: read-only by intent — payroll owns the grade master.
+- **StaffMovements** — Classified 2026-08-29: the upload route is wired through hrDocumentService and the metadata route beside it deliberately refuses every file-location field. Neither is a gap.

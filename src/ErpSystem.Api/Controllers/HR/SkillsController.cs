@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Shared;
@@ -12,11 +13,19 @@ namespace ErpSystem.Api.Controllers.HR;
 public sealed class SkillsController : ControllerBase
 {
     private readonly ISkillService _service;
+    private readonly ICertificationService _certifications;
 
-    public SkillsController(ISkillService service)
+    public SkillsController(ISkillService service, ICertificationService certifications)
     {
         _service = service;
+        _certifications = certifications;
     }
+
+    /// <summary>The credentials that evidence a skill (round 2, lane C2). The skill save sends the whole set.</summary>
+    [HttpGet("{id:guid}/certifications")]
+    [ProducesResponseType(typeof(IEnumerable<SkillCertificationDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<SkillCertificationDto>>> GetCertifications(Guid id, CancellationToken ct)
+        => Ok(await _certifications.GetSkillCertificationsAsync(id, ct));
 
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<SkillDto>), StatusCodes.Status200OK)]
@@ -63,8 +72,17 @@ public sealed class SkillsController : ControllerBase
     public async Task<ActionResult<SkillDto>> Create([FromBody] CreateSkillDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        var created = await _service.CreateSkillAsync(dto);
-        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        try
+        {
+            var created = await _service.CreateSkillAsync(dto);
+            return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault — the certification rule (C2) exists to explain itself.
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPut("{id:guid}")]
@@ -74,8 +92,13 @@ public sealed class SkillsController : ControllerBase
     public async Task<ActionResult<SkillDto>> Update(Guid id, [FromBody] CreateSkillDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        var updated = await _service.UpdateSkillAsync(id, dto);
-        return Ok(updated);
+        try
+        {
+            var updated = await _service.UpdateSkillAsync(id, dto);
+            return Ok(updated);
+        }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     [HttpDelete("{id:guid}")]

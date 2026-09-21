@@ -1,7 +1,8 @@
 'use client';
 
-import { History } from 'lucide-react';
+import { History, Pencil } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -29,6 +30,10 @@ import type {
  * resolves those names with the soft-delete filters ignored precisely so they survive, but a name
  * can still be genuinely absent (a hard-deleted row), and blank is not an answer a log may give.
  * `nameOf` is the single place that decides what to say instead.
+ *
+ * Demo feedback round 2 (O-3b): rows carry notes beside the reason, and a caller that passes
+ * `onEdit` gets a correction action per row — dates, reason and notes only, admin-tier on the
+ * server. The caller decides whether the viewer may see the action.
  */
 
 const CHANGE_TYPE_STYLES: Record<OrganizationUnitChangeType, string> = {
@@ -53,7 +58,9 @@ function nameOf(name?: string | null, id?: string | null): string {
  *
  * The four id pairs encode six distinct events, and collapsing them to "parent changed" would throw
  * away the two that matter most on a live structure: a unit being lifted to the top, and a unit
- * losing its head without gaining another.
+ * losing its head without gaining another. Since round 2 a unit's creation writes its initial
+ * placement, which is the "placed under" case; a root unit's creation and a hand-recorded entry
+ * carry no ids and are the `Other` case.
  */
 export function changeSentence(entry: OrganizationUnitHistoryEntry): string {
   if (entry.changeType === 'Restructure') {
@@ -78,7 +85,7 @@ export function changeSentence(entry: OrganizationUnitHistoryEntry): string {
     )} to ${nameOf(entry.newHeadEmployeeName, entry.newHeadEmployeeId)}.`;
   }
 
-  return 'A change was recorded against this unit.';
+  return 'No change of reporting line or head — an entry recorded by hand, or the unit created at the top of its structure.';
 }
 
 /** "04 Aug 2026 — present", or the closed period when a later change superseded it. */
@@ -93,6 +100,8 @@ interface UnitChangeLogProps {
   isLoading?: boolean;
   /** The register names the unit on every row; a single unit's own tab does not repeat it. */
   showUnit?: boolean;
+  /** When given, each row gets a "correct" action. The caller gates it on the viewer's tier. */
+  onEdit?: (entry: OrganizationUnitHistoryEntry) => void;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -101,10 +110,11 @@ export function UnitChangeLog({
   entries,
   isLoading,
   showUnit = false,
+  onEdit,
   emptyTitle = 'Nothing recorded yet',
-  emptyDescription = 'Reparenting a unit or changing its head writes an entry here. A rename does not — a log that records everything is one nobody reads.',
+  emptyDescription = 'Creating a unit, reparenting it or changing its head writes an entry here. A rename does not — a log that records everything is one nobody reads.',
 }: UnitChangeLogProps) {
-  const columns = showUnit ? 5 : 4;
+  const columns = 4 + (showUnit ? 1 : 0) + (onEdit ? 1 : 0);
 
   return (
     <div className="rounded-md border">
@@ -116,6 +126,7 @@ export function UnitChangeLog({
             <TableHead>What happened</TableHead>
             <TableHead className="w-[220px]">In force</TableHead>
             <TableHead className="w-[220px]">Recorded</TableHead>
+            {onEdit && <TableHead className="w-[60px]"><span className="sr-only">Correct</span></TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -159,6 +170,9 @@ export function UnitChangeLog({
                       // a blank line that reads like a rendering fault.
                       <div className="text-xs text-muted-foreground">No reason recorded.</div>
                     )}
+                    {entry.notes && (
+                      <div className="whitespace-pre-line text-xs text-muted-foreground">{entry.notes}</div>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">{period(entry)}</TableCell>
@@ -167,7 +181,22 @@ export function UnitChangeLog({
                   <div className="text-xs">
                     {entry.createdBy?.trim() ? `by ${entry.createdBy}` : 'author not recorded'}
                   </div>
+                  {entry.updatedAt && entry.updatedAt !== entry.createdAt && (
+                    <div className="text-xs">corrected {formatDateTime(entry.updatedAt)}</div>
+                  )}
                 </TableCell>
+                {onEdit && (
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => onEdit(entry)}
+                      title="Correct the dates, reason or notes"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                )}
               </TableRow>
             ))
           )}

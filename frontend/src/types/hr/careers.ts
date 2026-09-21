@@ -5,23 +5,48 @@
 import type { PublicVacancy } from '@/types/hr/recruitment';
 import type {
   Gender,
+  LanguageProficiency,
   PreferredWorkArrangement,
   ProficiencyLevel,
   QualificationType,
   WorkAuthorizationStatus,
 } from '@/types/hr/recruitment-pipeline';
 
-export type { PublicVacancy };
+export type { PublicVacancy, LanguageProficiency };
+// LanguageProficiency — HREnums.cs (Basic=1 … Native=5); one definition, shared with the HR tab.
+export { LANGUAGE_PROFICIENCIES } from '@/types/hr/recruitment-pipeline';
 
-// LanguageProficiency — HREnums.cs (Basic=1 … Native=5)
-export const LANGUAGE_PROFICIENCIES = [
-  'Basic',
-  'Conversational',
-  'ProfessionalWorking',
-  'Fluent',
-  'Native',
-] as const;
-export type LanguageProficiency = (typeof LANGUAGE_PROFICIENCIES)[number];
+// ── Public catalogues (api/public/catalogue/*, anonymous, X-Tenant-Id) ────────
+
+export interface PublicCatalogueSkill {
+  id: string;
+  name: string;
+}
+
+/** `type` is the row's kind (QualificationType name) — the form filters the list by it. */
+export interface PublicCatalogueQualification {
+  id: string;
+  name: string;
+  type: QualificationType;
+}
+
+export interface PublicCatalogueLanguage {
+  id: string;
+  name: string;
+  code?: string | null;
+}
+
+export interface PublicCatalogueIdentificationType {
+  id: string;
+  name: string;
+  code?: string | null;
+}
+
+export interface PublicCatalogueCurrency {
+  code: string;
+  name: string;
+  symbol?: string | null;
+}
 
 // The subset of ApplicationStatus the candidate surface renders.
 export type CandidateApplicationStatus =
@@ -81,11 +106,21 @@ export interface CareersSkill {
   yearsOfExperience?: number | null;
   isCertified: boolean;
   certificationName?: string | null;
+  // Round 3, lane C1 — the server clears all four together when `isCertified` is off.
+  certificationNumber?: string | null;
+  certifyingBody?: string | null;
+  certificationExpiryDate?: string | null;
 }
 
+/**
+ * Either `languageId` (a catalogue row; the name is mirrored back) or a typed `languageName`.
+ * The server refuses a row with neither, and an id it does not hold.
+ */
 export interface CareersLanguage {
   id: string;
-  languageName: string;
+  languageId?: string | null;
+  languageCode?: string | null;
+  languageName?: string | null;
   proficiency: LanguageProficiency;
 }
 
@@ -101,6 +136,8 @@ export interface CandidateDocument {
   fileName: string;
   filePath?: string | null;
   uploadDate: string;
+  /** What the file is, in the candidate's words (round 3, lane C1). */
+  description?: string | null;
 }
 
 export interface CandidateProfile {
@@ -135,8 +172,15 @@ export interface CandidateProfile {
   expectedSalaryMax?: number | null;
   expectedSalaryCurrency?: string | null;
   workAuthorizationStatus: WorkAuthorizationStatus;
+  // National identity (round 3, lane C1)
+  nationalIdTypeId?: string | null;
+  nationalIdTypeName?: string | null;
+  nationalIdNumber?: string | null;
+  nationalIdExpiryDate?: string | null;
   cvFilePath?: string | null;
   profilePhotoUrl?: string | null;
+  /** A photograph is on file — fetch `GET /candidate/profile/photo` only then (round 3, lane C2). */
+  hasPhoto: boolean;
   isInTalentPool: boolean;
   workHistories: CareersWorkHistory[];
   qualifications: CareersQualification[];
@@ -157,8 +201,8 @@ export interface SaveCandidateProfilePayload {
   dateOfBirth?: string | null;
   gender?: Gender | null;
   city?: string | null;
-  /** Non-nullable on the DTO; send EMPTY_GUID to leave the country unchanged. */
-  countryId: string;
+  /** Optional since 2026-09-14 — send null for "no country". The old EMPTY_GUID sentinel is retired. */
+  countryId?: string | null;
   postalAddress?: string | null;
   digitalAddress?: string | null;
   linkedInProfile?: string | null;
@@ -176,6 +220,11 @@ export interface SaveCandidateProfilePayload {
   expectedSalaryMax?: number | null;
   expectedSalaryCurrency?: string | null;
   workAuthorizationStatus: WorkAuthorizationStatus;
+  /** Round 3, lane C1: refused (400) for a type the tenant does not accept. */
+  nationalIdTypeId?: string | null;
+  nationalIdNumber?: string | null;
+  nationalIdExpiryDate?: string | null;
+  /** ⚠ Ignored by the server — the photograph is set by uploading it. Kept optional for old callers. */
   profilePhotoUrl?: string | null;
   isInTalentPool: boolean;
   workHistories: CareersWorkHistory[];
@@ -211,7 +260,12 @@ export interface ApplyPayload {
   coverLetter?: string | null;
   yearsOfExperience?: number | null;
   availableFrom?: string | null;
-  /** ApplicationSource — the candidate surface always sends CompanyWebsite. */
+  /**
+   * The advert the candidate came through (`/careers/{vacancyId}?posting={id}`; round 3, lane A).
+   * The server derives the source from its channel; without it the source is the company website.
+   */
+  jobPostingId?: string | null;
+  /** ⚠ Ignored by the server since lane A — the source is derived, never typed by the candidate. */
   source?: string;
   addToTalentPool?: boolean;
 }

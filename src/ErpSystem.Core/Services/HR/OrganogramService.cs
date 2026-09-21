@@ -108,8 +108,26 @@ public class OrganogramService : IOrganogramService
             .Where(x => x.UnitId.HasValue)
             .ToDictionary(x => x.UnitId!.Value, x => x.Count);
 
+        // What each unit is made of: its established posts, and how many of them nobody holds.
+        // "Vacant" here is the positions dimension's own predicate — zero holders on strength — so
+        // a unit's vacancy count and the vacant badges under it in the positions view agree.
+        var posts = await _positions.GetQueryable()
+            .Where(p => p.TenantId == tenantId && p.IsActive)
+            .Select(p => new { p.Id, p.OrganizationUnitId })
+            .ToListAsync(cancellationToken);
+        var heldPositionIds = (await _employees.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .Where(OnStrength)
+            .Select(e => e.PositionId)
+            .Distinct()
+            .ToListAsync(cancellationToken)).ToHashSet();
+        var postsByUnit = posts
+            .GroupBy(p => p.OrganizationUnitId)
+            .ToDictionary(g => g.Key, g => (Total: g.Count(), Vacant: g.Count(p => !heldPositionIds.Contains(p.Id))));
+
         var nodes = units.Select(u =>
         {
+            var postStats = postsByUnit.TryGetValue(u.Id, out var ps) ? ps : (Total: 0, Vacant: 0);
             var node = new OrganogramNodeDto
             {
                 Id = u.Id.ToString(),
@@ -121,6 +139,8 @@ public class OrganogramService : IOrganogramService
                 IsActive = u.IsActive,
                 IsVacant = u.HeadEmployeeId == null,
                 EmployeeCount = headcountByUnit.TryGetValue(u.Id, out var c) ? c : 0,
+                PositionCount = postStats.Total,
+                VacantPositionCount = postStats.Vacant,
                 Badge = !u.IsActive ? "Inactive" : (u.HeadEmployeeId == null ? "Vacant lead" : null),
             };
             if (!string.IsNullOrWhiteSpace(u.AccountCode)) node.Meta["Account code"] = u.AccountCode!;
@@ -142,17 +162,29 @@ public class OrganogramService : IOrganogramService
             .ThenBy(p => p.Title)
             .ToListAsync(cancellationToken);
 
-        var filled = await _employees.GetQueryable()
+        // Who holds each post, by name. Pulled as a projection rather than the Employee rows: the
+        // positions view is open to every authenticated user, and the only fields that leave the
+        // server are the ones a noticeboard chart shows. Capped per post in memory (see
+        // OrganogramNodeDto.HoldersCap) — the count is still exact.
+        var holders = await _employees.GetQueryable()
             .Where(e => e.TenantId == tenantId)
             .Where(OnStrength)
-            .GroupBy(e => e.PositionId)
-            .Select(g => new { PositionId = g.Key, Count = g.Count() })
+            .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
+            .Select(e => new { e.PositionId, e.FirstName, e.MiddleName, e.LastName })
             .ToListAsync(cancellationToken);
-        var filledByPosition = filled.ToDictionary(x => x.PositionId, x => x.Count);
+        var holdersByPosition = holders
+            .GroupBy(h => h.PositionId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(h => string.IsNullOrEmpty(h.MiddleName)
+                        ? $"{h.FirstName} {h.LastName}"
+                        : $"{h.FirstName} {h.MiddleName} {h.LastName}")
+                      .ToList());
 
         var nodes = positions.Select(p =>
         {
-            var current = filledByPosition.TryGetValue(p.Id, out var c) ? c : 0;
+            var names = holdersByPosition.TryGetValue(p.Id, out var hs) ? hs : new List<string>();
+            var current = names.Count;
             var node = new OrganogramNodeDto
             {
                 Id = p.Id.ToString(),
@@ -164,12 +196,15 @@ public class OrganogramService : IOrganogramService
                 EmployeeCount = current,
                 ExpectedHeadcount = p.ExpectedHeadcount,
                 IsVacant = current == 0,
+                Holders = names.Take(OrganogramNodeDto.HoldersCap).ToList(),
+                HoldersTruncated = current > OrganogramNodeDto.HoldersCap,
                 Badge = current == 0
                     ? "Vacant"
                     : (current < p.ExpectedHeadcount ? $"{current}/{p.ExpectedHeadcount}" : null),
             };
             if (p.StaffLevel != null) node.Meta["Staff level"] = p.StaffLevel.Name;
             node.Meta["Headcount"] = $"{current} of {p.ExpectedHeadcount}";
+            if (p.Level > 0) node.Meta["Position level"] = p.Level.ToString();
             return node;
         }).ToList();
 
@@ -187,6 +222,7 @@ public class OrganogramService : IOrganogramService
             .Where(e => e.TenantId == tenantId)
             .Where(OnStrength)
             .Include(e => e.Position)
+                .ThenInclude(p => p!.StaffLevel)
             .Include(e => e.OrganizationUnit)
             .OrderBy(e => e.LastName)
             .ThenBy(e => e.FirstName)
@@ -211,8 +247,15 @@ public class OrganogramService : IOrganogramService
                 EmployeeCount = reports.TryGetValue(e.Id, out var c) ? c : 0,
                 Badge = e.StaffStatus == StaffStatus.Active ? null : e.StaffStatus.ToString(),
             };
+            // Detail for the drawer. This dimension is already HR-gated (HR.Employee.Read), so the
+            // contact fields here reach only people who can open the employee record anyway.
             if (e.OrganizationUnit != null) node.Meta["Unit"] = e.OrganizationUnit.Name;
+            if (e.Position?.StaffLevel != null) node.Meta["Staff level"] = e.Position.StaffLevel.Name;
             if (!string.IsNullOrWhiteSpace(e.EmailAddress)) node.Meta["Email"] = e.EmailAddress;
+            var phone = !string.IsNullOrWhiteSpace(e.MobileNumber) ? e.MobileNumber : e.TelephoneNumber;
+            if (!string.IsNullOrWhiteSpace(phone)) node.Meta["Phone"] = phone!;
+            if (!string.IsNullOrWhiteSpace(e.Extension)) node.Meta["Extension"] = e.Extension!;
+            if (e.DateEmployed.HasValue) node.Meta["Date employed"] = e.DateEmployed.Value.ToString("yyyy-MM-dd");
             return node;
         }).ToList();
 

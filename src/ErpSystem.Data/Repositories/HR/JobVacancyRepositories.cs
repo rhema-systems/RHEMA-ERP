@@ -1,7 +1,8 @@
-using ErpSystem.Core.Entities.HR.Recruitment;
+﻿using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -16,10 +17,16 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
 {
     private readonly INumberSequenceService _sequences;
 
-    public JobVacancyRepository(ApplicationDbContext context, INumberSequenceService sequences)
+    private readonly ICurrentUserProvider _currentUser;
+
+    public JobVacancyRepository(
+        ApplicationDbContext context,
+        INumberSequenceService sequences,
+        ICurrentUserProvider currentUser)
         : base(context)
     {
         _sequences = sequences;
+        _currentUser = currentUser;
     }
 
     /// <summary>
@@ -164,11 +171,29 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Not year-scoped — the printed number carries no year.
+    ///
+    /// <para>Checked against the table rather than trusted: a counter left behind by a seeder or a
+    /// data load reissues numbers the register already holds, and the create then dies on
+    /// <c>IX_JobVacancy_Tenant_Number</c> as a 500. See <see cref="NumberSequenceExtensions"/>.</para>
+    /// </summary>
     public async Task<string> GetNextVacancyNumberAsync()
     {
-        // Not year-scoped — the printed number carries no year.
-        var next = await _sequences.NextAsync("VAC");
-        return $"VAC-{next:D6}";
+        var tenantId = _currentUser.TenantId;
+
+        // Soft-deleted rows still occupy the unique index, so the probe must see them too.
+        return await _sequences.NextUnusedAsync(
+            "VAC",
+            year: null,
+            format: value => $"VAC-{value:D6}",
+            isTaken: number => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(v => v.TenantId == tenantId && v.VacancyNumber == number),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(v => v.TenantId == tenantId)
+                    .Select(v => v.VacancyNumber)
+                    .ToListAsync()));
     }
 
     public async Task<IEnumerable<JobVacancy>> GetPublishedForPublicPortalAsync(
@@ -187,6 +212,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
             .Include(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .Include(v => v.Requisition).ThenInclude(r => r.OrganizationUnit)
             .Include(v => v.Requisition).ThenInclude(r => r.Location)
+            .Include(v => v.JobPostings)
             .Where(v => v.TenantId == tenantId)
             .Where(v => v.VacancyStatus == JobVacancyStatus.Published && !v.IsDeleted)
             .Where(v => v.ApplicationDeadline == null || v.ApplicationDeadline >= asOfUtc);

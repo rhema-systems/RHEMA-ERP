@@ -1,5 +1,10 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -32,11 +37,28 @@ public class UnionController : ControllerBase
 {
     private readonly IUnionService _unionService;
     private readonly ILogger<UnionController> _logger;
+    private readonly ICurrentUserService _currentUser;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
 
-    public UnionController(IUnionService unionService, ILogger<UnionController> logger)
+    public UnionController(
+        IUnionService unionService,
+        ILogger<UnionController> logger,
+        ICurrentUserService currentUser,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db)
     {
         _unionService = unionService;
         _logger = logger;
+        _currentUser = currentUser;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
     }
 
     /// <summary>
@@ -217,11 +239,149 @@ public class UnionController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // Round 3, lane U: a document is filed against the agreement. The message names how many.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting agreement {Id}", id);
             return StatusCode(500, "An error occurred while deleting the agreement.");
         }
+    }
+
+    #endregion
+
+    #region Contacts (round 3, lane U; register row U-1; decision D-8)
+
+    [HttpGet("{unionId:guid}/contacts")]
+    [ProducesResponseType(typeof(IEnumerable<UnionContactDto>), StatusCodes.Status200OK)]
+    public Task<IActionResult> GetContacts(Guid unionId)
+        => RunAsync(() => _unionService.GetContactsAsync(unionId), "retrieving the union's contacts");
+
+    [HttpPost("{unionId:guid}/contacts")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [ProducesResponseType(typeof(UnionContactDto), StatusCodes.Status200OK)]
+    public Task<IActionResult> AddContact(Guid unionId, [FromBody] CreateUnionContactDto dto)
+        => RunAsync(() => _unionService.AddContactAsync(unionId, dto), "adding a union contact");
+
+    [HttpPut("contacts/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [ProducesResponseType(typeof(UnionContactDto), StatusCodes.Status200OK)]
+    public Task<IActionResult> UpdateContact(Guid id, [FromBody] UpdateUnionContactDto dto)
+    {
+        if (id != dto.Id)
+            return Task.FromResult<IActionResult>(BadRequest(new { message = "The id in the route does not match the id in the body." }));
+        return RunAsync(() => _unionService.UpdateContactAsync(dto), "updating a union contact");
+    }
+
+    [HttpDelete("contacts/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    public Task<IActionResult> DeleteContact(Guid id)
+        => RunAsync(() => _unionService.DeleteContactAsync(id), "removing a union contact");
+
+    #endregion
+
+    #region Documents and logo (round 3, lane U; register row U-2)
+    // The requisition-attachment shape: multipart through the controlled-upload gate, served only
+    // by the gated download, never a caller-supplied path. Reads are open like the rest of the
+    // register; writes are HR.
+
+    [HttpGet("{unionId:guid}/documents")]
+    [ProducesResponseType(typeof(IEnumerable<UnionDocumentDto>), StatusCodes.Status200OK)]
+    public Task<IActionResult> GetDocuments(Guid unionId)
+        => RunAsync(() => _unionService.GetDocumentsAsync(unionId), "retrieving the union's documents");
+
+    /// <summary>
+    /// Attaches a file to the union: the signed collective agreement (name the agreement), the
+    /// constitution, correspondence. ⚠ Requires a working ClamAV — <c>hr-union-documents</c> is
+    /// scan-mandatory, so with no scanner the gate refuses with 422 before the row is written.
+    /// </summary>
+    [HttpPost("{unionId:guid}/documents")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [ProducesResponseType(typeof(UnionDocumentDto), StatusCodes.Status201Created)]
+    public async Task<IActionResult> AddDocument(
+        Guid unionId, IFormFile file, [FromForm] UnionDocumentKind kind = UnionDocumentKind.Other,
+        [FromForm] Guid? agreementId = null, [FromForm] string? description = null, CancellationToken ct = default)
+    {
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "Union",
+            sourceRecordId: unionId,
+            sourceLabel: "Union document",
+            documentType: "UnionDocument",
+            description: description,
+            persist: (uploadedById, document) => _unionService.AddDocumentAsync(
+                unionId, agreementId, kind, uploadedById, document.OriginalFileName, document.FileSize, description, ct,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrUnionDocuments);
+    }
+
+    [HttpGet("{unionId:guid}/documents/{documentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadDocument(Guid unionId, Guid documentId, CancellationToken ct)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+        var document = await _unionService.GetDocumentForDownloadAsync(unionId, documentId, ct);
+        if (document is null)
+            return NotFound(new { message = "Document not found" });
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId, legacyPath: null,
+            document.FileName, fallbackContentType: null,
+            inline: false, cancellationToken: ct);
+    }
+
+    [HttpDelete("documents/{documentId:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    public Task<IActionResult> DeleteDocument(Guid documentId)
+        => RunAsync(() => _unionService.DeleteDocumentAsync(documentId), "removing a union document");
+
+    /// <summary>The union's logo — a gated image, never a public URL. Answers the union with hasLogo true.</summary>
+    [HttpPost("{id:guid}/logo")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadLogo(Guid id, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+        var union = await _unionService.GetUnionForLogoAsync(id, ct);
+        if (union is null) return NotFound(new { message = $"Union '{id}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "Union",
+            sourceRecordId: id,
+            sourceLabel: "Union logo",
+            documentType: "UnionLogo",
+            description: null,
+            persist: (_, document) => _unionService.AttachLogoAsync(
+                id, document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                document.OriginalFileName, document.ContentType, document.FileSize, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrUnionDocuments);
+    }
+
+    [HttpGet("{id:guid}/logo")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadLogo(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+        var union = await _unionService.GetUnionForLogoAsync(id, ct);
+        if (union is null) return NotFound();
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            union.LogoDocumentRecordId, union.LogoDocumentVersionId,
+            union.LogoFileUploadRecordId, legacyPath: null,
+            union.LogoFileName ?? "union-logo",
+            fallbackContentType: union.LogoMimeType,
+            inline: true, ct);
     }
 
     #endregion

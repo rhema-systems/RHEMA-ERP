@@ -45,6 +45,7 @@ export default function NewRequisitionPage() {
     mutationFn: () =>
       staffRequisitionService.create({
         positionId: form.positionId,
+        jobDescriptionId: form.jobDescriptionId || null,
         organizationUnitId: position?.organizationUnitId ?? null,
         organizationLevelId: position?.organizationLevelId ?? null,
         locationId: form.locationId || null,
@@ -61,8 +62,8 @@ export default function NewRequisitionPage() {
         targetFillDate: form.targetFillDate || null,
         businessJustification: form.businessJustification.trim(),
         impactIfNotFilled: form.impactIfNotFilled.trim() || null,
-        isBudgeted: form.isBudgeted,
-        budgetCode: form.budgetCode.trim() || null,
+        manpowerBudgetLineId: form.manpowerBudgetLineId || null,
+        exceptionJustification: form.exceptionJustification.trim() || null,
         allowInternalCandidates: form.allowInternalCandidates,
         allowExternalCandidates: form.allowExternalCandidates,
         notes: form.notes.trim() || null,
@@ -102,8 +103,9 @@ export default function NewRequisitionPage() {
         <Info className="h-4 w-4" />
         <AlertTitle>The organisation unit comes from the position</AlertTitle>
         <AlertDescription>
-          Pick the position and the unit and level follow from it. The requisition is checked
-          against that position&apos;s approved manpower budget when you submit it.
+          Pick the position and the unit and level follow from it. Raise it against an approved
+          manpower budget line where one covers the post; the check on the form says what the
+          server will say at submit, against the budget and the establishment.
         </AlertDescription>
       </Alert>
 

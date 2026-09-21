@@ -1,4 +1,5 @@
 import { apiService } from '../api.service';
+import type { EmployeeSkillRequirements } from '@/types/hr/named-sets';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   Employee,
@@ -9,7 +10,11 @@ import type {
   TerminateEmployeeRequest,
   EmployeePayrollStatus,
   PayrollReconciliation,
+  SetPayBasisRequest,
+  EmployeePayrollComponents,
 } from '@/types/hr/employee';
+// Payroll's own profile shape — read through HR's door, saved through payroll's.
+import type { PayrollEmployeeProfile } from '@/services/payrollService';
 import type {
   EmployeeContact,
   CreateEmployeeContactRequest,
@@ -119,6 +124,35 @@ class EmployeeService {
 
   getPayrollReconciliation(): Promise<PayrollReconciliation> {
     return apiService.get<PayrollReconciliation>(`${this.baseUrl}/payroll-reconciliation`);
+  }
+
+  /**
+   * Payroll's employee profile — the window the Salary tab hosts — through HR's own door.
+   *
+   * ⚠ Payroll exposes no by-employee read (its list is a search capped at 250), so this is the
+   * server filtering that search to the exact person. Null when payroll has no profile yet, which
+   * is the normal state for somebody just created: the tab then offers to make one.
+   */
+  /**
+   * Every active payroll component with this employee's exception beside it (round 3, lane X).
+   * Read here; saved one row at a time through payroll's `component-exceptions/bulk`.
+   */
+  getPayrollComponentExceptions(id: string): Promise<EmployeePayrollComponents> {
+    return apiService.get<EmployeePayrollComponents>(`${this.baseUrl}/${id}/payroll-component-exceptions`);
+  }
+
+  async getPayrollProfile(id: string): Promise<PayrollEmployeeProfile | null> {
+    try {
+      return await apiService.get<PayrollEmployeeProfile>(`${this.baseUrl}/${id}/payroll-profile`);
+    } catch (error: any) {
+      if (error?.status === 404 || error?.response?.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** Scale or negotiated, and why. Negotiated closes any open grade placement server-side. */
+  setPayBasis(id: string, data: SetPayBasisRequest): Promise<EmployeeDetail> {
+    return apiService.put<EmployeeDetail>(`${this.baseUrl}/${id}/pay-basis`, data);
   }
 
   create(data: CreateEmployeeRequest): Promise<EmployeeDetail> {
@@ -389,6 +423,16 @@ class EmployeeService {
 
   getEmployeeSkills(employeeId: string): Promise<EmployeeSkill[]> {
     return apiService.get<EmployeeSkill[]>(this.sub(employeeId, 'skills'));
+  }
+
+  /**
+   * What the employee's post asks of them against what they hold (round 2, lane C3b).
+   *
+   * ⚠ The post's requirement is its EFFECTIVE one — the skill sets attached to it unioned with its
+   * individual rows — so a skill required through a set counts exactly as one listed individually.
+   */
+  getSkillRequirements(employeeId: string): Promise<EmployeeSkillRequirements> {
+    return apiService.get<EmployeeSkillRequirements>(this.sub(employeeId, 'skill-requirements'));
   }
 
   addEmployeeSkill(employeeId: string, data: CreateEmployeeSkillRequest): Promise<EmployeeSkill> {
@@ -706,6 +750,15 @@ class EmployeeService {
 
   getGuarantors(employeeId: string): Promise<EmployeeGuarantor[]> {
     return apiService.get<EmployeeGuarantor[]>(this.sub(employeeId, 'guarantors'));
+  }
+
+  /**
+   * The full record. ⚠ The list is a SUMMARY — address, employer, national ID, surety and the
+   * photo metadata are absent from it — so the edit dialog must hydrate from this or a save
+   * silently blanks every optional field the list did not carry.
+   */
+  getGuarantor(employeeId: string, id: string): Promise<EmployeeGuarantor> {
+    return apiService.get<EmployeeGuarantor>(this.sub(employeeId, `guarantors/${id}`));
   }
 
   addGuarantor(

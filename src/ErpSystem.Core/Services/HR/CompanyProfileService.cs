@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -46,22 +46,15 @@ public class CompanyProfileService : ICompanyProfileService
     /// Rewrites <c>Region</c> and <c>City</c> from the profile's administrative area. A null area
     /// leaves both exactly as they were.
     /// </summary>
-    private async Task ApplyGeoAreaSnapshotAsync(CompanyProfile entity, CancellationToken ct)
-    {
-        if (entity.GeoAreaId is not { } areaId) return;
-
-        var (region, city) = await _geography.GetAddressSnapshotAsync(areaId, ct);
-        if (region is null && city is null)
-        {
-            _logger.LogWarning(
-                "Company profile references geo area {GeoAreaId}, which could not be resolved; the "
-                + "address was left unchanged.", areaId);
-            return;
-        }
-
-        if (region is not null) entity.Region = region;
-        if (city is not null) entity.City = city;
-    }
+    /// <remarks>
+    /// The rule itself lives in <see cref="ErpSystem.Core.Services.Reference.GeoAddressSnapshot"/> since round 2 lane D2 — there were
+    /// four private copies of it and they had already drifted.
+    /// </remarks>
+    private Task ApplyGeoAreaSnapshotAsync(CompanyProfile entity, CancellationToken ct)
+        => ErpSystem.Core.Services.Reference.GeoAddressSnapshot.ApplyAsync(
+            _geography, _logger, entity.GeoAreaId,
+            r => entity.Region = r, c => entity.City = c,
+            "company profile", entity.Id, ct);
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and

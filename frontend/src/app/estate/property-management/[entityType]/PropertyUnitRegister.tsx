@@ -24,7 +24,6 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import {
   Select,
   SelectContent,
@@ -47,6 +46,7 @@ import {
   EstateManagedAssetType,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
+import { useManagedAssetsPage } from './use-managed-assets-page';
 
 const statusLabels: Record<EstateManagedAssetStatus, string> = {
   [EstateManagedAssetStatus.LandBank]: 'Land bank',
@@ -126,51 +126,40 @@ function getCurrentLesseeOrOwner(asset: EstateManagedAsset) {
 
 export function PropertyUnitRegister() {
   const router = useRouter();
-  const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [searchDraft, setSearchDraft] = React.useState('');
   const [search, setSearch] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('all');
   const [statusFilter, setStatusFilter] = React.useState('all');
-  const [isLoading, setIsLoading] = React.useState(true);
   const [sendingListingId, setSendingListingId] = React.useState<string | null>(
     null
   );
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-  const assetPages = usePaginatedItems(assets, 10);
-
-  const loadAssets = React.useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      setAssets(
-        await estateLandManagementService.getManagedAssets({
-          search: search || undefined,
-          assetType:
-            typeFilter === 'all'
-              ? undefined
-              : (Number(typeFilter) as EstateManagedAssetType),
-          status:
-            statusFilter === 'all'
-              ? undefined
-              : (Number(statusFilter) as EstateManagedAssetStatus),
-          take: 500,
-        })
-      );
-    } catch {
-      setAssets([]);
-      setLoadError('Unable to load the Property and Unit Register.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [search, statusFilter, typeFilter]);
-
-  React.useEffect(() => {
-    void loadAssets();
-  }, [loadAssets]);
+  const {
+    assets,
+    page,
+    setPage,
+    isLoading,
+    loadError,
+    loadAssets,
+    pageSize,
+    totalPages,
+    totalItems,
+  } = useManagedAssetsPage({
+    search: search || undefined,
+    assetType:
+      typeFilter === 'all'
+        ? undefined
+        : (Number(typeFilter) as EstateManagedAssetType),
+    status:
+      statusFilter === 'all'
+        ? undefined
+        : (Number(statusFilter) as EstateManagedAssetStatus),
+    errorMessage: 'Unable to load the Property and Unit Register.',
+  });
 
   const clearFilters = () => {
     setSearchDraft('');
     setSearch('');
+    setPage(1);
     setTypeFilter('all');
     setStatusFilter('all');
   };
@@ -182,9 +171,7 @@ export function PropertyUnitRegister() {
       setSendingListingId(asset.id);
       if (asset.externalListingType === 'None') {
         const listingType =
-          asset.isAvailableForSale && asset.isAvailableForLease
-            ? 'SaleAndRent'
-            : asset.isAvailableForSale
+          asset.isAvailableForSale
               ? 'Sale'
               : 'Rent';
         await estateLandManagementService.updateExternalListing(asset.id, {
@@ -267,6 +254,7 @@ export function PropertyUnitRegister() {
             className="grid gap-2 lg:grid-cols-[minmax(16rem,1fr)_13rem_13rem_auto]"
             onSubmit={(event) => {
               event.preventDefault();
+              setPage(1);
               setSearch(searchDraft.trim());
             }}
           >
@@ -280,7 +268,7 @@ export function PropertyUnitRegister() {
                 aria-label="Search the Property and Unit Register"
               />
             </div>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <Select value={typeFilter} onValueChange={(value) => { setPage(1); setTypeFilter(value); }}>
               <SelectTrigger aria-label="Filter by record type">
                 <SelectValue placeholder="All record types" />
               </SelectTrigger>
@@ -293,7 +281,7 @@ export function PropertyUnitRegister() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(value) => { setPage(1); setStatusFilter(value); }}>
               <SelectTrigger aria-label="Filter by status">
                 <SelectValue placeholder="All statuses" />
               </SelectTrigger>
@@ -362,7 +350,7 @@ export function PropertyUnitRegister() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {assetPages.items.map((asset) => {
+                  {assets.map((asset) => {
                     const lesseeOrOwner = getCurrentLesseeOrOwner(asset);
                     const isPortalListing =
                       asset.externalListingType !== 'None';
@@ -488,7 +476,7 @@ export function PropertyUnitRegister() {
               </Table>
             </div>
           ) : null}
-          {assets.length > assetPages.pageSize ? <Pagination currentPage={assetPages.currentPage} totalPages={assetPages.totalPages} totalItems={assetPages.totalItems} pageSize={assetPages.pageSize} onPageChange={assetPages.setCurrentPage} /> : null}
+          {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
         </CardContent>
       </Card>
     </div>

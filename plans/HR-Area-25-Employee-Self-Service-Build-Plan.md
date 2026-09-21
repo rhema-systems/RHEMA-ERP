@@ -162,7 +162,7 @@ surfaces move.
 `PayrollPayslipSnapshot` for the token's employee only — list (period, number, gross, net)
 + detail rendered from `SnapshotJson` + print via the body-class pattern. **No payroll
 code touched, no write, no recompute** (`payroll-ownership-boundary`). Flag to the payroll
-owner as a consumed surface (add to `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`
+owner as a consumed surface (add to `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`
 as an FYI-not-defect, or the HR-Finance backlog's notes — slice 10 decides placement).
 Empty-state copy explains payslips appear when payroll publishes them.
 

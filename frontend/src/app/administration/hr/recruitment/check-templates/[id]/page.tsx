@@ -30,6 +30,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { CheckProviderPicker } from '@/components/hr/recruitment/CheckProviderPicker';
 import { useToast } from '@/hooks/use-toast';
 import { humanizeEnum } from '@/lib/hr/attendance-format';
 import { preEmploymentCheckTemplateService } from '@/services/hr/offers.service';
@@ -42,6 +43,7 @@ import {
 const blankItem = (): CreatePreEmploymentCheckTemplateItem => ({
   checkType: 'BackgroundCheck',
   defaultServiceProvider: '',
+  defaultServiceProviderSupplierId: null,
   instructions: '',
   isMandatory: true,
   isBlockingOnFail: true,
@@ -105,6 +107,7 @@ export default function PreEmploymentCheckTemplateDetailPage() {
     setItemForm({
       checkType: item.checkType,
       defaultServiceProvider: item.defaultServiceProvider ?? '',
+      defaultServiceProviderSupplierId: item.defaultServiceProviderSupplierId ?? null,
       instructions: item.instructions ?? '',
       isMandatory: item.isMandatory,
       isBlockingOnFail: item.isBlockingOnFail,
@@ -119,6 +122,7 @@ export default function PreEmploymentCheckTemplateDetailPage() {
         // CheckType is excluded on update — delete and re-add to change it.
         return preEmploymentCheckTemplateService.updateItem(id, itemDialog.id, {
           defaultServiceProvider: itemForm.defaultServiceProvider?.trim() || null,
+          defaultServiceProviderSupplierId: itemForm.defaultServiceProviderSupplierId || null,
           instructions: itemForm.instructions?.trim() || null,
           isMandatory: itemForm.isMandatory,
           isBlockingOnFail: itemForm.isBlockingOnFail,
@@ -288,14 +292,16 @@ export default function PreEmploymentCheckTemplateDetailPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="defaultServiceProvider">Default service provider</Label>
-              <Input
-                id="defaultServiceProvider"
-                value={itemForm.defaultServiceProvider ?? ''}
-                onChange={(e) => setItemForm({ ...itemForm, defaultServiceProvider: e.target.value })}
-              />
-            </div>
+            {/* Round 3, lane G (D-14): the default provider from the suppliers set up for this check type. */}
+            <CheckProviderPicker
+              idPrefix="defaultProvider"
+              checkType={itemForm.checkType}
+              supplierId={itemForm.defaultServiceProviderSupplierId ?? null}
+              name={itemForm.defaultServiceProvider ?? ''}
+              onChange={({ supplierId, name }) =>
+                setItemForm({ ...itemForm, defaultServiceProviderSupplierId: supplierId || null, defaultServiceProvider: name })
+              }
+            />
             <div className="space-y-1.5">
               <Label htmlFor="templateItemInstructions">Instructions</Label>
               <Textarea

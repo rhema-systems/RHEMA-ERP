@@ -90,11 +90,30 @@ public class PositionEstablishmentDto
     public Guid? OrganizationUnitId { get; set; }
     public string? OrganizationUnitName { get; set; }
 
+    /// <summary>
+    /// The stored headcount — <b>meaningless unless <see cref="IsEstablished"/></b>. 186 of 231
+    /// live positions carry the column default of 1 (measured 2026-09-10); only
+    /// <c>EstablishmentApprovedOn</c> makes the number an authorisation.
+    /// </summary>
     public int ExpectedHeadcount { get; set; }
     public int FilledCount { get; set; }
-    public int VacantCount => Math.Max(0, ExpectedHeadcount - FilledCount);
-    public bool IsFullyFilled => VacantCount == 0;
-    public bool IsOverEstablishment => FilledCount > ExpectedHeadcount;
+
+    /// <summary>
+    /// Round 2b, R4a. ⚠ Before this the grid reported a "gap" of 0 of 1 for every unestablished
+    /// post — the opposite of the rule every enforcement path uses — and reconcile opened a
+    /// vacancy for each one with nobody in it (38 phantom gaps on the live tenant, none on an
+    /// established post). A gap can only be stated where a headcount was authorised.
+    /// </summary>
+    public bool IsEstablished { get; set; }
+    public DateTime? EstablishmentApprovedOn { get; set; }
+    public Guid? EstablishmentSourceBudgetId { get; set; }
+    public string? EstablishmentSourceBudgetNumber { get; set; }
+
+    /// <summary>Whether a gap can be stated at all — the same as <see cref="IsEstablished"/>, named for the reader.</summary>
+    public bool GapKnown => IsEstablished;
+    public int VacantCount => IsEstablished ? Math.Max(0, ExpectedHeadcount - FilledCount) : 0;
+    public bool IsFullyFilled => IsEstablished && VacantCount == 0;
+    public bool IsOverEstablishment => IsEstablished && FilledCount > ExpectedHeadcount;
 
     /// <summary>The open tracking vacancy for this position, if one has been logged.</summary>
     public Guid? OpenVacancyId { get; set; }

@@ -59,13 +59,16 @@ function formatLeaseTerm(months?: number | null) {
 
 function listingPriceSummary(listing: ExternalEstateListing) {
   if (listing.externalListingType === 'Rent') {
-    if (isLandListing(listing)) {
-      return `${formatMoney(listing.groundRentPayable, listing.externalListingCurrency)} annual ground rent`;
-    }
     return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
+  }
+  if (listing.externalListingType === 'Lease') {
+    return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / year`;
   }
   if (listing.externalListingType === 'SaleAndRent') {
     return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Rent ${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
+  }
+  if (listing.externalListingType === 'SaleAndLease') {
+    return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Lease ${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / year`;
   }
   return formatMoney(
     listing.externalSalePrice ?? listing.externalListingPrice,
@@ -73,10 +76,16 @@ function listingPriceSummary(listing: ExternalEstateListing) {
   );
 }
 
+function isLeaseListingType(value: string) {
+  return value === 'Lease' || value === 'SaleAndLease';
+}
+
 function listingTypeLabel(value: string) {
   if (value === 'SaleAndRent') return 'Sale and rent';
+  if (value === 'SaleAndLease') return 'Sale and lease';
   if (value === 'Sale') return 'For sale';
   if (value === 'Rent') return 'For rent';
+  if (value === 'Lease') return 'For lease';
   return value;
 }
 
@@ -128,12 +137,6 @@ function parsePriceFilter(value: string) {
   return value.trim() && Number.isFinite(parsed) && parsed >= 0
     ? parsed
     : undefined;
-}
-
-function isLandListing(listing?: ExternalEstateListing | null) {
-  if (!listing) return false;
-  const assetType = String(listing.assetType).toLowerCase();
-  return assetType === '0' || assetType === 'land';
 }
 
 function ListingImage({ listing }: { listing: ExternalEstateListing }) {
@@ -341,6 +344,7 @@ export default function ExternalPropertyListingsPage() {
               <SelectItem value="all">All listings</SelectItem>
               <SelectItem value="Sale">For sale</SelectItem>
               <SelectItem value="Rent">For rent</SelectItem>
+              <SelectItem value="Lease">For lease</SelectItem>
             </SelectContent>
             </Select>
           <Input
@@ -522,21 +526,12 @@ export default function ExternalPropertyListingsPage() {
                     {selected.externalListingType !== 'Sale' ? (
                       <ListingStat
                         icon={CalendarDays}
-                        label="Rental duration"
-                        value={formatLeaseTerm(
-                          selected.externalLeaseTermMonths
-                        )}
-                      />
-                    ) : null}
-                    {selected.externalListingType !== 'Sale' &&
-                    isLandListing(selected) ? (
-                      <ListingStat
-                        icon={FileText}
-                        label="Annual ground rent"
-                        value={formatMoney(
-                          selected.groundRentPayable,
-                          selected.externalListingCurrency
-                        )}
+                        label={
+                          isLeaseListingType(selected.externalListingType)
+                            ? 'Lease duration'
+                            : 'Rental duration'
+                        }
+                        value="Duration on request"
                       />
                     ) : null}
                   </div>
@@ -545,8 +540,8 @@ export default function ExternalPropertyListingsPage() {
                     <div className="text-xs text-slate-500">
                       {selected.externalListingType === 'Sale'
                         ? 'Sale price'
-                        : isLandListing(selected)
-                          ? 'Annual ground rent'
+                        : isLeaseListingType(selected.externalListingType)
+                          ? 'Lease amount per year'
                           : 'Rent per month'}
                     </div>
                     <div className="mt-1 text-xl font-semibold text-slate-900">
@@ -554,18 +549,14 @@ export default function ExternalPropertyListingsPage() {
                         selected.externalListingType === 'Sale'
                           ? (selected.externalSalePrice ??
                               selected.externalListingPrice)
-                          : isLandListing(selected)
-                            ? selected.groundRentPayable
-                            : (selected.externalMonthlyRent ??
-                              selected.externalListingPrice),
+                          : (selected.externalMonthlyRent ??
+                            selected.externalListingPrice),
                         selected.externalListingCurrency
                       )}
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
                       {selected.externalListingType !== 'Sale'
-                        ? `${formatLeaseTerm(
-                            selected.externalLeaseTermMonths
-                          )} · Sales will continue the enquiry`
+                        ? 'Sales will continue the enquiry'
                         : listingTypeLabel(selected.externalListingType)}
                     </div>
                   </div>

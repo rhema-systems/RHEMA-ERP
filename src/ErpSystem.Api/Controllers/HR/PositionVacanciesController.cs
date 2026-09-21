@@ -110,7 +110,22 @@ public class PositionVacanciesController : ControllerBase
     }
 
     /// <summary>Raises a Draft requisition pre-filled from the vacancy and returns its id for editing.</summary>
+    /// <remarks>
+    /// <para>Gated on Write since 2026-09-15 (G-3.3). It was the one action on this controller
+    /// carrying no policy at all, inheriting only the controller's <c>InternalOnly</c> — which is
+    /// a blocklist, so any authenticated internal user reached it.</para>
+    ///
+    /// <para>Half of that was deliberate and is unchanged: <c>POST /StaffRequisitions</c> is
+    /// ungated on purpose, because the module's stance is that any employee may ask for headcount
+    /// — line managers raise requisitions, not HR. What is <b>not</b> ordinary is this endpoint's
+    /// second half: it writes <c>StaffRequisitionId</c> onto the vacancy and moves it to
+    /// <c>RequisitionRaised</c>, a status reconcile deliberately never closes. That let any
+    /// employee pin a position vacancy open permanently, which the plain create endpoint cannot
+    /// do. A manager who should raise a requisition still can — through the requisition screen.
+    /// </para>
+    /// </remarks>
     [HttpPost("{id:guid}/raise-requisition")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RaiseRequisitionResultDto>> RaiseRequisition(
         Guid id, [FromBody] RaiseRequisitionFromVacancyDto? dto, CancellationToken ct)
     {

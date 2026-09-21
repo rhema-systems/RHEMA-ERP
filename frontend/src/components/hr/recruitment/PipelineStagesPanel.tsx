@@ -143,7 +143,9 @@ export function PipelineStagesPanel({ pipelineId, canEdit }: { pipelineId: strin
         stageType: values.stageType as RecruitmentPipelineStageType,
         description: values.description || null,
         instructions: values.instructions || null,
-        maxAttempts: values.maxAttempts ?? null,
+        // D-13: derived on the server too; sent consistently so old readers of the payload agree.
+        isRequired: !values.canSkip,
+        maxAttempts: values.canRepeat ? values.maxAttempts ?? null : null,
         defaultTimeToCompleteDays: values.defaultTimeToCompleteDays ?? null,
       };
       if (editing) {
@@ -232,8 +234,7 @@ export function PipelineStagesPanel({ pipelineId, canEdit }: { pipelineId: strin
                     </TableCell>
                     <TableCell className="space-x-1 text-xs text-muted-foreground">
                       {s.isFinalStage && <span className="font-medium text-foreground">Final</span>}
-                      {s.isRequired ? <span>Required</span> : <span>Optional</span>}
-                      {s.canSkip && <span>· Skippable</span>}
+                      {s.canSkip ? <span>Can be skipped</span> : <span>Required — cannot be skipped</span>}
                       {s.canRepeat ? <span>· Repeatable</span> : null}
                       {s.maxAttempts ? <span>· Max {s.maxAttempts}</span> : null}
                     </TableCell>
@@ -330,16 +331,27 @@ export function PipelineStagesPanel({ pipelineId, canEdit }: { pipelineId: strin
             </FieldRow>
             <FieldRow>
               <SwitchField form={form} name="isActive" label="Active" />
-              <SwitchField form={form} name="isRequired" label="Required" />
-            </FieldRow>
-            <FieldRow>
               <SwitchField form={form} name="isFinalStage" label="Final stage" />
-              <SwitchField form={form} name="canSkip" label="Can be skipped" />
             </FieldRow>
+            {/* Round 3, lane G (D-13): ONE switch. A stage is required exactly when it cannot be
+                skipped — the server derives `isRequired` and enforces both: a non-skippable stage
+                cannot be jumped over, and the final stage refuses an application that never
+                entered a required one. "Max entries" only means something when re-entry is allowed. */}
             <FieldRow>
+              <SwitchField
+                form={form}
+                name="canSkip"
+                label="Can be skipped"
+                description={form.watch('canSkip') ? 'Optional — an application may move past it.' : 'Required — every application must pass through it.'}
+              />
               <SwitchField form={form} name="canRepeat" label="Can be re-entered" />
-              <NumberField form={form} name="maxAttempts" label="Max entries" />
             </FieldRow>
+            {form.watch('canRepeat') && (
+              <FieldRow>
+                <NumberField form={form} name="maxAttempts" label="Max entries" />
+                <div />
+              </FieldRow>
+            )}
             <TextareaField form={form} name="instructions" label="Instructions for reviewers" />
           </form>
 

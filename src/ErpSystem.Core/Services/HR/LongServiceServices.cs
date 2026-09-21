@@ -185,7 +185,7 @@ public class LongServiceMilestoneService : ILongServiceMilestoneService
     ///
     /// <para><b>Only the years are seeded.</b> Money, leave days and benefits are left empty on
     /// purpose: TDC has not said what a twenty-year award is worth, and a seeded figure would look
-    /// like an approved one. See <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>.</para>
+    /// like an approved one. See <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c>.</para>
     /// </remarks>
     public async Task<LongServiceLadderSeedResultDto> SeedDefaultLadderAsync(
         Guid awardTypeId, Guid userId, IReadOnlyList<int>? years = null)

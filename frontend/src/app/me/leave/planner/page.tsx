@@ -96,8 +96,8 @@ export default function MyLeavePlannerPage() {
         startDate: f.startDate,
         endDate: f.endDate,
         notes: f.notes || null,
-        // plannedBy is stamped server-side from the token (finish-plan lane 4).
-        year: new Date(f.startDate).getFullYear(),
+        // plannedBy and year are both stamped server-side: the actor from the token (finish-plan
+        // lane 4), the year from the start date (closure plan L-17).
       };
       return f.id ? leavePlanService.update(f.id, payload) : leavePlanService.create(payload);
     },
@@ -264,6 +264,36 @@ export default function MyLeavePlannerPage() {
                       </Button>
                     </>
                   )}
+                  {/*
+                    The last step of the planning cycle, from the employee's own side: turn the plan
+                    they agreed with their manager into the actual request, instead of re-typing the
+                    same dates into a blank form (closure plan L-9 / R-1). Once a request exists the
+                    button becomes a link to it.
+                  */}
+                  {p.status === 'Approved' &&
+                    (p.raisedLeaveRequestId ? (
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href={`/me/leave/${p.raisedLeaveRequestId}`}>
+                          {p.raisedLeaveRequestNumber ?? 'View request'}
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button size="sm" asChild>
+                        <Link
+                          href={`/me/leave/new?${new URLSearchParams({
+                            planId: p.id,
+                            leaveTypeId: p.leaveTypeId,
+                            startDate: p.startDate?.slice(0, 10) ?? '',
+                            endDate: p.endDate?.slice(0, 10) ?? '',
+                            ...(p.leaveSubTypeId ? { leaveSubTypeId: p.leaveSubTypeId } : {}),
+                            ...(p.relieverId ? { relieverId: p.relieverId } : {}),
+                            ...(p.secondRelieverId ? { secondRelieverId: p.secondRelieverId } : {}),
+                          }).toString()}`}
+                        >
+                          Raise the request
+                        </Link>
+                      </Button>
+                    ))}
                   {p.status === 'ChangesSuggested' && (
                     <Button
                       size="sm"

@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { FinancePostingCard } from '@/components/hr/common/FinancePostingCard';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import {
   DateField,
@@ -353,6 +354,9 @@ export default function TravelClaimDetailPage({ params }: { params: Promise<{ id
           the net payable above still shows the full amount.
         </p>
       )}
+
+      {/* What Finance holds for this claim: recognition on approval, settlement on payment (lane 8). */}
+      <FinancePostingCard sourceDocumentId={id} />
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">

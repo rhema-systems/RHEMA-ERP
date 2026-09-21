@@ -114,8 +114,15 @@ public class PreEmploymentCheckTemplateController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record.");
 
-        var result = await _service.AddItemAsync(dto, tenantId.Value, employeeId.Value);
-        return Ok(result);
+        try
+        {
+            var result = await _service.AddItemAsync(dto, tenantId.Value, employeeId.Value);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { message = ex.Message });
+        }
     }
 
     [HttpPut("{id:guid}/items/{itemId:guid}")]
@@ -134,8 +141,15 @@ public class PreEmploymentCheckTemplateController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record.");
 
-        var result = await _service.UpdateItemAsync(dto, employeeId.Value);
-        return Ok(result);
+        try
+        {
+            var result = await _service.UpdateItemAsync(dto, employeeId.Value);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{id:guid}/items/{itemId:guid}")]

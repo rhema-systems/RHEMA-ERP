@@ -5,10 +5,14 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR.Requisition;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Services.HR;
+using ErpSystem.Core.Services.HR.Recruitment;
+using ErpSystem.Core.Services.HR.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -27,11 +31,14 @@ public class StaffRequisitionService : IStaffRequisitionService
     private readonly IStaffRequisitionAttachmentRepository _attachmentRepository;
     private readonly IStaffRequisitionCommentRepository _commentRepository;
     private readonly IStaffRequisitionHistoryRepository _historyRepository;
+    private readonly IJobDescriptionRepository _jobDescriptionRepository;
     private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly HrCurrencyBridge _currency;
+    private readonly IHrFinancePostingAdapter _financePosting;
     private readonly ILogger<StaffRequisitionService> _logger;
 
     /// <summary>
@@ -47,18 +54,24 @@ public class StaffRequisitionService : IStaffRequisitionService
         IStaffRequisitionAttachmentRepository attachmentRepository,
         IStaffRequisitionCommentRepository commentRepository,
         IStaffRequisitionHistoryRepository historyRepository,
+        IJobDescriptionRepository jobDescriptionRepository,
         ICompanyHrPolicyProvider policyProvider,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
+        HrCurrencyBridge currency,
+        IHrFinancePostingAdapter financePosting,
         ILogger<StaffRequisitionService> logger)
     {
+        _currency = currency;
+        _financePosting = financePosting;
         _requisitionRepository = requisitionRepository;
         _costRepository = costRepository;
         _attachmentRepository = attachmentRepository;
         _commentRepository = commentRepository;
         _historyRepository = historyRepository;
+        _jobDescriptionRepository = jobDescriptionRepository;
         _policyProvider = policyProvider;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
@@ -286,6 +299,8 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         var entity = createDto.ToEntity(current, requestedByUserId);
         entity.RequisitionNumber = await GenerateRequisitionNumberAsync(current, cancellationToken);
+        await RequireJobDescriptionOfPositionAsync(entity, cancellationToken);
+        await ApplyBudgetLinkAsync(entity, createDto.ManpowerBudgetLineId, cancellationToken);
 
         await _requisitionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -306,6 +321,8 @@ public class StaffRequisitionService : IStaffRequisitionService
             throw new InvalidOperationException("Only Draft or Rejected requisitions can be edited.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        await RequireJobDescriptionOfPositionAsync(entity, cancellationToken);
+        await ApplyBudgetLinkAsync(entity, updateDto.ManpowerBudgetLineId, cancellationToken);
 
         await _requisitionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -313,6 +330,28 @@ public class StaffRequisitionService : IStaffRequisitionService
         _logger.LogInformation("Staff requisition updated: {RequisitionNumber}", entity.RequisitionNumber);
 
         return await ReloadDtoAsync(entity.Id, cancellationToken);
+    }
+
+    /// <summary>
+    /// A requisition may name the job description it recruits against (round 3, lane Q — the
+    /// form never sent one, and nothing checked one). The reference is optional; when present it
+    /// must be a description of THIS requisition's position: an offer letter later picks the
+    /// position's description, and a requisition pointing at another post's description would
+    /// read as one job and hire for another. Refused as an <see cref="InvalidOperationException"/>
+    /// — a bad reference inside a payload is a bad request, not a missing resource, and this
+    /// controller maps it to 422 like every other rule here.
+    /// </summary>
+    private async Task RequireJobDescriptionOfPositionAsync(StaffRequisition entity, CancellationToken cancellationToken)
+    {
+        if (entity.JobDescriptionId is not { } jobDescriptionId) return;
+
+        var jobDescription = await _jobDescriptionRepository.GetByIdAsync(jobDescriptionId);
+        if (jobDescription == null || jobDescription.IsDeleted || jobDescription.TenantId != entity.TenantId)
+            throw new InvalidOperationException("The job description named on this requisition does not exist.");
+
+        if (jobDescription.PositionId != entity.PositionId)
+            throw new InvalidOperationException(
+                $"The job description '{jobDescription.JobTitle}' describes a different position; choose one written for the requisition's position.");
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -344,16 +383,46 @@ public class StaffRequisitionService : IStaffRequisitionService
         // and Block mode must refuse before an approver is ever troubled with it.
         await EnforceBudgetAsync(entity, "submitted", cancellationToken);
         await EnforceEstablishmentAsync(entity, "submitted", cancellationToken);
+        // Round 2b, R5 (D-4, D-2): the exception must be written down, and the establishment the
+        // approver is asked to decide against is stamped on the record.
+        await RequireExceptionJustificationAsync(entity, cancellationToken);
+        await StampEstablishmentSnapshotAsync(entity, cancellationToken);
 
         var fromStatus = entity.Status;
+
+        // ── G-4.1 (2026-09-15): submitting must never approve ──────────────────────────────────
+        // WorkflowIntegrationService.SubmitAsync returns WorkflowOutcome.Approved whenever no
+        // active definition exists for the entity type — a deliberate "approval is not configured,
+        // use the direct lifecycle" signal that nine modules share. The requisition adapter maps
+        // Approved straight to StaffRequisitionStatus.Approved, so on a tenant with no published
+        // StaffRequisition definition pressing Submit took a requisition Draft → Approved in one
+        // step, with no
+        // approver, no CanUserApproveAsync check, and — the part that matters — no segregation of
+        // duties, because "you cannot approve a requisition you raised yourself" lives in
+        // ApproveAsync, which was never called. The history row recorded the transition, so
+        // afterwards it was indistinguishable from a reviewed approval.
+        //
+        // ⚠ Corrected 2026-09-16: an earlier version of this comment added "(which is every
+        // tenant: none is seeded anywhere in the solution)". That was false —
+        // EnsureHrWorkflowsSeededAsync seeds a published StaffRequisition definition, so on a
+        // seeded tenant this never fired. Kept as defence in depth; see HrWorkflowFallbackAuthority.
+        //
+        // The shared fallback is left alone; it is load-bearing for the other eight applications.
+        // Here we simply ask the question first and refuse to let submission decide. With no
+        // definition the requisition lands at Submitted and waits for a human — ApproveAsync then
+        // runs its own checks, including the ones the engine would have run. See
+        // RequiresFallbackApprovalAsync for who may give that decision.
+        var hasWorkflow = await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType);
 
         var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(
                 workflowResult.ExecutionResult.Message ?? "Failed to start the requisition approval workflow.");
 
+        var submitOutcome = hasWorkflow ? workflowResult.Outcome : WorkflowOutcome.Pending;
+
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = submittedByUserId.ToString();
 
@@ -394,19 +463,37 @@ public class StaffRequisitionService : IStaffRequisitionService
         // entity stores (RequestedById, the history row's ChangedById) is an Employee FK and gets
         // the id the controller passed. See hr-attendance-actor-conventions.
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var fromStatus = entity.Status;
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Approve", approveDto.Comments);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        // With a definition published, the engine names the approver and rules on the step. With
+        // none, it has no instance to answer about — CanUserApproveAsync returns false and
+        // ProcessApprovalAsync has nothing to process — so authority falls to the recruitment
+        // administer tier and the outcome is applied directly. See RecruitmentApprovalAuthority
+        // for why that tier, and note that the segregation-of-duties check above has already run
+        // either way: holding the permission never lets you approve your own requisition.
+        WorkflowOutcome approvalOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Approve", approveDto.Comments);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+            approvalOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            RecruitmentApprovalAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "approve a staff requisition");
+            approvalOutcome = WorkflowOutcome.Approved;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, actingUserId);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = approvedByUserId.ToString();
 
@@ -428,20 +515,35 @@ public class StaffRequisitionService : IStaffRequisitionService
             throw new InvalidOperationException("Only Submitted or UnderReview requisitions can be rejected.");
 
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var fromStatus = entity.Status;
         var rejectionText = string.IsNullOrWhiteSpace(rejectDto.Comments) ? "Rejected" : rejectDto.Comments.Trim();
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Reject", rejectionText);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+        // Same two paths as ApproveAsync. Rejection matters as much as approval here: without the
+        // no-workflow branch, a requisition submitted on an unconfigured tenant could be neither
+        // approved nor rejected nor recalled, and Cancel would be its only exit.
+        WorkflowOutcome rejectionOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Reject", rejectionText);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+            rejectionOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            RecruitmentApprovalAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "reject a staff requisition");
+            rejectionOutcome = WorkflowOutcome.Rejected;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, actingUserId, rejectionText);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = rejectedByUserId.ToString();
 
@@ -471,10 +573,18 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         var fromStatus = entity.Status;
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, entity.Id, _currentUserProvider.UserId);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to recall the requisition.");
+        // The requester-only rule above is the whole gate, so there is no permission branch here —
+        // but the engine still has to be skipped when nothing is published, because
+        // RecallWorkflowAsync answers "No active workflow found" and the recall would fail. Before
+        // G-4.1 this branch could not be reached at all: submission went straight to Approved, and
+        // an approved requisition is past recalling. Closing that opened this.
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, entity.Id, _currentUserProvider.UserId);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to recall the requisition.");
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyRecallOutcome(entity, _currentUserProvider.UserId, reason);
@@ -552,6 +662,28 @@ public class StaffRequisitionService : IStaffRequisitionService
         if (fulfillDto.PositionsFilled < 1 || fulfillDto.PositionsFilled > entity.NumberOfPositions)
             throw new InvalidOperationException($"Positions filled must be between 1 and {entity.NumberOfPositions}.");
 
+        // ── G-4.5 (2026-09-15): the other half of reconciling the two writers ──────────────────
+        // This path sets an ABSOLUTE total from what a user types; ConfirmStartAsync derives one
+        // from the confirmed hire records. They used to be additive, so a manual "2" followed by a
+        // confirmed start read 3. They are now reconciled on the rule that **a confirmed hire is a
+        // fact and a typed number is a claim**: the claim may exceed the facts (a seat filled by a
+        // transfer or secondment that produced no hire record is real), but it may not contradict
+        // them by going below. Saying "1 filled" when two people have started is not a correction,
+        // it is a mistake, and it used to be silently accepted.
+        var confirmedHires = await _unitOfWork.Repository<JobHireRecord>().GetQueryable()
+            .Where(h => h.TenantId == entity.TenantId
+                     && !h.IsDeleted
+                     && h.Status == JobHireStatus.Active
+                     && h.Application != null
+                     && h.Application.JobVacancy != null
+                     && h.Application.JobVacancy.StaffRequisitionId == entity.Id)
+            .CountAsync(cancellationToken);
+
+        if (fulfillDto.PositionsFilled < confirmedHires)
+            throw new InvalidOperationException(
+                $"{confirmedHires} hire(s) have already been confirmed against this requisition, so " +
+                $"the number filled cannot be {fulfillDto.PositionsFilled}. Record {confirmedHires} or more.");
+
         var fromStatus = entity.Status;
         entity.PositionsFilled = fulfillDto.PositionsFilled;
 
@@ -611,9 +743,146 @@ public class StaffRequisitionService : IStaffRequisitionService
         await GetOwnedAsync(createDto.RequisitionId);
 
         var entity = createDto.ToEntity(current, recordedByUserId);
+        await ApplyCostMoneyAsync(entity, cancellationToken);
         await _costRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await WithEnvelopeAsync((await ReloadCostAsync(entity.Id, cancellationToken)).ToDto(), entity, false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Round 2b, R6 (decision D-5, Q-R5): the recruitment envelope is the linked budget's
+    /// <c>RecruitmentBudget</c>, drawn down by the APPROVED costs of every requisition on that
+    /// budget. Recording never refuses (a recorded cost is not signed); approving refuses under
+    /// Block and warns under Warn. An envelope of 0 means "not set" and constrains nothing.
+    /// Returns the approved total so far (excluding this cost), the envelope and the budget number,
+    /// or null when the requisition is not linked to a live budget.
+    /// </summary>
+    private async Task<(decimal Approved, decimal Pending, decimal Envelope, string BudgetNumber, BudgetEnforcementMode Mode)?> EnvelopeAsync(
+        StaffRequisitionCost cost, CancellationToken cancellationToken)
+    {
+        var requisition = await _unitOfWork.Repository<StaffRequisition>().GetQueryable().AsNoTracking()
+            .Include(r => r.ManpowerBudgetLine).ThenInclude(l => l!.ManpowerBudget)
+            .FirstOrDefaultAsync(r => r.Id == cost.RequisitionId, cancellationToken);
+        var budget = requisition?.ManpowerBudgetLine?.ManpowerBudget;
+        if (budget == null || budget.IsDeleted
+            || (budget.Status != ManpowerBudgetStatus.Approved && budget.Status != ManpowerBudgetStatus.Active))
+            return null;
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var others = await _unitOfWork.Repository<StaffRequisitionCost>().GetQueryable().AsNoTracking()
+            .Where(c => c.TenantId == cost.TenantId && !c.IsDeleted && c.Id != cost.Id
+                     && c.Requisition != null && !c.Requisition.IsDeleted
+                     && c.Requisition.Status != StaffRequisitionStatus.Cancelled
+                     && c.Requisition.Status != StaffRequisitionStatus.Rejected
+                     && c.Requisition.ManpowerBudgetLine != null
+                     && c.Requisition.ManpowerBudgetLine.ManpowerBudgetId == budget.Id
+                     && c.Status != StaffRequisitionCostStatus.Rejected)
+            .Select(c => new { c.Status, c.AmountBaseCurrency })
+            .ToListAsync(cancellationToken);
+        return (
+            others.Where(c => c.Status == StaffRequisitionCostStatus.Approved).Sum(c => c.AmountBaseCurrency),
+            others.Where(c => c.Status == StaffRequisitionCostStatus.Recorded).Sum(c => c.AmountBaseCurrency),
+            budget.RecruitmentBudget,
+            budget.BudgetNumber,
+            settings.BudgetEnforcementMode);
+    }
+
+    /// <summary>Decorates a cost's write response with the budget it counts against and a warning when the envelope would be passed.</summary>
+    private async Task<StaffRequisitionCostDto> WithEnvelopeAsync(StaffRequisitionCostDto dto, StaffRequisitionCost cost, bool approving, CancellationToken cancellationToken)
+    {
+        var env = await EnvelopeAsync(cost, cancellationToken);
+        if (env is null) return dto;
+        var (approved, pending, envelope, number, mode) = env.Value;
+        dto.BudgetNumber = number;
+        if (envelope <= 0 || mode == BudgetEnforcementMode.Off) return dto;
+        var projected = approved + cost.AmountBaseCurrency + (approving ? 0 : pending);
+        if (projected > envelope)
+            dto.BudgetWarning = approving
+                ? $"Approving this cost takes {number}'s recruitment spend to {projected:N2} against an envelope of {envelope:N2} ({approved:N2} already approved)."
+                : $"With this cost, {number}'s recorded and approved recruitment spend would be {projected:N2} against an envelope of {envelope:N2} ({approved:N2} approved, {pending:N2} pending). Approval will be {(mode == BudgetEnforcementMode.Block ? "refused" : "warned")}.";
+        return dto;
+    }
+
+    /// <summary>
+    /// Round 2b, R7: the money on a cost comes from Finance's masters. The currency must be one
+    /// Finance holds; the rate is Finance's for the cost date; the base-currency amount is stored
+    /// so the total does not move with the rate. The payee is a Procurement supplier (name
+    /// snapshotted) or, with none, a typed name. Refusals are <see cref="InvalidOperationException"/>
+    /// → 422 on this controller.
+    /// </summary>
+    private async Task ApplyCostMoneyAsync(StaffRequisitionCost entity, CancellationToken cancellationToken)
+    {
+        await _currency.RequireKnownCurrencyAsync(entity.Currency, cancellationToken);
+        entity.Currency = entity.Currency.Trim().ToUpperInvariant();
+        entity.ExchangeRate = await _currency.GetRateToBaseAsync(entity.Currency, entity.CostDate, cancellationToken);
+        entity.AmountBaseCurrency = Math.Round(entity.Amount * entity.ExchangeRate, 2);
+
+        if (entity.SupplierId is { } supplierId)
+        {
+            var supplier = await _unitOfWork.Repository<Supplier>().GetQueryable().AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == supplierId && s.TenantId == entity.TenantId && !s.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("The supplier named does not exist in this organisation.");
+            if (!supplier.IsActive)
+                throw new InvalidOperationException($"Supplier {supplier.Name} is inactive; choose an active supplier or name the payee.");
+            entity.PayeeName = supplier.Name;
+        }
+        else if (string.IsNullOrWhiteSpace(entity.PayeeName))
+        {
+            throw new InvalidOperationException("Say who was paid: choose a supplier, or name the payee.");
+        }
+    }
+
+    private async Task<StaffRequisitionCost> ReloadCostAsync(Guid id, CancellationToken cancellationToken)
+        => await _unitOfWork.Repository<StaffRequisitionCost>().GetQueryable().AsNoTracking()
+            .Include(c => c.Requisition).Include(c => c.RecordedBy).Include(c => c.Supplier).Include(c => c.ApprovedBy)
+            .FirstAsync(c => c.Id == id, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<StaffRequisitionCostDto> DecideCostAsync(Guid costId, bool approve, string? note, Guid actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCostAsync(costId);
+        if (entity.Status != StaffRequisitionCostStatus.Recorded)
+            throw new InvalidOperationException($"This cost is already {entity.Status}.");
+        // Two-actor rule: the person who recorded a cost does not approve it.
+        if (entity.RecordedById == actorEmployeeId)
+            throw new UnauthorizedAccessException("The person who recorded a cost cannot approve or reject it.");
+        // R6: the envelope is enforced at APPROVAL — the act that commits the money.
+        if (approve && await EnvelopeAsync(entity, cancellationToken) is { } env
+            && env.Envelope > 0 && env.Mode == BudgetEnforcementMode.Block
+            && env.Approved + entity.AmountBaseCurrency > env.Envelope)
+            throw new InvalidOperationException(
+                $"Approving this cost would take {env.BudgetNumber}'s recruitment spend to {env.Approved + entity.AmountBaseCurrency:N2} against an envelope of {env.Envelope:N2} " +
+                $"({env.Approved:N2} already approved). Budget enforcement is set to Block: revise the budget's recruitment envelope, or reject the cost.");
+
+        // HR's approval of the cost is the event that hands it to Finance (lane 8, slice 5, the R8
+        // AP hand-off): the approval and the vendor invoice commit together, or neither does. A
+        // cost paid to a person rather than a supplier is recorded Skipped and stays HR-side.
+        var requisitionNumber = await _unitOfWork.Repository<StaffRequisition>().GetQueryable().AsNoTracking()
+            .Where(r => r.Id == entity.RequisitionId).Select(r => r.RequisitionNumber).FirstOrDefaultAsync(cancellationToken) ?? "REQ";
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.Status = approve ? StaffRequisitionCostStatus.Approved : StaffRequisitionCostStatus.Rejected;
+            entity.ApprovedById = actorEmployeeId;
+            entity.ApprovedOn = DateTime.UtcNow;
+            entity.ApprovalNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+            entity.UpdatedAt = DateTime.UtcNow;
+            await _costRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return approve ? HrFinancePostingCommandFactory.RequisitionCostApproved(entity, requisitionNumber) : null;
+        }, _currentUserProvider.UserId, cancellationToken);
+        var dto = (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
+        if (!approve) return dto;
+        // After the save the cost is Approved, so "others" excludes it and the projection is exact.
+        var after = await EnvelopeAsync(entity, cancellationToken);
+        if (after is { } a)
+        {
+            dto.BudgetNumber = a.BudgetNumber;
+            if (a.Envelope > 0 && a.Mode == BudgetEnforcementMode.Warn && a.Approved + entity.AmountBaseCurrency > a.Envelope)
+            {
+                dto.BudgetWarning = $"{a.BudgetNumber}'s approved recruitment spend is now {a.Approved + entity.AmountBaseCurrency:N2} against an envelope of {a.Envelope:N2}. Budget enforcement is set to Warn.";
+                _logger.LogWarning("Recruitment cost {CostId} approved over the envelope of {Budget}: {Warning}", entity.Id, a.BudgetNumber, dto.BudgetWarning);
+            }
+        }
+        return dto;
     }
 
     public async Task<IEnumerable<StaffRequisitionCostDto>> GetCostsAsync(Guid requisitionId, CancellationToken cancellationToken = default)
@@ -625,11 +894,17 @@ public class StaffRequisitionService : IStaffRequisitionService
     }
 
     public async Task<decimal> GetTotalCostAsync(Guid requisitionId, CancellationToken cancellationToken = default)
+        => await GetTotalCostAsync(requisitionId, null, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<decimal> GetTotalCostAsync(Guid requisitionId, StaffRequisitionCostStatus? status, CancellationToken cancellationToken = default)
     {
         await GetOwnedAsync(requisitionId);
         var tenantId = GetTenantId();
         var entities = await _costRepository.GetByRequisitionIdAsync(requisitionId);
-        return entities.Where(e => e.TenantId == tenantId).Sum(e => e.Amount * e.ExchangeRate);
+        // The STORED base-currency figure (R7), not amount × a rate that may have moved since.
+        return entities.Where(e => e.TenantId == tenantId && (status == null || e.Status == status.Value))
+            .Sum(e => e.AmountBaseCurrency);
     }
 
     public async Task<IEnumerable<StaffRequisitionCostDto>> GetCostsByCategoryAsync(Guid requisitionId, StaffRequisitionCostCategory category, CancellationToken cancellationToken = default)
@@ -644,17 +919,40 @@ public class StaffRequisitionService : IStaffRequisitionService
     {
         var entity = await GetOwnedCostAsync(updateDto.Id);
 
-        entity.UpdateEntity(updateDto, updatedByUserId);
+        if (entity.Status == StaffRequisitionCostStatus.Approved)
+        {
+            // An approved cost is what HR signed; only the voucher and the note may follow it.
+            var moneyChanged = updateDto.Amount != entity.Amount
+                || !string.Equals(updateDto.Currency?.Trim(), entity.Currency, StringComparison.OrdinalIgnoreCase)
+                || updateDto.Category != entity.Category
+                || updateDto.Purpose != entity.Purpose
+                || updateDto.SupplierId != entity.SupplierId
+                || (updateDto.CostDate.HasValue && updateDto.CostDate.Value != entity.CostDate);
+            if (moneyChanged)
+                throw new InvalidOperationException(
+                    "This cost has been approved; its amount, currency, date, category, purpose and payee are fixed. Only the payment voucher and the note can be changed.");
+            entity.PaymentVoucherNumber = updateDto.PaymentVoucherNumber;
+            entity.Description = updateDto.Description;
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = updatedByUserId.ToString();
+        }
+        else
+        {
+            entity.UpdateEntity(updateDto, updatedByUserId);
+            await ApplyCostMoneyAsync(entity, cancellationToken);
+        }
 
         await _costRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await WithEnvelopeAsync((await ReloadCostAsync(entity.Id, cancellationToken)).ToDto(), entity, false, cancellationToken);
     }
 
     public async Task<bool> DeleteCostAsync(Guid costId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCostAsync(costId);
+        // A cost Finance already holds as an invoice is not deleted from HR; withdraw it through the register first.
+        await _financePosting.EnsureNotPostedAsync(HrFinancePostingEventCatalog.SourceStaffRequisitionCost, entity.Id, "delete", cancellationToken);
 
         await _costRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -859,25 +1157,9 @@ public class StaffRequisitionService : IStaffRequisitionService
         var mode = settings.EstablishmentEnforcementMode;
         if (mode == BudgetEnforcementMode.Off) return null;
         if (blockingOnly && mode != BudgetEnforcementMode.Block) return null;
-
-        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
-            .FirstOrDefaultAsync(p => p.Id == entity.PositionId && p.TenantId == entity.TenantId,
-                cancellationToken);
-
-        // Not established by anyone: not constrained. See the remarks.
-        if (position?.EstablishmentApprovedOn == null) return null;
-
-        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
-            .CountAsync(e => e.TenantId == entity.TenantId
-                          && e.PositionId == entity.PositionId
-                          && e.IsActive, cancellationToken);
-
-        var projected = occupied + entity.NumberOfPositions;
-        if (projected <= position.ExpectedHeadcount) return null;
-
-        return $"{position.Title} is established for {position.ExpectedHeadcount} post(s) and "
-             + $"{occupied} are filled. This requisition would take it to {projected}, outside the "
-             + $"establishment approved on {position.EstablishmentApprovedOn:dd MMM yyyy}.";
+        // One computation for the refusal and the panel (R5).
+        var est = await BuildEstablishmentCheckAsync(entity, settings, cancellationToken);
+        return est.WouldExceed ? est.Message : null;
     }
 
     private async Task<RequisitionBudgetCheckDto> BuildBudgetCheckAsync(StaffRequisition entity, CancellationToken cancellationToken)
@@ -885,26 +1167,41 @@ public class StaffRequisitionService : IStaffRequisitionService
         var settings = await _policyProvider.GetAsync(cancellationToken);
         var mode = settings.BudgetEnforcementMode;
 
+        // Round 2b, R5: the policy's fiscal year, not the calendar year (§ 3 defect 3).
         var referenceDate = entity.DesiredStartDate != default ? entity.DesiredStartDate : entity.RequestDate;
-        var fiscalYear = referenceDate.Year;
+        var fiscalYear = HrFiscalYear.For(referenceDate, settings);
 
         var result = new RequisitionBudgetCheckDto
         {
             Mode               = mode,
             FiscalYear         = fiscalYear,
             RequestedPositions = entity.NumberOfPositions,
+            Establishment      = await BuildEstablishmentCheckAsync(entity, settings, cancellationToken),
         };
 
-        // Match the position's budget line for the fiscal year.
-        //
-        // ⚠ Only an APPROVED or ACTIVE budget counts. This previously matched any budget and merely
-        // ordered approved ones first, so a Draft budget line constrained — or authorised — a
-        // requisition. That inverts the point of FR-HR-135's chain: headcount is authorised by
-        // Department Head → HR → Managing Director, and until they have ruled, a department typing
-        // "50" into a draft has authorised nothing. Nobody could have noticed before area 17,
-        // because there were no ManpowerBudgetLine rows in the database at all (area-17 build plan
-        // §3.3), so this branch had never once been reached with data.
-        var line = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable()
+        // The line: the one the requisition is LINKED to (R5), else the old match by position and
+        // fiscal year. Only an APPROVED or ACTIVE budget counts — a Draft authorises nothing
+        // (area 17 slice 7), and a linked budget since rejected or withdrawn is reported by name
+        // rather than silently treated as absent (Q-R4).
+        ManpowerBudgetLine? line = null;
+        if (entity.ManpowerBudgetLineId is { } linkedId)
+        {
+            var linked = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable().AsNoTracking()
+                .Include(l => l.ManpowerBudget)
+                .FirstOrDefaultAsync(l => l.Id == linkedId && l.TenantId == entity.TenantId, cancellationToken);
+            if (linked?.ManpowerBudget != null)
+            {
+                result.LinkedLineId = linked.Id;
+                result.LinkedBudgetId = linked.ManpowerBudgetId;
+                result.LinkedBudgetNumber = linked.ManpowerBudget.BudgetNumber;
+                result.LinkedBudgetStatus = linked.ManpowerBudget.Status.ToString();
+                var live = !linked.ManpowerBudget.IsDeleted
+                        && (linked.ManpowerBudget.Status == ManpowerBudgetStatus.Approved
+                         || linked.ManpowerBudget.Status == ManpowerBudgetStatus.Active);
+                if (live) { line = linked; result.IsLinked = true; }
+            }
+        }
+        line ??= await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable().AsNoTracking()
             .Include(l => l.ManpowerBudget)
             .Where(l => l.TenantId == entity.TenantId
                      && l.PositionId == entity.PositionId
@@ -919,21 +1216,54 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         if (line is null)
         {
-            // No budgeted headcount for this position — enforcement never applies.
             result.HasBudgetLine = false;
             result.ProjectedHeadcount = entity.NumberOfPositions;
-            result.Message = mode == BudgetEnforcementMode.Off
-                ? "Budget enforcement is turned off."
-                : $"No approved manpower budget line exists for this position in {fiscalYear}; the requisition is not budget-constrained.";
+            result.ExceptionRequired = mode != BudgetEnforcementMode.Off;
+            result.ExceptionReason = result.LinkedBudgetNumber != null
+                ? $"Budget {result.LinkedBudgetNumber} is {result.LinkedBudgetStatus}, so it no longer authorises anything."
+                : "No approved manpower budget line covers this position for the fiscal year.";
+            // D-4: under Block a requisition not drawn from an approved budget is refused outright.
+            result.WouldBlock = mode == BudgetEnforcementMode.Block;
+            result.Message = mode switch
+            {
+                BudgetEnforcementMode.Off => "Budget enforcement is turned off.",
+                BudgetEnforcementMode.Block =>
+                    $"No approved manpower budget line covers this position in {fiscalYear}, and budget enforcement is set to Block: " +
+                    "a requisition must be raised against an approved budget line. Plan a budget from the establishment, or ask for the setting to be relaxed.",
+                _ => $"No approved manpower budget line covers this position in {fiscalYear}; the requisition is not budget-constrained, but the exception must be justified.",
+            };
             return result;
         }
+
+        // D-8: what the line budgets for, and what other requisitions have already asked of it.
+        var budgeted = line.PlannedNewPositions > 0 ? line.PlannedNewPositions : Math.Max(0, line.PlannedCount - line.CurrentFilled);
+        var drawdown = await DrawdownAsync(line.Id, entity.Id, cancellationToken);
 
         result.HasBudgetLine = true;
         result.PlannedCount = line.PlannedCount;
         result.CurrentFilled = line.CurrentFilled;
-        result.ProjectedHeadcount = line.CurrentFilled + entity.NumberOfPositions;
-        result.IsOverBudget = mode != BudgetEnforcementMode.Off && result.ProjectedHeadcount > line.PlannedCount;
-        result.WouldBlock = mode == BudgetEnforcementMode.Block && result.IsOverBudget;
+        result.BudgetedNewPosts = budgeted;
+        result.Drawdown = drawdown;
+        result.Remaining = budgeted - drawdown;
+        result.ProjectedHeadcount = line.CurrentFilled + drawdown + entity.NumberOfPositions;
+        if (!result.IsLinked)
+        {
+            // Matched, not linked: the form can offer this line. Naming it is what makes the
+            // requisition budgeted; until then the exception rule applies.
+            result.LinkedLineId ??= line.Id;
+            result.LinkedBudgetId ??= line.ManpowerBudgetId;
+            result.LinkedBudgetNumber ??= line.ManpowerBudget?.BudgetNumber;
+            result.LinkedBudgetStatus ??= line.ManpowerBudget?.Status.ToString();
+            result.ExceptionRequired = mode != BudgetEnforcementMode.Off;
+            result.ExceptionReason = $"Budget {line.ManpowerBudget?.BudgetNumber} covers this position but the requisition is not raised against it.";
+        }
+        else if (result.Establishment is { IsEstablished: true, Gap: <= 0 } est && mode != BudgetEnforcementMode.Off)
+        {
+            result.ExceptionRequired = true;
+            result.ExceptionReason = $"The post is established for {est.ExpectedHeadcount} and {est.Filled} are in it — no establishment gap.";
+        }
+        result.IsOverBudget = mode != BudgetEnforcementMode.Off && drawdown + entity.NumberOfPositions > budgeted;
+        result.WouldBlock = mode == BudgetEnforcementMode.Block && (result.IsOverBudget || !result.IsLinked);
 
         if (mode == BudgetEnforcementMode.Off)
         {
@@ -943,19 +1273,197 @@ public class StaffRequisitionService : IStaffRequisitionService
         {
             result.Message =
                 $"This requisition would take the position to {result.ProjectedHeadcount} filled " +
-                $"({line.CurrentFilled} filled + {entity.NumberOfPositions} requested) against an approved " +
-                $"budget of {line.PlannedCount} for {fiscalYear}." +
+                $"({line.CurrentFilled} filled + {drawdown} already requested + {entity.NumberOfPositions} requested) against " +
+                $"{budgeted} new post(s) budgeted for {fiscalYear} on {line.ManpowerBudget?.BudgetNumber} (planned headcount {line.PlannedCount})." +
                 (result.WouldBlock
                     ? " Budget enforcement is set to Block, so it cannot be submitted or approved until the budget is revised."
                     : " Budget enforcement is set to Warn — proceed with caution.");
         }
+        else if (!result.IsLinked && mode == BudgetEnforcementMode.Block)
+        {
+            result.Message =
+                $"Budget {line.ManpowerBudget?.BudgetNumber} covers this position in {fiscalYear} but the requisition is not raised against it, " +
+                "and budget enforcement is set to Block: choose the budget line on the requisition.";
+        }
         else
         {
             result.Message =
-                $"Within budget: {result.ProjectedHeadcount} of {line.PlannedCount} budgeted for {fiscalYear}.";
+                $"Within budget: {drawdown + entity.NumberOfPositions} of {budgeted} new post(s) budgeted for {fiscalYear}" +
+                (result.IsLinked ? $" on {line.ManpowerBudget?.BudgetNumber}." : $" on {line.ManpowerBudget?.BudgetNumber} — not yet raised against it.");
         }
 
         return result;
+    }
+
+    /// <summary>D-8: posts on OTHER live requisitions drawing down from the same line.</summary>
+    private Task<int> DrawdownAsync(Guid lineId, Guid? excludeRequisitionId, CancellationToken cancellationToken)
+        => _unitOfWork.Repository<StaffRequisition>().GetQueryable().AsNoTracking()
+            .Where(r => r.ManpowerBudgetLineId == lineId && !r.IsDeleted
+                     && r.Id != excludeRequisitionId
+                     && r.Status != StaffRequisitionStatus.Cancelled
+                     && r.Status != StaffRequisitionStatus.Rejected)
+            .SumAsync(r => (int?)r.NumberOfPositions, cancellationToken)
+            .ContinueWith(t => t.Result ?? 0, cancellationToken);
+
+    /// <summary>
+    /// The establishment side of the check, as a DTO (R5): the numbers <see cref="CheckEstablishmentAsync"/>
+    /// refuses on, now visible on the panel before submit.
+    /// </summary>
+    private async Task<RequisitionEstablishmentCheckDto> BuildEstablishmentCheckAsync(
+        StaffRequisition entity, CompanyHrPolicySettings settings, CancellationToken cancellationToken)
+    {
+        var mode = settings.EstablishmentEnforcementMode;
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == entity.PositionId && p.TenantId == entity.TenantId, cancellationToken);
+        // ⚠ G-4.4 (2026-09-15): this counted `e.IsActive` ONLY, ignoring StaffStatus entirely —
+        // a third definition of "how many people are in this post", alongside the establishment
+        // grid's and the vacancy mutation's. A terminated employee whose IsActive flag was never
+        // cleared counted as filled here but not on the establishment screen, so the two screens
+        // could disagree about whether a gap existed — and this is the count that REFUSES a
+        // submission, so the disagreement had teeth. All three now use the shared predicate.
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(e => e.TenantId == entity.TenantId && e.PositionId == entity.PositionId)
+            .Where(HrServingEmployees.Predicate)
+            .CountAsync(cancellationToken);
+
+        var dto = new RequisitionEstablishmentCheckDto { Mode = mode, Filled = occupied };
+        if (position?.EstablishmentApprovedOn == null)
+        {
+            dto.IsEstablished = false;
+            dto.Message = "Nobody has established this post, so no headcount rule applies to it.";
+            return dto;
+        }
+        dto.IsEstablished = true;
+        dto.ExpectedHeadcount = position.ExpectedHeadcount;
+        dto.Gap = Math.Max(0, position.ExpectedHeadcount - occupied);
+        if (position.EstablishmentSourceBudgetId is { } sid)
+            dto.SourceBudgetNumber = await _unitOfWork.Repository<ManpowerBudget>().GetQueryable().AsNoTracking()
+                .Where(b => b.Id == sid).Select(b => b.BudgetNumber).FirstOrDefaultAsync(cancellationToken);
+        var projected = occupied + entity.NumberOfPositions;
+        dto.WouldExceed = mode != BudgetEnforcementMode.Off && projected > position.ExpectedHeadcount;
+        dto.WouldBlock = dto.WouldExceed && mode == BudgetEnforcementMode.Block;
+        dto.Message = dto.WouldExceed
+            ? $"{position.Title} is established for {position.ExpectedHeadcount} post(s) and {occupied} are filled. This requisition would take it to {projected}, outside the establishment approved on {position.EstablishmentApprovedOn:dd MMM yyyy}."
+            : $"{position.Title} is established for {position.ExpectedHeadcount} post(s); {occupied} filled, {dto.Gap} to fill.";
+        return dto;
+    }
+
+    /// <summary>
+    /// Round 2b, R5: derives the budget link and the two derived columns. Null = not raised
+    /// against a budget. A line must name this position, belong to this tenant, sit on an
+    /// Approved/Active budget, and cover the desired start date's fiscal year.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Refusals are <see cref="InvalidOperationException"/>, which this controller's rules filter
+    /// answers as 422 — the same code its establishment and budget refusals use. An
+    /// <see cref="ArgumentException"/> here would come back as 404, and a bad reference INSIDE a
+    /// payload is a refusal, not a missing resource (the lane-B2 lesson, learned twice).
+    /// </remarks>
+    private async Task ApplyBudgetLinkAsync(StaffRequisition entity, Guid? lineId, CancellationToken cancellationToken)
+    {
+        if (lineId is null)
+        {
+            entity.ManpowerBudgetLineId = null;
+            entity.IsBudgeted = false;
+            entity.BudgetCode = null;
+            return;
+        }
+        var line = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable().AsNoTracking()
+            .Include(l => l.ManpowerBudget)
+            .FirstOrDefaultAsync(l => l.Id == lineId.Value && l.TenantId == entity.TenantId && !l.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("The manpower budget line named does not exist in this organisation.");
+        if (line.PositionId != entity.PositionId)
+            throw new InvalidOperationException("The manpower budget line named is for a different position than the requisition.");
+        var budget = line.ManpowerBudget ?? throw new InvalidOperationException("The manpower budget line named belongs to no budget.");
+        if (budget.IsDeleted || (budget.Status != ManpowerBudgetStatus.Approved && budget.Status != ManpowerBudgetStatus.Active))
+            throw new InvalidOperationException($"Budget {budget.BudgetNumber} is {budget.Status}; only an Approved budget can be drawn down from.");
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var referenceDate = entity.DesiredStartDate != default ? entity.DesiredStartDate : entity.RequestDate;
+        var fiscalYear = HrFiscalYear.For(referenceDate, settings);
+        if (budget.FiscalYear != fiscalYear)
+            throw new InvalidOperationException($"Budget {budget.BudgetNumber} is for {budget.FiscalYear}; the desired start date falls in fiscal year {fiscalYear}.");
+
+        entity.ManpowerBudgetLineId = line.Id;
+        entity.IsBudgeted = true;
+        entity.BudgetCode = budget.BudgetNumber;
+    }
+
+    /// <summary>D-4: an exception must be written down where the check says one is required.</summary>
+    private async Task RequireExceptionJustificationAsync(StaffRequisition entity, CancellationToken cancellationToken)
+    {
+        var check = await BuildBudgetCheckAsync(entity, cancellationToken);
+        if (!check.ExceptionRequired || !string.IsNullOrWhiteSpace(entity.ExceptionJustification)) return;
+        throw new InvalidOperationException(
+            $"This requisition needs an exception justification before it can be submitted: {check.ExceptionReason} " +
+            "Say why the post should be recruited for anyway.");
+    }
+
+    /// <summary>D-2: the establishment as the approver will be asked to decide against it.</summary>
+    private async Task StampEstablishmentSnapshotAsync(StaffRequisition entity, CancellationToken cancellationToken)
+    {
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var est = await BuildEstablishmentCheckAsync(entity, settings, cancellationToken);
+        entity.EstablishmentSnapshotOn = DateTime.UtcNow;
+        entity.EstablishmentSnapshotIsEstablished = est.IsEstablished;
+        entity.EstablishmentSnapshotExpected = est.ExpectedHeadcount;
+        entity.EstablishmentSnapshotFilled = est.Filled;
+        entity.EstablishmentSnapshotSourceBudgetNumber = est.SourceBudgetNumber;
+    }
+
+    /// <inheritdoc />
+    public async Task<RequisitionBudgetCheckDto> PreviewBudgetCheckAsync(RequisitionBudgetCheckPreviewDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var probe = new StaffRequisition
+        {
+            Id = dto.ExcludeRequisitionId ?? Guid.Empty,
+            TenantId = tenantId,
+            PositionId = dto.PositionId,
+            NumberOfPositions = dto.NumberOfPositions,
+            DesiredStartDate = dto.DesiredStartDate ?? DateTime.UtcNow.AddDays(30),
+            RequestDate = DateTime.UtcNow,
+            ManpowerBudgetLineId = dto.ManpowerBudgetLineId,
+        };
+        return await BuildBudgetCheckAsync(probe, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<StaffRequisitionDto> CreateFromBudgetLineAsync(Guid lineId, Guid requestedByUserId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var line = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable().AsNoTracking()
+            .Include(l => l.ManpowerBudget).Include(l => l.Position)
+            .FirstOrDefaultAsync(l => l.Id == lineId && l.TenantId == tenantId && !l.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("The manpower budget line does not exist in this organisation.");
+        var budget = line.ManpowerBudget!;
+        if (budget.Status != ManpowerBudgetStatus.Approved && budget.Status != ManpowerBudgetStatus.Active)
+            throw new InvalidOperationException($"Budget {budget.BudgetNumber} is {budget.Status}; requisitions are raised from an Approved budget.");
+        var budgeted = line.PlannedNewPositions > 0 ? line.PlannedNewPositions : Math.Max(0, line.PlannedCount - line.CurrentFilled);
+        var drawdown = await DrawdownAsync(line.Id, null, cancellationToken);
+        var remaining = budgeted - drawdown;
+        if (remaining <= 0)
+            throw new InvalidOperationException(
+                $"Budget {budget.BudgetNumber} authorises {budgeted} new post(s) for {line.Position?.Title} and {drawdown} are already requested; nothing is left to draw down.");
+
+        var start = budget.PeriodStartDate > DateTime.UtcNow ? budget.PeriodStartDate : DateTime.UtcNow.AddDays(30);
+        var dto = new CreateStaffRequisitionDto
+        {
+            PositionId = line.PositionId,
+            OrganizationUnitId = line.Position?.OrganizationUnitId,
+            OrganizationLevelId = line.Position?.OrganizationLevelId,
+            RequisitionTitle = line.Position?.Title ?? "Requisition from budget",
+            Type = StaffRequisitionType.NewPosition,
+            // The budget line's Critical maps to the requisition's Urgent — the two ladders differ by one name.
+            Priority = line.Priority switch { BudgetPriority.Critical => StaffRequisitionPriority.Urgent, BudgetPriority.High => StaffRequisitionPriority.High, BudgetPriority.Low => StaffRequisitionPriority.Low, _ => StaffRequisitionPriority.Medium },
+            NumberOfPositions = remaining,
+            DesiredStartDate = start,
+            BusinessJustification = $"Raised from manpower budget {budget.BudgetNumber} ({budget.FiscalYear}), line for {line.Position?.Title}: {budgeted} new post(s) authorised, {drawdown} already requested.",
+            Notes = string.Empty,
+            AllowInternalCandidates = true,
+            AllowExternalCandidates = true,
+            ManpowerBudgetLineId = line.Id,
+        };
+        return await CreateAsync(dto, tenantId, requestedByUserId, cancellationToken);
     }
 
     /// <summary>

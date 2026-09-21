@@ -21,6 +21,8 @@ public interface IJobApplicationService
 
     // CRUD
     Task<JobApplicationDto> CreateAsync(CreateJobApplicationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <summary>Round 3, lane A: HR corrects the source and the advert an application came through.</summary>
+    Task<JobApplicationDto> UpdateSourceAsync(Guid id, UpdateJobApplicationSourceDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Workflow

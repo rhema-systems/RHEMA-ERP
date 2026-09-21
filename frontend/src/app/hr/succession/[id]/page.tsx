@@ -117,6 +117,7 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
    * reviewer could move a plan straight to Approved around whatever approval was configured.
    */
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'SuccessionPlan',
     entityId: id,
     entityLabel: 'Succession Plan',

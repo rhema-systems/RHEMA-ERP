@@ -114,6 +114,8 @@ public static class EmployeeMappingExtensions
             PhotoMimeType = e.PhotoMimeType,
             PhotoFileSizeBytes = e.PhotoFileSizeBytes,
             DisabilityDescription = e.DisabilityDescription,
+            DisabilityTypeId = e.DisabilityTypeId,
+            DisabilityTypeName = e.DisabilityType?.Name,
             Address = e.Address,
             City = e.City,
             State = e.State,
@@ -124,6 +126,12 @@ public static class EmployeeMappingExtensions
             BusinessNumber = e.BusinessNumber,
             Extension = e.Extension,
             ProbationPeriodDays = e.ProbationPeriodDays,
+            ProbationSource = e.ProbationSource,
+            // Computed on read so it cannot go stale behind a change of hire date or term. Null
+            // where there is nothing to compute from — an employee with no start date, or none.
+            ExpectedConfirmationDate = e.DateEmployed is { } hired && e.ProbationPeriodDays > 0
+                ? hired.AddDays(e.ProbationPeriodDays)
+                : null,
             ConfirmationDate = e.ConfirmationDate,
             RetirementDate = e.RetirementDate,
             TaxNumber = e.TaxNumber,
@@ -139,6 +147,8 @@ public static class EmployeeMappingExtensions
             Overtime = e.Overtime,
             OffPayrollReason = e.OffPayrollReason,
             OffPayrollNote = e.OffPayrollNote,
+            PayBasis = e.PayBasis,
+            PayBasisNote = e.PayBasisNote,
             BadgeNumber = e.BadgeNumber,
             Notes = e.Notes,
             LastPromotionDate = e.LastPromotionDate,
@@ -236,6 +246,8 @@ public static class EmployeeMappingExtensions
         to.PhotoMimeType = from.PhotoMimeType;
         to.PhotoFileSizeBytes = from.PhotoFileSizeBytes;
         to.DisabilityDescription = from.DisabilityDescription;
+        to.DisabilityTypeId = from.DisabilityTypeId;
+        to.DisabilityTypeName = from.DisabilityTypeName;
         to.Address = from.Address;
         to.City = from.City;
         to.State = from.State;
@@ -246,6 +258,8 @@ public static class EmployeeMappingExtensions
         to.BusinessNumber = from.BusinessNumber;
         to.Extension = from.Extension;
         to.ProbationPeriodDays = from.ProbationPeriodDays;
+        to.ProbationSource = from.ProbationSource;
+        to.ExpectedConfirmationDate = from.ExpectedConfirmationDate;
         to.ConfirmationDate = from.ConfirmationDate;
         to.RetirementDate = from.RetirementDate;
         to.TaxNumber = from.TaxNumber;
@@ -260,6 +274,8 @@ public static class EmployeeMappingExtensions
         to.Overtime = from.Overtime;
         to.OffPayrollReason = from.OffPayrollReason;
         to.OffPayrollNote = from.OffPayrollNote;
+        to.PayBasis = from.PayBasis;
+        to.PayBasisNote = from.PayBasisNote;
         to.BadgeNumber = from.BadgeNumber;
         to.Notes = from.Notes;
         to.LastPromotionDate = from.LastPromotionDate;
@@ -320,7 +336,10 @@ public static class EmployeeMappingExtensions
             GenderDescription = dto.GenderDescription,
             Hometown = dto.Hometown,
             HasDisability = dto.HasDisability,
-            DisabilityDescription = dto.DisabilityDescription,
+            // Round 3, lane P2: a type without the tick is contradictory — the service refuses it
+            // before this runs, and a false tick clears both the type and the notes.
+            DisabilityTypeId = dto.HasDisability ? dto.DisabilityTypeId : null,
+            DisabilityDescription = dto.HasDisability ? dto.DisabilityDescription : null,
             IsFullTime = dto.IsFullTime,
             DateEmployed = dto.DateEmployed,
 
@@ -341,7 +360,10 @@ public static class EmployeeMappingExtensions
             Extension = dto.Extension,
 
             EmploymentType = dto.EmploymentType,
-            ProbationPeriodDays = dto.ProbationPeriodDays,
+            // ⚠ A placeholder, overwritten by the caller. The term is settled against the POSITION
+            // (EmployeeService.ResolveProbationAsync), which this mapper cannot see; the entity's
+            // own default stands in only so the property is never left unassigned.
+            ProbationPeriodDays = dto.ProbationPeriodDays ?? 90,
             ConfirmationDate = dto.ConfirmationDate,
             RetirementDate = dto.RetirementDate,
 
@@ -403,6 +425,10 @@ public static class EmployeeMappingExtensions
         // treating false as absent would make the tick impossible to UNtick.
         e.HasDisability = dto.HasDisability;
         if (dto.DisabilityDescription != null) e.DisabilityDescription = dto.DisabilityDescription;
+        // Round 3, lane P2. Like the description: written when supplied, so a partial update (the
+        // import's) leaves it alone; untick and both go.
+        if (dto.DisabilityTypeId.HasValue) e.DisabilityTypeId = dto.DisabilityTypeId;
+        if (!dto.HasDisability) { e.DisabilityTypeId = null; e.DisabilityDescription = null; }
         if (dto.DateEmployed.HasValue) e.DateEmployed = dto.DateEmployed;
 
         e.IsFullTime = dto.IsFullTime;
@@ -516,7 +542,10 @@ public static class EmployeeMappingExtensions
             EmailAddress = e.EmailAddress,
             Address = e.Address,
             City = e.City,
+            Region = e.Region,
             CountryId = e.CountryId,
+            GeoAreaId = e.GeoAreaId,
+            RelationshipTypeId = e.RelationshipTypeId,
             DigitalAddress = e.DigitalAddress,
             IsPrimary = e.IsPrimary,
             IsActive = e.IsActive,
@@ -537,7 +566,10 @@ public static class EmployeeMappingExtensions
             EmailAddress = dto.EmailAddress,
             Address = dto.Address,
             City = dto.City,
+            Region = dto.Region,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
+            RelationshipTypeId = dto.RelationshipTypeId,
             DigitalAddress = dto.DigitalAddress,
             IsPrimary = dto.IsPrimary,
             IsActive = dto.IsActive,
@@ -556,7 +588,12 @@ public static class EmployeeMappingExtensions
         e.EmailAddress = dto.EmailAddress;
         e.Address = dto.Address;
         e.City = dto.City;
+        e.Region = dto.Region;
         if (dto.CountryId.HasValue) e.CountryId = dto.CountryId;
+        // ⚠ Full replace, unlike CountryId above: this DTO's own address fields are full-replace,
+        // so emptying the cascade on the form has to clear the link. See the DTO's remark.
+        e.GeoAreaId = dto.GeoAreaId;
+        e.RelationshipTypeId = dto.RelationshipTypeId;
         e.DigitalAddress = dto.DigitalAddress;
         if (dto.IsPrimary.HasValue) e.IsPrimary = dto.IsPrimary.Value;
         if (dto.IsActive.HasValue) e.IsActive = dto.IsActive.Value;
@@ -579,6 +616,7 @@ public static class EmployeeMappingExtensions
             Region = e.Region,
             DigitalAddress = e.DigitalAddress,
             CountryId = e.CountryId,
+            GeoAreaId = e.GeoAreaId,
             IsPrimary = e.IsPrimary
         };
 
@@ -593,6 +631,7 @@ public static class EmployeeMappingExtensions
             Region = dto.Region,
             DigitalAddress = dto.DigitalAddress,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
             IsPrimary = dto.IsPrimary
         };
 
@@ -605,6 +644,8 @@ public static class EmployeeMappingExtensions
         e.Region = dto.Region;
         e.DigitalAddress = dto.DigitalAddress;
         if (dto.CountryId.HasValue) e.CountryId = dto.CountryId;
+        // ⚠ Full replace, unlike CountryId above — see the DTO's remark.
+        e.GeoAreaId = dto.GeoAreaId;
         if (dto.IsPrimary.HasValue) e.IsPrimary = dto.IsPrimary.Value;
     }
 
@@ -648,6 +689,8 @@ public static class EmployeeMappingExtensions
             PhotoFileSizeBytes = d.PhotoFileSizeBytes,
             HasDisability = d.HasDisability,
             DisabilityDescription = d.DisabilityDescription,
+            DisabilityTypeId = d.DisabilityTypeId,
+            DisabilityTypeName = d.DisabilityType?.Name,
             GhanaCardNumber = d.GhanaCardNumber,
             Phone = d.Phone,
             DigitalAddress = d.DigitalAddress,
@@ -671,7 +714,10 @@ public static class EmployeeMappingExtensions
             Gender = dto.Gender,
             GenderDescription = dto.GenderDescription,
             HasDisability = dto.HasDisability,
-            DisabilityDescription = dto.DisabilityDescription,
+            // Round 3, lane P2: a type without the tick is contradictory — the service refuses it
+            // before this runs, and a false tick clears both the type and the notes.
+            DisabilityTypeId = dto.HasDisability ? dto.DisabilityTypeId : null,
+            DisabilityDescription = dto.HasDisability ? dto.DisabilityDescription : null,
             GhanaCardNumber = dto.GhanaCardNumber,
             Phone = dto.Phone,
             DigitalAddress = dto.DigitalAddress,
@@ -694,6 +740,9 @@ public static class EmployeeMappingExtensions
         d.GenderDescription = dto.GenderDescription;
         if (dto.HasDisability.HasValue) d.HasDisability = dto.HasDisability.Value;
         d.DisabilityDescription = dto.DisabilityDescription;
+        // Round 3, lane P2: the dependant update is a replace, like its description.
+        d.DisabilityTypeId = dto.DisabilityTypeId;
+        if (!d.HasDisability) { d.DisabilityTypeId = null; d.DisabilityDescription = null; }
         d.GhanaCardNumber = dto.GhanaCardNumber;
         d.Phone = dto.Phone;
         d.DigitalAddress = dto.DigitalAddress;
@@ -817,8 +866,29 @@ public static class EmployeeMappingExtensions
             CertifyingBodyName = s.CertifyingBodyRef?.Name,
             IsVerified = s.IsVerified,
             IsCertificationExpired = s.CertificationExpiryDate.HasValue && s.CertificationExpiryDate < DateOnly.FromDateTime(DateTime.UtcNow),
-            Notes = s.Notes
+            Notes = s.Notes,
+            // Round 2, lane C2. Resolved from the navigation, so every read Includes
+            // EmployeeCertification and its Certification.
+            EmployeeCertificationId = s.EmployeeCertificationId,
+            EmployeeCertificationName = s.EmployeeCertification?.Certification?.Name,
+            RequiresCertification = s.Skill?.RequiresCertification ?? false,
+            IsCompliant = SkillIsCompliant(s)
         };
+
+    /// <summary>
+    /// A skill that requires certification is compliant when a linked credential is not revoked
+    /// and not expired, or — for rows recorded before the catalogue — the per-skill certification
+    /// is still in date. Any other skill is compliant by definition.
+    /// </summary>
+    private static bool SkillIsCompliant(EmployeeSkill s)
+    {
+        if (s.Skill == null || !s.Skill.RequiresCertification) return true;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var c = s.EmployeeCertification;
+        if (c != null && !c.IsDeleted && !c.IsRevoked && (!c.ExpiresOn.HasValue || c.ExpiresOn.Value >= today))
+            return true;
+        return s.IsCertified && (!s.CertificationExpiryDate.HasValue || s.CertificationExpiryDate.Value >= today);
+    }
 
     public static EmployeeSkill ToEntity(this CreateEmployeeSkillDto dto)
         => new()
@@ -832,6 +902,7 @@ public static class EmployeeMappingExtensions
             CertificationNumber = dto.CertificationNumber,
             CertifyingBody = dto.CertifyingBody,
             CertifyingBodyId = dto.CertifyingBodyId,
+            EmployeeCertificationId = dto.EmployeeCertificationId,
             Notes = dto.Notes,
             IsCertified = dto.CertificationDate.HasValue
         };
@@ -851,6 +922,8 @@ public static class EmployeeMappingExtensions
         // certifying body once and there would be no way back to "none". The sole caller is the
         // skill form, which posts the whole record, so "absent" and "cleared" are the same intent.
         s.CertifyingBodyId = dto.CertifyingBodyId;
+        // Same reasoning, same unconditional application (round 2, lane C2).
+        s.EmployeeCertificationId = dto.EmployeeCertificationId;
         if (dto.Notes != null) s.Notes = dto.Notes;
         if (dto.IsVerified.HasValue) s.IsVerified = dto.IsVerified.Value;
     }
@@ -866,8 +939,14 @@ public static class EmployeeMappingExtensions
             EmployeeId = c.EmployeeId,
             ContractNumber = c.ContractNumber,
             EmploymentType = c.EmploymentType,
+            ContractTypeId = c.ContractTypeId,
+            // Null unless the caller Included it — the list and single reads both do.
+            ContractTypeName = c.ContractType?.Name,
             StartDate = c.StartDate,
+            EffectiveDate = c.EffectiveDate,
             EndDate = c.EndDate,
+            ContractEndDate = c.ContractEndDate,
+            IsCurrent = c.IsCurrent,
             Salary = c.Salary,
             PayFrequency = c.PayFrequency.ToString(),
             PayFrequencyType = c.PayFrequency,
@@ -876,8 +955,6 @@ public static class EmployeeMappingExtensions
             IsPensionApplicable = c.IsPensionApplicable,
             IsTaxExempt = c.IsTaxExempt,
             WorkingHoursPerWeek = c.WorkingHoursPerWeek,
-            VacationDaysPerYear = c.VacationDaysPerYear,
-            SickDaysPerYear = c.SickDaysPerYear,
             ProbationPeriodDays = c.ProbationPeriodDays,
             ConfirmationDate = c.ConfirmationDate,
             CurrencyCode = c.CurrencyCode,
@@ -977,6 +1054,10 @@ public static class EmployeeMappingExtensions
             EmployeeId = w.EmployeeId,
             CompanyName = w.CompanyName,
             CompanyAddress = w.CompanyAddress,
+            CountryId = w.CountryId,
+            City = w.City,
+            Region = w.Region,
+            GeoAreaId = w.GeoAreaId,
             JobTitle = w.JobTitle,
             JobDescription = w.JobDescription,
             StartDate = w.StartDate,
@@ -994,6 +1075,10 @@ public static class EmployeeMappingExtensions
             EmployeeId = dto.EmployeeId,
             CompanyName = dto.CompanyName,
             CompanyAddress = dto.CompanyAddress,
+            CountryId = dto.CountryId,
+            City = dto.City,
+            Region = dto.Region,
+            GeoAreaId = dto.GeoAreaId,
             JobTitle = dto.JobTitle,
             JobDescription = dto.JobDescription,
             StartDate = dto.StartDate,
@@ -1009,6 +1094,12 @@ public static class EmployeeMappingExtensions
     {
         if (!string.IsNullOrWhiteSpace(dto.CompanyName)) w.CompanyName = dto.CompanyName.Trim();
         w.CompanyAddress = dto.CompanyAddress;
+        w.City = dto.City;
+        w.Region = dto.Region;
+        if (dto.CountryId.HasValue) w.CountryId = dto.CountryId;
+        // ⚠ Full replace, unlike CountryId above: this DTO's address fields are full-replace, so
+        // emptying the cascade on the form has to clear the link.
+        w.GeoAreaId = dto.GeoAreaId;
         if (!string.IsNullOrWhiteSpace(dto.JobTitle)) w.JobTitle = dto.JobTitle.Trim();
         w.JobDescription = dto.JobDescription;
         if (dto.StartDate.HasValue) w.StartDate = dto.StartDate.Value;
@@ -1229,6 +1320,22 @@ public static class EmployeeMappingExtensions
     private static string? NullIfBlank(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    /// <summary>
+    /// Whether this placement is the one in force on <paramref name="asOf"/>: taken effect, not
+    /// ended, and not withdrawn.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The in-memory twin of the predicate every as-of QUERY uses (<c>ActiveAssignments</c>,
+    /// <c>EmolumentService</c>, <c>GetCurrentAsync</c>). The four copies had drifted — two never
+    /// asked whether the placement had STARTED — and a projection that disagrees with the query is
+    /// how a screen says "Active" about a row no calculation will use. EF cannot translate a method
+    /// into SQL, so the query sites still spell it out; this is for materialised rows.
+    /// </remarks>
+    public static bool IsInForceOn(this EmployeeSalaryAssignment s, DateTime asOf)
+        => s.WithdrawnAt == null
+        && s.EffectiveDate <= asOf
+        && (s.EffectiveTo == null || s.EffectiveTo >= asOf);
+
     public static EmployeeSalaryAssignmentListDto ToListDto(this EmployeeSalaryAssignment s)
         => new()
         {
@@ -1244,7 +1351,10 @@ public static class EmployeeMappingExtensions
             EffectiveDate = s.EffectiveDate,
             EffectiveTo = s.EffectiveTo,
             Reason = s.AssignmentReason,
-            IsActive = s.EffectiveTo == null || s.EffectiveTo >= DateTime.Today,
+            IsActive = s.IsInForceOn(DateTime.Today),
+            IsScheduled = s.WithdrawnAt == null && s.EffectiveDate > DateTime.Today,
+            WithdrawnAt = s.WithdrawnAt,
+            WithdrawnReason = s.WithdrawnReason,
             Amount = s.Notch?.SalaryAmount ?? s.Level?.MidSalary
         };
 
@@ -1264,7 +1374,10 @@ public static class EmployeeMappingExtensions
             EffectiveTo = s.EffectiveTo,
             AssignmentReason = s.AssignmentReason,
             Reason = s.AssignmentReason,
-            IsActive = s.EffectiveTo == null || s.EffectiveTo >= DateTime.Today,
+            IsActive = s.IsInForceOn(DateTime.Today),
+            IsScheduled = s.WithdrawnAt == null && s.EffectiveDate > DateTime.Today,
+            WithdrawnAt = s.WithdrawnAt,
+            WithdrawnReason = s.WithdrawnReason,
             Amount = s.Notch?.SalaryAmount ?? s.Level?.MidSalary
         };
 
@@ -1300,10 +1413,18 @@ public static class EmployeeMappingExtensions
             Organization = r.Organization,
             PositionOrTitle = r.PositionOrTitle,
             Relationship = r.Relationship,
+            RelationshipTypeId = r.RelationshipTypeId,
             PhoneNumber = r.PhoneNumber,
             EmailAddress = r.EmailAddress,
             IsPrimary = r.IsPrimary,
-            IsActive = r.IsActive
+            IsActive = r.IsActive,
+            IsContacted = r.IsContacted,
+            // One flag rather than making every screen reason about which of three ids means
+            // "there is a file". The list carries it since round 2 so the tab can show a paperclip.
+            HasLetter = r.LetterFileUploadRecordId != null || r.LetterDocumentRecordId != null,
+            LetterFileName = r.LetterFileName,
+            LetterMimeType = r.LetterMimeType,
+            LetterFileSizeBytes = r.LetterFileSizeBytes
         };
 
     public static EmployeeRefereeDetailDto ToDetailDto(this EmployeeReferee r)
@@ -1316,6 +1437,7 @@ public static class EmployeeMappingExtensions
             Organization = r.Organization,
             PositionOrTitle = r.PositionOrTitle,
             Relationship = r.Relationship,
+            RelationshipTypeId = r.RelationshipTypeId,
             PhoneNumber = r.PhoneNumber,
             EmailAddress = r.EmailAddress,
             IsPrimary = r.IsPrimary,
@@ -1340,6 +1462,7 @@ public static class EmployeeMappingExtensions
             Organization = dto.Organization,
             PositionOrTitle = dto.PositionOrTitle,
             Relationship = dto.Relationship,
+            RelationshipTypeId = dto.RelationshipTypeId,
             PhoneNumber = dto.PhoneNumber,
             EmailAddress = dto.EmailAddress,
             IsPrimary = dto.IsPrimary,
@@ -1353,6 +1476,11 @@ public static class EmployeeMappingExtensions
         if (dto.Organization != null) r.Organization = dto.Organization;
         if (dto.PositionOrTitle != null) r.PositionOrTitle = dto.PositionOrTitle;
         if (dto.Relationship != null) r.Relationship = dto.Relationship;
+        // ⚠ Clear-flag rather than a bare null, because every field on this DTO means "not
+        // supplied" when null — the ClearNationalIdType shape. The service overwrites Relationship
+        // from the catalogue row AFTER this runs, so the order here does not matter.
+        if (dto.ClearRelationshipType) r.RelationshipTypeId = null;
+        else if (dto.RelationshipTypeId.HasValue) r.RelationshipTypeId = dto.RelationshipTypeId;
         if (dto.PhoneNumber != null) r.PhoneNumber = dto.PhoneNumber;
         if (dto.EmailAddress != null) r.EmailAddress = dto.EmailAddress;
         if (dto.IsContacted.HasValue) r.IsContacted = dto.IsContacted.Value;
@@ -1374,7 +1502,15 @@ public static class EmployeeMappingExtensions
             PhoneNumber = g.PhoneNumber,
             EmailAddress = g.EmailAddress,
             IsVerified = g.IsVerified,
-            IsActive = g.IsActive
+            IsActive = g.IsActive,
+            HasPhoto = g.PhotoFileUploadRecordId != null || g.PhotoDocumentRecordId != null,
+            // ⚠ Both need the navigations loaded — the list read Includes them. A repository
+            // FindAsync would leave them null and this would read "no type, no documents" for
+            // every row, which is the stale-navigation shape met sixteen times in this module.
+            NationalIdTypeId = g.NationalIdTypeId,
+            NationalIdTypeName = g.NationalIdTypeRef?.Name,
+            RelationshipTypeId = g.RelationshipTypeId,
+            DocumentCount = g.Documents?.Count(d => !d.IsDeleted) ?? 0
         };
 
     public static EmployeeGuarantorDetailDto ToDetailDto(this EmployeeGuarantor g)
@@ -1392,8 +1528,11 @@ public static class EmployeeMappingExtensions
             DateOfBirth = g.DateOfBirth,
             Address = g.Address,
             City = g.City,
+            Region = g.Region,
             DigitalAddress = g.DigitalAddress,
             CountryId = g.CountryId,
+            GeoAreaId = g.GeoAreaId,
+            RelationshipTypeId = g.RelationshipTypeId,
             PhoneNumber = g.PhoneNumber,
             EmailAddress = g.EmailAddress,
             JobTitle = g.JobTitle,
@@ -1409,6 +1548,9 @@ public static class EmployeeMappingExtensions
             PhotoMimeType = g.PhotoMimeType,
             PhotoFileSizeBytes = g.PhotoFileSizeBytes,
             NationalIdType = g.NationalIdType,
+            NationalIdTypeId = g.NationalIdTypeId,
+            NationalIdTypeName = g.NationalIdTypeRef?.Name,
+            DocumentCount = g.Documents?.Count(d => !d.IsDeleted) ?? 0,
             NationalIdNumberMasked = string.IsNullOrWhiteSpace(g.NationalIdNumber) ? null : Mask(g.NationalIdNumber),
             NationalIdExpiryDate = g.NationalIdExpiryDate,
             HasSignedGuarantorForm = g.HasSignedGuarantorForm,
@@ -1436,8 +1578,11 @@ public static class EmployeeMappingExtensions
             DateOfBirth = dto.DateOfBirth,
             Address = dto.Address,
             City = dto.City,
+            Region = dto.Region,
             DigitalAddress = dto.DigitalAddress,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
+            RelationshipTypeId = dto.RelationshipTypeId,
             PhoneNumber = dto.PhoneNumber,
             EmailAddress = dto.EmailAddress,
             JobTitle = dto.JobTitle,
@@ -1449,11 +1594,12 @@ public static class EmployeeMappingExtensions
             AmountGuaranteedCurrencyCode = dto.AmountGuaranteedCurrencyCode,
             GenderDescription = dto.GenderDescription,
             NationalIdType = dto.NationalIdType,
+            NationalIdTypeId = dto.NationalIdTypeId,
             NationalIdNumber = dto.NationalIdNumber,
             NationalIdExpiryDate = dto.NationalIdExpiryDate,
             HasSignedGuarantorForm = dto.HasSignedGuarantorForm,
             DateFormSigned = dto.DateFormSigned,
-            GuarantorFormPath = dto.GuarantorFormPath,
+            // GuarantorFormPath is deliberately not mapped: it is no longer on the DTO.
             Notes = dto.Notes,
             IsActive = dto.IsActive
         };
@@ -1470,8 +1616,14 @@ public static class EmployeeMappingExtensions
         if (dto.DateOfBirth.HasValue) g.DateOfBirth = dto.DateOfBirth;
         if (dto.Address != null) g.Address = dto.Address;
         if (dto.City != null) g.City = dto.City;
+        if (dto.Region != null) g.Region = dto.Region;
         if (dto.DigitalAddress != null) g.DigitalAddress = dto.DigitalAddress;
         if (dto.CountryId.HasValue) g.CountryId = dto.CountryId;
+        // ⚠ Clear-flags, not bare nulls: every field on this DTO means "not supplied" when null.
+        if (dto.ClearGeoArea) g.GeoAreaId = null;
+        else if (dto.GeoAreaId.HasValue) g.GeoAreaId = dto.GeoAreaId;
+        if (dto.ClearRelationshipType) g.RelationshipTypeId = null;
+        else if (dto.RelationshipTypeId.HasValue) g.RelationshipTypeId = dto.RelationshipTypeId;
         if (dto.PhoneNumber != null) g.PhoneNumber = dto.PhoneNumber;
         if (dto.EmailAddress != null) g.EmailAddress = dto.EmailAddress;
         if (dto.JobTitle != null) g.JobTitle = dto.JobTitle;
@@ -1483,11 +1635,13 @@ public static class EmployeeMappingExtensions
         if (dto.AmountGuaranteedCurrencyCode != null) g.AmountGuaranteedCurrencyCode = dto.AmountGuaranteedCurrencyCode;
         if (dto.GenderDescription != null) g.GenderDescription = dto.GenderDescription;
         if (dto.NationalIdType != null) g.NationalIdType = dto.NationalIdType;
+        if (dto.ClearNationalIdType) g.NationalIdTypeId = null;
+        else if (dto.NationalIdTypeId.HasValue) g.NationalIdTypeId = dto.NationalIdTypeId;
         if (dto.NationalIdNumber != null) g.NationalIdNumber = dto.NationalIdNumber;
         if (dto.NationalIdExpiryDate.HasValue) g.NationalIdExpiryDate = dto.NationalIdExpiryDate;
         if (dto.HasSignedGuarantorForm.HasValue) g.HasSignedGuarantorForm = dto.HasSignedGuarantorForm.Value;
         if (dto.DateFormSigned.HasValue) g.DateFormSigned = dto.DateFormSigned;
-        if (dto.GuarantorFormPath != null) g.GuarantorFormPath = dto.GuarantorFormPath;
+        // GuarantorFormPath is no longer writable — see the entity remark.
         if (dto.IsVerified.HasValue) g.IsVerified = dto.IsVerified.Value;
         if (dto.VerificationDate.HasValue) g.VerificationDate = dto.VerificationDate;
         if (dto.VerifiedByEmployeeId.HasValue) g.VerifiedByEmployeeId = dto.VerifiedByEmployeeId;
@@ -1622,7 +1776,13 @@ public static class EmployeeMappingExtensions
 
     public static void Apply(this UpdateEmployeeBankDetailDto dto, EmployeeBankDetail e)
     {
+        // Nullable-means-not-supplied, so switching a row from a catalogue bank back to a typed
+        // name has to say so explicitly — otherwise the old link would survive beside the new text.
+        if (dto.ClearBankLink)                 { e.BankId = null; e.BranchId = null; }
         if (dto.BankId.HasValue)               e.BankId               = dto.BankId;
+        // Changing the bank without naming a branch drops the old branch rather than pairing it
+        // with a bank it does not belong to; the service refuses the mismatch anyway.
+        if (dto.BankId.HasValue && !dto.BranchId.HasValue) e.BranchId = null;
         if (dto.BranchId.HasValue)             e.BranchId             = dto.BranchId;
         if (dto.BankName != null)              e.BankName             = dto.BankName;
         if (dto.BranchName != null)            e.BranchName           = dto.BranchName;

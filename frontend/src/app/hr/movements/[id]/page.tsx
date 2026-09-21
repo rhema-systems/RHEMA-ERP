@@ -101,6 +101,7 @@ export default function MovementDetailPage() {
    * gate could express it.
    */
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'StaffMovement',
     entityId: id,
     entityLabel: 'Staff Movement',

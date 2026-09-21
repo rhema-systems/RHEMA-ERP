@@ -62,3 +62,75 @@ public sealed class HealthcareFacilityGeoAreaConsumer : IGeoAreaConsumer
         => _unitOfWork.Repository<HealthcareFacility>().GetQueryable()
             .CountAsync(f => f.TenantId == tenantId && !f.IsDeleted && f.GeoAreaId == geoAreaId, ct);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//  Round 2, lane D2 — the employee's address-bearing sub-records (register rows E-3, E-6).
+//
+//  ⚠ Four probes for four columns, each registered in ServiceCollectionExtensions. The employee's
+//  OWN address already had one; these are the addresses hanging off them — a second home, a next of
+//  kin, a guarantor, a previous employer — and without a probe each they would be exactly as
+//  exposed as the seeded community that vanished on 2026-09-03.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// <summary>An employee's further addresses — a postal address, a temporary one, a second home.</summary>
+public sealed class EmployeeContactGeoAreaConsumer : IGeoAreaConsumer
+{
+    private readonly IUnitOfWork _unitOfWork;
+    public EmployeeContactGeoAreaConsumer(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+
+    public string ResourceName => "employee addresses";
+    public string ResourceNameSingular => "employee address";
+
+    public Task<int> CountUsagesAsync(Guid geoAreaId, Guid tenantId, CancellationToken ct = default)
+        => _unitOfWork.Repository<EmployeeContact>().GetQueryable()
+            .CountAsync(c => c.TenantId == tenantId && !c.IsDeleted && c.GeoAreaId == geoAreaId, ct);
+}
+
+/// <summary>Where an employee's next of kin or emergency contact lives.</summary>
+public sealed class EmployeeEmergencyContactGeoAreaConsumer : IGeoAreaConsumer
+{
+    private readonly IUnitOfWork _unitOfWork;
+    public EmployeeEmergencyContactGeoAreaConsumer(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+
+    public string ResourceName => "emergency contacts";
+    public string ResourceNameSingular => "emergency contact";
+
+    public Task<int> CountUsagesAsync(Guid geoAreaId, Guid tenantId, CancellationToken ct = default)
+        => _unitOfWork.Repository<EmployeeEmergencyContact>().GetQueryable()
+            .CountAsync(c => c.TenantId == tenantId && !c.IsDeleted && c.GeoAreaId == geoAreaId, ct);
+}
+
+/// <summary>Where a guarantor lives — the address a surety is actually served at.</summary>
+public sealed class EmployeeGuarantorGeoAreaConsumer : IGeoAreaConsumer
+{
+    private readonly IUnitOfWork _unitOfWork;
+    public EmployeeGuarantorGeoAreaConsumer(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+
+    public string ResourceName => "guarantors";
+    public string ResourceNameSingular => "guarantor";
+
+    public Task<int> CountUsagesAsync(Guid geoAreaId, Guid tenantId, CancellationToken ct = default)
+        => _unitOfWork.Repository<EmployeeGuarantor>().GetQueryable()
+            .CountAsync(g => g.TenantId == tenantId && !g.IsDeleted && g.GeoAreaId == geoAreaId, ct);
+}
+
+/// <summary>
+/// Where a previous employer is.
+/// </summary>
+/// <remarks>
+/// ⚠ This one is a PLACE, which is why it earns a <c>GeoAreaId</c> at all: a company sits somewhere
+/// and someone may have to write to it for a reference. It is not the "merely mentions a city" case
+/// the file header warns about.
+/// </remarks>
+public sealed class EmployeeWorkHistoryGeoAreaConsumer : IGeoAreaConsumer
+{
+    private readonly IUnitOfWork _unitOfWork;
+    public EmployeeWorkHistoryGeoAreaConsumer(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+
+    public string ResourceName => "previous employers";
+    public string ResourceNameSingular => "previous employer";
+
+    public Task<int> CountUsagesAsync(Guid geoAreaId, Guid tenantId, CancellationToken ct = default)
+        => _unitOfWork.Repository<EmployeeWorkHistory>().GetQueryable()
+            .CountAsync(w => w.TenantId == tenantId && !w.IsDeleted && w.GeoAreaId == geoAreaId, ct);
+}

@@ -96,8 +96,12 @@ export const SHE_COMPLIANCE_STATUS_OPTIONS = opts<SheComplianceStatus>([
 
 export interface SheInspectionChecklistItem extends AuditFields {
   checklistId: string;
+  /** Null only on rows that pre-date the builder. */
+  sectionId?: string | null;
   itemOrder: number;
-  category: string;
+  /** Printed running number across the standard sections; 0 for critical-section items. */
+  itemNumber: number;
+  category?: string | null;
   itemDescription: string;
   isMandatory: boolean;
   regulatoryReference?: string | null;
@@ -113,12 +117,37 @@ export interface SheInspectionChecklist extends AuditFields {
   type: SheInspectionType;
   typeName: string;
   version: number;
+  /** Offered for new inspections only when active AND published. */
   isActive: boolean;
-  /** Loaded on the detail read only — list reads return it empty. */
+  status: SheChecklistStatus;
+  statusName: string;
+  /** True once published or retired — structure writes are refused (422). */
+  isStructureLocked: boolean;
+  scoringMode: SheChecklistScoringMode;
+  scoringModeName: string;
+  allowPartialCompliance: boolean;
+  printTitle?: string | null;
+  printSubtitle?: string | null;
+  instructions?: string | null;
+  criticalSectionNote?: string | null;
+  publishedAt?: string | null;
+  publishedById?: string | null;
+  publishedByName?: string | null;
+  retiredAt?: string | null;
+  previousVersionId?: string | null;
+  /** Item count across all sections — carried by list reads too. */
+  itemCount: number;
+  /** Structure below is loaded on the detail read only — list reads return the arrays empty. */
+  fields: SheInspectionChecklistField[];
+  /** Ordered sections with their items. Legacy section-less items come under a synthetic section whose id is the empty GUID. */
+  sections: SheInspectionChecklistSection[];
+  /** The flat item list in form order. */
   items: SheInspectionChecklistItem[];
+  outcomes: SheInspectionChecklistOutcome[];
+  signatories: SheInspectionChecklistSignatory[];
 }
 
-/** The server refuses (422) a duplicate checklist number within the tenant. */
+/** The server refuses (422) a duplicate checklist number + version within the tenant. */
 export interface SheInspectionChecklistCreateRequest {
   checklistNumber: string;
   name: string;
@@ -126,9 +155,19 @@ export interface SheInspectionChecklistCreateRequest {
   type: SheInspectionType;
   version?: number;
   isActive?: boolean;
+  scoringMode?: SheChecklistScoringMode;
+  allowPartialCompliance?: boolean;
+  printTitle?: string | null;
+  printSubtitle?: string | null;
+  instructions?: string | null;
+  criticalSectionNote?: string | null;
 }
 
-/** The number is immutable after creation — it is not on the update contract. */
+/**
+ * The number is immutable after creation — it is not on the update contract. On a locked
+ * (published / retired) template only name, description and isActive apply; a change to any
+ * structural field is refused with 422.
+ */
 export interface SheInspectionChecklistUpdateRequest {
   id: string;
   name: string;
@@ -136,12 +175,20 @@ export interface SheInspectionChecklistUpdateRequest {
   type: SheInspectionType;
   version?: number;
   isActive?: boolean;
+  scoringMode?: SheChecklistScoringMode;
+  allowPartialCompliance?: boolean;
+  printTitle?: string | null;
+  printSubtitle?: string | null;
+  instructions?: string | null;
+  criticalSectionNote?: string | null;
 }
 
 export interface SheInspectionChecklistItemCreateRequest {
   checklistId: string;
+  sectionId?: string | null;
   itemOrder: number;
-  category: string;
+  /** Defaults to the section title when blank. */
+  category?: string | null;
   itemDescription: string;
   isMandatory: boolean;
   regulatoryReference?: string | null;
@@ -150,8 +197,9 @@ export interface SheInspectionChecklistItemCreateRequest {
 
 export interface SheInspectionChecklistItemUpdateRequest {
   id: string;
+  sectionId?: string | null;
   itemOrder: number;
-  category: string;
+  category?: string | null;
   itemDescription: string;
   isMandatory: boolean;
   regulatoryReference?: string | null;
@@ -163,6 +211,14 @@ export interface SheInspectionChecklistItemUpdateRequest {
 export interface SafetyInspectionItem extends AuditFields {
   inspectionId: string;
   checklistItemId?: string | null;
+  /** Form position when materialised from a template; 0 for hand-added findings. */
+  displayOrder: number;
+  /** Printed running number across the standard sections; 0 for critical items and hand-added findings. */
+  itemNumber: number;
+  sectionId?: string | null;
+  sectionCode?: string | null;
+  sectionTitle?: string | null;
+  sectionKind?: SheChecklistSectionKind | null;
   itemDescription: string;
   status: SheComplianceStatus;
   statusName: string;
@@ -252,6 +308,33 @@ export interface SafetyInspection extends AuditFields {
   closedDate?: string | null;
   closedById?: string | null;
   closedByName?: string | null;
+  // ── Checklist run ──
+  checklistNumber?: string | null;
+  checklistVersion?: number | null;
+  scoringMode?: SheChecklistScoringMode | null;
+  scoringModeName?: string | null;
+  totalApplicableItems?: number | null;
+  totalCompliantItems?: number | null;
+  totalNonCompliantItems?: number | null;
+  totalPartiallyCompliantItems?: number | null;
+  criticalNonConformityCount?: number | null;
+  compliancePercentage?: number | null;
+  recommendedOutcomeId?: string | null;
+  recommendedOutcomeLabel?: string | null;
+  outcomeId?: string | null;
+  outcomeLabel?: string | null;
+  outcomeIsDisqualifying?: boolean | null;
+  outcomeReinspectionWithinDays?: number | null;
+  outcomeOverrideReason?: string | null;
+  subjectComments?: string | null;
+  completedAt?: string | null;
+  completedById?: string | null;
+  completedByName?: string | null;
+  /** The pinned template with its structure — detail read only; null on free-form inspections. */
+  checklist?: SheInspectionChecklist | null;
+  fieldValues: SafetyInspectionFieldValue[];
+  signatures: SafetyInspectionSignature[];
+  /** In form order — materialised items first, hand-added findings after. */
   items: SafetyInspectionItem[];
   hazards: SafetyInspectionHazard[];
   documents: SafetyInspectionDocument[];
@@ -392,4 +475,272 @@ export interface SafetyInspectionDocumentCreateRequest {
   filePath: string;
   description?: string | null;
   uploadedById: string;
+}
+
+// ── Checklist builder (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md) ─────────────
+// A template is header fields + lettered sections of items (+ critical Yes/No sections) + a
+// scoring mode + outcomes + signatories. Structure is writable only while Draft; publishing
+// validates and freezes it; "new version" clones it into Draft v+1 under the same number.
+
+export type SheChecklistStatus = 'Draft' | 'Published' | 'Retired';
+
+export const SHE_CHECKLIST_STATUS_OPTIONS = opts<SheChecklistStatus>([
+  ['Draft', 'Draft'],
+  ['Published', 'Published'],
+  ['Retired', 'Retired'],
+]);
+
+export type SheChecklistScoringMode = 'None' | 'CompliancePercentage' | 'QualitativeRating';
+
+export const SHE_CHECKLIST_SCORING_MODE_OPTIONS = opts<SheChecklistScoringMode>([
+  ['CompliancePercentage', 'Compliance percentage with decision bands'],
+  ['QualitativeRating', 'Qualitative rating (inspector picks an outcome)'],
+  ['None', 'No score — items and findings only'],
+]);
+
+export type SheChecklistSectionKind = 'Standard' | 'Critical';
+
+export const SHE_CHECKLIST_SECTION_KIND_OPTIONS = opts<SheChecklistSectionKind>([
+  ['Standard', 'Standard (C / NC / NA)'],
+  ['Critical', 'Critical non-conformities (Yes / No — any Yes disqualifies)'],
+]);
+
+export type SheChecklistFieldType =
+  | 'Text'
+  | 'LongText'
+  | 'Number'
+  | 'Date'
+  | 'Time'
+  | 'YesNo'
+  | 'Choice'
+  | 'Employee'
+  | 'Location'
+  | 'OrganizationUnit';
+
+export const SHE_CHECKLIST_FIELD_TYPE_OPTIONS = opts<SheChecklistFieldType>([
+  ['Text', 'Text'],
+  ['LongText', 'Long text'],
+  ['Number', 'Number'],
+  ['Date', 'Date'],
+  ['Time', 'Time'],
+  ['YesNo', 'Yes / No'],
+  ['Choice', 'Choice (one of a list)'],
+  ['Employee', 'Employee'],
+  ['Location', 'Location'],
+  ['OrganizationUnit', 'Organization unit'],
+]);
+
+export type SheChecklistSignatoryKind = 'SystemUser' | 'External';
+
+export const SHE_CHECKLIST_SIGNATORY_KIND_OPTIONS = opts<SheChecklistSignatoryKind>([
+  ['SystemUser', 'System user (signs in-app as themselves)'],
+  ['External', 'External party (typed name and date)'],
+]);
+
+export interface SheInspectionChecklistField extends AuditFields {
+  checklistId: string;
+  displayOrder: number;
+  label: string;
+  fieldType: SheChecklistFieldType;
+  fieldTypeName: string;
+  isRequired: boolean;
+  /** '|'-separated options for Choice fields. */
+  choiceOptions?: string | null;
+  helpText?: string | null;
+  /** choiceOptions split, trimmed, blanks dropped. */
+  choices: string[];
+}
+
+export interface SheInspectionChecklistFieldCreateRequest {
+  checklistId: string;
+  displayOrder: number;
+  label: string;
+  fieldType: SheChecklistFieldType;
+  isRequired: boolean;
+  choiceOptions?: string | null;
+  helpText?: string | null;
+}
+
+export interface SheInspectionChecklistFieldUpdateRequest {
+  id: string;
+  displayOrder: number;
+  label: string;
+  fieldType: SheChecklistFieldType;
+  isRequired: boolean;
+  choiceOptions?: string | null;
+  helpText?: string | null;
+}
+
+export interface SheInspectionChecklistSection extends AuditFields {
+  checklistId: string;
+  displayOrder: number;
+  code?: string | null;
+  title: string;
+  description?: string | null;
+  kind: SheChecklistSectionKind;
+  kindName: string;
+  items: SheInspectionChecklistItem[];
+}
+
+export interface SheInspectionChecklistSectionCreateRequest {
+  checklistId: string;
+  displayOrder: number;
+  code?: string | null;
+  title: string;
+  description?: string | null;
+  kind: SheChecklistSectionKind;
+}
+
+export interface SheInspectionChecklistSectionUpdateRequest {
+  id: string;
+  displayOrder: number;
+  code?: string | null;
+  title: string;
+  description?: string | null;
+  kind: SheChecklistSectionKind;
+}
+
+export interface SheInspectionChecklistOutcome extends AuditFields {
+  checklistId: string;
+  displayOrder: number;
+  label: string;
+  description?: string | null;
+  minPercent?: number | null;
+  maxPercent?: number | null;
+  reinspectionWithinDays?: number | null;
+  isDisqualifying: boolean;
+}
+
+export interface SheInspectionChecklistOutcomeCreateRequest {
+  checklistId: string;
+  displayOrder: number;
+  label: string;
+  description?: string | null;
+  minPercent?: number | null;
+  maxPercent?: number | null;
+  reinspectionWithinDays?: number | null;
+  isDisqualifying: boolean;
+}
+
+export interface SheInspectionChecklistOutcomeUpdateRequest {
+  id: string;
+  displayOrder: number;
+  label: string;
+  description?: string | null;
+  minPercent?: number | null;
+  maxPercent?: number | null;
+  reinspectionWithinDays?: number | null;
+  isDisqualifying: boolean;
+}
+
+export interface SheInspectionChecklistSignatory extends AuditFields {
+  checklistId: string;
+  displayOrder: number;
+  roleLabel: string;
+  kind: SheChecklistSignatoryKind;
+  kindName: string;
+  isRequired: boolean;
+}
+
+export interface SheInspectionChecklistSignatoryCreateRequest {
+  checklistId: string;
+  displayOrder: number;
+  roleLabel: string;
+  kind: SheChecklistSignatoryKind;
+  isRequired: boolean;
+}
+
+export interface SheInspectionChecklistSignatoryUpdateRequest {
+  id: string;
+  displayOrder: number;
+  roleLabel: string;
+  kind: SheChecklistSignatoryKind;
+  isRequired: boolean;
+}
+
+/** Replace-set ordering: every current child id in its new order (a missing or foreign id is refused). */
+export interface SheChecklistReorderRequest {
+  orderedIds: string[];
+}
+
+// ── Checklist run (inspection side) ───────────────────────────────────────────
+
+export interface SafetyInspectionFieldValue extends AuditFields {
+  inspectionId: string;
+  checklistFieldId: string;
+  label: string;
+  fieldType: SheChecklistFieldType;
+  fieldTypeName: string;
+  valueText?: string | null;
+  valueReferenceId?: string | null;
+  /** The resolved name for reference fields; valueText otherwise. */
+  valueDisplay?: string | null;
+}
+
+export interface SafetyInspectionFieldValueWrite {
+  checklistFieldId: string;
+  valueText?: string | null;
+  valueReferenceId?: string | null;
+}
+
+/** One item's answer in the bulk walk. */
+export interface SafetyInspectionResponse {
+  itemId: string;
+  status: SheComplianceStatus;
+  deficiencyNoted?: string | null;
+  actionRequired?: string | null;
+  riskLevel?: SheRiskLevel | null;
+}
+
+export interface SafetyInspectionCompleteRequest {
+  /** Required in QualitativeRating mode; in CompliancePercentage mode defaults to the recommendation. */
+  outcomeId?: string | null;
+  outcomeOverrideReason?: string | null;
+  subjectComments?: string | null;
+  findingsAndObservations?: string | null;
+  recommendedActions?: string | null;
+  overallRiskRating?: SheRiskLevel | null;
+  complianceDeadline?: string | null;
+  nextInspectionDueDate?: string | null;
+}
+
+export interface SafetyInspectionSignatureCreateRequest {
+  checklistSignatoryId: string;
+  /** External signatories only — ignored for SystemUser rows, which sign as the logged-in employee. */
+  signedName?: string | null;
+  signedAt?: string | null;
+  notes?: string | null;
+}
+
+export interface SafetyInspectionSignature extends AuditFields {
+  inspectionId: string;
+  checklistSignatoryId: string;
+  roleLabel: string;
+  kind: SheChecklistSignatoryKind;
+  kindName: string;
+  signedByEmployeeId?: string | null;
+  signedByName?: string | null;
+  signedName: string;
+  signedAt: string;
+  notes?: string | null;
+}
+
+/** The live computation over the current answers — what Complete will persist. */
+export interface SafetyInspectionScore {
+  scoringMode: SheChecklistScoringMode;
+  scoringModeName: string;
+  totalItems: number;
+  totalApplicableItems: number;
+  totalCompliantItems: number;
+  totalNonCompliantItems: number;
+  totalPartiallyCompliantItems: number;
+  totalNotApplicableItems: number;
+  totalNotAssessedItems: number;
+  criticalNonConformityCount: number;
+  compliancePercentage?: number | null;
+  isDisqualified: boolean;
+  recommendedOutcomeId?: string | null;
+  recommendedOutcomeLabel?: string | null;
+  isReadyToComplete: boolean;
+  missingRequiredFields: string[];
 }

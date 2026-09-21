@@ -26,6 +26,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly IStaffTravelRequestAttachmentRepository _attachmentRepository;
     private readonly IStaffGroupTravelRepository _groupTravelRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    // Held alongside _currentUserProvider only for EmployeeId, which ICurrentUserProvider does not
+    // carry. The travel entity's traveller column is an Employee FK, so the self-approval rule
+    // below cannot be asked of the user id. Same pairing JobInterviewService uses.
+    private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
@@ -39,6 +43,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         IStaffTravelRequestAttachmentRepository attachmentRepository,
         IStaffGroupTravelRepository groupTravelRepository,
         ICurrentUserProvider currentUserProvider,
+        ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork,
         IAppEventBus appEventBus,
         IWorkflowIntegrationService workflowIntegrationService,
@@ -51,6 +56,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _attachmentRepository = attachmentRepository;
         _groupTravelRepository = groupTravelRepository;
         _currentUserProvider = currentUserProvider;
+        _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
         _appEventBus = appEventBus;
         _workflowIntegrationService = workflowIntegrationService;
@@ -562,6 +568,30 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     // ---- Workflow ----------------------------------------------------------
+    /// <summary>
+    /// You cannot decide your own trip.
+    /// </summary>
+    /// <remarks>
+    /// <para>Travel had NO segregation-of-duties rule of its own: <c>CanUserApproveAsync</c> was the
+    /// whole gate, and it is a fact about the published definition rather than about the record. On
+    /// a tenant with a definition that is defensible — the definition names the approver and can set
+    /// <c>preventInitiatorApproval</c>. On a tenant with none it was not a gate at all, and once
+    /// submit stopped auto-approving (see <see cref="HrWorkflowFallbackAuthority"/>) a holder of
+    /// <see cref="HrPermissions.ApproveTravel"/> could have approved their own trip.</para>
+    ///
+    /// <para>It runs on BOTH paths deliberately, like the equivalent rule in
+    /// <c>StaffMovementService.ApproveAsync</c>: the engine's own check is by ApplicationUser, and
+    /// this one is by Employee, so it still catches a traveller deciding through a second login.
+    /// The comparison is Employee id to Employee id — <c>StaffTravelRequest.EmployeeId</c> is the
+    /// traveller, and the engine's actor is a user id, so the two must not be mixed.</para>
+    /// </remarks>
+    private void RequireNotTheTraveller(StaffTravelRequest entity, string verb)
+    {
+        var callerEmployeeId = _currentUserService.EmployeeId;
+        if (callerEmployeeId is null || callerEmployeeId.Value != entity.EmployeeId) return;
+
+        throw new UnauthorizedAccessException($"You cannot {verb} your own travel request.");
+    }
 
     public async Task<bool> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default)
     {
@@ -570,15 +600,18 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (entity.Status is not (StaffTravelRequestStatus.Draft or StaffTravelRequestStatus.ReturnedForRevision))
             throw new InvalidOperationException("Only draft or returned requests can be submitted.");
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(
                 workflowResult.ExecutionResult.Message ?? "Failed to start the travel approval workflow.");
 
         // The adapter owns the status. A definition with one Approval step approves on submission
-        // (the documented single-step trap), so this can legitimately come back Approved.
+        // (the documented single-step trap), so this can legitimately come back Approved — but only
+        // when a definition is actually published. With none, the engine's "not configured" signal
+        // is also Approved, which approved the trip outright; the helper substitutes Pending there.
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, RequireUserId());
+            .ApplySubmitOutcome(entity, submitOutcome, RequireUserId());
 
         entity.SubmittedAt = submitDto.SubmittedAt;
         entity.UpdatedBy = RequireUserId().ToString();
@@ -610,19 +643,19 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         var userId = RequireUserId();
 
+        RequireNotTheTraveller(entity, "approve");
+
         // The engine decides who may approve, against the published definition. The bespoke chain
         // this replaces took the approver from the request body, so a caller could record a
-        // decision in someone else's name.
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, userId, "Approve", approveDto.Notes);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        // decision in someone else's name. With no definition published there is no instance, so
+        // CanUserApproveAsync answers false for everybody and the trip could not be decided at
+        // all — the Travel approve tier rules in that case.
+        var decisionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, entity.Id, userId,
+            "Approve", approveDto.Notes, "approve a travel request", HrPermissions.ApproveTravel);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+            .ApplyApprovalOutcome(entity, decisionOutcome, userId);
 
         // The approved budget is the domain's own decision, not the engine's, so it is applied only
         // once the engine says the request is actually approved.
@@ -654,16 +687,14 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        RequireNotTheTraveller(entity, "reject");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, userId, "Reject", reason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+        var decisionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, entity.Id, userId,
+            "Reject", reason, "reject a travel request", HrPermissions.ApproveTravel);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, reason);
+            .ApplyApprovalOutcome(entity, decisionOutcome, userId, reason);
 
         entity.UpdatedBy = userId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;

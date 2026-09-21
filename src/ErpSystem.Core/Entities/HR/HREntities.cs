@@ -17,7 +17,7 @@ namespace ErpSystem.Core.Entities.HR;
 /// The authoritative HR record for a person employed by the organisation.
 /// Created (or linked) when a JobHireRecord is confirmed and onboarding completes.
 /// </summary>
-public class Employee : TenantEntity
+public class Employee : TenantEntity, IDisabilityTypeConsumer
 {
     [Required]
     [MaxLength(50)]
@@ -87,6 +87,12 @@ public class Employee : TenantEntity
     /// is not asked to learn a second vocabulary for one idea.</para>
     /// </remarks>
     public bool HasDisability { get; set; }
+
+    /// <summary>Which kind, from the tenant's catalogue (round 3, lane P2). Notes stay in the description.</summary>
+    public Guid? DisabilityTypeId { get; set; }
+
+    [ForeignKey(nameof(DisabilityTypeId))]
+    public virtual DisabilityType? DisabilityType { get; set; }
 
     [MaxLength(500)]
     public string? DisabilityDescription { get; set; }
@@ -168,7 +174,29 @@ public class Employee : TenantEntity
 
     public int ProbationPeriodDays { get; set; } = 90;
 
-    public DateOnly? ConfirmationDate { get; set; } // Date probation was passed
+    /// <summary>
+    /// Where <see cref="ProbationPeriodDays"/> came from — the post, the company policy, or a
+    /// length supplied for this person.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Null on rows created before lane D1 (2026-09-09). See <see cref="Core.Enums.ProbationSource"/>
+    /// for why it is not defaulted.
+    /// </remarks>
+    public ProbationSource? ProbationSource { get; set; }
+
+    /// <summary>
+    /// The date probation was passed. <b>An outcome, not a term.</b>
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Written by <c>ProbationService.MarkEmployeeConfirmed</c> — and, for staff confirmed
+    /// before this system existed, by the IMPORT door only. The ordinary employee update refuses
+    /// it (lane D1): until then <c>UpdateEmployeeDto.ConfirmationDate</c> was applied straight onto
+    /// this column by <c>EmployeeMappingExtensions.Apply</c> with no guard at all, so anyone who
+    /// could edit an employee could confirm them — bypassing the authority, the letter and the
+    /// probation record. The contract's own copy had been guarded since lane 3d; the header, which
+    /// is the one the guard READS, had not.
+    /// </remarks>
+    public DateOnly? ConfirmationDate { get; set; }
 
     public DateOnly? RetirementDate { get; set; }
 
@@ -271,6 +299,24 @@ public class Employee : TenantEntity
     /// <summary>Free text qualifying the reason (who pays, under what arrangement).</summary>
     [MaxLength(500)]
     public string? OffPayrollNote { get; set; }
+
+    // ── Pay basis ───────────────────────────────────────────────────────────────────────────
+    // A different question from membership. On payroll says the run pays them; this says how the
+    // figure it pays is arrived at — read off the scale, or agreed for the person.
+
+    /// <summary>Scale or negotiated. See <see cref="Core.Enums.PayBasis"/>.</summary>
+    /// <remarks>
+    /// Defaults to the scale, which is what every existing row was implicitly: a placement on a
+    /// grade was the only pay basis HR could record before lane E1.
+    /// </remarks>
+    public PayBasis PayBasis { get; set; } = PayBasis.SalaryScale;
+
+    /// <summary>
+    /// Why the pay is negotiated — "contract engagement, rate per agreement of 2026-07-01". Required
+    /// when <see cref="PayBasis"/> is <c>Negotiated</c>; cleared on return to the scale.
+    /// </summary>
+    [MaxLength(500)]
+    public string? PayBasisNote { get; set; }
 
     [MaxLength(50)]
     public string? BadgeNumber { get; set; }
@@ -833,6 +879,9 @@ public class BenefitPolicy : TenantEntity
 
     /// <summary>Direct, in-force employee enrollments in this policy.</summary>
     public virtual List<EmployeeBenefitEnrollment> Enrollments { get; set; } = new List<EmployeeBenefitEnrollment>();
+
+    /// <summary>The benefit groups this policy belongs to (round 2, lane C3 — register row P-3).</summary>
+    public virtual ICollection<BenefitGroupMember> GroupMemberships { get; set; } = new List<BenefitGroupMember>();
 }
 
 public class BenefitPolicyRelation : TenantEntity
@@ -1003,8 +1052,23 @@ public class EmployeePosition : TenantEntity
     public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
     public virtual ICollection<EmployeePositionHistory> PositionHistories { get; set; } = new List<EmployeePositionHistory>();
     public virtual ICollection<PositionSkillRequirement> SkillRequirements { get; set; } = new List<PositionSkillRequirement>();
+
+    /// <summary>
+    /// What the post must hold (round 2, lane C2 — register row P-2). <see cref="RequiresCertification"/>
+    /// and <see cref="RequiresLicense"/> stay as the switches; these rows are what they mean.
+    /// </summary>
+    public virtual ICollection<PositionCertificationRequirement> CertificationRequirements { get; set; } = new List<PositionCertificationRequirement>();
     public virtual List<EmployeePositionBenefit> PositionBenefits { get; set; } = new List<EmployeePositionBenefit>();
     public virtual ICollection<PositionOvertimePolicy> OvertimePolicies { get; set; } = new List<PositionOvertimePolicy>();
+
+    // ── Named sets (round 2, lane C3 — register rows P-3, S-3; plan § 6.4) ──────────────────
+    // Attachments, not rows: what the post actually requires is the UNION of these sets' members
+    // with the individual collections above, which is what IPositionEffectiveSets computes. Every
+    // consumer of the individual rows reads the union instead — a set whose members nothing acts
+    // on is the dead path this lane exists to avoid.
+    public virtual ICollection<EmployeePositionBenefitGroup> BenefitGroups { get; set; } = new List<EmployeePositionBenefitGroup>();
+    public virtual ICollection<PositionSkillSet> SkillSets { get; set; } = new List<PositionSkillSet>();
+    public virtual ICollection<PositionCertificationSet> CertificationSets { get; set; } = new List<PositionCertificationSet>();
 }
 
 public class EmployeePositionBenefit : TenantEntity
@@ -1035,7 +1099,22 @@ public class EmployeeContractType : TenantEntity
 
     public string? Description { get; set; }
 
+    /// <summary>How long this kind of engagement normally runs, in MONTHS. Zero means open-ended.</summary>
+    /// <remarks>
+    /// It is what gives <see cref="EmployeeContractDetail.ContractEndDate"/> a default: pick
+    /// "Fixed Term" (12) on a contract starting 1 March and the end date offered is 28 February.
+    /// </remarks>
     public int Duration { get; set; }
+
+    /// <summary>
+    /// Retire a kind of engagement without deleting the contracts written against it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Added in lane D1. The table was seeded with seven TDC rows in 2026 and had no DTO, no
+    /// service, no controller and no screen — it could be read only by opening the database. It is
+    /// now the contract-kind picker, so it needs the retire-without-delete every other HR lookup has.
+    /// </remarks>
+    public bool IsActive { get; set; } = true;
 }
 
 #endregion
@@ -1072,6 +1151,21 @@ public class EmployeeContact : TenantEntity
  
     public Guid? CountryId { get; set; }
     public virtual Country? Country { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the shared administrative-geography tree (round 2, lane D2 —
+    /// register row E-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set, <see cref="City"/> and <see cref="Region"/> above become DISPLAY
+    /// SNAPSHOTS written from the tree — the <c>Employee.City</c>/<c>State</c> convention. A null
+    /// area leaves both exactly as they were; most rows predate the tree and the free text is the
+    /// only address they have.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
  
     public bool IsPrimary { get; set; }
 }
@@ -1079,7 +1173,7 @@ public class EmployeeContact : TenantEntity
 /// <summary>
 /// Represents emergency contacts for employees
 /// </summary>
-public class EmployeeEmergencyContact : TenantEntity
+public class EmployeeEmergencyContact : TenantEntity, IRelationshipTypeConsumer
 {
     [Required]
     public Guid EmployeeId { get; set; }
@@ -1094,9 +1188,34 @@ public class EmployeeEmergencyContact : TenantEntity
     [MaxLength(100)]
     public string LastName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// How this person is tied to the employee, as words.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Widened from 50 to 100 in round 2 lane D2, to match the guarantor's column and the
+    /// catalogue's <c>RelationshipType.Name</c>. It had been the narrowest of the four columns
+    /// spelling out the same idea, while its DTO carried no length at all and the screen's schema
+    /// allowed 100 — so a 51-character relationship reached SQL Server and failed as a truncation
+    /// 500 rather than a refusal.
+    /// </remarks>
     [Required]
-    [MaxLength(50)]
+    [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tie, from the tenant's relationship catalogue (round 2, lane D2 — register rows E-11a,
+    /// E-11b).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The free-text <c>Relationship</c> above is kept and MIRRORED from this row's name
+    /// whenever the id is set, so rows written before the catalogue keep their wording and every
+    /// consumer that reads the string keeps working. Nullable: a tie nobody has catalogued may
+    /// still be typed.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
+    [ForeignKey(nameof(RelationshipTypeId))]
+    public virtual RelationshipType? RelationshipTypeRef { get; set; }
 
     public EmergencyContactType ContactType { get; set; } = EmergencyContactType.EmergencyContact;
 
@@ -1114,10 +1233,29 @@ public class EmployeeEmergencyContact : TenantEntity
     [MaxLength(500)]
     public string? Address { get; set; }
 
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
     [MaxLength(100)]
     public string? City { get; set; }
 
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the shared administrative-geography tree (round 2, lane D2 —
+    /// register row E-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set, <see cref="City"/> and <see cref="Region"/> become DISPLAY SNAPSHOTS
+    /// written from the tree — the <c>Employee.City</c>/<c>State</c> convention. A null area
+    /// leaves both exactly as they were.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
@@ -1140,7 +1278,7 @@ public class EmployeeEmergencyContact : TenantEntity
 /// <summary>
 /// Represents employee dependents
 /// </summary>
-public class EmployeeDependent : TenantEntity
+public class EmployeeDependent : TenantEntity, IDisabilityTypeConsumer
 {
     [Required]
     public Guid EmployeeId { get; set; }
@@ -1169,6 +1307,12 @@ public class EmployeeDependent : TenantEntity
     public string? GenderDescription { get; set; }
 
     public bool HasDisability { get; set; }
+
+    /// <summary>Which kind, from the tenant's catalogue (round 3, lane P2). Notes stay in the description.</summary>
+    public Guid? DisabilityTypeId { get; set; }
+
+    [ForeignKey(nameof(DisabilityTypeId))]
+    public virtual DisabilityType? DisabilityType { get; set; }
 
     [MaxLength(500)]
     public string? DisabilityDescription { get; set; }
@@ -1355,8 +1499,48 @@ public class EmployeeWorkHistory : TenantEntity
     [MaxLength(200)]
     public string CompanyName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The employer's street address, as one line.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 200, and the screen's schema said 300 until round 2 lane D2 (finding X-5) — so a 201-to-300
+    /// character address passed the form, was refused by the create with a 400 the user could not
+    /// have predicted, and reached SQL Server as a truncation 500 on the update, whose DTO carried
+    /// no length at all. The country, area and city below are where the structured part now lives.
+    /// </remarks>
     [MaxLength(200)]
     public string? CompanyAddress { get; set; }
+
+    /// <summary>
+    /// The country the employer is in. Added in round 2 lane D2 (register row E-6): the work
+    /// history was one free-text line with no country, city or geography at all.
+    /// </summary>
+    public Guid? CountryId { get; set; }
+
+    [ForeignKey(nameof(CountryId))]
+    public virtual Country? Country { get; set; }
+
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the shared administrative-geography tree (round 2, lane D2 —
+    /// register row E-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set, <see cref="City"/> and <see cref="Region"/> become DISPLAY SNAPSHOTS
+    /// written from the tree — the <c>Employee.City</c>/<c>State</c> convention. A null area
+    /// leaves both exactly as they were.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -1402,8 +1586,34 @@ public class EmployeeContractDetail : TenantEntity
 
     public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
 
+    /// <summary>
+    /// Which kind of engagement this is, from the tenant's own vocabulary.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A DIFFERENT axis from <see cref="EmploymentType"/>, which is the system's fixed enum.
+    /// This is TDC's list — Permanent, Contract, Fixed Term, National Service, Internship, Casual,
+    /// Consultancy — the one the appointment letter picks from, and it carries the
+    /// <see cref="EmployeeContractType.Duration"/> that gives <see cref="ContractEndDate"/> a default.
+    /// Nullable: rows written before lane D1, and tenants that keep no such list, name no kind.
+    /// </remarks>
+    public Guid? ContractTypeId { get; set; }
+
+    [ForeignKey(nameof(ContractTypeId))]
+    public virtual EmployeeContractType? ContractType { get; set; }
+
     public DateOnly StartDate { get; set; }
 
+    /// <summary>
+    /// When the engagement ACTUALLY ended.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not the same date as <see cref="ContractEndDate"/>, which is when it was SCHEDULED to end.
+    /// A two-year contract run to term has both, equal; one terminated in month seven has an
+    /// EndDate of month seven and a ContractEndDate still in month twenty-four, and the gap between
+    /// them is the fact a separation or a renewal report is asking about. This column is written by
+    /// the terminate and separate paths (<c>EndDate ??= terminationDate</c>) and by the supersede
+    /// path, which closes an open row the day before its successor takes effect.
+    /// </remarks>
     public DateOnly? EndDate { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
@@ -1435,20 +1645,35 @@ public class EmployeeContractDetail : TenantEntity
     /// </summary>
     public bool IsTaxExempt { get; set; } = false;
 
-    public DateOnly EffectiveDate { get; set; }
- 
     /// <summary>
-    /// Null for permanent employment; populated for fixed-term/contract.
+    /// The day these terms take effect — the one the contract history is ordered and closed on.
     /// </summary>
+    /// <remarks>
+    /// ⚠ Every row added through the manual tab before lane D1 carried <c>0001-01-01</c>:
+    /// <c>AddContractAsync</c> never set it and the DTO did not expose it. It now defaults to
+    /// <see cref="StartDate"/> when a caller says nothing, and superseding a current row uses it to
+    /// date the closure.
+    /// </remarks>
+    public DateOnly EffectiveDate { get; set; }
+
+    /// <summary>
+    /// When the engagement is SCHEDULED to end. Null for permanent employment; populated for
+    /// fixed-term and contract appointments.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="EndDate"/> for the distinction. Defaulted from
+    /// <see cref="EmployeeContractType.Duration"/> when a kind is named and no date is given.
+    /// </remarks>
     public DateOnly? ContractEndDate { get; set; }
 
     public int WorkingHoursPerWeek { get; set; } = 40;
 
-    public int AnnualLeaveEntitlementDays { get; set; } = 20;
-
-    public int VacationDaysPerYear { get; set; } = 15;
-
-    public int SickDaysPerYear { get; set; } = 10;
+    // ⚠ Round 3, lane P3 (decision D-5): `AnnualLeaveEntitlementDays`, `VacationDaysPerYear` and
+    // `SickDaysPerYear` were DROPPED (migration DropContractLeaveColumns). Leave entitlement lives in
+    // the leave module — LeaveType / LeaveCategoryAllocation / LeaveBalance — and a second copy on
+    // the contract disagreed with it by default (20 against 15) and was read by nothing but its own
+    // tab. The ledger's probe found 0 of 24 rows off the defaults, so nothing was lost. The reserved
+    // trio (EffectiveDate, ContractEndDate, IsCurrent) is untouched — see HR-CLOSURE-LEDGER § F.
 
     public int? ProbationPeriodDays { get; set; }
 
@@ -1463,8 +1688,21 @@ public class EmployeeContractDetail : TenantEntity
     public string? SpecialConditions { get; set; }
 
     /// <summary>
-    /// Whether this is the employee's currently active terms record.
+    /// Whether these are the terms in force today. At most one row per employee carries it.
     /// </summary>
+    /// <remarks>
+    /// <para>⚠ Until lane D1 this was a default nobody maintained: <c>AddContractAsync</c> left it
+    /// at <c>true</c> on every row it inserted, nothing closed the row it superseded, and the two
+    /// termination paths cleared <c>IsActive</c> without clearing this — so
+    /// <see cref="Employee.CurrentTerms"/>, which reads it, returned whichever contract EF happened
+    /// to materialise first, terminated ones included.</para>
+    ///
+    /// <para>It is now maintained by one helper, and it is the flag the "current contract" read and
+    /// the header write-through both key off. <see cref="IsActive"/> and
+    /// <see cref="ContractStatus"/> remain the ROW's own lifecycle: a superseded contract is not
+    /// current, and it is also no longer active — but an inactive row that was never superseded
+    /// (a draft, a backfilled historical term) is not current either.</para>
+    /// </remarks>
     public bool IsCurrent { get; set; } = true;
 
     public bool IsActive { get; set; } = true;
@@ -1624,9 +1862,45 @@ public class EmployeeSalaryAssignment : TenantEntity
     public Guid? NotchId { get; set; }
     
     public DateTime EffectiveDate { get; set; }
-    
+
+    /// <summary>
+    /// The last day these terms were in force. Null while they still are.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Written ONLY for a placement that actually took effect. A placement withdrawn before its
+    /// start date was never in force, so it has no window at all — see <see cref="WithdrawnAt"/>.
+    /// </remarks>
     public DateTime? EffectiveTo { get; set; }
-    
+
+    /// <summary>
+    /// When this placement was withdrawn — as opposed to superseded by a later one, or simply run
+    /// to its end. Null on a placement that stands, and on one replaced in the ordinary way.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ This column exists because one date interval was carrying two different facts,
+    /// and the collision had teeth.</b> "When were these terms in force" is the window; "was this
+    /// row withdrawn" is a separate act. Closing used to express the second by clamping the first,
+    /// and the clamp could not go earlier than the row's own start date without producing a window
+    /// that ends before it begins. So a placement withdrawn on or before its start date was closed
+    /// to <c>EffectiveTo = EffectiveDate</c> — a one-day window.</para>
+    ///
+    /// <para>For a placement starting TODAY that was a cosmetic lag: it read as in force until
+    /// midnight. For a FUTURE-dated one — a promotion booked ahead, then withdrawn when the person
+    /// moved to negotiated pay or came off payroll — it was a live defect: the window
+    /// <c>[1 Oct, 1 Oct]</c> matches the as-of predicate again ON 1 October, weeks after the
+    /// withdrawal, and <c>EmolumentService</c> would read that notch as basic pay for the day.
+    /// Benefit enrolment computes contributions from that figure.</para>
+    ///
+    /// <para>Every as-of read must exclude withdrawn rows. Kept rather than deleted, and kept
+    /// distinct from <c>IsDeleted</c> — "entered in error" and "withdrawn because the pay basis
+    /// changed" are different statements, and the second is worth showing on the tab.</para>
+    /// </remarks>
+    public DateTime? WithdrawnAt { get; set; }
+
+    /// <summary>Why it was withdrawn — "taken off payroll", "pay basis changed to negotiated".</summary>
+    [MaxLength(500)]
+    public string? WithdrawnReason { get; set; }
+
     public string AssignmentReason { get; set; } = string.Empty; // Promotion, Annual Review, etc.
     
     [ForeignKey(nameof(EmployeeId))]
@@ -1645,7 +1919,7 @@ public class EmployeeSalaryAssignment : TenantEntity
 /// <summary>
 /// Represents referees provided by an employee/applicant
 /// </summary>
-public class EmployeeReferee : TenantEntity
+public class EmployeeReferee : TenantEntity, IRelationshipTypeConsumer
 {
     [Required]
     public Guid EmployeeId { get; set; }
@@ -1668,6 +1942,21 @@ public class EmployeeReferee : TenantEntity
     [Required]
     [MaxLength(200)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tie, from the tenant's relationship catalogue (round 2, lane D2 — register rows E-11a,
+    /// E-11b).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The free-text <c>Relationship</c> above is kept and MIRRORED from this row's name
+    /// whenever the id is set, so rows written before the catalogue keep their wording and every
+    /// consumer that reads the string keeps working. Nullable: a tie nobody has catalogued may
+    /// still be typed.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
+    [ForeignKey(nameof(RelationshipTypeId))]
+    public virtual RelationshipType? RelationshipTypeRef { get; set; }
 
     [Required]
     [MaxLength(50)]
@@ -1710,7 +1999,7 @@ public class EmployeeReferee : TenantEntity
 /// <summary>
 /// Represents guarantors for employees (if required)
 /// </summary>
-public class EmployeeGuarantor : TenantEntity
+public class EmployeeGuarantor : TenantEntity, IRelationshipTypeConsumer
 {
     [Required]
     public Guid EmployeeId { get; set; }
@@ -1726,6 +2015,21 @@ public class EmployeeGuarantor : TenantEntity
     [Required]
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tie, from the tenant's relationship catalogue (round 2, lane D2 — register rows E-11a,
+    /// E-11b).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The free-text <c>Relationship</c> above is kept and MIRRORED from this row's name
+    /// whenever the id is set, so rows written before the catalogue keep their wording and every
+    /// consumer that reads the string keeps working. Nullable: a tie nobody has catalogued may
+    /// still be typed.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
+    [ForeignKey(nameof(RelationshipTypeId))]
+    public virtual RelationshipType? RelationshipTypeRef { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -1753,13 +2057,32 @@ public class EmployeeGuarantor : TenantEntity
     [MaxLength(500)]
     public string Address { get; set; } = string.Empty;
 
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
     [MaxLength(100)]
     public string? City { get; set; }
+
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
+    [MaxLength(100)]
+    public string? Region { get; set; }
 
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the shared administrative-geography tree (round 2, lane D2 —
+    /// register row E-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set, <see cref="City"/> and <see cref="Region"/> become DISPLAY SNAPSHOTS
+    /// written from the tree — the <c>Employee.City</c>/<c>State</c> convention. A null area
+    /// leaves both exactly as they were.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     [MaxLength(50)]
     public string? PhoneNumber { get; set; }
@@ -1783,8 +2106,27 @@ public class EmployeeGuarantor : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal? MonthlyIncome { get; set; }
 
+    /// <summary>
+    /// The kind of national ID, as free text — the ported column.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Kept alongside <see cref="NationalIdTypeId"/>, not replaced by it (the lane-3b idiom for
+    /// the certifying body): existing rows hold text nobody has mapped, and blanking it would lose
+    /// what was typed. The screen offers the lookup; this column is shown only where the FK is
+    /// null. Nothing new should write it.
+    /// </remarks>
     [MaxLength(50)]
     public string? NationalIdType { get; set; } // e.g. Ghana Card, Passport
+
+    /// <summary>
+    /// The kind of national ID, from the tenant's identification-type catalogue (demo feedback
+    /// round 2, E-13: "National ID type for the guarantor should be a dropdown populated with the
+    /// set up identification document types").
+    /// </summary>
+    public Guid? NationalIdTypeId { get; set; }
+
+    [ForeignKey(nameof(NationalIdTypeId))]
+    public virtual IdentificationType? NationalIdTypeRef { get; set; }
 
     [MaxLength(100)]
     public string? NationalIdNumber { get; set; }
@@ -1838,6 +2180,15 @@ public class EmployeeGuarantor : TenantEntity
 
     public DateOnly? DateFormSigned { get; set; }
 
+    /// <summary>
+    /// LEGACY caller-supplied location of the signed guarantor form.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Read-only since demo feedback round 2 (lane A-6). The write DTOs no longer carry it — a
+    /// path string on a JSON body is the sink D-10, D-14 and D-39 each had to remove — and the
+    /// signed form now goes on the row as an <see cref="EmployeeGuarantorDocument"/> through the
+    /// gate. The column stays so ported values are not lost; the detail read still returns it.
+    /// </remarks>
     [MaxLength(500)]
     public string? GuarantorFormPath { get; set; }
 
@@ -1862,6 +2213,9 @@ public class EmployeeGuarantor : TenantEntity
     
     [ForeignKey(nameof(CountryId))]
     public virtual Country? Country { get; set; }
+
+    /// <summary>Documents pertaining to this guarantor — the signed form, an ID scan, a payslip.</summary>
+    public virtual ICollection<EmployeeGuarantorDocument> Documents { get; set; } = new List<EmployeeGuarantorDocument>();
 
     [NotMapped]
     public string FullName =>
@@ -2029,6 +2383,15 @@ public class Skill : TenantEntity
     public virtual ICollection<EmployeeSkill> EmployeeSkills { get; set; } = new List<EmployeeSkill>();
     public virtual ICollection<PositionSkillRequirement> PositionRequirements { get; set; } = new List<PositionSkillRequirement>();
     public virtual ICollection<CompetencySkillIndicator> CompetencyIndicators { get; set; } = new List<CompetencySkillIndicator>();
+
+    /// <summary>
+    /// The credential(s) that evidence this skill (round 2, lane C2 — register row S-1). A skill
+    /// with <see cref="RequiresCertification"/> carries at least one.
+    /// </summary>
+    public virtual ICollection<SkillCertification> Certifications { get; set; } = new List<SkillCertification>();
+
+    /// <summary>The skill sets this skill belongs to (round 2, lane C3 — register row S-3).</summary>
+    public virtual ICollection<SkillSetMember> SetMemberships { get; set; } = new List<SkillSetMember>();
 }
 
 /// <summary>
@@ -2077,6 +2440,16 @@ public class EmployeeSkill : TenantEntity
     public string? Notes { get; set; }
 
     public bool IsVerified { get; set; } = false;
+
+    /// <summary>
+    /// The credential on the employee's certification tab that evidences this skill (round 2,
+    /// lane C2). The per-skill certification columns above stay, and are shown when this is null —
+    /// the lane-3b idiom for the free-text certifying body beside its FK.
+    /// </summary>
+    public Guid? EmployeeCertificationId { get; set; }
+
+    [ForeignKey(nameof(EmployeeCertificationId))]
+    public virtual EmployeeCertification? EmployeeCertification { get; set; }
 
     // Navigation Properties
     public virtual Employee Employee { get; set; } = null!;
@@ -2322,6 +2695,9 @@ public class CertifyingBody : TenantEntity
     public bool IsActive { get; set; } = true;
 
     public virtual ICollection<EmployeeSkill> EmployeeSkills { get; set; } = new List<EmployeeSkill>();
+
+    /// <summary>The credentials this body issues (round 2, lane C2 — register row S-2).</summary>
+    public virtual ICollection<Certification> Certifications { get; set; } = new List<Certification>();
 }
 
 /// <summary>

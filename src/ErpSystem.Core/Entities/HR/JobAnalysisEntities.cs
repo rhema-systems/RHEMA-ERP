@@ -95,6 +95,21 @@ public class JobDescription : TenantEntity
     [MaxLength(2000)]
     public string? ValuationNotes { get; set; }
 
+    /// <summary>
+    /// The grade the author PROPOSES for the post (round 3, lane J2; decision D-11). The suggestion
+    /// above is the system's output and stays read-only; this is the human's answer to it, defaulted
+    /// to the suggestion when the valuation is stored and otherwise the author's. The post's ACTUAL
+    /// grade is on the position, where payroll reads it — neither of these assigns it.
+    /// </summary>
+    public Guid? ProposedSalaryGradeId { get; set; }
+
+    [ForeignKey(nameof(ProposedSalaryGradeId))]
+    public virtual SalaryGrade? ProposedSalaryGrade { get; set; }
+
+    /// <summary>Why the proposal differs from the suggestion, when it does.</summary>
+    [MaxLength(500)]
+    public string? ProposedSalaryGradeNote { get; set; }
+
     // ───────────────────────── Authority & Financial Limits ─────────────────────────
     /// <summary>Level of decision-making authority/autonomy the role carries.</summary>
     public DecisionAuthorityLevel? AutonomyLevel { get; set; }
@@ -255,6 +270,15 @@ public class JobQualification : TenantEntity
 
     [ForeignKey(nameof(QualificationId))]
     public virtual Qualification? Qualification { get; set; }
+
+    /// <summary>
+    /// A credential from the certification catalogue, where the requirement is one (round 2,
+    /// lane C2, § 6.3): one column, so the job description and the position name the same thing.
+    /// </summary>
+    public Guid? CertificationId { get; set; }
+
+    [ForeignKey(nameof(CertificationId))]
+    public virtual Certification? Certification { get; set; }
 
     /// <summary>
     /// If QualificationId is set, this is auto-populated from qualification name
@@ -626,6 +650,36 @@ public class ManpowerBudgetLine : TenantEntity
     
     [ForeignKey(nameof(JobDescriptionId))]
     public virtual JobDescription? JobDescription { get; set; }
+
+    /// <summary>
+    /// The place on the salary scale the planned average salary was read from (round 2b, R3).
+    /// </summary>
+    /// <remarks>
+    /// <para>The demo asked for "the salary that goes with a position" to show once the position
+    /// is chosen, and for the line to take its figure from the scale rather than a typed number.
+    /// Grade → (level) → notch, all optional, pre-selected on screen from
+    /// <c>EmployeePosition.SalaryGradeId</c> (122 of 212 live positions carry one, measured
+    /// 2026-09-10). The amount stays editable: <see cref="PlannedSalarySource"/> says whether it
+    /// was read from the notch, the level's mid-point, the grade's minimum, or typed.</para>
+    /// <para>Restrict on all three: a grade referenced by a budget line cannot be deleted from
+    /// under it; retire it instead (the structure's own rule).</para>
+    /// </remarks>
+    public Guid? SalaryGradeId { get; set; }
+
+    [ForeignKey(nameof(SalaryGradeId))]
+    public virtual SalaryGrade? SalaryGrade { get; set; }
+
+    public Guid? SalaryLevelId { get; set; }
+
+    [ForeignKey(nameof(SalaryLevelId))]
+    public virtual SalaryLevel? SalaryLevel { get; set; }
+
+    public Guid? SalaryNotchId { get; set; }
+
+    [ForeignKey(nameof(SalaryNotchId))]
+    public virtual SalaryNotch? SalaryNotch { get; set; }
+
+    public PlannedSalarySource PlannedSalarySource { get; set; } = PlannedSalarySource.Manual;
 
     // Current
     public int CurrentCount { get; set; }

@@ -77,6 +77,22 @@ public static class UnionMappingExtensions
                 .OrderByDescending(a => a.EffectiveDate)
                 .Select(a => a.ToDto())
                 .ToList() ?? new List<CollectiveBargainingAgreementDto>(),
+            Contacts = entity.Contacts?
+                .Where(c => !c.IsDeleted)
+                .OrderByDescending(c => c.IsPrimary).ThenBy(c => c.Role)
+                .Select(c => c.ToContactDto())
+                .ToList() ?? new List<UnionContactDto>(),
+            PrimaryContact = entity.Contacts?
+                .Where(c => !c.IsDeleted && c.IsPrimary)
+                .Select(c => c.ToContactDto())
+                .FirstOrDefault(),
+            Documents = entity.Documents?
+                .Where(d => !d.IsDeleted)
+                .OrderByDescending(d => d.UploadDate)
+                .Select(d => d.ToDocumentDto())
+                .ToList() ?? new List<UnionDocumentDto>(),
+            HasLogo = entity.LogoFileUploadRecordId.HasValue,
+            LogoFileName = entity.LogoFileName,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -114,6 +130,29 @@ public static class UnionMappingExtensions
 
     #endregion
 
+    #region UnionContact / UnionDocument (round 3, lane U)
+
+    public static UnionContactDto ToContactDto(this UnionContact c) => new()
+    {
+        Id = c.Id, TenantId = c.TenantId, UnionId = c.UnionId,
+        EmployeeId = c.EmployeeId, EmployeeNumber = c.Employee?.EmployeeNumber,
+        ExternalName = c.ExternalName,
+        DisplayName = c.Employee?.FullName ?? c.ExternalName ?? string.Empty,
+        Email = c.Email, Phone = c.Phone, Role = c.Role, IsPrimary = c.IsPrimary, Notes = c.Notes,
+        CreatedAt = c.CreatedAt, CreatedBy = c.CreatedBy ?? string.Empty, UpdatedAt = c.UpdatedAt, UpdatedBy = c.UpdatedBy,
+    };
+
+    public static UnionDocumentDto ToDocumentDto(this UnionDocument d) => new()
+    {
+        Id = d.Id, TenantId = d.TenantId, UnionId = d.UnionId, AgreementId = d.AgreementId,
+        AgreementTitle = d.Agreement?.Title, Kind = d.Kind, FileName = d.FileName, FileSize = d.FileSize,
+        Description = d.Description, UploadDate = d.UploadDate, UploadedById = d.UploadedById,
+        UploadedByName = d.UploadedBy?.FullName ?? string.Empty,
+        CreatedAt = d.CreatedAt, CreatedBy = d.CreatedBy ?? string.Empty, UpdatedAt = d.UpdatedAt, UpdatedBy = d.UpdatedBy,
+    };
+
+    #endregion
+
     #region CollectiveBargainingAgreement
 
     public static CollectiveBargainingAgreementDto ToDto(this CollectiveBargainingAgreement entity)
@@ -133,6 +172,7 @@ public static class UnionMappingExtensions
             IsActive = entity.IsActive,
             Status = CollectiveBargainingAgreementStatuses.Classify(entity, DateTime.UtcNow),
             IsInForce = CollectiveBargainingAgreementStatuses.IsInForce(entity, DateTime.UtcNow),
+            DocumentCount = entity.Documents?.Count(d => !d.IsDeleted) ?? 0,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,

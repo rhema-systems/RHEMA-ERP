@@ -1753,6 +1753,86 @@ public class SimpleWorkflowService : IWorkflowService
             return context;
         }
 
+        // ── Round 2, lane F3 — teams and committees ──────────────────────────────
+        //
+        // ⚠ Both cases carry `organizationUnitId` and `teamType`, and those are the two a tenant
+        // would actually branch on: a statutory committee serving the whole organisation is a
+        // different sign-off from a project team inside one department. The unit is read from the
+        // TEAM, not from the record, because neither a charter nor an objective knows which unit it
+        // serves — the team does.
+        if (IsEntityType(entityTypeRecord, "HR_TEAM_TERMS_OF_REFERENCE", "HrTeamTermsOfReference", "HR Team Terms Of Reference"))
+        {
+            var terms = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.TeamTermsOfReference>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Terms of reference not found");
+
+            var chartedTeam = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Team>()
+                .FirstOrDefaultAsync(t => t.Id == terms.TeamId);
+
+            context["teamId"] = terms.TeamId;
+            context["teamName"] = chartedTeam?.Name;
+            context["teamType"] = chartedTeam?.TeamType.ToString();
+            context["organizationUnitId"] = chartedTeam?.OrganizationUnitId;
+            context["version"] = terms.Version;
+            // A first charter is a different conversation from a re-issue — the same distinction
+            // the job-description context draws with isFirstVersion.
+            context["isFirstVersion"] = terms.Version <= 1;
+            context["effectiveFrom"] = terms.EffectiveFrom.ToString("yyyy-MM-dd");
+            context["effectiveTo"] = terms.EffectiveTo?.ToString("yyyy-MM-dd");
+            // Open-ended authority is the one worth routing higher: a charter with no end date is
+            // a standing power, not an annual one.
+            context["isOpenEnded"] = terms.EffectiveTo is null;
+            context["status"] = terms.Status.ToString();
+
+            return context;
+        }
+
+        if (IsEntityType(entityTypeRecord, "HR_EMPLOYEE_SALARY_CHANGE_REQUEST", "HrEmployeeSalaryChangeRequest", "HR Employee Salary Change Request"))
+        {
+            var request = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeSalaryChangeRequest>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Salary change request not found");
+
+            // The size of the change is what a definition would branch on: a 3% move and a 40%
+            // move are not the same decision. Both figures are monthly.
+            context["employeeId"] = request.EmployeeId;
+            context["kind"] = request.Kind.ToString();
+            context["currentAmount"] = request.CurrentAmount;
+            context["proposedAmount"] = request.ProposedAmount;
+            context["increasePercent"] = request.CurrentAmount is > 0 && request.ProposedAmount.HasValue
+                ? Math.Round((request.ProposedAmount.Value - request.CurrentAmount.Value) / request.CurrentAmount.Value * 100m, 2)
+                : (decimal?)null;
+            context["proposedPayBasis"] = request.ProposedPayBasis?.ToString();
+            context["status"] = request.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "HR_TEAM_OBJECTIVE", "HrTeamObjective", "HR Team Objective"))
+        {
+            var objective = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.TeamObjective>()
+                .FirstOrDefaultAsync(o => o.Id == entityId)
+                ?? throw new InvalidOperationException("Team objective not found");
+
+            var owningTeam = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Team>()
+                .FirstOrDefaultAsync(t => t.Id == objective.TeamId);
+
+            context["teamId"] = objective.TeamId;
+            context["teamName"] = owningTeam?.Name;
+            context["teamType"] = owningTeam?.TeamType.ToString();
+            context["organizationUnitId"] = owningTeam?.OrganizationUnitId;
+            context["objectiveCode"] = objective.Code;
+            context["objectiveTitle"] = objective.Title;
+            // The weight is what a tenant wanting a heavier sign-off on the team's biggest
+            // undertaking would branch on; the window says whether this is a year's work or a month's.
+            context["weight"] = objective.Weight;
+            context["startDate"] = objective.StartDate.ToString("yyyy-MM-dd");
+            context["dueDate"] = objective.DueDate?.ToString("yyyy-MM-dd");
+            context["hasOwner"] = objective.OwnerMemberId is not null;
+            context["progressMode"] = objective.ProgressMode.ToString();
+            context["status"] = objective.Status.ToString();
+
+            return context;
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_MOVEMENT", "StaffMovement", "Staff Movement"))
         {
             var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()
@@ -1873,6 +1953,11 @@ public class SimpleWorkflowService : IWorkflowService
             context["priority"] = requisition.Priority.ToString();
             context["numberOfPositions"] = requisition.NumberOfPositions;
             context["isBudgeted"] = requisition.IsBudgeted;
+            // Round 2b, R5: budgeted is a fact about a link now, and a definition may route an
+            // unbudgeted requisition to a different approver.
+            context["manpowerBudgetLineId"] = requisition.ManpowerBudgetLineId;
+            context["manpowerBudgetNumber"] = requisition.BudgetCode;
+            context["hasBudgetLine"] = requisition.ManpowerBudgetLineId != null;
             context["requestedById"] = requisition.RequestedById;
             context["desiredStartDate"] = requisition.DesiredStartDate;
             context["status"] = requisition.Status.ToString();

@@ -22,7 +22,7 @@ import { CycleSelect } from '@/components/hr/performance/CycleSelect';
 import { TeamGoalTable } from '@/components/hr/performance/TeamGoalTable';
 import { atRiskGoalsService, goalRiskSettingsService } from '@/services/hr/goals.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 /**
  * Goals at risk across the whole organisation — HR's counterpart to the manager workspace's
@@ -41,10 +41,6 @@ export default function OrgWideAtRiskPage() {
   const [orgUnitId, setOrgUnitId] = useState<string>(ANY);
   const [orgLevelId, setOrgLevelId] = useState<string>(ANY);
 
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
   const { data: levels } = useQuery({
     queryKey: ['hr', 'organization-levels'],
     queryFn: () => organizationLevelService.getAll(),
@@ -77,10 +73,6 @@ export default function OrgWideAtRiskPage() {
     return { overdue, severe, employees, avgProgress };
   }, [rows]);
 
-  const unitOptions = useMemo(
-    () => (units ?? []).map((u) => ({ value: u.id, label: u.name })),
-    [units],
-  );
   const levelOptions = useMemo(
     () => (levels ?? []).map((l) => ({ value: l.id, label: l.name })),
     [levels],
@@ -167,36 +159,18 @@ export default function OrgWideAtRiskPage() {
           <Card>
             <CardContent className="flex flex-wrap items-end gap-4 p-4">
               <div className="w-[240px] space-y-2">
-                <Label htmlFor="orgUnit">Organisation unit</Label>
-                <Select value={orgUnitId} onValueChange={setOrgUnitId}>
-                  <SelectTrigger id="orgUnit">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ANY}>All units</SelectItem>
-                    {unitOptions.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="w-[240px] space-y-2">
-                <Label htmlFor="orgLevel">Organisation level</Label>
-                <Select value={orgLevelId} onValueChange={setOrgLevelId}>
-                  <SelectTrigger id="orgLevel">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ANY}>All levels</SelectItem>
-                    {levelOptions.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <OrganizationUnitPicker
+                  value={orgUnitId === ANY ? '' : orgUnitId}
+                  onChange={(id) => setOrgUnitId(id || ANY)}
+                  onLevelChange={(id) => setOrgLevelId(id || ANY)}
+                  initialLevelId={orgLevelId === ANY ? '' : orgLevelId}
+                  allowNoLevel="All levels"
+                  allowNone="All units"
+                  levelLabel="Organisation level"
+                  unitLabel="Organisation unit"
+                  idPrefix="at-risk-scope"
+                  className="flex flex-wrap items-end gap-4"
+                />
               </div>
               <p className="pb-2 text-xs text-muted-foreground">
                 Filters match the employee&apos;s own unit and level, not the goal&apos;s.

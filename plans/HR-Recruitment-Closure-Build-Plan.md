@@ -1,6 +1,6 @@
 # HR Recruitment Closure — Build Plan
 
-> The closure programme's recruitment block: the 31 BUILD endpoints in `docs/HR-CLOSURE-LEDGER.md`
+> The closure programme's recruitment block: the 31 BUILD endpoints in `docs/HR/programme/HR-CLOSURE-LEDGER.md`
 > (sections C/D2) that close out HR recruitment. Written 2026-08-30 at kickoff, from the ledger,
 > the port plan's area 6/26 rows, the Blazor spec (`D:\ERP Demo\HRApi\ErpSystem.BlazorServer\Pages\Careers\`,
 > 15 pages), and two code surveys. The loop per slice: **backend checks → build → harness → stage**
@@ -244,5 +244,5 @@ HR screens read the applications candidates filed. Then regenerate the ledger (d
   `SystemCleanScanRequired` (D-11).
 - Type-check with a scoped tsconfig against a stashed baseline — full `tsc` crashes on the clean
   tree (D-22 note).
-- Money events (if any surface — offers carry salary) go to `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`,
+- Money events (if any surface — offers carry salary) go to `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`,
   never an HR-side posting mechanism.

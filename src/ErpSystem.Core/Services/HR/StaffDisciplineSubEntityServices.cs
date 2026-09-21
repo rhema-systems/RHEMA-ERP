@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Services.HR.Finance;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -790,6 +791,7 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineFineService> _logger;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     public StaffDisciplineFineService(
         IStaffDisciplineFineRepository fineRepository,
@@ -797,7 +799,8 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
         IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
-        ILogger<StaffDisciplineFineService> logger)
+        ILogger<StaffDisciplineFineService> logger,
+        IHrFinancePostingAdapter financePosting)
     {
         _fineRepository = fineRepository;
         _caseRepository = caseRepository;
@@ -805,6 +808,7 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _financePosting = financePosting;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -905,17 +909,24 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
             CreatedBy            = userId.ToString(),
         };
 
-        await _fineRepository.AddAsync(entity);
-
-        if (disciplinaryCase.Status == DisciplinaryStatus.AwaitingDecision)
+        // The fine, the case's decision and Finance's receivable commit together (HR finish plan
+        // lane 8, slice 4). Imposing the fine IS the authorising event: the case decision was the
+        // approval, and there is no separate approve step on a fine.
+        await _financePosting.RunAsync(async ct =>
         {
-            disciplinaryCase.Status    = DisciplinaryStatus.DecisionMade;
-            disciplinaryCase.UpdatedAt = DateTime.UtcNow;
-            disciplinaryCase.UpdatedBy = userId.ToString();
-            await _caseRepository.UpdateAsync(disciplinaryCase);
-        }
+            await _fineRepository.AddAsync(entity);
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (disciplinaryCase.Status == DisciplinaryStatus.AwaitingDecision)
+            {
+                disciplinaryCase.Status    = DisciplinaryStatus.DecisionMade;
+                disciplinaryCase.UpdatedAt = DateTime.UtcNow;
+                disciplinaryCase.UpdatedBy = userId.ToString();
+                await _caseRepository.UpdateAsync(disciplinaryCase);
+            }
+
+            await _unitOfWork.SaveChangesAsync(ct);
+            return HrFinancePostingCommandFactory.DisciplineFineImposed(entity, disciplinaryCase.CaseNumber, disciplinaryCase.EmployeeId);
+        }, userId, cancellationToken);
 
         _logger.LogInformation("Fine penalty recorded for case {CaseId}, Amount: {Amount}", dto.CaseId, dto.FineAmount);
 
@@ -929,14 +940,31 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
         if (entity.FinePaymentStatus == DisciplinaryFinePaymentStatus.FullyPaid)
             throw new InvalidOperationException("The fine for this case has already been fully paid.");
 
-        entity.FinePaidAmount    = (entity.FinePaidAmount ?? 0m) + dto.AmountPaid;
-        entity.FinePaymentDate   = dto.PaymentDate;
-        entity.FinePaymentStatus = dto.PaymentStatus;
-        entity.UpdatedAt         = DateTime.UtcNow;
-        entity.UpdatedBy         = userId.ToString();
+        // A closed fine (Waived) is not re-opened by a further payment.
+        if (entity.FinePaymentStatus == DisciplinaryFinePaymentStatus.Waived)
+            throw new InvalidOperationException("The fine for this case was waived; it cannot take a payment.");
 
-        await _fineRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // Partial payments accumulate on the record; Finance is told once, when the fine CLOSES
+        // (Fully Paid or Waived) — the settlement posting carries what was paid and what was
+        // forgiven (lane 8, slice 4). A fine that closes with nothing paid and nothing forgiven is
+        // recorded Skipped.
+        var disciplinaryCase = await GetOwnedCaseAsync(entity.DisciplinaryActionId);
+        var imposedPosted = await _financePosting.IsPostedAsync(HrFinancePostingEventCatalog.DisciplineFineImposed, entity.Id, cancellationToken);
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.FinePaidAmount    = (entity.FinePaidAmount ?? 0m) + dto.AmountPaid;
+            entity.FinePaymentDate   = dto.PaymentDate;
+            entity.FinePaymentStatus = dto.PaymentStatus;
+            entity.UpdatedAt         = DateTime.UtcNow;
+            entity.UpdatedBy         = userId.ToString();
+
+            await _fineRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return entity.FinePaymentStatus is DisciplinaryFinePaymentStatus.FullyPaid or DisciplinaryFinePaymentStatus.Waived
+                ? HrFinancePostingCommandFactory.DisciplineFineSettled(entity, disciplinaryCase.CaseNumber, disciplinaryCase.EmployeeId, imposedPosted)
+                : null;
+        }, userId, cancellationToken);
 
         _logger.LogInformation("Fine payment recorded for case {CaseId}, Amount paid: {Amount}", dto.CaseId, dto.AmountPaid);
 

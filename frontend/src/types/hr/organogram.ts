@@ -39,9 +39,38 @@ export interface OrganogramNode {
   /** Headcount at and below this node. Null on locations and teams, which carry no headcount. */
   totalEmployeeCount: number | null;
   expectedHeadcount: number | null;
+  /** Units only (2026-09-08 enrichment): established posts attached to this unit. Null elsewhere. */
+  positionCount: number | null;
+  /** Units only: posts in this unit nobody on strength holds. Null elsewhere. */
+  vacantPositionCount: number | null;
+  /** Positions only: names of the on-strength holders, capped server-side at 25. Null elsewhere. */
+  holders: string[] | null;
+  /** Positions only: true when the post has more holders than `holders` lists. */
+  holdersTruncated: boolean;
   lineType: 'solid' | 'dotted';
   /** Free key/value detail for the side panel: "Unit", "Email", "Staff level", "City", … */
   meta: Record<string, string>;
+}
+
+/**
+ * Where a node's own record lives, for the drawer's "Open record" action. Locations have no
+ * detail route of their own yet (the register is a table under /administration/hr/location), so
+ * the dimension returns null and the action is not offered.
+ */
+export function recordHref(dimension: OrganogramDimension, id: string): string | null {
+  if (id === SYNTHETIC_ROOT_ID) return null;
+  switch (dimension) {
+    case 'units':
+      return `/administration/hr/organization/units/${id}`;
+    case 'positions':
+      return `/administration/hr/positions/${id}`;
+    case 'people':
+      return `/hr/employees/${id}`;
+    case 'teams':
+      return `/administration/hr/organization/teams/${id}`;
+    case 'locations':
+      return null;
+  }
 }
 
 export interface OrganogramResponse {
@@ -133,6 +162,45 @@ export interface OrganogramHealth {
   widestFanOut: number;
   /** True when the server had to invent a root because the dimension has several. */
   hasSyntheticRoot: boolean;
+  /** Real nodes flagged vacant by the server: unfilled posts, headless units, lead-less teams. */
+  vacantCount: number;
+  /** Real nodes whose record is inactive. */
+  inactiveCount: number;
+  /** Sum of `employeeCount` over real nodes — the on-strength headcount the dimension carries. */
+  headcount: number | null;
+}
+
+/** Lookup structures over a forest, built once per payload so navigation is O(1). */
+export interface ForestIndex {
+  byId: Map<string, OrganogramTreeNode>;
+  parentOf: Map<string, OrganogramTreeNode | null>;
+}
+
+export function indexForest(roots: OrganogramTreeNode[]): ForestIndex {
+  const byId = new Map<string, OrganogramTreeNode>();
+  const parentOf = new Map<string, OrganogramTreeNode | null>();
+  const queue: OrganogramTreeNode[] = [...roots];
+  for (const r of roots) parentOf.set(r.node.id, null);
+  for (let i = 0; i < queue.length; i++) {
+    const entry = queue[i];
+    byId.set(entry.node.id, entry);
+    for (const child of entry.children) {
+      parentOf.set(child.node.id, entry);
+      queue.push(child);
+    }
+  }
+  return { byId, parentOf };
+}
+
+/** Root-first chain of ancestors, the node itself excluded. */
+export function ancestorsOf(index: ForestIndex, id: string): OrganogramTreeNode[] {
+  const chain: OrganogramTreeNode[] = [];
+  let cursor = index.parentOf.get(id) ?? null;
+  while (cursor) {
+    chain.unshift(cursor);
+    cursor = index.parentOf.get(cursor.node.id) ?? null;
+  }
+  return chain;
 }
 
 /**
@@ -201,12 +269,17 @@ export function measureHealth(nodes: OrganogramNode[], roots: OrganogramTreeNode
     queue.push(...entry.children);
   }
 
+  const carriesHeadcount = real.some((n) => n.employeeCount !== null);
+
   return {
     realNodeCount: real.length,
     unlinkedCount,
     maxDepth,
     widestFanOut,
     hasSyntheticRoot,
+    vacantCount: real.filter((n) => n.isVacant).length,
+    inactiveCount: real.filter((n) => !n.isActive).length,
+    headcount: carriesHeadcount ? real.reduce((sum, n) => sum + (n.employeeCount ?? 0), 0) : null,
   };
 }
 

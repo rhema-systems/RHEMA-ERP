@@ -57,6 +57,14 @@ public interface INumberSequenceService
         string key, long minimum, int? year = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Tenant-explicit overload of <see cref="AdvanceToAtLeastAsync(string,long,int?,CancellationToken)"/>,
+    /// for callers with no authenticated tenant claim (public career portal) and for repairs that
+    /// realign a counter on behalf of a tenant other than the caller's.
+    /// </summary>
+    Task<long> AdvanceToAtLeastAsync(
+        string key, long minimum, Guid tenantId, int? year = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Where the counter stands, without moving it. <c>0</c> when it has never issued a number.
     /// </summary>
     /// <remarks>

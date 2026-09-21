@@ -33,13 +33,18 @@ namespace ErpSystem.Api.Controllers.HR
         // W3: a year-end job rewrites every balance in the tenant - admin tier only.
         [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
         [ProducesResponseType(typeof(LeaveYearEndResult), StatusCodes.Status200OK)]
+        /// <param name="dryRun">
+        /// ⚠ Compute and report, write nothing. This job moves people's balances in bulk and has no
+        /// undo, so a preview is the difference between catching a misconfigured leave type before
+        /// the run and catching it in nine hundred balances afterwards (finding L-24).
+        /// </param>
         public async Task<ActionResult<LeaveYearEndResult>> ProcessCarryOver(
-            [FromQuery] int fromYear, [FromQuery] Guid? employeeId = null)
+            [FromQuery] int fromYear, [FromQuery] Guid? employeeId = null, [FromQuery] bool dryRun = false)
         {
             if (fromYear < 2000)
                 return BadRequest(new { message = "A valid fromYear is required." });
 
-            var result = await _yearEndService.ProcessCarryOverAsync(fromYear, employeeId);
+            var result = await _yearEndService.ProcessCarryOverAsync(fromYear, employeeId, dryRun);
             return Ok(result);
         }
 
@@ -51,15 +56,19 @@ namespace ErpSystem.Api.Controllers.HR
         // W3: a year-end job rewrites every balance in the tenant - admin tier only.
         [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
         [ProducesResponseType(typeof(LeaveYearEndResult), StatusCodes.Status200OK)]
+        /// <param name="dryRun">⚠ Compute and report, write nothing (finding L-24).</param>
         public async Task<ActionResult<LeaveYearEndResult>> ProcessForfeiture(
-            [FromQuery] int year, [FromQuery] DateOnly? asOf = null, [FromQuery] Guid? employeeId = null)
+            [FromQuery] int year, [FromQuery] DateOnly? asOf = null, [FromQuery] Guid? employeeId = null,
+            [FromQuery] bool dryRun = false)
         {
             if (year < 2000)
                 return BadRequest(new { message = "A valid year is required." });
 
             try
             {
-                var result = await _yearEndService.ProcessForfeitureAsync(year, asOf, employeeId);
+                // ⚠ A dry run still requires a linked actor. The preview must fail wherever the real
+                // run would, or it is not a preview of anything.
+                var result = await _yearEndService.ProcessForfeitureAsync(year, asOf, employeeId, dryRun);
                 return Ok(result);
             }
             catch (InvalidOperationException ex)

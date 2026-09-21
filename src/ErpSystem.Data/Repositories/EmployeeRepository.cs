@@ -39,6 +39,7 @@ namespace ErpSystem.Data.Repositories
                 .Include(e => e.LocationLevel)
                 .Include(e => e.Location)
                 .Include(e => e.Country)
+                .Include(e => e.DisabilityType)
                 .Include(e => e.EmergencyContacts)
                 .Include(e => e.Dependents)
                 .Include(e => e.Qualifications)
@@ -57,6 +58,7 @@ namespace ErpSystem.Data.Repositories
         {
             return WithBasicIncludes(query)
                 .Include(e => e.Country)
+                .Include(e => e.DisabilityType)
                 .Include(e => e.LocationLevel)
                 .Include(e => e.Location)
                 .Include(e => e.OrganizationLevel)

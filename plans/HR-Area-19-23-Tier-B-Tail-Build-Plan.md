@@ -230,7 +230,7 @@ the `/hr` home dashboard; facility services onto area 11; authorization for all 
 **Out:** union dues and any deduction (payroll owns — [[payroll-ownership-boundary]]);
 org-authority modelling, i.e. actually populating unit heads and manager links — the screen to do
 it is in scope, the data programme is not ([[hr-deferred-modules]]); GL posting (none of this moves
-money, so nothing is even owed to `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`); the W3 permission
+money, so nothing is even owed to `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`); the W3 permission
 *seeding* sweep, which stays a separate cross-cutting workstream.
 
 **Risk carried:** slice 3 changes an area-1 service (`OrganizationStructureServices`) that every
@@ -1518,7 +1518,7 @@ an id. The seven live external associates carry **employee ids** in the name col
 facility services. The pattern spans `ReportRoleAssignmentController` (3 sites), `AssetTypeService`,
 `ExchangeRateService` — which has a `// TODO: Resolve username` admitting it — `ApplicationPipelineService`
 and `AppraisalCycleService`. ⚠ **A convention that spans four modules is not an HR slice's to
-change**, so it is `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` **#6**, with the note that the
+change**, so it is `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` **#6**, with the note that the
 real fix is probably to give `UpdateAuditableEntities` an `ICurrentUserProvider` and close the whole
 class at once. The run **prints** that facility-services still stamps a GUID rather than asserting
 it — asserting someone else's defect as expected behaviour would freeze it in place.

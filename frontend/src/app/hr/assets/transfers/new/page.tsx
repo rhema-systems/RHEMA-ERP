@@ -21,9 +21,9 @@ import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { useDebounce } from '@/hooks/use-debounce';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { useToast } from '@/hooks/use-toast';
 import { ASSET_TRANSFER_TYPES } from '@/types/hr/assets';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -69,10 +69,6 @@ export default function NewAssetTransferPage() {
     queryFn: () => assetRegisterService.getAssetsPaged({
       pageSize: 25, searchTerm: debouncedAssetSearch || undefined,
     }),
-  });
-  const { data: units = [] } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
   });
   const { data: locations = [] } = useQuery({
     queryKey: ['hr', 'locations'],
@@ -224,16 +220,12 @@ export default function NewAssetTransferPage() {
           )}
           {form.type === 'UnitToUnit' && (
             <div className="space-y-2 sm:col-span-2">
-              <Label>To which unit *</Label>
-              <Select
+              <OrganizationUnitPicker
                 value={form.toUnitId}
-                onValueChange={(v) => setForm((f) => ({ ...f, toUnitId: v }))}
-              >
-                <SelectTrigger><SelectValue placeholder="Choose a unit" /></SelectTrigger>
-                <SelectContent>
-                  {units.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+                onChange={(id) => setForm((f) => ({ ...f, toUnitId: id }))}
+                unitLabel="To which unit *"
+                idPrefix="transfer-to-unit"
+              />
             </div>
           )}
 

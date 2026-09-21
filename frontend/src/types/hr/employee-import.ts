@@ -1,6 +1,6 @@
 /**
  * Employee bulk import — the wire types of `api/hr/employees/import-sessions`.
- * Backend: `EmployeeImportDtos.cs`; design: `docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md`.
+ * Backend: `EmployeeImportDtos.cs`; design: `docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md`.
  */
 
 export type EmployeeImportSessionStatus =

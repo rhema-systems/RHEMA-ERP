@@ -1,7 +1,8 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.HR.Payroll;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Payroll;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
@@ -66,7 +67,12 @@ public class PayrollMembershipService : IPayrollMembershipService
         => _unitOfWork.Repository<EmployeeSalaryAssignment>().GetQueryable()
             .Include(a => a.Notch)
             .Include(a => a.Level)
+            .Include(a => a.Grade)
+            // ⚠ WithdrawnAt is part of the predicate, not an afterthought: a placement withdrawn
+            // before its start date has no window to exclude it, so this is the only thing keeping
+            // it out. See EmployeeSalaryAssignment.WithdrawnAt.
             .Where(a => a.TenantId == tenantId && !a.IsDeleted
+                     && a.WithdrawnAt == null
                      && a.EffectiveDate <= asOf
                      && (a.EffectiveTo == null || a.EffectiveTo >= asOf));
 
@@ -86,8 +92,8 @@ public class PayrollMembershipService : IPayrollMembershipService
             .Include(p => p.SalaryBasis)
             .FirstOrDefaultAsync(p => p.EmployeeId == employeeId, cancellationToken);
 
-        var hrBasic = employee.IsOnPayroll ? HrBasicPay(employee, assignment) : null;
         var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
+        var (hrBasic, source) = HrBasicPay.Resolve(employee, assignment, payrollBasic);
 
         return new EmployeePayrollStatusDto
         {
@@ -96,14 +102,215 @@ public class PayrollMembershipService : IPayrollMembershipService
             IsOnPayroll = employee.IsOnPayroll,
             OffPayrollReason = employee.OffPayrollReason,
             OffPayrollNote = employee.OffPayrollNote,
+            PayBasis = employee.PayBasis,
+            PayBasisNote = employee.PayBasisNote,
             HrMonthlyBasicPay = hrBasic,
+            HrBasicPaySource = source,
             HasActiveSalaryAssignment = assignment != null,
             HasPayrollProfile = profile != null,
             PayrollActive = profile?.PayrollActive,
             PayrollMonthlyBasicSalary = payrollBasic,
             PayrollCurrencyCode = profile?.SalaryBasis?.CurrencyCode ?? profile?.CurrencyCode,
-            Issue = IssueFor(employee.IsOnPayroll, profile != null, profile?.PayrollActive, hrBasic, payrollBasic)?.ToString(),
+            Issue = IssueFor(employee, profile != null, profile?.PayrollActive, assignment, hrBasic, payrollBasic)?.ToString(),
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<PayrollEmployeeProfileDto?> GetPayrollProfileAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId && !e.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        // The staff number as the search term: payroll's filter is a Contains over number and
+        // name, so the term narrows the list to this person and whoever shares a substring of
+        // their number — then the id picks the one. Never the bare list, which stops at 250.
+        var matches = await _payroll.GetEmployeeProfilesAsync(tenantId, employee.EmployeeNumber, cancellationToken);
+        return matches.FirstOrDefault(p => p.EmployeeId == employeeId);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Round 3, lane X. Payroll's own read is component-first (one component, every employee) and
+    /// answers an EMPTY list when no component is named — which is why the Salary tab's "component
+    /// exceptions" table had never shown a row. This is the employee-first read: every ACTIVE
+    /// component, with the person's exception beside it where one exists. Payroll's tables, read
+    /// directly like the grade projection; nothing here writes.
+    /// </remarks>
+    public async Task<EmployeePayrollComponentsDto> GetPayrollComponentsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId && !e.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        var profile = await Profiles(tenantId)
+            .FirstOrDefaultAsync(p => p.EmployeeId == employeeId, cancellationToken);
+
+        var components = await _unitOfWork.Repository<PayrollComponent>().GetQueryable().AsNoTracking()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.IsActive)
+            .OrderBy(c => c.ComponentType).ThenBy(c => c.Code)
+            .ToListAsync(cancellationToken);
+
+        var exceptions = profile == null
+            ? new List<PayrollEmployeeComponent>()
+            : await _unitOfWork.Repository<PayrollEmployeeComponent>().GetQueryable().AsNoTracking()
+                .Where(x => x.TenantId == tenantId && !x.IsDeleted && x.EmployeeProfileId == profile.Id)
+                .ToListAsync(cancellationToken);
+        var byComponent = exceptions.GroupBy(x => x.PayrollComponentId).ToDictionary(g => g.Key, g => g.First());
+
+        return new EmployeePayrollComponentsDto
+        {
+            EmployeeId = employee.Id,
+            EmployeeNumber = employee.EmployeeNumber,
+            HasPayrollProfile = profile != null,
+            PayrollProfileId = profile?.Id,
+            Rows = components.Select(c =>
+            {
+                byComponent.TryGetValue(c.Id, out var x);
+                return new EmployeePayrollComponentRowDto
+                {
+                    PayrollComponentId = c.Id,
+                    Code = c.Code,
+                    Name = c.Name,
+                    ComponentType = c.ComponentType,
+                    DefaultCalculationType = c.CalculationType,
+                    DefaultAmount = c.Amount,
+                    DefaultRate = c.Rate,
+                    DefaultTaxable = c.Taxable,
+                    CurrencyCode = c.CurrencyCode,
+                    AppliesByDefault = c.AppliesByDefault,
+                    ExceptionId = x?.Id,
+                    CalculationType = x?.CalculationTypeOverride,
+                    Amount = x?.AmountOverride,
+                    Rate = x?.RateOverride,
+                    Taxable = x?.TaxableOverride,
+                    Applicable = x?.Applicable,
+                    EffectiveFrom = x?.EffectiveFrom,
+                    EffectiveTo = x?.EffectiveTo,
+                };
+            }).ToList(),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<PayrollBasicWriteResult> UpdateMonthlyBasicAsync(
+        Guid employeeId, decimal monthlyBasic, string? currencyCode, DateTime effectiveFrom, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        PayrollEmployeeProfileDto? profile;
+        try { profile = await GetPayrollProfileAsync(employeeId, cancellationToken); }
+        catch (Exception ex) { return PayrollBasicWriteResult.Failed($"Payroll's profile could not be read: {ex.Message}"); }
+        if (profile == null)
+            return PayrollBasicWriteResult.Failed("Payroll has no profile for this employee yet; create it on the Salary tab, then apply again.");
+
+        var beforeMethods = profile.PaymentMethods.Select(m => m.Id).OrderBy(x => x).ToList();
+        var currency = string.IsNullOrWhiteSpace(currencyCode)
+            ? (profile.SalaryBasis?.CurrencyCode ?? profile.CurrencyCode)
+            : currencyCode.Trim().ToUpperInvariant();
+
+        var dto = new UpsertPayrollEmployeeProfileDto
+        {
+            Id = profile.Id,
+            EmployeeId = profile.EmployeeId,
+            EmployeeNumber = profile.EmployeeNumber,
+            LegacyEmployeeId = profile.LegacyEmployeeId,
+            LegacyEmployeeNumber = profile.LegacyEmployeeNumber,
+            PayrollActive = profile.PayrollActive,
+            PayTax = profile.PayTax,
+            SsfApplicable = profile.SsfApplicable,
+            GrossUp = profile.GrossUp,
+            Tier2Only = profile.Tier2Only,
+            OvertimeEligible = profile.OvertimeEligible,
+            SsfNumber = profile.SsfNumber,
+            TinNumber = profile.TinNumber,
+            CurrencyCode = profile.CurrencyCode,
+            SalaryBasis = new UpsertPayrollSalaryBasisDto
+            {
+                Id = profile.SalaryBasis?.Id,
+                MonthlyBasicSalary = monthlyBasic,
+                AnnualBasicSalary = monthlyBasic * 12,
+                HourlyRate = profile.SalaryBasis?.HourlyRate,
+                CurrencyCode = currency,
+                EffectiveFrom = effectiveFrom.Date,
+                IsActive = true,
+            },
+            // Carried through unchanged, ids included: the upsert replaces the list it is given.
+            PaymentMethods = profile.PaymentMethods.Select(m => new UpsertPayrollPaymentMethodDto
+            {
+                Id = m.Id, PaymentType = m.PaymentType, PaymentMode = m.PaymentMode, PaymentPercent = m.PaymentPercent,
+                Amount = m.Amount, BankCode = m.BankCode, BankBranchCode = m.BankBranchCode, AccountNumber = m.AccountNumber,
+                ChequeNumber = m.ChequeNumber, ChequeBankCode = m.ChequeBankCode, CurrencyCode = m.CurrencyCode,
+                ExchangeRate = m.ExchangeRate, SequenceNo = m.SequenceNo, StartDate = m.StartDate, EndDate = m.EndDate,
+                IsActive = m.IsActive,
+            }).ToList(),
+            EmployeeComponents = profile.EmployeeComponents.Select(c => new UpsertPayrollEmployeeComponentDto
+            {
+                Id = c.Id, PayrollComponentId = c.PayrollComponentId, CalculationTypeOverride = c.CalculationTypeOverride,
+                AmountOverride = c.AmountOverride, RateOverride = c.RateOverride, TaxableOverride = c.TaxableOverride,
+                TaxFreeCeilingOverride = c.TaxFreeCeilingOverride, EmployerAmountOverride = c.EmployerAmountOverride,
+                EmployerTaxableOverride = c.EmployerTaxableOverride, GrossUpOverride = c.GrossUpOverride,
+                CurrencyCodeOverride = c.CurrencyCodeOverride, Applicable = c.Applicable,
+                EffectiveFrom = c.EffectiveFrom, EffectiveTo = c.EffectiveTo,
+            }).ToList(),
+        };
+
+        try
+        {
+            await _payroll.UpsertEmployeeProfileAsync(tenantId, dto, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Payroll's upsert refused the approved monthly basic for {EmployeeId}.", employeeId);
+            return PayrollBasicWriteResult.Failed($"Payroll refused the change: {ex.Message}");
+        }
+
+        PayrollEmployeeProfileDto? after;
+        try { after = await GetPayrollProfileAsync(employeeId, cancellationToken); }
+        catch (Exception ex) { return PayrollBasicWriteResult.Failed($"Written, but payroll's profile could not be re-read: {ex.Message}"); }
+
+        var afterMethods = after?.PaymentMethods.Select(m => m.Id).OrderBy(x => x).ToList() ?? new List<Guid>();
+        if (!beforeMethods.SequenceEqual(afterMethods))
+        {
+            _logger.LogError(
+                "Payroll's upsert changed the payment methods of {EmployeeId} on a basis-only round trip ({Before} → {After}). Report to the payroll owner.",
+                employeeId, beforeMethods.Count, afterMethods.Count);
+            return PayrollBasicWriteResult.Failed(
+                $"Payroll's payment methods changed on the round trip ({beforeMethods.Count} → {afterMethods.Count}); check the profile in payroll before applying again.");
+        }
+        if (after?.SalaryBasis == null || after.SalaryBasis.MonthlyBasicSalary != monthlyBasic)
+            return PayrollBasicWriteResult.Failed(
+                $"Payroll answered without refusing, but its basis reads {after?.SalaryBasis?.MonthlyBasicSalary.ToString() ?? "nothing"} rather than {monthlyBasic}.");
+
+        _logger.LogInformation("Payroll monthly basic for {EmployeeId} set to {Amount} {Currency} from {From:yyyy-MM-dd} (approved salary change).",
+            employeeId, monthlyBasic, currency, effectiveFrom);
+        return PayrollBasicWriteResult.Ok();
+    }
+
+    /// <inheritdoc />
+    public async Task<(decimal? MonthlyBasicPay, string Source)> ResolveMonthlyBasicPayAsync(
+        Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId && !e.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        if (!employee.IsOnPayroll)
+            return (null, "Not on payroll: no basic pay is on record in HR.");
+
+        var today = DateTime.UtcNow.Date;
+        var assignment = await ActiveAssignments(tenantId, today)
+            .Where(a => a.EmployeeId == employeeId)
+            .OrderByDescending(a => a.EffectiveDate)
+            .FirstOrDefaultAsync(cancellationToken);
+        var profile = await Profiles(tenantId)
+            .Include(p => p.SalaryBasis)
+            .FirstOrDefaultAsync(p => p.EmployeeId == employeeId, cancellationToken);
+        var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
+
+        return HrBasicPay.Resolve(employee, assignment, payrollBasic);
     }
 
     public async Task<PayrollReconciliationDto> GetReconciliationAsync(CancellationToken cancellationToken = default)
@@ -138,10 +345,10 @@ public class PayrollMembershipService : IPayrollMembershipService
 
             profileByEmployee.TryGetValue(e.Id, out var profile);
             assignmentByEmployee.TryGetValue(e.Id, out var assignment);
-            var hrBasic = e.IsOnPayroll ? HrBasicPay(e, assignment) : null;
             var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
+            var hrBasic = HrBasicPay.Resolve(e, assignment, payrollBasic).Amount;
 
-            var issue = IssueFor(e.IsOnPayroll, profile != null, profile?.PayrollActive, hrBasic, payrollBasic);
+            var issue = IssueFor(e, profile != null, profile?.PayrollActive, assignment, hrBasic, payrollBasic);
             if (issue == null) continue;
 
             switch (issue.Value)
@@ -150,6 +357,7 @@ public class PayrollMembershipService : IPayrollMembershipService
                 case PayrollReconciliationIssue.InactiveInPayroll: result.InactiveInPayroll++; break;
                 case PayrollReconciliationIssue.StillActiveInPayroll: result.StillActiveInPayroll++; break;
                 case PayrollReconciliationIssue.NoPayBasis: result.NoPayBasis++; break;
+                case PayrollReconciliationIssue.BasicPayMismatch: result.BasicPayMismatch++; break;
             }
 
             result.Rows.Add(new PayrollReconciliationRowDto
@@ -165,7 +373,9 @@ public class PayrollMembershipService : IPayrollMembershipService
                 OffPayrollReason = e.OffPayrollReason,
                 HasPayrollProfile = profile != null,
                 PayrollActive = profile?.PayrollActive,
+                PayBasis = e.PayBasis,
                 HrMonthlyBasicPay = hrBasic,
+                PayrollMonthlyBasicSalary = payrollBasic,
                 Issue = issue.Value,
             });
         }
@@ -173,9 +383,12 @@ public class PayrollMembershipService : IPayrollMembershipService
         // The ones the payroll owner must act on first: people HR says are off payroll whom the run
         // will still pay, then people waiting to be set up, then the rest.
         result.Rows = result.Rows
+            // A mismatch pays somebody the wrong amount every month until it is seen, so it sits
+            // above "nothing to pay from", which at least pays nothing.
             .OrderBy(r => r.Issue == PayrollReconciliationIssue.StillActiveInPayroll ? 0
                         : r.Issue == PayrollReconciliationIssue.AwaitingPayrollSetup ? 1
-                        : r.Issue == PayrollReconciliationIssue.InactiveInPayroll ? 2 : 3)
+                        : r.Issue == PayrollReconciliationIssue.InactiveInPayroll ? 2
+                        : r.Issue == PayrollReconciliationIssue.BasicPayMismatch ? 3 : 4)
             .ThenBy(r => r.EmployeeNumber)
             .ToList();
         return result;
@@ -340,23 +553,27 @@ public class PayrollMembershipService : IPayrollMembershipService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// The HR-side basic pay, the same way EmolumentService resolves it: the current notch's amount,
-    /// else the level's mid-point, else the flat figure on the record.
-    /// </summary>
-    private static decimal? HrBasicPay(Employee employee, EmployeeSalaryAssignment? assignment)
-        => assignment?.Notch?.SalaryAmount ?? assignment?.Level?.MidSalary ?? employee.Salary;
-
     private static PayrollReconciliationIssue? IssueFor(
-        bool isOnPayroll, bool hasProfile, bool? payrollActive, decimal? hrBasic, decimal? payrollBasic)
+        Employee employee, bool hasProfile, bool? payrollActive,
+        EmployeeSalaryAssignment? assignment, decimal? hrBasic, decimal? payrollBasic)
     {
-        if (isOnPayroll)
+        if (employee.IsOnPayroll)
         {
             if (!hasProfile) return PayrollReconciliationIssue.AwaitingPayrollSetup;
             if (payrollActive == false) return PayrollReconciliationIssue.InactiveInPayroll;
             // A run skips a zero basis silently (PayrollService: "if (originalBasicSalary <= 0) continue"),
             // which is exactly the case nobody would notice until payday.
             if ((hrBasic ?? 0m) <= 0m && (payrollBasic ?? 0m) <= 0m) return PayrollReconciliationIssue.NoPayBasis;
+
+            // ⚠ Scale only, and only from a NOTCH. A level mid-point is an estimate, not a placed
+            // figure, and a flat record figure is what payroll was seeded from — neither is a claim
+            // that payroll is wrong. A notch is: somebody placed this person there on purpose.
+            if (employee.PayBasis == PayBasis.SalaryScale
+                && assignment?.Notch?.SalaryAmount is { } placed
+                && payrollBasic is > 0m
+                && placed != payrollBasic.Value)
+                return PayrollReconciliationIssue.BasicPayMismatch;
+
             return null;
         }
 

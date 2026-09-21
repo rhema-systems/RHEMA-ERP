@@ -1,10 +1,12 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Recruitment;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -21,6 +23,11 @@ public class JobVacancyService : IJobVacancyService
     private readonly IStaffRequisitionRepository _requisitionRepository;
     private readonly IJobPostingRepository _postingRepository;
     private readonly IVacancyPipelineStageAssignmentRepository _stageAssignmentRepository;
+    private readonly IGenericRepository<JobShortlistingCriteriaValue> _criteriaValueRepository;
+    private readonly IGenericRepository<Skill> _skillMasterRepository;
+    private readonly IGenericRepository<Qualification> _qualificationMasterRepository;
+    private readonly IGenericRepository<Certification> _certificationMasterRepository;
+    private readonly IGenericRepository<Language> _languageMasterRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobVacancyService> _logger;
@@ -34,6 +41,11 @@ public class JobVacancyService : IJobVacancyService
         IStaffRequisitionRepository requisitionRepository,
         IJobPostingRepository postingRepository,
         IVacancyPipelineStageAssignmentRepository stageAssignmentRepository,
+        IGenericRepository<JobShortlistingCriteriaValue> criteriaValueRepository,
+        IGenericRepository<Skill> skillMasterRepository,
+        IGenericRepository<Qualification> qualificationMasterRepository,
+        IGenericRepository<Certification> certificationMasterRepository,
+        IGenericRepository<Language> languageMasterRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<JobVacancyService> logger)
@@ -46,6 +58,11 @@ public class JobVacancyService : IJobVacancyService
         _requisitionRepository = requisitionRepository;
         _postingRepository = postingRepository;
         _stageAssignmentRepository = stageAssignmentRepository;
+        _criteriaValueRepository = criteriaValueRepository;
+        _skillMasterRepository = skillMasterRepository;
+        _qualificationMasterRepository = qualificationMasterRepository;
+        _certificationMasterRepository = certificationMasterRepository;
+        _languageMasterRepository = languageMasterRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -128,7 +145,13 @@ public class JobVacancyService : IJobVacancyService
     public async Task<JobVacancyDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
-        return entity.ToDto();
+        var dto = entity.ToDto();
+        // Round 3, lane K (D-7): derived on the read, never stored — the criteria are the truth.
+        var tenantId = GetTenantId();
+        var criteria = await _criteriaRepository.GetByVacancyIdAsync(id);
+        dto.UsesProtectedCharacteristicCriterion = criteria.Any(c =>
+            c.TenantId == tenantId && !c.IsDeleted && ShortlistingCriteriaShapes.Of(c.Type)?.IsProtectedCharacteristic == true);
+        return dto;
     }
 
     public async Task<JobVacancyDto?> GetByVacancyNumberAsync(string vacancyNumber, CancellationToken cancellationToken = default)
@@ -396,15 +419,84 @@ public class JobVacancyService : IJobVacancyService
             [JobVacancyStatus.Draft]                 = new[] { JobVacancyStatus.PendingApproval, JobVacancyStatus.Approved, JobVacancyStatus.Cancelled },
             [JobVacancyStatus.PendingApproval]       = new[] { JobVacancyStatus.Approved, JobVacancyStatus.Rejected, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
             [JobVacancyStatus.Rejected]              = new[] { JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.Approved]              = new[] { JobVacancyStatus.Published, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.Published]             = new[] { JobVacancyStatus.ClosedForApplications, JobVacancyStatus.Shortlisting, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.ClosedForApplications] = new[] { JobVacancyStatus.Shortlisting, JobVacancyStatus.Published, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.Shortlisting]          = new[] { JobVacancyStatus.Interviewing, JobVacancyStatus.ClosedForApplications, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.Interviewing]          = new[] { JobVacancyStatus.OfferStage, JobVacancyStatus.Shortlisting, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.OfferStage]            = new[] { JobVacancyStatus.Filled, JobVacancyStatus.Interviewing, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Approved]              = new[] { JobVacancyStatus.Published, JobVacancyStatus.Draft, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Published]             = new[] { JobVacancyStatus.ClosedForApplications, JobVacancyStatus.Shortlisting, JobVacancyStatus.Draft, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.ClosedForApplications] = new[] { JobVacancyStatus.Shortlisting, JobVacancyStatus.Published, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Shortlisting]          = new[] { JobVacancyStatus.Interviewing, JobVacancyStatus.ClosedForApplications, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Interviewing]          = new[] { JobVacancyStatus.OfferStage, JobVacancyStatus.Shortlisting, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.OfferStage]            = new[] { JobVacancyStatus.Filled, JobVacancyStatus.Interviewing, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+
+            // ⚠ G-5.3 (2026-09-15): OnHold appeared in NO transition in this map and in no service
+            // code, so it could not be reached at all — by UI or by API — despite being a declared
+            // JobVacancyStatus. It is now reachable from every live status and, critically, has a
+            // way OUT to each of them. That second half is the lesson from G-4.2, the requisition's
+            // On Hold: it could be entered and never left, every other route out closed by its own
+            // precondition, with Cancel the only remaining action — while the dialog told the user
+            // it could be taken off hold later. A hold that cannot be released is not a hold.
+            //
+            // Resuming returns the vacancy to whichever stage it was at, chosen by the user, rather
+            // than to a remembered one: this map is stateless by design, and a "resume to where you
+            // were" would need a column nothing writes.
+            [JobVacancyStatus.OnHold]                = new[]
+            {
+                JobVacancyStatus.Approved,
+                JobVacancyStatus.Published,
+                JobVacancyStatus.ClosedForApplications,
+                JobVacancyStatus.Shortlisting,
+                JobVacancyStatus.Interviewing,
+                JobVacancyStatus.OfferStage,
+                JobVacancyStatus.Cancelled,
+            },
+
             [JobVacancyStatus.Filled]                = Array.Empty<JobVacancyStatus>(),
             [JobVacancyStatus.Cancelled]             = Array.Empty<JobVacancyStatus>(),
         };
+
+    /// <summary>
+    /// The statuses a vacancy may legally move to from where it is now.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so the detail page's "Advance to…" picker can offer only legal moves (G-5.7). It
+    /// used to list all five hiring stages from any non-terminal status, so a Draft vacancy was
+    /// offered <i>Filled</i> and a Published one <i>Interviewing</i>; both were refused, and the
+    /// only way to find out was to click. The refusal names the legal next states, so it failed
+    /// safely and informatively — but the picker can simply ask.
+    /// </remarks>
+    public static IReadOnlyCollection<JobVacancyStatus> AllowedNextStatuses(JobVacancyStatus from)
+        => AllowedTransitions.TryGetValue(from, out var allowed) ? allowed : Array.Empty<JobVacancyStatus>();
+
+    /// <summary>
+    /// Segregation of duties on the approval step (G-5.4, 2026-09-15).
+    /// </summary>
+    /// <remarks>
+    /// <para>A vacancy has <b>no workflow integration at all</b> — <c>JobVacancy</c> appears
+    /// nowhere in the workflow services — so unlike a requisition or an offer there is no engine
+    /// to name an approver. <i>Approve</i> was a plain status change guarded only by
+    /// <c>RecruitmentWrite</c>: no separate approver, no check that the person approving was not
+    /// the person who opened it. Given that a vacancy is what authorises advertising and hiring
+    /// against approved headcount, that was a lighter gate than the requisition behind it.</para>
+    ///
+    /// <para>This is the same rule the requisition has always carried, on the same comparison:
+    /// <c>CreatedById</c> is an Employee id (<c>JobVacancyService</c> stamps it from the
+    /// controller's <c>EmployeeId</c>), and so is the acting id passed in. It is deliberately
+    /// narrow — it says who may <i>not</i> approve, not who may. Widening it into a named approver
+    /// chain means putting <c>JobVacancy</c> on the workflow engine, which is a larger change than
+    /// this gap asks for.</para>
+    ///
+    /// <para>Only the approval step is guarded. Publishing, closing for applications and the
+    /// hiring stages are the vacancy being worked by whoever is running it, and are not approvals.
+    /// </para>
+    /// </remarks>
+    private static void GuardApprovalSeparation(JobVacancy entity, JobVacancyStatus toStatus, Guid actingEmployeeId)
+    {
+        if (toStatus != JobVacancyStatus.Approved) return;
+        if (actingEmployeeId == Guid.Empty) return;
+        if (entity.CreatedById != actingEmployeeId) return;
+
+        throw new InvalidOperationException(
+            "You cannot approve a vacancy that you opened yourself. Approval authorises advertising " +
+            "and hiring against this headcount, so it needs a second pair of eyes.");
+    }
 
     private static void GuardTransition(JobVacancy entity, JobVacancyStatus toStatus)
     {
@@ -441,6 +533,7 @@ public class JobVacancyService : IJobVacancyService
             throw new InvalidOperationException("A closed or filled vacancy cannot be edited.");
 
         GuardTransition(entity, dto.NewStatus);
+        GuardApprovalSeparation(entity, dto.NewStatus, userId);
 
         var fromStatus = entity.VacancyStatus;
 
@@ -490,6 +583,7 @@ public class JobVacancyService : IJobVacancyService
         var entity = await GetOwnedAsync(dto.VacancyId);
 
         GuardTransition(entity, dto.NewStatus);
+        GuardApprovalSeparation(entity, dto.NewStatus, changedByUserId);
 
         var from = entity.VacancyStatus;
         entity.VacancyStatus = dto.NewStatus;
@@ -546,7 +640,30 @@ public class JobVacancyService : IJobVacancyService
                                    && !hasExternalPosting;
 
         var publishDate = entity.PublishDate ?? DateTime.UtcNow;
-        var postingTitle = entity.CustomAdvertTitle ?? entity.VacancyNumber;
+
+        // ── G-5.6 (2026-09-15): the advert candidates actually see ─────────────────────────────
+        // Both auto-created postings were built with Description = string.Empty and a title of
+        // `CustomAdvertTitle ?? VacancyNumber`. A vacancy published without a custom advert title
+        // therefore produced a live advert headed with an internal reference number — "VAC-2026-041"
+        // — and no text at all, on the company website. That is what an external applicant saw.
+        //
+        // The vacancy already carries everything a serviceable advert needs; nothing assembled it.
+        // A recruiter can still overwrite either field afterwards on the Adverts tab, and the
+        // six-field print-advert composition block (G-6.4) is a richer path for newspaper copy —
+        // this is the floor, not the ceiling.
+        var positionTitle = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .AsNoTracking()
+            .Where(p => p.Id == entity.PositionId && p.TenantId == entity.TenantId)
+            .Select(p => p.Title)
+            .FirstOrDefaultAsync();
+
+        var postingTitle = !string.IsNullOrWhiteSpace(entity.CustomAdvertTitle)
+            ? entity.CustomAdvertTitle!
+            : !string.IsNullOrWhiteSpace(positionTitle)
+                ? positionTitle!
+                : entity.VacancyNumber;
+
+        var postingBody = ComposeAdvertBody(entity, positionTitle);
 
         if (shouldCreateInternal)
         {
@@ -557,7 +674,7 @@ public class JobVacancyService : IJobVacancyService
                 JobVacancyId = entity.Id,
                 Channel      = JobPostingChannel.InternalPortal,
                 Title        = postingTitle,
-                Description  = string.Empty,
+                Description  = postingBody,
                 Status       = JobPostingStatus.Published,
                 IsActive     = true,
                 PublishDate  = publishDate,
@@ -577,7 +694,7 @@ public class JobVacancyService : IJobVacancyService
                 JobVacancyId = entity.Id,
                 Channel      = JobPostingChannel.CompanyWebsite,
                 Title        = postingTitle,
-                Description  = string.Empty,
+                Description  = postingBody,
                 Status       = JobPostingStatus.Published,
                 IsActive     = true,
                 PublishDate  = publishDate,
@@ -596,6 +713,64 @@ public class JobVacancyService : IJobVacancyService
                 shouldCreateInternal,
                 shouldCreateExternal);
         }
+    }
+
+    /// <summary>
+    /// Builds the body of an auto-created advert from what the vacancy already knows (G-5.6).
+    /// </summary>
+    /// <remarks>
+    /// <para>Deliberately plain text with blank-line paragraphs rather than HTML or Markdown: this
+    /// string is rendered by the internal portal, the careers site and whatever an external board
+    /// is given, and only the lowest common denominator is safe in all three. A recruiter who
+    /// wants formatting edits the advert afterwards.</para>
+    ///
+    /// <para>Salary appears only when <c>IsSalaryVisible</c> is set — the vacancy's own answer to
+    /// whether the range is publishable, and an advert is the most public thing in the module, so
+    /// getting this backwards would disclose a pay band to every applicant.</para>
+    /// </remarks>
+    private static string ComposeAdvertBody(JobVacancy entity, string? positionTitle)
+    {
+        var role = !string.IsNullOrWhiteSpace(positionTitle) ? positionTitle! : "this role";
+        var parts = new List<string>
+        {
+            entity.NumberOfPositions > 1
+                ? $"We are recruiting {entity.NumberOfPositions} {role} posts."
+                : $"We are recruiting a {role}.",
+            $"Employment type: {entity.EmploymentType}. Work mode: {entity.WorkMode}."
+        };
+
+        if (entity.RequiredMinExperienceYears is > 0 and { } years)
+            parts.Add($"Minimum experience: {years} year{(years == 1 ? "" : "s")}.");
+
+        if (entity.IsSalaryVisible && entity.SalaryRangeMin.HasValue && entity.SalaryRangeMax.HasValue)
+        {
+            var currency = string.IsNullOrWhiteSpace(entity.SalaryCurrencyCode)
+                ? string.Empty
+                : entity.SalaryCurrencyCode + " ";
+            parts.Add($"Salary range: {currency}{entity.SalaryRangeMin:N0} – {currency}{entity.SalaryRangeMax:N0}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(entity.KeyBenefitsSummary))
+            parts.Add($"What we offer: {entity.KeyBenefitsSummary!.Trim()}");
+
+        if (entity.RequiresWrittenTest || entity.RequiresPracticalTest)
+        {
+            var tests = entity.RequiresWrittenTest && entity.RequiresPracticalTest
+                ? "a written and a practical test"
+                : entity.RequiresWrittenTest ? "a written test" : "a practical test";
+            parts.Add($"Shortlisted candidates will sit {tests}.");
+        }
+
+        if (entity.TargetStartDate is { } start)
+            parts.Add($"Expected start date: {start:dd MMM yyyy}.");
+
+        parts.Add(entity.ApplicationDeadline is { } deadline
+            ? $"Closing date for applications: {deadline:dd MMM yyyy}."
+            : "Applications are open until further notice.");
+
+        parts.Add($"Reference: {entity.VacancyNumber}.");
+
+        return string.Join("\n\n", parts);
     }
 
     /// <summary>
@@ -646,8 +821,18 @@ public class JobVacancyService : IJobVacancyService
     {
         var entity = await GetOwnedAsync(dto.VacancyId);
 
-        if (entity.VacancyStatus == JobVacancyStatus.Cancelled)
-            throw new InvalidOperationException("Vacancy is already closed.");
+        // G-5.5 (2026-09-15): this used to check only "is it already Cancelled?" and never call
+        // GuardTransition, so a **Filled** vacancy — terminal in the map — could be cancelled
+        // through the API, undoing a completed hire's vacancy record. The UI hides the button when
+        // the vacancy is terminal, so it was reachable only by calling the endpoint directly; but
+        // the map is the thing that is supposed to make that impossible, and this was the third
+        // door into a status change that did not go through it. (The first two were closed when
+        // TransitionAsync and ChangeStatusAsync were unified onto the map — see AllowedTransitions.)
+        //
+        // Cancellation is reachable from every live status, so in practice this refuses exactly
+        // two things: cancelling an already-Cancelled vacancy, which was already refused with a
+        // friendlier sentence above, and cancelling a Filled one, which is the defect.
+        GuardTransition(entity, JobVacancyStatus.Cancelled);
 
         var from = entity.VacancyStatus;
         entity.VacancyStatus = JobVacancyStatus.Cancelled;
@@ -802,13 +987,18 @@ public class JobVacancyService : IJobVacancyService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedAsync(createDto.JobVacancyId);
-        RequireScorableCriterion(createDto.Type);
+        var values = await ResolveCriterionValuesAsync(
+            createDto.Type, createDto.IsMandatory, createDto.Values, createDto.RequiredValue,
+            createDto.MinValue, createDto.MaxValue, createDto.RequiredSkillId, createDto.RequiredQualificationId, current);
 
         var entity = createDto.ToEntity(current, createdByUserId);
+        entity.RequiredValue = MirrorLabels(entity.Type, values, createDto.RequiredValue, legacyShape: createDto.Values is null);
         await _criteriaRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await WriteCriterionValuesAsync(entity, values, current, cancellationToken);
         await MarkApplicationScoresStaleAsync(createDto.JobVacancyId, cancellationToken);
-        return entity.ToDto();
+        return WithValues(entity.ToDto(), values);
     }
 
     public async Task<IEnumerable<JobShortlistingCriteriaDto>> GetCriteriaAsync(Guid vacancyId, CancellationToken cancellationToken = default)
@@ -822,13 +1012,172 @@ public class JobVacancyService : IJobVacancyService
     public async Task<JobShortlistingCriteriaDto> UpdateCriteriaAsync(UpdateJobShortlistingCriteriaDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCriteriaAsync(updateDto.Id);
-        RequireScorableCriterion(updateDto.Type);
+        var tenantId = GetTenantId();
+        var values = await ResolveCriterionValuesAsync(
+            updateDto.Type, updateDto.IsMandatory, updateDto.Values, updateDto.RequiredValue,
+            updateDto.MinValue, updateDto.MaxValue, updateDto.RequiredSkillId, updateDto.RequiredQualificationId, tenantId);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        entity.RequiredValue = MirrorLabels(entity.Type, values, updateDto.RequiredValue, legacyShape: updateDto.Values is null);
         await _criteriaRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Replace-set: retire what is there, write what was sent — through the repository, never by
+        // adding to the tracked parent's collection (the tracked-graph trap).
+        var existing = await _criteriaValueRepository.FindAsync(v => v.JobShortlistingCriteriaId == entity.Id && !v.IsDeleted);
+        if (existing.Any())
+        {
+            await _criteriaValueRepository.DeleteRangeAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        await WriteCriterionValuesAsync(entity, values, tenantId, cancellationToken);
         await MarkApplicationScoresStaleAsync(entity.JobVacancyId, cancellationToken);
-        return entity.ToDto();
+        return WithValues(entity.ToDto(), values);
+    }
+
+    /// <summary>
+    /// The DTO's values are the rows just written — read off the list, never off the parent's
+    /// navigation. ⚠ Assigning <c>entity.Values</c> on a tracked parent whose retired children fixup
+    /// had attached severed a required relationship at the NEXT save (marking scores stale), which
+    /// only happens on a vacancy with applications — so it passed the create-only probes and failed
+    /// the first real edit. The tracked-graph trap, again.
+    /// </summary>
+    private static JobShortlistingCriteriaDto WithValues(JobShortlistingCriteriaDto dto, List<JobShortlistingCriteriaValue> values)
+    {
+        dto.Values = values
+            .OrderBy(v => v.SortOrder)
+            .Select(v => new JobShortlistingCriteriaValueDto
+            {
+                Id = v.Id, Kind = v.Kind, ReferenceId = v.ReferenceId, Label = v.Label, SortOrder = v.SortOrder,
+            })
+            .ToList();
+        return dto;
+    }
+
+    /// <summary>
+    /// Round 3, lane K: the rules a criterion must satisfy before it is stored, and the accepted
+    /// values resolved against their catalogues. Register row R-8 (values from the setups) and R-5
+    /// fixes 2 and 8 (a blank value list passed everyone; a mandatory Other disqualified nobody),
+    /// decision D-7 (Gender and Age may never be mandatory).
+    /// </summary>
+    /// <remarks>
+    /// <para>The shape table (<see cref="ShortlistingCriteriaShapes"/>) is the single source of what a
+    /// type needs. A catalogue id must be the tenant's live row and its name is mirrored into the
+    /// label; a gender must be a member of the enum (or "Any"); text is trimmed. Duplicates collapse.
+    /// A legacy caller that sends only the comma-separated <c>RequiredValue</c> (or a
+    /// <c>RequiredSkillId</c> / <c>RequiredQualificationId</c>) gets the same rows derived from it,
+    /// so the old shape keeps working and the new column fills for everyone.</para>
+    /// </remarks>
+    private async Task<List<JobShortlistingCriteriaValue>> ResolveCriterionValuesAsync(
+        JobShortlistingCriteriaType type, bool isMandatory, List<ShortlistingCriteriaValueInputDto>? inputs,
+        string? legacyRequiredValue, decimal? minValue, decimal? maxValue,
+        Guid? legacySkillId, Guid? legacyQualificationId, Guid tenantId)
+    {
+        RequireScorableCriterion(type);
+        var shape = ShortlistingCriteriaShapes.Of(type)!;
+
+        if (isMandatory && !shape.AllowsMandatory)
+            throw new InvalidOperationException(shape.MandatoryRefusal ?? $"A {shape.Label} criterion cannot be mandatory.");
+
+        if (shape.IsNumeric)
+        {
+            if (minValue is null && maxValue is null)
+                throw new InvalidOperationException($"A {shape.Label} criterion needs a minimum or a maximum — without a bound it measures nothing.");
+            return new List<JobShortlistingCriteriaValue>();
+        }
+
+        var kind = shape.ValueKind ?? ShortlistingValueKind.Text;
+        var candidates = new List<(Guid? Id, string? Label)>();
+        if (inputs is not null)
+        {
+            candidates.AddRange(inputs.Select(i => (i.ReferenceId, i.Label)));
+        }
+        else
+        {
+            // Legacy shape: the comma-separated list, plus the single catalogue id the old columns carried.
+            if (!string.IsNullOrWhiteSpace(legacyRequiredValue))
+                candidates.AddRange(legacyRequiredValue
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(l => ((Guid?)null, (string?)l)));
+            if (kind == ShortlistingValueKind.Skill && legacySkillId is { } sid) candidates.Add((sid, null));
+            if (kind == ShortlistingValueKind.Qualification && legacyQualificationId is { } qid) candidates.Add((qid, null));
+        }
+
+        var master = kind switch
+        {
+            ShortlistingValueKind.Skill => (await _skillMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            ShortlistingValueKind.Qualification => (await _qualificationMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            ShortlistingValueKind.Certification => (await _certificationMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            ShortlistingValueKind.Language => (await _languageMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            _ => new Dictionary<Guid, string>(),
+        };
+
+        var rows = new List<JobShortlistingCriteriaValue>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, rawLabel) in candidates)
+        {
+            Guid? referenceId = null;
+            string label;
+            if (id is { } key)
+            {
+                if (kind is ShortlistingValueKind.Text or ShortlistingValueKind.Gender)
+                    throw new InvalidOperationException($"A {shape.Label} criterion takes typed values, not a catalogue id.");
+                if (!master.TryGetValue(key, out var name))
+                    throw new InvalidOperationException($"The {shape.Label.ToLowerInvariant()} chosen is not in the catalogue. Pick one from the list.");
+                referenceId = key;
+                label = name;
+            }
+            else
+            {
+                label = rawLabel?.Trim() ?? string.Empty;
+                if (label.Length == 0) continue;
+                if (kind == ShortlistingValueKind.Gender)
+                {
+                    if (label.Equals("any", StringComparison.OrdinalIgnoreCase)) label = "Any";
+                    else if (Enum.TryParse<Gender>(label, ignoreCase: true, out var gender) && Enum.IsDefined(typeof(Gender), gender)) label = gender.ToString();
+                    else throw new InvalidOperationException($"'{label}' is not a gender the register knows. Tick the genders the role is open to.");
+                }
+            }
+            var dedupeKey = referenceId?.ToString() ?? $"text:{label}";
+            if (!seen.Add(dedupeKey)) continue;
+            rows.Add(new JobShortlistingCriteriaValue
+            {
+                TenantId = tenantId, Kind = kind, ReferenceId = referenceId, Label = label, SortOrder = rows.Count,
+            });
+        }
+
+        if (rows.Count == 0 && shape.RequiresValues)
+            throw new InvalidOperationException(
+                $"A {shape.Label} criterion needs at least one accepted value — with none it passes every candidate and measures nothing.");
+        return rows;
+    }
+
+    /// <summary>
+    /// The label list mirrored onto the parent, so rows and readers that only know the text still
+    /// agree. A LEGACY caller (no <c>values</c> on the payload) keeps its text exactly as sent — the
+    /// rows are derived from it, the text is not rewritten from them; lane 5b asserts the echo, and a
+    /// legacy single catalogue id must not append its name to what the caller typed.
+    /// </summary>
+    private static string? MirrorLabels(JobShortlistingCriteriaType type, List<JobShortlistingCriteriaValue> values, string? legacyRequiredValue, bool legacyShape)
+    {
+        var shape = ShortlistingCriteriaShapes.Of(type);
+        if (shape?.IsNumeric == true || legacyShape) return string.IsNullOrWhiteSpace(legacyRequiredValue) ? null : legacyRequiredValue.Trim();
+        if (values.Count == 0) return null;
+        var joined = string.Join(", ", values.Select(v => v.Label));
+        return joined.Length <= 500 ? joined : joined[..500];
+    }
+
+    private async Task WriteCriterionValuesAsync(JobShortlistingCriteria entity, List<JobShortlistingCriteriaValue> values, Guid tenantId, CancellationToken cancellationToken)
+    {
+        foreach (var value in values)
+        {
+            value.JobShortlistingCriteriaId = entity.Id;
+            value.TenantId = tenantId;
+            await _criteriaValueRepository.AddAsync(value);
+        }
+        if (values.Count > 0)
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // ⚠ Deliberately NOT `entity.Values = values` — see WithValues.
     }
 
     /// <summary>
@@ -1097,6 +1446,12 @@ public class JobVacancyService : IJobVacancyService
     {
         var entity = await GetOwnedStageAssignmentAsync(dto.Id);
         RequireStageOwnership(entity, userId, "skip");
+
+        // Round 3, lane G (D-13): the stage's own flag decides, and it never used to be read here.
+        var stage = await _unitOfWork.Repository<RecruitmentPipelineStage>().GetByIdAsync(entity.PipelineStageId);
+        if (stage is not null && !stage.CanSkip)
+            throw new InvalidOperationException(
+                $"Stage '{stage.Name}' cannot be skipped: complete it, or mark the stage as skippable on the pipeline.");
 
         entity.Status          = VacancyStageAssignmentStatus.Skipped;
         entity.CompletionNotes = dto.Reason;

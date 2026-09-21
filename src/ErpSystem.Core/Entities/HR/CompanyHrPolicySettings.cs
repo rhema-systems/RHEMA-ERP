@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR;
@@ -108,6 +108,39 @@ public class CompanyHrPolicySettings : TenantEntity
     [Range(0, 3650)]
     public int ProbationEndLeadDays { get; set; } = 30;
 
+    /// <summary>
+    /// How far ahead of a credential's expiry the certification sweep warns, when the catalogue
+    /// row sets no lead time of its own (round 2, lane C2).
+    /// </summary>
+    /// <remarks>⚠ Non-nullable: it is in the HasData seed AND the migration adds it with a real
+    /// DEFAULT, so no tenant's row is left at zero.</remarks>
+    public int CertificationExpiryLeadDays { get; set; } = 60;
+
+    /// <summary>
+    /// How many days ahead of its due date a team task starts reminding its assignee
+    /// (round 2, lane F2).
+    /// </summary>
+    /// <remarks>
+    /// <para>Three, not thirty, and the difference is the point. A probation end is a date somebody
+    /// plans a month around; a committee action item is a thing somebody does on Tuesday. A lead
+    /// time long enough for the first would make the second a background hum nobody reads.</para>
+    ///
+    /// <para>⚠ Non-nullable with a real DEFAULT in the migration, like
+    /// <see cref="CertificationExpiryLeadDays"/> — otherwise every existing tenant's row sits at
+    /// zero and the sweep silently warns about nothing.</para>
+    /// </remarks>
+    [Range(0, 365)]
+    public int TeamTaskReminderLeadDays { get; set; } = 3;
+
+    /// <summary>
+    /// Round 3, lane S (decision D-1). When on, the three direct pay doors — grade placement, pay
+    /// basis, and the employee header's salary figure — refuse and point at the salary change
+    /// request, which is applied when the engine approves it. Movements and hire-from-offer are
+    /// unaffected: they are approved records already.
+    /// ⚠ Defaults ON, and the migration must say <c>DEFAULT (1)</c>: the scaffold writes false.
+    /// </summary>
+    public bool SalaryChangeRequiresApproval { get; set; } = true;
+
     // ═══════════════════════════════════════════
     //  EMPLOYEE-RELATIONS CLOCKS (area 9c slice 7)
     // ═══════════════════════════════════════════
@@ -118,7 +151,7 @@ public class CompanyHrPolicySettings : TenantEntity
     /// <remarks>
     /// ⚠ <b>Ours, not TDC's, and that is why it lives here.</b> FR-HR-181 names the escalation route
     /// and sets no time limit at any rung; five days is a working assumption raised with TDC in
-    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered. Until slice 7 it was a
+    /// <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered. Until slice 7 it was a
     /// <c>const</c> in <c>DisciplineReminderService</c>, so TDC's eventual answer would have cost a
     /// code change and a deploy. Now it costs a settings edit.
     ///
@@ -212,6 +245,29 @@ public class CompanyHrPolicySettings : TenantEntity
     /// That is what makes Block safe on a tenant where most positions still carry the default.</para>
     /// </remarks>
     public BudgetEnforcementMode EstablishmentEnforcementMode { get; set; } = BudgetEnforcementMode.Block;
+
+    // ═══════════════════════════════════════════
+    //  SALARY STRUCTURE (lane G)
+    // ═══════════════════════════════════════════
+
+    /// <summary>
+    /// Two-tier (grade → notch) or three-tier (grade → level → notch). Default two-tier — what
+    /// payroll is, what TDC's 2026 scale is, and what every existing tenant was implicitly.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Governs screens and placement rules only; the tables are three-tier either way, with one
+    /// implicit level per grade in the two-tier case. Switching to three-tier is refused while
+    /// <see cref="SalaryStructureSource"/> is Payroll (payroll has no level tier); switching back to
+    /// two-tier is refused while any active grade holds more than one active level. See
+    /// <c>CompanyHrPolicySettingsService.ValidateSalaryStructureAsync</c>.
+    /// </remarks>
+    public SalaryStructureTiers SalaryStructureTiers { get; set; } = SalaryStructureTiers.GradeAndNotch;
+
+    /// <summary>
+    /// Whether the scale is maintained in Payroll (mirrored into HR, HR read-only) or in HR
+    /// (projection off, HR's own grade/level/notch screens open). Default Payroll.
+    /// </summary>
+    public SalaryStructureSource SalaryStructureSource { get; set; } = SalaryStructureSource.Payroll;
 
     // ═══════════════════════════════════════════
     //  SUCCESSION FIT-SCORE WEIGHTS (relative)
@@ -328,4 +384,116 @@ public class CompanyHrPolicySettings : TenantEntity
     /// the dashboard disagree with itself.</para>
     /// </remarks>
     public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
+
+    // ── Leave encashment (residue plan G2) ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether leave may be encashed <b>while still employed</b>, as opposed to only on exit.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>This settles a requirements conflict rather than expressing a preference.</b>
+    /// FR-HR-046 says leave is encashed <i>"only on exit, no other route"</i> — and the module ships
+    /// an in-service encashment path, with annual leave flagged <c>AllowCashConversion</c> in the
+    /// seed. <b>Both readings were live in the product at once.</b></para>
+    ///
+    /// <para><b>Defaults to false</b>, which is FR-HR-046's literal reading, so a fresh tenant
+    /// matches the requirement out of the box. A client whose policy permits in-service encashment
+    /// turns it on <i>deliberately</i>, rather than getting it by accident. This is a product
+    /// serving many clients, not a bespoke build — so the conflict is resolved by a default, not by
+    /// waiting for one client to answer.</para>
+    ///
+    /// <para>⚠ <b>It gates <c>LeaveType.AllowCashConversion</c>, it does not replace it.</b> The
+    /// per-type flag still decides <i>which</i> leave may be converted; this decides whether the
+    /// in-service route exists at all. Off here means off for every type, whatever they say.</para>
+    ///
+    /// <para>⚠ The TDC demo tenant is seeded with this ON, because stakeholders have already been
+    /// shown the encashment screen. Turning it off by default without that seed line would make a
+    /// demonstrated feature vanish.</para>
+    /// </remarks>
+    public bool AllowInServiceEncashment { get; set; } = false;
+
+    /// <summary>
+    /// Working days in a month, used to turn monthly emoluments into a daily encashment rate when a
+    /// leave type does not set its own divisor.
+    /// </summary>
+    /// <remarks>
+    /// <para>Was a private const in <c>EmolumentService</c> — the last genuinely hardcoded piece of
+    /// the encashment rate, and the fallback every leave type lands on until somebody edits it.</para>
+    ///
+    /// <para>⚠ <b>Read this beside <see cref="SettlementDaysPerYear"/>, and expect them to
+    /// disagree.</b> Encashment computes <c>(basic + linked allowances) ÷ this</c>; a settlement
+    /// computes <c>monthly × 12 ÷ SettlementDaysPerYear</c>. At the defaults — 22 working days a
+    /// month against 365 calendar days a year — that is roughly a <b>38% spread on the same
+    /// salary</b>.</para>
+    ///
+    /// <para><b>That is not necessarily wrong, and the two are deliberately not merged.</b>
+    /// Encashing five unused days while employed is not the same money event as a final settlement
+    /// on exit, and plenty of clients will want different bases for each. What was wrong is that
+    /// they sat on different screens at different scopes, so nobody could see the gap. They are now
+    /// presented together with a worked example, and leave stamps its basis onto the payout the way
+    /// the settlement already did.</para>
+    /// </remarks>
+    [Range(1, 31)]
+    public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+
+    // ── Leave reminder windows (residue plan G2) ─────────────────────────────────────────────
+    //
+    // All five were private consts in LeaveReminderService, documented there as "ours, not TDC's".
+    // They are the cadence at which the module nags people, which is exactly the sort of thing one
+    // client wants weekly and another wants fortnightly — so it belongs here rather than in a
+    // deploy. Same argument as GrievanceRungChaseDays above.
+    //
+    // ⚠ NOT moved: the reminder engine's 90-day backlog horizon. That one stops the first run on an
+    // established database queueing years of history at once (area 9 queued 275, of which 242 were
+    // history). It protects the system from itself; it is not a policy anybody should be choosing.
+
+    /// <summary>Days before a start date that approved leave is announced to employee and manager.</summary>
+    [Range(0, 180)]
+    public int LeaveStartingReminderDays { get; set; } = 7;
+
+    /// <summary>Days after an end date before leave nobody has closed is chased.</summary>
+    [Range(0, 180)]
+    public int LeaveClosureGraceDays { get; set; } = 2;
+
+    /// <summary>Days a request may sit undecided before its approver is chased.</summary>
+    [Range(0, 180)]
+    public int LeaveUndecidedChaseDays { get; set; } = 5;
+
+    /// <summary>
+    /// Month of the year from which outstanding mandatory leave starts being chased (9 = September).
+    /// </summary>
+    /// <remarks>
+    /// Late enough that the chase is not noise, early enough that there is still time to take the
+    /// leave. Chasing in January says nothing; chasing in December is too late to act on.
+    /// </remarks>
+    [Range(1, 12)]
+    public int MandatoryLeaveChaseFromMonth { get; set; } = 9;
+
+    /// <summary>Days before carry-over expires that the employee is warned.</summary>
+    [Range(0, 365)]
+    public int LeaveCarryOverExpiryReminderDays { get; set; } = 30;
+
+    /// <summary>
+    /// ⚠ <b>The month the tenant's LEAVE YEAR begins</b> (entitlement plan C1). <c>1</c> = January,
+    /// the calendar year, and the behaviour of every tenant before this existed.
+    /// </summary>
+    /// <remarks>
+    /// <para>A leave year is <b>labelled by the calendar year it starts in</b>: with an April start,
+    /// 15 March 2028 falls in leave year 2027 (April 2027 – March 2028). That matches
+    /// <c>HrFiscalYear</c>, and it is the only convention under which <c>LeaveBalance.Year</c> can
+    /// stay an <c>int</c>.</para>
+    ///
+    /// <para>⚠ <b>Deliberately NOT the same field as <c>FiscalYearStartMonth</c>.</b> The finance
+    /// year and the leave year are different facts and plenty of organisations run them apart.
+    /// Coupling them is invisible until a client wants a July leave year on a January fiscal year,
+    /// and by then two modules read the field.</para>
+    ///
+    /// <para>⚠ <b>Change-once-at-setup (decision D-9).</b> The service refuses a change once the
+    /// tenant holds any leave request or balance. Moving the boundary re-labels which leave year
+    /// some dates fall in while stored rows keep their old labels, and of the figures involved only
+    /// <c>CarriedOverDays</c> cannot be re-derived — it was computed by a year-end run against
+    /// boundaries that no longer exist, and no repair pass can reconstruct it. So the change is
+    /// refused rather than half-corrected.</para>
+    /// </remarks>
+    public int LeaveYearStartMonth { get; set; } = 1;
 }

@@ -23,9 +23,12 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
+import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import type { LeaveType } from '@/types/hr/leave';
 
 export default function LeaveTypesPage() {
+  // Retiring a leave type is HR.Leave.Admin; the HR role holds Read and Write only (L-11).
+  const { canAdminister } = useLeavePermissions();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -178,7 +181,7 @@ export default function LeaveTypesPage() {
                         <StatusBadge active={t.isActive} />
                       </TableCell>
                       <TableCell className="text-right">
-                        {t.isActive && (
+                        {t.isActive && canAdminister && (
                           <Button
                             size="sm"
                             variant="ghost"

@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -135,12 +136,18 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
                     ? "Set the proposed bonus amount before submitting this proposal."
                     : "Set the proposed increase percentage before submitting this proposal.");
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        // Submitting must never approve. With no published definition the engine returns
+        // WorkflowOutcome.Approved as its "approval is not configured" signal, and this adapter
+        // maps Approved to SalaryReviewProposalStatus.Approved — so Submit would approve a pay
+        // proposal with nobody asked. Defence in depth: a SALARY_REVIEW_PROPOSAL definition IS
+        // seeded, so this only bites on an unseeded tenant. See HrWorkflowFallbackAuthority.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start the proposal approval workflow.");
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -154,15 +161,15 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        // Engine when a definition is published; the Approve tier when none is. Without the second
+        // branch a proposal submitted on an unseeded tenant could not be approved at all, because
+        // CanUserApproveAsync answers false with no workflow instance to name an approver.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, id, userId,
+            "Approve", null, "approve a salary review proposal", HrPermissions.ApproveCompensation);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -176,16 +183,14 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, id, userId,
+            "Reject", rejectionText, "reject a salary review proposal", HrPermissions.ApproveCompensation);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -202,9 +207,10 @@ public class SalaryReviewProposalService : ISalaryReviewProposalService
         if (entity.Status != SalaryReviewProposalStatus.PendingApproval)
             throw new InvalidOperationException("Only a proposal still awaiting approval can be recalled.");
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, id, userId);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the proposal.");
+        // Skipped when nothing is published — RecallWorkflowAsync answers "No active workflow
+        // found" without an instance, which would strand a proposal that Submit had just left at
+        // PendingApproval. The record returns to Draft via the adapter either way.
+        await HrWorkflowFallbackAuthority.RecallAsync(_workflowIntegrationService, EntityType, id, userId);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId);
 

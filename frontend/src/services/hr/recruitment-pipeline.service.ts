@@ -14,6 +14,8 @@ import type {
   CandidateDocument,
   CandidateDocumentType,
   CandidateInterest,
+  CandidateLanguage,
+  CandidateLanguageForm,
   CandidateNote,
   CandidateNoteForm,
   CandidateQualification,
@@ -54,6 +56,7 @@ import type {
   ShortlistSummary,
   StageApplicationsQuery,
   UpdateApplicantTestResult,
+  UpdateJobApplicationSource,
   UpdateJobCandidate,
   UpdateRecruitmentPipeline,
   UpdateRecruitmentPipelineStage,
@@ -137,8 +140,24 @@ class RecruitmentPipelineService {
 class JobCandidateService {
   private readonly baseUrl = '/job-candidates';
 
-  getPaged(pageNumber = 1, pageSize = 20): Promise<HrPagedResult<JobCandidateSummary>> {
-    return apiService.get<HrPagedResult<JobCandidateSummary>>(this.baseUrl, { pageNumber, pageSize });
+  /**
+   * One page of the candidate register.
+   *
+   * `search` (G-7.6, 2026-09-15) matches name, email, phone, headline, current title and current
+   * employer — the same predicate the talent-pool screen has always used. Before it, the register's
+   * only lookup was an exact-email match, so finding someone whose address you did not know meant
+   * paging twenty at a time through the whole register.
+   */
+  getPaged(
+    pageNumber = 1,
+    pageSize = 20,
+    search?: string,
+  ): Promise<HrPagedResult<JobCandidateSummary>> {
+    return apiService.get<HrPagedResult<JobCandidateSummary>>(this.baseUrl, {
+      pageNumber,
+      pageSize,
+      ...(search?.trim() ? { search: search.trim() } : {}),
+    });
   }
 
   getAll(): Promise<JobCandidateSummary[]> {
@@ -178,13 +197,10 @@ class JobCandidateService {
     return apiService.delete<void>(`${this.baseUrl}/${id}`);
   }
 
-  addToTalentPool(id: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/${id}/add-to-talent-pool`, {});
-  }
-
-  removeFromTalentPool(id: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/${id}/remove-from-talent-pool`, {});
-  }
+  // ⚠ `addToTalentPool` / `removeFromTalentPool` were REMOVED on 2026-09-15 (G-7.4), along with the
+  // two endpoints behind them. They set `isInTalentPool` with no source, no reason and no review
+  // date — the data loss the `talentPoolService` endpoints were written to stop. Use those instead:
+  // entry and exit both record who, why and when to look again.
 
   // ── files ────────────────────────────────────────────────────────────────
   // Candidate files live in private storage with no public URL — always fetched as a blob.
@@ -195,6 +211,16 @@ class JobCandidateService {
 
   downloadPhoto(id: string): Promise<Blob> {
     return apiService.downloadBlob(`${this.baseUrl}/${id}/photo`);
+  }
+
+  /** The gated route `GatedPhoto` / `PhotoDialog` fetch the photograph from (round 3, lane C2). */
+  photoUrl(id: string): string {
+    return `${this.baseUrl}/${id}/photo`;
+  }
+
+  /** HR sets the photograph through the scanned gate — same category as the careers upload. */
+  uploadPhoto(id: string, file: File): Promise<{ url: string; hasPhoto: boolean }> {
+    return hrDocumentService.upload<{ url: string; hasPhoto: boolean }>(`${this.baseUrl}/${id}/photo`, file);
   }
 
   // ── sub-resources ────────────────────────────────────────────────────────
@@ -283,6 +309,26 @@ class JobCandidateService {
 
   deleteSkill(skillId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/skills/${skillId}`);
+  }
+
+  // Languages (round 3, lane C1 — the door; C2 — the tab). Same route shape as skills.
+  getLanguages(candidateId: string): Promise<CandidateLanguage[]> {
+    return apiService.get<CandidateLanguage[]>(`${this.baseUrl}/${candidateId}/languages`);
+  }
+
+  addLanguage(candidateId: string, payload: CandidateLanguageForm): Promise<CandidateLanguage> {
+    return apiService.post<CandidateLanguage>(`${this.baseUrl}/${candidateId}/languages`, payload);
+  }
+
+  updateLanguage(candidateId: string, languageId: string, payload: CandidateLanguageForm): Promise<CandidateLanguage> {
+    return apiService.put<CandidateLanguage>(`${this.baseUrl}/${candidateId}/languages/${languageId}`, {
+      ...payload,
+      id: languageId,
+    });
+  }
+
+  deleteLanguage(languageId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/languages/${languageId}`);
   }
 
   getInterests(candidateId: string): Promise<CandidateInterest[]> {
@@ -410,6 +456,11 @@ class JobApplicationService {
 
   getShortlisted(vacancyId: string): Promise<JobApplicationSummary[]> {
     return apiService.get<JobApplicationSummary[]>(`${this.baseUrl}/vacancy/${vacancyId}/shortlisted`);
+  }
+
+  /** HR corrects the source and the advert an application came through (round 3, lane A). */
+  updateSource(id: string, payload: UpdateJobApplicationSource): Promise<JobApplication> {
+    return apiService.patch<JobApplication>(`${this.baseUrl}/${id}/source`, payload);
   }
 
   create(payload: CreateJobApplication): Promise<JobApplication> {

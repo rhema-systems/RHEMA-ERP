@@ -43,6 +43,16 @@ function formatDate(value: string) {
     : date.toLocaleDateString();
 }
 
+function formatMoney(value: string, currencyCode = 'GHS') {
+  const amount = Number(value.replace(/[^\d.-]/g, ''));
+  return Number.isFinite(amount)
+    ? new Intl.NumberFormat('en-GH', {
+        style: 'currency',
+        currency: currencyCode || 'GHS',
+      }).format(amount)
+    : 'Not recorded';
+}
+
 function requestTypeLabel(request: ExternalEstateServiceRequest) {
   if (request.title.toLowerCase().startsWith('purchase bid')) {
     return 'Purchase bid';
@@ -65,6 +75,18 @@ function isRentalRequest(request: ExternalEstateServiceRequest) {
     requestType.includes('lease') ||
     request.title.toLowerCase().startsWith('lease request') ||
     request.title.toLowerCase().startsWith('rental request')
+  );
+}
+
+function hasPremiumCharge(request: ExternalEstateServiceRequest) {
+  const required = fieldValue(request, 'premiumChargeRequired')
+    .trim()
+    .toLowerCase();
+  return (
+    required === 'yes' ||
+    required === 'true' ||
+    required === 'required' ||
+    Boolean(fieldValue(request, 'premiumChargeInvoiceReference'))
   );
 }
 
@@ -620,6 +642,56 @@ export function PropertyRequestsView({
                     <p className="mt-1 text-sm text-amber-800">
                       {listingOutcomeMessage(request)} This request has been
                       archived.
+                    </p>
+                  </div>
+                ) : null}
+
+                {isRentalRequest(request) && hasPremiumCharge(request) ? (
+                  <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-4">
+                    <div className="flex items-center gap-2 font-medium text-blue-900">
+                      <ClipboardList className="h-4 w-4" />
+                      Premium charge
+                    </div>
+                    <div className="mt-3 grid gap-3 text-sm text-blue-900 sm:grid-cols-4">
+                      <div>
+                        <span className="text-blue-700/80">Amount</span>
+                        <div className="mt-1 font-medium">
+                          {formatMoney(
+                            fieldValue(request, 'premiumChargeAmount'),
+                            fieldValue(request, 'currency') || 'GHS'
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-blue-700/80">Invoice</span>
+                        <div className="mt-1 font-medium">
+                          {fieldValue(request, 'premiumChargeInvoiceReference') ||
+                            'Awaiting invoice'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-blue-700/80">Payment</span>
+                        <div className="mt-1 font-medium">
+                          {fieldValue(request, 'premiumChargePaymentStatus') ||
+                            'Pending invoice'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-blue-700/80">Balance</span>
+                        <div className="mt-1 font-medium">
+                          {fieldValue(request, 'premiumChargeBalance')
+                            ? formatMoney(
+                                fieldValue(request, 'premiumChargeBalance'),
+                                fieldValue(request, 'currency') || 'GHS'
+                              )
+                            : 'Awaiting Finance'}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-sm text-blue-800">
+                      Estate continues agreement processing after Finance
+                      confirms this premium charge as paid or Estate records an
+                      approved waiver.
                     </p>
                   </div>
                 ) : null}

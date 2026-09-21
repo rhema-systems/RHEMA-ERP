@@ -46,6 +46,12 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     'EmployeeSeparation',
     'HrAssetRequisition',
     'HrAssetTransfer',
+    // Round 2, lane F3. `Hr`-prefixed for the same reason as the asset types above: the entity-type
+    // namespace is flat and shared across modules.
+    'HrTeamTermsOfReference',
+    'HrTeamObjective',
+    // Round 3, lane S.
+    'HrEmployeeSalaryChangeRequest',
   ],
   helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],

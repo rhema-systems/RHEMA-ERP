@@ -17,6 +17,17 @@ class EmployeePositionService {
     return apiService.get<EmployeePosition[]>(this.baseUrl);
   }
 
+  /**
+   * Positions in a unit and, by default, in every unit above it — the reports-to option source
+   * (round 2, C1). The server walks the parent chain, so this works on seeded units with no path.
+   */
+  getByOrganizationUnit(organizationUnitId: string, includeAncestors = true): Promise<EmployeePosition[]> {
+    return apiService.get<EmployeePosition[]>(
+      `${this.baseUrl}/organization-unit/${organizationUnitId}`,
+      { includeAncestors },
+    );
+  }
+
   getActive(): Promise<EmployeePosition[]> {
     return apiService.get<EmployeePosition[]>(`${this.baseUrl}/active`);
   }

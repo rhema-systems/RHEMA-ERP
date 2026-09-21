@@ -453,7 +453,9 @@ public sealed class PropertyManagementArBillingController : ControllerBase
 
         if (!Guid.TryParse(FieldValue(fields, "sourceReference"), out var customerId))
             throw new InvalidOperationException("The sale request is not linked to a Finance AR customer.");
-        var purchasePrice = ResolveSalePayableAmount(fields);
+        var salePayable = ResolveSalePayable(fields);
+        if (salePayable.EstateBalance <= 0m)
+            throw new InvalidOperationException("Sales has already recorded the full sale amount. No Estate balance remains to invoice.");
 
         var revenueAccount = await _db.Accounts
             .AsNoTracking()
@@ -486,7 +488,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                     GLAccountId = revenueAccount.Id,
                     Description = $"Property sale: {propertyUnit}",
                     Quantity = 1m,
-                    UnitPrice = purchasePrice,
+                    UnitPrice = salePayable.EstateBalance,
                     DiscountPercentage = 0m
                 }
             ]
@@ -499,9 +501,10 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         UpsertCaseField(sourceCase, fields, "saleInvoiceAmount", "Sale invoice amount", invoice.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Sale invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Sale invoice balance", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", $"Awaiting full payment; paid {invoice.CurrencyCode} {invoice.PaidAmount:N2} of {invoice.CurrencyCode} {purchasePrice:N2}.", now);
+        UpsertCaseField(sourceCase, fields, "estateRemainingAmount", "Balance for Estate processing", salePayable.EstateBalance.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", BuildSalePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice.PaidAmount, invoice.BalanceAmount), now);
         UpsertCaseField(sourceCase, fields, "salePaymentStatus", "Sale payment status", "Pending full payment", now);
-        UpsertCaseField(sourceCase, fields, "ownershipTransferStatus", "Ownership transfer status", "Blocked - full payment and Legal conveyance required", now);
+        UpsertCaseField(sourceCase, fields, "ownershipTransferStatus", "Ownership transfer status", "Blocked - Estate balance and Legal conveyance required", now);
         sourceCase.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -532,18 +535,23 @@ public sealed class PropertyManagementArBillingController : ControllerBase
     {
         var sourceCase = await LoadSaleProcedureCaseAsync(procedureCaseId, cancellationToken);
         var fields = CaseFields(sourceCase);
-        if (!Guid.TryParse(FieldValue(fields, "saleInvoiceId"), out var invoiceId))
-            throw new InvalidOperationException("Create and complete the Finance AR sale invoice first.");
-        var invoice = await _invoiceService.GetByIdAsync(invoiceId, cancellationToken)
-            ?? throw new InvalidOperationException("The linked Finance AR sale invoice was not found.");
-        var payableAmount = ResolveSalePayableAmount(fields);
-        var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
-        var paidInFull = invoiceAmountMatches
-            && invoice.PaidAmount >= payableAmount
-            && invoice.BalanceAmount <= 0m
-            && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
-        if (!paidInFull)
-            throw new InvalidOperationException($"Invoice {invoice.InvoiceNumber} must match the approved sale amount and be fully paid before ownership transfer.");
+        var salePayable = ResolveSalePayable(fields);
+        var payableAmount = salePayable.EstateBalance;
+        InvoiceDto? invoice = null;
+        if (payableAmount > 0m)
+        {
+            if (!Guid.TryParse(FieldValue(fields, "saleInvoiceId"), out var invoiceId))
+                throw new InvalidOperationException("Create and complete the Finance AR sale invoice for the Estate balance first.");
+            invoice = await _invoiceService.GetByIdAsync(invoiceId, cancellationToken)
+                ?? throw new InvalidOperationException("The linked Finance AR sale invoice was not found.");
+            var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
+            var paidInFull = invoiceAmountMatches
+                && invoice.PaidAmount >= payableAmount
+                && invoice.BalanceAmount <= 0m
+                && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
+            if (!paidInFull)
+                throw new InvalidOperationException($"Invoice {invoice.InvoiceNumber} must match the Estate balance and be fully paid before ownership transfer.");
+        }
         if (!string.Equals(FieldValue(fields, "legalConveyanceStatus"), "Completed by Legal", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Legal must complete conveyance and registration before ownership transfer.");
         if (!Guid.TryParse(FieldValue(fields, "sourceReference"), out var customerId))
@@ -580,11 +588,12 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         asset.UpdatedAt = now;
         asset.UpdatedBy = User.Identity?.Name ?? "System";
         asset.LastModifiedById = GetUserId();
-        UpsertCaseField(sourceCase, fields, "saleInvoiceStatus", "Sale invoice status", "Paid", now);
-        UpsertCaseField(sourceCase, fields, "saleInvoiceAmount", "Sale invoice amount", invoice.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Sale invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Sale invoice balance", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", $"Paid in full; paid {invoice.CurrencyCode} {invoice.PaidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}.", now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceStatus", "Sale invoice status", invoice?.Status ?? "Not required", now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceAmount", "Sale invoice amount", (invoice?.TotalAmount ?? 0m).ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Sale invoice paid amount", (invoice?.PaidAmount ?? 0m).ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Sale invoice balance", (invoice?.BalanceAmount ?? 0m).ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "estateRemainingAmount", "Balance for Estate processing", salePayable.EstateBalance.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", BuildSalePaymentCheckMessage(FieldValue(fields, "currency") ?? invoice?.CurrencyCode ?? "GHS", salePayable, invoice?.PaidAmount ?? 0m, invoice?.BalanceAmount ?? 0m), now);
         UpsertCaseField(sourceCase, fields, "salePaymentStatus", "Sale payment status", "Paid in full", now);
         UpsertCaseField(sourceCase, fields, "ownershipTransferStatus", "Ownership transfer status", "Completed - purchaser recorded as owner", now);
         UpsertCaseField(sourceCase, fields, "applicationStatus", "Request status", "Sale completed", now);
@@ -610,8 +619,8 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                         Metadata = new Dictionary<string, object>
                         {
                             ["assetId"] = asset.Id,
-                            ["invoiceId"] = invoice.Id,
-                            ["invoiceNumber"] = invoice.InvoiceNumber,
+                            ["invoiceId"] = invoice?.Id ?? Guid.Empty,
+                            ["invoiceNumber"] = invoice?.InvoiceNumber ?? FieldValue(fields, "salesPaymentReference") ?? string.Empty,
                             ["agreementReference"] = asset.PropertyFileReference ?? string.Empty
                         }
                     },
@@ -628,9 +637,105 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             asset.Id,
             asset.AssetCode,
             customerId,
-            invoice.Id,
-            invoice.InvoiceNumber,
+            invoice?.Id,
+            invoice?.InvoiceNumber,
             "Ownership transfer completed. The property is sold and removed from portal listings."));
+    }
+
+    [HttpPost("premium/{procedureCaseId:guid}/invoice")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Property Officer,Finance Officer")]
+    public async Task<ActionResult<EstatePremiumChargeInvoiceResult>> CreatePremiumChargeInvoice(
+        Guid procedureCaseId,
+        CancellationToken cancellationToken)
+    {
+        var sourceCase = await LoadRentalProcedureCaseAsync(procedureCaseId, cancellationToken);
+        var fields = CaseFields(sourceCase);
+        if (!IsPremiumChargeRequired(fields))
+            throw new InvalidOperationException("Premium charge is not required for this request.");
+
+        var premiumAmount = ResolvePremiumChargeAmount(fields);
+        if (string.Equals(FieldValue(fields, "premiumChargePaymentStatus"), "Waived", StringComparison.OrdinalIgnoreCase))
+        {
+            return Ok(new EstatePremiumChargeInvoiceResult(
+                null,
+                FieldValue(fields, "premiumChargeInvoiceReference"),
+                "Waived",
+                premiumAmount,
+                0m,
+                0m,
+                FieldValue(fields, "currency") ?? "GHS",
+                "Waived",
+                "Premium charge has been waived; no Finance invoice is required."));
+        }
+
+        if (Guid.TryParse(FieldValue(fields, "premiumChargeInvoiceId"), out var existingInvoiceId))
+        {
+            var existingInvoice = await _invoiceService.GetByIdAsync(existingInvoiceId, cancellationToken);
+            if (existingInvoice is not null)
+            {
+                var existingResult = BuildPremiumChargeInvoiceResult(
+                    existingInvoice,
+                    premiumAmount,
+                    "Premium charge invoice already exists.");
+                await PersistPremiumChargePaymentStatusAsync(sourceCase, existingResult, cancellationToken);
+                return Ok(existingResult);
+            }
+        }
+
+        if (!Guid.TryParse(FieldValue(fields, "sourceReference"), out var customerId))
+            throw new InvalidOperationException("The rental or lease request is not linked to a Finance AR customer.");
+
+        var revenueAccountId = await FindPropertyManagementRevenueAccountIdAsync(cancellationToken);
+        var propertyUnit = FieldValue(fields, "propertyUnit") ?? FieldValue(fields, "listingReference") ?? sourceCase.Title;
+        var invoice = await _invoiceService.CreateAsync(new InvoiceCreateDto
+        {
+            CustomerId = customerId,
+            InvoiceDate = DateTime.UtcNow.Date,
+            DueDate = DateTime.UtcNow.Date,
+            Reference = BuildPremiumInvoiceReference(sourceCase.ReferenceNumber ?? sourceCase.Id.ToString()),
+            CurrencyCode = FieldValue(fields, "currency") ?? "GHS",
+            ExchangeRate = 1m,
+            Notes = EnsureSourceLabel($"Premium charge for {propertyUnit}."),
+            LineItems =
+            [
+                new InvoiceLineItemCreateDto
+                {
+                    LineItemType = "GLAccount",
+                    GLAccountId = revenueAccountId,
+                    Description = $"Premium charge: {propertyUnit}",
+                    Quantity = 1m,
+                    UnitPrice = premiumAmount,
+                    DiscountPercentage = 0m
+                }
+            ]
+        }, cancellationToken);
+
+        var result = BuildPremiumChargeInvoiceResult(
+            invoice,
+            premiumAmount,
+            $"Finance AR draft {invoice.InvoiceNumber} was created for the premium charge.");
+        await PersistPremiumChargePaymentStatusAsync(sourceCase, result, cancellationToken);
+
+        await NotifyBillingResultAsync(
+            "Premium charge invoice created",
+            $"Finance AR draft invoice {invoice.InvoiceNumber} was created for {propertyUnit}.",
+            "estate.property-management.premium-invoice-created",
+            "Invoice",
+            invoice.Id,
+            $"/finance/ar/invoices/{invoice.Id}",
+            BillingMetadata(invoice.InvoiceNumber, invoice.CustomerId, invoice.CustomerName, invoice.TotalAmount, invoice.CurrencyCode, sourceCase.ReferenceNumber, propertyUnit),
+            cancellationToken);
+
+        await NotifyCustomerPremiumChargeAsync(
+            sourceCase,
+            fields,
+            result,
+            "Premium charge invoice issued",
+            $"Premium charge invoice {invoice.InvoiceNumber} has been issued. Estate will continue the agreement after Finance confirms payment.",
+            "estate.property-management.premium-invoice-customer",
+            cancellationToken);
+
+        return Ok(result);
     }
 
     [HttpPost("sale/{procedureCaseId:guid}/sync-payment-status")]
@@ -644,6 +749,21 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         var result = await SyncSalePaymentStatusAsync(sourceCase, fields, cancellationToken);
         await PersistSalePaymentStatusAsync(sourceCase, result, cancellationToken);
         await NotifySalePaymentReceivedAsync(sourceCase, fields, result, cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpPost("premium/{procedureCaseId:guid}/sync-payment-status")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Property Officer,Head of Estate,Finance Officer")]
+    public async Task<ActionResult<EstatePremiumChargeInvoiceResult>> SyncPremiumChargePaymentStatus(
+        Guid procedureCaseId,
+        CancellationToken cancellationToken)
+    {
+        var sourceCase = await LoadRentalProcedureCaseAsync(procedureCaseId, cancellationToken);
+        var fields = CaseFields(sourceCase);
+        var result = await SyncPremiumChargePaymentStatusAsync(sourceCase, fields, cancellationToken);
+        await PersistPremiumChargePaymentStatusAsync(sourceCase, result, cancellationToken);
+        await NotifyPremiumChargePaymentReceivedAsync(sourceCase, fields, result, cancellationToken);
 
         return Ok(result);
     }
@@ -918,6 +1038,28 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         return sourceCase;
     }
 
+    private async Task<ProcedureCase> LoadRentalProcedureCaseAsync(
+        Guid procedureCaseId,
+        CancellationToken cancellationToken)
+    {
+        var sourceCase = await _db.ProcedureCases
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .FirstOrDefaultAsync(item => item.TenantId == GetTenantId()
+                && item.Id == procedureCaseId
+                && !item.IsDeleted
+                && item.Module == "PropertyManagement"
+                && item.EntityType == "EstatePropertyManagementListingApplication",
+                cancellationToken)
+            ?? throw new KeyNotFoundException("The property rent or lease request was not found.");
+        var fields = CaseFields(sourceCase);
+        var requestType = FieldValue(fields, "requestType") ?? sourceCase.Title;
+        if (!requestType.Contains("rent", StringComparison.OrdinalIgnoreCase)
+            && !requestType.Contains("lease", StringComparison.OrdinalIgnoreCase)
+            && !requestType.Contains("rental", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("This operation applies only to property rent or lease requests.");
+        return sourceCase;
+    }
+
     private async Task<DateTime?> ResolveSaleAgreementDateAsync(
         Guid tenantId,
         Guid sourceCaseId,
@@ -974,13 +1116,30 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         IDictionary<string, ProcedureCaseField> fields,
         CancellationToken cancellationToken)
     {
+        var salePayable = ResolveSalePayable(fields);
+        if (salePayable.EstateBalance <= 0m)
+        {
+            return new EstateSalePaymentStatusResult(
+                null,
+                FieldValue(fields, "salesPaymentReference"),
+                "Not required",
+                0m,
+                0m,
+                0m,
+                "Paid in full",
+                string.Equals(FieldValue(fields, "legalConveyanceStatus"), "Completed by Legal", StringComparison.OrdinalIgnoreCase)
+                    ? "Ready for ownership transfer"
+                    : "Blocked - Legal conveyance and registration pending",
+                BuildSalePaymentCheckMessage(FieldValue(fields, "currency") ?? "GHS", salePayable, 0m, 0m));
+        }
+
         if (!Guid.TryParse(FieldValue(fields, "saleInvoiceId"), out var invoiceId))
-            throw new InvalidOperationException("Create the Finance AR sale invoice before syncing payment status.");
+            throw new InvalidOperationException("Create the Finance AR sale invoice for the Estate balance before syncing payment status.");
 
         var invoice = await _invoiceService.GetByIdAsync(invoiceId, cancellationToken)
             ?? throw new InvalidOperationException("The linked Finance AR sale invoice was not found.");
 
-        var payableAmount = ResolveSalePayableAmount(fields);
+        var payableAmount = salePayable.EstateBalance;
         var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
         var paidInFull = invoiceAmountMatches
             && invoice.PaidAmount >= payableAmount
@@ -988,10 +1147,8 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
         var paymentStatus = paidInFull ? "Paid in full" : "Pending full payment";
         var paymentCheckStatus = invoiceAmountMatches
-            ? paidInFull
-                ? $"Paid in full; paid {invoice.CurrencyCode} {invoice.PaidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}."
-                : $"Awaiting full payment; paid {invoice.CurrencyCode} {invoice.PaidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}; balance {invoice.CurrencyCode} {invoice.BalanceAmount:N2}."
-            : $"Invoice total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match approved sale amount {invoice.CurrencyCode} {payableAmount:N2}.";
+            ? BuildSalePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice.PaidAmount, invoice.BalanceAmount)
+            : $"Invoice total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match Estate balance {invoice.CurrencyCode} {payableAmount:N2}. Sales already recorded {invoice.CurrencyCode} {salePayable.SalesAmountPaid:N2} against approved amount {invoice.CurrencyCode} {salePayable.ApprovedAmount:N2}.";
         var legalCompleted = string.Equals(
             FieldValue(fields, "legalConveyanceStatus"),
             "Completed by Legal",
@@ -1014,6 +1171,54 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             paymentCheckStatus);
     }
 
+    private async Task<EstatePremiumChargeInvoiceResult> SyncPremiumChargePaymentStatusAsync(
+        ProcedureCase sourceCase,
+        IDictionary<string, ProcedureCaseField> fields,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPremiumChargeRequired(fields))
+        {
+            return new EstatePremiumChargeInvoiceResult(
+                null,
+                null,
+                "Not required",
+                0m,
+                0m,
+                0m,
+                FieldValue(fields, "currency") ?? "GHS",
+                "Not required",
+                "Premium charge is not required for this request.");
+        }
+
+        var premiumAmount = ResolvePremiumChargeAmount(fields);
+        if (string.Equals(FieldValue(fields, "premiumChargePaymentStatus"), "Waived", StringComparison.OrdinalIgnoreCase))
+        {
+            return new EstatePremiumChargeInvoiceResult(
+                null,
+                FieldValue(fields, "premiumChargeInvoiceReference"),
+                "Waived",
+                premiumAmount,
+                0m,
+                0m,
+                FieldValue(fields, "currency") ?? "GHS",
+                "Waived",
+                "Premium charge has been waived; no Finance payment is required.");
+        }
+
+        if (!Guid.TryParse(FieldValue(fields, "premiumChargeInvoiceId"), out var invoiceId))
+            throw new InvalidOperationException("Create the premium charge invoice before syncing payment status.");
+
+        var invoice = await _invoiceService.GetByIdAsync(invoiceId, cancellationToken)
+            ?? throw new InvalidOperationException("The linked premium charge invoice was not found.");
+
+        return BuildPremiumChargeInvoiceResult(
+            invoice,
+            premiumAmount,
+            IsPremiumChargeInvoicePaid(invoice, premiumAmount)
+                ? "Premium charge payment has been confirmed by Finance. Estate can continue the agreement."
+                : $"Premium charge invoice {invoice.InvoiceNumber} is still awaiting full payment in Finance.");
+    }
+
     private async Task PersistSalePaymentStatusAsync(
         ProcedureCase sourceCase,
         EstateSalePaymentStatusResult result,
@@ -1028,6 +1233,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             new SalePaymentFieldUpdate("saleInvoiceAmount", "Sale invoice amount", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("saleInvoicePaidAmount", "Sale invoice paid amount", result.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("saleInvoiceBalance", "Sale invoice balance", result.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture)),
+            new SalePaymentFieldUpdate("estateRemainingAmount", "Balance for Estate processing", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("salePaymentCheckStatus", "Sale payment check", result.Message),
             new SalePaymentFieldUpdate("salePaymentStatus", "Sale payment status", result.PaymentStatus),
             new SalePaymentFieldUpdate("ownershipTransferStatus", "Ownership transfer status", result.OwnershipTransferStatus)
@@ -1079,18 +1285,259 @@ public sealed class PropertyManagementArBillingController : ControllerBase
 
     private sealed record SalePaymentFieldUpdate(string Key, string Label, string? Value);
 
-    private static decimal ResolveSalePayableAmount(IDictionary<string, ProcedureCaseField> fields)
+    private async Task<Guid> FindPropertyManagementRevenueAccountIdAsync(CancellationToken cancellationToken)
+        => await _db.Accounts
+            .AsNoTracking()
+            .Where(item => item.TenantId == GetTenantId()
+                && !item.IsDeleted
+                && item.Status == AccountStatus.Active
+                && item.AccountType == AccountType.Revenue
+                && item.AllowDirectPosting
+                && !item.IsControlAccount
+                && item.AccountCode == "4100")
+            .Select(item => (Guid?)item.Id)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("Finance must configure the active property management revenue account 4100.");
+
+    private async Task PersistPremiumChargePaymentStatusAsync(
+        ProcedureCase sourceCase,
+        EstatePremiumChargeInvoiceResult result,
+        CancellationToken cancellationToken)
+    {
+        var fields = CaseFields(sourceCase);
+        var now = DateTime.UtcNow;
+        UpsertCaseField(sourceCase, fields, "premiumChargeInvoiceId", "Premium charge invoice ID", result.InvoiceId?.ToString(), now);
+        UpsertCaseField(sourceCase, fields, "premiumChargeInvoiceReference", "Premium charge invoice reference", result.InvoiceNumber, now);
+        UpsertCaseField(sourceCase, fields, "premiumChargeInvoiceStatus", "Premium charge invoice status", result.InvoiceStatus, now);
+        UpsertCaseField(sourceCase, fields, "premiumChargeAmount", "Premium charge amount", result.Amount.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "premiumChargePaidAmount", "Premium charge paid amount", result.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "premiumChargeBalance", "Premium charge balance", result.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "premiumChargePaymentStatus", "Premium charge payment status", result.PaymentStatus, now);
+        UpsertCaseField(sourceCase, fields, "applicationStatus", "Request status", result.PaymentStatus == "Paid" ? "Premium charge paid" : result.PaymentStatus, now);
+        sourceCase.UpdatedAt = now;
+        sourceCase.LastModifiedById = GetUserId();
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task NotifyPremiumChargePaymentReceivedAsync(
+        ProcedureCase sourceCase,
+        IDictionary<string, ProcedureCaseField> fields,
+        EstatePremiumChargeInvoiceResult result,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(result.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        const string notificationType = "estate.property-management.premium-payment-received";
+        var tenantId = GetTenantId();
+        var alreadyNotified = await _db.Notifications
+            .AsNoTracking()
+            .AnyAsync(notification => notification.TenantId == tenantId
+                && !notification.IsDeleted
+                && notification.NotificationType == notificationType
+                && notification.EntityType == "ProcedureCase"
+                && notification.EntityId == sourceCase.Id,
+                cancellationToken);
+        if (alreadyNotified)
+        {
+            return;
+        }
+
+        var propertyUnit = FieldValue(fields, "propertyUnit")
+            ?? FieldValue(fields, "listingReference")
+            ?? sourceCase.Title
+            ?? sourceCase.ReferenceNumber
+            ?? sourceCase.Id.ToString();
+
+        try
+        {
+            await RoleNotificationDispatcher.NotifyRolesAsync(
+                _db,
+                _notificationService,
+                tenantId,
+                GetUserId(),
+                new[] { "Property Manager", "Property Officer", "Estate Manager", "Estate Officer", "Head of Estate" },
+                "Premium charge payment received",
+                $"Finance confirmed premium charge invoice {result.InvoiceNumber} is paid for {propertyUnit}. Estate can now generate the agreement.",
+                notificationType,
+                "ProcedureCase",
+                sourceCase.Id,
+                $"/estate/property-management/EstatePropertyManagementListingApplication?caseId={sourceCase.Id}",
+                new Dictionary<string, object>
+                {
+                    ["sourceLabel"] = SourceLabel,
+                    ["sourceModule"] = "Estate / Property Management",
+                    ["sourceRecordReference"] = sourceCase.ReferenceNumber ?? sourceCase.Id.ToString(),
+                    ["propertyUnit"] = propertyUnit,
+                    ["invoiceId"] = result.InvoiceId,
+                    ["invoiceNumber"] = result.InvoiceNumber ?? string.Empty,
+                    ["invoiceStatus"] = result.InvoiceStatus,
+                    ["paymentStatus"] = result.PaymentStatus,
+                    ["amount"] = result.Amount,
+                    ["paidAmount"] = result.PaidAmount,
+                    ["balanceAmount"] = result.BalanceAmount
+                },
+                cancellationToken);
+        }
+        catch
+        {
+            // Notification delivery must not block Estate from syncing the paid invoice status.
+        }
+
+        await NotifyCustomerPremiumChargeAsync(
+            sourceCase,
+            fields,
+            result,
+            "Premium charge payment confirmed",
+            $"Finance has confirmed payment for premium charge invoice {result.InvoiceNumber}. Estate can now continue your agreement.",
+            "estate.property-management.premium-payment-customer",
+            cancellationToken);
+    }
+
+    private async Task NotifyCustomerPremiumChargeAsync(
+        ProcedureCase sourceCase,
+        IDictionary<string, ProcedureCaseField> fields,
+        EstatePremiumChargeInvoiceResult result,
+        string title,
+        string message,
+        string type,
+        CancellationToken cancellationToken)
+    {
+        if (sourceCase.OpenedById == Guid.Empty)
+        {
+            return;
+        }
+
+        try
+        {
+            await _notificationService.CreateNotificationAsync(
+                new CreateNotificationDto
+                {
+                    RecipientId = sourceCase.OpenedById,
+                    Type = type,
+                    Title = title,
+                    Message = message,
+                    Priority = "High",
+                    EntityType = "ProcedureCase",
+                    EntityId = sourceCase.Id,
+                    ActionUrl = $"/external-portal/my-property-requests/{sourceCase.Id}",
+                    Metadata = new Dictionary<string, object>
+                    {
+                        ["sourceLabel"] = SourceLabel,
+                        ["sourceModule"] = "Estate / Property Management",
+                        ["sourceRecordReference"] = sourceCase.ReferenceNumber ?? sourceCase.Id.ToString(),
+                        ["propertyUnit"] = FieldValue(fields, "propertyUnit") ?? FieldValue(fields, "listingReference") ?? string.Empty,
+                        ["invoiceId"] = result.InvoiceId,
+                        ["invoiceNumber"] = result.InvoiceNumber ?? string.Empty,
+                        ["invoiceStatus"] = result.InvoiceStatus,
+                        ["paymentStatus"] = result.PaymentStatus,
+                        ["amount"] = result.Amount,
+                        ["paidAmount"] = result.PaidAmount,
+                        ["balanceAmount"] = result.BalanceAmount
+                    }
+                },
+                GetUserId() ?? sourceCase.OpenedById,
+                GetTenantId());
+        }
+        catch
+        {
+            // Customer notification delivery must not roll back the Finance billing status.
+        }
+    }
+
+    private static SalePayableSnapshot ResolveSalePayable(IDictionary<string, ProcedureCaseField> fields)
     {
         var amountText = FieldValue(fields, "offerAmount") ?? FieldValue(fields, "listingPrice");
         if (!decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var purchasePrice)
             || purchasePrice <= 0m)
             throw new InvalidOperationException("Record an approved purchase price before creating or completing the sale invoice.");
 
-        return purchasePrice;
+        var salesAmountPaid = ParseOptionalMoney(FieldValue(fields, "salesAmountPaid"));
+        if (salesAmountPaid < 0m)
+            throw new InvalidOperationException("Amount paid in Sales cannot be negative.");
+        if (salesAmountPaid > purchasePrice)
+            throw new InvalidOperationException("Amount paid in Sales cannot be greater than the approved purchase price.");
+
+        return new SalePayableSnapshot(
+            purchasePrice,
+            salesAmountPaid,
+            decimal.Round(purchasePrice - salesAmountPaid, 2, MidpointRounding.AwayFromZero));
     }
+
+    private static decimal ResolveSalePayableAmount(IDictionary<string, ProcedureCaseField> fields)
+        => ResolveSalePayable(fields).EstateBalance;
+
+    private static bool IsPremiumChargeRequired(IDictionary<string, ProcedureCaseField> fields)
+    {
+        var value = FieldValue(fields, "premiumChargeRequired")?.Trim().ToLowerInvariant();
+        return value is "yes" or "true" or "required";
+    }
+
+    private static decimal ResolvePremiumChargeAmount(IDictionary<string, ProcedureCaseField> fields)
+    {
+        var amountText = FieldValue(fields, "premiumChargeAmount");
+        if (!decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var premiumAmount)
+            || premiumAmount <= 0m)
+            throw new InvalidOperationException("Record a premium charge amount before creating the premium invoice.");
+
+        return decimal.Round(premiumAmount, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static decimal ParseOptionalMoney(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? 0m
+            : decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : throw new InvalidOperationException("Amount paid in Sales must be a valid number.");
+
+    private static string BuildSalePaymentCheckMessage(
+        string currency,
+        SalePayableSnapshot salePayable,
+        decimal estatePaidAmount,
+        decimal estateBalanceAmount)
+    {
+        var totalPaid = salePayable.SalesAmountPaid + estatePaidAmount;
+        if (estateBalanceAmount <= 0m)
+        {
+            return $"Paid in full; Sales paid {currency} {salePayable.SalesAmountPaid:N2}, Estate paid {currency} {estatePaidAmount:N2}, total paid {currency} {totalPaid:N2} of {currency} {salePayable.ApprovedAmount:N2}.";
+        }
+
+        return $"Awaiting Estate balance; Sales paid {currency} {salePayable.SalesAmountPaid:N2}, Estate paid {currency} {estatePaidAmount:N2}, total paid {currency} {totalPaid:N2} of {currency} {salePayable.ApprovedAmount:N2}; Estate balance {currency} {estateBalanceAmount:N2}.";
+    }
+
+    private sealed record SalePayableSnapshot(
+        decimal ApprovedAmount,
+        decimal SalesAmountPaid,
+        decimal EstateBalance);
 
     private static bool AmountsMatch(decimal left, decimal right)
         => Math.Abs(left - right) < 0.01m;
+
+    private static bool IsPremiumChargeInvoicePaid(InvoiceDto invoice, decimal premiumAmount)
+        => AmountsMatch(invoice.TotalAmount, premiumAmount)
+            && invoice.PaidAmount >= premiumAmount
+            && invoice.BalanceAmount <= 0m
+            && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
+
+    private static EstatePremiumChargeInvoiceResult BuildPremiumChargeInvoiceResult(
+        InvoiceDto invoice,
+        decimal premiumAmount,
+        string message)
+    {
+        var paid = IsPremiumChargeInvoicePaid(invoice, premiumAmount);
+        return new EstatePremiumChargeInvoiceResult(
+            invoice.Id,
+            invoice.InvoiceNumber,
+            invoice.Status,
+            invoice.TotalAmount,
+            invoice.PaidAmount,
+            invoice.BalanceAmount,
+            invoice.CurrencyCode,
+            paid ? "Paid" : "Payment pending",
+            message);
+    }
 
     private void UpsertCaseField(
         ProcedureCase procedureCase,
@@ -1126,6 +1573,12 @@ public sealed class PropertyManagementArBillingController : ControllerBase
     private static string BuildSaleInvoiceReference(string sourceReference)
     {
         var reference = $"PROPERTY-SALE-{sourceReference}";
+        return reference.Length <= 100 ? reference : reference[..100];
+    }
+
+    private static string BuildPremiumInvoiceReference(string sourceReference)
+    {
+        var reference = $"PROPERTY-PREMIUM-{sourceReference}";
         return reference.Length <= 100 ? reference : reference[..100];
     }
 
@@ -1190,8 +1643,8 @@ public sealed record EstateSaleInvoiceResult(
     string Message);
 
 public sealed record EstateSalePaymentStatusResult(
-    Guid InvoiceId,
-    string InvoiceNumber,
+    Guid? InvoiceId,
+    string? InvoiceNumber,
     string InvoiceStatus,
     decimal TotalAmount,
     decimal PaidAmount,
@@ -1200,12 +1653,23 @@ public sealed record EstateSalePaymentStatusResult(
     string OwnershipTransferStatus,
     string Message);
 
+public sealed record EstatePremiumChargeInvoiceResult(
+    Guid? InvoiceId,
+    string? InvoiceNumber,
+    string InvoiceStatus,
+    decimal Amount,
+    decimal PaidAmount,
+    decimal BalanceAmount,
+    string CurrencyCode,
+    string PaymentStatus,
+    string Message);
+
 public sealed record EstateSaleCompletionResult(
     Guid AssetId,
     string AssetCode,
     Guid PurchaserCustomerId,
-    Guid InvoiceId,
-    string InvoiceNumber,
+    Guid? InvoiceId,
+    string? InvoiceNumber,
     string Message);
 
 public sealed record UpdateEstateRentPenaltyTermsRequest(

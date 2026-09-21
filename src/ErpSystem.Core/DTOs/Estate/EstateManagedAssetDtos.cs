@@ -229,6 +229,9 @@ public class EstateLandDemarcationDto
     public decimal? AllocatedCost { get; set; }
     public decimal? CostPerAcre { get; set; }
     public decimal? TargetSalePrice { get; set; }
+    public decimal? GroundRentPayable { get; set; }
+    public decimal? GroundRentRatePerAcre { get; set; }
+    public decimal? GroundRentComputed { get; set; }
     public string? ParentLandAssetReference { get; set; }
     public string? ParentFixedAssetReference { get; set; }
     public string? ChildFixedAssetReference { get; set; }
@@ -299,12 +302,15 @@ public class EstateManagedAssetQuery
 {
     public EstateManagedAssetType? AssetType { get; set; }
     public EstateManagedAssetStatus? Status { get; set; }
+    public List<EstateManagedAssetStatus> Statuses { get; set; } = new();
     public List<EstateManagedAssetStatus> ExcludedStatuses { get; set; } = new();
     public string? Search { get; set; }
     public bool? AvailableForLease { get; set; }
     public bool? AvailableForSale { get; set; }
     public bool? AvailableForSaleOrLease { get; set; }
     public bool? PortalListingCandidates { get; set; }
+    public bool? PublishedToExternalPortal { get; set; }
+    public int Skip { get; set; }
     public int Take { get; set; } = 100;
 }
 

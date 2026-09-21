@@ -5,7 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { locationService } from '@/services/hr/location.service';
 import { employeeService } from '@/services/hr/employee.service';
 import {
@@ -14,6 +13,7 @@ import {
 } from '@/types/hr/employee-subresources';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
 import { DateField, FieldRow, SelectField, TextareaField } from './fields';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 const schema = z
   .object({
@@ -79,10 +79,6 @@ export function PositionHistoryTab({ employeeId }: { employeeId: string }) {
     queryKey: ['hr', 'organization-levels', 'all'],
     queryFn: () => organizationLevelService.getAll(),
   });
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-  });
   const { data: locations } = useQuery({
     queryKey: ['hr', 'locations', 'all'],
     queryFn: () => locationService.getAll(),
@@ -130,9 +126,6 @@ export function PositionHistoryTab({ employeeId }: { employeeId: string }) {
       })}
       renderFields={(form) => {
         const levelId = form.watch('organizationLevelId');
-        const unitOptions = (units ?? [])
-          .filter((u) => !levelId || u.organizationLevelId === levelId)
-          .map((u) => ({ value: u.id, label: u.name }));
 
         return (
           <>
@@ -143,22 +136,14 @@ export function PositionHistoryTab({ employeeId }: { employeeId: string }) {
               required
               options={(positions ?? []).map((p) => ({ value: p.id, label: p.title }))}
             />
-            <FieldRow>
-              <SelectField
-                form={form}
-                name="organizationLevelId"
-                label="Organization level"
-                required
-                options={(levels ?? []).map((l) => ({ value: l.id, label: l.name }))}
-              />
-              <SelectField
-                form={form}
-                name="organizationUnitId"
-                label="Organization unit"
-                options={unitOptions}
-                allowEmpty
-              />
-            </FieldRow>
+            <OrganizationUnitPickerField
+              form={form}
+              name="organizationUnitId"
+              levelName="organizationLevelId"
+              label="Organization unit"
+              levelLabel="Organization level *"
+              allowEmpty
+            />
             <SelectField
               form={form}
               name="locationId"

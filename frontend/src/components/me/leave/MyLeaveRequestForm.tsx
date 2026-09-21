@@ -41,6 +41,8 @@ export const myLeaveRequestSchema = z
     secondRelieverEmployeeId: z.string().optional().or(z.literal('')),
     relieverNotes: z.string().max(1000).optional().or(z.literal('')),
     handoverNotes: z.string().max(2000).optional().or(z.literal('')),
+    /** Set only when the request was raised from an approved plan; never edited on the form. */
+    leavePlanId: z.string().optional().or(z.literal('')),
   })
   .refine((v) => v.endDate >= v.startDate, {
     message: 'End date cannot be before the start date',
@@ -71,6 +73,7 @@ export const emptyMyLeaveRequest: MyLeaveRequestFormValues = {
   secondRelieverEmployeeId: '',
   relieverNotes: '',
   handoverNotes: '',
+  leavePlanId: '',
 };
 
 export const myLeaveRequestToPayload = (
@@ -88,7 +91,9 @@ export const myLeaveRequestToPayload = (
   secondRelieverEmployeeId: v.secondRelieverEmployeeId || null,
   relieverNotes: v.relieverNotes || null,
   handoverNotes: v.handoverNotes || null,
-  leavePlanId: null,
+  // Written when the request came from an approved plan, so the planning cycle joins up instead of
+  // dead-ending and the employee re-keying their own dates (closure plan L-9).
+  leavePlanId: v.leavePlanId || null,
   saveAsDraft,
 });
 
@@ -125,8 +130,8 @@ export function MyLeaveRequestForm({
   });
 
   const { data: subTypes } = useQuery({
-    queryKey: ['hr', 'leave-types', leaveTypeId, 'sub-types'],
-    queryFn: () => leaveTypeService.getSubTypes(leaveTypeId),
+    queryKey: ['hr', 'leave-types', leaveTypeId, 'sub-types', 'active'],
+    queryFn: () => leaveTypeService.getSubTypes(leaveTypeId, true),
     enabled: !!leaveTypeId,
   });
 
@@ -152,6 +157,7 @@ export function MyLeaveRequestForm({
   const balance = balances?.find((b) => b.leaveTypeId === leaveTypeId);
   const selectedType = leaveTypes?.find((t) => t.id === leaveTypeId);
 
+
   // Calendar-day span; the server computes the authoritative chargeable total.
   const spanDays =
     startDate && endDate && endDate >= startDate
@@ -159,6 +165,15 @@ export function MyLeaveRequestForm({
           (new Date(endDate).getTime() - new Date(startDate).getTime()) / 86_400_000,
         ) + 1
       : null;
+  /*
+   * ⚠ L-15, reshaped by G3 — see the note on the HR desk form. There is no uploader here
+   * because the controlled upload gate needs a request id, so nothing exists to attach a file
+   * to until the record does. What matters is not being REFUSED at submit with no warning.
+   */
+  const needsCertificate =
+    !!selectedType?.requiresMedicalCertificate &&
+    spanDays !== null &&
+    spanDays > (selectedType.selfCertificationDays ?? 0);
 
   return (
     <Card>
@@ -190,17 +205,40 @@ export function MyLeaveRequestForm({
             />
           </FieldRow>
 
+          {/* Say where the dates came from, so nobody wonders why the form arrived filled in. */}
+          {form.watch('leavePlanId') && (
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+              Raised from your approved leave plan. These are the dates you agreed — change them if
+              they have moved, and the request stays linked to the plan.
+            </div>
+          )}
+
+          {/*
+            Two figures, and the one that binds goes first. `availableDays` is the policy balance
+            (entitled for the whole year); `accruedAvailableDays` is what the server's create check
+            enforces, which on an accruing type counts only what has accrued so far. Showing only the
+            policy figure invited requests the server then refused (closure plan L-14).
+          */}
           {balance && (
             <div className="rounded-md border bg-muted/40 p-3 text-sm">
               <span className="text-muted-foreground">
                 Your balance for {balance.leaveTypeName}:{' '}
               </span>
-              <span className="font-medium">{balance.availableDays} days available</span>
+              <span className="font-medium">
+                {balance.accruedAvailableDays} days you can take now
+              </span>
               <span className="text-muted-foreground">
                 {' '}
                 (entitled {balance.entitledDays}, used {balance.usedDays}, pending{' '}
                 {balance.pendingDays})
               </span>
+              {balance.accruedAvailableDays !== balance.availableDays && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {balance.availableDays} days for the full year — this leave type accrues, so{' '}
+                  {Math.round((balance.availableDays - balance.accruedAvailableDays) * 100) / 100}{' '}
+                  of them have not accrued yet.
+                </p>
+              )}
             </div>
           )}
 
@@ -211,6 +249,20 @@ export function MyLeaveRequestForm({
               can be saved any time.
             </p>
           ) : null}
+
+          {/* Said before Submit, not after it is refused. */}
+          {needsCertificate && (
+            <div className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
+              <p className="font-medium">
+                You will need a medical certificate — excuse duty — for this.
+              </p>
+              <p className="mt-1">
+                {selectedType?.name} lets you take {selectedType?.selfCertificationDays ?? 0} day(s)
+                on your own word, and you have chosen {spanDays}.{' '}
+                <strong>Save it as a draft</strong>, attach the certificate, then submit it.
+              </p>
+            </div>
+          )}
 
           <FieldRow>
             <DateField form={form} name="startDate" label="Start date" required />

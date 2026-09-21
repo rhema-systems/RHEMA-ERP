@@ -104,6 +104,12 @@ export interface LocationSummary {
   name: string;
   code: string;
   levelName?: string | null;
+  /** Structure, level, tier and path — what the cascading picker ranks on (round 2, O-5). */
+  structureId: string;
+  locationLevelId: string;
+  levelNumber: number;
+  parentLocationId?: string | null;
+  path: string;
   city?: string | null;
   /** The administrative area this site stands in; city is a snapshot of it. */
   geoAreaId?: string | null;

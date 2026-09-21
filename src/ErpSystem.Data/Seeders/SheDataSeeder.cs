@@ -543,23 +543,335 @@ public class SheDataSeeder
 
     // ── D. Inspections ───────────────────────────────────────────────────────
 
+    // Three published templates (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §6): the
+    // original general walk, now sectioned, plus TDC's own two paper forms transcribed — the Food
+    // Vendor Screening & Inspection Checklist (percentage bands + critical disqualifiers) and the
+    // Cafeteria Inspection Checklist (qualitative rating). Then one run against each shape.
     private async Task SeedInspectionsAsync(Dictionary<string, SheCorrectiveActionTemplate> ca)
     {
-        if (await _context.SheInspectionChecklists.AnyAsync(c => c.TenantId == _tenantId && c.ChecklistNumber == "CHK-001"))
+        // Each template seeds independently, so `seed-hr-all` tops an existing database up with the
+        // two TDC forms without a rebuild. A number that already exists is left exactly as it is.
+        var have = await _context.SheInspectionChecklists
+            .Where(c => c.TenantId == _tenantId && !c.IsDeleted)
+            .Select(c => c.ChecklistNumber).ToListAsync();
+        if (have.Contains("CHK-001") && have.Contains("CHK-002") && have.Contains("CHK-003"))
             return;
 
-        var checklist = New(new SheInspectionChecklist
+        var publishedOn = _today.AddDays(-30);
+
+        SheInspectionChecklist NewChecklist(string number, string name, string description, SheInspectionType type,
+            SheChecklistScoringMode mode, string printTitle, string? printSubtitle, string? instructions, string? criticalNote)
+            => New(new SheInspectionChecklist
+            {
+                ChecklistNumber = number, Name = name, Description = description, Type = type, Version = 1, IsActive = true,
+                Status = SheChecklistStatus.Published, PublishedAt = publishedOn, PublishedById = Emp(0),
+                ScoringMode = mode, PrintTitle = printTitle, PrintSubtitle = printSubtitle,
+                Instructions = instructions, CriticalSectionNote = criticalNote,
+            });
+
+        SheInspectionChecklistSection AddSection(SheInspectionChecklist chk, string? code, string title, SheChecklistSectionKind kind, params string[] items)
         {
-            ChecklistNumber = "CHK-001", Name = "General Workplace Inspection",
-            Description = "Routine general-area workplace inspection checklist.",
-            Type = SheInspectionType.Routine, Version = 1, IsActive = true,
-        });
-        checklist.Items.Add(New(new SheInspectionChecklistItem { ItemOrder = 1, Category = "Housekeeping", ItemDescription = "Walkways clear of obstructions.", IsMandatory = true }));
-        checklist.Items.Add(New(new SheInspectionChecklistItem { ItemOrder = 2, Category = "Fire Safety", ItemDescription = "Fire extinguishers accessible and in date.", IsMandatory = true }));
-        checklist.Items.Add(New(new SheInspectionChecklistItem { ItemOrder = 3, Category = "Electrical", ItemDescription = "No damaged cables or overloaded sockets.", IsMandatory = true }));
-        _context.SheInspectionChecklists.Add(checklist);
+            var section = New(new SheInspectionChecklistSection
+            {
+                DisplayOrder = chk.Sections.Count + 1, Code = code, Title = title, Kind = kind,
+            });
+            chk.Sections.Add(section);
+            var order = 0;
+            foreach (var text in items)
+                chk.Items.Add(New(new SheInspectionChecklistItem
+                {
+                    Section = section, ItemOrder = ++order, Category = title, ItemDescription = text, IsMandatory = true,
+                }));
+            return section;
+        }
+
+        void AddField(SheInspectionChecklist chk, string label, SheChecklistFieldType type, bool required = false, string? options = null)
+            => chk.Fields.Add(New(new SheInspectionChecklistField
+            {
+                DisplayOrder = chk.Fields.Count + 1, Label = label, FieldType = type, IsRequired = required, ChoiceOptions = options,
+            }));
+
+        SheInspectionChecklistOutcome AddOutcome(SheInspectionChecklist chk, string label, decimal? min, decimal? max, int? reinspect = null, bool disqualifying = false, string? description = null)
+        {
+            var outcome = New(new SheInspectionChecklistOutcome
+            {
+                DisplayOrder = chk.Outcomes.Count + 1, Label = label, Description = description,
+                MinPercent = min, MaxPercent = max, ReinspectionWithinDays = reinspect, IsDisqualifying = disqualifying,
+            });
+            chk.Outcomes.Add(outcome);
+            return outcome;
+        }
+
+        SheInspectionChecklistSignatory AddSignatory(SheInspectionChecklist chk, string role, SheChecklistSignatoryKind kind, bool required = true)
+        {
+            var signatory = New(new SheInspectionChecklistSignatory
+            {
+                DisplayOrder = chk.Signatories.Count + 1, RoleLabel = role, Kind = kind, IsRequired = required,
+            });
+            chk.Signatories.Add(signatory);
+            return signatory;
+        }
+
+        SheInspectionChecklist? chk1 = null, chk2 = null, chk3 = null;
+        SheInspectionChecklistOutcome? approvedWithCa = null;
+        SheInspectionChecklistSignatory? vendorSig = null, officerSig = null, siteRepSig = null;
+
+        // ── CHK-001 · General workplace walk ──
+        if (!have.Contains("CHK-001"))
+        {
+        chk1 = NewChecklist("CHK-001", "General Workplace Inspection",
+            "Routine general-area workplace inspection checklist.", SheInspectionType.Routine,
+            SheChecklistScoringMode.CompliancePercentage, "GENERAL WORKPLACE INSPECTION CHECKLIST", null,
+            "Score every item C, NC or NA. Non-compliant items become corrective actions tracked to close-out.", null);
+        AddField(chk1, "Specific area", SheChecklistFieldType.Text, required: true);
+        AddField(chk1, "Weather (if applicable)", SheChecklistFieldType.Text);
+        AddSection(chk1, "A", "Housekeeping", SheChecklistSectionKind.Standard,
+            "Walkways clear of obstructions.",
+            "Work areas free of spills and waste.");
+        AddSection(chk1, "B", "Fire Safety", SheChecklistSectionKind.Standard,
+            "Fire extinguishers accessible and in date.",
+            "Emergency exits unobstructed and signed.");
+        AddSection(chk1, "C", "Electrical", SheChecklistSectionKind.Standard,
+            "No damaged cables or overloaded sockets.");
+        AddOutcome(chk1, "Satisfactory", 80m, 100m);
+        AddOutcome(chk1, "Requires improvement", 60m, 79.99m, reinspect: 14);
+        AddOutcome(chk1, "Unsatisfactory", 0m, 59.99m, reinspect: 7);
+        AddSignatory(chk1, "Inspector", SheChecklistSignatoryKind.SystemUser);
+        AddSignatory(chk1, "Area supervisor", SheChecklistSignatoryKind.External, required: false);
+        AddSignatory(chk1, "SHE Supervisor", SheChecklistSignatoryKind.SystemUser);
+        }
+
+        // ── CHK-002 · Food vendor screening & inspection (the Community 27 form) ──
+        if (!have.Contains("CHK-002"))
+        {
+        chk2 = NewChecklist("CHK-002", "Food Vendor Screening & Inspection",
+            "Pre-qualification, routine inspection and periodic SHE audit of food vendors operating on a construction site.",
+            SheInspectionType.Routine, SheChecklistScoringMode.CompliancePercentage,
+            "FOOD VENDOR SCREENING & INSPECTION CHECKLIST", "Community 27 Construction Site",
+            "Immediate Disqualification Conditions — a vendor should not be permitted to operate on the site if any of the following are observed: " +
+            "no valid food handler's medical certificate; evidence of food contamination or spoiled food; active pest infestation; unsafe LPG installation or gas leakage; " +
+            "lack of potable water for food preparation and handwashing; serious personal hygiene deficiencies; failure to comply with TDC Ghana Ltd SHE requirements or corrective actions.\n\n" +
+            "This checklist is suitable for pre-qualification, routine inspections and periodic SHE audits of food vendors operating at the construction site and aligns with good practices in food hygiene, occupational health and construction site safety.",
+            "Tick where applicable.");
+        AddField(chk2, "Site", SheChecklistFieldType.Text, required: true);
+        AddField(chk2, "Inspection time", SheChecklistFieldType.Time);
+        AddField(chk2, "Vendor name", SheChecklistFieldType.Text, required: true);
+        AddField(chk2, "Food", SheChecklistFieldType.Text);
+        AddField(chk2, "Stall / location", SheChecklistFieldType.Text);
+        AddField(chk2, "Vendor contact", SheChecklistFieldType.Text);
+        AddField(chk2, "Type of food sold", SheChecklistFieldType.Text);
+        AddField(chk2, "SHE Officer", SheChecklistFieldType.Employee, required: true);
+        AddField(chk2, "Inspection type", SheChecklistFieldType.Choice, required: true, options: "Initial|Routine|Follow-up|Complaint Investigation");
+        AddSection(chk2, "A", "Vendor Documentation", SheChecklistSectionKind.Standard,
+            "Vendor has management approval to operate on site",
+            "Vendor possesses a valid national identification",
+            "Food handler has a valid medical certificate",
+            "Vendor possesses a valid Food Hygiene Certificate (where applicable)",
+            "Vendor has emergency contact details available");
+        AddSection(chk2, "B", "Personal Hygiene", SheChecklistSectionKind.Standard,
+            "Vendor appears clean and well-groomed",
+            "Fingernails are clean and trimmed",
+            "Hair is properly covered",
+            "Clean protective clothing/apron worn",
+            "Closed shoes worn during food preparation",
+            "No visible skin infections or wounds",
+            "Hands washed before food preparation",
+            "Disposable gloves used where necessary");
+        AddSection(chk2, "C", "Food Preparation Area", SheChecklistSectionKind.Standard,
+            "Food preparation area is clean",
+            "Tables and work surfaces are clean",
+            "Adequate lighting available",
+            "Area is free from dust and smoke",
+            "Food protected from contamination",
+            "Cooking equipment is clean",
+            "Food served with utensils rather than bare hands");
+        AddSection(chk2, "D", "Food Safety", SheChecklistSectionKind.Standard,
+            "Raw and cooked foods stored separately",
+            "Food is adequately covered",
+            "Perishable foods properly refrigerated or kept hot",
+            "No spoiled or expired food observed",
+            "Ingredients appear fresh",
+            "Cooking oil appears clean and suitable for use",
+            "Food served at safe temperature");
+        AddSection(chk2, "E", "Water Supply", SheChecklistSectionKind.Standard,
+            "Potable water available",
+            "Water stored in clean containers",
+            "Separate handwashing facility provided",
+            "Soap available for handwashing");
+        AddSection(chk2, "F", "Waste Management", SheChecklistSectionKind.Standard,
+            "Waste bins available",
+            "Waste bins have covers",
+            "Waste disposed of regularly",
+            "Waste area free from foul odour");
+        AddSection(chk2, "G", "Pest Control", SheChecklistSectionKind.Standard,
+            "No evidence of rodents",
+            "No evidence of cockroaches",
+            "No flies on food",
+            "Food adequately protected from insects");
+        AddSection(chk2, "H", "Fire & General Safety", SheChecklistSectionKind.Standard,
+            "LPG cylinder in good condition",
+            "LPG hose in good condition",
+            "Gas regulator properly fitted",
+            "No gas leakage detected",
+            "Fire extinguisher available",
+            "Fire extinguisher inspection date valid",
+            "Cooking area well ventilated",
+            "No combustible materials near cooking area",
+            "Electrical wiring safe");
+        AddSection(chk2, "I", "Environmental Compliance", SheChecklistSectionKind.Standard,
+            "Surroundings kept clean",
+            "No stagnant water",
+            "No offensive odour",
+            "Adequate drainage around stall");
+        AddSection(chk2, "J", "Worker Welfare", SheChecklistSectionKind.Standard,
+            "Vendor has access to toilet facilities",
+            "Vendor understands food safety requirements",
+            "Vendor follows site SHE rules");
+        AddSection(chk2, null, "Critical Non-Conformities (Immediate Disqualification)", SheChecklistSectionKind.Critical,
+            "Food handler has infectious disease",
+            "Expired food being sold",
+            "Unsafe drinking water",
+            "Evidence of food poisoning risk",
+            "Pest infestation",
+            "Gas leakage",
+            "Food prepared in unhygienic conditions",
+            "Lack of valid medical certificate");
+        AddOutcome(chk2, "Approved to Operate", 95m, 100m, description: "Approved");
+        approvedWithCa = AddOutcome(chk2, "Approved with Corrective Actions", 85m, 94.99m, description: "Approved with corrective actions");
+        AddOutcome(chk2, "Conditional Approval", 70m, 84.99m, reinspect: 7, description: "Conditional approval; re-inspection required within 7 days");
+        AddOutcome(chk2, "Rejected", 0m, 69.99m, disqualifying: true, description: "Not approved to operate");
+        AddOutcome(chk2, "Temporarily Suspended", null, null, description: "Operation suspended pending corrective actions");
+        vendorSig = AddSignatory(chk2, "Vendor", SheChecklistSignatoryKind.External);
+        officerSig = AddSignatory(chk2, "SHE Officer", SheChecklistSignatoryKind.SystemUser);
+        siteRepSig = AddSignatory(chk2, "Site Representative", SheChecklistSignatoryKind.External);
+
+        }
+
+        // ── CHK-003 · Cafeteria inspection ──
+        if (!have.Contains("CHK-003"))
+        {
+        chk3 = NewChecklist("CHK-003", "Cafeteria Inspection",
+            "Routine SHE inspection of a staff cafeteria: housekeeping, food hygiene, fire and occupational safety, sanitation, documentation.",
+            SheInspectionType.Routine, SheChecklistScoringMode.QualitativeRating,
+            "CAFETERIA INSPECTION CHECKLIST", "Safety, Health and Environment (SHE) Section",
+            "This checklist is aligned with occupational safety, food hygiene, housekeeping, fire safety and workplace health inspection requirements, making it suitable for routine SHE inspections and audit documentation at TDC Ghana Ltd.",
+            null);
+        AddField(chk3, "Time", SheChecklistFieldType.Time);
+        AddField(chk3, "Location", SheChecklistFieldType.Location, required: true);
+        AddField(chk3, "Organization unit", SheChecklistFieldType.OrganizationUnit);
+        AddField(chk3, "Name of cafeteria operator", SheChecklistFieldType.Text, required: true);
+        AddField(chk3, "Weather (if applicable)", SheChecklistFieldType.Text);
+        AddSection(chk3, "A", "General Housekeeping", SheChecklistSectionKind.Standard,
+            "Floors are clean, dry and free from slip hazards.",
+            "Walls and ceilings are clean and in good condition.",
+            "Work surfaces are clean and sanitized.",
+            "Waste bins are available, covered and regularly emptied.",
+            "No accumulation of rubbish or food waste.",
+            "Good housekeeping practices are maintained.");
+        AddSection(chk3, "B", "Food Safety & Hygiene", SheChecklistSectionKind.Standard,
+            "Food is properly covered and protected from contamination.",
+            "Raw and cooked foods are stored separately.",
+            "Perishable foods are stored at appropriate temperatures.",
+            "Food preparation areas are hygienic.",
+            "Expired food items are not present.",
+            "Food storage shelves are clean and organized.");
+        AddSection(chk3, "C", "Personal Hygiene", SheChecklistSectionKind.Standard,
+            "Food handlers wear clean uniforms/aprons.",
+            "Hairnets/head covers are worn.",
+            "Disposable gloves are used where required.",
+            "Staff wash hands before handling food.",
+            "No jewellery worn while handling food (except permitted items).",
+            "Staff appear medically fit for food handling.");
+        AddSection(chk3, "D", "Kitchen Equipment", SheChecklistSectionKind.Standard,
+            "Cooking equipment is clean and functional.",
+            "Refrigerators/freezers are operational.",
+            "Temperature records are maintained.",
+            "Gas cylinders are properly secured.",
+            "Gas hoses and regulators are in good condition.",
+            "Electrical appliances are in good condition.");
+        AddSection(chk3, "E", "Fire Safety", SheChecklistSectionKind.Standard,
+            "Fire extinguisher available and accessible.",
+            "Fire extinguisher inspection tag is current.",
+            "Fire blanket available and accessible.",
+            "Emergency exits are unobstructed.",
+            "Emergency evacuation signage displayed.",
+            "Staff are aware of emergency procedures.");
+        AddSection(chk3, "F", "Occupational Safety", SheChecklistSectionKind.Standard,
+            "Wet floor signs available and used when required.",
+            "Adequate lighting provided.",
+            "Adequate ventilation provided.",
+            "Walkways are free from obstruction.",
+            "First aid box available and fully stocked.",
+            "Staff use appropriate PPE where necessary.");
+        AddSection(chk3, "G", "Pest Control", SheChecklistSectionKind.Standard,
+            "No evidence of rodents or insects.",
+            "Pest control programme is current.",
+            "Doors and windows fitted with insect screens where applicable.");
+        AddSection(chk3, "H", "Water & Sanitation", SheChecklistSectionKind.Standard,
+            "Potable water available.",
+            "Handwashing facilities available and functional.",
+            "Soap and hand-drying facilities available.",
+            "Toilets are clean and hygienic.");
+        AddSection(chk3, "I", "Documentation", SheChecklistSectionKind.Standard,
+            "Food handlers possess valid medical certificates (where required).",
+            "Cleaning schedule is available and implemented.",
+            "Pest control records are available.",
+            "Equipment maintenance records are available.",
+            "Previous inspection findings have been addressed.");
+        AddOutcome(chk3, "Excellent", null, null);
+        AddOutcome(chk3, "Satisfactory", null, null);
+        AddOutcome(chk3, "Requires Improvement", null, null, reinspect: 30);
+        AddOutcome(chk3, "Unsatisfactory", null, null, reinspect: 7);
+        AddSignatory(chk3, "Inspector", SheChecklistSignatoryKind.SystemUser);
+        AddSignatory(chk3, "Cafeteria Supervisor", SheChecklistSignatoryKind.External);
+        AddSignatory(chk3, "Reviewed by (SHE Supervisor)", SheChecklistSignatoryKind.SystemUser);
+        }
+
+        _context.SheInspectionChecklists.AddRange(new[] { chk1, chk2, chk3 }.Where(c => c != null)!);
         await _context.SaveChangesAsync();
 
+        // ── Runs ──
+
+        // Materialises a template's items onto an inspection in form order; the answer function decides each status.
+        void Materialise(SafetyInspection insp, SheInspectionChecklist chk, Func<int, SheInspectionChecklistItem, SheComplianceStatus> answer)
+        {
+            var order = 0;
+            var ordered = chk.Sections.OrderBy(s => s.DisplayOrder)
+                .SelectMany(s => chk.Items.Where(i => i.Section == s).OrderBy(i => i.ItemOrder));
+            foreach (var item in ordered)
+            {
+                var n = ++order;
+                var status = answer(n, item);
+                insp.Items.Add(New(new SafetyInspectionItem
+                {
+                    ChecklistItemId = item.Id, DisplayOrder = n, ItemDescription = item.ItemDescription, Status = status,
+                    IsResolved = status is SheComplianceStatus.Compliant or SheComplianceStatus.NotApplicable,
+                }));
+            }
+        }
+
+        // Applies the §2.5 scoring maths to a materialised run.
+        void Score(SafetyInspection insp, SheInspectionChecklist chk, SheInspectionChecklistOutcome? recommended, SheInspectionChecklistOutcome? chosen)
+        {
+            bool IsCritical(SafetyInspectionItem i) => chk.Items.First(c => c.Id == i.ChecklistItemId).Section?.Kind == SheChecklistSectionKind.Critical;
+            var standard = insp.Items.Where(i => !IsCritical(i)).ToList();
+            insp.TotalCompliantItems = standard.Count(i => i.Status == SheComplianceStatus.Compliant);
+            insp.TotalNonCompliantItems = standard.Count(i => i.Status == SheComplianceStatus.NonCompliant);
+            insp.TotalPartiallyCompliantItems = standard.Count(i => i.Status == SheComplianceStatus.PartiallyCompliant);
+            insp.TotalApplicableItems = insp.TotalCompliantItems + insp.TotalNonCompliantItems + insp.TotalPartiallyCompliantItems;
+            insp.CriticalNonConformityCount = insp.Items.Count(i => IsCritical(i) && i.Status == SheComplianceStatus.NonCompliant);
+            insp.CompliancePercentage = insp.TotalApplicableItems > 0
+                ? Math.Round(insp.TotalCompliantItems.Value * 100m / insp.TotalApplicableItems.Value, 2) : null;
+            insp.ComplianceScore = insp.CompliancePercentage == null ? null : (int)Math.Round(insp.CompliancePercentage.Value, MidpointRounding.AwayFromZero);
+            insp.RecommendedOutcomeId = recommended?.Id;
+            insp.OutcomeId = chosen?.Id;
+        }
+
+        var runs = new List<SafetyInspection>();
+
+        if (chk1 != null)
+        {
+        // INSP-2026-001: the general walk, one open finding — matches the corrective-action seed below.
         var insp1 = New(new SafetyInspection
         {
             InspectionNumber = "INSP-2026-001",
@@ -567,30 +879,26 @@ public class SheDataSeeder
             LocationId = Loc(0), SpecificArea = "Production hall",
             OrganizationUnitId = Org(0),
             Type = SheInspectionType.Routine, Category = SheInspectionCategory.General,
-            ChecklistId = checklist.Id,
+            ChecklistId = chk1.Id,
             InspectorId = Emp(0),
             FindingsAndObservations = "Two housekeeping issues and one blocked fire exit identified.",
             RecommendedActions = "Clear obstructions; reinforce housekeeping standard.",
             Status = SheInspectionStatus.PendingCorrectiveActions,
             OverallRiskRating = SheRiskLevel.Medium,
-            ComplianceScore = 78,
             ComplianceDeadline = _today.AddDays(14),
             NextInspectionDueDate = _today.AddDays(10), // due within 30 days
+            CompletedAt = _today.AddDays(-7).AddHours(11), CompletedById = Emp(0),
         });
-        insp1.Items.Add(New(new SafetyInspectionItem
-        {
-            ItemDescription = "Walkways clear of obstructions.",
-            Status = SheComplianceStatus.NonCompliant,
-            DeficiencyNoted = "Pallets stored across the main walkway.",
-            ActionRequired = "Relocate pallets to the racking area.",
-            RiskLevel = SheRiskLevel.Medium, TargetDate = _today.AddDays(7),
-            ResponsiblePersonId = Emp(1),
-        }));
-        insp1.Items.Add(New(new SafetyInspectionItem
-        {
-            ItemDescription = "Fire extinguishers accessible and in date.",
-            Status = SheComplianceStatus.Compliant, IsResolved = true,
-        }));
+        Materialise(insp1, chk1, (n, _) => n == 1 ? SheComplianceStatus.NonCompliant : SheComplianceStatus.Compliant);
+        var walkway = insp1.Items.First(i => i.DisplayOrder == 1);
+        walkway.DeficiencyNoted = "Pallets stored across the main walkway.";
+        walkway.ActionRequired = "Relocate pallets to the racking area.";
+        walkway.RiskLevel = SheRiskLevel.Medium;
+        walkway.TargetDate = _today.AddDays(7);
+        walkway.ResponsiblePersonId = Emp(1);
+        Score(insp1, chk1, chk1.Outcomes.First(o => o.Label == "Satisfactory"), chk1.Outcomes.First(o => o.Label == "Satisfactory"));
+        insp1.FieldValues.Add(New(new SafetyInspectionFieldValue { ChecklistFieldId = chk1.Fields.First(f => f.Label == "Specific area").Id, ValueText = "Production hall, bays 1-4" }));
+        insp1.Signatures.Add(New(new SafetyInspectionSignature { ChecklistSignatoryId = chk1.Signatories.First(s => s.RoleLabel == "Inspector").Id, RoleLabel = "Inspector", SignedByEmployeeId = Emp(0), SignedName = _employees[0].FullName, SignedAt = _today.AddDays(-7).AddHours(11) }));
         var ih = New(new SafetyInspectionHazard
         {
             HazardDescription = "Blocked fire exit in the production hall.",
@@ -612,6 +920,7 @@ public class SheDataSeeder
         }
         insp1.Hazards.Add(ih);
 
+        // INSP-2026-002: a free-form (no template) inspection — the path that predates the builder.
         var insp2 = New(new SafetyInspection
         {
             InspectionNumber = "INSP-2026-002",
@@ -626,9 +935,75 @@ public class SheDataSeeder
             ComplianceScore = 94,
             NextInspectionDueDate = _today.AddDays(5), // due within 30 days
         });
+        runs.Add(insp1);
+        runs.Add(insp2);
+        }
 
-        _context.SafetyInspections.AddRange(insp1, insp2);
-        await _context.SaveChangesAsync();
+        if (chk2 != null && approvedWithCa != null && vendorSig != null && officerSig != null && siteRepSig != null)
+        {
+        // INSP-2026-003: a completed food-vendor screening — 50 compliant, 3 non-compliant, 2 N/A → 94.34% →
+        // "Approved with Corrective Actions"; no critical hits; all three signatures on the form.
+        var insp3 = New(new SafetyInspection
+        {
+            InspectionNumber = "INSP-2026-003",
+            InspectionDate = _today.AddDays(-3),
+            LocationId = Loc(0), SpecificArea = "Vendor stall 4, site canteen row",
+            OrganizationUnitId = Org(0),
+            Type = SheInspectionType.Routine, Category = SheInspectionCategory.General,
+            ChecklistId = chk2.Id,
+            InspectorId = Emp(0),
+            FindingsAndObservations = "Vendor documentation complete. Two hygiene lapses (hair cover, gloves) and the extinguisher tag is out of date.",
+            RecommendedActions = "Replace extinguisher inspection tag; issue hair nets and gloves; re-check at next routine visit.",
+            SubjectComments = "Will buy hair nets today and call the fire service contractor for the extinguisher.",
+            Status = SheInspectionStatus.PendingCorrectiveActions,
+            OverallRiskRating = SheRiskLevel.Low,
+            ComplianceDeadline = _today.AddDays(7),
+            NextInspectionDueDate = _today.AddDays(27),
+            CompletedAt = _today.AddDays(-3).AddHours(10), CompletedById = Emp(0),
+        });
+        var nonCompliant = new HashSet<int> { 8, 13, 45 };   // hair covered · gloves · extinguisher date
+        var notApplicable = new HashSet<int> { 4, 41 };      // hygiene certificate (where applicable) · LPG hose (charcoal stove)
+        Materialise(insp3, chk2, (n, item) =>
+            item.Section!.Kind == SheChecklistSectionKind.Critical ? SheComplianceStatus.Compliant
+            : nonCompliant.Contains(n) ? SheComplianceStatus.NonCompliant
+            : notApplicable.Contains(n) ? SheComplianceStatus.NotApplicable
+            : SheComplianceStatus.Compliant);
+        foreach (var item in insp3.Items.Where(i => i.Status == SheComplianceStatus.NonCompliant))
+        {
+            item.RiskLevel = item.DisplayOrder == 45 ? SheRiskLevel.Medium : SheRiskLevel.Low;
+            item.TargetDate = _today.AddDays(item.DisplayOrder == 45 ? 7 : 2);
+            item.ResponsiblePersonId = Emp(0);
+            item.DeficiencyNoted = item.DisplayOrder switch
+            {
+                8 => "Hair uncovered while serving.",
+                13 => "Bare hands used to plate rice.",
+                _ => "Extinguisher inspection tag expired two months ago.",
+            };
+        }
+        Score(insp3, chk2, approvedWithCa, approvedWithCa);
+        SafetyInspectionFieldValue Val(string label, string? text = null, Guid? reference = null)
+            => New(new SafetyInspectionFieldValue { ChecklistFieldId = chk2.Fields.First(f => f.Label == label).Id, ValueText = text, ValueReferenceId = reference });
+        insp3.FieldValues.Add(Val("Site", "Community 27 Construction Site"));
+        insp3.FieldValues.Add(Val("Inspection time", "09:30"));
+        insp3.FieldValues.Add(Val("Vendor name", "Akosua Mensah"));
+        insp3.FieldValues.Add(Val("Food", "Waakye, jollof, fried fish"));
+        insp3.FieldValues.Add(Val("Stall / location", "Stall 4, canteen row"));
+        insp3.FieldValues.Add(Val("Vendor contact", "024 000 0000"));
+        insp3.FieldValues.Add(Val("Type of food sold", "Cooked meals"));
+        insp3.FieldValues.Add(Val("SHE Officer", reference: Emp(0)));
+        insp3.FieldValues.Add(Val("Inspection type", "Routine"));
+        var signedAt = _today.AddDays(-3).AddHours(10);
+        insp3.Signatures.Add(New(new SafetyInspectionSignature { ChecklistSignatoryId = vendorSig.Id, RoleLabel = vendorSig.RoleLabel, SignedName = "Akosua Mensah", SignedAt = signedAt }));
+        insp3.Signatures.Add(New(new SafetyInspectionSignature { ChecklistSignatoryId = officerSig.Id, RoleLabel = officerSig.RoleLabel, SignedByEmployeeId = Emp(0), SignedName = _employees[0].FullName, SignedAt = signedAt }));
+        insp3.Signatures.Add(New(new SafetyInspectionSignature { ChecklistSignatoryId = siteRepSig.Id, RoleLabel = siteRepSig.RoleLabel, SignedName = "K. Boateng (Site Agent)", SignedAt = signedAt.AddMinutes(20) }));
+        runs.Add(insp3);
+        }
+
+        if (runs.Count > 0)
+        {
+            _context.SafetyInspections.AddRange(runs);
+            await _context.SaveChangesAsync();
+        }
     }
 
     // ── E. Permits-to-work ───────────────────────────────────────────────────

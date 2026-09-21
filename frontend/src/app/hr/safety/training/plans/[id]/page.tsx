@@ -40,8 +40,8 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { safetyTrainingService } from '@/services/hr/safety-training.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { locationService } from '@/services/hr/location.service';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import {
   SHE_TRAINING_PLAN_STATUS_OPTIONS,
   SHE_TRAINING_CATEGORY_OPTIONS,
@@ -103,10 +103,6 @@ export default function SafetyTrainingPlanDetailPage() {
     queryKey: ['hr', 'safety-training', 'plan', planId],
     queryFn: () => safetyTrainingService.getPlan(planId),
     enabled: !!planId,
-  });
-  const { data: orgUnits = [] } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
   });
   const { data: locations = [] } = useQuery({
     queryKey: ['hr', 'locations'],
@@ -354,14 +350,7 @@ export default function SafetyTrainingPlanDetailPage() {
               <NumberField form={editForm} name="quarter" label="Quarter (1–4, optional)" />
             </FieldRow>
             <FieldRow>
-              <SelectField
-                form={editForm}
-                name="organizationUnitId"
-                label="Organization unit"
-                allowEmpty
-                emptyLabel="Company-wide"
-                options={orgUnits.map((u) => ({ value: u.id, label: u.name }))}
-              />
+              <OrganizationUnitPickerField form={editForm} name="organizationUnitId" label="Organization unit" allowEmpty emptyLabel="Company-wide" />
               <SelectField
                 form={editForm}
                 name="status"

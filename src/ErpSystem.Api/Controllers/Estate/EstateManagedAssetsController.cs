@@ -53,20 +53,26 @@ public sealed class EstateManagedAssetsController : ControllerBase
     public async Task<IActionResult> GetManagedAssets(
         [FromQuery] EstateManagedAssetType? assetType = null,
         [FromQuery] EstateManagedAssetStatus? status = null,
+        [FromQuery] List<EstateManagedAssetStatus>? statuses = null,
         [FromQuery] string? search = null,
         [FromQuery] bool? availableForLease = null,
         [FromQuery] bool? availableForSale = null,
         [FromQuery] bool? portalListingCandidates = null,
+        [FromQuery] bool? publishedToExternalPortal = null,
+        [FromQuery] int skip = 0,
         [FromQuery] int take = 100)
     {
         var assets = await _managedAssetService.GetManagedAssetsAsync(new EstateManagedAssetQuery
         {
             AssetType = assetType,
             Status = status,
+            Statuses = statuses ?? new List<EstateManagedAssetStatus>(),
             Search = search,
             AvailableForLease = availableForLease,
             AvailableForSale = availableForSale,
             PortalListingCandidates = portalListingCandidates,
+            PublishedToExternalPortal = publishedToExternalPortal,
+            Skip = skip,
             Take = take
         });
 
@@ -162,7 +168,10 @@ public sealed class EstateManagedAssetsController : ControllerBase
     }
 
     [HttpGet("portal-listing-demarcations")]
-    public async Task<IActionResult> GetPortalListingDemarcations([FromQuery] string? search = null, [FromQuery] int take = 300)
+    public async Task<IActionResult> GetPortalListingDemarcations(
+        [FromQuery] string? search = null,
+        [FromQuery] int skip = 0,
+        [FromQuery] int take = 300)
     {
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         if (tenantId == Guid.Empty)
@@ -172,6 +181,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
 
         var normalizedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim().ToLowerInvariant();
         var limit = Math.Clamp(take <= 0 ? 300 : take, 1, 500);
+        var offset = Math.Max(0, skip);
         var query = _db.EstateLandDemarcations
             .AsNoTracking()
             .Include(item => item.EstateManagedAsset)
@@ -195,6 +205,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
 
         var candidates = await query
             .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .Skip(offset)
             .Take(limit)
             .Select(item => new
             {
@@ -238,12 +249,20 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 ProjectId = item.EstateManagedAsset.ProjectId,
                 ProjectCode = item.EstateManagedAsset.ProjectCode,
                 ProjectTitle = item.EstateManagedAsset.ProjectTitle,
+                GroundRentPayable = item.GroundRentPayable,
+                GroundRentRatePerAcre = item.GroundRentRatePerAcre,
+                GroundRentComputed = item.GroundRentComputed,
                 AreaSquareFeet = item.AreaSquareFeet,
                 ValuationAmount = item.AllocatedCost,
                 TargetSalePrice = item.TargetSalePrice,
                 Currency = item.ExternalListingCurrency,
-                IsAvailableForLease = item.ExternalListingType == "Rent" || item.ExternalListingType == "SaleAndRent",
-                IsAvailableForSale = item.ExternalListingType == "Sale" || item.ExternalListingType == "SaleAndRent",
+                IsAvailableForLease = item.ExternalListingType == "Rent"
+                    || item.ExternalListingType == "Lease"
+                    || item.ExternalListingType == "SaleAndRent"
+                    || item.ExternalListingType == "SaleAndLease",
+                IsAvailableForSale = item.ExternalListingType == "Sale"
+                    || item.ExternalListingType == "SaleAndRent"
+                    || item.ExternalListingType == "SaleAndLease",
                 IsPublishedFromProject = item.EstateManagedAsset.IsPublishedFromProject,
                 PublishedFromProjectAt = item.EstateManagedAsset.PublishedFromProjectAt,
                 IsPublishedToExternalPortal = item.IsPublishedToExternalPortal,
@@ -411,6 +430,9 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 request.SalesOpportunityId ?? Guid.Empty,
                 request.SalesReference ?? string.Empty,
                 request.AgreedAmount,
+                request.RequestedLeaseTerm,
+                request.SalesAmountPaid,
+                request.SalesPaymentReference,
                 request.Currency,
                 request.SalesCompletedAt,
                 request.Notes), cancellationToken);
@@ -754,18 +776,32 @@ public sealed class EstateManagedAssetsController : ControllerBase
             || normalized.Equals("Sale", StringComparison.OrdinalIgnoreCase)
             ? "Purchase"
             : normalized.Equals("Lease", StringComparison.OrdinalIgnoreCase)
-                || normalized.Equals("Rent", StringComparison.OrdinalIgnoreCase)
                 ? "Lease"
-                : listingType == "Sale" ? "Purchase" : "Lease";
+                : normalized.Equals("Rent", StringComparison.OrdinalIgnoreCase)
+                    || normalized.Equals("Rental", StringComparison.OrdinalIgnoreCase)
+                    || normalized.Equals("Tenancy", StringComparison.OrdinalIgnoreCase)
+                    ? "Rent"
+                    : listingType switch
+                    {
+                        "Sale" => "Purchase",
+                        "Lease" or "SaleAndLease" => "Lease",
+                        "Rent" or "SaleAndRent" => "Rent",
+                        _ => "Lease"
+                    };
 
         if (listingType == "Sale" && normalized != "Purchase")
         {
             return "Purchase";
         }
 
-        if (listingType == "Rent" && normalized != "Lease")
+        if (listingType == "Lease" && normalized != "Lease")
         {
             return "Lease";
+        }
+
+        if (listingType == "Rent" && normalized != "Rent")
+        {
+            return "Rent";
         }
 
         return normalized;
@@ -818,6 +854,9 @@ public sealed record CreateEstateSalesListingApplicationHandoffDto(
     Guid? SalesOpportunityId,
     string? SalesReference,
     decimal? AgreedAmount,
+    string? RequestedLeaseTerm,
+    decimal? SalesAmountPaid,
+    string? SalesPaymentReference,
     string? Currency,
     DateTime? SalesCompletedAt,
     string? Notes);

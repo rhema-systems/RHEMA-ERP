@@ -255,6 +255,16 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderLandedCostPlanRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderLandedCostPlanRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderLandedCostPlanItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderLandedCostPlanItemRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierRepository, ErpSystem.Data.Repositories.Procurement.SupplierRepository>();
+            // ⚠ These two were never registered, and SuppliersController takes all three in its
+            // constructor — so EVERY endpoint under /api/Suppliers answered 400 INVALID_OPERATION
+            // ("Unable to resolve service for type 'ISupplierContactRepository' while attempting to
+            // activate 'SuppliersController'") before a line of controller code ran. The whole
+            // controller was dead. Both interfaces and both implementations already existed; only
+            // the registration was missing. Found 2026-09-14 because HR's pre-employment check
+            // providers cannot be registered without a supplier. Recorded in
+            // docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md.
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierContactRepository, ErpSystem.Data.Repositories.Procurement.SupplierContactRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierItemCatalogRepository, ErpSystem.Data.Repositories.Procurement.SupplierItemCatalogRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionItemRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderReceiptRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderReceiptRepository>();
@@ -1139,7 +1149,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.IStaffNumberService,
                                ErpSystem.Core.Services.HR.StaffNumberService>();
 
-            // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md): template, check, review,
+            // Employee bulk import (docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md): template, check, review,
             // commit. Lives in Api because it reads and writes workbooks (ClosedXML) and stores the
             // upload through the HR document gate; every employee still goes through IEmployeeService.
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeImportService,
@@ -1170,6 +1180,18 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
                                ErpSystem.Core.Services.HR.HealthcareFacilityGeoAreaConsumer>();
 
+            // Round 2, lane D2 — the addresses hanging off an employee. The employee's own address
+            // was covered from the start; these four were not, and a soft-deleted area would have
+            // taken a next of kin's address, a guarantor's and a previous employer's with it.
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeContactGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeEmergencyContactGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeGuarantorGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeWorkHistoryGeoAreaConsumer>();
+
             // The company seal and signature, versioned rather than overwritten.
             services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
                                ErpSystem.Core.Services.HR.CompanySealAssetService>();
@@ -1179,6 +1201,27 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // run because nothing hosted them.
             services.AddScoped<ErpSystem.Core.Services.HR.IIdentificationExpiryReminderService,
                                ErpSystem.Core.Services.HR.IdentificationExpiryReminderService>();
+
+            // Demo feedback round 2, lane C2 — the certification model and its expiry sweep. The
+            // sweep's host is registered with the other hosted services below.
+            services.AddScoped<ErpSystem.Core.Services.HR.ICertificationService,
+                               ErpSystem.Core.Services.HR.CertificationService>();
+            services.AddScoped<ErpSystem.Core.Services.HR.ICertificationExpiryReminderService,
+                               ErpSystem.Core.Services.HR.CertificationExpiryReminderService>();
+
+            // Demo feedback round 2, lane C3 — named sets. The three masters, and the one service
+            // that unions a position's attached sets with its individual rows. ⚠ Several existing
+            // services now depend on IPositionNamedSetService for their EFFECTIVE reads (benefit
+            // enrolment, succession matching, certification compliance, offer benefit seeding), so
+            // it must be registered even where no set has been created yet.
+            services.AddScoped<ErpSystem.Core.Services.HR.IPositionNamedSetService,
+                               ErpSystem.Core.Services.HR.PositionNamedSetService>();
+            services.AddScoped<ErpSystem.Core.Services.HR.IBenefitGroupService,
+                               ErpSystem.Core.Services.HR.BenefitGroupService>();
+            services.AddScoped<ErpSystem.Core.Services.HR.ISkillSetService,
+                               ErpSystem.Core.Services.HR.SkillSetService>();
+            services.AddScoped<ErpSystem.Core.Services.HR.ICertificationSetService,
+                               ErpSystem.Core.Services.HR.CertificationSetService>();
 
             // Organization Structure Services
             services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
@@ -2539,9 +2582,21 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.ProbationReminderBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.HR.IdentificationExpiryReminderBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.HR.CertificationExpiryReminderBackgroundService>();
 
             // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();
+
+            // Leave reminder engine (closure plan wave E, slice E2): daily sweep — approved leave
+            // about to start with nobody confirming it is still going, leave that ended and was
+            // never closed, a request nobody has decided, mandatory leave still outstanding late in
+            // the year, and carry-over about to lapse. Sweep logic is scoped (ILeaveReminderService)
+            // so run-now shares it.
+            //
+            // ⚠ This engine WARNS ONLY. LeaveYearEndService, which actually moves carry-over and
+            // forfeiture, stays deliberately unhosted — those two acts change people's entitlements
+            // and automating them is TDC's policy call, not a defect to fix.
+            services.AddHostedService<ErpSystem.Api.Services.HR.LeaveReminderBackgroundService>();
 
             // Separation reminder engine (FR-HR-111): daily sweep — a retirement
             // or a contract expiry approaching with no exit raised, a clearance with mandatory lines
@@ -2556,6 +2611,22 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // that require regular servicing with no next date at all. Sweep logic is scoped
             // (IAssetReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.AssetReminderBackgroundService>();
+
+            // Recruitment lifecycle sweep (G-2.4, G-6.2): daily — an offer whose expiry passed
+            // unanswered, an advert past its closing date, and an anticipated vacancy whose day has
+            // come. ⚠ This is the recruitment module's FIRST scheduled job: before it, no offer was
+            // ever marked Expired and no advert ever closed itself, so every counter built on those
+            // statuses drifted without bound. Sweep logic is scoped
+            // (IRecruitmentLifecycleSweepService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.RecruitmentLifecycleSweepBackgroundService>();
+
+            // Team reminder engine (round 2, lane F2): daily sweep — a task due within the tenant's
+            // lead time, a task already overdue, an objective past its date, a meeting tomorrow, and
+            // terms of reference lapsing within thirty days. Sweep logic is scoped
+            // (ITeamReminderService) so run-now shares it.
+            // ⚠ Without THIS LINE the engine runs only when somebody presses the button — which is
+            // exactly what happened to two other HR sweeps here, unnoticed, for months.
+            services.AddHostedService<ErpSystem.Api.Services.HR.TeamReminderBackgroundService>();
 
             // Employee bulk-import committer: polls for sessions HR has confirmed and writes them
             // in batches, one fresh scope per batch. There is no job queue in this API, so the

@@ -12,7 +12,7 @@ namespace ErpSystem.Core.Interfaces.HR;
 /// <c>Employees.ManagerId</c> is set for 486 of 8,353 (5.8%) and <c>OrganizationUnits.HeadEmployeeId</c>
 /// for 2 of 48 — both worse than six weeks earlier. Deriving FR-HR-181's Supervisor and HOD rungs
 /// from that resolves to nobody for 94% of staff. This is the alternative already recommended to TDC
-/// (<c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4): HR names who answers, on a screen.</para>
+/// (<c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4): HR names who answers, on a screen.</para>
 ///
 /// <para><b>Resolution order: unit row → tenant default → nobody.</b> "Nobody" is a supported
 /// outcome. A case in a unit with no row is still filed and simply arrives unassigned, exactly as

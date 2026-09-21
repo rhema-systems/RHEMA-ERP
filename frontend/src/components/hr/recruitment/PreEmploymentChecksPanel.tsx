@@ -31,11 +31,14 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { CheckProviderPicker } from '@/components/hr/recruitment/CheckProviderPicker';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import { preEmploymentCheckService, preEmploymentCheckTemplateService } from '@/services/hr/offers.service';
+// G-11.3: the candidate's nominated referees, so a recorded reference can be linked to one.
+import { jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
 import {
   CHECK_ITEM_STATUSES,
   OUTSTANDING_CHECK_ITEM_STATUSES,
@@ -52,6 +55,7 @@ const blankItem = (): CreatePreEmploymentCheckItem => ({
   checkType: 'BackgroundCheck',
   name: '',
   serviceProviderName: '',
+  serviceProviderSupplierId: null,
   instructions: '',
   isMandatory: true,
   isBlockingOnFail: true,
@@ -75,10 +79,17 @@ export function PreEmploymentChecksPanel({
   offerId,
   offerIsConditional,
   canManage,
+  candidateId,
 }: {
   offerId: string;
   offerIsConditional: boolean;
   canManage: boolean;
+  /**
+   * The candidate this offer is for, so a recorded reference can be linked back to the referee they
+   * actually nominated (G-7.3's sibling, G-11.3). Optional because a caller that does not have it
+   * should still get the panel — the picker simply does not appear.
+   */
+  candidateId?: string | null;
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -266,6 +277,7 @@ export function PreEmploymentChecksPanel({
                   canManage={canManage}
                   onRemove={() => removeItem.mutate(item.id)}
                   afterChange={invalidate}
+                  candidateId={candidateId}
                 />
               ))}
             </Accordion>
@@ -319,14 +331,16 @@ export function PreEmploymentChecksPanel({
                 placeholder="Defaults to the check type"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="serviceProvider">Service provider</Label>
-              <Input
-                id="serviceProvider"
-                value={itemForm.serviceProviderName ?? ''}
-                onChange={(e) => setItemForm({ ...itemForm, serviceProviderName: e.target.value })}
-              />
-            </div>
+            {/* Round 3, lane G (D-14): the provider from the suppliers set up for this check type;
+                another supplier from the register, or a typed name when it is not a supplier. */}
+            <CheckProviderPicker
+              checkType={itemForm.checkType}
+              supplierId={itemForm.serviceProviderSupplierId ?? null}
+              name={itemForm.serviceProviderName ?? ''}
+              onChange={({ supplierId, name }) =>
+                setItemForm({ ...itemForm, serviceProviderSupplierId: supplierId || null, serviceProviderName: name })
+              }
+            />
             <div className="space-y-1.5">
               <Label htmlFor="itemInstructions">Instructions</Label>
               <Textarea
@@ -441,12 +455,14 @@ function ItemRow({
   canManage,
   onRemove,
   afterChange,
+  candidateId,
 }: {
   checkId: string;
   item: CheckItem;
   canManage: boolean;
   onRemove: () => void;
   afterChange: () => Promise<void>;
+  candidateId?: string | null;
 }) {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -597,7 +613,12 @@ function ItemRow({
         )}
 
         {item.checkType === 'ReferenceCheck' && (
-          <ReferenceResponsesSection checkItemId={item.id} canManage={canManage} afterChange={afterChange} />
+          <ReferenceResponsesSection
+            checkItemId={item.id}
+            canManage={canManage}
+            afterChange={afterChange}
+            candidateId={candidateId}
+          />
         )}
       </AccordionContent>
 
@@ -693,6 +714,22 @@ function ItemRow({
 }
 
 const blankReferenceForm = () => ({
+  /**
+   * The candidate's own nominated referee this reply came from, when it is one of them.
+   *
+   * ⚠ G-11.3 (2026-09-15): `ReferenceCheckResponse.RefereeId` is a nullable FK to
+   * `JobCandidateReferee` and is on the create DTO, and **the UI never sent it** — this dialog
+   * captured the referee as free text with no picker. Two consequences:
+   * `GET /api/pre-employment-checks/reference-responses/referee/{refereeId}` could never return
+   * anything, and there was no way to answer *"which of this candidate's nominated referees have we
+   * actually contacted?"* — the reply existed, the nomination existed, and nothing joined them. The
+   * only place `RefereeId` was populated was the demo seeder.
+   *
+   * The five snapshot fields below stay and are still what is stored: the entity says they are
+   * "captured at time of check in case profile changes", which is right. A snapshot is meant to sit
+   * *beside* the link, not replace it.
+   */
+  refereeId: null as string | null,
   refereeName: '',
   refereeOrganisation: '',
   refereePosition: '',
@@ -715,16 +752,27 @@ function ReferenceResponsesSection({
   checkItemId,
   canManage,
   afterChange,
+  candidateId,
 }: {
   checkItemId: string;
   canManage: boolean;
   afterChange: () => Promise<void>;
+  candidateId?: string | null;
 }) {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [adding, setAdding] = useState(false);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const [form, setForm] = useState(blankReferenceForm);
+
+  // The referees the candidate actually nominated (G-11.3). Loaded only when the dialog is open —
+  // a reference check on a hand-typed candidate often has none, and that is a legitimate state:
+  // HR types the referee's details in directly and the reply is simply not linked to a nomination.
+  const referees = useQuery({
+    queryKey: ['hr', 'candidate-referees', candidateId],
+    queryFn: () => jobCandidateService.getReferees(candidateId!),
+    enabled: !!candidateId && adding,
+  });
 
   const responses = useQuery({
     queryKey: ['hr', 'reference-responses', checkItemId],
@@ -740,6 +788,8 @@ function ReferenceResponsesSection({
   const add = useMutation({
     mutationFn: () =>
       preEmploymentCheckService.addReferenceResponse(checkItemId, {
+        // G-11.3: the link back to the nomination, beside the snapshot rather than instead of it.
+        refereeId: form.refereeId,
         refereeName: form.refereeName.trim(),
         refereeOrganisation: form.refereeOrganisation.trim(),
         refereePosition: form.refereePosition.trim(),
@@ -864,13 +914,67 @@ function ReferenceResponsesSection({
             <DialogTitle>Record a reference</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2">
+            {/* G-11.3: pick the referee the candidate nominated, and the five snapshot fields below
+                fill themselves in. Choosing "Someone else" clears the link but keeps whatever has
+                been typed — HR often contacts a referee the candidate did not list, and that is a
+                legitimate reference, just not a linked one. */}
+            {(referees.data ?? []).length > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="refereePick">Which referee replied?</Label>
+                <Select
+                  value={form.refereeId ?? '__other__'}
+                  onValueChange={(v) => {
+                    if (v === '__other__') {
+                      setForm({ ...form, refereeId: null });
+                      return;
+                    }
+                    const picked = (referees.data ?? []).find((r) => r.id === v);
+                    if (!picked) return;
+                    setForm({
+                      ...form,
+                      refereeId: picked.id,
+                      refereeName: picked.fullName || form.refereeName,
+                      // ⚠ The referee entity spells it `organization`; this form's field is
+                      // `refereeOrganisation`. Two spellings of one word, one of them a silent
+                      // `undefined` if you assume they match.
+                      refereeOrganisation: picked.organization || form.refereeOrganisation,
+                      refereePosition: picked.position || form.refereePosition,
+                      refereeEmail: picked.email || form.refereeEmail,
+                      refereePhone: picked.phone || form.refereePhone,
+                    });
+                  }}
+                >
+                  <SelectTrigger id="refereePick">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(referees.data ?? []).map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.fullName}
+                        {r.organization ? ` · ${r.organization}` : ''}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="__other__">Someone else (not a nominated referee)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Links the reply to the nomination, so you can see which referees have actually
+                  been contacted. The details below are still stored as a snapshot.
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="refName">Referee name</Label>
                 <Input
                   id="refName"
                   value={form.refereeName}
-                  onChange={(e) => setForm({ ...form, refereeName: e.target.value })}
+                  onChange={(e) =>
+                    // Typing over a picked referee's name breaks the link: the snapshot would no
+                    // longer describe the person the FK points at.
+                    setForm({ ...form, refereeName: e.target.value, refereeId: null })
+                  }
                 />
               </div>
               <div className="space-y-1.5">

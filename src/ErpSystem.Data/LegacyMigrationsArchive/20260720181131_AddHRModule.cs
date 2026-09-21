@@ -112,39 +112,39 @@ END;
             // upgrade with guidance on a populated pre-port database instead of silently destroying
             // history. The LeaveTypes.ApplicableTo* columns and EmployeePositions.SectionId/UnitId are
             // intentionally NOT guarded — they were normalised onto the new lookup/organization-structure
-            // model and are deliberately superseded. See docs/hr-port-data-migration.md.
+            // model and are deliberately superseded. See docs/HR/operations/hr-port-data-migration.md.
             migrationBuilder.Sql(@"
 -- Table drops with no faithful replacement
 IF OBJECT_ID(N'EmployeeShiftPreferences', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM EmployeeShiftPreferences)
-    THROW 50000, 'HR-port upgrade halted: EmployeeShiftPreferences holds data and the concept was dropped (no replacement entity). Export/migrate it per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: EmployeeShiftPreferences holds data and the concept was dropped (no replacement entity). Export/migrate it per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'Shifts', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM Shifts)
-    THROW 50000, 'HR-port upgrade halted: Shifts holds data. The replacement ShiftDefinition requires a WorkSchedule that has no legacy source, so it cannot be auto-migrated. Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: Shifts holds data. The replacement ShiftDefinition requires a WorkSchedule that has no legacy source, so it cannot be auto-migrated. Migrate per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'WorkStations', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM WorkStations)
-    THROW 50000, 'HR-port upgrade halted: WorkStations holds data. This migration drops DepartmentId/StationType and adds a required CountryId with no legacy source. Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: WorkStations holds data. This migration drops DepartmentId/StationType and adds a required CountryId with no legacy source. Migrate per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 -- Column drops that would silently lose data (nullable columns: only halt when actually populated)
 IF EXISTS (SELECT 1 FROM ShiftAssignments WHERE StartDate IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: ShiftAssignments.StartDate holds data being dropped. Preserve it per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: ShiftAssignments.StartDate holds data being dropped. Preserve it per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 -- ApprovalDate is preserved below (backfilled into the new ApprovedDate before it is dropped), so it is NOT halted here.
 IF EXISTS (SELECT 1 FROM LeaveRequests WHERE ApprovalNotes IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: LeaveRequests.ApprovalNotes holds data being dropped (no target column). Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: LeaveRequests.ApprovalNotes holds data being dropped (no target column). Preserve per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF EXISTS (SELECT 1 FROM LeaveRequests WHERE RejectionDate IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: LeaveRequests.RejectionDate holds rejection timestamps being dropped (the new model keeps only RejectionReason). Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: LeaveRequests.RejectionDate holds rejection timestamps being dropped (the new model keeps only RejectionReason). Preserve per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 -- FK-retarget with a non-nullable new column and no valid legacy mapping: cannot be auto-migrated on populated data.
 IF OBJECT_ID(N'ShiftAssignments', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM ShiftAssignments)
-    THROW 50000, 'HR-port upgrade halted: ShiftAssignments holds data; its ShiftId is re-pointed to the new ShiftDefinitions table with no legacy mapping (would create dangling FKs). Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: ShiftAssignments holds data; its ShiftId is re-pointed to the new ShiftDefinitions table with no legacy mapping (would create dangling FKs). Migrate per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF EXISTS (SELECT 1 FROM LeavePlans WHERE DepartmentId IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: LeavePlans.DepartmentId holds data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: LeavePlans.DepartmentId holds data being dropped. Preserve per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF EXISTS (SELECT 1 FROM LeaveBalances WHERE AdjustmentReason IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: LeaveBalances.AdjustmentReason holds data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: LeaveBalances.AdjustmentReason holds data being dropped. Preserve per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF EXISTS (SELECT 1 FROM EmployeePositions WHERE MinSalary IS NOT NULL OR MaxSalary IS NOT NULL OR Requirements IS NOT NULL OR Responsibilities IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: EmployeePositions.MinSalary/MaxSalary/Requirements/Responsibilities hold data being dropped (no target column in the new model). Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: EmployeePositions.MinSalary/MaxSalary/Requirements/Responsibilities hold data being dropped (no target column in the new model). Preserve per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF EXISTS (SELECT 1 FROM EmployeeIdentificationCards WHERE DocumentType IS NOT NULL OR IssuingAuthority IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: EmployeeIdentificationCards.DocumentType/IssuingAuthority hold data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: EmployeeIdentificationCards.DocumentType/IssuingAuthority hold data being dropped. Preserve per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF EXISTS (SELECT 1 FROM EmployeeDependents WHERE IsEmergencyContact = 1 OR IsStudentDependent = 1)
-    THROW 50000, 'HR-port upgrade halted: EmployeeDependents.IsEmergencyContact/IsStudentDependent hold data being dropped. Preserve per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: EmployeeDependents.IsEmergencyContact/IsStudentDependent hold data being dropped. Preserve per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 -- Required FK added to a brand-new empty table with no legacy source (would fail the FK on a populated table)
 IF EXISTS (SELECT 1 FROM PublicHolidays)
-    THROW 50000, 'HR-port upgrade halted: PublicHolidays holds rows but this migration adds a required HolidayCalendarId pointing at the new (empty) HolidayCalendars table. Create a calendar and assign holidays per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: PublicHolidays holds rows but this migration adds a required HolidayCalendarId pointing at the new (empty) HolidayCalendars table. Create a calendar and assign holidays per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 ");
 
             migrationBuilder.DropTable(
@@ -435,7 +435,7 @@ IF EXISTS (SELECT 1 FROM PublicHolidays)
             // recoverable and is carried into the new ApprovedById once that column exists, further below.
             migrationBuilder.Sql(@"
 IF EXISTS (SELECT 1 FROM Employees WHERE HireRecordId IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: Employees.ShiftId holds data and is renamed to HireRecordId, which points at the unrelated hire-record model. Preserve the shift assignment per docs/hr-port-data-migration.md, then re-run.', 1;");
+    THROW 50000, 'HR-port upgrade halted: Employees.ShiftId holds data and is renamed to HireRecordId, which points at the unrelated hire-record model. Preserve the shift assignment per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;");
 
             migrationBuilder.RenameIndex(
                 name: "IX_EmployeeBankBranch_Tenant_Bank_Code",
@@ -744,7 +744,7 @@ FROM   LeaveRequests lr
 WHERE  lr.WorkflowInstanceId IS NOT NULL;
 
 IF EXISTS (SELECT 1 FROM LeaveRequests WHERE WorkflowInstanceId IS NOT NULL AND ApprovedById IS NULL)
-    THROW 50000, 'HR-port upgrade halted: some LeaveRequests hold a legacy ApprovedByEmployeeId whose employee has no Users account in the same tenant, so the approver cannot be carried into the new ApprovedById. Link those approvers to user accounts (Users.EmployeeId) or migrate them per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: some LeaveRequests hold a legacy ApprovedByEmployeeId whose employee has no Users account in the same tenant, so the approver cannot be carried into the new ApprovedById. Link those approvers to user accounts (Users.EmployeeId) or migrate them per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 
 UPDATE LeaveRequests SET WorkflowInstanceId = NULL WHERE WorkflowInstanceId IS NOT NULL;");
 

@@ -1,7 +1,9 @@
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -24,6 +26,7 @@ public class LeaveYearEndService : ILeaveYearEndService
     private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _clock;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeaveYearEndService> _logger;
 
     public LeaveYearEndService(
@@ -36,6 +39,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork,
         IDateTimeProvider clock,
+        ILeaveYearContext leaveYear,
         ILogger<LeaveYearEndService> logger)
     {
         _balanceRepository = balanceRepository;
@@ -47,6 +51,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
         _clock = clock;
+        _leaveYear = leaveYear;
         _logger = logger;
     }
 
@@ -61,10 +66,52 @@ public class LeaveYearEndService : ILeaveYearEndService
         return tenantId;
     }
 
-    public async Task<LeaveYearEndResult> ProcessCarryOverAsync(int fromYear, Guid? employeeId = null, CancellationToken ct = default)
+    /// <summary>
+    /// The days a year-end run treats as unused, per the leave type's <c>YearEndBasis</c>
+    /// (entitlement plan B2, decision D-2).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Granted</b> — the default, and what both runs did before this existed — reads
+    /// <c>LeaveBalance.AvailableDays</c>, which is built on the whole year's <c>EntitledDays</c>. A
+    /// mid-year joiner who accrued 3.5 days and took none therefore carries the full cap.</para>
+    ///
+    /// <para><b>Earned</b> substitutes accrued-to-date, through the same definition the create check
+    /// and every balance read use — so "what you may carry" and "what you could have booked" cannot
+    /// disagree.</para>
+    ///
+    /// <para>⚠ <b>Accrual is asked as at the END of the year being closed</b>, not as at today. A
+    /// carry-over run in February for the year just gone must not credit somebody with two months of
+    /// the year they are now in, and a run for the CURRENT year must not count months that have not
+    /// happened. Passing the year end and letting the engine clamp does both.</para>
+    /// </remarks>
+    private async Task<decimal> UnusedDaysAsync(
+        LeaveBalance balance, LeaveType leaveType, int year, CancellationToken ct)
+    {
+        if (leaveType.YearEndBasis != LeaveYearEndBasis.Earned)
+            return balance.AvailableDays;
+
+        // ⚠ The EARLIER of the year end and today. The engine clamps a later date down to the year
+        // end, so a completed year asks as at 31 December — but it does NOT clamp to today, and
+        // passing the year end for the CURRENT year would credit months that have not happened yet.
+        // Under Earned that would carry days nobody has earned, which is the one thing the setting
+        // exists to prevent.
+        var yearEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync());
+        var today = _clock.TodayUtc;
+        var asOf = today < yearEnd ? today : yearEnd;
+
+        var snapshot = await _entitlementService.GetSnapshotAsync(
+            balance.EmployeeId, balance.LeaveTypeId, balance.LeaveSubTypeId, year, asOf, ct);
+
+        return snapshot.AvailableFrom(
+            balance.EntitledDays, balance.CarriedOverDays, balance.AdjustmentDays,
+            balance.UsedDays, balance.PendingDays, balance.EncashedDays);
+    }
+
+    public async Task<LeaveYearEndResult> ProcessCarryOverAsync(
+        int fromYear, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var result = new LeaveYearEndResult();
+        var result = new LeaveYearEndResult { IsDryRun = dryRun };
         var toYear = fromYear + 1;
 
         var balances = await LoadBalancesAsync(fromYear, employeeId, ct);
@@ -77,7 +124,7 @@ public class LeaveYearEndService : ILeaveYearEndService
             if (leaveType is null || leaveType.TenantId != tenantId || !leaveType.AllowCarryOver)
                 continue;
 
-            var remaining = balance.AvailableDays;
+            var remaining = await UnusedDaysAsync(balance, leaveType, fromYear, ct);
             if (remaining <= 0)
                 continue;
 
@@ -91,6 +138,9 @@ public class LeaveYearEndService : ILeaveYearEndService
                                        && b.LeaveTypeId == balance.LeaveTypeId
                                        && b.Year == toYear, ct);
 
+            // ⚠ A dry run computes the same figure and writes nothing. It must still reach here,
+            // past every guard above, or the preview would count balances the real run would skip.
+            if (!dryRun)
             await _unitOfWork.ExecuteInTransactionAsync(async innerCt =>
             {
                 if (target == null)
@@ -121,13 +171,20 @@ public class LeaveYearEndService : ILeaveYearEndService
             result.TotalDaysCarriedOver += carryAmount;
         }
 
-        result.Notes.Add($"Carried over {result.TotalDaysCarriedOver} day(s) from {fromYear} into {toYear} across {result.BalancesAffected} balance(s).");
-        _logger.LogInformation("Leave carry-over processed for {FromYear}->{ToYear}: {Affected} balances, {Days} days",
-            fromYear, toYear, result.BalancesAffected, result.TotalDaysCarriedOver);
+        result.BalancesSkipped = result.BalancesProcessed - result.BalancesAffected;
+        result.Notes.Add(
+            $"Examined {result.BalancesProcessed} balance(s): carried over {result.TotalDaysCarriedOver} day(s) "
+            + $"from {fromYear} into {toYear} across {result.BalancesAffected}, left {result.BalancesSkipped} alone."
+            + (dryRun ? " NOTHING WAS WRITTEN - this was a dry run." : string.Empty));
+        _logger.LogInformation(
+            "Leave carry-over {Mode} for {FromYear}->{ToYear}: {Affected} of {Examined} balances, {Days} days",
+            dryRun ? "previewed" : "processed", fromYear, toYear,
+            result.BalancesAffected, result.BalancesProcessed, result.TotalDaysCarriedOver);
         return result;
     }
 
-    public async Task<LeaveYearEndResult> ProcessForfeitureAsync(int year, DateOnly? asOf = null, Guid? employeeId = null, CancellationToken ct = default)
+    public async Task<LeaveYearEndResult> ProcessForfeitureAsync(
+        int year, DateOnly? asOf = null, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default)
     {
         var performedBy = _currentUserService.EmployeeId is Guid actor && actor != Guid.Empty
             ? actor
@@ -136,7 +193,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         var tenantId = GetTenantId();
         var result = new LeaveYearEndResult();
         var effectiveAsOf = asOf ?? _clock.TodayUtc;
-        var yearStart = new DateOnly(year, 1, 1);
+        var yearStart = LeaveYear.StartOf(year, await _leaveYear.StartMonthAsync());
 
         var balances = await LoadBalancesAsync(year, employeeId, ct);
 
@@ -155,6 +212,8 @@ public class LeaveYearEndService : ILeaveYearEndService
                 && balance.CarriedOverDays > 0
                 && effectiveAsOf >= yearStart.AddMonths(expiryMonths))
             {
+                // ⚠ Dry run: compute, count, write nothing.
+                if (!dryRun)
                 await _unitOfWork.ExecuteInTransactionAsync(async innerCt =>
                 {
                     balance.CarriedOverDays = 0m;
@@ -173,9 +232,16 @@ public class LeaveYearEndService : ILeaveYearEndService
                     .GetQueryable()
                     .AnyAsync(a => a.TenantId == tenantId && a.LeaveBalanceId == balance.Id && a.Reason == ForfeitureReason, ct);
 
-                var unused = balance.AvailableDays;
+                // ⚠ Forfeiture follows the SAME basis, which is why the setting is not called
+                // "carry-over basis". Under Earned it removes what the employee earned and did not
+                // take; the part of the grant they never accrued is simply not forfeited, because
+                // it was never theirs to lose. That reads oddly against "use it or lose it" until
+                // you notice the alternative is forfeiting days the employee could not have taken.
+                var unused = await UnusedDaysAsync(balance, leaveType, year, ct);
                 if (!alreadyForfeited && unused > 0)
                 {
+                    // ⚠ Dry run: compute, count, write nothing.
+                    if (!dryRun)
                     await _unitOfWork.ExecuteInTransactionAsync(async innerCt =>
                     {
                         var adjustment = new LeaveAdjustment
@@ -211,8 +277,16 @@ public class LeaveYearEndService : ILeaveYearEndService
             if (affected) result.BalancesAffected++;
         }
 
-        _logger.LogInformation("Leave forfeiture processed for {Year} as of {AsOf}: {Affected} balances, {Days} days forfeited",
-            year, effectiveAsOf, result.BalancesAffected, result.TotalDaysForfeited);
+        result.BalancesSkipped = result.BalancesProcessed - result.BalancesAffected;
+        result.Notes.Add(
+            $"Examined {result.BalancesProcessed} balance(s): forfeited {result.TotalDaysForfeited} day(s) "
+            + $"across {result.BalancesAffected}, left {result.BalancesSkipped} alone."
+            + (dryRun ? " NOTHING WAS WRITTEN - this was a dry run." : string.Empty));
+
+        _logger.LogInformation(
+            "Leave forfeiture {Mode} for {Year} as of {AsOf}: {Affected} of {Examined} balances, {Days} days forfeited",
+            dryRun ? "previewed" : "processed", year, effectiveAsOf,
+            result.BalancesAffected, result.BalancesProcessed, result.TotalDaysForfeited);
         return result;
     }
 

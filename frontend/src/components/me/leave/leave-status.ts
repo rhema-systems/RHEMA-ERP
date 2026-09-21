@@ -13,6 +13,9 @@ export const LEAVE_STATUS_BADGE: Record<LeaveStatus, string> = {
   Cancelled: 'bg-muted text-muted-foreground line-through',
   InProgress: 'bg-blue-100 text-blue-900 dark:bg-blue-950/60 dark:text-blue-200',
   Completed: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200',
+  // Same blue as the plan's own ChangesSuggested — it means the same thing on both records:
+  // the approver sent it back with dates of their own and it is the employee's move.
+  ChangesSuggested: 'bg-blue-100 text-blue-900 dark:bg-blue-950/60 dark:text-blue-200',
 };
 
 export const LEAVE_PLAN_STATUS_BADGE: Record<LeavePlanStatus, string> = {

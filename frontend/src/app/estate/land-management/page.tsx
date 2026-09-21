@@ -335,10 +335,7 @@ export default function EstateLandManagementPage() {
                 selectedAsset.demarcationCount
               ? 'Verify every demarcation first.'
               : undefined;
-  const saleListingLabel =
-    selectedAsset?.externalListingType !== 'None'
-      ? 'View Portal Listing'
-      : 'Send to Portal Listings';
+  const saleListingLabel = 'List Demarcation';
 
   const markAssetProjectReady = async (asset: EstateManagedAsset) => {
     const key = `asset:${asset.id}`;
@@ -695,13 +692,13 @@ export default function EstateLandManagementPage() {
                       {saleListingLabel}
                     </Button>
                   ) : (
-                    <Button asChild variant="outline">
-                      <Link
-                        href={`/estate/property-management/listings?assetId=${encodeURIComponent(selected.asset.id)}&listingType=Sale`}
-                      >
-                        <Globe2 className="mr-2 h-4 w-4" />
-                        {saleListingLabel}
-                      </Link>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDemarcationAsset(selected.asset)}
+                    >
+                      <Globe2 className="mr-2 h-4 w-4" />
+                      {saleListingLabel}
                     </Button>
                   )}
                   {selected.asset.isReadyForProjectManagement ? (

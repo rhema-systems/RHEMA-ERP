@@ -269,7 +269,7 @@ a reconciliation of twenty-seven inconsistent decisions instead of one design ap
 consistently. Master data is the opposite case: it diverges by sitting still, so it is fixed now.
 
 **The obligation this creates:** every area from here on records its money-touching points in
-`docs/HR-FINANCE-INTEGRATION-BACKLOG.md` as it is built. The deferral is only safe if the sweep
+`docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` as it is built. The deferral is only safe if the sweep
 starts with a complete worklist rather than a re-survey. Areas already closed (2, 4, 11 in
 particular) need a back-fill pass into that register before the sweep begins.
 
@@ -511,7 +511,7 @@ HR — otherwise two people are promised the same vehicle and neither system kno
 
 **Do not build any of this in area 12.** It is recorded here so the later sweep inherits a
 worklist instead of re-discovering it. See D-4 for the reasoning and
-`docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the module-wide register.
+`docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` for the module-wide register.
 
 None of these have a Finance artifact today.
 
@@ -802,7 +802,7 @@ but `POST /api/Suppliers` returns **201 Created with an empty body and writes no
 `GenericRepository.AddAsync` never calls `SaveChangesAsync`, and the handler also never sets
 `TenantId`. The trial was **reverted**; nothing in Procurement is modified.
 
-Full reproduction, evidence and fix list: `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §1.
+Full reproduction, evidence and fix list: `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §1.
 **Travel's vendor selection cannot work until that controller does.**
 
 ⚠ **CORRECTION.** An earlier draft of this section said supplier creation is gated behind a staged
@@ -862,7 +862,7 @@ someone else approved or disbursed money. Stamped from the token, removed from t
 **Three parent guards** added to budget, claim and advance creates.
 
 **Integration: none, per D-4.** No GL posting was added; the accounting side stays registered as
-items 12.1–12.3 in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, and the settlement code says so in
+items 12.1–12.3 in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`, and the settlement code says so in
 its own remarks so a later reader does not mistake the travel-side arithmetic for the accounting.
 
 ### Slice 5 — Policies and compliance ✅ **green 2026-08-17, 26 assertions**
@@ -986,7 +986,7 @@ the reciprocal.
 directly would make travel right today and put it in open disagreement with every other module —
 two truths about the same trip, which is worse than one shared, fixable error and is precisely the
 divergence this slice existed to remove. Fixing Finance fixes travel with no change here. Full
-reproduction: `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §2.
+reproduction: `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §2.
 
 The harness asserts **agreement with Finance** rather than any constant, so it stays correct once
 Finance is fixed, and prints a warning naming the defect on every run.
@@ -1264,7 +1264,7 @@ whose removal matters because it was a FK into a table about to be dropped.
 
 ## 9. Open for TDC
 
-Add to `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` when the area is closed enough to state it well:
+Add to `docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md` when the area is closed enough to state it well:
 
 **How is a travel expense reimbursed — through payroll, or as a direct payment?** This decides
 where slice 4's payment leg posts, and it cannot be assumed. Payroll is another developer's
@@ -1285,7 +1285,7 @@ departure announcement uses **14 days** and the first-sweep backlog floor is **9
 **⚠ For Procurement's owner, not TDC:** `SuppliersController` is entirely non-functional — two
 missing DI registrations stop it activating at all, and its create is a dead path that answers 201
 and writes nothing. Reproduced, trialled and reverted; the full report is in
-`docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §1. **Travel's vendor selection cannot work until
+`docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §1. **Travel's vendor selection cannot work until
 it is fixed.**
 
 **Does TDC operate staff travel in the ERP at all, and if so how much of it?** The system now
@@ -1337,10 +1337,10 @@ Frontend `tsc` clean (19 pre-existing inventory errors) and `eslint` clean throu
 
 ### Owed after this area
 
-- **GL posting and the rest of Finance (D-4)** — `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, 18 entries;
+- **GL posting and the rest of Finance (D-4)** — `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`, 18 entries;
   areas 2, 4, 7, 10, 11 still need back-filling before the sweep starts.
 - **Two blocked cross-module defects** — Procurement's dead `SuppliersController` (travel has no
   selectable vendors until it is fixed) and Finance's inverted conversion.
-  `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.
+  `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.
 - **TDC questions** — §9, plus: should the travel desk be able to see the reminder log (it is
   Admin-gated including reads), and are travel administrators employee-linked accounts?

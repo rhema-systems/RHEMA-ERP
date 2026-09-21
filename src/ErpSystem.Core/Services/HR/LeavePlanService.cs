@@ -4,6 +4,8 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +17,7 @@ public class LeavePlanService : ILeavePlanService
 
     private readonly ILeavePlanRepository _leavePlanRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeavePlanService> _logger;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
@@ -24,6 +27,7 @@ public class LeavePlanService : ILeavePlanService
     public LeavePlanService(
         ILeavePlanRepository leavePlanRepository,
         IUnitOfWork unitOfWork,
+        ILeaveYearContext leaveYear,
         ILogger<LeavePlanService> logger,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
@@ -32,6 +36,7 @@ public class LeavePlanService : ILeavePlanService
     {
         _leavePlanRepository = leavePlanRepository;
         _unitOfWork = unitOfWork;
+        _leaveYear = leaveYear;
         _logger = logger;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
@@ -110,6 +115,7 @@ public class LeavePlanService : ILeavePlanService
             .ToListAsync();
         var dtos = items.ToDtoList();
         await EnrichRelieverClashesAsync(dtos);
+        await EnrichRaisedRequestsAsync(dtos);
         return dtos;
     }
 
@@ -129,6 +135,7 @@ public class LeavePlanService : ILeavePlanService
             .ToListAsync();
         var dtos = items.ToDtoList();
         await EnrichRelieverClashesAsync(dtos);
+        await EnrichRaisedRequestsAsync(dtos);
         return dtos;
     }
 
@@ -139,6 +146,7 @@ public class LeavePlanService : ILeavePlanService
             throw new ArgumentException($"Leave plan '{id}' not found.");
         var dto = entity.ToDto();
         await EnrichRelieverClashesAsync(new List<LeavePlanDto> { dto });
+        await EnrichRaisedRequestsAsync(new List<LeavePlanDto> { dto });
         return dto;
     }
 
@@ -154,6 +162,9 @@ public class LeavePlanService : ILeavePlanService
         var entity = dto.ToEntity();
         entity.TenantId = GetTenantId();
         entity.PlannedBy = RequireActingEmployeeId();
+        // ⚠ The mapper leaves Year at 0 on purpose — it cannot read the tenant's leave year. Set
+        // here and on the update path, so both agree (entitlement plan C1).
+        entity.Year = LeaveYear.For(dto.StartDate, await _leaveYear.StartMonthAsync());
         await _leavePlanRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Leave plan created for employee {employeeId}", dto.EmployeeId);
@@ -185,7 +196,8 @@ public class LeavePlanService : ILeavePlanService
         entity.SecondRelieverId = dto.SecondRelieverId;
         entity.Notes = dto.Notes;
         // PlannedBy is who raised the plan; an edit does not re-author it.
-        entity.Year = dto.Year;
+        // Year follows the dates — moving a plan into January moves its year with it (L-17).
+        entity.Year = LeaveYear.For(dto.StartDate, await _leaveYear.StartMonthAsync());
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -198,19 +210,43 @@ public class LeavePlanService : ILeavePlanService
         if (entity.Status != LeavePlanStatus.Draft)
             throw new InvalidOperationException("Only draft leave plans can be submitted.");
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        // Submitting must never approve — see HrWorkflowFallbackAuthority. Defence in depth; a
+        // LEAVE_PLAN definition is seeded, so this bites only on an unseeded tenant.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
 
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult, GetCurrentUserId());
+        adapter.ApplySubmitOutcome(entity, submitOutcome, GetCurrentUserId());
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Leave plan {id} submitted for approval", id);
         return (await GetWithIncludes(id))!.ToDto();
+    }
+
+        /// <summary>
+    /// Refuses an approval by the very employee the record is about.
+    /// </summary>
+    /// <remarks>
+    /// This is the segregation the two-stage leave definition relies on, and it is done HERE rather
+    /// than with the engine's <c>PreventInitiatorApproval</c> on purpose. That flag guards the
+    /// INITIATOR; a leave record's conflicted party is its SUBJECT, and HR raises leave on other
+    /// people's behalf from the desk. On a tenant with one HR user the flag would strand every
+    /// desk-raised record at the HR stage with nobody able to clear it — trap 7 of
+    /// <c>HR-WORKFLOW-ENGINE-INTEGRATION.md</c>, and the area-9b mistake. Checking the subject
+    /// blocks the real conflict and cannot strand somebody else's record.
+    ///
+    /// It sits before the authority call so it holds on the fallback path too, not just the engine.
+    /// </remarks>
+    private void RefuseSelfApproval(Guid subjectEmployeeId, string what)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == subjectEmployeeId)
+            throw new InvalidOperationException(
+                $"You cannot approve your own {what}. It has to be approved by someone else.");
     }
 
     public async Task<LeavePlanDto> ApproveLeavePlanAsync(Guid id)
@@ -221,17 +257,14 @@ public class LeavePlanService : ILeavePlanService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        RefuseSelfApproval(entity.EmployeeId, "leave plan");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve", null);
-
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval.");
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Approve", null, "approve a leave plan", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+        adapter.ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -248,18 +281,14 @@ public class LeavePlanService : ILeavePlanService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = !string.IsNullOrWhiteSpace(reason) ? reason : "Rejected";
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
 
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process rejection.");
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Reject", rejectionText, "reject a leave plan", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+        adapter.ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -280,16 +309,32 @@ public class LeavePlanService : ILeavePlanService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        // Suggesting changes is a third decision verb alongside approve and reject, and it needs
+        // the same two paths they have. With no definition published there is no instance, so
+        // CanUserApproveAsync answers false for everybody and nothing could be sent back to the
+        // employee — and CancelWorkflowAsync would have no instance to cancel either. A plan can
+        // now sit at Submitted on such a tenant (that is the point of this programme), so without
+        // this branch that plan would be stuck with cancellation as its only exit.
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
+            if (!canApprove)
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        // Suggesting changes sends the plan back to the employee, so the active approval
-        // workflow is cancelled; a fresh one starts when the employee re-submits.
-        var cancelResult = await _workflowIntegrationService.CancelWorkflowAsync(
-            EntityType, id, "Manager suggested alternative dates");
-        if (!cancelResult.Success)
-            throw new InvalidOperationException(cancelResult.Message ?? "Failed to update the approval workflow.");
+            // Suggesting changes sends the plan back to the employee, so the active approval
+            // workflow is cancelled; a fresh one starts when the employee re-submits.
+            var cancelResult = await _workflowIntegrationService.CancelWorkflowAsync(
+                EntityType, id, "Manager suggested alternative dates");
+            if (!cancelResult.Success)
+                throw new InvalidOperationException(cancelResult.Message ?? "Failed to update the approval workflow.");
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserService.Roles,
+                "send a leave plan back with suggested changes",
+                HrPermissions.ApproveLeave);
+        }
 
         entity.Status = LeavePlanStatus.ChangesSuggested;
         entity.SuggestedStartDate = dto.SuggestedStartDate;
@@ -337,7 +382,7 @@ public class LeavePlanService : ILeavePlanService
 
         entity.StartDate = newStart;
         entity.EndDate = newEnd;
-        entity.Year = newStart.Year;
+        entity.Year = LeaveYear.For(newStart, await _leaveYear.StartMonthAsync());
         if (!string.IsNullOrWhiteSpace(dto.Notes))
             entity.Notes = dto.Notes;
 
@@ -346,12 +391,15 @@ public class LeavePlanService : ILeavePlanService
         entity.SuggestedEndDate = null;
         entity.ManagerSuggestionNotes = null;
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        // The resubmission path, and it needs the same guard as the first submit above: without it
+        // a plan sent back for changes would approve itself on its way back in.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult, GetCurrentUserId());
+        adapter.ApplySubmitOutcome(entity, submitOutcome, GetCurrentUserId());
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -405,6 +453,43 @@ public class LeavePlanService : ILeavePlanService
     /// Fills <see cref="LeavePlanDto.RelieverClashes"/> for every plan in the list with one query per
     /// source over the whole window, rather than three per row.
     /// </summary>
+    /// <summary>
+    /// Fills <c>RaisedLeaveRequestId</c>/<c>Number</c> — the request, if any, already raised from
+    /// each plan. One query for the whole page, the same shape as its reliever-clash sibling.
+    /// </summary>
+    /// <remarks>
+    /// Cancelled and rejected requests are excluded on purpose: a plan whose request was cancelled
+    /// has not been used up, and the employee should be able to raise another from it.
+    /// </remarks>
+    private async Task EnrichRaisedRequestsAsync(List<LeavePlanDto> plans)
+    {
+        if (plans.Count == 0) return;
+
+        var tenantId = GetTenantId();
+        var planIds = plans.Select(p => p.Id).ToList();
+
+        var raised = await _leaveRequestRepository
+            .GetQueryable()
+            .Where(r => r.TenantId == tenantId
+                     && r.LeavePlanId != null
+                     && planIds.Contains(r.LeavePlanId!.Value)
+                     && r.Status != LeaveStatus.Cancelled
+                     && r.Status != LeaveStatus.Rejected)
+            .Select(r => new { PlanId = r.LeavePlanId!.Value, r.Id, r.RequestNumber })
+            .ToListAsync();
+
+        var byPlan = raised
+            .GroupBy(r => r.PlanId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var plan in plans)
+        {
+            if (!byPlan.TryGetValue(plan.Id, out var request)) continue;
+            plan.RaisedLeaveRequestId = request.Id;
+            plan.RaisedLeaveRequestNumber = request.RequestNumber;
+        }
+    }
+
     private async Task EnrichRelieverClashesAsync(List<LeavePlanDto> plans)
     {
         var withReliever = plans.Where(p => p.RelieverId.HasValue || p.SecondRelieverId.HasValue).ToList();

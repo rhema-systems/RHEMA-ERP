@@ -125,6 +125,26 @@ export const CANDIDATE_DOCUMENT_TYPES = [
 ] as const;
 export type CandidateDocumentType = (typeof CANDIDATE_DOCUMENT_TYPES)[number];
 
+/**
+ * The types the GENERIC document dropdown offers (round 3, lane C2; decision D-17). A reference
+ * letter is attached from the referee it vouches for and an ID scan from the national-ID trio —
+ * each upload fixes the type itself — so neither is offered here. The enum members stay: the rows
+ * they write are read back through the same type column.
+ */
+export const CANDIDATE_GENERIC_DOCUMENT_TYPES = CANDIDATE_DOCUMENT_TYPES.filter(
+  (t) => t !== 'ReferenceLetter' && t !== 'IdDocument',
+);
+
+// LanguageProficiency — HREnums.cs (Basic=1 … Native=5). Not the skill ladder above.
+export const LANGUAGE_PROFICIENCIES = [
+  'Basic',
+  'Conversational',
+  'ProfessionalWorking',
+  'Fluent',
+  'Native',
+] as const;
+export type LanguageProficiency = (typeof LANGUAGE_PROFICIENCIES)[number];
+
 export const GENDERS = ['Male', 'Female', 'Other', 'PreferNotToSay'] as const;
 export type Gender = (typeof GENDERS)[number];
 
@@ -276,6 +296,8 @@ export interface JobCandidateSummary {
   city: string;
   countryName: string;
   isInTalentPool: boolean;
+  /** A photograph is on file — fetch `GET /job-candidates/{id}/photo` only then (round 3, lane C2). */
+  hasPhoto: boolean;
   applicationCount: number;
 }
 
@@ -328,8 +350,17 @@ export interface JobCandidate {
   workAuthorizationStatus: WorkAuthorizationStatus;
   workAuthorizationStatusName: string;
 
+  // National identity (round 3, lane C1) — the employee's trio; the type is a seeded
+  // IdentificationType ("Ghana Card" is a row, not a column).
+  nationalIdTypeId?: string | null;
+  nationalIdTypeName?: string | null;
+  nationalIdNumber?: string | null;
+  nationalIdExpiryDate?: string | null;
+
   cvFilePath?: string | null;
   profilePhotoUrl?: string | null;
+  /** A photograph is on file — derived from the gated upload record (round 3, lane C2). */
+  hasPhoto: boolean;
   applicationCount: number;
   createdAt: string;
   updatedAt?: string | null;
@@ -360,11 +391,32 @@ export interface CreateJobCandidate {
   postalAddress?: string | null;
   digitalAddress?: string | null;
   city: string;
-  countryId: string;
+  /**
+   * The candidate's nationality, as free text.
+   *
+   * ⚠ G-7.3: settable since 2026-09-15. It existed on the read DTO alone, so the Personal card
+   * rendered it and nothing could ever write it — the only assignment anywhere in the solution was
+   * the TDC demo seeder, which sets "Ghanaian". On a real tenant the row always read "—"; on the
+   * demo tenant it always looked fine. Distinct from `countryId`, which is where they are.
+   */
+  nationality?: string | null;
+  /** Optional since 2026-09-14, matching the entity — send null for "no country". */
+  countryId?: string | null;
   linkedInProfile?: string | null;
   portfolioUrl?: string | null;
   gitHubUrl?: string | null;
+  /** Round 3, lane C1: refused (422) for a type the tenant does not accept. */
+  nationalIdTypeId?: string | null;
+  nationalIdNumber?: string | null;
+  nationalIdExpiryDate?: string | null;
   isInTalentPool: boolean;
+}
+
+/** HR corrects how an application arrived (round 3, lane A) — PATCH job-applications/{id}/source. */
+export interface UpdateJobApplicationSource {
+  source: ApplicationSource;
+  /** Must be one of the application's vacancy's adverts; null clears it. */
+  jobPostingId?: string | null;
 }
 
 export interface UpdateJobCandidate extends CreateJobCandidate {
@@ -428,6 +480,14 @@ export interface CandidateReferee {
   email: string;
   phone: string;
   relationship: string;
+  /**
+   * The relationship-catalogue row behind `relationship` (round 2, lane D2).
+   *
+   * ⚠ `relationship` already carries the row's NAME — the server mirrors it on every save — so this
+   * is for re-opening the dropdown, not for display. PROFESSIONAL and OTHER values only: a
+   * candidate may name a pastor or a family friend, not their mother.
+   */
+  relationshipTypeId?: string | null;
   yearsKnown: number;
 }
 
@@ -444,6 +504,10 @@ export interface CandidateSkill {
   yearsOfExperience?: number | null;
   isCertified: boolean;
   certificationName?: string | null;
+  // Round 3, lane C1 — cleared together with the name whenever `isCertified` is off.
+  certificationNumber?: string | null;
+  certifyingBody?: string | null;
+  certificationExpiryDate?: string | null;
 }
 
 export interface CandidateSkillForm {
@@ -453,6 +517,9 @@ export interface CandidateSkillForm {
   yearsOfExperience?: number | null;
   isCertified: boolean;
   certificationName?: string | null;
+  certificationNumber?: string | null;
+  certifyingBody?: string | null;
+  certificationExpiryDate?: string | null;
 }
 
 export interface CandidateInterest {
@@ -461,12 +528,26 @@ export interface CandidateInterest {
   detail: string;
 }
 
+/**
+ * A language the candidate speaks (round 3, lane C1). `languageId` is the catalogue row when one
+ * was picked; `languageName` is ALWAYS filled — mirrored from the catalogue, or typed when the
+ * language is not listed. The proficiency scale is the language one, not the skill ladder.
+ */
 export interface CandidateLanguage {
   id: string;
   jobCandidateId: string;
+  languageId?: string | null;
+  languageCode?: string | null;
   languageName: string;
-  proficiency?: ProficiencyLevel | null;
+  proficiency: LanguageProficiency;
   proficiencyName?: string | null;
+}
+
+/** Either `languageId` or `languageName`; the server refuses neither, and an id it does not hold. */
+export interface CandidateLanguageForm {
+  languageId?: string | null;
+  languageName?: string | null;
+  proficiency: LanguageProficiency;
 }
 
 export interface CandidateDocument {
@@ -478,6 +559,8 @@ export interface CandidateDocument {
   /** Legacy only — rows written since the upload gate leave this empty. Download by id instead. */
   filePath: string;
   uploadDate: string;
+  /** What the file is, in the uploader's words (round 3, lane C1). */
+  description?: string | null;
 }
 
 export interface CandidateNote {
@@ -531,6 +614,8 @@ export interface JobApplication extends JobApplicationSummary {
   candidatePhone: string;
   jobPostingId?: string | null;
   jobPostingChannel?: string | null;
+  /** The advert's own title (round 3, lane A). */
+  jobPostingTitle?: string | null;
   availableFrom?: string | null;
   coverLetter?: string | null;
   /** JSON string holding a `CriterionScore[]`; parse with `parseScoreBreakdown`. */

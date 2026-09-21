@@ -30,9 +30,9 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { useDebounce } from '@/hooks/use-debounce';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { useToast } from '@/hooks/use-toast';
 import { ASSET_CONDITIONS } from '@/types/hr/assets';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 const NONE = '__none__';
 const fmtNum = (v?: number | null) =>
@@ -79,10 +79,6 @@ export default function RegisterFromFixedAssetPage() {
   const { data: types = [] } = useQuery({
     queryKey: ['hr', 'assets', 'types'],
     queryFn: () => assetRegisterService.getTypes(),
-  });
-  const { data: units = [] } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
   });
   const { data: locations = [] } = useQuery({
     queryKey: ['hr', 'locations'],
@@ -254,14 +250,13 @@ export default function RegisterFromFixedAssetPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label>Organisation unit</Label>
-            <Select value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v }))}>
-              <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Not set</SelectItem>
-                {units.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <OrganizationUnitPicker
+              value={form.unitId === NONE ? '' : form.unitId}
+              onChange={(id) => setForm((f) => ({ ...f, unitId: id || NONE }))}
+              allowNone="Not set"
+              unitLabel="Organisation unit"
+              idPrefix="asset-unit"
+            />
           </div>
           <div className="space-y-2">
             <Label>Location</Label>

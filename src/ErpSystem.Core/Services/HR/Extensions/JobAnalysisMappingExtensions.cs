@@ -43,6 +43,11 @@ public static class JobAnalysisMappingExtensions
             SuggestedSalaryGradeId = entity.SuggestedSalaryGradeId,
             SuggestedSalaryGradeName = entity.SuggestedSalaryGrade != null ? entity.SuggestedSalaryGrade.Name : null,
             ValuationNotes = entity.ValuationNotes,
+            ProposedSalaryGradeId = entity.ProposedSalaryGradeId,
+            ProposedSalaryGradeName = entity.ProposedSalaryGrade?.Name,
+            ProposedSalaryGradeNote = entity.ProposedSalaryGradeNote,
+            PositionSalaryGradeId = entity.Position?.SalaryGradeId,
+            PositionSalaryGradeName = entity.Position?.SalaryGrade?.Name,
             AutonomyLevel = entity.AutonomyLevel,
             DecisionMakingScope = entity.DecisionMakingScope,
             FinancialAuthorityLimit = entity.FinancialAuthorityLimit,
@@ -128,6 +133,11 @@ public static class JobAnalysisMappingExtensions
             SuggestedSalaryGradeId = entity.SuggestedSalaryGradeId,
             SuggestedSalaryGradeName = entity.SuggestedSalaryGrade != null ? entity.SuggestedSalaryGrade.Name : null,
             ValuationNotes = entity.ValuationNotes,
+            ProposedSalaryGradeId = entity.ProposedSalaryGradeId,
+            ProposedSalaryGradeName = entity.ProposedSalaryGrade?.Name,
+            ProposedSalaryGradeNote = entity.ProposedSalaryGradeNote,
+            PositionSalaryGradeId = entity.Position?.SalaryGradeId,
+            PositionSalaryGradeName = entity.Position?.SalaryGrade?.Name,
             AutonomyLevel = entity.AutonomyLevel,
             DecisionMakingScope = entity.DecisionMakingScope,
             FinancialAuthorityLimit = entity.FinancialAuthorityLimit,
@@ -180,14 +190,17 @@ public static class JobAnalysisMappingExtensions
             JobSubFamilyId = dto.JobSubFamilyId,
             JobLevelId = dto.JobLevelId,
             StaffLevelId = dto.StaffLevelId,
-            SuggestedSalaryGradeId = dto.SuggestedSalaryGradeId,
+            // Round 3, lane J2: SuggestedSalaryGradeId is the valuation's output and is not taken
+            // from the payload; the proposal is the author's.
+            ProposedSalaryGradeId = dto.ProposedSalaryGradeId,
+            ProposedSalaryGradeNote = dto.ProposedSalaryGradeNote,
             UnionId = dto.UnionId,
             IsBargainingUnitRole = dto.IsBargainingUnitRole,
             OccupationCode = dto.OccupationCode,
             EssentialFunctionsSummary = dto.EssentialFunctionsSummary,
             IntendedEmploymentType = dto.IntendedEmploymentType,
             RoleCriticality = dto.RoleCriticality,
-            RoleIntrinsicValue = dto.RoleIntrinsicValue,
+            // D-9: the intrinsic value is derived from the job's own rows; nothing types it any more.
             IndustryBenchmarkSalary = dto.IndustryBenchmarkSalary,
             ValuationNotes = dto.ValuationNotes,
             AutonomyLevel = dto.AutonomyLevel,
@@ -205,14 +218,21 @@ public static class JobAnalysisMappingExtensions
         entity.ExpiryDate = dto.ExpiryDate;
         entity.RevisionReason = dto.RevisionReason;
         entity.JobSummary = dto.JobSummary;
-        entity.Status = dto.Status;
+        // ⚠ Status is deliberately NOT assigned here. It is moved by submitting, reviewing and
+        // approving — the three paths that also carry the reviewer, the approver and the
+        // supersession of the previous version. An edit that could set it would let a caller mark a
+        // description Approved without any of that happening, and an edit that omitted it wrote
+        // 0 (Draft is 1), a value no enum member holds, leaving the record unable to move again.
+        // JobDescriptionService.UpdateAsync refuses a status that contradicts the record.
         entity.NextReviewDate = dto.NextReviewDate;
         entity.ReviewCycleMonths = dto.ReviewCycleMonths;
-        entity.RoleIntrinsicValue = dto.RoleIntrinsicValue;
+        // Round 3, lane J2: RoleIntrinsicValue is derived (D-9) and SuggestedSalaryGradeId is the
+        // valuation's output (D-11) — neither is taken from an edit any more. The proposal is.
         entity.RoleCriticality = dto.RoleCriticality;
         entity.IndustryBenchmarkSalary = dto.IndustryBenchmarkSalary;
-        entity.SuggestedSalaryGradeId = dto.SuggestedSalaryGradeId;
         entity.ValuationNotes = dto.ValuationNotes;
+        entity.ProposedSalaryGradeId = dto.ProposedSalaryGradeId;
+        entity.ProposedSalaryGradeNote = dto.ProposedSalaryGradeNote;
         entity.AutonomyLevel = dto.AutonomyLevel;
         entity.DecisionMakingScope = dto.DecisionMakingScope;
         entity.FinancialAuthorityLimit = dto.FinancialAuthorityLimit;
@@ -303,6 +323,8 @@ public static class JobAnalysisMappingExtensions
             Type = entity.Type,
             QualificationId = entity.QualificationId,
             QualificationName = entity.Qualification?.Name,
+            CertificationId = entity.CertificationId,
+            CertificationName = entity.Certification?.Name,
             Title = entity.Title,
             Description = entity.Description,
             IsRequired = entity.IsRequired,
@@ -323,7 +345,8 @@ public static class JobAnalysisMappingExtensions
             JobDescriptionId = dto.JobDescriptionId,
             Type = dto.Type,
             QualificationId = dto.QualificationId,
-            Title = dto.Title,
+            CertificationId = dto.CertificationId,
+            Title = dto.Title ?? string.Empty,
             Description = dto.Description,
             IsRequired = dto.IsRequired,
             JobSpecificRequirements = dto.JobSpecificRequirements,
@@ -333,9 +356,11 @@ public static class JobAnalysisMappingExtensions
 
     public static void UpdateEntity(this UpdateJobQualificationDto dto, JobQualification entity)
     {
+        entity.JobResponsibilityId = dto.JobResponsibilityId;
         entity.Type = dto.Type;
         entity.QualificationId = dto.QualificationId;
-        entity.Title = dto.Title;
+        entity.CertificationId = dto.CertificationId;
+        entity.Title = dto.Title ?? string.Empty;
         entity.Description = dto.Description;
         entity.IsRequired = dto.IsRequired;
         entity.JobSpecificRequirements = dto.JobSpecificRequirements;
@@ -384,7 +409,7 @@ public static class JobAnalysisMappingExtensions
             JobDescriptionId = dto.JobDescriptionId,
             SkillId = dto.SkillId,
             CompetencyId = dto.CompetencyId,
-            CompetencyName = dto.CompetencyName,
+            CompetencyName = dto.CompetencyName ?? string.Empty,
             Description = dto.Description,
             Type = dto.Type,
             RequiredLevel = dto.RequiredLevel,
@@ -395,9 +420,10 @@ public static class JobAnalysisMappingExtensions
 
     public static void UpdateEntity(this UpdateJobCompetencyDto dto, JobCompetency entity)
     {
+        entity.JobResponsibilityId = dto.JobResponsibilityId;
         entity.SkillId = dto.SkillId;
         entity.CompetencyId = dto.CompetencyId;
-        entity.CompetencyName = dto.CompetencyName;
+        entity.CompetencyName = dto.CompetencyName ?? string.Empty;
         entity.Description = dto.Description;
         entity.Type = dto.Type;
         entity.RequiredLevel = dto.RequiredLevel;
@@ -543,6 +569,11 @@ public static class JobAnalysisMappingExtensions
 
     public static void UpdateEntity(this UpdateManpowerBudgetDto dto, ManpowerBudget entity)
     {
+        // Scope: null means unchanged (see the DTO). The service has already checked the unit.
+        if (dto.FiscalYear.HasValue) entity.FiscalYear = dto.FiscalYear.Value;
+        if (dto.OrganizationUnitId.HasValue) entity.OrganizationUnitId = dto.OrganizationUnitId;
+        if (dto.OrganizationLevelId.HasValue) entity.OrganizationLevelId = dto.OrganizationLevelId;
+
         entity.PeriodStartDate = dto.PeriodStartDate;
         entity.PeriodEndDate = dto.PeriodEndDate;
         entity.CurrentHeadcount = dto.CurrentHeadcount;
@@ -557,8 +588,10 @@ public static class JobAnalysisMappingExtensions
         entity.BenefitsBudget = dto.BenefitsBudget;
         entity.RecruitmentBudget = dto.RecruitmentBudget;
         entity.TrainingBudget = dto.TrainingBudget;
-        entity.ActualSpent = dto.ActualSpent;
-        entity.Status = dto.Status;
+        // ⚠ `ActualSpent` is deliberately NOT assigned (round 2b, lane R1): the screen never sent it,
+        // so this line zeroed it on every correction, and it belongs to Finance's actuals anyway.
+        // ⚠ Status is not assigned either — see UpdateManpowerBudgetDto.Status. The correction dialog does not send
+        // a status, so this line wrote 0 over every budget it touched and left it unsubmittable.
         entity.BusinessJustification = dto.BusinessJustification;
     }
 
@@ -587,6 +620,14 @@ public static class JobAnalysisMappingExtensions
             PositionTitle = entity.Position?.Title ?? string.Empty,
             JobDescriptionId = entity.JobDescriptionId,
             JobDescriptionNumber = entity.JobDescription?.JobDescriptionNumber,
+            SalaryGradeId = entity.SalaryGradeId,
+            SalaryGradeCode = entity.SalaryGrade?.Code,
+            SalaryGradeName = entity.SalaryGrade?.Name,
+            SalaryLevelId = entity.SalaryLevelId,
+            SalaryLevelCode = entity.SalaryLevel?.Code,
+            SalaryNotchId = entity.SalaryNotchId,
+            SalaryNotchNumber = entity.SalaryNotch?.NotchNumber,
+            PlannedSalarySource = entity.PlannedSalarySource,
             CurrentCount = entity.CurrentCount,
             CurrentFilled = entity.CurrentFilled,
             CurrentVacant = entity.CurrentVacant,
@@ -624,8 +665,10 @@ public static class JobAnalysisMappingExtensions
             PlannedCount = dto.PlannedCount,
             PlannedNewPositions = dto.PlannedNewPositions,
             PlannedEliminations = dto.PlannedEliminations,
-            PlannedAverageSalary = dto.PlannedAverageSalary,
-            PlannedTotalCost = dto.PlannedTotalCost,
+            // ⚠ The amount, the total, the scale ids and the source are written by the service
+            // (ApplyLineSalaryAsync), which checks the scale and resolves the figure. Not here.
+            PlannedAverageSalary = dto.PlannedAverageSalary ?? 0m,
+            PlannedTotalCost = 0m,
             Quarter = dto.Quarter,
             TargetFillDate = dto.TargetFillDate,
             Priority = dto.Priority,
@@ -644,8 +687,7 @@ public static class JobAnalysisMappingExtensions
         entity.PlannedCount = dto.PlannedCount;
         entity.PlannedNewPositions = dto.PlannedNewPositions;
         entity.PlannedEliminations = dto.PlannedEliminations;
-        entity.PlannedAverageSalary = dto.PlannedAverageSalary;
-        entity.PlannedTotalCost = dto.PlannedTotalCost;
+        // ⚠ Amount, total, scale ids and source: the service's ApplyLineSalaryAsync, not here.
         entity.Quarter = dto.Quarter;
         entity.TargetFillDate = dto.TargetFillDate;
         entity.Priority = dto.Priority;

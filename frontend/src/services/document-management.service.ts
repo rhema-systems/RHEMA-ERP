@@ -629,12 +629,32 @@ class DocumentManagementService {
     return response.data || [];
   }
 
-  async getRecords(module?: string): Promise<CentralDocumentRecord[]> {
+  async getRecords(
+    module?: string,
+    options?: { documentReference?: string; take?: number }
+  ): Promise<CentralDocumentRecord[]> {
     const response = await apiService.get<ApiResponse<CentralDocumentRecord[]>>(
       '/document-management/records',
-      module ? { module } : undefined
+      {
+        ...(module ? { module } : {}),
+        ...(options?.documentReference
+          ? { documentReference: options.documentReference }
+          : {}),
+        ...(options?.take ? { take: options.take } : {}),
+      }
     );
     return response.data || [];
+  }
+
+  async getRecordByDocumentReference(
+    documentReference: string,
+    module?: string
+  ): Promise<CentralDocumentRecord | null> {
+    const records = await this.getRecords(module, {
+      documentReference,
+      take: 1,
+    });
+    return records[0] || null;
   }
 
   async getRecord(id: string): Promise<CentralDocumentRecordDetail | null> {

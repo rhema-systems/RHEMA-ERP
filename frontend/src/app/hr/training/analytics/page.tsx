@@ -39,10 +39,30 @@ import { trainingAnalyticsService } from '@/services/hr/training-analytics.servi
  * Two-series categorical palette, validated for both modes against the CVD, chroma, lightness-band
  * and contrast checks rather than picked by eye. Light steps sit in L 0.43–0.77 on a light surface;
  * the dark steps are re-stepped for L 0.48–0.67, not an automatic flip of the same hex.
+ *
+ * ⚠ The dark steps were declared here from the first version and then never read — every fill took
+ * the `.light` value, so dark mode drew the light palette onto a dark card. The values themselves
+ * were right (both pairs still pass every gate against this app's own card surfaces, `#ffffff` and
+ * `#202020`); only the wiring was missing. They travel as CSS custom properties now, which is how a
+ * colour held in a JS constant can follow the theme without the chart re-rendering.
+ *
+ * `.dark` is the only selector needed: next-themes runs with `attribute="class"` and `enableSystem`,
+ * so even the "system" setting resolves to a real class on `<html>`.
  */
+const SERIES_PALETTE_CSS = `
+.tr-viz {
+  --tr-passed: #2563eb;
+  --tr-not-passed: #d97706;
+}
+.dark .tr-viz {
+  --tr-passed: #3b82f6;
+  --tr-not-passed: #d97706;
+}
+`;
+
 const SERIES = {
-  passed: { light: '#2563eb', dark: '#3b82f6', label: 'Passed' },
-  notPassed: { light: '#d97706', dark: '#d97706', label: 'Not passed' },
+  passed: 'var(--tr-passed)',
+  notPassed: 'var(--tr-not-passed)',
 };
 
 const pct = (v: number) => `${Math.round(v * 10) / 10}%`;
@@ -102,7 +122,9 @@ export default function TrainingAnalyticsPage() {
       : pct(analytics.complianceRate);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="tr-viz space-y-6 p-6">
+      <style>{SERIES_PALETTE_CSS}</style>
+
       <PageHeader
         title="Training Analytics"
         description="Operations and effectiveness across the organisation."
@@ -176,9 +198,9 @@ export default function TrainingAnalyticsPage() {
                     <Tooltip
                       contentStyle={{
                         borderRadius: 8,
-                        border: '1px solid hsl(var(--border))',
-                        background: 'hsl(var(--popover))',
-                        color: 'hsl(var(--popover-foreground))',
+                        border: '1px solid var(--border)',
+                        background: 'var(--popover)',
+                        color: 'var(--popover-foreground)',
                         fontSize: 12,
                       }}
                     />
@@ -187,13 +209,13 @@ export default function TrainingAnalyticsPage() {
                     <Bar
                       dataKey="Passed"
                       stackId="a"
-                      fill={SERIES.passed.light}
+                      fill={SERIES.passed}
                       maxBarSize={28}
                     />
                     <Bar
                       dataKey="Not passed"
                       stackId="a"
-                      fill={SERIES.notPassed.light}
+                      fill={SERIES.notPassed}
                       radius={[4, 4, 0, 0]}
                       maxBarSize={28}
                     />
@@ -265,7 +287,7 @@ export default function TrainingAnalyticsPage() {
                       className="h-full rounded-full"
                       style={{
                         width: `${(s.value / max) * 100}%`,
-                        backgroundColor: SERIES.passed.light,
+                        backgroundColor: SERIES.passed,
                       }}
                     />
                   </div>

@@ -198,14 +198,20 @@ export default function HolidayCalendarDetailPage() {
                 label="Observance"
                 required
                 options={HOLIDAY_OBSERVANCE_TYPE_OPTIONS}
+                description="Mandatory and Substitute Day close the office: leave and HR's statutory clocks skip them. Optional leaves the day open, so taking it is leave like any other."
               />
               <DateField form={form} name="substitutionDate" label="Substitute day" />
             </FieldRow>
+            {/*
+              Recorded here, applied by payroll. HR owns the calendar; what an hour worked on a
+              holiday is worth is payroll's, and payroll is another module — so this pair is stored
+              honestly and the label says who acts on it rather than implying HR does (L-33).
+            */}
             <SwitchField
               form={form}
               name="attractsHolidayPay"
               label="Attracts holiday pay"
-              description="Employees who work the day are paid at the multiplier below."
+              description="Recorded for payroll: employees who work the day are paid at the multiplier below. HR stores it; payroll applies it."
             />
             {!!form.watch('attractsHolidayPay') && (
               <NumberField
@@ -214,6 +220,7 @@ export default function HolidayCalendarDetailPage() {
                 label="Pay multiplier"
                 step="0.1"
                 placeholder="e.g. 2 for double time"
+                description="Read by payroll, not by HR."
               />
             )}
             <SwitchField

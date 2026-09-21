@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/app/hr/awards/[id]/page.tsx",
+    "src/app/hr/awards/long-service/page.tsx",
+    "src/app/hr/leave/encashments/page.tsx"
+  ]
+}

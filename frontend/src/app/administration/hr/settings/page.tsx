@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, SlidersHorizontal } from 'lucide-react';
+import { Building2, Landmark, SlidersHorizontal } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid, type NavCardItem } from '@/components/hr/common/NavCardGrid';
 
@@ -23,6 +23,13 @@ const items: NavCardItem[] = [
       'Retirement ages, probation and notice defaults, reminder lead times, enforcement modes and succession weights.',
     href: '/administration/hr/settings/policy',
     icon: SlidersHorizontal,
+  },
+  {
+    title: 'Finance Posting',
+    description:
+      'Which Finance accounts HR posts to, which HR money events post, and whether each one reached the ledger.',
+    href: '/administration/hr/settings/finance-posting',
+    icon: Landmark,
   },
 ];
 
