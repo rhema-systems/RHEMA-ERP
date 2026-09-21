@@ -374,8 +374,9 @@ function Invoke-RemoteHelper {
 function Copy-ToVps {
     param([string[]]$LocalPaths, [string]$RemoteDirectory)
     if ($LocalVps) {
-        Assert-True (Test-Path -LiteralPath $RemoteDirectory) `
-            "Local VPS package directory is missing: $RemoteDirectory"
+        # The package directory is a disposable staging area. A VPS that was
+        # provisioned from only the live service folders may not have it yet.
+        New-Item -ItemType Directory -Path $RemoteDirectory -Force | Out-Null
         foreach ($path in $LocalPaths) {
             Copy-Item -LiteralPath $path -Destination $RemoteDirectory -Force
         }
