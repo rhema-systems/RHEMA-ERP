@@ -9,6 +9,8 @@ namespace ErpSystem.Core.Interfaces.Finance
 
         Task<AccountingBookDto> GetBookAsync(Guid id, CancellationToken cancellationToken = default);
 
+        Task<DeltaBookCombinedReportDto> GetDeltaCombinedReportAsync(Guid id, DateTime asOfDate, CancellationToken cancellationToken = default);
+
         Task<AccountingBookDto> CreateAsync(CreateAccountingBookDto request, CancellationToken cancellationToken = default);
 
         Task<AccountingBookDto> UpdateAsync(Guid id, UpdateAccountingBookDto request, CancellationToken cancellationToken = default);
@@ -18,6 +20,13 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<AccountingBookDto> ApproveTransitionAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default);
 
         Task<AccountingBookDto> RejectTransitionAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default);
+
+        Task<AccountingBookDto> RequestPrimaryReplacementAsync(Guid id, RequestPrimaryAccountingBookReplacementDto request, CancellationToken cancellationToken = default);
+        Task<AccountingBookDto> ApprovePrimaryReplacementAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default);
+        Task<AccountingBookDto> RejectPrimaryReplacementAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default);
+        Task<AccountingBookDto> RequestPrimaryReplacementReversalAsync(Guid id, RequestPrimaryAccountingBookReversalDto request, CancellationToken cancellationToken = default);
+        Task<AccountingBookDto> ApprovePrimaryReplacementReversalAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default);
+        Task<AccountingBookDto> RejectPrimaryReplacementReversalAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default);
 
         Task EnsureTenantDefaultsAsync(CancellationToken cancellationToken = default);
 

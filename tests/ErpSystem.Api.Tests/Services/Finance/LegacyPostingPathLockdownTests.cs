@@ -327,12 +327,20 @@ public sealed class LegacyPostingPathLockdownTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-LegacyPostingLockdown")]
     [Trait("Category", "Architecture")]
-    public void BankOpeningBalancePosting_ShouldRemainDisabledUntilPostingEngineMigration()
+    public void BankMasterCreation_ShouldNotExposeLegacyOpeningBalanceInputs()
     {
         var root = FindRepositoryRoot();
         var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "Cash", "BankAccountService.cs"));
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "BankAccountDtos.cs"));
+        var createDto = dto[dto.IndexOf("public class CreateBankAccountDto", StringComparison.Ordinal)
+            ..dto.IndexOf("public class UpdateBankAccountDto", StringComparison.Ordinal)];
 
-        service.Should().Contain("FIN-LIM-0006 opening-balance migration batch");
+        createDto.Should().NotContain("OpeningBalance")
+            .And.NotContain("OpeningBalanceExchangeRate")
+            .And.NotContain("OpeningDate");
+        service.Should().Contain("OpeningBalance = 0m")
+            .And.Contain("CurrentBalance = 0m")
+            .And.Contain("AvailableBalance = 0m");
         service.Should().NotContain("_journalEntryService");
         service.Should().NotContain("CreateJournalEntryAsync");
         service.Should().NotContain("PostJournalEntryAsync");

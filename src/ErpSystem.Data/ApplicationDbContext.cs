@@ -123,6 +123,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinanceDimensionReadinessAssessment> FinanceDimensionReadinessAssessments { get; set; }
     public DbSet<Account> Accounts { get; set; }
     public DbSet<AccountingBook> AccountingBooks { get; set; }
+    public DbSet<AccountingBookPrimaryDesignation> AccountingBookPrimaryDesignations { get; set; }
     public DbSet<AccountingBookPeriod> AccountingBookPeriods { get; set; }
     public DbSet<AccountingBookInitialization> AccountingBookInitializations { get; set; }
     public DbSet<AccountingBookInitializationLine> AccountingBookInitializationLines { get; set; }
@@ -2967,6 +2968,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.FunctionalCurrencyCode).HasMaxLength(3);
             entity.Property(e => e.PendingTransitionReason).HasMaxLength(500);
             entity.Property(e => e.TransitionDecisionReason).HasMaxLength(500);
+            entity.Property(e => e.PrimaryReplacementReason).HasMaxLength(500);
             entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
             // The filtered key makes the one-primary invariant concurrency-safe; service validation
             // remains responsible for the richer PrimaryFull/default/full-book relationship.
@@ -2983,6 +2985,26 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookPrimaryDesignation>(entity =>
+        {
+            entity.ToTable("AccountingBookPrimaryDesignations", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookPrimaryDesignations_DifferentBooks", "[PreviousPrimaryBookId] <> [NewPrimaryBookId]");
+                table.HasCheckConstraint("CK_AccountingBookPrimaryDesignations_NoDelete", "[IsDeleted] = 0");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.EffectiveFrom }).IsUnique();
+            entity.Property(item => item.RequestReason).HasMaxLength(500).IsRequired();
+            entity.Property(item => item.DecisionReason).HasMaxLength(500).IsRequired();
+            entity.HasOne(item => item.PreviousPrimaryBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.PreviousPrimaryBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.NewPrimaryBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.NewPrimaryBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany()
+                .HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AccountingEvent>(entity =>
@@ -3191,6 +3213,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("AccountingBookApplicabilityPolicies", table =>
             {
+                if (Database.IsSqlServer()) table.HasTrigger("TR_AccountingBookApplicabilityPolicies_C5Authority");
                 table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_NoDelete", "[IsDeleted] = 0");
                 table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_Status", "[PolicyStatus] IN (1, 2, 3, 4, 5)");
                 table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_EffectiveRange", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
@@ -3225,8 +3248,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("AccountingBookApplicabilityRules", table =>
             {
+                if (Database.IsSqlServer()) table.HasTrigger("TR_AccountingBookApplicabilityRules_C5Immutable");
                 table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_NoDelete", "[IsDeleted] = 0");
-                table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_Priority", "[Priority] >= 0");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_Priority", "[Priority] >= 0 AND [Priority] <= 1000");
                 if (Database.IsSqlServer())
                 {
                     table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_RuleCodeCanonical", "LEN([RuleCode]) > 0 AND LEFT([RuleCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [RuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([RuleCode]))) COLLATE Latin1_General_100_BIN2 AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
@@ -3254,6 +3278,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("AccountingBookApplicabilityRuleBooks", table =>
             {
+                if (Database.IsSqlServer()) table.HasTrigger("TR_AccountingBookApplicabilityRuleBooks_C5Immutable");
                 table.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_NoDelete", "[IsDeleted] = 0");
                 if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
             });

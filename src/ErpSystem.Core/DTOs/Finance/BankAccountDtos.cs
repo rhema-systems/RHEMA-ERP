@@ -18,9 +18,12 @@ public class BankAccountDto
     public string? GLAccountName { get; set; }
     public decimal CurrentBalance { get; set; }
     public decimal AvailableBalance { get; set; }
-    public decimal OpeningBalance { get; set; }
     public bool IsActive { get; set; }
-    public DateTime OpeningDate { get; set; }
+    /// <summary>
+    /// Date of the currently effective governed bank-opening batch. Null until that
+    /// batch is posted, and null again after its governed reversal is posted.
+    /// </summary>
+    public DateTime? GovernedOpeningDate { get; set; }
     public DateTime? ClosingDate { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -36,9 +39,6 @@ public class CreateBankAccountDto
     public string Currency { get; set; } = "GHS";
     public BankAccountType AccountType { get; set; }
     public Guid? GLAccountId { get; set; }
-    public decimal OpeningBalance { get; set; }
-    public decimal? OpeningBalanceExchangeRate { get; set; }
-    public DateTime OpeningDate { get; set; }
     public string? Notes { get; set; }
 }
 

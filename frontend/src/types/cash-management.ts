@@ -97,9 +97,8 @@ export interface BankAccount {
     glAccountName?: string;
     currentBalance: number;
     availableBalance: number;
-    openingBalance: number;
     isActive: boolean;
-    openingDate: string;
+    governedOpeningDate?: string;
     closingDate?: string;
     notes?: string;
     createdAt: string;
@@ -330,9 +329,6 @@ export interface CreateBankAccountDto {
     currency: string;
     accountType: BankAccountType;
     glAccountId?: string;
-    openingBalance: number;
-    openingBalanceExchangeRate?: number;
-    openingDate: string;
     notes?: string;
 }
 

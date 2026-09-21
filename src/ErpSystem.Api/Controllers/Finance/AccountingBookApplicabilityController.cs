@@ -19,6 +19,10 @@ public sealed class AccountingBookApplicabilityController(IAccountingBookApplica
     [Authorize(Policy = FinancePermissions.ViewAccountingBookApplicabilityPolicy)]
     public async Task<IActionResult> GetEligibleBooks(CancellationToken ct) => Ok(await service.GetEligibleBooksAsync(ct));
 
+    [HttpGet("posting-identities")]
+    [Authorize(Policy = FinancePermissions.ViewAccountingBookApplicabilityPolicy)]
+    public async Task<IActionResult> GetPostingIdentities(CancellationToken ct) => Ok(await service.GetPostingIdentitiesAsync(ct));
+
     [HttpPost("policies")]
     [Authorize(Policy = FinancePermissions.ManageAccountingBookApplicabilityPolicy)]
     public async Task<IActionResult> CreateDraft([FromBody] SaveAccountingBookApplicabilityPolicyDto request, CancellationToken ct) => Ok(await service.CreateDraftAsync(request, ct));

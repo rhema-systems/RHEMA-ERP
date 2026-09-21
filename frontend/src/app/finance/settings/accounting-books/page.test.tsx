@@ -31,6 +31,12 @@ vi.mock('@/services/finance/finance-data.service', () => ({
         requestAccountingBookTransition: vi.fn(),
         approveAccountingBookTransition: vi.fn(),
         rejectAccountingBookTransition: vi.fn(),
+        requestPrimaryAccountingBookReplacement: vi.fn(),
+        approvePrimaryAccountingBookReplacement: vi.fn(),
+        rejectPrimaryAccountingBookReplacement: vi.fn(),
+        requestPrimaryAccountingBookReplacementReversal: vi.fn(),
+        approvePrimaryAccountingBookReplacementReversal: vi.fn(),
+        rejectPrimaryAccountingBookReplacementReversal: vi.fn(),
         getAccountingBookInitialization: vi.fn(),
         getAccountingBookActivationReadiness: vi.fn(),
         getAccountingBookPeriods: vi.fn(),
@@ -121,6 +127,42 @@ describe('accounting book settings', () => {
         await waitFor(() => expect(financeDataService.getAccountingBook).toHaveBeenCalledWith('book-primary'));
         expect(await screen.findByText('Accounting use')).toBeInTheDocument();
         expect(screen.getByText('Yes — structure locked')).toBeInTheDocument();
+    });
+
+    it('offers a governed same-day reversal on the current primary designation', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Request');
+        const currentPrimary = {
+            ...primaryBook,
+            id: 'book-local',
+            code: 'LOCAL_STATUTORY',
+            name: 'Local Statutory',
+            reversiblePrimaryDesignationId: 'designation-1',
+            reversiblePrimaryDesignationPreviousBookId: 'book-primary',
+            reversiblePrimaryDesignationEffectiveDate: '2026-09-20T00:00:00Z',
+        };
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([
+            { ...primaryBook, isDefault: false, bookType: 'ParallelFull' },
+            currentPrimary,
+        ]);
+        vi.mocked(financeDataService.requestPrimaryAccountingBookReplacementReversal)
+            .mockResolvedValue(currentPrimary);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: "Reverse today's primary change" }));
+        expect(screen.getByText("Reverse today's primary-book replacement")).toBeInTheDocument();
+        expect(screen.getByText(/restoration of IFRS/)).toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText('Correction reason'), {
+            target: { value: 'Restore the intended IFRS authority' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Submit reversal for approval' }));
+
+        await waitFor(() => expect(
+            financeDataService.requestPrimaryAccountingBookReplacementReversal,
+        ).toHaveBeenCalledWith('book-local', {
+            reason: 'Restore the intended IFRS authority',
+            rowVersion: 'AQID',
+        }));
     });
 
     it('directs an initializing book with incomplete evidence to readiness', async () => {
@@ -340,6 +382,43 @@ describe('accounting book settings', () => {
         expect(screen.queryByRole('button', { name: 'Review & approve' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Review & reject' })).not.toBeInTheDocument();
         expect(financeDataService.approveAccountingBookTransition).not.toHaveBeenCalled();
+    });
+
+    it('does not show an awaiting-checker label for a completed historical request', async () => {
+        authUserId = 'MAKER-ID';
+        permissions.add('Finance.AccountingBooks.Transitions.Request');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            lifecycleStatus: 'Active',
+            isActive: true,
+            allowsPosting: true,
+            activationReady: true,
+            pendingLifecycleStatus: undefined,
+            transitionRequestedByUserId: 'maker-id',
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+
+        expect(await screen.findByRole('button', { name: 'Request as primary' })).toBeInTheDocument();
+        expect(screen.queryByText('Awaiting a different authorized checker.')).not.toBeInTheDocument();
+    });
+
+    it('does not expose Request as primary to an approval-only checker', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Approve');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            lifecycleStatus: 'Active',
+            isActive: true,
+            allowsPosting: true,
+            activationReady: true,
+            pendingLifecycleStatus: undefined,
+            transitionRequestedByUserId: undefined,
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+
+        expect(await screen.findByText('LOCAL_STATUTORY — Local Statutory')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Request as primary' })).not.toBeInTheDocument();
     });
 
     it('does not let a checker approve Active before C4 readiness', async () => {

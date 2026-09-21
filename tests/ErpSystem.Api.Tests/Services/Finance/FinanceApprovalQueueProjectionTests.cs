@@ -218,6 +218,57 @@ public sealed class FinanceApprovalQueueProjectionTests
         staleRows.Should().BeEmpty("resolved book decisions cannot reappear from stale workflow rows");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceApprovalActiveQueue")]
+    public async Task Applicability_policy_queue_should_route_only_the_independent_checker_to_the_domain_page()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        var approvalId = AddApprovalGraph(db, tenantId,
+            WorkflowInstanceStatus.InProgress, WorkflowStepInstanceStatus.Pending,
+            approvalIsForCurrentStep: true,
+            entityCode: "AccountingBookApplicabilityPolicy", initiatorId: makerId,
+            approverRole: "Financial Controller");
+        var instance = db.WorkflowApprovals.Local.Single(item => item.Id == approvalId)
+            .StepInstance.WorkflowInstance;
+        db.AccountingBookApplicabilityPolicies.Add(new AccountingBookApplicabilityPolicy
+        {
+            Id = instance.EntityId,
+            TenantId = tenantId,
+            PolicyCode = "TEST",
+            Version = 1,
+            Name = "Test applicability",
+            EffectiveFrom = new DateTime(2026, 9, 20),
+            PolicyStatus = AccountingBookApplicabilityPolicyStatus.PendingApproval,
+            Reason = "Test governed routing",
+            PreparedByUserId = makerId,
+            PreparedAtUtc = DateTime.UtcNow,
+            WorkflowInstanceId = instance.Id
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var checker = CreateQueueController(db, tenantId, checkerId);
+        var checkerResponse = await checker.GetPending(CancellationToken.None);
+        var checkerRows = ((OkObjectResult)checkerResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        checkerRows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(row =>
+            row.EntityType == "AccountingBookApplicabilityPolicy" &&
+            row.Reference == "TEST/V1" && row.DecisionOnDetailPage &&
+            row.DetailHref == "/finance/settings/accounting-books/applicability" &&
+            !row.CanApprove && !row.CanReject);
+
+        var maker = CreateQueueController(db, tenantId, makerId);
+        var makerResponse = await maker.GetPending(CancellationToken.None);
+        var makerRows = ((OkObjectResult)makerResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        makerRows.Should().BeEmpty();
+    }
+
     private static Guid AddApprovalGraph(
         ApplicationDbContext db,
         Guid tenantId,
@@ -344,6 +395,8 @@ public sealed class FinanceApprovalQueueProjectionTests
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookPeriodLifecycle", It.IsAny<Guid>(), userId))
             .ReturnsAsync(true);
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookInitialization", It.IsAny<Guid>(), userId))
+            .ReturnsAsync(true);
+        workflow.Setup(value => value.CanUserApproveAsync("AccountingBookApplicabilityPolicy", It.IsAny<Guid>(), userId))
             .ReturnsAsync(true);
         return new FinanceApprovalsController(
             db, user.Object, authorization.Object, workflow.Object,

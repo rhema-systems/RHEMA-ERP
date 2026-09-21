@@ -2285,7 +2285,7 @@ public sealed class ControlledOpeningBalancePostingTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "CashBank")]
-    public async Task BankNonzeroOpeningBalance_ShouldRemainBlockedUnlessPostedThroughOpeningBalanceFlow()
+    public async Task BankCreationContract_ShouldNotAcceptOrCreateUngovernedOpeningValues()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -2294,20 +2294,23 @@ public sealed class ControlledOpeningBalancePostingTests
         await db.SaveChangesAsync();
         var service = CreateBankAccountService(db, tenantId);
 
-        var act = () => service.CreateAsync(new CreateBankAccountDto
+        var created = await service.CreateAsync(new CreateBankAccountDto
         {
             AccountNumber = "BANK-001",
             AccountName = "Tenant Bank",
             BankName = "Bank",
             Currency = "GHS",
             AccountType = BankAccountType.Checking,
-            GLAccountId = glAccount.Id,
-            OpeningDate = new DateTime(2026, 1, 1),
-            OpeningBalance = 100m
+            GLAccountId = glAccount.Id
         });
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*FIN-LIM-0006 opening-balance migration batch*");
+        var stored = await db.BankAccounts.SingleAsync(item => item.Id == created.Id);
+        stored.OpeningBalance.Should().Be(0m);
+        stored.CurrentBalance.Should().Be(0m);
+        stored.AvailableBalance.Should().Be(0m);
+        typeof(CreateBankAccountDto).GetProperty("OpeningBalance").Should().BeNull();
+        typeof(CreateBankAccountDto).GetProperty("OpeningBalanceExchangeRate").Should().BeNull();
+        typeof(CreateBankAccountDto).GetProperty("OpeningDate").Should().BeNull();
     }
 
     [Fact]

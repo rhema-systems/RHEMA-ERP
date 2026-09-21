@@ -198,11 +198,13 @@ export default function BankAccountDetailsPage() {
                 </Card>
                 <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">Opening Balance</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Governed Opening Date</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{formatMoney(account.openingBalance, account.currency)}</div>
-                        <p className="mt-1 text-xs text-muted-foreground">As of {formatDate(account.openingDate)}</p>
+                        <div className="text-lg font-semibold">
+                            {account.governedOpeningDate ? formatDate(account.governedOpeningDate) : 'Not posted'}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">Set only by the governed bank-opening workflow</p>
                     </CardContent>
                 </Card>
                 <Card>

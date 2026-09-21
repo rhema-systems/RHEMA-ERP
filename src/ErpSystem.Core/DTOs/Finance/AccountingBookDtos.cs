@@ -26,6 +26,19 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? TransitionRequestedByUserId { get; set; }
         public DateTime? TransitionRequestedAtUtc { get; set; }
         public Guid? TransitionWorkflowInstanceId { get; set; }
+        public Guid? PrimaryReplacementFromBookId { get; set; }
+        public DateTime? PrimaryReplacementEffectiveDate { get; set; }
+        public string? PrimaryReplacementReason { get; set; }
+        public Guid? PrimaryReplacementRequestedByUserId { get; set; }
+        public DateTime? PrimaryReplacementRequestedAtUtc { get; set; }
+        public Guid? PrimaryReplacementWorkflowInstanceId { get; set; }
+        public Guid? ReversiblePrimaryDesignationId { get; set; }
+        public Guid? ReversiblePrimaryDesignationPreviousBookId { get; set; }
+        public DateTime? ReversiblePrimaryDesignationEffectiveDate { get; set; }
+        public string? PrimaryReversalReason { get; set; }
+        public Guid? PrimaryReversalRequestedByUserId { get; set; }
+        public DateTime? PrimaryReversalRequestedAtUtc { get; set; }
+        public Guid? PrimaryReversalWorkflowInstanceId { get; set; }
         public bool HasAccountingUse { get; set; }
         public bool ActivationReady { get; set; }
         public string? ReadinessMessage { get; set; }
@@ -62,6 +75,54 @@ namespace ErpSystem.Core.DTOs.Finance
     {
         public string Reason { get; set; } = string.Empty;
         public string RowVersion { get; set; } = string.Empty;
+    }
+
+    public sealed class RequestPrimaryAccountingBookReplacementDto
+    {
+        public DateTime EffectiveDate { get; set; }
+        public string Reason { get; set; } = string.Empty;
+        public string RowVersion { get; set; } = string.Empty;
+    }
+
+    public sealed class RequestPrimaryAccountingBookReversalDto
+    {
+        public string Reason { get; set; } = string.Empty;
+        public string RowVersion { get; set; } = string.Empty;
+    }
+
+    public sealed class DeltaBookStructurePreparationDto
+    {
+        public Guid AccountingBookId { get; set; }
+        public string AccountingBookCode { get; set; } = string.Empty;
+        public Guid BaseAccountingBookId { get; set; }
+        public string BaseAccountingBookCode { get; set; } = string.Empty;
+        public int ClassificationCount { get; set; }
+        public int AccountMappingCount { get; set; }
+    }
+
+    public sealed class DeltaBookCombinedReportLineDto
+    {
+        public Guid AccountId { get; set; }
+        public string AccountNumber { get; set; } = string.Empty;
+        public string AccountName { get; set; } = string.Empty;
+        public string AccountType { get; set; } = string.Empty;
+        public decimal BaseSignedBalance { get; set; }
+        public decimal DeltaSignedBalance { get; set; }
+        public decimal CombinedSignedBalance { get; set; }
+    }
+
+    public sealed class DeltaBookCombinedReportDto
+    {
+        public Guid DeltaAccountingBookId { get; set; }
+        public string DeltaAccountingBookCode { get; set; } = string.Empty;
+        public Guid BaseAccountingBookId { get; set; }
+        public string BaseAccountingBookCode { get; set; } = string.Empty;
+        public string FunctionalCurrencyCode { get; set; } = string.Empty;
+        public DateTime AsOfDate { get; set; }
+        public decimal BaseTotal { get; set; }
+        public decimal DeltaTotal { get; set; }
+        public decimal CombinedTotal { get; set; }
+        public IReadOnlyList<DeltaBookCombinedReportLineDto> Lines { get; set; } = Array.Empty<DeltaBookCombinedReportLineDto>();
     }
 
     public class AccountAccountingBookDto

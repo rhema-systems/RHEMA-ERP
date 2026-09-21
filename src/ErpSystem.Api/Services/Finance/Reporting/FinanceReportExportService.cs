@@ -814,11 +814,13 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
     {
         var rows = new List<string[]>
         {
-            new[] { "SourceModule", "AsOfDate", "ControlAccountNumber", "ControlAccountName", "ReadModelOutstanding", "PostedGlControlBalance", "Variance", "DocumentCount", "DiagnosticCount" },
+            new[] { "SourceModule", "AsOfDate", "AccountingBookCode", "AccountingBookName", "ControlAccountNumber", "ControlAccountName", "ReadModelOutstanding", "PostedGlControlBalance", "Variance", "DocumentCount", "DiagnosticCount" },
             new[]
             {
                 report.SourceModule,
                 Date(report.AsOfDate),
+                report.AccountingBookCode ?? string.Empty,
+                report.AccountingBookName ?? string.Empty,
                 report.ControlAccountNumber ?? string.Empty,
                 report.ControlAccountName ?? string.Empty,
                 Money(report.ReadModelOutstanding),
@@ -839,6 +841,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
                 diagnostic.SourceDocumentId?.ToString() ?? string.Empty,
                 diagnostic.PostingEventId?.ToString() ?? string.Empty,
                 Money(diagnostic.VarianceAmount),
+                string.Empty,
+                string.Empty,
                 string.Empty,
                 string.Empty,
                 string.Empty

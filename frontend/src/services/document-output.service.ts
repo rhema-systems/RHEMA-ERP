@@ -26,6 +26,7 @@ export const DOCUMENT_TYPES = {
   financeBudgetConsolidated: 'Finance.Budget.Consolidated',
   financeBudgetScenarioComparison: 'Finance.Budget.ScenarioComparison',
   financeTrialBalance: 'Finance.TrialBalance',
+  financeBaseDeltaReport: 'Finance.BaseDeltaReport',
   financeIncomeStatement: 'Finance.IncomeStatement',
   financeBalanceSheet: 'Finance.BalanceSheet',
   financeCashFlowStatement: 'Finance.CashFlowStatement',

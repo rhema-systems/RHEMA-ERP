@@ -129,7 +129,7 @@ public static class FinancePermissionPolicyMap
             },
             "AccountingBookApplicability" => action switch
             {
-                "GetPolicies" or "GetEligibleBooks" => One(FinancePermissions.ViewAccountingBookApplicabilityPolicy),
+                "GetPolicies" or "GetEligibleBooks" or "GetPostingIdentities" => One(FinancePermissions.ViewAccountingBookApplicabilityPolicy),
                 "Approve" or "Reject" or "ApproveRetirement" or "RejectRetirement" => One(FinancePermissions.ApproveAccountingBookApplicabilityPolicy),
                 "Resolve" or "Freeze" => One(FinancePermissions.ResolveAccountingBookApplicability),
                 _ => One(FinancePermissions.ManageAccountingBookApplicabilityPolicy)

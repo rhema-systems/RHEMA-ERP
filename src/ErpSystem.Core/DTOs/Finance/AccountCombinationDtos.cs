@@ -224,6 +224,13 @@ namespace ErpSystem.Core.DTOs.Finance
         public List<AccountCombinationPreviewDto> Combinations { get; set; } = new();
 
         /// <summary>
+        /// Governed accounting-book destinations and posting classifications applied to every
+        /// account in this homogeneous batch. At least one enabled mapping is required.
+        /// </summary>
+        [Required, MinLength(1)]
+        public List<AccountAccountingBookUpdateDto> AccountingBooks { get; set; } = new();
+
+        /// <summary>
         /// Skip combinations marked as Duplicate (default: true)
         /// </summary>
         public bool SkipDuplicates { get; set; } = true;

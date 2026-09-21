@@ -338,9 +338,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                 IsMultiCurrency = dto.IsMultiCurrency,
                 IsControlAccount = dto.IsControlAccount,
                 AllowDirectPosting = dto.IsPostingAllowed,
+                BudgetTrackingEnabled = dto.BudgetTrackingEnabled,
                 ReferenceNumber = dto.ReferenceNumber ?? string.Empty,
                 Status = Enum.TryParse<AccountStatus>(dto.Status, out var status) ? status : AccountStatus.Active,
-                EffectiveDate = dto.EffectiveDate,
+                // A blank effective date must not make a newly-created account appear
+                // retroactive to an already-approved opening-balance cutoff.
+                EffectiveDate = dto.EffectiveDate ?? now.Date,
                 ExpirationDate = dto.ExpirationDate,
                 Metadata = dto.Metadata,
                 Tags = dto.Tags,
@@ -453,6 +456,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             account.IsMultiCurrency = dto.IsMultiCurrency;
             account.IsControlAccount = dto.IsControlAccount;
             account.AllowDirectPosting = dto.IsPostingAllowed;
+            if (dto.BudgetTrackingEnabled.HasValue)
+                account.BudgetTrackingEnabled = dto.BudgetTrackingEnabled.Value;
             account.ReferenceNumber = dto.ReferenceNumber ?? account.ReferenceNumber;
             if (!string.IsNullOrEmpty(dto.Status) && Enum.TryParse<AccountStatus>(dto.Status, out var newStatus))
             {
@@ -602,6 +607,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 IsControlAccount = account.IsControlAccount,
                 IsPostingAllowed = account.AllowDirectPosting,
                 AllowDirectPosting = account.AllowDirectPosting,
+                BudgetTrackingEnabled = account.BudgetTrackingEnabled,
                 ReferenceNumber = account.ReferenceNumber,
                 Status = account.Status.ToString(),
                 EffectiveDate = account.EffectiveDate,

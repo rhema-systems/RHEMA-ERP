@@ -1,11 +1,9 @@
 using System.Data;
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -42,6 +40,8 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
     {
         var book = await RequireBookAsync(accountingBookId, cancellationToken);
         if (!Enum.TryParse<AccountingBookInitializationMode>(mode, true, out var parsedMode)) throw new InvalidOperationException("Initialization mode is invalid.");
+        if (book.BookType == AccountingBookType.Delta && parsedMode != AccountingBookInitializationMode.IndependentOpeningBalances)
+            throw new InvalidOperationException("DELTA_INITIALIZATION_MODE_INVALID: A Delta book must initialize as an independent adjustment-only layer.");
         if (cutoffDate == default) throw new InvalidOperationException("An initialization cutoff date is required.");
         var cutoffPeriods = (await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted).ToListAsync(cancellationToken))
             .Where(item => item.EndDate.Date == cutoffDate.Date).ToList();
@@ -54,8 +54,13 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         var mappings = await _db.AccountAccountingBooks.AsNoTracking().Include(item => item.Account).Include(item => item.AccountClassification)
             .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
             .ToListAsync(cancellationToken);
-        mappings = mappings.Where(item => item.IsEnabled || !book.IsActive && FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(item))
+        mappings = mappings.Where(item => (item.IsEnabled || !book.IsActive && FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(item))
+                && (item.Account.EffectiveDate == null || item.Account.EffectiveDate.Value.Date <= cutoffDate.Date))
             .OrderBy(item => item.Account.AccountNumber).ToList();
+        if (mappings.Count == 0)
+            throw new InvalidOperationException(book.BookType == AccountingBookType.Delta
+                ? "DELTA_ACCOUNT_MAPPINGS_REQUIRED: Prepare the Delta book structure from its base book before loading initialization evidence."
+                : "Initialization requires at least one eligible enabled account mapping.");
         if (mappings.Any(item => item.Account == null || item.Account.IsDeleted || item.Account.TenantId != TenantId
             || item.AccountClassification == null || item.AccountClassification.IsDeleted || item.AccountClassification.Status != AccountClassificationStatus.Active
             || !item.AccountClassification.IsPostingClassification || item.AccountClassification.TenantId != TenantId
@@ -74,6 +79,148 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                 AccountClassificationCode = item.AccountClassification!.Code, AuthoritativeSignedBalance = latest.GetValueOrDefault(item.AccountId) }).ToList() };
     }
 
+    public Task<DeltaBookStructurePreparationDto> EnsureDeltaStructureAsync(Guid accountingBookId, CancellationToken cancellationToken = default) =>
+        AtomicAsync(async () =>
+        {
+            var book = await _db.AccountingBooks.SingleOrDefaultAsync(item => item.Id == accountingBookId
+                && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
+                ?? throw new KeyNotFoundException("Accounting book was not found.");
+            if (book.BookType != AccountingBookType.Delta || !book.BaseAccountingBookId.HasValue)
+                throw new InvalidOperationException("Only a Delta book with a governed base book can prepare Delta structure.");
+            if (book.LifecycleStatus is not (AccountingBookLifecycleStatus.Configuring or AccountingBookLifecycleStatus.Initializing))
+                throw new InvalidOperationException("Delta structure may be prepared only while the book is Configuring or Initializing.");
+
+            var baseBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item => item.Id == book.BaseAccountingBookId.Value
+                && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("The Delta book's governed base book is unavailable.");
+            if (baseBook.LifecycleStatus is not (AccountingBookLifecycleStatus.Initializing or AccountingBookLifecycleStatus.Active))
+                throw new InvalidOperationException("The Delta book's governed base book must be initializing or active before Delta structure can be prepared.");
+
+            var sourceClassifications = await _db.AccountClassifications.AsNoTracking()
+                .Where(item => item.TenantId == TenantId && item.AccountingBookId == baseBook.Id
+                    && !item.IsDeleted && item.Status == AccountClassificationStatus.Active)
+                .OrderBy(item => item.DisplayOrder).ThenBy(item => item.Code).ToListAsync(cancellationToken);
+            var sourceMappings = await _db.AccountAccountingBooks.AsNoTracking()
+                .Include(item => item.Account).Include(item => item.AccountClassification)
+                .Where(item => item.TenantId == TenantId && item.AccountingBookId == baseBook.Id
+                    && !item.IsDeleted && item.IsEnabled)
+                .OrderBy(item => item.AccountId).ToListAsync(cancellationToken);
+            if (sourceMappings.Count == 0 || sourceMappings.Any(item => item.Account == null || item.Account.IsDeleted
+                || item.AccountClassification == null || item.AccountClassification.IsDeleted
+                || item.AccountClassification.Status != AccountClassificationStatus.Active))
+                throw new InvalidOperationException("The base book must have complete enabled account mappings with active classifications before Delta structure can be prepared.");
+
+            var targetClassifications = await _db.AccountClassifications
+                .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
+                .ToListAsync(cancellationToken);
+            var sourceById = sourceClassifications.ToDictionary(item => item.Id);
+            var targetByCode = targetClassifications.ToDictionary(item => item.Code, StringComparer.Ordinal);
+            var clonedBySourceId = new Dictionary<Guid, AccountClassification>();
+
+            AccountClassification ResolveClassification(AccountClassification source)
+            {
+                if (clonedBySourceId.TryGetValue(source.Id, out var resolved)) return resolved;
+                AccountClassification? parent = null;
+                if (source.ParentClassificationId.HasValue)
+                {
+                    if (!sourceById.TryGetValue(source.ParentClassificationId.Value, out var sourceParent))
+                        throw new InvalidOperationException($"Base classification {source.Code} has no active parent classification.");
+                    parent = ResolveClassification(sourceParent);
+                }
+                if (!targetByCode.TryGetValue(source.Code, out resolved))
+                {
+                    resolved = new AccountClassification
+                    {
+                        TenantId = TenantId, AccountingBookId = book.Id, ParentClassificationId = parent?.Id,
+                        Code = source.Code, Name = source.Name, Description = source.Description,
+                        CoreAccountType = source.CoreAccountType, DefaultRevaluationTreatment = source.DefaultRevaluationTreatment,
+                        SystemRole = source.SystemRole, IsPostingClassification = source.IsPostingClassification,
+                        Status = AccountClassificationStatus.Active, DisplayOrder = source.DisplayOrder,
+                        CreatedAt = DateTime.UtcNow, CreatedBy = ActorName()
+                    };
+                    _db.AccountClassifications.Add(resolved);
+                    targetByCode.Add(resolved.Code, resolved);
+                }
+                else if (resolved.Status != AccountClassificationStatus.Active
+                    || resolved.CoreAccountType != source.CoreAccountType
+                    || resolved.IsPostingClassification != source.IsPostingClassification)
+                {
+                    throw new InvalidOperationException($"Delta classification {resolved.Code} conflicts with its base-book authority.");
+                }
+                else
+                {
+                    resolved.ParentClassificationId = parent?.Id;
+                    resolved.Name = source.Name;
+                    resolved.Description = source.Description;
+                    resolved.DefaultRevaluationTreatment = source.DefaultRevaluationTreatment;
+                    resolved.SystemRole = source.SystemRole;
+                    resolved.DisplayOrder = source.DisplayOrder;
+                    resolved.UpdatedAt = DateTime.UtcNow;
+                    resolved.UpdatedBy = ActorName();
+                }
+                clonedBySourceId[source.Id] = resolved;
+                return resolved;
+            }
+
+            foreach (var source in sourceClassifications) ResolveClassification(source);
+
+            var targetMappings = await _db.AccountAccountingBooks
+                .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
+                .ToDictionaryAsync(item => item.AccountId, cancellationToken);
+            foreach (var sourceMapping in sourceMappings)
+            {
+                var targetClassification = ResolveClassification(sourceMapping.AccountClassification!);
+                if (!targetMappings.TryGetValue(sourceMapping.AccountId, out var targetMapping))
+                {
+                    targetMapping = new AccountAccountingBook
+                    {
+                        TenantId = TenantId, AccountId = sourceMapping.AccountId, AccountingBookId = book.Id,
+                        AccountClassificationId = targetClassification.Id, IsEnabled = true,
+                        FinancialStatementLineItem = sourceMapping.FinancialStatementLineItem,
+                        CreatedAt = DateTime.UtcNow, CreatedBy = ActorName()
+                    };
+                    _db.AccountAccountingBooks.Add(targetMapping);
+                    targetMappings.Add(targetMapping.AccountId, targetMapping);
+                }
+                else
+                {
+                    targetMapping.AccountClassificationId = targetClassification.Id;
+                    targetMapping.IsEnabled = true;
+                    targetMapping.FinancialStatementLineItem ??= sourceMapping.FinancialStatementLineItem;
+                    targetMapping.UpdatedAt = DateTime.UtcNow;
+                    targetMapping.UpdatedBy = ActorName();
+                }
+            }
+            var sourceAccountIds = sourceMappings.Select(item => item.AccountId).ToHashSet();
+            foreach (var targetMapping in targetMappings.Values.Where(item =>
+                         item.IsEnabled && !sourceAccountIds.Contains(item.AccountId)))
+            {
+                targetMapping.IsEnabled = false;
+                targetMapping.UpdatedAt = DateTime.UtcNow;
+                targetMapping.UpdatedBy = ActorName();
+            }
+            await _db.SaveChangesAsync(cancellationToken);
+            await _audit.RecordAsync(new FinanceAuditEventDto
+            {
+                TenantId = TenantId, EventType = FinanceAuditEvents.AccountingBookDeltaStructurePrepared,
+                SourceModule = "GL", SourceDocumentType = "AccountingBook", SourceDocumentId = book.Id,
+                Resource = "Finance.AccountingBook", ResourceId = book.Id.ToString(),
+                AfterValues = new
+                {
+                    DeltaAccountingBookId = book.Id, DeltaAccountingBookCode = book.Code,
+                    BaseAccountingBookId = baseBook.Id, BaseAccountingBookCode = baseBook.Code,
+                    ClassificationCount = clonedBySourceId.Count, AccountMappingCount = sourceMappings.Count
+                },
+                Reason = "Prepared the governed Delta classification and account structure from its base book."
+            }, cancellationToken);
+            return new DeltaBookStructurePreparationDto
+            {
+                AccountingBookId = book.Id, AccountingBookCode = book.Code,
+                BaseAccountingBookId = baseBook.Id, BaseAccountingBookCode = baseBook.Code,
+                ClassificationCount = clonedBySourceId.Count, AccountMappingCount = sourceMappings.Count
+            };
+        }, cancellationToken);
+
     public Task<AccountingBookInitializationDto> ConfigureAsync(Guid accountingBookId, ConfigureAccountingBookInitializationDto request, CancellationToken cancellationToken = default) =>
         AtomicAsync(async () =>
         {
@@ -81,6 +228,8 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             if (book.LifecycleStatus is not (AccountingBookLifecycleStatus.Configuring or AccountingBookLifecycleStatus.Initializing))
                 throw new InvalidOperationException("Book initialization may be configured only while the book is Configuring or Initializing.");
             if (!Enum.TryParse<AccountingBookInitializationMode>(request.Mode, true, out var mode)) throw new InvalidOperationException("Initialization mode is invalid.");
+            if (book.BookType == AccountingBookType.Delta && mode != AccountingBookInitializationMode.IndependentOpeningBalances)
+                throw new InvalidOperationException("DELTA_INITIALIZATION_MODE_INVALID: A Delta book must initialize as an independent adjustment-only layer.");
             if (request.CutoffDate == default) throw new InvalidOperationException("An initialization cutoff date is required.");
             if (string.IsNullOrWhiteSpace(request.IdempotencyKey)) throw new InvalidOperationException("An initialization idempotency key is required.");
             if (string.IsNullOrWhiteSpace(request.Reason)) throw new InvalidOperationException("An initialization reason is required.");
@@ -268,8 +417,12 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         var source = await ValidateSourceAsync(entity.AccountingBook, entity.Mode, entity.SourceAccountingBookId, ct);
         var prepared = await PrepareEvidenceAsync(entity.AccountingBook, source, entity.Mode, entity.CutoffDate,
             entity.IdempotencyKey, entity.Reason, entity.Lines.Select(MapLine).ToList(), ct);
-        if (prepared.CutoffFiscalPeriodId != entity.CutoffFiscalPeriodId || prepared.EvidenceFingerprint != entity.EvidenceFingerprint || prepared.ReconciliationFingerprint != entity.ReconciliationFingerprint)
-            throw new InvalidOperationException("INITIALIZATION_EVIDENCE_STALE: Account mappings, classifications, base balances or opening evidence changed.");
+        if (prepared.CutoffFiscalPeriodId != entity.CutoffFiscalPeriodId)
+            throw new InvalidOperationException("INITIALIZATION_EVIDENCE_STALE: The authoritative cutoff period changed.");
+        if (!prepared.AcceptedEvidenceFingerprints.Contains(entity.EvidenceFingerprint))
+            throw new InvalidOperationException("INITIALIZATION_EVIDENCE_STALE: Book identity or opening-line evidence changed.");
+        if (!prepared.AcceptedReconciliationFingerprints.Contains(entity.ReconciliationFingerprint))
+            throw new InvalidOperationException("INITIALIZATION_EVIDENCE_STALE: Account authority, balances, or posted transactions changed.");
     }
 
     private async Task<Prepared> PrepareEvidenceAsync(AccountingBook book, AccountingBook? source, AccountingBookInitializationMode mode, DateTime cutoff,
@@ -280,19 +433,34 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         if (cutoffPeriods.Count != 1)
             throw new InvalidOperationException("INITIALIZATION_CUTOFF_PERIOD_INVALID: Cutoff must be the end date of exactly one live same-tenant fiscal period.");
         var cutoffPeriod = cutoffPeriods[0];
-        var mappings = await _db.AccountAccountingBooks.AsNoTracking().Include(item => item.Account).Include(item => item.AccountClassification)
+        var allMappings = await _db.AccountAccountingBooks.AsNoTracking().Include(item => item.Account).Include(item => item.AccountClassification)
             .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted).ToListAsync(ct);
-        mappings = mappings.Where(item => item.IsEnabled || !book.IsActive && FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(item))
+        allMappings = allMappings.Where(item => item.IsEnabled || !book.IsActive && FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(item))
             .OrderBy(item => item.AccountId).ToList();
-        if (mappings.Count == 0 || mappings.Any(item => item.Account == null || item.Account.IsDeleted || item.Account.TenantId != TenantId
+        var mappings = allMappings.Where(item => item.Account.EffectiveDate == null || item.Account.EffectiveDate.Value.Date <= cutoff.Date)
+            .ToList();
+        if (mappings.Count == 0 || allMappings.Any(item => item.Account == null || item.Account.IsDeleted || item.Account.TenantId != TenantId
             || item.AccountClassification == null || item.AccountClassification.IsDeleted || item.AccountClassification.Status != AccountClassificationStatus.Active
             || !item.AccountClassification.IsPostingClassification || item.AccountClassification.TenantId != TenantId
             || item.AccountClassification.AccountingBookId != book.Id || item.AccountClassification.CoreAccountType != item.Account.AccountType))
             throw new InvalidOperationException("Initialization requires complete enabled account mappings with compatible active posting classifications.");
         var lines = requested.OrderBy(item => item.AccountId).ToList();
-        if (lines.Count != mappings.Count || lines.Select(item => item.AccountId).Distinct().Count() != lines.Count
-            || !lines.Select(item => item.AccountId).SequenceEqual(mappings.Select(item => item.AccountId)))
+        var lineIds = lines.Select(item => item.AccountId).ToHashSet();
+        var eligibleIds = mappings.Select(item => item.AccountId).ToHashSet();
+        var mappedIds = allMappings.Select(item => item.AccountId).ToHashSet();
+        if (lines.Select(item => item.AccountId).Distinct().Count() != lines.Count
+            || !eligibleIds.IsSubsetOf(lineIds) || !lineIds.IsSubsetOf(mappedIds))
             throw new InvalidOperationException("Initialization must contain exactly one opening line for every enabled mapped account.");
+        // Older approved packs may retain zero lines for accounts that were subsequently given a
+        // future effective date. Those frozen lines are harmless historical evidence. They must
+        // not make an already-active book unready, while a newly retroactive account still makes
+        // the pack stale because every cutoff-eligible mapping remains mandatory.
+        var futureLineIds = allMappings.Where(item => item.Account.EffectiveDate?.Date > cutoff.Date)
+            .Select(item => item.AccountId).ToHashSet();
+        if (lines.Any(item => !eligibleIds.Contains(item.AccountId)
+            && (!futureLineIds.Contains(item.AccountId) || item.OpeningDebit != 0 || item.OpeningCredit != 0
+                || item.BaseBookSignedBalance != 0 || item.OpeningAdjustment != 0)))
+            throw new InvalidOperationException("Initialization contains non-zero evidence for an account that was not effective at the cutoff.");
         var tenantCurrency = await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId).Select(item => item.BaseCurrency).SingleOrDefaultAsync(ct);
         if (tenantCurrency is not { Length: 3 } || tenantCurrency.Any(ch => ch is < 'A' or > 'Z')) throw new InvalidOperationException("Canonical tenant functional-currency authority is required.");
         foreach (var line in lines)
@@ -342,7 +510,8 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         }
         var debit = lines.Sum(item => item.OpeningDebit); var credit = lines.Sum(item => item.OpeningCredit);
         if (debit != credit) throw new InvalidOperationException("Initialization opening evidence must be balanced.");
-        var authority = string.Join('|', mappings.Select(item => $"{item.AccountId:N}:{item.Account.AccountNumber}:{item.Account.AccountType}:{item.Id:N}:{item.AccountClassificationId:N}:{item.AccountClassification!.Code}:{item.AccountClassification.Status}:{item.AccountClassification.IsPostingClassification}"));
+        var evidenceMappings = allMappings.Where(item => lineIds.Contains(item.AccountId)).OrderBy(item => item.AccountId);
+        var authority = string.Join('|', evidenceMappings.Select(item => $"{item.AccountId:N}:{item.Account.AccountNumber}:{item.Account.AccountType}:{item.Id:N}:{item.AccountClassificationId:N}:{item.AccountClassification!.Code}:{item.AccountClassification.Status}:{item.AccountClassification.IsPostingClassification}"));
         var balanceEvidence = string.Join('|', latest.OrderBy(item => item.Key).Select(item => $"{item.Key:N}:{item.Value.Id:N}:{item.Value.FiscalPeriodId:N}:{item.Value.FiscalPeriod.PeriodCode}:{item.Value.FiscalPeriod.StartDate:O}:{item.Value.FiscalPeriod.EndDate:O}:{D(item.Value.OpeningBalance)}:{D(item.Value.PeriodDebits)}:{D(item.Value.PeriodCredits)}:{D(item.Value.ClosingBalance)}"));
         var transactionEvidence = string.Join('|', sourceTransactions.OrderBy(item => item.TransactionDate).ThenBy(item => item.JournalEntryId).ThenBy(item => item.Id)
             .Select(item => new { item.Id, item.JournalEntryId, item.FiscalPeriodId, item.AccountId, item.TransactionDate, item.DebitAmount, item.CreditAmount, item.TransactionCurrency, item.ForeignCurrencyAmount, item.ExchangeRate })
@@ -350,10 +519,40 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         var lineEvidence = string.Join('|', lines.Select(item => $"{item.AccountId:N}:{item.CurrencyCode}:{D(item.OpeningDebit)}:{D(item.OpeningCredit)}:{D(item.BaseBookSignedBalance)}:{D(item.OpeningAdjustment)}"));
         // Lifecycle activation changes the book's state but not its approved opening authority.
         // The source's active/postable state is revalidated separately on every evidence read.
-        var evidence = Hash($"BOOK-INITIALIZATION-EVIDENCE-V2|{TenantId:N}|{book.Id:N}|{book.Code}|{book.BookType}|{book.FunctionalCurrencyCode}|{mode}|{cutoff:yyyy-MM-dd}|{cutoffPeriod.Id:N}|{cutoffPeriod.PeriodCode}|{cutoffPeriod.StartDate:O}|{cutoffPeriod.EndDate:O}|{source?.Id:N}|{source?.Code}|{source?.BookType}|{source?.FunctionalCurrencyCode}|{idempotencyKey}|{reason}|{lineEvidence}");
-        var reconciliation = Hash($"BOOK-INITIALIZATION-RECONCILIATION-V1|{evidence}|{authority}|{balanceEvidence}|{transactionEvidence}|{D(debit)}|{D(credit)}");
-        return new Prepared(lines, mappings.Count, debit, credit, evidence, reconciliation, cutoffPeriod.Id);
+        var evidence = AccountingBookInitializationFingerprint.Evidence(
+            TenantId, book.Id, book.Code, book.BookType, book.FunctionalCurrencyCode,
+            mode, cutoff, cutoffPeriod.Id, cutoffPeriod.PeriodCode, cutoffPeriod.StartDate,
+            cutoffPeriod.EndDate, source?.Id, source?.Code, source?.BookType,
+            source?.FunctionalCurrencyCode, idempotencyKey, reason, lineEvidence);
+        var reconciliation = AccountingBookInitializationFingerprint.Reconciliation(
+            evidence, authority, balanceEvidence, transactionEvidence, debit, credit);
+        // V2 fingerprints encoded the mutable PrimaryFull/ParallelFull designation for both
+        // the initialized book and its source. A governed primary replacement legitimately
+        // swaps those designations without changing opening evidence. Accept every equivalent
+        // legacy full-book designation while issuing only the designation-neutral V3 format.
+        var acceptedEvidence = new HashSet<string>(StringComparer.Ordinal) { evidence };
+        foreach (var legacyBookType in FingerprintTypeCandidates(book.BookType))
+        foreach (var legacySourceType in FingerprintTypeCandidates(source?.BookType))
+            acceptedEvidence.Add(AccountingBookInitializationFingerprint.LegacyEvidenceV2(
+                TenantId, book.Id, book.Code, legacyBookType!.Value, book.FunctionalCurrencyCode,
+                mode, cutoff, cutoffPeriod.Id, cutoffPeriod.PeriodCode, cutoffPeriod.StartDate,
+                cutoffPeriod.EndDate, source?.Id, source?.Code, legacySourceType,
+                source?.FunctionalCurrencyCode, idempotencyKey, reason, lineEvidence));
+        var acceptedReconciliation = acceptedEvidence.Select(fingerprint =>
+                AccountingBookInitializationFingerprint.Reconciliation(
+                    fingerprint, authority, balanceEvidence, transactionEvidence, debit, credit))
+            .ToHashSet(StringComparer.Ordinal);
+        return new Prepared(lines, mappings.Count, debit, credit, evidence, reconciliation, cutoffPeriod.Id,
+            acceptedEvidence, acceptedReconciliation);
     }
+
+    private static IReadOnlyList<AccountingBookType?> FingerprintTypeCandidates(AccountingBookType? type) => type switch
+    {
+        AccountingBookType.PrimaryFull or AccountingBookType.ParallelFull =>
+            new AccountingBookType?[] { AccountingBookType.PrimaryFull, AccountingBookType.ParallelFull },
+        null => new AccountingBookType?[] { null },
+        _ => new AccountingBookType?[] { type }
+    };
 
     private async Task<AccountingBook?> ValidateSourceAsync(AccountingBook book, AccountingBookInitializationMode mode, Guid? sourceId, CancellationToken ct)
     {
@@ -415,10 +614,17 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             var fullName = $"{user.FirstName} {user.LastName}".Trim();
             return string.IsNullOrWhiteSpace(fullName) ? user.UserName ?? "Unknown user" : fullName;
         });
-        dto.PreparedByName = names.GetValueOrDefault(item.PreparedByUserId);
-        dto.ApprovedByName = item.ApprovedByUserId.HasValue ? names.GetValueOrDefault(item.ApprovedByUserId.Value) : null;
-        dto.RejectedByName = item.RejectedByUserId.HasValue ? names.GetValueOrDefault(item.RejectedByUserId.Value) : null;
-        dto.DecidedByName = item.DecidedByUserId.HasValue ? names.GetValueOrDefault(item.DecidedByUserId.Value) : null;
+        dto.PreparedByName = names.GetValueOrDefault(item.PreparedByUserId)
+            ?? FinanceBaselineProvisioningSeeder.AuthorityName(item.PreparedByUserId);
+        dto.ApprovedByName = item.ApprovedByUserId.HasValue
+            ? names.GetValueOrDefault(item.ApprovedByUserId.Value) ?? FinanceBaselineProvisioningSeeder.AuthorityName(item.ApprovedByUserId.Value)
+            : null;
+        dto.RejectedByName = item.RejectedByUserId.HasValue
+            ? names.GetValueOrDefault(item.RejectedByUserId.Value) ?? FinanceBaselineProvisioningSeeder.AuthorityName(item.RejectedByUserId.Value)
+            : null;
+        dto.DecidedByName = item.DecidedByUserId.HasValue
+            ? names.GetValueOrDefault(item.DecidedByUserId.Value) ?? FinanceBaselineProvisioningSeeder.AuthorityName(item.DecidedByUserId.Value)
+            : null;
         return dto;
     }
     private async Task AuditAsync(string type, AccountingBookInitialization entity, string reason, CancellationToken ct) => await _audit.RecordAsync(new FinanceAuditEventDto
@@ -435,11 +641,11 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
       _db.Entry(entity).Property(item => item.RowVersion).OriginalValue = value; }
     private Guid Actor() => Guid.TryParse(_currentUser.UserId, out var id) && id != Guid.Empty ? id : throw new UnauthorizedAccessException("An authenticated Finance user is required.");
     private string ActorName() => _currentUser.UserName ?? "system";
-    private Task<T> AtomicAsync<T>(Func<Task<T>> action, CancellationToken ct) => !_db.Database.IsRelational() ? action() : _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+    private Task<T> AtomicAsync<T>(Func<Task<T>> action, CancellationToken ct) => !_db.Database.IsRelational() || _db.Database.CurrentTransaction != null ? action() : _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
     { await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct); try { var result = await action(); await tx.CommitAsync(ct); return result; }
       catch { await tx.RollbackAsync(CancellationToken.None); _db.ChangeTracker.Clear(); throw; } });
-    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
-    private static string D(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
+    private static string D(decimal value) => AccountingBookInitializationFingerprint.Decimal(value);
     private sealed record Prepared(IReadOnlyList<AccountingBookInitializationLineDto> Lines, int RequiredCount, decimal TotalDebits,
-        decimal TotalCredits, string EvidenceFingerprint, string ReconciliationFingerprint, Guid CutoffFiscalPeriodId);
+        decimal TotalCredits, string EvidenceFingerprint, string ReconciliationFingerprint, Guid CutoffFiscalPeriodId,
+        IReadOnlySet<string> AcceptedEvidenceFingerprints, IReadOnlySet<string> AcceptedReconciliationFingerprints);
 }

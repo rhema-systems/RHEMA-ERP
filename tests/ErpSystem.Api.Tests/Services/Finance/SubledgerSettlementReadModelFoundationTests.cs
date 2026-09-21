@@ -595,6 +595,69 @@ public sealed class SubledgerSettlementReadModelFoundationTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
+    [Trait("Category", "AccountingBooks")]
+    public async Task ControlReconciliationUsesPrimaryBookEffectiveAtCutoffWithoutDoubleCountingParallelBooks()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFinanceFixture(db, tenantId);
+        var invoice = SeedPostedApInvoice(db, fixture, "AP-MULTIBOOK", 100m, i => i.PaidAmount = 40m);
+        SeedPostedApPayment(db, fixture, invoice, "APP-MULTIBOOK", 40m);
+
+        var historicalPrimary = fixture.AccountingBook;
+        historicalPrimary.BookType = AccountingBookType.ParallelFull;
+        historicalPrimary.IsDefault = false;
+        var currentPrimary = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "LOCAL_STATUTORY", Name = "Local Statutory",
+            BookType = AccountingBookType.PrimaryFull, IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(currentPrimary);
+        db.AccountingBookPrimaryDesignations.Add(new AccountingBookPrimaryDesignation
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            PreviousPrimaryBookId = historicalPrimary.Id,
+            NewPrimaryBookId = currentPrimary.Id,
+            EffectiveFrom = AsOfDate.AddDays(1),
+            RequestReason = "Controlled primary replacement after the reconciliation cutoff",
+            RequestedByUserId = Guid.NewGuid(), RequestedAtUtc = DateTime.UtcNow,
+            ApprovedByUserId = Guid.NewGuid(), ApprovedAtUtc = DateTime.UtcNow,
+            DecisionReason = "Approved after independent review"
+        });
+
+        var primaryControlLines = db.AccountTransactions.Local
+            .Where(item => item.AccountId == fixture.ApControl.Id)
+            .ToList();
+        foreach (var line in primaryControlLines)
+        {
+            line.AccountingBookId = historicalPrimary.Id;
+            line.BookClassification = historicalPrimary.Code;
+            db.AccountTransactions.Add(new AccountTransaction
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryId = line.JournalEntryId,
+                AccountId = line.AccountId, FiscalPeriodId = line.FiscalPeriodId,
+                TransactionDate = line.TransactionDate, DebitAmount = line.DebitAmount,
+                CreditAmount = line.CreditAmount, PostingStatus = line.PostingStatus,
+                AccountingBookId = currentPrimary.Id, BookClassification = currentPrimary.Code,
+                LineNumber = line.LineNumber + 100, FunctionalCurrencyCode = line.FunctionalCurrencyCode,
+                TransactionCurrency = line.TransactionCurrency, SourceModule = line.SourceModule,
+                SourceDocumentType = line.SourceDocumentType, SourceDocumentId = line.SourceDocumentId,
+                SourceReferenceNumber = line.SourceReferenceNumber
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var report = await CreateSettlementService(db, tenantId).GetControlReconciliationAsync("AP", AsOfDate);
+
+        report.AccountingBookId.Should().Be(historicalPrimary.Id);
+        report.AccountingBookCode.Should().Be("IFRS");
+        report.ReadModelOutstanding.Should().Be(60m);
+        report.PostedGlControlBalance.Should().Be(60m);
+        report.Variance.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerSettlementReadModel")]
     [Trait("Category", "AccountsReceivable")]
     public async Task ArControlReconciliationShowsZeroVarianceForCleanData()
     {
@@ -758,6 +821,14 @@ public sealed class SubledgerSettlementReadModelFoundationTests
         };
         db.FiscalPeriods.Add(period);
 
+        var accountingBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            BookType = AccountingBookType.PrimaryFull, IsDefault = true,
+            IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(accountingBook);
+
         var apControl = SeedAccount(db, tenantId, AccountType.Liability, "2000", "AP Control");
         var arControl = SeedAccount(db, tenantId, AccountType.Asset, "1200", "AR Control");
         var expense = SeedAccount(db, tenantId, AccountType.Expense, "5000", "Expense");
@@ -799,7 +870,7 @@ public sealed class SubledgerSettlementReadModelFoundationTests
         };
         db.BusinessPartners.Add(customer);
 
-        return new FinanceFixture(tenantId, period, apControl, arControl, expense, revenue, cash, fxGainLoss, supplier, customer);
+        return new FinanceFixture(tenantId, period, accountingBook, apControl, arControl, expense, revenue, cash, fxGainLoss, supplier, customer);
     }
 
     private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")
@@ -1163,6 +1234,7 @@ public sealed class SubledgerSettlementReadModelFoundationTests
             FiscalPeriodId = fixture.Period.Id,
             PostingStatus = "Posted",
             BookClassification = "IFRS",
+            AccountingBookId = fixture.AccountingBook.Id,
             SourceModule = sourceModule,
             SourceDocumentType = sourceDocumentType,
             SourceDocumentId = sourceDocumentId,
@@ -1187,6 +1259,7 @@ public sealed class SubledgerSettlementReadModelFoundationTests
                 CreditAmount = line.Credit,
                 PostingStatus = "Posted",
                 BookClassification = "IFRS",
+                AccountingBookId = fixture.AccountingBook.Id,
                 LineNumber = lineNumber++,
                 FunctionalCurrencyCode = "GHS",
                 TransactionCurrency = "GHS",
@@ -1213,7 +1286,8 @@ public sealed class SubledgerSettlementReadModelFoundationTests
             FunctionalCurrencyCode = "GHS",
             TotalDebitAmount = functionalAmount,
             TotalCreditAmount = functionalAmount,
-            BookClassification = "IFRS"
+            BookClassification = "IFRS",
+            AccountingBookId = fixture.AccountingBook.Id
         };
         db.FinancePostingEvents.Add(postingEvent);
         return (journal, postingEvent);
@@ -1222,6 +1296,7 @@ public sealed class SubledgerSettlementReadModelFoundationTests
     private sealed record FinanceFixture(
         Guid TenantId,
         FiscalPeriod Period,
+        AccountingBook AccountingBook,
         Account ApControl,
         Account ArControl,
         Account Expense,

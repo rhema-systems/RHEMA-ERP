@@ -262,6 +262,7 @@
     <Compile Include="Services\Finance\ApSupplierStatementDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\SubledgerReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ManagementReportDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\BaseDeltaReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePartnerDefaultsTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
@@ -322,6 +323,7 @@
     <Compile Include="Services\Finance\LegacyPostingPathLockdownTests.cs" />
     <Compile Include="Services\Finance\FinanceConcurrencyHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceApprovalQueueProjectionTests.cs" />
+    <Compile Include="Services\Finance\WorkflowEntityDisplayServiceFinanceBookTests.cs" />
     <Compile Include="Services\Finance\FinanceSettingsMigrationGapTests.cs" />
     <Compile Include="Services\Finance\CrossCurrencyBankTransferMigrationTests.cs" />
     <!-- Cross-currency settlement is a Finance release gate. Keep both pure arithmetic and

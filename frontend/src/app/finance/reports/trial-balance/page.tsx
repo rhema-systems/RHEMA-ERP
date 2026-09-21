@@ -11,7 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { FinanceSettings, TrialBalanceLineDto, TrialBalanceReportDto } from '@/types/finance';
+import type { DeltaBookCombinedReport, FinanceSettings, TrialBalanceLineDto, TrialBalanceReportDto } from '@/types/finance';
 import { Download, Loader2, Printer, Search } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DEFAULT_ACCOUNTING_BOOKS } from '@/lib/finance/accounting-books';
@@ -37,6 +37,8 @@ export default function TrialBalancePage() {
     const router = useRouter();
     const [asAtDate, setAsAtDate] = useState(new Date().toISOString().split('T')[0]);
     const [bookClassification, setBookClassification] = useState('IFRS');
+    const [reportingView, setReportingView] = useState<'single' | 'base-delta'>('single');
+    const [deltaAccountingBookId, setDeltaAccountingBookId] = useState('');
     const [accountingBooks, setAccountingBooks] = useState(DEFAULT_ACCOUNTING_BOOKS);
     const [hideZeroBalances, setHideZeroBalances] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -53,6 +55,7 @@ export default function TrialBalancePage() {
     const [appliedDimensionFilters, setAppliedDimensionFilters] = useState<FinanceDimensionFilterDto[]>([]);
     const [dimensionLoadError, setDimensionLoadError] = useState<string | null>(null);
     const [report, setReport] = useState<TrialBalanceReportDto | null>(null);
+    const [deltaReport, setDeltaReport] = useState<DeltaBookCombinedReport | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
@@ -76,7 +79,11 @@ export default function TrialBalancePage() {
                 }),
             ]);
             setSettings(settingsData);
-            if (books.length > 0) setAccountingBooks(books);
+            if (books.length > 0) {
+                setAccountingBooks(books);
+                const firstDelta = books.find(book => book.bookType === 'Delta' && book.isActive !== false && book.allowsPosting !== false);
+                if (firstDelta) setDeltaAccountingBookId(firstDelta.id);
+            }
             setReportingDimensions(dimensions);
             setTransactionDimensions(transactionDimensionOptions);
             const data = await financeDataService.getTrialBalance({
@@ -99,6 +106,12 @@ export default function TrialBalancePage() {
         try {
             setRunning(true);
             setError(null);
+            if (reportingView === 'base-delta') {
+                if (!deltaAccountingBookId) throw new Error('Select an active Delta adjustment layer.');
+                const data = await financeDataService.getDeltaBookCombinedReport(deltaAccountingBookId, asAtDate);
+                setDeltaReport(data);
+                return;
+            }
             const segmentFilters = buildFinanceSegmentFilters(reportingDimensions, segmentSelections);
             const dimensionFilters = buildFinanceDimensionFilters(transactionDimensions, dimensionSelections);
             const data = await financeDataService.getTrialBalance({
@@ -113,7 +126,7 @@ export default function TrialBalancePage() {
             setAppliedDimensionFilters(dimensionFilters);
         } catch (err) {
             console.error('Error loading trial balance report:', err);
-            setError('Could not generate the trial balance report.');
+            setError(err instanceof Error ? err.message : 'Could not generate the trial balance report.');
         } finally {
             setRunning(false);
         }
@@ -131,13 +144,32 @@ export default function TrialBalancePage() {
         );
     }, [report, searchTerm]);
 
+    const filteredDeltaLines = useMemo(() => {
+        const search = searchTerm.trim().toLowerCase();
+        const lines = deltaReport?.lines ?? [];
+        if (!search) return lines;
+        return lines.filter(line => line.accountNumber.toLowerCase().includes(search)
+            || line.accountName.toLowerCase().includes(search)
+            || line.accountType.toLowerCase().includes(search));
+    }, [deltaReport, searchTerm]);
+
+    const deltaBooks = useMemo(() => accountingBooks.filter(book =>
+        book.bookType === 'Delta' && book.isActive !== false && book.allowsPosting !== false), [accountingBooks]);
+    const selectedDeltaBook = deltaBooks.find(book => book.id === deltaAccountingBookId);
+
     const formatMoney = (amount: number) => new Intl.NumberFormat('en-GH', {
         style: 'decimal',
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     }).format(amount || 0);
+    const formatSigned = (amount: number) => amount > 0
+        ? `${formatMoney(amount)} Dr`
+        : amount < 0 ? `${formatMoney(Math.abs(amount))} Cr` : formatMoney(0);
 
     const reportParameters = () => {
+        if (reportingView === 'base-delta') {
+            return { asOfDate: asAtDate, deltaAccountingBookId };
+        }
         return {
             asAtDate,
             bookClassification,
@@ -177,7 +209,9 @@ export default function TrialBalancePage() {
         try {
             setActionLoading('print');
             setError(null);
-            await documentOutputService.printReportDocument(DOCUMENT_TYPES.financeTrialBalance, reportParameters());
+            await documentOutputService.printReportDocument(
+                reportingView === 'base-delta' ? DOCUMENT_TYPES.financeBaseDeltaReport : DOCUMENT_TYPES.financeTrialBalance,
+                reportParameters());
         } catch (err) {
             console.error('Error printing trial balance report:', err);
             setError('Could not print the trial balance report.');
@@ -190,7 +224,9 @@ export default function TrialBalancePage() {
         try {
             setActionLoading('export');
             setError(null);
-            await documentOutputService.downloadReportDocument(DOCUMENT_TYPES.financeTrialBalance, reportParameters());
+            await documentOutputService.downloadReportDocument(
+                reportingView === 'base-delta' ? DOCUMENT_TYPES.financeBaseDeltaReport : DOCUMENT_TYPES.financeTrialBalance,
+                reportParameters());
         } catch (err) {
             console.error('Error exporting trial balance report:', err);
             setError('Could not export the trial balance report.');
@@ -222,11 +258,11 @@ export default function TrialBalancePage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline" onClick={printReport} disabled={!report || actionLoading !== null}>
+                    <Button variant="outline" onClick={printReport} disabled={(reportingView === 'single' ? !report : !deltaReport) || actionLoading !== null}>
                         {actionLoading === 'print' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
                         Print
                     </Button>
-                    <Button variant="outline" onClick={exportReport} disabled={!report || actionLoading !== null}>
+                    <Button variant="outline" onClick={exportReport} disabled={(reportingView === 'single' ? !report : !deltaReport) || actionLoading !== null}>
                         {actionLoading === 'export' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                         Export
                     </Button>
@@ -261,9 +297,21 @@ export default function TrialBalancePage() {
                             <Input type="date" value={asAtDate} onChange={(event) => setAsAtDate(event.target.value)} />
                         </div>
                         <div className="space-y-2">
-                            <Label>Book</Label>
-                            <Select value={bookClassification} onValueChange={setBookClassification}>
-                                <SelectTrigger>
+                            <Label>Reporting view</Label>
+                            <Select value={reportingView} onValueChange={(value) => setReportingView(value as 'single' | 'base-delta')}>
+                                <SelectTrigger aria-label="Reporting view">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="single">Single book</SelectItem>
+                                    <SelectItem value="base-delta">Base + Delta</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>{reportingView === 'single' ? 'Book' : 'Delta adjustment layer'}</Label>
+                            {reportingView === 'single' ? <Select value={bookClassification} onValueChange={setBookClassification}>
+                                <SelectTrigger aria-label="Book">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -271,7 +319,10 @@ export default function TrialBalancePage() {
                                         <SelectItem key={book.code} value={book.code}>{book.name}</SelectItem>
                                     ))}
                                 </SelectContent>
-                            </Select>
+                            </Select> : <Select value={deltaAccountingBookId} onValueChange={setDeltaAccountingBookId}>
+                                <SelectTrigger aria-label="Delta adjustment layer"><SelectValue placeholder="Select an active Delta layer" /></SelectTrigger>
+                                <SelectContent>{deltaBooks.map(book => <SelectItem key={book.id} value={book.id}>{book.code} — {book.name}</SelectItem>)}</SelectContent>
+                            </Select>}
                         </div>
                         <div className="space-y-2">
                             <Label>Find in Results</Label>
@@ -285,41 +336,42 @@ export default function TrialBalancePage() {
                                 />
                             </div>
                         </div>
-                        <ReportSegmentFilters
+                        {reportingView === 'single' && <ReportSegmentFilters
                             dimensions={reportingDimensions}
                             selections={segmentSelections}
                             onSelectionChange={updateSegmentSelection}
                             disabled={running}
-                        />
-                        <ReportDimensionFilters
+                        />}
+                        {reportingView === 'single' && <ReportDimensionFilters
                             definitions={transactionDimensions}
                             selections={dimensionSelections}
                             onSelectionChange={updateDimensionSelection}
                             disabled={running}
-                        />
-                        <div className="flex items-center gap-2 pb-2">
+                        />}
+                        {reportingView === 'single' && <div className="flex items-center gap-2 pb-2">
                             <Switch id="hide-zero" checked={hideZeroBalances} onCheckedChange={setHideZeroBalances} />
                             <Label htmlFor="hide-zero">Hide Zero Balances</Label>
-                        </div>
-                        <Button onClick={runReport} disabled={running}>
+                        </div>}
+                        <Button onClick={runReport} disabled={running || reportingView === 'base-delta' && !deltaAccountingBookId}>
                             {running && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Run Report
                         </Button>
                     </div>
-                    {segmentLoadError && <div className="mt-4 text-sm text-amber-700">{segmentLoadError}</div>}
-                    {dimensionLoadError && <div className="mt-4 text-sm text-amber-700">{dimensionLoadError}</div>}
+                    {reportingView === 'base-delta' && <p className="mt-3 text-sm text-muted-foreground">{selectedDeltaBook ? `Base book: ${selectedDeltaBook.baseAccountingBookCode || 'governed base'} · Adjustment layer: ${selectedDeltaBook.code} · View: base balances plus posted Delta adjustments.` : 'Select an active Delta adjustment layer. Its governed base book will be included automatically.'}</p>}
+                    {reportingView === 'single' && segmentLoadError && <div className="mt-4 text-sm text-amber-700">{segmentLoadError}</div>}
+                    {reportingView === 'single' && dimensionLoadError && <div className="mt-4 text-sm text-amber-700">{dimensionLoadError}</div>}
                     {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
-                    <AppliedReportSegmentFilters
+                    {reportingView === 'single' && <AppliedReportSegmentFilters
                         dimensions={reportingDimensions}
                         appliedFilters={appliedSegmentFilters}
                         pendingFilters={buildFinanceSegmentFilters(reportingDimensions, segmentSelections)}
-                    />
-                    <AppliedReportDimensionFilters
+                    />}
+                    {reportingView === 'single' && <AppliedReportDimensionFilters
                         definitions={transactionDimensions}
                         appliedFilters={appliedDimensionFilters}
                         pendingFilters={buildFinanceDimensionFilters(transactionDimensions, dimensionSelections)}
-                    />
-                    {appliedDimensionFilters.length > 0 && (
+                    />}
+                    {reportingView === 'single' && appliedDimensionFilters.length > 0 && (
                         <p className="mt-3 text-xs text-amber-700">
                             Transaction-dimension totals include only ledger lines carrying the selected immutable coding. Operational adapters remain outside this view until individually certified. Analytical slices may be unbalanced unless the selected dimension is governed as Balancing.
                         </p>
@@ -327,7 +379,7 @@ export default function TrialBalancePage() {
                 </CardContent>
             </Card>
 
-            <Card>
+            {reportingView === 'single' ? <Card>
                 <CardHeader className="border-b pb-2">
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                         <CardTitle className="text-lg">
@@ -389,7 +441,26 @@ export default function TrialBalancePage() {
                         </div>
                     )}
                 </CardContent>
-            </Card>
+            </Card> : <Card>
+                <CardHeader className="border-b pb-2">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                        <CardTitle className="text-lg">{deltaReport ? `${deltaReport.baseAccountingBookCode} + ${deltaReport.deltaAccountingBookCode}` : 'Base + Delta report'}</CardTitle>
+                        <span className="text-sm text-muted-foreground">Currency: {deltaReport?.functionalCurrencyCode || settings?.baseCurrency || 'GHS'} | {filteredDeltaLines.length} accounts</span>
+                    </div>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-6">
+                    <div className="grid gap-3 md:grid-cols-3">
+                        <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Base net control</p><p className="font-medium tabular-nums">{formatSigned(deltaReport?.baseTotal ?? 0)}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Delta net control</p><p className="font-medium tabular-nums">{formatSigned(deltaReport?.deltaTotal ?? 0)}</p></div>
+                        <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Combined net control</p><p className="font-medium tabular-nums">{formatSigned(deltaReport?.combinedTotal ?? 0)}</p></div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Positive values are net debits; negative values are net credits. These controls should normally be zero for balanced posted journals.</p>
+                    <div className="rounded-md border"><Table>
+                        <TableHeader><TableRow className="bg-muted/50"><TableHead>Account</TableHead><TableHead>Account Name</TableHead><TableHead>Type</TableHead><TableHead className="text-right">Base ({deltaReport?.baseAccountingBookCode || '—'})</TableHead><TableHead className="text-right">Delta ({deltaReport?.deltaAccountingBookCode || '—'})</TableHead><TableHead className="text-right">Combined</TableHead></TableRow></TableHeader>
+                        <TableBody>{filteredDeltaLines.length > 0 ? filteredDeltaLines.map(line => <TableRow key={line.accountId} className={line.deltaSignedBalance !== 0 ? 'bg-blue-50/60' : undefined}><TableCell className="font-mono text-sm">{line.accountNumber}</TableCell><TableCell>{line.accountName}</TableCell><TableCell>{line.accountType}</TableCell><TableCell className="text-right tabular-nums">{formatSigned(line.baseSignedBalance)}</TableCell><TableCell className="text-right tabular-nums">{formatSigned(line.deltaSignedBalance)}</TableCell><TableCell className="text-right tabular-nums font-medium">{formatSigned(line.combinedSignedBalance)}</TableCell></TableRow>) : <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">{deltaReport ? 'No mapped accounts or posted balances were found.' : 'Choose a Delta adjustment layer and run the report.'}</TableCell></TableRow>}</TableBody>
+                    </Table></div>
+                </CardContent>
+            </Card>}
         </div>
     );
 }

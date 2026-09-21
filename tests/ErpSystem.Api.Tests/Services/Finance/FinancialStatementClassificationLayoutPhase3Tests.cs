@@ -91,8 +91,8 @@ public sealed class FinancialStatementClassificationLayoutPhase3Tests
         var book = new AccountingBook { Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary", Purpose = "Primary", IsActive = true, AllowsPosting = true };
         db.AccountingBooks.Add(book);
         db.AccountClassifications.AddRange(
-            Classification(tenantId, book.Id, "ASSET_ROOT", "Assets"),
-            Classification(tenantId, book.Id, "LIABILITY_ROOT", "Liabilities"),
+            Classification(tenantId, book.Id, "ASSETS", "Assets"),
+            Classification(tenantId, book.Id, "LIABILITIES", "Liabilities"),
             Classification(tenantId, book.Id, "EQUITY_ROOT", "Equity"),
             Classification(tenantId, book.Id, "REVENUE_ROOT", "Revenue"),
             Classification(tenantId, book.Id, "EXPENSE_ROOT", "Expenses"));

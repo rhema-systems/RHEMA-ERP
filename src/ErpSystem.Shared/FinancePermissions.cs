@@ -340,6 +340,35 @@ public static class FinancePermissions
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
 
+    /// <summary>
+    /// Maker-side accounting-book authorities. These must not be assigned to the
+    /// Financial Controller checker role, otherwise the same operational role can
+    /// prepare requests and decide them merely by switching user accounts.
+    /// </summary>
+    public static readonly string[] AccountingBookMakerNames =
+    {
+        ManageAccountingBooks,
+        RequestAccountingBookTransitions,
+        ManageAccountingBookPeriods,
+        ManageAccountingBookInitialization,
+        ManageAccountingBookApplicabilityPolicy
+    };
+
+    public static readonly string[] FinancialControllerNames = AllNames
+        .Except(AccountingBookMakerNames, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    /// <summary>
+    /// Grants that must be removed from already-provisioned roles. The database
+    /// seeder is otherwise add-only, so narrowing a role definition would not
+    /// repair existing installations.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string[]> RoleRevocations =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Financial Controller"] = AccountingBookMakerNames
+        };
+
     public static readonly string[] AllPolicyNames = AllNames
         .Concat(new[]
         {

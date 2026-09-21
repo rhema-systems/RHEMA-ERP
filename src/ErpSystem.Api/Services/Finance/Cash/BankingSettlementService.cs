@@ -473,10 +473,14 @@ public sealed class BankingSettlementService : IBankingSettlementService
 
     public async Task<IReadOnlyList<BankDepositDto>> GetDepositsAsync(
         BankDepositStatus? status = null,
+        bool includeAllocations = false,
+        int limit = 200,
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var query = DepositQuery().Where(item => item.TenantId == tenantId);
+        var query = _context.BankDepositBatches
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId);
         if (status.HasValue)
         {
             query = query.Where(item => item.Status == status.Value);
@@ -485,8 +489,94 @@ public sealed class BankingSettlementService : IBankingSettlementService
         var deposits = await query
             .OrderByDescending(item => item.DepositDate)
             .ThenByDescending(item => item.CreatedAt)
+            .Take(Math.Clamp(limit, 1, 500))
+            .Select(item => new BankDepositDto
+            {
+                Id = item.Id,
+                DepositNumber = item.DepositNumber,
+                BankAccountId = item.BankAccountId,
+                BankAccountName = item.BankAccount.AccountName,
+                BankGLAccountId = item.BankAccount.GLAccountId,
+                DepositDate = item.DepositDate,
+                DepositReference = item.DepositReference,
+                Currency = item.Currency,
+                Status = item.Status,
+                PolicySnapshot = item.PolicySnapshot,
+                TotalReceipts = item.TotalReceipts,
+                TotalDeductions = item.TotalDeductions,
+                NetAmount = item.NetAmount,
+                Notes = item.Notes,
+                WorkflowInstanceId = item.WorkflowInstanceId,
+                SubmittedAt = item.SubmittedAt,
+                SubmittedById = item.SubmittedById,
+                ApprovedAt = item.ApprovedAt,
+                ApprovedById = item.ApprovedById,
+                PostedAt = item.PostedAt,
+                JournalEntryId = item.JournalEntryId,
+                CashTransactionId = item.CashTransactionId,
+                ConfirmationStatus = item.ConfirmationStatus,
+                BankConfirmationReference = item.BankConfirmationReference,
+                BankConfirmationDate = item.BankConfirmationDate,
+                BankConfirmedAt = item.BankConfirmedAt,
+                BankConfirmedById = item.BankConfirmedById,
+                BankConfirmationNotes = item.BankConfirmationNotes,
+                IsReconciled = item.CashTransaction != null && item.CashTransaction.IsReconciled,
+                BankReconciliationId = item.CashTransaction == null ? null : item.CashTransaction.ReconciliationId,
+                ReconciliationStatus = item.CashTransaction == null || item.CashTransaction.Reconciliation == null
+                    ? null
+                    : item.CashTransaction.Reconciliation.Status,
+                ReconciledAt = item.CashTransaction == null || item.CashTransaction.Reconciliation == null
+                    ? null
+                    : item.CashTransaction.Reconciliation.ReconciledAt,
+                ReconciliationApprovedAt = item.CashTransaction == null || item.CashTransaction.Reconciliation == null
+                    ? null
+                    : item.CashTransaction.Reconciliation.ApprovedAt,
+                RejectionReason = item.RejectionReason,
+                CancellationReason = item.CancellationReason
+            })
             .ToListAsync(cancellationToken);
-        return deposits.Select(MapDeposit).ToArray();
+
+        if (!includeAllocations || deposits.Count == 0)
+        {
+            return deposits;
+        }
+
+        var depositIds = deposits.Select(item => item.Id).ToArray();
+        var allocations = await _context.BankDepositAllocations
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && depositIds.Contains(item.BankDepositBatchId))
+            .OrderBy(item => item.LiquidityAccountEntry.EntryDate)
+            .Select(item => new DepositAllocationListRow(
+                item.BankDepositBatchId,
+                item.Id,
+                item.LiquidityAccountEntryId,
+                item.LiquidityAccountEntry.SourceDocumentType,
+                item.LiquidityAccountEntry.SourceDocumentId,
+                item.LiquidityAccountEntry.EntryNumber,
+                item.LiquidityAccountEntry.EntryDate,
+                item.LiquidityAccountEntry.LiquidityAccount.Name,
+                item.LiquidityAccountEntry.LiquidityAccount.GLAccountId,
+                item.LiquidityAccountEntry.EntryType,
+                item.AllocationType,
+                item.Amount,
+                item.LiquidityAccountEntry.ReferenceNumber,
+                item.LiquidityAccountEntry.CounterpartyName,
+                item.LiquidityAccountEntry.Description,
+                item.Notes))
+            .ToListAsync(cancellationToken);
+        var allocationsByDeposit = allocations
+            .GroupBy(item => item.BankDepositBatchId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<BankDepositAllocationDto>)group.Select(MapAllocation).ToArray());
+        foreach (var deposit in deposits)
+        {
+            deposit.Allocations = allocationsByDeposit.GetValueOrDefault(
+                deposit.Id,
+                Array.Empty<BankDepositAllocationDto>());
+        }
+
+        return deposits;
     }
 
     public async Task<BankDepositDto?> GetDepositAsync(Guid id, CancellationToken cancellationToken = default)
@@ -957,10 +1047,13 @@ public sealed class BankingSettlementService : IBankingSettlementService
 
     public async Task<IReadOnlyList<ReturnedChequeCaseDto>> GetReturnedChequesAsync(
         ReturnedChequeCaseStatus? status = null,
+        int limit = 200,
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var query = ReturnedChequeQuery().Where(item => item.TenantId == tenantId);
+        var query = _context.ReturnedChequeCases
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId);
         if (status.HasValue)
         {
             query = query.Where(item => item.Status == status.Value);
@@ -969,8 +1062,55 @@ public sealed class BankingSettlementService : IBankingSettlementService
         var cases = await query
             .OrderByDescending(item => item.ReturnDate)
             .ThenByDescending(item => item.CreatedAt)
+            .Take(Math.Clamp(limit, 1, 500))
+            .Select(item => new ReturnedChequeCaseDto
+            {
+                Id = item.Id,
+                CaseNumber = item.CaseNumber,
+                CustomerPaymentId = item.CustomerPaymentId,
+                PaymentNumber = item.CustomerPayment.PaymentNumber,
+                CustomerId = item.CustomerPayment.CustomerId,
+                BankDepositBatchId = item.BankDepositBatchId,
+                DepositNumber = item.BankDepositBatch == null ? null : item.BankDepositBatch.DepositNumber,
+                BankAccountId = item.BankAccountId,
+                BankAccountName = item.BankAccount.AccountName,
+                ChequeNumber = item.ChequeNumber,
+                DrawerBank = item.DrawerBank,
+                ReturnDate = item.ReturnDate,
+                BankReference = item.BankReference,
+                ReturnReason = item.ReturnReason,
+                ReturnedAmount = item.ReturnedAmount,
+                BankChargeAmount = item.BankChargeAmount,
+                ChargeTreatment = item.ChargeTreatment,
+                CustomerRecoverableChargeAmount = item.CustomerRecoverableChargeAmount,
+                ExpenseChargeAmount = item.ExpenseChargeAmount,
+                Status = item.Status,
+                WorkflowInstanceId = item.WorkflowInstanceId,
+                SubmittedAt = item.SubmittedAt,
+                ApprovedAt = item.ApprovedAt,
+                PostedAt = item.PostedAt,
+                JournalEntryId = item.JournalEntryId,
+                ReturnCashTransactionId = item.ReturnCashTransactionId,
+                ChargeCashTransactionId = item.ChargeCashTransactionId,
+                Notes = item.Notes,
+                RejectionReason = item.RejectionReason
+            })
             .ToListAsync(cancellationToken);
-        return await MapReturnedChequesAsync(cases, cancellationToken);
+        if (cases.Count == 0)
+        {
+            return cases;
+        }
+
+        var customerIds = cases.Select(item => item.CustomerId).Distinct().ToArray();
+        var customerNames = await _context.BusinessPartners
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && customerIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, item => item.PartnerName, cancellationToken);
+        foreach (var item in cases)
+        {
+            item.CustomerName = customerNames.GetValueOrDefault(item.CustomerId, "Customer");
+        }
+        return cases;
     }
 
     public async Task<ReturnedChequeCaseDto?> GetReturnedChequeAsync(
@@ -2385,6 +2525,26 @@ public sealed class BankingSettlementService : IBankingSettlementService
             RowVersion = Convert.ToBase64String(item.RowVersion)
         };
 
+    private static BankDepositAllocationDto MapAllocation(DepositAllocationListRow item)
+        => new()
+        {
+            Id = item.Id,
+            LiquidityAccountEntryId = item.LiquidityAccountEntryId,
+            SourceDocumentType = item.SourceDocumentType,
+            SourceDocumentId = item.SourceDocumentId,
+            EntryNumber = item.EntryNumber,
+            EntryDate = item.EntryDate,
+            LiquidityAccountName = item.LiquidityAccountName,
+            GLAccountId = item.GLAccountId,
+            EntryType = item.EntryType,
+            AllocationType = item.AllocationType,
+            Amount = item.Amount,
+            ReferenceNumber = item.ReferenceNumber,
+            CounterpartyName = item.CounterpartyName,
+            Description = item.Description,
+            Notes = item.Notes
+        };
+
     private BankDepositDto MapDeposit(BankDepositBatch item)
         => new()
         {
@@ -2759,6 +2919,24 @@ public sealed class BankingSettlementService : IBankingSettlementService
         decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
     private readonly record struct RateEvidence(Guid? ExchangeRateId, decimal ExchangeRate);
+
+    private sealed record DepositAllocationListRow(
+        Guid BankDepositBatchId,
+        Guid Id,
+        Guid LiquidityAccountEntryId,
+        string SourceDocumentType,
+        Guid SourceDocumentId,
+        string EntryNumber,
+        DateTime EntryDate,
+        string LiquidityAccountName,
+        Guid GLAccountId,
+        LiquidityEntryType EntryType,
+        BankDepositAllocationType AllocationType,
+        decimal Amount,
+        string? ReferenceNumber,
+        string? CounterpartyName,
+        string? Description,
+        string? Notes);
 
     private sealed record EvidenceAmountShare(
         FinanceSettlementDimensionComponentDto Evidence,

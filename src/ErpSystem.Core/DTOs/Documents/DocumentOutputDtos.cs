@@ -151,6 +151,7 @@ public static class DocumentTypes
     public const string FinanceBudgetConsolidated = "Finance.Budget.Consolidated";
     public const string FinanceBudgetScenarioComparison = "Finance.Budget.ScenarioComparison";
     public const string FinanceTrialBalance = "Finance.TrialBalance";
+    public const string FinanceBaseDeltaReport = "Finance.BaseDeltaReport";
     public const string FinanceIncomeStatement = "Finance.IncomeStatement";
     public const string FinanceBalanceSheet = "Finance.BalanceSheet";
     public const string FinanceCashFlowStatement = "Finance.CashFlowStatement";

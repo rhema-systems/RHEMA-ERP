@@ -1,8 +1,10 @@
 using ErpSystem.Api.Extensions;
+using ErpSystem.Api.Services.Finance.Settings;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -135,9 +137,44 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
         (await verify.AccountAccountingBooks.CountAsync(item =>
             item.TenantId == tenantId && accounts.Select(account => account.Id).Contains(item.AccountId)))
             .Should().Be(9);
+        var baselineBooks = await verify.AccountingBooks.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && new[] { "IFRS", "LOCAL_STATUTORY", "MANAGEMENT" }.Contains(item.Code))
+            .ToListAsync();
+        baselineBooks.Should().HaveCount(3);
+        baselineBooks.Should().OnlyContain(item => item.IsActive && item.AllowsPosting
+            && item.LifecycleStatus == AccountingBookLifecycleStatus.Active,
+            "standard books must be immediately usable in a newly provisioned tenant");
+        (await verify.AccountingBooks.AnyAsync(item => item.TenantId == tenantId
+            && item.BookType == AccountingBookType.Delta && !item.IsDeleted)).Should().BeFalse(
+            "Delta books require an explicit adjustment purpose and base-book authority and are not generic baseline destinations");
         (await verify.AccountAccountingBooks.Where(item => item.TenantId == tenantId)
-            .AllAsync(item => !item.IsEnabled)).Should().BeTrue(
-            "the three freshly configured books are deliberately non-posting until governed activation");
+            .AllAsync(item => item.IsEnabled)).Should().BeTrue(
+            "the executable baseline enables only mappings whose classification authority was validated");
+
+        var initializations = await verify.AccountingBookInitializations.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted).ToListAsync();
+        initializations.Should().HaveCount(3);
+        initializations.Should().OnlyContain(item =>
+            item.InitializationStatus == AccountingBookInitializationStatus.Approved
+            && item.RequiredAccountCount == item.CoveredAccountCount
+            && item.EvidenceFingerprint.Length == 64
+            && item.ReconciliationFingerprint != null && item.ReconciliationFingerprint.Length == 64);
+        var initializationService = new AccountingBookInitializationService(
+            verify, currentUser.Object, Mock.Of<IWorkflowService>(), Mock.Of<IFinanceAuditService>());
+        foreach (var book in baselineBooks)
+        {
+            var validation = await initializationService.ValidateCurrentApprovedEvidenceAsync(book.Id);
+            validation.IsValid.Should().BeTrue(validation.Blocker);
+        }
+
+        var baselinePolicy = await verify.AccountingBookApplicabilityPolicies.AsNoTracking()
+            .Include(item => item.Rules).ThenInclude(item => item.SelectedBooks)
+            .SingleAsync(item => item.TenantId == tenantId
+                && item.PolicyCode == FinanceBaselineProvisioningSeeder.BaselinePolicyCode && !item.IsDeleted);
+        baselinePolicy.PolicyStatus.Should().Be(AccountingBookApplicabilityPolicyStatus.Approved);
+        baselinePolicy.Rules.Should().HaveCount(FinancePostingIdentityCatalog.Definitions.Count);
+        baselinePolicy.Rules.Should().OnlyContain(rule => rule.Priority == 0 && rule.SelectedBooks.Count == 3,
+            "the fallback policy covers every registered producer while remaining overridable by governed user rules");
     }
 
     private static async Task AddSupplierPrerequisitesAsync(ApplicationDbContext db, Guid tenantId)

@@ -27,6 +27,8 @@ public sealed class AccountingBookApplicabilityC5Tests
         var methods = typeof(AccountingBookApplicabilityController).GetMethods(BindingFlags.Instance | BindingFlags.Public);
         methods.Single(item => item.Name == nameof(AccountingBookApplicabilityController.GetEligibleBooks)).GetCustomAttribute<AuthorizeAttribute>()!.Policy
             .Should().Be(FinancePermissions.ViewAccountingBookApplicabilityPolicy);
+        methods.Single(item => item.Name == nameof(AccountingBookApplicabilityController.GetPostingIdentities)).GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be(FinancePermissions.ViewAccountingBookApplicabilityPolicy);
         methods.Single(item => item.Name == nameof(AccountingBookApplicabilityController.CreateDraft)).GetCustomAttribute<AuthorizeAttribute>()!.Policy
             .Should().Be(FinancePermissions.ManageAccountingBookApplicabilityPolicy);
         methods.Single(item => item.Name == nameof(AccountingBookApplicabilityController.Approve)).GetCustomAttribute<AuthorizeAttribute>()!.Policy
@@ -34,6 +36,27 @@ public sealed class AccountingBookApplicabilityC5Tests
         methods.Single(item => item.Name == nameof(AccountingBookApplicabilityController.Resolve)).GetCustomAttribute<AuthorizeAttribute>()!.Policy
             .Should().Be(FinancePermissions.ResolveAccountingBookApplicability);
         methods.Should().NotContain(item => item.Name.Contains("Delete", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task PostingIdentityCatalogAndPriorityRangeAreEnforcedAtServiceBoundary()
+    {
+        await using var db = Context(); var state = Seed(db, ready: true); await db.SaveChangesAsync();
+        var service = Service(db, state.TenantId);
+        var identities = await service.GetPostingIdentitiesAsync();
+        identities.Should().Contain(item => item.OriginatingModuleCode == "SALES"
+            && item.SourceDocumentType == "CUSTOMERINVOICE" && item.PostingAction == "POST");
+
+        var misspelled = Draft(state.Primary.Id);
+        misspelled.Rules.Single().SourceDocumentType = "CUSTOMERINV";
+        misspelled.Rules.Single().OriginatingModuleCode = "SALES";
+        await FluentActions.Awaiting(() => service.CreateDraftAsync(misspelled))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("FINANCE_POSTING_IDENTITY_NOT_REGISTERED:*");
+
+        var excessive = Draft(state.Primary.Id);
+        excessive.Rules.Single().Priority = 1001;
+        await FluentActions.Awaiting(() => service.CreateDraftAsync(excessive))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("Rule priority must be between 0 and 1000;*");
     }
 
     [Fact]

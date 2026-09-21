@@ -83,7 +83,11 @@ public interface IBankingSettlementService
         RegisterPostedLiquidityPaymentDto dto,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<BankDepositDto>> GetDepositsAsync(BankDepositStatus? status = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BankDepositDto>> GetDepositsAsync(
+        BankDepositStatus? status = null,
+        bool includeAllocations = false,
+        int limit = 200,
+        CancellationToken cancellationToken = default);
     Task<BankDepositDto?> GetDepositAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BankDepositDto> CreateDepositAsync(CreateBankDepositDto dto, CancellationToken cancellationToken = default);
     Task<BankDepositDto> UpdateDepositAsync(Guid id, UpdateBankDepositDto dto, CancellationToken cancellationToken = default);
@@ -98,7 +102,10 @@ public interface IBankingSettlementService
     Task<BankDepositDto> PostDepositAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BankDepositDto> ConfirmDepositAsync(Guid id, ConfirmBankDepositDto dto, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<ReturnedChequeCaseDto>> GetReturnedChequesAsync(ReturnedChequeCaseStatus? status = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ReturnedChequeCaseDto>> GetReturnedChequesAsync(
+        ReturnedChequeCaseStatus? status = null,
+        int limit = 200,
+        CancellationToken cancellationToken = default);
     Task<ReturnedChequeCaseDto?> GetReturnedChequeAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ReturnedChequeCaseDto> CreateReturnedChequeAsync(CreateReturnedChequeCaseDto dto, CancellationToken cancellationToken = default);
     Task<ReturnedChequeCaseDto> UpdateReturnedChequeDimensionsAsync(Guid id, FinanceSourceDocumentDimensionInputDto dto, CancellationToken cancellationToken = default);

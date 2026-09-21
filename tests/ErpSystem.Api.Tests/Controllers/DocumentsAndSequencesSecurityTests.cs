@@ -98,9 +98,11 @@ public sealed class DocumentsAndSequencesSecurityTests
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(DocumentTypes.FinanceTrialBalance)]
+    [InlineData(DocumentTypes.FinanceBaseDeltaReport)]
     [Trait("Category", "FinanceSecurity")]
-    public async Task FinanceDocumentRender_ShouldRequireFinanceExportPermission()
+    public async Task FinanceDocumentRender_ShouldRequireFinanceExportPermission(string documentType)
     {
         var documents = new Mock<IDocumentOutputService>(MockBehavior.Strict);
         var authorization = new Mock<IAuthorizationService>(MockBehavior.Strict);
@@ -113,7 +115,7 @@ public sealed class DocumentsAndSequencesSecurityTests
 
         var controller = CreateDocumentsController(documents, authorization);
 
-        var result = await controller.RenderDocument(DocumentTypes.FinanceTrialBalance, Guid.NewGuid());
+        var result = await controller.RenderDocument(documentType, Guid.NewGuid());
 
         result.Should().BeOfType<ForbidResult>();
         documents.Verify(service => service.RenderAsync(

@@ -2,6 +2,10 @@
 const isStandaloneBuild = process.env.NEXT_OUTPUT === 'standalone';
 
 const nextConfig = {
+  // Keep production compilation isolated from `next dev`. Both commands mutate
+  // their output directory, so sharing `.next` can produce missing page modules.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
+
   // `next start` is used for local UAT and needs the regular .next output. Docker opts into
   // standalone explicitly through NEXT_OUTPUT=standalone (see Dockerfile).
   output: isStandaloneBuild ? 'standalone' : undefined,

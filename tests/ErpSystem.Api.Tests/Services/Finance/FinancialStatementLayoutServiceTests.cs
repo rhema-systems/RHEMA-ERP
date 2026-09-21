@@ -22,6 +22,44 @@ public sealed class FinancialStatementLayoutServiceTests
 {
     [Fact]
     [Trait("Category", "Reporting")]
+    public async Task GetLayouts_ShouldReturnVersionSummaryWithoutLoadingLayoutDetails()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var layout = new FinancialStatementLayout
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "BS_SUMMARY", Name = "Balance sheet summary",
+            StatementType = FinancialStatementType.BalanceSheet, IsActive = true
+        };
+        layout.Versions.Add(new FinancialStatementLayoutVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, VersionNumber = 1,
+            Status = FinancialStatementLayoutVersionStatus.Published
+        });
+        layout.Versions.Add(new FinancialStatementLayoutVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, VersionNumber = 2,
+            Status = FinancialStatementLayoutVersionStatus.Draft
+        });
+        context.FinancialStatementLayouts.Add(layout);
+        await context.SaveChangesAsync();
+
+        context.ChangeTracker.Clear();
+        var summaries = await CreateService(context, tenantId).GetLayoutsAsync();
+
+        summaries.Should().ContainSingle().Which.Should().Match<FinancialStatementLayoutSummaryDto>(item =>
+            item.Code == "BS_SUMMARY"
+            && item.AccountingBookCode == "IFRS"
+            && item.LatestVersionNumber == 2
+            && item.PublishedVersionNumber == 1);
+        context.ChangeTracker.Entries<FinancialStatementLayoutVersion>().Should().BeEmpty(
+            "the register query should project version aggregates instead of materializing the detail graph");
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
     public async Task DraftLifecycle_ShouldReplaceValidateAndPublishVersionedRows()
     {
         var tenantId = Guid.NewGuid();

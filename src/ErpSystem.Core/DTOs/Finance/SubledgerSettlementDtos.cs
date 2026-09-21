@@ -102,6 +102,9 @@ public sealed class SubledgerControlReconciliationDto
 {
     public string SourceModule { get; set; } = string.Empty;
     public DateTime AsOfDate { get; set; }
+    public Guid? AccountingBookId { get; set; }
+    public string? AccountingBookCode { get; set; }
+    public string? AccountingBookName { get; set; }
     public Guid? ControlAccountId { get; set; }
     public string? ControlAccountNumber { get; set; }
     public string? ControlAccountName { get; set; }

@@ -148,6 +148,57 @@ public sealed class InventoryValuationReconciliationServiceTests
         result.Exceptions.Should().NotContain(value => value.Code == "INV_VALUATION_GL_MISMATCH");
     }
 
+    [Fact, Trait("Batch", "TDC-0613")]
+    public async Task Reconciliation_uses_primary_book_without_double_counting_parallel_representations()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var inventoryAccountId = (await fixture.Db.FinanceSettings.SingleAsync()).ControlAccountInventoryId!.Value;
+        var primary = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "IFRS", Name = "IFRS Primary",
+            BookType = AccountingBookType.PrimaryFull, IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        var parallel = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "LOCAL_STATUTORY", Name = "Local Statutory",
+            BookType = AccountingBookType.ParallelFull, IsDefault = false, IsActive = true, AllowsPosting = true
+        };
+        fixture.Db.AccountingBooks.AddRange(primary, parallel);
+        fixture.Db.InventoryMovements.Add(new InventoryMovement
+        {
+            TenantId = fixture.TenantId, InventoryItemId = Guid.NewGuid(), WarehouseId = Guid.NewGuid(),
+            MovementNumber = "ADJ-MULTIBOOK", MovementType = InventoryMovementType.AdjustmentIn,
+            Direction = MovementDirection.In, TotalValue = 90m, Quantity = 9m, UnitCost = 10m,
+            IsPosted = true, PostingDate = new DateTime(2026, 12, 10)
+        });
+        fixture.Db.InventoryBalances.Add(new InventoryBalance
+        {
+            TenantId = fixture.TenantId, InventoryItemId = Guid.NewGuid(), WarehouseId = Guid.NewGuid(),
+            QuantityOnHand = 9m, TotalValue = 90m
+        });
+        foreach (var book in new[] { primary, parallel })
+        {
+            fixture.Db.AccountTransactions.Add(new AccountTransaction
+            {
+                TenantId = fixture.TenantId, AccountId = inventoryAccountId,
+                JournalEntryId = Guid.NewGuid(), DebitAmount = 90m, PostingStatus = "Posted",
+                TransactionDate = new DateTime(2026, 12, 10), TransactionTag = "INV-ADJ-CONTROL",
+                AccountingBookId = book.Id, BookClassification = book.Code
+            });
+        }
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.GenerateAsync(new GenerateInventoryValuationReconciliationRequest
+        {
+            FiscalPeriodId = fixture.PeriodId, ToleranceAmount = 0m,
+            IdempotencyKey = "multibook-primary-only", CorrelationId = "multibook-primary-only"
+        });
+
+        result.GeneralLedgerValue.Should().Be(90m);
+        result.ReconciliationVariance.Should().Be(0m);
+        result.Exceptions.Should().NotContain(value => value.Code == "INV_VALUATION_GL_MISMATCH");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(ApplicationDbContext db, Guid tenantId, Guid periodId,

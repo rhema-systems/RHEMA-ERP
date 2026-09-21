@@ -623,6 +623,57 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
             }
 
             // Finance approval notifications depend on these entity links, so keep them with the newer Sales workflow mappings below.
+            if (key == Normalize("AccountingBookLifecycle"))
+            {
+                var book = await _unitOfWork.Repository<AccountingBook>().FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "AccountingBookLifecycle";
+                info.EntityNumber = book?.Code;
+                info.EntityName = book?.Name;
+                info.ActionUrl = "/finance/settings/accounting-books";
+                return info;
+            }
+
+            if (key == Normalize("AccountingBookPeriodLifecycle"))
+            {
+                var period = await _unitOfWork.Repository<AccountingBookPeriod>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.AccountingBook);
+                info.EntityType = "AccountingBookPeriodLifecycle";
+                info.EntityNumber = period?.AccountingBook?.Code;
+                info.EntityName = period == null
+                    ? null
+                    : $"{period.AccountingBook?.Name ?? "Accounting book"} period {period.PeriodStatus}";
+                info.ActionUrl = period == null
+                    ? "/finance/settings/accounting-books"
+                    : $"/finance/settings/accounting-books/{period.AccountingBookId:D}/readiness";
+                return info;
+            }
+
+            if (key == Normalize("AccountingBookInitialization"))
+            {
+                var initialization = await _unitOfWork.Repository<AccountingBookInitialization>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.AccountingBook);
+                info.EntityType = "AccountingBookInitialization";
+                info.EntityNumber = initialization == null
+                    ? null
+                    : $"{initialization.AccountingBook?.Code}/V{initialization.Version}";
+                info.EntityName = initialization?.AccountingBook?.Name;
+                info.ActionUrl = initialization == null
+                    ? "/finance/settings/accounting-books"
+                    : $"/finance/settings/accounting-books/{initialization.AccountingBookId:D}/readiness";
+                return info;
+            }
+
+            if (key == Normalize("AccountingBookApplicabilityPolicy"))
+            {
+                var policy = await _unitOfWork.Repository<AccountingBookApplicabilityPolicy>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "AccountingBookApplicabilityPolicy";
+                info.EntityNumber = policy == null ? null : $"{policy.PolicyCode}/V{policy.Version}";
+                info.EntityName = policy?.Name;
+                info.ActionUrl = "/finance/settings/accounting-books/applicability";
+                return info;
+            }
+
             if (key == Normalize("JournalEntry"))
             {
                 var journal = await _unitOfWork.Repository<JournalEntry>().FirstOrDefaultAsync(x => x.Id == entityId);

@@ -188,7 +188,7 @@ public sealed class CashBankOperationalBalanceHardeningTests
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
-        var fixture = await SeedCashTransactionAsync(db, tenantId, CashTransactionType.Receipt, 1000m, CashTransactionApprovalStatus.Approved);
+        var fixture = await SeedCashTransactionAsync(db, tenantId, CashTransactionType.Receipt, 0m, CashTransactionApprovalStatus.Approved);
         var service = CreateService(db, tenantId);
         await service.PostAsync(fixture.Transaction.Id);
         fixture.BankAccount.CurrentBalance += 5m;
@@ -198,8 +198,8 @@ public sealed class CashBankOperationalBalanceHardeningTests
         var mismatches = await DetectStoredSnapshotMismatchesAsync(db, tenantId);
 
         mismatches.Should().ContainSingle(m => m.BankAccountId == fixture.BankAccount.Id);
-        mismatches.Single().StoredCurrentBalance.Should().Be(1105m);
-        mismatches.Single().ExpectedCurrentBalance.Should().Be(1100m);
+        mismatches.Single().StoredCurrentBalance.Should().Be(105m);
+        mismatches.Single().ExpectedCurrentBalance.Should().Be(100m);
     }
 
     private static async Task<IReadOnlyList<BalanceMismatch>> DetectStoredSnapshotMismatchesAsync(ApplicationDbContext db, Guid tenantId)
@@ -223,7 +223,9 @@ public sealed class CashBankOperationalBalanceHardeningTests
                     t.PostingStatus == "Posted" &&
                     !t.IsDeleted)
                 .SumAsync(t => t.DebitAmount - t.CreditAmount);
-            var expected = bank.OpeningBalance + postedMovement;
+            // Governed openings are included in postedMovement. The deprecated bank-master
+            // OpeningBalance snapshot must never be added to ledger authority.
+            var expected = postedMovement;
             if (expected != bank.CurrentBalance || expected != bank.AvailableBalance)
             {
                 result.Add(new BalanceMismatch(bank.Id, bank.CurrentBalance, bank.AvailableBalance, expected));

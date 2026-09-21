@@ -129,13 +129,24 @@ public sealed class FinanceClassificationManifestSeeder
                 {
                     throw new InvalidOperationException($"Classification {book.Code}/{definition.Code} has an incompatible core account type.");
                 }
-                else if (classification.CreatedBy?.Contains("FIN-CLASSIFICATION-", StringComparison.Ordinal) == true
-                    && classification.UpdatedBy == null)
+                else if (IsUntouchedManifestOwnedClassification(classification))
                 {
                     // Phase 4 owns the reviewed monetary defaults. Upgrade only untouched
                     // system rows; an administrator decision is authoritative even when it
                     // differs from this manifest.
                     classification.DefaultRevaluationTreatment = definition.Treatment;
+                    if (definition.Role.HasValue
+                        && classification.SystemRole == null
+                        && !classifications.Any(item => item.Id != classification.Id
+                            && item.AccountingBookId == book.Id
+                            && !item.IsDeleted
+                            && item.SystemRole == definition.Role))
+                    {
+                        // Older manifest versions created these exact system rows before
+                        // SystemRole existed. Backfill only an untouched manifest-owned row,
+                        // and never displace an administrator-assigned role.
+                        classification.SystemRole = definition.Role;
+                    }
                 }
             }
             await _db.SaveChangesAsync(cancellationToken);
@@ -144,8 +155,7 @@ public sealed class FinanceClassificationManifestSeeder
                 var classification = classifications.Single(item => item.AccountingBookId == book.Id && item.Code == definition.Code);
                 var parent = classifications.Single(item => item.AccountingBookId == book.Id && item.Code == definition.ParentCode);
                 if (classification.ParentClassificationId == null
-                    && classification.CreatedBy?.Contains("FIN-CLASSIFICATION-", StringComparison.Ordinal) == true
-                    && classification.UpdatedBy == null)
+                    && IsUntouchedManifestOwnedClassification(classification))
                     classification.ParentClassificationId = parent.Id;
             }
         }
@@ -205,6 +215,12 @@ public sealed class FinanceClassificationManifestSeeder
     public static bool IsUntouchedManifestOwnedMapping(AccountAccountingBook mapping) =>
         mapping.UpdatedBy is null
         && mapping.CreatedBy is "System (FIN-CLASSIFICATION-1.0)"
+            or "System (FIN-CLASSIFICATION-2.0)"
+            or "System (FIN-CLASSIFICATION-3.0)";
+
+    public static bool IsUntouchedManifestOwnedClassification(AccountClassification classification) =>
+        classification.UpdatedBy is null
+        && classification.CreatedBy is "System (FIN-CLASSIFICATION-1.0)"
             or "System (FIN-CLASSIFICATION-2.0)"
             or "System (FIN-CLASSIFICATION-3.0)";
 

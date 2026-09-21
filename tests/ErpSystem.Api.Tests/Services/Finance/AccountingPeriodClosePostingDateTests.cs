@@ -231,6 +231,39 @@ public sealed class AccountingPeriodClosePostingDateTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-PeriodClose")]
     [Trait("Category", "FiscalPeriod")]
+    public async Task ValidatePeriodClose_ShouldExcludeDraftAndDeletedLedgerLinesFromTrialBalanceEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        db.AccountTransactions.AddRange(
+            new AccountTransaction
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = Guid.NewGuid(),
+                FiscalPeriodId = period.Id, TransactionDate = period.StartDate,
+                DebitAmount = 999m, CreditAmount = 0m, PostingStatus = "Draft"
+            },
+            new AccountTransaction
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = Guid.NewGuid(),
+                FiscalPeriodId = period.Id, TransactionDate = period.StartDate,
+                DebitAmount = 0m, CreditAmount = 777m, PostingStatus = "Posted", IsDeleted = true
+            });
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db, tenantId).ValidatePeriodCloseAsync(period.Id);
+
+        result.TotalDebits.Should().Be(0m);
+        result.TotalCredits.Should().Be(0m);
+        result.Difference.Should().Be(0m);
+        result.ValidationErrors.Should().NotContain(message =>
+            message.Contains("Trial Balance", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-PeriodClose")]
+    [Trait("Category", "FiscalPeriod")]
     public async Task ReopenPeriod_ShouldRequireIndependentApprovalAndAuditSuccessfulReopen()
     {
         var tenantId = Guid.NewGuid();
@@ -493,6 +526,13 @@ public sealed class AccountingPeriodClosePostingDateTests
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
         var period = SeedPeriod(db, tenantId);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            BookType = AccountingBookType.PrimaryFull, IsDefault = true,
+            IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
         db.JournalEntries.Add(new JournalEntry
         {
             Id = Guid.NewGuid(),
@@ -503,6 +543,8 @@ public sealed class AccountingPeriodClosePostingDateTests
             FiscalPeriodId = period.Id,
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             TotalDebitAmount = 100m,
             TotalCreditAmount = 100m
         });

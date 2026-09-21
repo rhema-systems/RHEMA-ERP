@@ -14,6 +14,7 @@ vi.mock('@/services/finance/finance-data.service', () => ({ financeDataService: 
     getAccountingBook: vi.fn(), getAccountingBooks: vi.fn(), getAccountingBookPeriods: vi.fn(), getFiscalPeriods: vi.fn(),
     getAccountingBookInitialization: vi.fn(), getAccountingBookActivationReadiness: vi.fn(), createAccountingBookPeriod: vi.fn(),
     requestAccountingBookPeriodTransition: vi.fn(), decideAccountingBookPeriodTransition: vi.fn(), prepareAccountingBookInitialization: vi.fn(),
+    prepareDeltaBookStructure: vi.fn(),
     configureAccountingBookInitialization: vi.fn(), submitAccountingBookInitialization: vi.fn(), decideAccountingBookInitialization: vi.fn(),
 } }));
 
@@ -84,6 +85,14 @@ describe('accounting book C4 readiness', () => {
         await waitFor(() => expect(financeDataService.requestAccountingBookPeriodTransition).toHaveBeenCalledWith('book-1', 'bp-1', 'Open', 'Open after close checks', 'AQ=='));
     });
 
+    it('shows a guided next action without collapsing the independent controls', async () => {
+        render(<AccountingBookReadinessPage />);
+        expect(await screen.findByText('Setup progress')).toBeInTheDocument();
+        expect(screen.getByText('Next required action')).toBeInTheDocument();
+        expect(screen.getByText('Load governed preparation and save the initialization evidence.')).toBeInTheDocument();
+        expect(screen.getByText('Open period required')).toBeInTheDocument();
+    });
+
     it('makes period approval a clear confirmation and does not clear a repeated selection', async () => {
         permissions.add('Finance.AccountingBooks.Periods.Approve');
         vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([{
@@ -114,8 +123,57 @@ describe('accounting book C4 readiness', () => {
         fireEvent.change(screen.getByLabelText('Preparation reason'), { target: { value: 'Reviewed opening evidence' } });
         fireEvent.click(screen.getByRole('button', { name: 'Load governed preparation' }));
         expect(await screen.findByText('1000 — Cash')).toBeInTheDocument();
+        expect(screen.getByText(/server-derived from this book’s posted exact-book balances/i)).toBeInTheDocument();
+        expect(screen.getByLabelText('1000 debit')).toHaveAttribute('readonly');
+        expect(screen.getByLabelText('1000 credit')).toHaveAttribute('readonly');
+        expect(screen.getByLabelText('1000 adjustment')).toBeDisabled();
         fireEvent.click(screen.getByRole('button', { name: 'Save draft evidence' }));
         await waitFor(() => expect(financeDataService.configureAccountingBookInitialization).toHaveBeenCalledWith('book-1', expect.objectContaining({ mode: 'IndependentOpeningBalances', cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', idempotencyKey: 'init-1', lines: [expect.objectContaining({ accountId: 'account-1', currencyCode: 'GHS' })] })));
+    });
+
+    it('keeps Delta zero-balance initialization read-only', async () => {
+        permissions.add('Finance.AccountingBooks.Initialization.Manage');
+        const delta = { ...book, code: 'IFRS_CONSOL_ADJ', name: 'IFRS consolidation adjustments', bookType: 'Delta', baseAccountingBookCode: 'IFRS' };
+        vi.mocked(financeDataService.getAccountingBook).mockResolvedValue(delta as never);
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([delta] as never);
+        vi.mocked(financeDataService.prepareDeltaBookStructure).mockResolvedValue({} as never);
+        vi.mocked(financeDataService.prepareAccountingBookInitialization).mockResolvedValue({ accountingBookId: 'book-1', accountingBookCode: 'IFRS_CONSOL_ADJ', mode: 'IndependentOpeningBalances', cutoffDate: '2026-01-31', cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', functionalCurrencyCode: 'GHS', accounts: [{ accountId: 'account-1', accountNumber: '1000', accountName: 'Cash', accountClassificationId: 'class-1', accountClassificationCode: 'CASH', authoritativeSignedBalance: 0 }] });
+
+        render(<AccountingBookReadinessPage />);
+        fireEvent.change(await screen.findByLabelText('Cutoff date'), { target: { value: '2026-01-31' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Load governed preparation' }));
+
+        expect(await screen.findByText(/This Delta layer starts at zero/i)).toBeInTheDocument();
+        expect(financeDataService.prepareDeltaBookStructure).toHaveBeenCalledWith('book-1');
+        expect(screen.getByLabelText('1000 debit')).toHaveAttribute('readonly');
+        expect(screen.getByLabelText('1000 credit')).toHaveAttribute('readonly');
+        expect(screen.getByLabelText('1000 adjustment')).toBeDisabled();
+    });
+
+    it('lets a full book edit only the governed opening adjustment and derives debit and credit', async () => {
+        permissions.add('Finance.AccountingBooks.Initialization.Manage');
+        const ifrs = { ...book, id: 'ifrs', code: 'IFRS', name: 'IFRS Primary', bookType: 'PrimaryFull', lifecycleStatus: 'Active', isActive: true, isDefault: true, allowsPosting: true };
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([book, ifrs] as never);
+        vi.mocked(financeDataService.prepareAccountingBookInitialization).mockResolvedValue({ accountingBookId: 'book-1', accountingBookCode: 'LOCAL', mode: 'BaseBalancesWithOpeningAdjustments', cutoffDate: '2026-01-31', cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', sourceAccountingBookId: 'ifrs', sourceAccountingBookCode: 'IFRS', functionalCurrencyCode: 'GHS', accounts: [{ accountId: 'account-1', accountNumber: '1000', accountName: 'Cash', accountClassificationId: 'class-1', accountClassificationCode: 'CASH', authoritativeSignedBalance: 1200 }] });
+
+        render(<AccountingBookReadinessPage />);
+        fireEvent.click(await screen.findByLabelText('Initialization mode'));
+        fireEvent.click(await screen.findByText('BaseBalancesWithOpeningAdjustments'));
+        fireEvent.click(screen.getByLabelText('Source full book'));
+        fireEvent.click(await screen.findByText('IFRS — IFRS Primary'));
+        fireEvent.change(screen.getByLabelText('Cutoff date'), { target: { value: '2026-01-31' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Load governed preparation' }));
+
+        expect(await screen.findByText(/Edit Adjustment only/i)).toBeInTheDocument();
+        const debit = screen.getByLabelText('1000 debit');
+        const credit = screen.getByLabelText('1000 credit');
+        const adjustment = screen.getByLabelText('1000 adjustment');
+        expect(debit).toHaveAttribute('readonly');
+        expect(credit).toHaveAttribute('readonly');
+        expect(adjustment).not.toBeDisabled();
+        fireEvent.change(adjustment, { target: { value: '25' } });
+        expect(debit).toHaveValue(1225);
+        expect(credit).toHaveValue(0);
     });
 
     it('shows maker-checker initialization actions only under approval permission', async () => {

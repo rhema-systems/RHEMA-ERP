@@ -359,7 +359,118 @@ public sealed class AccountingBookLifecycleC3Tests
             .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.RequestAccountingBookTransitions);
         methods.Single(item => item.Name == nameof(AccountingBooksController.ApproveTransition))
             .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ApproveAccountingBookTransitions);
+        methods.Single(item => item.Name == nameof(AccountingBooksController.RequestPrimaryReplacementReversal))
+            .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.RequestAccountingBookTransitions);
+        methods.Single(item => item.Name == nameof(AccountingBooksController.ApprovePrimaryReplacementReversal))
+            .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ApproveAccountingBookTransitions);
+        methods.Single(item => item.Name == nameof(AccountingBooksController.RejectPrimaryReplacementReversal))
+            .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ApproveAccountingBookTransitions);
         methods.Should().NotContain(item => item.Name.Contains("Delete", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task PrimaryReplacement_UsesIndependentApproval_AndAtomicallyPromotesReadyFullBook()
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
+        var current = SeedBook(db, tenantId, "IFRS", AccountingBookType.PrimaryFull, true, AccountingBookLifecycleStatus.Active);
+        var proposed = SeedBook(db, tenantId, "MANAGEMENT", AccountingBookType.ParallelFull, false, AccountingBookLifecycleStatus.Active);
+        await db.SaveChangesAsync();
+        var initialization = new Mock<IAccountingBookInitializationService>();
+        initialization.Setup(item => item.GetReadinessAsync(proposed.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccountingBookActivationReadinessDto { IsReady = true });
+
+        var requested = await Service(db, tenantId, maker, initialization: initialization.Object)
+            .RequestPrimaryReplacementAsync(proposed.Id, new RequestPrimaryAccountingBookReplacementDto
+            { EffectiveDate = DateTime.UtcNow.Date, Reason = "Adopt management authority", RowVersion = Convert.ToBase64String(proposed.RowVersion) });
+        requested.PrimaryReplacementFromBookId.Should().Be(current.Id);
+
+        var approved = await Service(db, tenantId, checker, initialization: initialization.Object)
+            .ApprovePrimaryReplacementAsync(proposed.Id, new DecideAccountingBookTransitionDto
+            { Reason = "Readiness and currency verified", RowVersion = requested.RowVersion });
+
+        approved.IsDefault.Should().BeTrue();
+        approved.BookType.Should().Be("PrimaryFull");
+        var old = await db.AccountingBooks.AsNoTracking().SingleAsync(item => item.Id == current.Id);
+        old.IsDefault.Should().BeFalse(); old.BookType.Should().Be(AccountingBookType.ParallelFull);
+        (await db.AccountingBookPrimaryDesignations.SingleAsync()).PreviousPrimaryBookId.Should().Be(current.Id);
+    }
+
+    [Fact]
+    public async Task SameDayPrimaryReplacementReversal_PreservesDesignationAudit_AndRestoresPreviousPrimary()
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
+        var current = SeedBook(db, tenantId, "IFRS", AccountingBookType.PrimaryFull, true, AccountingBookLifecycleStatus.Active);
+        var proposed = SeedBook(db, tenantId, "LOCAL_STATUTORY", AccountingBookType.ParallelFull, false, AccountingBookLifecycleStatus.Active);
+        await db.SaveChangesAsync();
+        var initialization = new Mock<IAccountingBookInitializationService>();
+        initialization.Setup(item => item.GetReadinessAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccountingBookActivationReadinessDto { IsReady = true });
+
+        var requestedReplacement = await Service(db, tenantId, maker, initialization: initialization.Object)
+            .RequestPrimaryReplacementAsync(proposed.Id, new RequestPrimaryAccountingBookReplacementDto
+            { EffectiveDate = DateTime.UtcNow.Date, Reason = "Use local statutory authority", RowVersion = Convert.ToBase64String(proposed.RowVersion) });
+        var promoted = await Service(db, tenantId, checker, initialization: initialization.Object)
+            .ApprovePrimaryReplacementAsync(proposed.Id, new DecideAccountingBookTransitionDto
+            { Reason = "Replacement controls reviewed", RowVersion = requestedReplacement.RowVersion });
+
+        var reversalRequested = await Service(db, tenantId, maker, initialization: initialization.Object)
+            .RequestPrimaryReplacementReversalAsync(proposed.Id, new RequestPrimaryAccountingBookReversalDto
+            { Reason = "Correct same-day designation error", RowVersion = promoted.RowVersion });
+
+        reversalRequested.ReversiblePrimaryDesignationPreviousBookId.Should().Be(current.Id);
+        reversalRequested.PrimaryReversalRequestedByUserId.Should().Be(maker);
+        reversalRequested.PrimaryReversalReason.Should().Be("Correct same-day designation error");
+
+        var restored = await Service(db, tenantId, checker, initialization: initialization.Object)
+            .ApprovePrimaryReplacementReversalAsync(proposed.Id, new DecideAccountingBookTransitionDto
+            { Reason = "Confirmed same-day correction", RowVersion = reversalRequested.RowVersion });
+
+        restored.IsDefault.Should().BeFalse();
+        restored.BookType.Should().Be("ParallelFull");
+        var previous = await db.AccountingBooks.AsNoTracking().SingleAsync(item => item.Id == current.Id);
+        previous.IsDefault.Should().BeTrue();
+        previous.BookType.Should().Be(AccountingBookType.PrimaryFull);
+
+        var designation = await db.AccountingBookPrimaryDesignations.AsNoTracking().SingleAsync();
+        designation.ReversedAtUtc.Should().NotBeNull();
+        designation.ReversalRequestedByUserId.Should().Be(maker);
+        designation.ReversedByUserId.Should().Be(checker);
+        designation.ReversalReason.Should().Be("Correct same-day designation error");
+        designation.ReversalDecisionReason.Should().Be("Confirmed same-day correction");
+    }
+
+    [Fact]
+    public async Task SameDayPrimaryReplacementReversal_RejectsMakerAsChecker()
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        var maker = Guid.NewGuid(); var replacementChecker = Guid.NewGuid();
+        var current = SeedBook(db, tenantId, "IFRS", AccountingBookType.PrimaryFull, true, AccountingBookLifecycleStatus.Active);
+        var proposed = SeedBook(db, tenantId, "LOCAL_STATUTORY", AccountingBookType.ParallelFull, false, AccountingBookLifecycleStatus.Active);
+        await db.SaveChangesAsync();
+        var initialization = new Mock<IAccountingBookInitializationService>();
+        initialization.Setup(item => item.GetReadinessAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccountingBookActivationReadinessDto { IsReady = true });
+
+        var replacement = await Service(db, tenantId, maker, initialization: initialization.Object)
+            .RequestPrimaryReplacementAsync(proposed.Id, new RequestPrimaryAccountingBookReplacementDto
+            { EffectiveDate = DateTime.UtcNow.Date, Reason = "Temporary primary", RowVersion = Convert.ToBase64String(proposed.RowVersion) });
+        var promoted = await Service(db, tenantId, replacementChecker, initialization: initialization.Object)
+            .ApprovePrimaryReplacementAsync(proposed.Id, new DecideAccountingBookTransitionDto
+            { Reason = "Approved", RowVersion = replacement.RowVersion });
+        var reversal = await Service(db, tenantId, maker, initialization: initialization.Object)
+            .RequestPrimaryReplacementReversalAsync(proposed.Id, new RequestPrimaryAccountingBookReversalDto
+            { Reason = "Reverse mistake", RowVersion = promoted.RowVersion });
+
+        await FluentActions.Awaiting(() => Service(db, tenantId, maker, initialization: initialization.Object)
+                .ApprovePrimaryReplacementReversalAsync(proposed.Id, new DecideAccountingBookTransitionDto
+                { Reason = "Self approval", RowVersion = reversal.RowVersion }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*prohibits the requester*");
     }
 
     private static ApplicationDbContext NewDatabase() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -413,13 +524,13 @@ public sealed class AccountingBookLifecycleC3Tests
     { Code = code, Name = code, Purpose = "Adjustment", BookType = "Delta", BaseAccountingBookId = baseId };
 
     private static AccountingBookService Service(ApplicationDbContext db, Guid tenantId, Guid? actor = null,
-        IWorkflowService? workflow = null, IFinanceAuditService? audit = null)
+        IWorkflowService? workflow = null, IFinanceAuditService? audit = null, IAccountingBookInitializationService? initialization = null)
     {
         var current = new Mock<ICurrentUserService>();
         current.SetupGet(item => item.TenantId).Returns(tenantId);
         current.SetupGet(item => item.UserId).Returns((actor ?? Guid.NewGuid()).ToString());
         current.SetupGet(item => item.UserName).Returns("finance.c3.tests");
-        return new AccountingBookService(db, current.Object, workflow ?? Workflow().Object, audit ?? Audit().Object);
+        return new AccountingBookService(db, current.Object, workflow ?? Workflow().Object, audit ?? Audit().Object, initialization);
     }
 
     private static Mock<IWorkflowService> Workflow()

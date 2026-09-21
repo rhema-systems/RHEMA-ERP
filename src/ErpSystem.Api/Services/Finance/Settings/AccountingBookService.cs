@@ -43,11 +43,13 @@ public sealed class AccountingBookService : IAccountingBookService
         if (!includeInactive) query = query.Where(book => book.IsActive);
         var books = await query.OrderBy(book => book.SortOrder).ThenBy(book => book.Code).ToListAsync(cancellationToken);
         var used = await GetUsedBookIdsAsync(books.Select(item => item.Id), cancellationToken);
+        var reversible = await GetReversibleDesignationAsync(cancellationToken);
         var result = new List<AccountingBookDto>();
         foreach (var item in books)
         {
             var readiness = await GetActivationReadinessAsync(item, cancellationToken);
-            result.Add(Map(item, used.Contains(item.Id), readiness));
+            result.Add(Map(item, used.Contains(item.Id), readiness,
+                reversible?.NewPrimaryBookId == item.Id ? reversible : null));
         }
         return result;
     }
@@ -56,7 +58,9 @@ public sealed class AccountingBookService : IAccountingBookService
     {
         var book = await BookQuery().AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Accounting book was not found.");
-        return Map(book, await HasUseAsync(id, cancellationToken), await GetActivationReadinessAsync(book, cancellationToken));
+        var reversible = await GetReversibleDesignationAsync(cancellationToken);
+        return Map(book, await HasUseAsync(id, cancellationToken), await GetActivationReadinessAsync(book, cancellationToken),
+            reversible?.NewPrimaryBookId == id ? reversible : null);
     }
 
     public async Task EnsureTenantDefaultsAsync(CancellationToken cancellationToken = default)
@@ -78,6 +82,267 @@ public sealed class AccountingBookService : IAccountingBookService
         DecideAsync(id, request, "Approve", cancellationToken);
     public Task<AccountingBookDto> RejectTransitionAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
         DecideAsync(id, request, "Reject", cancellationToken);
+    public Task<AccountingBookDto> RequestPrimaryReplacementAsync(Guid id, RequestPrimaryAccountingBookReplacementDto request, CancellationToken cancellationToken = default) =>
+        AtomicAsync(() => RequestPrimaryReplacementCoreAsync(id, request, cancellationToken), cancellationToken);
+    public Task<AccountingBookDto> ApprovePrimaryReplacementAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
+        DecidePrimaryReplacementAsync(id, request, true, cancellationToken);
+    public Task<AccountingBookDto> RejectPrimaryReplacementAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
+        DecidePrimaryReplacementAsync(id, request, false, cancellationToken);
+    public Task<AccountingBookDto> RequestPrimaryReplacementReversalAsync(Guid id, RequestPrimaryAccountingBookReversalDto request, CancellationToken cancellationToken = default) =>
+        AtomicAsync(() => RequestPrimaryReplacementReversalCoreAsync(id, request, cancellationToken), cancellationToken);
+    public Task<AccountingBookDto> ApprovePrimaryReplacementReversalAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
+        DecidePrimaryReplacementReversalAsync(id, request, true, cancellationToken);
+    public Task<AccountingBookDto> RejectPrimaryReplacementReversalAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
+        DecidePrimaryReplacementReversalAsync(id, request, false, cancellationToken);
+
+    private async Task<AccountingBookDto> RequestPrimaryReplacementCoreAsync(Guid id, RequestPrimaryAccountingBookReplacementDto request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) throw new InvalidOperationException("A primary-book replacement reason is required.");
+        var effectiveDate = request.EffectiveDate.Date;
+        if (effectiveDate < DateTime.UtcNow.Date) throw new InvalidOperationException("A primary-book replacement cannot be backdated.");
+        var target = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct)
+            ?? throw new KeyNotFoundException("Accounting book was not found.");
+        ApplyRowVersion(target, request.RowVersion);
+        if (target.PendingLifecycleStatus.HasValue || target.PrimaryReplacementRequestedAtUtc.HasValue)
+            throw new InvalidOperationException("The proposed primary book already has a pending governed change.");
+        if (await _db.AccountingBooks.AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted
+            && item.PrimaryReplacementRequestedAtUtc != null, ct))
+            throw new InvalidOperationException("The tenant already has a pending primary-book replacement.");
+        if (await HasPendingPrimaryReversalAsync(ct))
+            throw new InvalidOperationException("The tenant already has a pending primary-book replacement reversal.");
+        var current = await LockAndValidatePrimaryReplacementAsync(target, ct);
+        if (await _db.AccountingBookPrimaryDesignations.AnyAsync(item => item.TenantId == TenantId
+            && item.EffectiveFrom == effectiveDate && !item.IsDeleted, ct))
+            throw new InvalidOperationException("A primary-book designation already exists for this effective date.");
+        var workflow = Workflow();
+        if (!await workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType))
+            throw new InvalidOperationException("A published AccountingBookLifecycle approval workflow is required.");
+        var before = Snapshot(target);
+        target.PrimaryReplacementFromBookId = current.Id;
+        target.PrimaryReplacementEffectiveDate = effectiveDate;
+        target.PrimaryReplacementReason = request.Reason.Trim();
+        target.PrimaryReplacementRequestedByUserId = RequiredActor();
+        target.PrimaryReplacementRequestedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        var result = await workflow.StartApprovalWorkflowAsync(WorkflowEntityType, target.Id);
+        if (!result.Success) throw new InvalidOperationException(result.Message ?? "The primary-book replacement workflow could not be started.");
+        target.PrimaryReplacementWorkflowInstanceId = result.WorkflowInstanceId;
+        target.UpdatedAt = DateTime.UtcNow; target.UpdatedBy = ActorName();
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync(FinanceAuditEvents.AccountingBookPrimaryReplacementRequested, target, before, Snapshot(target), request.Reason, ct);
+        return await LoadDtoAsync(target.Id, ct);
+    }
+
+    private Task<AccountingBookDto> DecidePrimaryReplacementAsync(Guid id, DecideAccountingBookTransitionDto request, bool approve, CancellationToken ct) => AtomicAsync(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) throw new InvalidOperationException("A primary-book replacement decision reason is required.");
+        var target = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct)
+            ?? throw new KeyNotFoundException("Accounting book was not found.");
+        ApplyRowVersion(target, request.RowVersion);
+        if (!target.PrimaryReplacementRequestedAtUtc.HasValue || !target.PrimaryReplacementRequestedByUserId.HasValue
+            || !target.PrimaryReplacementFromBookId.HasValue || !target.PrimaryReplacementEffectiveDate.HasValue)
+            throw new InvalidOperationException("The accounting book has no pending primary-book replacement.");
+        var actor = RequiredActor();
+        if (target.PrimaryReplacementRequestedByUserId == actor)
+            throw new InvalidOperationException("Maker-checker control prohibits the requester from deciding this replacement.");
+        var workflow = Workflow();
+        if (!await workflow.CanUserApproveAsync(WorkflowEntityType, target.Id, actor))
+            throw new UnauthorizedAccessException("The current user is not an assigned approver for this replacement.");
+        AccountingBook? current = null;
+        if (approve)
+        {
+            if (target.PrimaryReplacementEffectiveDate.Value.Date > DateTime.UtcNow.Date)
+                throw new InvalidOperationException("The replacement cannot be approved before its effective date.");
+            current = await LockAndValidatePrimaryReplacementAsync(target, ct);
+            if (current.Id != target.PrimaryReplacementFromBookId)
+                throw new InvalidOperationException("The current primary book changed while this request awaited approval. Reject it and submit a fresh request.");
+        }
+        var before = Snapshot(target);
+        var result = await workflow.ProcessApprovalStepAsync(WorkflowEntityType, target.Id, actor, approve ? "Approve" : "Reject", request.Reason.Trim());
+        if (!result.Success) throw new InvalidOperationException(result.Message ?? "The primary-book replacement decision failed.");
+        if (!approve)
+        {
+            ClearPrimaryReplacement(target);
+        }
+        else if (result.Status == WorkflowInstanceStatus.Completed)
+        {
+            var oldPrimary = current!;
+            var designation = new AccountingBookPrimaryDesignation
+            {
+                TenantId = TenantId, PreviousPrimaryBookId = oldPrimary.Id, NewPrimaryBookId = target.Id,
+                EffectiveFrom = target.PrimaryReplacementEffectiveDate!.Value.Date,
+                RequestReason = target.PrimaryReplacementReason!, RequestedByUserId = target.PrimaryReplacementRequestedByUserId!.Value,
+                RequestedAtUtc = target.PrimaryReplacementRequestedAtUtc!.Value, ApprovedByUserId = actor, ApprovedAtUtc = DateTime.UtcNow,
+                DecisionReason = request.Reason.Trim(), WorkflowInstanceId = target.PrimaryReplacementWorkflowInstanceId,
+                CreatedAt = DateTime.UtcNow, CreatedBy = ActorName()
+            };
+            _db.AccountingBookPrimaryDesignations.Add(designation);
+            // Two saves are intentional: SQL Server's filtered unique index permits only one default.
+            // The serializable transaction prevents observers from seeing the temporary no-primary state.
+            oldPrimary.BookType = AccountingBookType.ParallelFull; oldPrimary.IsDefault = false;
+            oldPrimary.UpdatedAt = DateTime.UtcNow; oldPrimary.UpdatedBy = ActorName();
+            await _db.SaveChangesAsync(ct);
+            target.BookType = AccountingBookType.PrimaryFull; target.IsDefault = true;
+            ClearPrimaryReplacement(target);
+        }
+        target.UpdatedAt = DateTime.UtcNow; target.UpdatedBy = ActorName();
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync(approve ? FinanceAuditEvents.AccountingBookPrimaryReplacementApproved : FinanceAuditEvents.AccountingBookPrimaryReplacementRejected,
+            target, before, Snapshot(target), request.Reason, ct);
+        return await LoadDtoAsync(target.Id, ct);
+    }, ct);
+
+    private async Task<AccountingBook> LockAndValidatePrimaryReplacementAsync(AccountingBook target, CancellationToken ct)
+    {
+        if (target.BookType != AccountingBookType.ParallelFull || target.IsDefault)
+            throw new InvalidOperationException("Only a non-primary full accounting book can replace the current primary book.");
+        if (target.LifecycleStatus != AccountingBookLifecycleStatus.Active || !target.IsActive || !target.AllowsPosting)
+            throw new InvalidOperationException("The proposed primary book must be Active and posting-enabled.");
+        var readiness = await GetActivationReadinessAsync(target, ct);
+        if (!readiness.IsReady) throw new InvalidOperationException($"PRIMARY_REPLACEMENT_NOT_READY: {string.Join(" ", readiness.Blockers)}");
+        var primaries = await _db.AccountingBooks.Where(item => item.TenantId == TenantId && !item.IsDeleted
+            && item.BookType == AccountingBookType.PrimaryFull && item.IsDefault).ToListAsync(ct);
+        if (primaries.Count != 1) throw new InvalidOperationException("PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one current primary/default full book is required.");
+        var current = primaries[0];
+        if (current.PendingLifecycleStatus.HasValue || current.PrimaryReplacementRequestedAtUtc.HasValue)
+            throw new InvalidOperationException("The current primary book has a pending governed change.");
+        if (current.LifecycleStatus != AccountingBookLifecycleStatus.Active || !current.IsActive || !current.AllowsPosting)
+            throw new InvalidOperationException("The current primary book must remain Active until replacement is approved.");
+        if (!string.Equals(current.FunctionalCurrencyCode, target.FunctionalCurrencyCode, StringComparison.Ordinal))
+            throw new InvalidOperationException("The replacement and current primary books must have the same functional currency.");
+        return current;
+    }
+
+    private static void ClearPrimaryReplacement(AccountingBook book)
+    {
+        book.PrimaryReplacementFromBookId = null; book.PrimaryReplacementEffectiveDate = null;
+        book.PrimaryReplacementReason = null; book.PrimaryReplacementRequestedByUserId = null;
+        book.PrimaryReplacementRequestedAtUtc = null;
+    }
+
+    private async Task<AccountingBookDto> RequestPrimaryReplacementReversalCoreAsync(Guid id, RequestPrimaryAccountingBookReversalDto request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            throw new InvalidOperationException("A primary-book replacement reversal reason is required.");
+        var current = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct)
+            ?? throw new KeyNotFoundException("Accounting book was not found.");
+        ApplyRowVersion(current, request.RowVersion);
+        var (designation, _) = await LockAndValidatePrimaryReversalAsync(current, ct);
+        if (designation.ReversalRequestedAtUtc.HasValue)
+            throw new InvalidOperationException("This primary-book replacement already has a pending reversal.");
+        if (await _db.AccountingBookPrimaryDesignations.AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted
+            && item.ReversalRequestedAtUtc != null && item.ReversedAtUtc == null, ct))
+            throw new InvalidOperationException("The tenant already has a pending primary-book replacement reversal.");
+        var workflow = Workflow();
+        if (!await workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType))
+            throw new InvalidOperationException("A published AccountingBookLifecycle approval workflow is required.");
+        var before = Snapshot(current);
+        designation.ReversalReason = request.Reason.Trim();
+        designation.ReversalRequestedByUserId = RequiredActor();
+        designation.ReversalRequestedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        var result = await workflow.StartApprovalWorkflowAsync(WorkflowEntityType, current.Id);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Message ?? "The primary-book replacement reversal workflow could not be started.");
+        designation.ReversalWorkflowInstanceId = result.WorkflowInstanceId;
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync(FinanceAuditEvents.AccountingBookPrimaryReplacementReversalRequested, current, before,
+            new { Book = Snapshot(current), DesignationId = designation.Id, designation.ReversalReason }, request.Reason, ct,
+            designation.ReversalWorkflowInstanceId);
+        return await LoadDtoAsync(current.Id, ct);
+    }
+
+    private Task<AccountingBookDto> DecidePrimaryReplacementReversalAsync(Guid id, DecideAccountingBookTransitionDto request, bool approve, CancellationToken ct) => AtomicAsync(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            throw new InvalidOperationException("A primary-book replacement reversal decision reason is required.");
+        var current = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct)
+            ?? throw new KeyNotFoundException("Accounting book was not found.");
+        ApplyRowVersion(current, request.RowVersion);
+        var designation = await _db.AccountingBookPrimaryDesignations.SingleOrDefaultAsync(item =>
+            item.TenantId == TenantId && !item.IsDeleted && item.NewPrimaryBookId == current.Id
+            && item.ReversalRequestedAtUtc != null && item.ReversedAtUtc == null, ct)
+            ?? throw new InvalidOperationException("The accounting book has no pending primary-book replacement reversal.");
+        var actor = RequiredActor();
+        if (designation.ReversalRequestedByUserId == actor)
+            throw new InvalidOperationException("Maker-checker control prohibits the requester from deciding this reversal.");
+        var workflow = Workflow();
+        if (!await workflow.CanUserApproveAsync(WorkflowEntityType, current.Id, actor))
+            throw new UnauthorizedAccessException("The current user is not an assigned approver for this reversal.");
+        AccountingBook? restored = null;
+        if (approve)
+            (_, restored) = await LockAndValidatePrimaryReversalAsync(current, ct, designation.Id);
+        var before = new { Book = Snapshot(current), DesignationId = designation.Id, designation.ReversalReason };
+        var result = await workflow.ProcessApprovalStepAsync(WorkflowEntityType, current.Id, actor,
+            approve ? "Approve" : "Reject", request.Reason.Trim());
+        if (!result.Success)
+            throw new InvalidOperationException(result.Message ?? "The primary-book replacement reversal decision failed.");
+        if (!approve)
+        {
+            ClearPrimaryReversalRequest(designation);
+        }
+        else if (result.Status == WorkflowInstanceStatus.Completed)
+        {
+            current.BookType = AccountingBookType.ParallelFull;
+            current.IsDefault = false;
+            current.UpdatedAt = DateTime.UtcNow;
+            current.UpdatedBy = ActorName();
+            await _db.SaveChangesAsync(ct);
+            restored!.BookType = AccountingBookType.PrimaryFull;
+            restored.IsDefault = true;
+            restored.UpdatedAt = DateTime.UtcNow;
+            restored.UpdatedBy = ActorName();
+            designation.ReversedByUserId = actor;
+            designation.ReversedAtUtc = DateTime.UtcNow;
+            designation.ReversalDecisionReason = request.Reason.Trim();
+        }
+        await _db.SaveChangesAsync(ct);
+        await AuditAsync(approve ? FinanceAuditEvents.AccountingBookPrimaryReplacementReversalApproved
+                : FinanceAuditEvents.AccountingBookPrimaryReplacementReversalRejected,
+            current, before, new { Book = Snapshot(current), DesignationId = designation.Id, designation.ReversedAtUtc },
+            request.Reason, ct, designation.ReversalWorkflowInstanceId);
+        return await LoadDtoAsync(current.Id, ct);
+    }, ct);
+
+    private async Task<(AccountingBookPrimaryDesignation Designation, AccountingBook Restored)> LockAndValidatePrimaryReversalAsync(
+        AccountingBook current, CancellationToken ct, Guid? expectedDesignationId = null)
+    {
+        if (current.BookType != AccountingBookType.PrimaryFull || !current.IsDefault
+            || current.LifecycleStatus != AccountingBookLifecycleStatus.Active || !current.IsActive || !current.AllowsPosting)
+            throw new InvalidOperationException("Only the active current primary/default book can have its latest replacement reversed.");
+        if (current.PendingLifecycleStatus.HasValue || current.PrimaryReplacementRequestedAtUtc.HasValue)
+            throw new InvalidOperationException("The current primary book has another pending governed change.");
+        var latest = await _db.AccountingBookPrimaryDesignations
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.ReversedAtUtc == null)
+            .OrderByDescending(item => item.EffectiveFrom).ThenByDescending(item => item.ApprovedAtUtc)
+            .FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("There is no approved primary-book replacement to reverse.");
+        if (latest.NewPrimaryBookId != current.Id || (expectedDesignationId.HasValue && latest.Id != expectedDesignationId.Value))
+            throw new InvalidOperationException("Only the latest effective primary-book replacement can be reversed.");
+        if (latest.EffectiveFrom.Date != DateTime.UtcNow.Date)
+            throw new InvalidOperationException("Only a replacement effective today can use same-day reversal. Submit a new effective-dated replacement instead.");
+        var restored = await BookQuery().SingleOrDefaultAsync(item => item.Id == latest.PreviousPrimaryBookId, ct)
+            ?? throw new InvalidOperationException("The prior primary accounting book is unavailable.");
+        if (restored.BookType != AccountingBookType.ParallelFull || restored.IsDefault
+            || restored.LifecycleStatus != AccountingBookLifecycleStatus.Active || !restored.IsActive || !restored.AllowsPosting)
+            throw new InvalidOperationException("The prior primary book must remain Active, posting-enabled, and non-primary.");
+        if (restored.PendingLifecycleStatus.HasValue || restored.PrimaryReplacementRequestedAtUtc.HasValue)
+            throw new InvalidOperationException("The prior primary book has a pending governed change.");
+        if (!string.Equals(current.FunctionalCurrencyCode, restored.FunctionalCurrencyCode, StringComparison.Ordinal))
+            throw new InvalidOperationException("The current and prior primary books must have the same functional currency.");
+        var readiness = await GetActivationReadinessAsync(restored, ct);
+        if (!readiness.IsReady)
+            throw new InvalidOperationException($"PRIMARY_REVERSAL_NOT_READY: {string.Join(" ", readiness.Blockers)}");
+        return (latest, restored);
+    }
+
+    private static void ClearPrimaryReversalRequest(AccountingBookPrimaryDesignation designation)
+    {
+        designation.ReversalReason = null;
+        designation.ReversalRequestedByUserId = null;
+        designation.ReversalRequestedAtUtc = null;
+        designation.ReversalWorkflowInstanceId = null;
+    }
 
     private async Task<AccountingBookDto> CreateCoreAsync(CreateAccountingBookDto request, CancellationToken ct)
     {
@@ -103,7 +368,7 @@ public sealed class AccountingBookService : IAccountingBookService
         var book = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct)
             ?? throw new KeyNotFoundException("Accounting book was not found.");
         ApplyRowVersion(book, request.RowVersion);
-        if (book.PendingLifecycleStatus.HasValue) throw new InvalidOperationException("The accounting book has a pending lifecycle transition.");
+        if (book.PendingLifecycleStatus.HasValue || book.PrimaryReplacementRequestedAtUtc.HasValue || await HasPendingPrimaryReversalAsync(ct)) throw new InvalidOperationException("The accounting book has a pending governed change.");
         if (book.LifecycleStatus == AccountingBookLifecycleStatus.Retired) throw new InvalidOperationException("A retired accounting book cannot be edited.");
         var value = await ValidateStructureAsync(request, book, ct);
         var structuralChange = book.Code != value.Code || book.Purpose != value.Purpose || book.BookType != value.Type
@@ -130,7 +395,7 @@ public sealed class AccountingBookService : IAccountingBookService
         if (string.IsNullOrWhiteSpace(request.Reason)) throw new InvalidOperationException("A lifecycle-transition reason is required.");
         var book = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct) ?? throw new KeyNotFoundException("Accounting book was not found.");
         ApplyRowVersion(book, request.RowVersion);
-        if (book.PendingLifecycleStatus.HasValue) throw new InvalidOperationException("The accounting book already has a pending lifecycle transition.");
+        if (book.PendingLifecycleStatus.HasValue || book.PrimaryReplacementRequestedAtUtc.HasValue || await HasPendingPrimaryReversalAsync(ct)) throw new InvalidOperationException("The accounting book already has a pending governed change.");
         await ValidateGovernedTransitionAsync(book, target, ct);
         var workflow = Workflow();
         if (!await workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType)) throw new InvalidOperationException("A published AccountingBookLifecycle approval workflow is required.");
@@ -171,6 +436,13 @@ public sealed class AccountingBookService : IAccountingBookService
             var target = book.PendingLifecycleStatus!.Value;
             book.LifecycleStatus = target;
             if (target == AccountingBookLifecycleStatus.Initializing) book.InitializationStartedAtUtc ??= DateTime.UtcNow;
+            if (book.BookType == AccountingBookType.Delta
+                && target == AccountingBookLifecycleStatus.Initializing)
+            {
+                if (_initialization == null)
+                    throw new InvalidOperationException("Delta structure provisioning is unavailable.");
+                await _initialization.EnsureDeltaStructureAsync(book.Id, ct);
+            }
             ApplyPostingFlags(book); ClearPending(book, true);
             if (target is AccountingBookLifecycleStatus.Active or AccountingBookLifecycleStatus.Suspended)
             {
@@ -434,9 +706,74 @@ public sealed class AccountingBookService : IAccountingBookService
     private async Task<AccountingBookDto> LoadDtoAsync(Guid id, CancellationToken ct)
     {
         var item = await BookQuery().AsNoTracking().SingleAsync(book => book.Id == id, ct);
-        return Map(item, await HasUseAsync(id, ct), await GetActivationReadinessAsync(item, ct));
+        var reversible = await GetReversibleDesignationAsync(ct);
+        return Map(item, await HasUseAsync(id, ct), await GetActivationReadinessAsync(item, ct),
+            reversible?.NewPrimaryBookId == id ? reversible : null);
     }
-    private static AccountingBookDto Map(AccountingBook book, bool used, AccountingBookActivationReadinessDto readiness) => new()
+
+    public async Task<DeltaBookCombinedReportDto> GetDeltaCombinedReportAsync(Guid id, DateTime asOfDate, CancellationToken cancellationToken = default)
+    {
+        if (asOfDate == default) throw new InvalidOperationException("A report as-of date is required.");
+        var delta = await BookQuery().AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
+            ?? throw new KeyNotFoundException("Accounting book was not found.");
+        if (delta.BookType != AccountingBookType.Delta || !delta.BaseAccountingBookId.HasValue || delta.BaseAccountingBook == null)
+            throw new InvalidOperationException("A combined report is available only for a Delta book with governed base-book authority.");
+        var baseBook = delta.BaseAccountingBook;
+        if (baseBook.BookType == AccountingBookType.Delta)
+            throw new InvalidOperationException("Nested Delta combined reporting is not yet supported; select a Delta book whose base is a full book.");
+
+        var mappedAccountIds = await _db.AccountAccountingBooks.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsEnabled
+                && (item.AccountingBookId == baseBook.Id || item.AccountingBookId == delta.Id))
+            .Select(item => item.AccountId).Distinct().ToListAsync(cancellationToken);
+        var exclusiveEnd = asOfDate.Date.AddDays(1);
+        var balanceRows = await _db.AccountTransactions.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.PostingStatus == "Posted"
+                && item.TransactionDate < exclusiveEnd
+                && (item.AccountingBookId == baseBook.Id || item.AccountingBookId == delta.Id))
+            .GroupBy(item => new { item.AccountingBookId, item.AccountId })
+            .Select(group => new
+            {
+                group.Key.AccountingBookId,
+                group.Key.AccountId,
+                SignedBalance = group.Sum(item => item.DebitAmount - item.CreditAmount)
+            })
+            .ToListAsync(cancellationToken);
+        var accountIds = mappedAccountIds.Concat(balanceRows.Select(item => item.AccountId)).Distinct().ToList();
+        if (accountIds.Count == 0)
+            throw new InvalidOperationException("The base and Delta books have no enabled account mappings or posted balances to report.");
+
+        var accounts = await _db.Accounts.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && accountIds.Contains(item.Id))
+            .Select(item => new { item.Id, item.AccountNumber, item.AccountName, item.AccountType })
+            .OrderBy(item => item.AccountNumber).ToListAsync(cancellationToken);
+        var balances = balanceRows.ToDictionary(
+            item => (item.AccountingBookId, item.AccountId), item => item.SignedBalance);
+        var lines = accounts.Select(account =>
+        {
+            var baseBalance = balances.GetValueOrDefault((baseBook.Id, account.Id));
+            var deltaBalance = balances.GetValueOrDefault((delta.Id, account.Id));
+            return new DeltaBookCombinedReportLineDto
+            {
+                AccountId = account.Id, AccountNumber = account.AccountNumber, AccountName = account.AccountName,
+                AccountType = account.AccountType.ToString(), BaseSignedBalance = baseBalance,
+                DeltaSignedBalance = deltaBalance, CombinedSignedBalance = baseBalance + deltaBalance
+            };
+        }).ToList();
+        var currency = baseBook.FunctionalCurrencyCode
+            ?? await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId).Select(item => item.BaseCurrency).SingleAsync(cancellationToken);
+        return new DeltaBookCombinedReportDto
+        {
+            DeltaAccountingBookId = delta.Id, DeltaAccountingBookCode = delta.Code,
+            BaseAccountingBookId = baseBook.Id, BaseAccountingBookCode = baseBook.Code,
+            FunctionalCurrencyCode = currency, AsOfDate = asOfDate.Date,
+            BaseTotal = lines.Sum(item => item.BaseSignedBalance),
+            DeltaTotal = lines.Sum(item => item.DeltaSignedBalance),
+            CombinedTotal = lines.Sum(item => item.CombinedSignedBalance), Lines = lines
+        };
+    }
+    private static AccountingBookDto Map(AccountingBook book, bool used, AccountingBookActivationReadinessDto readiness,
+        AccountingBookPrimaryDesignation? reversible = null) => new()
     {
         Id = book.Id, TenantId = book.TenantId, Code = book.Code, Name = book.Name, Description = book.Description,
         Purpose = book.Purpose, BookType = book.BookType.ToString(), LifecycleStatus = book.LifecycleStatus.ToString(),
@@ -447,9 +784,30 @@ public sealed class AccountingBookService : IAccountingBookService
         PendingLifecycleStatus = book.PendingLifecycleStatus?.ToString(), PendingTransitionReason = book.PendingTransitionReason,
         TransitionRequestedByUserId = book.TransitionRequestedByUserId, TransitionRequestedAtUtc = book.TransitionRequestedAtUtc,
         TransitionWorkflowInstanceId = book.TransitionWorkflowInstanceId, HasAccountingUse = used, ActivationReady = readiness.IsReady,
+        PrimaryReplacementFromBookId = book.PrimaryReplacementFromBookId,
+        PrimaryReplacementEffectiveDate = book.PrimaryReplacementEffectiveDate,
+        PrimaryReplacementReason = book.PrimaryReplacementReason,
+        PrimaryReplacementRequestedByUserId = book.PrimaryReplacementRequestedByUserId,
+        PrimaryReplacementRequestedAtUtc = book.PrimaryReplacementRequestedAtUtc,
+        PrimaryReplacementWorkflowInstanceId = book.PrimaryReplacementWorkflowInstanceId,
+        ReversiblePrimaryDesignationId = reversible?.Id,
+        ReversiblePrimaryDesignationPreviousBookId = reversible?.PreviousPrimaryBookId,
+        ReversiblePrimaryDesignationEffectiveDate = reversible?.EffectiveFrom,
+        PrimaryReversalReason = reversible?.ReversalReason,
+        PrimaryReversalRequestedByUserId = reversible?.ReversalRequestedByUserId,
+        PrimaryReversalRequestedAtUtc = reversible?.ReversalRequestedAtUtc,
+        PrimaryReversalWorkflowInstanceId = reversible?.ReversalWorkflowInstanceId,
         ReadinessMessage = readiness.IsReady ? null : string.Join(" ", readiness.Blockers),
         RowVersion = book.RowVersion.Length == 0 ? string.Empty : Convert.ToBase64String(book.RowVersion)
     };
+    private Task<AccountingBookPrimaryDesignation?> GetReversibleDesignationAsync(CancellationToken ct) =>
+        _db.AccountingBookPrimaryDesignations.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.ReversedAtUtc == null
+                && item.EffectiveFrom == DateTime.UtcNow.Date)
+            .OrderByDescending(item => item.ApprovedAtUtc).FirstOrDefaultAsync(ct);
+    private Task<bool> HasPendingPrimaryReversalAsync(CancellationToken ct) =>
+        _db.AccountingBookPrimaryDesignations.AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted
+            && item.ReversalRequestedAtUtc != null && item.ReversedAtUtc == null, ct);
     private async Task<AccountingBookActivationReadinessDto> GetActivationReadinessAsync(AccountingBook book, CancellationToken ct)
     {
         // Lifecycle request and approval both call this method inside their serializable boundary.
@@ -465,11 +823,15 @@ public sealed class AccountingBookService : IAccountingBookService
         item.IsActive, item.AllowsPosting, item.SortOrder, item.InitializationStartedAtUtc,
         PendingLifecycleStatus = item.PendingLifecycleStatus?.ToString(), item.PendingTransitionReason,
         item.TransitionRequestedByUserId, item.TransitionRequestedAtUtc, item.TransitionWorkflowInstanceId,
+        item.PrimaryReplacementFromBookId, item.PrimaryReplacementEffectiveDate, item.PrimaryReplacementReason,
+        item.PrimaryReplacementRequestedByUserId, item.PrimaryReplacementRequestedAtUtc, item.PrimaryReplacementWorkflowInstanceId,
         item.TransitionDecidedByUserId, item.TransitionDecidedAtUtc, item.TransitionDecisionReason
     };
-    private async Task AuditAsync(string type, AccountingBook book, object? before, object after, string reason, CancellationToken ct) =>
+    private async Task AuditAsync(string type, AccountingBook book, object? before, object after, string reason, CancellationToken ct,
+        Guid? workflowInstanceId = null) =>
         await (_audit ?? throw new InvalidOperationException("Finance audit service is required for accounting-book mutation.")).RecordAsync(new FinanceAuditEventDto { TenantId = TenantId, EventType = type, SourceModule = "GL",
-            SourceDocumentType = WorkflowEntityType, SourceDocumentId = book.Id, WorkflowInstanceId = book.TransitionWorkflowInstanceId,
+            SourceDocumentType = WorkflowEntityType, SourceDocumentId = book.Id,
+            WorkflowInstanceId = workflowInstanceId ?? book.TransitionWorkflowInstanceId ?? book.PrimaryReplacementWorkflowInstanceId,
             Resource = "Finance.AccountingBook", ResourceId = book.Id.ToString(), BeforeValues = before, AfterValues = after, Reason = reason.Trim() }, ct);
     private void ApplyRowVersion(AccountingBook book, string? encoded)
     {
@@ -515,6 +877,7 @@ public sealed class AccountingBookService : IAccountingBookService
         var tenantId = account.TenantId;
         var books = await _db.AccountingBooks.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToListAsync(ct);
         var existing = await _db.AccountAccountingBooks.Where(item => item.TenantId == tenantId && item.AccountId == account.Id && !item.IsDeleted).ToListAsync(ct);
+        var before = existing.Select(MappingSnapshot).ToList();
         var classifications = await _db.AccountClassifications.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToListAsync(ct);
         var parentIds = classifications.Where(item => item.ParentClassificationId.HasValue).Select(item => item.ParentClassificationId!.Value).ToHashSet();
         var resolved = new List<(AccountAccountingBookUpdateDto Request, AccountingBook Book, AccountClassification? Classification)>();
@@ -522,7 +885,7 @@ public sealed class AccountingBookService : IAccountingBookService
         {
             var book = request.AccountingBookId.HasValue ? books.SingleOrDefault(item => item.Id == request.AccountingBookId)
                 : books.SingleOrDefault(item => string.Equals(item.Code, request.AccountingBookCode?.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (book == null || !book.IsActive || request.IsEnabled && !book.AllowsPosting)
+            if (book == null || request.IsEnabled && (!book.IsActive || !book.AllowsPosting))
                 throw new InvalidOperationException("An accounting-book assignment is invalid or inactive for this tenant.");
             var classification = request.AccountClassificationId.HasValue ? classifications.SingleOrDefault(item => item.Id == request.AccountClassificationId) : null;
             if (request.IsEnabled && (classification == null || classification.AccountingBookId != book.Id
@@ -548,7 +911,43 @@ public sealed class AccountingBookService : IAccountingBookService
             mapping.FinancialStatementLineItem = item.Request.FinancialStatementLineItem; mapping.UpdatedAt = now; mapping.UpdatedBy = ActorName();
         }
         await _db.SaveChangesAsync(ct);
+        if (_audit != null)
+        {
+            var after = await _db.AccountAccountingBooks.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.AccountId == account.Id && !item.IsDeleted)
+                .OrderBy(item => item.AccountingBookId)
+                .Select(item => new
+                {
+                    item.Id,
+                    item.AccountingBookId,
+                    item.AccountClassificationId,
+                    item.IsEnabled,
+                    item.FinancialStatementLineItem
+                })
+                .ToListAsync(ct);
+            await _audit.RecordAsync(new FinanceAuditEventDto
+            {
+                TenantId = tenantId,
+                EventType = FinanceAuditEvents.AccountBookMappingsChanged,
+                SourceModule = "GL",
+                SourceDocumentType = "Account",
+                SourceDocumentId = account.Id,
+                Resource = "Finance.Account.BookMappings",
+                ResourceId = account.Id.ToString(),
+                BeforeValues = before,
+                AfterValues = after
+            }, ct);
+        }
     }
+
+    private static object MappingSnapshot(AccountAccountingBook item) => new
+    {
+        item.Id,
+        item.AccountingBookId,
+        item.AccountClassificationId,
+        item.IsEnabled,
+        item.FinancialStatementLineItem
+    };
 
     private void ApplyMappingRowVersion(AccountAccountingBook mapping, string? encoded)
     {

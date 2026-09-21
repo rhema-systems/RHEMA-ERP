@@ -55,6 +55,11 @@ public sealed class CashierTillControlTests
             CreateEntry(tenantId, till.Id, LiquidityEntryDirection.Decrease, 50m, "AccountTransaction"));
         await db.SaveChangesAsync();
 
+        var liveRegisterRow = (await cashier.GetSessionsAsync()).Single();
+        liveRegisterRow.TransactionMovementAmount.Should().Be(450m);
+        liveRegisterRow.ExpectedClosingAmount.Should().Be(650m);
+        liveRegisterRow.CustodyEntryCount.Should().Be(2);
+
         var submitted = await cashier.SubmitCountAsync(opened.Id, new SubmitCashierTillCountDto
         {
             RowVersion = opened.RowVersion,

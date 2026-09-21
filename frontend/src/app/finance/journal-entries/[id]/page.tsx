@@ -695,14 +695,14 @@ export default function JournalEntryDetailPage() {
                             </div>
                             {entry.postingDate && (
                                 <div>
-                                    <p className="text-sm text-muted-foreground">Posted Date</p>
-                                    <p className="font-medium">{formatDate(entry.postingDate)}</p>
+                                    <p className="text-sm text-muted-foreground">Posted At</p>
+                                    <p className="font-medium">{formatDateTime(entry.postingDate)}</p>
                                 </div>
                             )}
                             {entry.approvedDate && (
                                 <div>
-                                    <p className="text-sm text-muted-foreground">Approved Date</p>
-                                    <p className="font-medium">{formatDate(entry.approvedDate)}</p>
+                                    <p className="text-sm text-muted-foreground">Approved At</p>
+                                    <p className="font-medium">{formatDateTime(entry.approvedDate)}</p>
                                 </div>
                             )}
                             <div>

@@ -49,9 +49,15 @@ public class BankAccountService : IBankAccountService
                 GLAccountId = a.GLAccountId,
                 CurrentBalance = a.CurrentBalance,
                 AvailableBalance = a.AvailableBalance,
-                OpeningBalance = a.OpeningBalance,
                 IsActive = a.IsActive,
-                OpeningDate = a.OpeningDate,
+                GovernedOpeningDate = _context.OpeningBalanceLines
+                    .Where(line => line.TenantId == tenantId &&
+                        line.BankAccountId == a.Id &&
+                        line.CounterpartyType == BankAccountOpening &&
+                        line.Batch.PostedAt != null &&
+                        !line.Batch.Reversals.Any(reversal => reversal.Status == "Posted"))
+                    .Select(line => (DateTime?)line.Batch.OpeningDate)
+                    .FirstOrDefault(),
                 ClosingDate = a.ClosingDate,
                 Notes = a.Notes,
                 CreatedAt = a.CreatedAt
@@ -78,9 +84,15 @@ public class BankAccountService : IBankAccountService
                 GLAccountId = a.GLAccountId,
                 CurrentBalance = a.CurrentBalance,
                 AvailableBalance = a.AvailableBalance,
-                OpeningBalance = a.OpeningBalance,
                 IsActive = a.IsActive,
-                OpeningDate = a.OpeningDate,
+                GovernedOpeningDate = _context.OpeningBalanceLines
+                    .Where(line => line.TenantId == tenantId &&
+                        line.BankAccountId == a.Id &&
+                        line.CounterpartyType == BankAccountOpening &&
+                        line.Batch.PostedAt != null &&
+                        !line.Batch.Reversals.Any(reversal => reversal.Status == "Posted"))
+                    .Select(line => (DateTime?)line.Batch.OpeningDate)
+                    .FirstOrDefault(),
                 ClosingDate = a.ClosingDate,
                 Notes = a.Notes,
                 CreatedAt = a.CreatedAt
@@ -114,12 +126,6 @@ public class BankAccountService : IBankAccountService
         var tenantId = TenantId;
         var currency = NormalizeCurrency(dto.Currency);
 
-        if (dto.OpeningBalance != 0m)
-        {
-            throw new InvalidOperationException(
-                "Bank account opening-balance posting is disabled until the FIN-LIM-0006 opening-balance migration batch routes opening balances through IFinancePostingEngine.");
-        }
-
         if (dto.GLAccountId.HasValue)
         {
             await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "bank", currency);
@@ -140,10 +146,13 @@ public class BankAccountService : IBankAccountService
                 Currency = currency,
                 AccountType = dto.AccountType,
                 GLAccountId = dto.GLAccountId,
-                OpeningBalance = dto.OpeningBalance,
-                CurrentBalance = dto.OpeningBalance,
-                AvailableBalance = dto.OpeningBalance,
-                OpeningDate = dto.OpeningDate,
+                // These legacy persistence fields are no longer client inputs. A newly
+                // created bank master starts at zero; the governed opening workflow is
+                // the only authority that can establish its ledger opening and snapshots.
+                OpeningBalance = 0m,
+                CurrentBalance = 0m,
+                AvailableBalance = 0m,
+                OpeningDate = default,
                 Notes = dto.Notes,
                 IsActive = true
             };

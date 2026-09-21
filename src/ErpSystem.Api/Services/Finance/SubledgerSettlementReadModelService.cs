@@ -223,6 +223,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
 
         Account? account = null;
         decimal postedGlBalance = 0m;
+        var primaryBook = await ResolveEffectivePrimaryBookAsync(tenantId, date, cancellationToken);
         var diagnostics = balances
             .Where(b => b.HasDiagnostics)
             .Select(b => new SubledgerSettlementDiagnosticDto
@@ -248,14 +249,34 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             }
             else
             {
-                var lines = await _context.AccountTransactions
+                var linesQuery = _context.AccountTransactions
                     .AsNoTracking()
                     .Where(t =>
                         t.TenantId == tenantId &&
                         t.AccountId == account.Id &&
                         t.PostingStatus == PostedStatus &&
-                        t.TransactionDate.Date <= date.Date)
-                    .ToListAsync(cancellationToken);
+                        !t.IsDeleted &&
+                        t.TransactionDate.Date <= date.Date);
+
+                if (primaryBook.Book != null)
+                {
+                    var primaryBookId = primaryBook.Book.Id;
+                    var primaryBookCode = primaryBook.Book.Code;
+                    linesQuery = linesQuery.Where(t =>
+                        t.AccountingBookId == primaryBookId ||
+                        (t.AccountingBookId == Guid.Empty && t.BookClassification == primaryBookCode));
+                }
+                else if (primaryBook.HasConfiguredBooks)
+                {
+                    diagnostics.Add(BuildDiagnostic(
+                        module,
+                        "PrimaryAccountingBookAmbiguous",
+                        "Exactly one effective primary accounting book is required for control-account reconciliation.",
+                        null));
+                    linesQuery = linesQuery.Where(_ => false);
+                }
+
+                var lines = await linesQuery.ToListAsync(cancellationToken);
 
                 postedGlBalance = module == SubledgerSettlementModules.AccountsPayable
                     ? lines.Sum(t => t.CreditAmount - t.DebitAmount)
@@ -272,6 +293,9 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
         {
             SourceModule = module,
             AsOfDate = date,
+            AccountingBookId = primaryBook.Book?.Id,
+            AccountingBookCode = primaryBook.Book?.Code,
+            AccountingBookName = primaryBook.Book?.Name,
             ControlAccountId = account?.Id,
             ControlAccountNumber = account?.AccountNumber ?? account?.AccountCode,
             ControlAccountName = account?.AccountName,
@@ -293,6 +317,49 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
         return report;
     }
 
+    private async Task<PrimaryBookResolution> ResolveEffectivePrimaryBookAsync(
+        Guid tenantId,
+        DateTime asOfDate,
+        CancellationToken cancellationToken)
+    {
+        var books = await _context.AccountingBooks
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+            .ToListAsync(cancellationToken);
+        if (books.Count == 0)
+        {
+            // Compatibility for historical tenants created before governed accounting books.
+            return new PrimaryBookResolution(null, false);
+        }
+
+        var date = asOfDate.Date;
+        var designation = await _context.AccountingBookPrimaryDesignations
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted &&
+                item.ReversedAtUtc == null && item.EffectiveFrom <= date)
+            .OrderByDescending(item => item.EffectiveFrom)
+            .ThenByDescending(item => item.ApprovedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        Guid? primaryBookId = designation?.NewPrimaryBookId;
+        if (!primaryBookId.HasValue)
+        {
+            primaryBookId = await _context.AccountingBookPrimaryDesignations
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted &&
+                    item.ReversedAtUtc == null && item.EffectiveFrom > date)
+                .OrderBy(item => item.EffectiveFrom)
+                .ThenBy(item => item.ApprovedAtUtc)
+                .Select(item => (Guid?)item.PreviousPrimaryBookId)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var matches = primaryBookId.HasValue
+            ? books.Where(item => item.Id == primaryBookId.Value).ToList()
+            : books.Where(item => item.IsDefault && item.BookType == AccountingBookType.PrimaryFull).ToList();
+        return new PrimaryBookResolution(matches.Count == 1 ? matches[0] : null, true);
+    }
+
     private async Task ClearModuleAsync(string module, CancellationToken cancellationToken)
     {
         var tenantId = TenantId;
@@ -311,6 +378,8 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             .ToListAsync(cancellationToken);
         _context.SubledgerUnappliedSettlementBalances.RemoveRange(unappliedBalances);
     }
+
+    private sealed record PrimaryBookResolution(AccountingBook? Book, bool HasConfiguredBooks);
 
     private async Task<ModuleRebuildResult> RebuildAccountsPayableAsync(
         Guid tenantId,
