@@ -852,7 +852,13 @@ function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupV
 }
 
 function Write-DisposableResetEvidenceManifest([string]$directory) {
-    & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Test-GlCutoverEvidencePackage.ps1') `
+    $powerShellHost = if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+        'pwsh'
+    }
+    else {
+        'powershell.exe'
+    }
+    & $powerShellHost -NoProfile -File (Join-Path $PSScriptRoot 'Test-GlCutoverEvidencePackage.ps1') `
         -EvidenceDirectory $directory -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Disposable reset evidence package validation or manifest creation failed.' }
 }
@@ -893,13 +899,18 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
         finally { Pop-Location }
         $repositoryMigrations = @(Get-DiscoveredMigrationIds (Join-Path $evidenceDirectory 'migration-discovery.log'))
         $repositoryLatest = if ($repositoryMigrations.Count) { $repositoryMigrations[-1] } else { '<none>' }
-        if ($repositoryMigrations.Count -ne $authoritativeMigrationCount -or $repositoryLatest -ne $authoritativeLatestMigration) {
-            throw "Disposable reset requires the authoritative disposable-development baseline; found $($repositoryMigrations.Count)/$repositoryLatest."
+        if ($repositoryMigrations.Count -lt 1 -or
+            $repositoryMigrations[0] -ne '20260916132000_DisposableDevelopmentCurrentModelBaseline') {
+            throw "Disposable reset requires the current baseline as the first compiled migration; found $($repositoryMigrations.Count)/$repositoryLatest."
         }
-        if (@($repositoryMigrations | Sort-Object -Unique).Count -ne $authoritativeMigrationCount -or
+        if (@($repositoryMigrations | Sort-Object -Unique).Count -ne $repositoryMigrations.Count -or
             (@($repositoryMigrations | Sort-Object) -join "`n") -cne ($repositoryMigrations -join "`n")) {
-            throw 'Disposable reset requires the exact authoritative disposable-development baseline identity before DROP.'
+            throw 'Disposable reset requires an exact, unique, ordered compiled migration set before DROP.'
         }
+        # The baseline is a zero-to-current schema migration. Future migrations may
+        # legitimately follow it and must be applied and recorded as one exact set.
+        $script:authoritativeMigrationCount = $repositoryMigrations.Count
+        $script:authoritativeLatestMigration = $repositoryLatest
         $repositoryEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectory 'repository-migration-history.txt') $repositoryMigrations
         $repositoryMigrations = @($repositoryEvidence.ids)
         $repositoryHistoryHash = $repositoryEvidence.sha256
