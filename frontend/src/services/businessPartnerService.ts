@@ -940,6 +940,19 @@ export const businessPartnerService = {
   },
 
   // Get partner licenses
+  async addPartnerLicense(partnerId: string, data: {
+    licenseTypeId: string; licenseNumber: string; issuingAuthority: string;
+    issueDate: string; expiryDate?: string;
+  }): Promise<BusinessPartnerLicenseDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/licenses`, {
+      method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || result.message || 'Unable to record the licence.');
+    return result;
+  },
+
+  // Get partner licenses
   async getPartnerLicenses(
     partnerId: string
   ): Promise<BusinessPartnerLicenseDto[]> {

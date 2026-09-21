@@ -1,5 +1,6 @@
 ﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Payroll;  // PayrollEmployeeProfile — read-only, for the negotiated pay basis (lane E1b)
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -27,6 +28,7 @@ public class EmolumentService : IEmolumentService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<EmolumentService> _logger;
+    private readonly ICompanyHrPolicyProvider _policyProvider;
 
     public EmolumentService(
         IGenericRepository<PayComponent> componentRepo,
@@ -39,7 +41,8 @@ public class EmolumentService : IEmolumentService
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IDateTimeProvider clock,
-        ILogger<EmolumentService> logger)
+        ILogger<EmolumentService> logger,
+        ICompanyHrPolicyProvider policyProvider)
     {
         _componentRepo = componentRepo;
         _positionCompRepo = positionCompRepo;
@@ -52,6 +55,7 @@ public class EmolumentService : IEmolumentService
         _unitOfWork = unitOfWork;
         _clock = clock;
         _logger = logger;
+        _policyProvider = policyProvider;
     }
 
     /// <summary>
@@ -405,34 +409,54 @@ public class EmolumentService : IEmolumentService
         };
     }
 
+    /// <remarks>
+    /// <para>⚠ <b>This had its own copy of the basic-pay rule and it had never heard of the pay
+    /// basis</b> — so a negotiated employee's benefit contribution was computed from a notch amount
+    /// HR had explicitly said was not their pay. Lane E1b made <see cref="HrBasicPay"/> the single
+    /// resolution and pointed this, the reconciliation and the separation settlement at it.</para>
+    ///
+    /// <para>Zero, not null, is still the answer for somebody the run does not pay — that is what
+    /// makes an encashment, a benefit contribution or a costing come out as "nothing from payroll",
+    /// and callers depend on it.</para>
+    /// </remarks>
     public async Task<decimal> GetMonthlyBasicPayAsync(Guid employeeId, DateOnly asOf)
     {
         var asOfDt = asOf.ToDateTime(TimeOnly.MinValue);
         var tenantId = GetTenantId();
 
-        // Somebody the payroll run does not pay has no monthly basic — not a stale figure from
-        // before they left payroll, not the notch they were on then. Zero here is what makes an
-        // encashment, a benefit contribution or a costing come out as "nothing from payroll".
         var employee = await _employeeRepo.GetByIdAsync(employeeId);
         if (employee == null || employee.TenantId != tenantId || !employee.IsOnPayroll)
             return 0m;
 
+        // ⚠ WithdrawnAt is what keeps a placement withdrawn before its start date out of this. It
+        // has no window to exclude it: see EmployeeSalaryAssignment.WithdrawnAt.
         var assignment = await _salaryAssignmentRepo.GetQueryable()
             .Include(a => a.Notch)
+            .Include(a => a.Level)
+            .Include(a => a.Grade)
             .Where(a => a.TenantId == tenantId
                 && a.EmployeeId == employeeId
+                && !a.IsDeleted
+                && a.WithdrawnAt == null
                 && a.EffectiveDate <= asOfDt
                 && (a.EffectiveTo == null || a.EffectiveTo >= asOfDt))
             .OrderByDescending(a => a.EffectiveDate)
             .FirstOrDefaultAsync();
 
-        if (assignment?.Notch != null)
-            return assignment.Notch.SalaryAmount;
+        // Payroll's basis, for the negotiated branch. ⚠ Payroll keeps ONE basis row and mutates it
+        // in place (round-2 plan § 7.1 item 3), so this is its present figure whatever asOf says —
+        // the limitation HrBasicPay documents rather than hides.
+        var payrollBasic = await _unitOfWork.Repository<PayrollEmployeeProfile>().GetQueryable()
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.EmployeeId == employeeId)
+            .Select(p => p.SalaryBasis != null && p.SalaryBasis.IsActive
+                ? (decimal?)p.SalaryBasis.MonthlyBasicSalary
+                : null)
+            .FirstOrDefaultAsync();
 
-        return employee.Salary ?? 0m;
+        return HrBasicPay.Resolve(employee, assignment, payrollBasic).Amount ?? 0m;
     }
 
-    public async Task<decimal> GetEncashmentDailyRateAsync(Guid employeeId, Guid leaveTypeId, DateOnly asOf)
+    public async Task<EncashmentDailyRate> GetEncashmentDailyRateAsync(Guid employeeId, Guid leaveTypeId, DateOnly asOf)
     {
         var tenantId = GetTenantId();
 
@@ -442,7 +466,13 @@ public class EmolumentService : IEmolumentService
         if (leaveType == null) throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
 
         if (leaveType.EncashmentRateBasis == EncashmentRateBasis.Manual)
-            return leaveType.EncashmentRatePerDay ?? 0m;
+        {
+            var manual = leaveType.EncashmentRatePerDay ?? 0m;
+            return new EncashmentDailyRate(manual,
+                manual > 0m
+                    ? $"A fixed rate of {manual:N4} per day, set on the '{leaveType.Name}' leave type."
+                    : $"No rate is set on the '{leaveType.Name}' leave type, which is configured to use a fixed one.");
+        }
 
         var employee = await _employeeRepo.GetQueryable()
             .Include(e => e.Position)
@@ -457,11 +487,32 @@ public class EmolumentService : IEmolumentService
             .Where(c => c.ComponentType == PayComponentType.Allowance && linkedIds.Contains(c.PayComponentId))
             .Sum(c => c.Amount);
 
+        // ⚠ The fallback is the TENANT'S number now, not a private const. It was
+        // `DefaultWorkingDaysPerMonth = 22` in this file — the last genuinely hardcoded piece of the
+        // encashment rate, and the one every leave type lands on until somebody edits its own
+        // divisor. A constant that decides what a day of leave is worth is a policy, and policy
+        // belongs in settings where a client can see and change it (residue plan G2).
+        var policy = await _policyProvider.GetAsync();
         var divisor = leaveType.EncashmentWorkingDaysPerMonth > 0
             ? leaveType.EncashmentWorkingDaysPerMonth
-            : DefaultWorkingDaysPerMonth;
+            : policy.EncashmentWorkingDaysPerMonth;
 
-        return Math.Round((basic + linkedAllowances) / divisor, 2);
+        // Guard the fallback's fallback: a settings row edited to 0 would divide by zero, and
+        // [Range] only binds on the way in through the API.
+        if (divisor <= 0) divisor = DefaultWorkingDaysPerMonth;
+
+        var monthly = basic + linkedAllowances;
+        var rate = Math.Round(monthly / divisor, 2);
+
+        // ⚠ Built from the very number used above, so the words can never describe a basis other
+        // than the one that produced the figure beside them.
+        var source = leaveType.EncashmentWorkingDaysPerMonth > 0
+            ? $"the '{leaveType.Name}' leave type"
+            : "HR policy settings";
+
+        return new EncashmentDailyRate(rate,
+            $"{monthly:N2} (basic + linked allowances) ÷ {divisor} working days = {rate:N2} per day, "
+            + $"per {source}.");
     }
 
     // ─── Effective-component composition ───────────────────────────────────────

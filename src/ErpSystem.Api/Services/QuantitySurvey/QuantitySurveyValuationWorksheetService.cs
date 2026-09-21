@@ -29,6 +29,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
     private readonly IControlledFileUploadService controlledFiles;
     private readonly ICentralDocumentRepositoryFileService centralDocuments;
     private readonly ILogger<QuantitySurveyValuationWorksheetService> logger;
+    private readonly bool externalSubmissionsEnabled;
 
     public QuantitySurveyValuationWorksheetService(
         ApplicationDbContext db,
@@ -38,7 +39,8 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
         IWorkflowStatusAdapterRegistry workflowAdapters,
         IControlledFileUploadService controlledFiles,
         ICentralDocumentRepositoryFileService centralDocuments,
-        ILogger<QuantitySurveyValuationWorksheetService> logger)
+        ILogger<QuantitySurveyValuationWorksheetService> logger,
+        IConfiguration? deploymentConfiguration = null)
     {
         this.db = db;
         this.currentUser = currentUser;
@@ -48,6 +50,9 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
         this.controlledFiles = controlledFiles;
         this.centralDocuments = centralDocuments;
         this.logger = logger;
+        externalSubmissionsEnabled = (deploymentConfiguration?["QuantitySurvey:OptionalFeatures"] ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Contains("external-submissions", StringComparer.Ordinal);
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -81,7 +86,8 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
         var lines = source.Lines.Select(value => QuantitySurveyValuationWorksheetRules.Calculate(
             value, value.MeasuredToDateQuantity, value.MeasuredToDateQuantity,
             valuation.RetentionPercentage, null)).ToList();
-        return MapPreview(valuation, source.Version, valuation.RetentionPercentage, lines);
+        var policy = await ResolveValuationPolicyAsync(DateTime.UtcNow, token);
+        return MapPreview(valuation, source.Version, valuation.RetentionPercentage, lines, policy);
     }
 
     public async Task<QuantitySurveyValuationWorksheetDto> SaveAsync(
@@ -109,8 +115,10 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
                 input.CurrentCertifiedQuantity, retention, input.ReviewNote);
         }).ToList();
         var totals = QuantitySurveyValuationWorksheetRules.Total(calculated);
-        var policy = await ResolveValuationPolicyAsync(DateTime.UtcNow, token);
-        var lookups = await BuildValuationLookupsAsync(valuation.ProjectId, null, token);
+        var existingPolicy = await db.QuantitySurveyValuationWorksheets.AsNoTracking().FirstOrDefaultAsync(value =>
+            value.TenantId == TenantId && !value.IsDeleted && value.ProjectInterimValuationId == interimValuationId, token);
+        var policy = await ResolveValuationPolicyAsync(DateTime.UtcNow, token, existingPolicy);
+        var lookups = await BuildValuationLookupsAsync(valuation.ProjectId, null, token, policy);
         if (policy.Valuation.RequireContractorSubmission &&
             (!request.ContractorBusinessPartnerId.HasValue ||
              !lookups.Contractors.Any(value => value.Id == request.ContractorBusinessPartnerId.Value)))
@@ -172,7 +180,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
                     ContractorBusinessPartnerId = request.ContractorBusinessPartnerId,
                     ConsultantBusinessPartnerId = request.ConsultantBusinessPartnerId,
                     ConfigurationProfileId = policy.Profile.Id, ValuationDecisionId = policy.ValuationDecision.Id,
-                    ExternalSubmissionDecisionId = policy.ExternalDecision.Id,
+                    ExternalSubmissionDecisionId = policy.ExternalDecision?.Id,
                     ApprovalWorkflowDefinitionId = policy.Valuation.ValuationWorkflowDefinitionId,
                     EvidenceMetadataTemplateId = policy.Template.Id,
                     EvidenceMetadataTemplateCodeSnapshot = policy.Template.TemplateCode,
@@ -414,7 +422,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
     };
 
     private static QuantitySurveyValuationWorksheetDto MapPreview(ProjectInterimValuation valuation, ProjectBoqVersion version,
-        decimal retention, IReadOnlyList<QuantitySurveyValuationLineCalculation> lines)
+        decimal retention, IReadOnlyList<QuantitySurveyValuationLineCalculation> lines, ValuationPolicyContext policy)
     {
         var totals = QuantitySurveyValuationWorksheetRules.Total(lines);
         return new()
@@ -422,6 +430,9 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
             ProjectId = valuation.ProjectId, ProjectInterimValuationId = valuation.Id, InterimValuationLabel = ValuationLabel(valuation),
             ProjectBoqVersionId = version.Id, BoqVersionNumber = version.VersionNumber,
             Status = QuantitySurveyValuationWorkflowStatuses.Draft, ApprovalStatus = "Draft",
+            ContractorSubmissionRequired = policy.Valuation.RequireContractorSubmission,
+            ConsultantEndorsementRequired = policy.Valuation.RequireConsultantEndorsement,
+            SupportingEvidenceRequired = policy.Valuation.RequireSupportingEvidence || policy.External.RequireEvidence,
             RetentionPercentage = retention, MeasuredToDateValue = totals.MeasuredToDateValue,
             PreviouslyCertifiedValue = totals.PreviouslyCertifiedValue, CurrentClaimedValue = totals.CurrentClaimedValue,
             CurrentCertifiedValue = totals.CurrentCertifiedValue, CurrentPeriodCertifiedValue = totals.CurrentPeriodCertifiedValue,

@@ -12,6 +12,20 @@ export type LeaveEligibilityType = 'Gender' | 'OrganizationLevel' | 'Organizatio
 export type AccrualFrequency = 'None' | 'Monthly' | 'Annual' | 'PerPayPeriod' | 'Quarterly' | 'SemiAnnual';
 export type AccrualMode = 'AccrueIncrementally' | 'FullGrantOnEligibility';
 
+/**
+ * What the year-end runs count as a person's unused days (entitlement plan B2).
+ *
+ * ⚠ It governs **both** carry-over and forfeiture, which is why it is not called a carry-over
+ * basis. Both readings are ordinary employer policy; the product answered the question silently as
+ * `Granted` until 2026-09-18.
+ */
+export type LeaveYearEndBasis = 'Granted' | 'Earned';
+
+export const LEAVE_YEAR_END_BASIS_OPTIONS: { value: LeaveYearEndBasis; label: string }[] = [
+  { value: 'Granted', label: 'What the year granted them' },
+  { value: 'Earned', label: 'What they actually earned' },
+];
+
 export const ENCASHMENT_RATE_BASIS_OPTIONS: { value: EncashmentRateBasis; label: string }[] = [
   { value: 'DerivedFromEmoluments', label: 'Derived from emoluments' },
   { value: 'Manual', label: 'Manual rate' },
@@ -24,13 +38,33 @@ export const LEAVE_ELIGIBILITY_TYPE_OPTIONS: { value: LeaveEligibilityType; labe
   { value: 'Position', label: 'Position' },
 ];
 
+/**
+ * ⚠ **`PerPayPeriod` is deliberately NOT offered** (entitlement plan B5, decision D-6).
+ *
+ * The accrual engine maps it to twelve periods a year and counts elapsed *months* for it, so it was
+ * a synonym for `Monthly` wearing a more specific label — and on a fortnightly or weekly payroll
+ * the label was a claim the product could not honour. The API refuses it too, so this is not a
+ * client-side-only rule.
+ *
+ * ⚠ The type keeps the value, because rows already carrying it still read and still accrue. What is
+ * retired is choosing it anew. Accruing on a real pay cycle needs the pay calendar, which payroll
+ * owns — it is a cross-module contract, not an HR setting.
+ */
 export const ACCRUAL_FREQUENCY_OPTIONS: { value: AccrualFrequency; label: string }[] = [
   { value: 'None', label: 'None' },
   { value: 'Monthly', label: 'Monthly' },
   { value: 'Quarterly', label: 'Quarterly' },
   { value: 'SemiAnnual', label: 'Semi-annual' },
   { value: 'Annual', label: 'Annual' },
-  { value: 'PerPayPeriod', label: 'Per pay period' },
+];
+
+/**
+ * For DISPLAY only — the picker's options plus the retired value, so a policy that still carries
+ * `PerPayPeriod` reads as words in a table rather than as a raw enum name.
+ */
+export const ACCRUAL_FREQUENCY_DISPLAY: { value: AccrualFrequency; label: string }[] = [
+  ...ACCRUAL_FREQUENCY_OPTIONS,
+  { value: 'PerPayPeriod', label: 'Per pay period (retired — accrues monthly)' },
 ];
 
 export const ACCRUAL_MODE_OPTIONS: { value: AccrualMode; label: string }[] = [
@@ -61,10 +95,33 @@ export interface LeaveType {
   minServiceMonthsToAccess?: number | null;
   carryOverExpiryMonths?: number | null;
   forfeitUnusedAfterMonths?: number | null;
+
+  /**
+   * ⚠ Governs **both** year-end runs, carry-over and forfeiture (entitlement plan B2).
+   * `Granted` is the default and is what both did before the setting existed.
+   */
+  yearEndBasis: LeaveYearEndBasis;
+  /**
+   * Scales a joiner's first-year entitlement to the months they were present.
+   * ⚠ The API refuses it alongside an incremental accrual policy — the two deduct for the same
+   * months, and the derived per-period rate would deduct for them a third time.
+   */
+  proRateFirstYearEntitlement: boolean;
   mandatoryAnnualLeave: boolean;
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
   encashmentWorkingDaysPerMonth: number;
+
+  /**
+   * Excuse duty and the medical board (R-15a). ⚠ All three live on the LEAVE TYPE, not the
+   * tenant, because they are rules about a KIND of leave — sick leave needs a certificate,
+   * annual leave does not, and every client has both.
+   */
+  requiresMedicalCertificate: boolean;
+  /** Days takeable on the employee's own word. ⚠ 3 is a starting value, not anyone's rule. */
+  selfCertificationDays: number;
+  /** Cumulative days in a year past which a board must sit. Null = never. ⚠ Counted per YEAR. */
+  medicalBoardThresholdDays?: number | null;
   isActive: boolean;
 }
 
@@ -96,10 +153,33 @@ export interface CreateLeaveTypeRequest {
   minServiceMonthsToAccess?: number | null;
   carryOverExpiryMonths?: number | null;
   forfeitUnusedAfterMonths?: number | null;
+
+  /**
+   * ⚠ Governs **both** year-end runs, carry-over and forfeiture (entitlement plan B2).
+   * `Granted` is the default and is what both did before the setting existed.
+   */
+  yearEndBasis: LeaveYearEndBasis;
+  /**
+   * Scales a joiner's first-year entitlement to the months they were present.
+   * ⚠ The API refuses it alongside an incremental accrual policy — the two deduct for the same
+   * months, and the derived per-period rate would deduct for them a third time.
+   */
+  proRateFirstYearEntitlement: boolean;
   mandatoryAnnualLeave: boolean;
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
   encashmentWorkingDaysPerMonth: number;
+
+  /**
+   * Excuse duty and the medical board (R-15a). ⚠ All three live on the LEAVE TYPE, not the
+   * tenant, because they are rules about a KIND of leave — sick leave needs a certificate,
+   * annual leave does not, and every client has both.
+   */
+  requiresMedicalCertificate: boolean;
+  /** Days takeable on the employee's own word. ⚠ 3 is a starting value, not anyone's rule. */
+  selfCertificationDays: number;
+  /** Cumulative days in a year past which a board must sit. Null = never. ⚠ Counted per YEAR. */
+  medicalBoardThresholdDays?: number | null;
   /** Pay components an encashment pays through — owned by the Emoluments area. */
   allowanceComponentIds: string[];
 }

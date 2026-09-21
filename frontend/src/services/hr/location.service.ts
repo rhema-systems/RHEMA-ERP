@@ -1,6 +1,7 @@
 import { apiService } from '../api.service';
 import type {
   Location,
+  LocationSummary,
   CreateLocationRequest,
   UpdateLocationRequest,
 } from '@/types/hr/location';
@@ -14,6 +15,11 @@ class LocationService {
 
   getAll(): Promise<Location[]> {
     return apiService.get<Location[]>(this.baseUrl);
+  }
+
+  /** The lookup shape: id, name, level, structure, path. What `LocationPicker` reads. */
+  getSummary(): Promise<LocationSummary[]> {
+    return apiService.get<LocationSummary[]>(`${this.baseUrl}/summary`);
   }
 
   getByStructure(structureId: string): Promise<Location[]> {

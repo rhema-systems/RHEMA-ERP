@@ -379,7 +379,7 @@ public class StaffGrievanceResolution : TenantEntity
 /// <para>This is the <b>fourth</b> requirement to hit that wall — FR-HR-080's HOD sanction rule,
 /// FR-HR-173's establishment check (already downgraded to advisory for exactly this reason),
 /// FR-HR-181's rungs, and now FR-HR-084. Rather than work around it a fourth time, slice 5 builds
-/// the alternative already put to TDC in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4: HR names who
+/// the alternative already put to TDC in <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4: HR names who
 /// answers, directly, on a screen. ⚠ <b>If reporting lines are ever genuinely maintained, this table
 /// does not need removing</b> — it is the override layer a derived lookup would need anyway.</para>
 ///

@@ -21,7 +21,7 @@ import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerFi
 import { safetyInspectionService } from '@/services/hr/safety-inspection.service';
 import { safetyChecklistService } from '@/services/hr/safety-checklist.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import {
   SHE_INSPECTION_TYPE_OPTIONS,
   SHE_INSPECTION_CATEGORY_OPTIONS,
@@ -73,10 +73,6 @@ export default function NewInspectionPage() {
     queryFn: () => locationService.getAll(),
   });
 
-  const { data: orgUnits = [] } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
 
   const { data: checklists = [] } = useQuery({
     queryKey: ['hr', 'safety-checklists', 'active'],
@@ -124,7 +120,7 @@ export default function NewInspectionPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Schedule Inspection"
-        description="The number is generated automatically and the inspection starts as Scheduled."
+        description="The number is generated automatically. Choosing a checklist loads its items onto the inspection and starts the walk; without one the inspection stays Scheduled and findings are recorded by hand."
         backHref="/hr/safety/inspections"
       />
 
@@ -161,13 +157,7 @@ export default function NewInspectionPage() {
               <TextField form={form} name="specificArea" label="Specific area" />
             </FieldRow>
             <FieldRow>
-              <SelectField
-                form={form}
-                name="organizationUnitId"
-                label="Organization unit"
-                allowEmpty
-                options={orgUnits.map((u) => ({ value: u.id, label: u.name }))}
-              />
+              <OrganizationUnitPickerField form={form} name="organizationUnitId" label="Organization unit" allowEmpty />
               <SelectField
                 form={form}
                 name="checklistId"

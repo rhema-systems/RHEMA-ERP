@@ -39,6 +39,15 @@ public class BusinessPartnerUsersController : ControllerBase
         }
     }
 
+    [HttpPost("business-partner/{businessPartnerId:guid}/link/{userId:guid}")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    public async Task<ActionResult<BusinessPartnerUserDto>> LinkExisting(Guid businessPartnerId, Guid userId)
+    {
+        try { return Ok(await _userService.LinkExistingExternalUserAsync(businessPartnerId, userId)); }
+        catch (UnauthorizedAccessException ex) { return Problem(statusCode: 403, detail: ex.Message); }
+        catch (InvalidOperationException ex) { return Problem(statusCode: 409, detail: ex.Message); }
+    }
+
     /// <summary>
     /// Get a specific business partner user by ID
     /// </summary>
@@ -259,4 +268,3 @@ public class ResetPasswordRequest
 {
     public string NewPassword { get; set; } = string.Empty;
 }
-

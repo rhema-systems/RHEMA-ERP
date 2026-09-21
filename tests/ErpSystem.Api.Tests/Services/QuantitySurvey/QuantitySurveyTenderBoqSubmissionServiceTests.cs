@@ -13,6 +13,7 @@ using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
 
@@ -75,7 +76,47 @@ public sealed class QuantitySurveyTenderBoqSubmissionServiceTests
             .WithMessage("*business-partner identity*");
     }
 
-    private static async Task<Fixture> CreateFixtureAsync(bool userOwnsPartner = true)
+    [Fact]
+    public async Task Default_procurement_route_does_not_require_optional_boq_alignment()
+    {
+        await using var fixture = await CreateFixtureAsync(externalSubmissionsEnabled: false);
+        var item = await fixture.Db.TenderItems.SingleAsync();
+        item.ItemCode = null;
+        var line = await fixture.Db.ProjectBoqVersionLines.SingleAsync();
+        line.LineNumber = "1.01";
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.EnsureReadyForTenderSubmissionAsync(fixture.BidId, "core-route");
+
+        (await fixture.Db.QuantitySurveyTenderBoqSubmissions.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Default_route_still_enforces_partner_ownership()
+    {
+        await using var fixture = await CreateFixtureAsync(userOwnsPartner: false, externalSubmissionsEnabled: false);
+        var action = () => fixture.Service.EnsureReadyForTenderSubmissionAsync(fixture.BidId, "wrong-owner");
+        await action.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
+    public async Task Existing_exchange_records_keep_alignment_checks_when_opt_in_is_removed()
+    {
+        await using var fixture = await CreateFixtureAsync();
+        await fixture.Service.EnsureReadyForTenderSubmissionAsync(fixture.BidId, "opt-in");
+        var item = await fixture.Db.TenderItems.SingleAsync();
+        item.ItemCode = "NO-MATCH";
+        await fixture.Db.SaveChangesAsync();
+        var defaultService = new QuantitySurveyTenderBoqSubmissionService(
+            fixture.Db, fixture.CurrentUser, fixture.Configuration,
+            Mock.Of<IControlledFileUploadService>(), Mock.Of<ICentralDocumentRepositoryFileService>(),
+            new EphemeralDataProtectionProvider());
+
+        var action = () => defaultService.EnsureReadyForTenderSubmissionAsync(fixture.BidId, "retained-exchange");
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*matched uniquely*");
+    }
+
+    private static async Task<Fixture> CreateFixtureAsync(bool userOwnsPartner = true, bool externalSubmissionsEnabled = true)
     {
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
@@ -254,14 +295,20 @@ public sealed class QuantitySurveyTenderBoqSubmissionServiceTests
             configuration.Object,
             Mock.Of<IControlledFileUploadService>(),
             Mock.Of<ICentralDocumentRepositoryFileService>(),
-            new EphemeralDataProtectionProvider());
+            new EphemeralDataProtectionProvider(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["QuantitySurvey:OptionalFeatures"] = externalSubmissionsEnabled ? "external-submissions" : "",
+            }).Build());
         return new Fixture(
             db,
             service,
             bidId,
             tenderItemId,
             publicationId,
-            publicationLineId);
+            publicationLineId,
+            currentUser.Object,
+            configuration.Object);
     }
 
     private sealed record Fixture(
@@ -270,7 +317,9 @@ public sealed class QuantitySurveyTenderBoqSubmissionServiceTests
         Guid BidId,
         Guid TenderItemId,
         Guid PublicationId,
-        Guid PublicationLineId) : IAsyncDisposable
+        Guid PublicationLineId,
+        ICurrentUserService CurrentUser,
+        IQuantitySurveyConfigurationService Configuration) : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => Db.DisposeAsync();
     }

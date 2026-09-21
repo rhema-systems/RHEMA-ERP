@@ -187,6 +187,50 @@ public class TeamService : ITeamService
 
     // ── writes ────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Validates the chosen chart-of-accounts row and writes the CostCenterCode SNAPSHOT
+    /// (round 2, lane B2). The twin of the same helper on the unit service - deliberately copied
+    /// rather than shared, because the two write different snapshot columns and a shared helper
+    /// taking a setter would be harder to read than fifteen repeated lines.
+    /// </summary>
+    private async Task ApplyFinanceAccountAsync(Team entity, Guid? financeAccountId, CancellationToken cancellationToken)
+    {
+        if (financeAccountId is null || financeAccountId == Guid.Empty)
+        {
+            entity.FinanceAccountId = null;
+            return;
+        }
+
+        var tenantId = GetTenantId();
+        var account = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.Account>()
+                          .GetQueryable()
+                          .AsNoTracking()
+                          .FirstOrDefaultAsync(a => a.Id == financeAccountId.Value
+                                                    && a.TenantId == tenantId
+                                                    && !a.IsDeleted, cancellationToken)
+                      // ⚠ InvalidOperationException, NOT ArgumentException, and the two doors are
+                      // why. TeamsController documents ArgumentException -> 404 ("the thing you
+                      // asked for is missing") and InvalidOperationException -> 400; the unit
+                      // controller answers 400. An account id the caller typed wrongly INSIDE a
+                      // payload is a bad request on both, not a missing resource on one and a bad
+                      // request on the other - one mistake, one status code.
+                      ?? throw new InvalidOperationException(
+                          $"No chart-of-accounts row was found with ID '{financeAccountId}'. "
+                          + "Choose an account from the chart.");
+
+        // Account.Status SHADOWS BusinessEntity's string Status with an AccountStatus enum - the
+        // string comparison the first cut used could not compile, and would have been a silent
+        // always-false if it had.
+        var unchanged = entity.FinanceAccountId == account.Id;
+        if (!unchanged && account.Status != ErpSystem.Core.Enums.AccountStatus.Active)
+            throw new InvalidOperationException(
+                $"Account '{account.AccountCode}' is {account.Status.ToString().ToLowerInvariant()} in the chart of "
+                + "accounts, so it cannot be charged to. Choose an active account, or have Finance reactivate it.");
+
+        entity.FinanceAccountId = account.Id;
+        entity.CostCenterCode = account.AccountCode;
+    }
+
     public async Task<TeamDto> CreateAsync(CreateTeamDto dto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -195,6 +239,8 @@ public class TeamService : ITeamService
 
         var entity = new Team { TenantId = tenantId };
         entity.ApplyCreate(dto);
+        // Round 2, lane B2 - before the insert, so a bad account stores nothing.
+        await ApplyFinanceAccountAsync(entity, dto.FinanceAccountId, cancellationToken);
 
         // EffectiveFrom is a required DateOnly with no sensible zero: default(DateOnly) is
         // 0001-01-01, which would silently save as a real date a century before the company existed.
@@ -226,6 +272,9 @@ public class TeamService : ITeamService
             dto.OrganizationUnitId, dto.TeamLeadId, selfId: dto.Id, cancellationToken);
 
         entity.ApplyUpdate(dto);
+        // Round 2, lane B2. After the mapper, which has just assigned CostCenterCode from the DTO:
+        // the account's own code is the one that wins.
+        await ApplyFinanceAccountAsync(entity, dto.FinanceAccountId, cancellationToken);
         if (entity.EffectiveFrom == default) entity.EffectiveFrom = Today;
 
         entity.StampUpdated(_currentUser);

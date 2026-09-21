@@ -53,5 +53,31 @@ public interface IEmolumentService
     Task<decimal> GetMonthlyBasicPayAsync(Guid employeeId, DateOnly asOf);
 
     /// <summary>Per-day encashment rate for an employee/leave-type pair, per the leave type's rate policy.</summary>
-    Task<decimal> GetEncashmentDailyRateAsync(Guid employeeId, Guid leaveTypeId, DateOnly asOf);
+    /// <remarks>
+    /// Returns the sentence that describes the rate as well as the rate — see
+    /// <see cref="EncashmentDailyRate"/> for why the two travel together.
+    /// </remarks>
+    Task<EncashmentDailyRate> GetEncashmentDailyRateAsync(Guid employeeId, Guid leaveTypeId, DateOnly asOf);
 }
+
+/// <summary>
+/// A per-day encashment rate, and the sentence describing how it was arrived at.
+/// </summary>
+/// <param name="Rate">The figure, per day.</param>
+/// <param name="Basis">
+/// How it was computed, in words — e.g. <c>"GHS 6,000.00 (basic + allowances) ÷ 22 working days =
+/// GHS 272.7273 per day"</c>.
+/// </param>
+/// <remarks>
+/// <para>⚠ <b>The divisor and the sentence are produced together, from the same number.</b> That is
+/// the whole point of returning them as a pair: words assembled anywhere else could describe a basis
+/// other than the one that produced the figure beside them, and nobody reading the payout would be
+/// able to tell.</para>
+///
+/// <para>The same guarantee the final settlement already gives (<c>SeparationService.DailyRateAsync</c>),
+/// now given by leave — which matters more here, because the two use <b>different bases by design</b>
+/// and a payout that cannot say which one produced it is unauditable. See
+/// <c>CompanyHrPolicySettings.EncashmentWorkingDaysPerMonth</c> for why they differ and why they are
+/// not merged.</para>
+/// </remarks>
+public sealed record EncashmentDailyRate(decimal Rate, string Basis);

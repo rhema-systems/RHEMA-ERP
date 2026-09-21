@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useForm, type UseFormReturn, type DefaultValues, type FieldValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { ZodType } from 'zod';
@@ -82,6 +82,12 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
    * from the owning module and a create would be refused with 409.
    */
   allowCreate?: boolean;
+  /**
+   * Set false when the caller may read and edit but not remove — typically because the delete
+   * endpoint sits on a higher permission tier than the rest of the collection. Hiding it is the
+   * point: a button that always answers 403 is worse than no button.
+   */
+  allowRemove?: boolean;
 
   columns: CollectionColumn<TItem>[];
   actions?: CollectionAction<TItem>[];
@@ -112,11 +118,35 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
    */
   renderFields: (form: UseFormReturn<TForm>, editing: boolean) => ReactNode;
 
+  /**
+   * Open the ADD dialog pre-filled, from outside the tab (round 2, lane C3b). Set it to a form
+   * value and the dialog opens on it; the tab calls `onPrefillConsumed` once, so the caller can
+   * clear its own state and the dialog does not reopen on every render.
+   *
+   * ⚠ Deliberately one-shot rather than a controlled `open` prop: the tab owns its dialog, and two
+   * owners of one boolean is how a dialog ends up flickering or refusing to close.
+   */
+  prefill?: TForm | null;
+  onPrefillConsumed?: () => void;
+
   getId: (item: TItem) => string;
   dialogClassName?: string;
   emptyDescription?: string;
   /** Sentence under the dialog title, e.g. "Add a sub-type to this leave type." */
   dialogHint?: string;
+  /**
+   * Whose record this collection belongs to, e.g. the employee's full name (round 3, lane P1 —
+   * the demo asked for the employee's name in every sub-detail dialog). Shown in the dialog
+   * description ("On Ama Mensah's profile") and in the remove confirmation. Optional: ~30 screens
+   * use this tab for lookups that belong to nobody.
+   */
+  subjectLabel?: string | null;
+  /**
+   * A short label for one row — the dependant's own name, the qualification's title — shown in
+   * the edit title ("Edit dependent — Kofi Mensah") and the remove confirmation, so a dialog
+   * about a person says which person, and the subject line says whose profile they are on.
+   */
+  itemLabel?: (item: TItem) => string | null | undefined;
 }
 
 /**
@@ -137,6 +167,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   update,
   remove,
   readOnly = false,
+  allowRemove = true,
   allowUpdate = true,
   allowCreate = true,
   columns,
@@ -150,6 +181,10 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   dialogClassName = 'sm:max-w-[560px]',
   emptyDescription,
   dialogHint,
+  subjectLabel,
+  itemLabel,
+  prefill,
+  onPrefillConsumed,
 }: ResourceCollectionTabProps<TItem, TForm>) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -158,6 +193,8 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   const [editing, setEditing] = useState<TItem | null>(null);
   const [hydrating, setHydrating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TItem | null>(null);
+  const editingLabel = editing && itemLabel ? itemLabel(editing) : null;
+  const pendingDeleteLabel = pendingDelete && itemLabel ? itemLabel(pendingDelete) : null;
   const [pendingAction, setPendingAction] = useState<{
     action: CollectionAction<TItem>;
     item: TItem;
@@ -229,6 +266,17 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
     setDialogOpen(true);
   };
 
+  // Round 2, lane C3b — a caller outside the tab (the skills gap card) asking for the add dialog
+  // pre-filled. Consumed once; the caller clears its own state in the callback.
+  useEffect(() => {
+    if (!prefill) return;
+    setEditing(null);
+    form.reset(prefill as DefaultValues<TForm>);
+    setDialogOpen(true);
+    onPrefillConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
+
   const openEdit = (item: TItem) => {
     setEditing(item);
     // Populate from the row first, so the dialog is never empty, then upgrade to the full record.
@@ -259,7 +307,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   const rows = data ?? [];
   const canAdd = !readOnly && allowCreate;
   const canEdit = !readOnly && allowUpdate;
-  const canRemove = !readOnly && !!remove;
+  const canRemove = !readOnly && allowRemove && !!remove;
   const hasRowMenu = canEdit || canRemove || actions.length > 0;
 
   return (
@@ -381,9 +429,17 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
         <DialogContent className={dialogClassName}>
           <form onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}>
             <DialogHeader>
-              <DialogTitle>{editing ? `Edit ${singular}` : `Add ${singular}`}</DialogTitle>
+              <DialogTitle>
+                {editing
+                  ? `Edit ${singular}${editingLabel ? ` — ${editingLabel}` : ''}`
+                  : `Add ${singular}`}
+              </DialogTitle>
               <DialogDescription>
-                {editing ? `Update this ${singular}.` : (dialogHint ?? `Add a new ${singular}.`)}
+                {editing
+                  ? subjectLabel
+                    ? `On ${subjectLabel}'s profile.`
+                    : `Update this ${singular}.`
+                  : (dialogHint ?? (subjectLabel ? `Add a new ${singular} to ${subjectLabel}'s profile.` : `Add a new ${singular}.`))}
               </DialogDescription>
             </DialogHeader>
 
@@ -418,8 +474,12 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
       <ConfirmationDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
-        title={`Remove ${singular}?`}
-        description={`This will remove the ${singular}.`}
+        title={`Remove ${singular}${pendingDeleteLabel ? ` — ${pendingDeleteLabel}` : ''}?`}
+        description={
+          subjectLabel
+            ? `This will remove the ${singular} from ${subjectLabel}'s profile.`
+            : `This will remove the ${singular}.`
+        }
         confirmText="Remove"
         variant="destructive"
         isLoading={deleteMutation.isPending}

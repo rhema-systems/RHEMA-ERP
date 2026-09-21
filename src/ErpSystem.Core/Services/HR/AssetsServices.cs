@@ -2996,12 +2996,17 @@ public class AssetRequisitionService : IAssetRequisitionService
         // The engine builds its routing context by reading the entity back out of the database, so
         // anything set-but-unsaved would be invisible to it. Nothing is pending here - the record
         // was saved by create or update - but the order is the rule, not the accident.
+        // The engine reports "approval is not configured" as WorkflowOutcome.Approved, and every HR
+        // adapter maps that to its approved status - so submitting used to approve the record
+        // outright. Pending instead lands it at the module's own awaiting-approval status.
+        var configured = await _workflow.HasActiveApprovalWorkflowAsync(EntityType);
         var result = await RunWorkflowAsync(
             () => _workflow.SubmitAsync(EntityType, entity.Id),
             "start the requisition approval workflow");
+        var submitOutcome = configured ? result.Outcome : WorkflowOutcome.Pending;
 
         var actingUserId = RequireCallerUserId();
-        _workflowAdapters.GetAdapter(EntityType).ApplySubmitOutcome(entity, result.Outcome, actingUserId);
+        _workflowAdapters.GetAdapter(EntityType).ApplySubmitOutcome(entity, submitOutcome, actingUserId);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = actingUserId.ToString();
 
@@ -3023,15 +3028,15 @@ public class AssetRequisitionService : IAssetRequisitionService
         RequireDecidable(entity);
         RequireNotTheBeneficiary(entity, approverId, "approve");
 
-        var result = await ProcessApprovalAsync(entity, "Approve", dto.ApprovalComments);
+        var outcome = await ProcessApprovalAsync(entity, "Approve", dto.ApprovalComments);
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId);
+            .ApplyApprovalOutcome(entity, outcome, actingUserId);
 
         // Stamped only when the chain has actually finished. A definition with two approval steps
         // leaves the record Submitted after the first signature, and writing ApprovedById there
         // would name one signatory as *the* approver of something not yet approved.
-        if (result.Outcome == WorkflowOutcome.Approved)
+        if (outcome == WorkflowOutcome.Approved)
         {
             entity.ApprovedById = approverId;
             entity.ApprovalDate = DateTime.UtcNow;
@@ -3057,10 +3062,10 @@ public class AssetRequisitionService : IAssetRequisitionService
         RequireNotTheBeneficiary(entity, approverId, "reject");
 
         var reason = string.IsNullOrWhiteSpace(dto.RejectionReason) ? "Rejected" : dto.RejectionReason.Trim();
-        var result = await ProcessApprovalAsync(entity, "Reject", reason);
+        var outcome = await ProcessApprovalAsync(entity, "Reject", reason);
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId, reason);
+            .ApplyApprovalOutcome(entity, outcome, actingUserId, reason);
 
         entity.RejectionReason = reason;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -3094,9 +3099,12 @@ public class AssetRequisitionService : IAssetRequisitionService
                 $"Only a requisition still awaiting approval can be recalled; this one is {entity.Status}.");
 
         var actingUserId = RequireCallerUserId();
-        var result = await RunWorkflowAsync(
-            () => _workflow.RecallAsync(EntityType, entity.Id, actingUserId, reason),
-            "recall the requisition");
+        // Nothing to recall when no definition is published - RecallWorkflowAsync would answer
+        // "No active workflow found". The record returns to Draft because the rules above say so.
+        if (await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+            await RunWorkflowAsync(
+                () => _workflow.RecallAsync(EntityType, entity.Id, actingUserId, reason),
+                "recall the requisition");
 
         _workflowAdapters.GetAdapter(EntityType).ApplyRecallOutcome(entity, actingUserId, reason);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -3153,18 +3161,35 @@ public class AssetRequisitionService : IAssetRequisitionService
     /// the requisition - so they run first and their refusals name the record. If the definition is
     /// missing or was authored wrongly, the record's own rules still hold.
     /// </remarks>
-    private async Task<WorkflowIntegrationResult> ProcessApprovalAsync(
+    private async Task<WorkflowOutcome> ProcessApprovalAsync(
         AssetRequisition entity, string action, string? comments)
     {
         var actingUserId = RequireCallerUserId();
+
+        // With no definition published there is no instance, so CanUserApproveAsync answers false
+        // for everybody and the requisition could not be decided at all. Authority falls to the module's
+        // approve tier. The beneficiary rule above is the stronger half of the gate and runs either way.
+        if (!await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserService.Roles,
+                $"{action.ToLowerInvariant()} an asset requisition",
+                HrPermissions.ApproveAssets);
+
+            return string.Equals(action, "Reject", StringComparison.OrdinalIgnoreCase)
+                ? WorkflowOutcome.Rejected
+                : WorkflowOutcome.Approved;
+        }
 
         if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
             throw new UnauthorizedAccessException(
                 "You are not assigned as an approver for the current step of this requisition's approval workflow.");
 
-        return await RunWorkflowAsync(
+        var result = await RunWorkflowAsync(
             () => _workflow.ProcessApprovalAsync(EntityType, entity.Id, actingUserId, action, comments),
             $"process the {action.ToLowerInvariant()}");
+
+        return result.Outcome;
     }
 
     /// <summary>
@@ -3606,12 +3631,17 @@ public class AssetTransferService : IAssetTransferService
                     ? "This transfer is already out for approval."
                     : $"Only a draft transfer can be submitted; this one is {entity.Status}.");
 
+        // The engine reports "approval is not configured" as WorkflowOutcome.Approved, and every HR
+        // adapter maps that to its approved status - so submitting used to approve the record
+        // outright. Pending instead lands it at the module's own awaiting-approval status.
+        var configured = await _workflow.HasActiveApprovalWorkflowAsync(EntityType);
         var result = await AssetRequisitionService.RunWorkflowAsync(
             () => _workflow.SubmitAsync(EntityType, entity.Id),
             "start the transfer approval workflow");
+        var submitOutcome = configured ? result.Outcome : WorkflowOutcome.Pending;
 
         var actingUserId = RequireCallerUserId();
-        _workflowAdapters.GetAdapter(EntityType).ApplySubmitOutcome(entity, result.Outcome, actingUserId);
+        _workflowAdapters.GetAdapter(EntityType).ApplySubmitOutcome(entity, submitOutcome, actingUserId);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = actingUserId.ToString();
 
@@ -3633,11 +3663,11 @@ public class AssetTransferService : IAssetTransferService
         RequireDecidable(entity);
         RequireNotTheRecipient(entity, approverId, "approve");
 
-        var result = await ProcessApprovalAsync(entity, "Approve", null);
+        var outcome = await ProcessApprovalAsync(entity, "Approve", null);
 
-        _workflowAdapters.GetAdapter(EntityType).ApplyApprovalOutcome(entity, result.Outcome, actingUserId);
+        _workflowAdapters.GetAdapter(EntityType).ApplyApprovalOutcome(entity, outcome, actingUserId);
 
-        if (result.Outcome == WorkflowOutcome.Approved)
+        if (outcome == WorkflowOutcome.Approved)
         {
             entity.ApprovedById = approverId;
             entity.ApprovalDate = DateTime.UtcNow;
@@ -3660,10 +3690,10 @@ public class AssetTransferService : IAssetTransferService
         RequireDecidable(entity);
         RequireNotTheRecipient(entity, approverId, "reject");
 
-        var result = await ProcessApprovalAsync(entity, "Reject", "Rejected");
+        var outcome = await ProcessApprovalAsync(entity, "Reject", "Rejected");
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId, "Rejected");
+            .ApplyApprovalOutcome(entity, outcome, actingUserId, "Rejected");
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = actingUserId.ToString();
 
@@ -3686,9 +3716,12 @@ public class AssetTransferService : IAssetTransferService
                 $"Only a transfer still awaiting approval can be recalled; this one is {entity.Status}.");
 
         var actingUserId = RequireCallerUserId();
-        var result = await AssetRequisitionService.RunWorkflowAsync(
-            () => _workflow.RecallAsync(EntityType, entity.Id, actingUserId, reason),
-            "recall the transfer");
+        // Nothing to recall when no definition is published - RecallWorkflowAsync would answer
+        // "No active workflow found". The record returns to Draft because the rules above say so.
+        if (await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+            await AssetRequisitionService.RunWorkflowAsync(
+                () => _workflow.RecallAsync(EntityType, entity.Id, actingUserId, reason),
+                "recall the transfer");
 
         _workflowAdapters.GetAdapter(EntityType).ApplyRecallOutcome(entity, actingUserId, reason);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -3727,18 +3760,35 @@ public class AssetTransferService : IAssetTransferService
             $"You cannot {verb} a transfer of an asset to yourself.");
     }
 
-    private async Task<WorkflowIntegrationResult> ProcessApprovalAsync(
+    private async Task<WorkflowOutcome> ProcessApprovalAsync(
         AssetTransfer entity, string action, string? comments)
     {
         var actingUserId = RequireCallerUserId();
+
+        // With no definition published there is no instance, so CanUserApproveAsync answers false
+        // for everybody and the transfer could not be decided at all. Authority falls to the module's
+        // approve tier. The recipient rule above is the stronger half of the gate and runs either way.
+        if (!await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserService.Roles,
+                $"{action.ToLowerInvariant()} an asset transfer",
+                HrPermissions.ApproveAssets);
+
+            return string.Equals(action, "Reject", StringComparison.OrdinalIgnoreCase)
+                ? WorkflowOutcome.Rejected
+                : WorkflowOutcome.Approved;
+        }
 
         if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
             throw new UnauthorizedAccessException(
                 "You are not assigned as an approver for the current step of this transfer's approval workflow.");
 
-        return await AssetRequisitionService.RunWorkflowAsync(
+        var result = await AssetRequisitionService.RunWorkflowAsync(
             () => _workflow.ProcessApprovalAsync(EntityType, entity.Id, actingUserId, action, comments),
             $"process the {action.ToLowerInvariant()}");
+
+        return result.Outcome;
     }
 
     public async Task CompleteAsync(Guid id)

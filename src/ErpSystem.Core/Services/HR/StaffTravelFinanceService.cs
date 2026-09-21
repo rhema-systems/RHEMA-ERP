@@ -3,6 +3,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Finance;
 using ErpSystem.Application.HR.Extensions;
 using Microsoft.Extensions.Logging;
 
@@ -26,6 +27,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private readonly IStaffTravelPerDiemRateRepository _perDiemRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IHrFinancePostingAdapter _financePosting;
     private readonly ILogger<StaffTravelFinanceService> _logger;
 
     public StaffTravelFinanceService(
@@ -39,6 +41,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         IStaffTravelPerDiemRateRepository perDiemRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IHrFinancePostingAdapter financePosting,
         ILogger<StaffTravelFinanceService> logger)
     {
         _budgetRepository = budgetRepository;
@@ -51,8 +54,22 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         _perDiemRepository = perDiemRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _financePosting = financePosting;
         _logger = logger;
     }
+
+    /// <summary>
+    /// A claim or advance whose approval, payment or disbursement is in Finance's ledger is not
+    /// edited into a different number (HR finish plan lane 8). The way out is the register's
+    /// reversal, which is explicit and reasoned; then the edit.
+    /// </summary>
+    private Task GuardClaimNotPostedAsync(Guid claimId, string action, CancellationToken cancellationToken)
+        => _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceStaffTravelExpenseClaim, claimId, action, cancellationToken);
+
+    private Task GuardAdvanceNotPostedAsync(Guid advanceId, string action, CancellationToken cancellationToken)
+        => _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceStaffTravelAdvance, advanceId, action, cancellationToken);
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
@@ -300,6 +317,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
         if (entity.Status is TravelClaimStatus.Paid or TravelClaimStatus.Approved)
             throw new InvalidOperationException($"A claim in status '{entity.Status}' cannot be edited.");
+        await GuardClaimNotPostedAsync(entity.Id, "Editing this claim", cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _claimRepository.UpdateAsync(entity);
@@ -344,15 +362,28 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     {
         var entity = await GetOwnedClaimAsync(reviewDto.ClaimId);
 
-        entity.Status = reviewDto.NewStatus;
-        entity.FinanceReviewedById = reviewerEmployeeId;   // the caller, not a payload value
-        entity.FinanceReviewedAt = DateTime.UtcNow;        // ...and the clock, not one either
+        var approving = reviewDto.NewStatus is TravelClaimStatus.Approved or TravelClaimStatus.PartiallyApproved;
+        // Moving a claim whose approval Finance already holds to anything other than an approved
+        // state would leave the expense recognised with nothing behind it; reverse first.
+        if (!approving)
+            await GuardClaimNotPostedAsync(entity.Id, "Changing the review outcome", cancellationToken);
 
-        entity.UpdatedBy = reviewerEmployeeId.ToString();
-        entity.UpdatedAt = DateTime.UtcNow;
+        // Review and its Finance recognition commit together (HR finish plan lane 8). A second
+        // approval of the same claim is answered by the register as a duplicate, not re-posted.
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.Status = reviewDto.NewStatus;
+            entity.FinanceReviewedById = reviewerEmployeeId;   // the caller, not a payload value
+            entity.FinanceReviewedAt = DateTime.UtcNow;        // ...and the clock, not one either
 
-        await _claimRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            entity.UpdatedBy = reviewerEmployeeId.ToString();
+            entity.UpdatedAt = DateTime.UtcNow;
+
+            await _claimRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return approving ? HrFinancePostingCommandFactory.TravelClaimApproved(entity) : null;
+        }, _currentUserProvider.UserId, cancellationToken);
 
         _logger.LogInformation("Expense claim reviewed: {ClaimNumber}, NewStatus: {Status}", entity.ClaimNumber, entity.Status);
         return true;
@@ -365,18 +396,26 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         if (entity.Status is not (TravelClaimStatus.Approved or TravelClaimStatus.PartiallyApproved))
             throw new InvalidOperationException("Only approved claims can be paid.");
 
-        entity.Status = TravelClaimStatus.Paid;
-        entity.PaymentMethod = payDto.PaymentMethod;
-        entity.PaymentReference = payDto.PaymentReference;
-        // When money left is the clock's answer, not the caller's. `PaidAt` is the date every
-        // downstream reconciliation will key off, and it was whatever the payload said.
-        entity.PaidAt = DateTime.UtcNow;
-        entity.UpdatedAt = DateTime.UtcNow;
+        // Payment, the advance settlement and the Finance journal commit together (lane 8): the
+        // settlement posting carries the advance recovery as its own leg, so it must be built AFTER
+        // SettleLinkedAdvanceAsync has decided how much was recovered.
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.Status = TravelClaimStatus.Paid;
+            entity.PaymentMethod = payDto.PaymentMethod;
+            entity.PaymentReference = payDto.PaymentReference;
+            // When money left is the clock's answer, not the caller's. `PaidAt` is the date every
+            // downstream reconciliation will key off, and it was whatever the payload said.
+            entity.PaidAt = DateTime.UtcNow;
+            entity.UpdatedAt = DateTime.UtcNow;
 
-        await SettleLinkedAdvanceAsync(entity, cancellationToken);
+            await SettleLinkedAdvanceAsync(entity, ct);
 
-        await _claimRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _claimRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return HrFinancePostingCommandFactory.TravelClaimPaid(entity);
+        }, _currentUserProvider.UserId, cancellationToken);
 
         _logger.LogInformation(
             "Expense claim paid: {ClaimNumber}, net {NetPayable}, advance deducted {AdvanceDeducted}",
@@ -390,6 +429,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedClaimAsync(createDto.StaffTravelExpenseClaimId);
+        await GuardClaimNotPostedAsync(createDto.StaffTravelExpenseClaimId, "Adding a line to this claim", cancellationToken);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await ApplyBaseCurrencyAmountAsync(entity, cancellationToken);
@@ -413,6 +453,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     public async Task<StaffTravelExpenseClaimLineDto> UpdateClaimLineAsync(UpdateStaffTravelExpenseClaimLineDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimLineAsync(updateDto.Id);
+        await GuardClaimNotPostedAsync(entity.StaffTravelExpenseClaimId, "Editing a line of this claim", cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -434,6 +475,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     public async Task<bool> ReviewClaimLineAsync(ReviewStaffTravelExpenseClaimLineDto reviewDto, Guid reviewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedClaimLineAsync(reviewDto.LineId);
+        await GuardClaimNotPostedAsync(entity.StaffTravelExpenseClaimId, "Reviewing a line of this claim", cancellationToken);
 
         entity.Status = reviewDto.Status;
         entity.AmountApproved = reviewDto.AmountApproved;
@@ -457,6 +499,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         var entity = await GetOwnedClaimLineAsync(lineId);
 
         var claimId = entity.StaffTravelExpenseClaimId;
+        await GuardClaimNotPostedAsync(claimId, "Deleting a line of this claim", cancellationToken);
         await _lineRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -559,6 +602,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
         if (entity.Status is TravelAdvanceStatus.Disbursed)
             throw new InvalidOperationException("A disbursed advance cannot be edited.");
+        await GuardAdvanceNotPostedAsync(entity.Id, "Editing this advance", cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         entity.UnsettledAmount = (entity.ApprovedAmount ?? entity.RequestedAmount) - entity.SettledAmount;
@@ -608,17 +652,23 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         if (entity.Status != TravelAdvanceStatus.Approved)
             throw new InvalidOperationException("Only approved advances can be disbursed.");
 
-        entity.Status = TravelAdvanceStatus.Disbursed;
-        entity.DisbursedById = disburserEmployeeId;   // the caller, not a payload value
-        // ...and the clock, not a payload value either. `DisburseStaffTravelAdvanceDto.DisbursedAt`
-        // let a caller state when the money went out — the F-09 fiction shape — which matters here
-        // because the settlement deadline and the overdue-settlement sweep are both driven by dates.
-        entity.DisbursedAt = DateTime.UtcNow;
-        entity.UpdatedBy = disburserEmployeeId.ToString();
-        entity.UpdatedAt = DateTime.UtcNow;
+        // Disbursement and its Finance receivable commit together (lane 8).
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.Status = TravelAdvanceStatus.Disbursed;
+            entity.DisbursedById = disburserEmployeeId;   // the caller, not a payload value
+            // ...and the clock, not a payload value either. `DisburseStaffTravelAdvanceDto.DisbursedAt`
+            // let a caller state when the money went out — the F-09 fiction shape — which matters here
+            // because the settlement deadline and the overdue-settlement sweep are both driven by dates.
+            entity.DisbursedAt = DateTime.UtcNow;
+            entity.UpdatedBy = disburserEmployeeId.ToString();
+            entity.UpdatedAt = DateTime.UtcNow;
 
-        await _advanceRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _advanceRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return HrFinancePostingCommandFactory.TravelAdvanceDisbursed(entity);
+        }, _currentUserProvider.UserId, cancellationToken);
 
         _logger.LogInformation("Travel advance disbursed: {AdvanceNumber}", entity.AdvanceNumber);
         return true;
@@ -738,7 +788,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// <para>⚠ This is the travel-side arithmetic only. The GL entries that ought to accompany it —
     /// clearing an employee receivable, posting the net payment — are deliberately out of scope per
     /// decision D-4 and are registered as items 12.1–12.3 in
-    /// <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
+    /// <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
     /// </remarks>
     private async Task SettleLinkedAdvanceAsync(
         StaffTravelExpenseClaim claim, CancellationToken cancellationToken)

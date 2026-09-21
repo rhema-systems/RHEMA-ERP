@@ -27,7 +27,7 @@ Those existing objects may remain in the system for now, but the migrated payrol
 
 Payroll settings and setup screens belong under:
 
-- `Administration > HR > Payroll`
+- `Administration > HR > Pay & Benefits > Payroll Setup`
 - route root: `/administration/hr/payroll`
 
 Operational payroll user screens belong under:

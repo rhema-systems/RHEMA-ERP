@@ -1,5 +1,7 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
+import type { BudgetLineForRequisition } from '@/types/hr/recruitment';
 import type {
   BatchAssessmentResult,
   Competency,
@@ -39,8 +41,15 @@ import type {
   JobResponsibility,
   JobResponsibilityKpi,
   JobSubFamily,
+  JobValuationSummary,
+  SetProposedSalaryGradeRequest,
   JobWorkingCondition,
   ManpowerBudget,
+  AddLinesFromEstablishmentResult,
+  CreateManpowerBudgetFromEstablishment,
+  ManpowerBudgetDetail,
+  ManpowerPlanningBaseline,
+  PositionSalaryReference,
   ManpowerBudgetLine,
   OrganisationCompetencyGap,
   PositionCompetency,
@@ -59,6 +68,8 @@ import type {
   UpdateJobResponsibility,
   UpdateJobResponsibilityKpi,
   UpdateJobWorkingCondition,
+  RecruitmentSpend,
+  ManpowerBudgetWorkbookImportResult,
 } from '@/types/hr/job-architecture';
 
 /**
@@ -137,6 +148,38 @@ class JobArchitectureService {
     return apiService.put<JobDescription>(`${this.jobs}/descriptions/${id}`, payload);
   }
 
+  /**
+   * What the role is worth, from the money attached to its qualifications and competencies plus its
+   * intrinsic value, blended with any industry benchmark and banded at ±10%.
+   *
+   * Safe: it computes and returns, and changes nothing — so it belongs in a `useQuery` like any
+   * other read. Until 2026-09-07 it was not safe, and that is the whole point of the pair below:
+   * this GET persisted what it computed, so a retry, a cache revalidation or a refetch-on-focus was
+   * an UPDATE, and `SaveChanges` stamped `UpdatedAt` on the record every time.
+   */
+  getValuation(id: string) {
+    return apiService.get<JobValuationSummary>(`${this.jobs}/descriptions/${id}/valuation`);
+  }
+
+  /**
+   * Work the valuation out and STORE it on the job description.
+   *
+   * ⚠ `HR.JobArchitecture.Write`, and the API refuses an approved record — storing an estimate is
+   * an edit to the document, and an approved one is the version in force for its position.
+   */
+  recalculateValuation(id: string) {
+    return apiService.post<JobValuationSummary>(`${this.jobs}/descriptions/${id}/valuation`);
+  }
+
+  /**
+   * The author's proposed grade beside the suggestion (round 3, lane J2; D-11). Null follows the
+   * suggestion. Refused on an approved description and for a grade that is not the tenant's.
+   * Answers the fresh valuation.
+   */
+  setProposedGrade(id: string, body: SetProposedSalaryGradeRequest) {
+    return apiService.put<JobValuationSummary>(`${this.jobs}/descriptions/${id}/proposed-grade`, body);
+  }
+
   submitJobDescription(id: string) {
     return apiService.post(`${this.jobs}/descriptions/${id}/submit`, { jobDescriptionId: id });
   }
@@ -174,8 +217,19 @@ class JobArchitectureService {
     });
   }
 
-  cloneJobDescription(id: string) {
-    return apiService.post<JobDescription>(`${this.jobs}/descriptions/${id}/clone`, {});
+  /** Same position → a "(Copy)" draft; `targetPositionId` → a copy onto that position (round 3, J1). */
+  cloneJobDescription(id: string, targetPositionId?: string | null) {
+    return apiService.post<JobDescription>(`${this.jobs}/descriptions/${id}/clone`, {
+      targetPositionId: targetPositionId ?? null,
+    });
+  }
+
+  /** Bring the position's effective skill and certification requirements onto the description. Idempotent. */
+  importPositionRequirements(id: string) {
+    return apiService.post<{ competenciesAdded: number; qualificationsAdded: number; alreadyPresent: number }>(
+      `${this.jobs}/descriptions/${id}/import-position-requirements`,
+      {},
+    );
   }
 
   deleteJobDescription(id: string) {
@@ -771,7 +825,7 @@ class JobArchitectureService {
    * ⚠ Note the route: a line is CREATED under its budget and then addressed at
    * `JobAnalysis/lines/{id}` — the same asymmetry the bank branches have.
    */
-  updateBudgetLine(lineId: string, payload: Partial<ManpowerBudgetLine> & { id: string }) {
+  updateBudgetLine(lineId: string, payload: ManpowerBudgetLineWrite & { id: string }) {
     return apiService.put<ManpowerBudgetLine>(`${this.jobs}/lines/${lineId}`, payload);
   }
 
@@ -780,7 +834,7 @@ class JobArchitectureService {
     return apiService.delete<void>(`${this.jobs}/lines/${lineId}`);
   }
 
-  addBudgetLine(budgetId: string, payload: Partial<ManpowerBudgetLine> & { positionId: string }) {
+  addBudgetLine(budgetId: string, payload: ManpowerBudgetLineWrite & { positionId: string }) {
     return apiService.post<ManpowerBudgetLine>(`${this.jobs}/budgets/${budgetId}/lines`, {
       manpowerBudgetId: budgetId,
       ...payload,
@@ -810,6 +864,71 @@ class JobArchitectureService {
     return apiService.post(`${this.jobs}/budgets/${id}/workflow/reject`, { reason });
   }
 
+  /**
+   * The planning baseline for a unit's subtree over a period (round 2b, R2): serving headcount,
+   * estimated salary cost, exits due, each post against its establishment. Dates as `YYYY-MM-DD`.
+   */
+  getPlanningBaseline(organizationUnitId: string, periodStart: string, periodEnd: string) {
+    return apiService.get<ManpowerPlanningBaseline>(`${this.jobs}/budgets/planning-baseline`, {
+      organizationUnitId,
+      periodStart,
+      periodEnd,
+    });
+  }
+
+  /** The grade a position carries, for the budget line's scale picker (R3). */
+  getPositionSalaryReference(positionId: string) {
+    return apiService.get<PositionSalaryReference>(`${this.jobs}/positions/${positionId}/salary-reference`);
+  }
+
+  /** A Draft budget with a line per post in the unit's subtree, from the establishment (R4a). 409 if one is live for the unit + year. */
+  createBudgetFromEstablishment(payload: CreateManpowerBudgetFromEstablishment) {
+    return apiService.post<ManpowerBudgetDetail>(`${this.jobs}/budgets/from-establishment`, payload);
+  }
+
+  /** Adds posts from the establishment to a draft; lines already on it are never overwritten (R4a). */
+  addLinesFromEstablishment(budgetId: string, includeUnestablished = true) {
+    return apiService.post<AddLinesFromEstablishmentResult>(
+      `${this.jobs}/budgets/${budgetId}/lines/from-establishment?includeUnestablished=${includeUnestablished}`,
+      {},
+    );
+  }
+
+  /** Approved and pending recruitment costs drawn against the budget's recruitment envelope (R6). */
+  getRecruitmentSpend(budgetId: string) {
+    return apiService.get<RecruitmentSpend>(`${this.jobs}/budgets/${budgetId}/recruitment-spend`);
+  }
+
+  /** The budget's posts against the establishment as an .xlsx to edit and import back (R4b). Streams through the authorised download path. */
+  exportEstablishmentWorkbook(budgetId: string, budgetNumber: string) {
+    return hrDocumentService.download(`${this.jobs}/budgets/${budgetId}/establishment-workbook`, `${budgetNumber} establishment.xlsx`);
+  }
+
+  /**
+   * Imports an edited establishment workbook onto a Draft/Rejected budget (R4b). All-or-nothing:
+   * a 422 carries the same result shape with `applied: false` and the rows named — read it from
+   * the error's `response` rather than treating it as a plain failure.
+   */
+  importEstablishmentWorkbook(budgetId: string, file: File) {
+    const form = new FormData();
+    form.append('file', file);
+    return apiService.post<ManpowerBudgetWorkbookImportResult>(`${this.jobs}/budgets/${budgetId}/establishment-workbook`, form);
+  }
+
+  /** Every position's establishment in one read — the admin screen's list (R4a). */
+  getEstablishmentList(organizationUnitId?: string | null) {
+    return apiService.get<PositionEstablishment[]>(`${this.jobs}/establishment`, {
+      organizationUnitId: organizationUnitId ?? undefined,
+    });
+  }
+
+  /** Approved budget lines a requisition for this position may draw down from, with what each has left (R5). */
+  getLinesForPosition(positionId: string, fiscalYear?: number | null) {
+    return apiService.get<BudgetLineForRequisition[]>(`${this.jobs}/budgets/lines/for-position/${positionId}`, {
+      fiscalYear: fiscalYear ?? undefined,
+    });
+  }
+
   // ── establishment (FR-HR-136) ──────────────────────────────────────────────
 
   getPositionEstablishment(positionId: string) {
@@ -831,5 +950,13 @@ class JobArchitectureService {
     );
   }
 }
+
+/**
+ * A budget line as written (R3). `plannedAverageSalary: null` means "read it from the scale
+ * named by the grade/level/notch ids"; a number is kept as typed. The total is never sent.
+ */
+export type ManpowerBudgetLineWrite = Omit<Partial<ManpowerBudgetLine>, 'plannedAverageSalary'> & {
+  plannedAverageSalary?: number | null;
+};
 
 export const jobArchitectureService = new JobArchitectureService();

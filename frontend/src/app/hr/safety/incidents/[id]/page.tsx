@@ -49,6 +49,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { LinkedErCasesPanel } from '@/components/hr/employee-relations/LinkedErCasesPanel';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { FinancePostingCard } from '@/components/hr/common/FinancePostingCard';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
@@ -495,6 +496,10 @@ export default function IncidentDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* What Finance holds for this incident: the insurance recovery, booked when the claim is
+          filed with an amount paid. The incident is the posting source; the claim is a field on it. */}
+      <FinancePostingCard sourceDocumentId={id} invalidateKeys={[detailKey]} />
 
       {/* Lane 6: the reverse ER link. HR-desk screen only — the read is ER-permission gated. */}
       <LinkedErCasesPanel source="SafetyIncident" recordId={id} />

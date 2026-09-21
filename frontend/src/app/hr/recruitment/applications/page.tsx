@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { FileText, Loader2 } from 'lucide-react';
+import { FileText, Loader2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -18,6 +19,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { RecordApplicationDialog } from '@/components/hr/recruitment/RecordApplicationDialog';
+import { useAuth } from '@/hooks/use-auth';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
 import { jobApplicationService } from '@/services/hr/recruitment-pipeline.service';
@@ -34,8 +37,12 @@ const ALL = '__all__';
  * otherwise would mean filtering a single page client-side and reporting the wrong totals.
  */
 export default function ApplicationsPage() {
+  const router = useRouter();
   const [page, setPage] = useState(1);
   const [vacancyId, setVacancyId] = useState<string>(ALL);
+  const [recording, setRecording] = useState(false);
+  const { hasAnyPermission } = useAuth();
+  const canRecord = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
   const [status, setStatus] = useState<string>(ALL);
 
   const vacancies = useQuery({
@@ -70,6 +77,24 @@ export default function ApplicationsPage() {
         title="Applications"
         description="Every application across all vacancies. Work a single vacancy from its pipeline board instead."
         backHref="/hr/recruitment"
+        actions={
+          canRecord ? (
+            <Button onClick={() => setRecording(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Record an application
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {/* Round 3, lane A: walk-ins, agency submissions and referrals — recorded by HR with the
+          source typed and the advert picked from the vacancy's own. */}
+      <RecordApplicationDialog
+        open={recording}
+        onOpenChange={setRecording}
+        vacancies={(vacancies.data ?? []).map((v) => ({ id: v.id, jobTitle: v.jobTitle, vacancyNumber: v.vacancyNumber }))}
+        defaultVacancyId={vacancyId === ALL ? null : vacancyId}
+        onRecorded={(applicationId) => router.push(`/hr/recruitment/applications/${applicationId}`)}
       />
 
       <Card>
@@ -148,7 +173,11 @@ export default function ApplicationsPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((a) => (
-                  <TableRow key={a.id}>
+<TableRow
+                    key={a.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/applications/${a.id}`)}
+                  >
                     <TableCell className="font-mono text-xs">
                       <Link href={`/hr/recruitment/applications/${a.id}`} className="hover:underline">
                         {a.applicationNumber}

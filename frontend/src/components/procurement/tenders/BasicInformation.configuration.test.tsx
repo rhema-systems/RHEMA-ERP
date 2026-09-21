@@ -98,6 +98,22 @@ it('filters QCBS, applies settings atomically, and clears selection on method ch
   expect(savedForm()).toMatchObject({ evaluationTemplateId: null, useQCBSEvaluation: true });
 });
 
+it('selects an exact Works template without treating legacy Construction or Goods as Works', async () => {
+  const works = { ...template('works', 'WeightedAverage'), category: 'Works' };
+  api.active.mockResolvedValue([works, ...templates,
+    { ...template('legacy-construction', 'WeightedAverage'), category: 'Construction' }]);
+  api.details.mockResolvedValue(works);
+  render(<Harness category="Works" />);
+  await loaded();
+  await choose('1. Evaluation Method', 'Standard (non-QCBS)');
+  await openSelect('2. Evaluation Template');
+  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual([
+    'Select a matching template', 'works (works)',
+  ]);
+  await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'works (works)', exact: true })); });
+  await waitFor(() => expect(savedForm()).toMatchObject({ evaluationTemplateId: 'works', useQCBSEvaluation: false }));
+});
+
 it('retains an existing compatible draft and restores template-owned weights', async () => {
   render(<Harness initial={{ ...initialForm, evaluationTemplateId: 'q', useQCBSEvaluation: true }} />);
   await loaded();

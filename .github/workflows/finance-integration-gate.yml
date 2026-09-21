@@ -18,6 +18,8 @@ on:
       - "src/ErpSystem.Data/Migrations/**"
       - "src/ErpSystem.Data/Seeders/FinanceDataSeeder.cs"
       - "tests/ErpSystem.Api.Tests/Services/Finance/**"
+      - "src/ErpSystem.Core/Services/HR/Finance/**"
+      - "tests/ErpSystem.Api.Tests/Services/HR/HrFinancePosting*.cs"
       - "tests/ErpSystem.Core.Tests/Services/Procurement/ProcurementSupplierOnboardingTokenServiceTests.cs"
       - "tests/ErpSystem.Core.Tests/Services/Inventory/**"
   workflow_dispatch:
@@ -112,7 +114,7 @@ jobs:
       - name: Run Finance-owned consumer contracts
         shell: bash
         run: |
-          api_filter='FullyQualifiedName~FinancePostingEngineTests|FullyQualifiedName~ApPaymentPostingMigrationTests.ApprovedApPayment_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent|FullyQualifiedName~ApPaymentPostingMigrationTests.CrossCurrencyApPayment_ShouldPostLineScopedDiscountAndWhtAtFrozenFunctionalValues|FullyQualifiedName~ApPaymentPostingMigrationTests.ForeignSupplierAdvance_ShouldApplyAtFrozenLotAndCurrentInvoiceRatesThenReverseImmutably|FullyQualifiedName~ArReceiptPostingMigrationTests.ApprovedArReceipt_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent|FullyQualifiedName~ArReceiptPostingMigrationTests.CrossCurrencyArReceipt_ShouldPostEveryDeductionAtItsFrozenFunctionalValue|FullyQualifiedName~ArReceiptPostingMigrationTests.ForeignCustomerAdvance_ShouldApplyAtFrozenLotAndCurrentInvoiceRatesThenReverseImmutably|FullyQualifiedName~CrossCurrencySettlementCalculatorTests.LineScopedDeductions_ShouldRetainIndependentlyRoundedFunctionalEvidence|FullyQualifiedName~LineScopedCrossCurrencyDeductionMigrationTests.Migration_ShouldAddAndRemoveEveryApArDeductionEvidenceColumn|FullyQualifiedName~E2E012InventoryAdjustmentFinancePostingTests|FullyQualifiedName~InventoryValuationFinancePostingTests|FullyQualifiedName~ProcurementFinanceReconciliationTests.Reconciliation_ShouldComposeExistingCommitmentReceiptApGlRetentionAndMilestones|FullyQualifiedName~FinanceIntegrationContractFoundationTests|FullyQualifiedName~FixedAssetDisposalFoundationTests.CreditSaleCreatesLinkedArInvoiceAgainstTheDisposalClearingAccount|FullyQualifiedName~FixedAssetDisposalFoundationTests.ImmediateSaleCreatesAndPostsReceiptAllocatedToLinkedInvoice|FullyQualifiedName~FixedAssetDisposalSettlementMigrationTests'
+          api_filter='FullyQualifiedName~FinancePostingEngineTests|FullyQualifiedName~ApPaymentPostingMigrationTests.ApprovedApPayment_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent|FullyQualifiedName~ApPaymentPostingMigrationTests.CrossCurrencyApPayment_ShouldPostLineScopedDiscountAndWhtAtFrozenFunctionalValues|FullyQualifiedName~ApPaymentPostingMigrationTests.ForeignSupplierAdvance_ShouldApplyAtFrozenLotAndCurrentInvoiceRatesThenReverseImmutably|FullyQualifiedName~ArReceiptPostingMigrationTests.ApprovedArReceipt_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent|FullyQualifiedName~ArReceiptPostingMigrationTests.CrossCurrencyArReceipt_ShouldPostEveryDeductionAtItsFrozenFunctionalValue|FullyQualifiedName~ArReceiptPostingMigrationTests.ForeignCustomerAdvance_ShouldApplyAtFrozenLotAndCurrentInvoiceRatesThenReverseImmutably|FullyQualifiedName~CrossCurrencySettlementCalculatorTests.LineScopedDeductions_ShouldRetainIndependentlyRoundedFunctionalEvidence|FullyQualifiedName~LineScopedCrossCurrencyDeductionMigrationTests.Migration_ShouldAddAndRemoveEveryApArDeductionEvidenceColumn|FullyQualifiedName~E2E012InventoryAdjustmentFinancePostingTests|FullyQualifiedName~InventoryValuationFinancePostingTests|FullyQualifiedName~ProcurementFinanceReconciliationTests.Reconciliation_ShouldComposeExistingCommitmentReceiptApGlRetentionAndMilestones|FullyQualifiedName~FinanceIntegrationContractFoundationTests|FullyQualifiedName~FixedAssetDisposalFoundationTests.CreditSaleCreatesLinkedArInvoiceAgainstTheDisposalClearingAccount|FullyQualifiedName~FixedAssetDisposalFoundationTests.ImmediateSaleCreatesAndPostsReceiptAllocatedToLinkedInvoice|FullyQualifiedName~FixedAssetDisposalSettlementMigrationTests|FullyQualifiedName~HrFinancePostingAdapterTests|FullyQualifiedName~HrFinancePostingCatalogueTests'
           dotnet test tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
             --configuration Debug \
             --no-build \
@@ -214,7 +216,7 @@ jobs:
             fi
           }
 
-          assert_trx_count "artifacts/finance-test-results/finance-consumer-contracts.trx" 35 "Finance consumer gate"
+          assert_trx_count "artifacts/finance-test-results/finance-consumer-contracts.trx" 70 "Finance consumer gate"
           assert_trx_count "artifacts/finance-test-results/finance-procurement-contracts.trx" 3 "Procurement-to-Finance gate"
           assert_trx_count "artifacts/finance-test-results/finance-inventory-contract.trx" 1 "Inventory-to-Finance gate"
           assert_trx_count "artifacts/finance-test-results/finance-sql-server-contracts.trx" 5 "SQL Server Finance gate"

@@ -12,6 +12,7 @@ import {
   TextField,
 } from '@/components/hr/employee/tabs/fields';
 import { countryService } from '@/services/hr/country.service';
+import { identificationTypeService } from '@/services/hr/lookup.service';
 import { GENDERS } from '@/types/hr/recruitment-pipeline';
 
 export const candidateSchema = z.object({
@@ -26,11 +27,24 @@ export const candidateSchema = z.object({
   postalAddress: z.string().max(200).optional().nullable(),
   digitalAddress: z.string().max(30).optional().nullable(),
   city: z.string().min(1, 'City is required').max(100),
-  countryId: z.string().min(1, 'Country is required'),
+  // G-7.3: free text, and optional. Nationality is not the same question as country of residence —
+  // a dual national or a stateless applicant is not served by a single FK into the country table.
+  nationality: z.string().max(100).optional().nullable(),
+  // Optional since 2026-09-14, matching the entity. It was `min(1)`, which meant a candidate
+  // with no country — every shadow record minted from a countryless employee by the internal job
+  // board — could not be saved from this form at all, whatever else you were trying to change.
+  countryId: z.string().optional().nullable(),
   linkedInProfile: z.string().max(200).optional().nullable(),
   portfolioUrl: z.string().max(200).optional().nullable(),
   gitHubUrl: z.string().max(200).optional().nullable(),
+  // National identity (round 3, lanes C1/C2) — the employee's trio, carried across at hire.
+  nationalIdTypeId: z.string().optional().nullable(),
+  nationalIdNumber: z.string().max(50).optional().nullable(),
+  nationalIdExpiryDate: z.string().optional().nullable(),
   isInTalentPool: z.boolean(),
+}).refine((v) => !v.nationalIdNumber?.trim() || !!v.nationalIdTypeId, {
+  message: 'Say which document the number is from',
+  path: ['nationalIdTypeId'],
 });
 
 export type CandidateFormValues = z.infer<typeof candidateSchema>;
@@ -47,10 +61,14 @@ export const emptyCandidate: CandidateFormValues = {
   postalAddress: null,
   digitalAddress: null,
   city: '',
+  nationality: null,
   countryId: '',
   linkedInProfile: null,
   portfolioUrl: null,
   gitHubUrl: null,
+  nationalIdTypeId: null,
+  nationalIdNumber: null,
+  nationalIdExpiryDate: null,
   isInTalentPool: false,
 };
 
@@ -68,6 +86,11 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
   const countries = useQuery({
     queryKey: ['hr', 'countries', 'active'],
     queryFn: () => countryService.getActive(),
+  });
+  // The tenant's identity documents (Ghana Card, passport, …) — the server refuses any other type.
+  const idTypes = useQuery({
+    queryKey: ['hr', 'identification-types', 'active'],
+    queryFn: () => identificationTypeService.getActive(),
   });
 
   return (
@@ -98,6 +121,23 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
             />
             <div />
           </FieldRow>
+          {/* Round 3, lane C1/C2 (register row R-3a): the national identity document. At hire it
+              becomes the employee's first identification card, unverified. */}
+          <FieldRow>
+            <SelectField
+              form={form}
+              name="nationalIdTypeId"
+              label="Identity document"
+              allowEmpty
+              emptyLabel="Not recorded"
+              options={(idTypes.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
+            />
+            <TextField form={form} name="nationalIdNumber" label="Document number" />
+          </FieldRow>
+          <FieldRow>
+            <DateField form={form} name="nationalIdExpiryDate" label="Document expiry" />
+            <div />
+          </FieldRow>
         </CardContent>
       </Card>
 
@@ -123,10 +163,12 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
               form={form}
               name="countryId"
               label="Country"
-              required
               options={(countries.data ?? []).map((c: any) => ({ value: c.id, label: c.name }))}
             />
-            <div />
+            {/* G-7.3: displayed on the Personal card since the module was built and settable by
+                nothing — the demo seeder was its only writer, which is why it read "Ghanaian" in
+                every walkthrough and "—" on every real tenant. */}
+            <TextField form={form} name="nationality" label="Nationality" />
           </FieldRow>
         </CardContent>
       </Card>

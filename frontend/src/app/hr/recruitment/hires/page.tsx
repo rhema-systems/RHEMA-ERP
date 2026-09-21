@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarClock, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -28,6 +29,7 @@ const STARTING_SOON = '__starting_soon__';
  * built reads, the same shape the interviews screen uses for the same reason.
  */
 export default function JobHiresPage() {
+  const router = useRouter();
   const [view, setView] = useState<string>(STARTING_SOON);
 
   const startApproaching = useQuery({
@@ -105,7 +107,11 @@ export default function JobHiresPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((h) => (
-                  <TableRow key={h.id} className="cursor-pointer">
+                  <TableRow
+                    key={h.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/hires/${h.id}`)}
+                  >
                     <TableCell>
                       <Link
                         href={`/hr/recruitment/hires/${h.id}`}

@@ -15,11 +15,23 @@ namespace ErpSystem.Core.Entities.HR.Recruitment;
 /// it exists whether or not anyone decides to recruit for it, and is what the stakeholder asked the
 /// system to "throw up" automatically when an employee leaves.</para>
 ///
-/// <para>Rows are normally created automatically by <c>PositionVacancyInterceptor</c> when an
-/// employee's status turns to Terminated/Retired or their <c>PositionId</c> changes (promotion /
-/// transfer), so no exit path can forget to log it. A departure is ALWAYS logged and then classified
-/// via <see cref="Classification"/> — never silently dropped even when the position is still at
-/// headcount.</para>
+/// <para><b>Rows are created two ways.</b> <c>PositionVacancyLog.LogDepartureAsync</c> writes one
+/// when a post actually falls empty — a termination, a retirement, a separation completing, or a
+/// movement taking someone to a different post — carrying the real <see cref="Reason"/>,
+/// <see cref="VacatedByEmployeeId"/> and <see cref="VacatedDate"/>. <c>ReconcilePositionVacanciesAsync</c>
+/// sweeps for gaps that exist but were never logged, and closes ones that have since been filled.
+/// A departure is logged and then classified via <see cref="Classification"/> — never silently
+/// dropped even when the position is still at headcount.</para>
+///
+/// <para>⚠ <b>This paragraph used to describe a <c>PositionVacancyInterceptor</c> that did not
+/// exist</b> (G-3.2, corrected 2026-09-15). The name occurred in exactly two places in the
+/// solution, both XML doc comments — this one and <c>IPositionVacancyService</c> — and there was no
+/// such class; the only registered interceptor was <c>AuditInterceptor</c>. Reconcile was the sole
+/// writer, so no departure was ever logged automatically and the guarantee stated here was not one
+/// the system provided. The guarantee is now real, but it rests on <b>explicit call sites</b>
+/// rather than on an interceptor: a new way to end employment must call
+/// <c>PositionVacancyLog.LogDepartureAsync</c>, because nothing at SaveChanges time will catch it.
+/// See that class for why the trade was made that way.</para>
 /// </summary>
 public class PositionVacancy : TenantEntity
 {

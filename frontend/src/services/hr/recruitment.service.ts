@@ -21,12 +21,15 @@ import type {
   RaiseRequisitionResult,
   RequisitionAttachment,
   RequisitionBudgetCheck,
+  RequisitionBudgetCheckPreview,
   RequisitionComment,
   RequisitionCost,
   RequisitionCostForm,
+  RequisitionCostStatus,
   RequisitionHistoryEntry,
   ShortlistingCriteria,
   ShortlistingCriteriaForm,
+  ShortlistingCriteriaShape,
   StaffRequisition,
   StaffRequisitionStatus,
   StaffRequisitionStatusSummary,
@@ -98,6 +101,16 @@ class StaffRequisitionService {
     return apiService.get<RequisitionBudgetCheck>(`${this.baseUrl}/${id}/budget-check`);
   }
 
+  /** The same check for a requisition still being typed — the form's live preview (R5). */
+  previewBudgetCheck(payload: RequisitionBudgetCheckPreview): Promise<RequisitionBudgetCheck> {
+    return apiService.post<RequisitionBudgetCheck>(`${this.baseUrl}/budget-check/preview`, payload);
+  }
+
+  /** A Draft drawing down what an approved budget line has left — "out of the budget, raise requisitions" (R5). */
+  createFromBudgetLine(lineId: string): Promise<StaffRequisition> {
+    return apiService.post<StaffRequisition>(`${this.baseUrl}/from-budget-line/${lineId}`, {});
+  }
+
   // ── writes ───────────────────────────────────────────────────────────────
 
   create(payload: CreateStaffRequisition): Promise<StaffRequisition> {
@@ -159,8 +172,18 @@ class StaffRequisitionService {
     return apiService.get<RequisitionCost[]>(`${this.baseUrl}/${id}/costs`);
   }
 
-  getTotalCost(id: string): Promise<number> {
-    return apiService.get<number>(`${this.baseUrl}/${id}/costs/total`);
+  /** The stored base-currency total; `status` narrows it (Approved = what HR has signed) (R7). */
+  getTotalCost(id: string, status?: RequisitionCostStatus | null): Promise<number> {
+    return apiService.get<number>(`${this.baseUrl}/${id}/costs/total`, status ? { status } : undefined);
+  }
+
+  /** HR approves a recorded cost — not the person who recorded it (R7). */
+  approveCost(costId: string, note?: string | null): Promise<RequisitionCost> {
+    return apiService.post<RequisitionCost>(`${this.baseUrl}/costs/${costId}/approve`, { note: note ?? null });
+  }
+
+  rejectCost(costId: string, note?: string | null): Promise<RequisitionCost> {
+    return apiService.post<RequisitionCost>(`${this.baseUrl}/costs/${costId}/reject`, { note: note ?? null });
   }
 
   addCost(id: string, payload: RequisitionCostForm): Promise<RequisitionCost> {
@@ -332,6 +355,11 @@ class JobVacancyService {
 
   getCriteria(vacancyId: string): Promise<ShortlistingCriteria[]> {
     return apiService.get<ShortlistingCriteria[]>(`${this.baseUrl}/${vacancyId}/criteria`);
+  }
+
+  /** The server's table of what each criterion type is made of (round 3, lane K). */
+  getCriteriaShapes(): Promise<ShortlistingCriteriaShape[]> {
+    return apiService.get<ShortlistingCriteriaShape[]>(`${this.baseUrl}/criteria/shapes`);
   }
 
   addCriteria(vacancyId: string, payload: ShortlistingCriteriaForm): Promise<ShortlistingCriteria> {

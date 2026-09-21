@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRightLeft, Loader2, UserCog } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,18 +14,19 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
 import type { OrganizationUnit } from '@/types/hr/organization';
+import {
+  HistoryStampFields,
+  emptyHistoryStamp,
+  stampError,
+  stampPayload,
+  type HistoryStamp,
+} from './HistoryStampFields';
 
 /**
  * The two acts the organisation-unit change log exists to record, each on its own command.
@@ -40,6 +41,9 @@ import type { OrganizationUnit } from '@/types/hr/organization';
  * ⚠ Both are no-ops when nothing changes. Re-sending a unit's current parent, or reappointing the
  * sitting head, returns success and records nothing — so neither dialog offers the current value as
  * a choice, rather than letting someone submit a change that will not appear in the log.
+ *
+ * Demo feedback round 2 (O-1, O-3b): the new parent is chosen level-first through the shared
+ * picker, and both dialogs carry the dates the change took effect and notes beyond the reason.
  */
 
 const ROOT = '__root__';
@@ -56,14 +60,11 @@ interface Props {
 export function MoveUnitDialog({ unit, open, onOpenChange, onDone }: Props) {
   const { toast } = useToast();
   const [parentId, setParentId] = useState<string>('');
+  const [toRoot, setToRoot] = useState(false);
   const [reason, setReason] = useState('');
+  const [stamp, setStamp] = useState<HistoryStamp>(emptyHistoryStamp);
   const [saving, setSaving] = useState(false);
 
-  const { data: units = [] } = useQuery({
-    queryKey: ['hr', 'organization-units', 'all'],
-    queryFn: () => organizationUnitService.getAll(),
-    enabled: open,
-  });
   const { data: levels = [] } = useQuery({
     queryKey: ['hr', 'organization-levels', 'all'],
     queryFn: () => organizationLevelService.getAll(),
@@ -71,46 +72,26 @@ export function MoveUnitDialog({ unit, open, onOpenChange, onDone }: Props) {
   });
 
   const ownLevel = levels.find((l) => l.id === unit.organizationLevelId);
-
-  /**
-   * ⚠ Three of the server's rules, restated so the picker cannot offer a move it will refuse:
-   * the parent must be in the same STRUCTURE, it must sit at a higher tier (a LOWER level number —
-   * level-skipping is allowed, which is the rule slice 3 reconciled the two endpoints onto), and it
-   * must not be the unit itself or anything beneath it.
-   *
-   * The descendant test reads `path`, which is `/ancestor/…/self`. That is only trustworthy because
-   * slice 3 made a reparent cascade the path to every descendant; before that a stale path would
-   * have let this list offer a unit its own child.
-   */
-  const candidates = useMemo(() => {
-    if (!ownLevel) return [];
-    const levelById = new Map(levels.map((l) => [l.id, l]));
-    return units
-      .filter((u) => {
-        if (u.id === unit.id || !u.isActive) return false;
-        if (u.path?.split('/').includes(unit.id)) return false;
-        const level = levelById.get(u.organizationLevelId);
-        if (!level || level.structureId !== ownLevel.structureId) return false;
-        return level.levelNumber < ownLevel.levelNumber;
-      })
-      .filter((u) => u.id !== unit.parentUnitId)
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [units, levels, ownLevel, unit.id, unit.parentUnitId]);
-
   const canRoot = !!ownLevel?.isRootLevel && !!unit.parentUnitId;
 
   const reset = () => {
     setParentId('');
+    setToRoot(false);
     setReason('');
+    setStamp(emptyHistoryStamp());
   };
 
+  const target = toRoot ? ROOT : parentId;
+  const ready = !!target && !!reason.trim() && !stampError(stamp);
+
   const submit = async () => {
-    if (!parentId || !reason.trim()) return;
+    if (!ready) return;
     setSaving(true);
     try {
       await organizationUnitService.move(unit.id, {
-        newParentId: parentId === ROOT ? null : parentId,
+        newParentId: toRoot ? null : parentId,
         changeReason: reason.trim(),
+        ...stampPayload(stamp),
       });
       await onDone();
       toast({
@@ -139,7 +120,7 @@ export function MoveUnitDialog({ unit, open, onOpenChange, onDone }: Props) {
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Move {unit.name}</DialogTitle>
           <DialogDescription>
@@ -151,56 +132,78 @@ export function MoveUnitDialog({ unit, open, onOpenChange, onDone }: Props) {
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>New parent *</Label>
-            <Select value={parentId} onValueChange={setParentId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose where it should report…" />
-              </SelectTrigger>
-              <SelectContent>
-                {canRoot && <SelectItem value={ROOT}>— the root (no parent) —</SelectItem>}
-                {candidates.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.name}
-                    {u.levelName ? ` · ${u.levelName}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/*
+              ⚠ The server's rules, restated so the picker cannot offer a move it will refuse: same
+              STRUCTURE, a higher tier (a LOWER level number — skipping allowed, the rule slice 3
+              reconciled both endpoints onto), never this unit or anything beneath it, and never
+              the parent it already has (a no-op the log would not record).
+            */}
+            {ownLevel ? (
+              <OrganizationUnitPicker
+                idPrefix="move-parent"
+                value={toRoot ? '' : parentId}
+                onChange={(id) => {
+                  setParentId(id);
+                  if (id) setToRoot(false);
+                }}
+                structureId={ownLevel.structureId}
+                maxLevelNumber={ownLevel.levelNumber - 1}
+                excludeSubtreeOf={unit.id}
+                excludeIds={unit.parentUnitId ? [unit.parentUnitId] : undefined}
+                levelLabel="Parent level"
+                unitLabel="Parent unit"
+                levelPlaceholder="Which level should it report to?"
+                noLevelsMessage="Nothing sits above this unit's level in its structure."
+                disabled={toRoot}
+              />
+            ) : (
+              <p className="text-muted-foreground text-sm">Loading the unit&apos;s level…</p>
+            )}
+            {canRoot && (
+              <Button
+                type="button"
+                variant={toRoot ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setToRoot((r) => !r);
+                  setParentId('');
+                }}
+              >
+                {toRoot ? 'Choose a parent instead' : 'Move to the top of the structure (no parent)'}
+              </Button>
+            )}
             <p className="text-muted-foreground text-xs">
               {unit.parentUnitName
                 ? `Currently under ${unit.parentUnitName}.`
                 : 'Currently at the root.'}{' '}
-              Only units in the same structure at a tier above{' '}
-              {ownLevel?.name ? `"${ownLevel.name}"` : 'this one'} are listed, and never this unit or
-              one beneath it.
+              Pick the parent&apos;s level, then the unit. Only levels above{' '}
+              {ownLevel?.name ? `"${ownLevel.name}"` : 'this one'} in the same structure are offered,
+              and never this unit or one beneath it.
             </p>
-            {!candidates.length && !canRoot && (
-              <p className="text-destructive text-sm">
-                There is nowhere this unit can move to — nothing sits above its level in this
-                structure.
-              </p>
-            )}
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="moveReason">Why *</Label>
             <Textarea
               id="moveReason"
-              rows={3}
+              rows={2}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="The reason this unit is being moved…"
             />
-            <p className="text-muted-foreground text-xs">
-              The change log has no delete. What you write here is permanent.
-            </p>
           </div>
+
+          <HistoryStampFields idPrefix="move" value={stamp} onChange={setStamp} />
+          <p className="text-muted-foreground text-xs">
+            The change log has no delete. What you write here can be corrected later, never removed.
+          </p>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={saving || !parentId || !reason.trim()}>
+          <Button onClick={submit} disabled={saving || !ready}>
             {saving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -222,6 +225,7 @@ export function ChangeUnitHeadDialog({ unit, open, onOpenChange, onDone }: Props
   const [employeeLabel, setEmployeeLabel] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [reason, setReason] = useState('');
+  const [stamp, setStamp] = useState<HistoryStamp>(emptyHistoryStamp);
   const [saving, setSaving] = useState(false);
 
   const { data: levels = [] } = useQuery({
@@ -236,12 +240,13 @@ export function ChangeUnitHeadDialog({ unit, open, onOpenChange, onDone }: Props
     setEmployeeLabel(null);
     setClearing(false);
     setReason('');
+    setStamp(emptyHistoryStamp());
   };
 
   // Reappointing the sitting head records nothing, so it is refused here rather than reported as a
   // success that leaves the log unchanged.
   const sameAsNow = !clearing && !!employeeId && employeeId === unit.headEmployeeId;
-  const ready = (clearing || !!employeeId) && !sameAsNow && !!reason.trim();
+  const ready = (clearing || !!employeeId) && !sameAsNow && !!reason.trim() && !stampError(stamp);
 
   const submit = async () => {
     if (!ready) return;
@@ -250,6 +255,7 @@ export function ChangeUnitHeadDialog({ unit, open, onOpenChange, onDone }: Props
       await organizationUnitService.changeHead(unit.id, {
         newHeadEmployeeId: clearing ? null : employeeId,
         changeReason: reason.trim(),
+        ...stampPayload(stamp),
       });
       await onDone();
       toast({
@@ -279,7 +285,7 @@ export function ChangeUnitHeadDialog({ unit, open, onOpenChange, onDone }: Props
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>
             {unit.headEmployeeId ? 'Change the head of' : 'Appoint a head for'} {unit.name}
@@ -342,15 +348,17 @@ export function ChangeUnitHeadDialog({ unit, open, onOpenChange, onDone }: Props
             <Label htmlFor="headReason">Why *</Label>
             <Textarea
               id="headReason"
-              rows={3}
+              rows={2}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Appointment, secondment, retirement…"
             />
-            <p className="text-muted-foreground text-xs">
-              The change log has no delete. What you write here is permanent.
-            </p>
           </div>
+
+          <HistoryStampFields idPrefix="head" value={stamp} onChange={setStamp} />
+          <p className="text-muted-foreground text-xs">
+            The change log has no delete. What you write here can be corrected later, never removed.
+          </p>
         </div>
 
         <DialogFooter>

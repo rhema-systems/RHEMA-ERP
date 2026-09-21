@@ -36,9 +36,9 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { probationConfirmingAuthorityService } from '@/services/hr/probation.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import { toast } from 'sonner';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 /**
  * Who confirms probation, per organisation unit and staff category (FR-HR-032, decision D-2).
@@ -179,10 +179,6 @@ function AddRuleDialog({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const [isActive, setIsActive] = useState(true);
   const [notes, setNotes] = useState('');
 
-  const { data: units } = useQuery({
-    queryKey: ['org-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
   const { data: levels } = useQuery({
     queryKey: ['staff-levels'],
     queryFn: () => staffLevelService.getAll(),
@@ -216,20 +212,13 @@ function AddRuleDialog({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Organisation unit</Label>
-            <Select value={unitId} onValueChange={setUnitId}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any">All units</SelectItem>
-                {(units ?? []).map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <OrganizationUnitPicker
+              value={unitId === 'any' ? '' : unitId}
+              onChange={(id) => setUnitId(id || 'any')}
+              allowNone="All units"
+              unitLabel="Organisation unit"
+              idPrefix="authority-unit"
+            />
           </div>
 
           <div className="space-y-2">

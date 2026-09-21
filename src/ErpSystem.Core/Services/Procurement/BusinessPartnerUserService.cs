@@ -10,7 +10,7 @@ using System.Security.Cryptography;
 
 namespace ErpSystem.Core.Services.Procurement;
 
-public class BusinessPartnerUserService : IBusinessPartnerUserService
+public partial class BusinessPartnerUserService : IBusinessPartnerUserService
 {
     private readonly IBusinessPartnerUserRepository _repository;
     private readonly IUserService _userService;
@@ -277,4 +277,3 @@ public class BusinessPartnerUserService : IBusinessPartnerUserService
         };
     }
 }
-

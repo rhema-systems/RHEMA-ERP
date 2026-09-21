@@ -34,7 +34,7 @@ public class QuantitySurveyProfileSummaryDto
     public bool IsDefault { get; init; }
     public int CompleteDecisionCount { get; init; }
     public int TotalDecisionCount { get; init; }
-    public bool IsComplete => TotalDecisionCount == 17 && CompleteDecisionCount == 17;
+    public bool IsComplete => TotalDecisionCount > 0 && CompleteDecisionCount == TotalDecisionCount;
     public DateTime UpdatedAt { get; init; }
     public string RowVersion { get; init; } = string.Empty;
 }

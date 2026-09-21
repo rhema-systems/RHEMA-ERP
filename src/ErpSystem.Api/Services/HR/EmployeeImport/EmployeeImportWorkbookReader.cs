@@ -68,7 +68,7 @@ public sealed class EmployeeImportParseResult
 /// decides each row. Nothing here touches the database.
 /// </summary>
 /// <remarks>
-/// The rules are the ones in <c>docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md</c> §5 (create) and §9
+/// The rules are the ones in <c>docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md</c> §5 (create) and §9
 /// (update). Error means the row will not be written; Warning means it will, and the person is
 /// listed for follow-up. In an update, a blank cell means "leave it" — never "clear it".
 /// </remarks>

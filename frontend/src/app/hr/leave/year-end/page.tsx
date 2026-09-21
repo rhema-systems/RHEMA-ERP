@@ -19,11 +19,31 @@ const currentYear = new Date().getFullYear();
 
 function ResultPanel({ title, result }: { title: string; result: LeaveYearEndResult }) {
   return (
-    <div className="space-y-3 rounded-md border p-4">
-      <p className="text-sm font-medium">{title}</p>
+    <div
+      className={
+        result.isDryRun
+          ? 'space-y-3 rounded-md border border-amber-300/60 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/40'
+          : 'space-y-3 rounded-md border p-4'
+      }
+    >
+      <p className="text-sm font-medium">
+        {title}
+        {result.isDryRun && (
+          <span className="ml-2 font-semibold uppercase tracking-wide">
+            &mdash; preview only, nothing was written
+          </span>
+        )}
+      </p>
       <div className="flex flex-wrap gap-2">
-        <Badge variant="secondary">{result.balancesProcessed} processed</Badge>
-        <Badge variant="secondary">{result.balancesAffected} affected</Badge>
+        {/*
+          ⚠ "Examined", not "processed". The old label counted every balance the loop LOOKED at,
+          including the ones it skipped, so a run that examined 900 and changed 12 reported "900
+          processed" (finding L-26). The skipped count sits beside it so the two cannot be read as
+          the same number.
+        */}
+        <Badge variant="secondary">{result.balancesProcessed} examined</Badge>
+        <Badge variant="secondary">{result.balancesAffected} changed</Badge>
+        <Badge variant="outline">{result.balancesSkipped} left alone</Badge>
         {result.totalDaysCarriedOver > 0 && (
           <Badge variant="outline">{result.totalDaysCarriedOver} days carried over</Badge>
         )}
@@ -57,17 +77,29 @@ export default function LeaveYearEndPage() {
   const [forfeitEmployeeId, setForfeitEmployeeId] = useState<string | null>(null);
 
   const [pending, setPending] = useState<null | 'carry' | 'forfeit'>(null);
+  // Which job a preview is for. Separate from `pending`, which drives the confirm dialog — a
+  // preview needs no confirming, because it changes nothing.
+  const [previewing, setPreviewing] = useState<null | 'carry' | 'forfeit'>(null);
   const [busy, setBusy] = useState(false);
   const [carryResult, setCarryResult] = useState<LeaveYearEndResult | null>(null);
   const [forfeitResult, setForfeitResult] = useState<LeaveYearEndResult | null>(null);
 
-  const run = async () => {
+  /**
+   * ⚠ `dryRun` is why this screen exists in its current shape (finding L-24).
+   *
+   * Both jobs move people's balances in bulk and neither has an undo. A preview is the difference
+   * between catching a misconfigured leave type before the run and catching it in nine hundred
+   * balances afterwards. It goes through the SAME path with the same guards — a preview that took
+   * a shortcut would not be a preview of anything.
+   */
+  const run = async (dryRun = false) => {
     setBusy(true);
     try {
-      if (pending === 'carry') {
+      if ((dryRun ? previewing : pending) === 'carry') {
         const res = await leaveYearEndService.processCarryOver(
           Number(carryFromYear),
           carryEmployeeId ?? undefined,
+          dryRun,
         );
         setCarryResult(res);
       } else {
@@ -75,12 +107,20 @@ export default function LeaveYearEndPage() {
           Number(forfeitYear),
           forfeitAsOf || undefined,
           forfeitEmployeeId ?? undefined,
+          dryRun,
         );
         setForfeitResult(res);
       }
-      await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-balances'] });
-      toast({ title: 'Completed', description: 'Year-end run finished.' });
+      // Nothing moved on a preview, so nothing needs refetching.
+      if (!dryRun) await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-balances'] });
+      toast({
+        title: dryRun ? 'Preview only' : 'Completed',
+        description: dryRun
+          ? 'Nothing was written. Read the figures, then run it for real.'
+          : 'Year-end run finished.',
+      });
       setPending(null);
+      setPreviewing(null);
       return true;
     } catch (e: any) {
       toast({ title: 'Error', description: e?.message || 'The run failed.', variant: 'destructive' });
@@ -133,6 +173,16 @@ export default function LeaveYearEndPage() {
                 Leave blank to run for every employee.
               </p>
             </div>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setPreviewing('carry');
+                void run(true);
+              }}
+            >
+              Preview
+            </Button>
             <Button onClick={() => setPending('carry')} disabled={busy}>
               {busy && pending === 'carry' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Run carry-over
@@ -174,6 +224,16 @@ export default function LeaveYearEndPage() {
               <Label>Employee (optional)</Label>
               <EmployeePicker value={forfeitEmployeeId} onChange={setForfeitEmployeeId} />
             </div>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setPreviewing('forfeit');
+                void run(true);
+              }}
+            >
+              Preview
+            </Button>
             <Button variant="destructive" onClick={() => setPending('forfeit')} disabled={busy}>
               {busy && pending === 'forfeit' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Run forfeiture
@@ -199,7 +259,11 @@ export default function LeaveYearEndPage() {
         confirmText={pending === 'carry' ? 'Run carry-over' : 'Run forfeiture'}
         variant={pending === 'forfeit' ? 'destructive' : 'default'}
         isLoading={busy}
-        onConfirm={run}
+        // ⚠ Explicitly false, not bare `run`. ConfirmationDialog calls onConfirm() with no
+        // arguments today, so this is equivalent — but if that ever changed, the first argument
+        // would land on `dryRun` and a real year-end run would silently become a preview, with
+        // the operator believing it had run.
+        onConfirm={() => run(false)}
       />
     </div>
   );

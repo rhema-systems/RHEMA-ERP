@@ -7,6 +7,7 @@ namespace ErpSystem.Core.Interfaces.Procurement;
 /// </summary>
 public interface IBusinessPartnerUserService
 {
+    Task<BusinessPartnerUserDto> LinkExistingExternalUserAsync(Guid businessPartnerId, Guid userId);
     /// <summary>
     /// Get all users for a business partner
     /// </summary>
@@ -62,4 +63,3 @@ public interface IBusinessPartnerUserService
     /// </summary>
     Task ResetPasswordAsync(Guid id, string newPassword);
 }
-

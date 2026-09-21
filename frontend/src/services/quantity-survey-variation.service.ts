@@ -12,8 +12,16 @@ export interface SaveVariationLine { projectBoqVersionLineId: string; quantityCh
 export interface VariationAction { clientRequestId: string; rowVersion: string; reason: string; }
 
 const root = '/quantity-survey/variations';
+const normalizeVariation = (value: GovernedVariation): GovernedVariation => ({
+  ...value,
+  // ASP.NET emits enum names in PascalCase; selectors use the request's camelCase values.
+  sourceType: (value.sourceType.charAt(0).toLowerCase() + value.sourceType.slice(1)) as VariationSourceType,
+});
 export const quantitySurveyVariationService = {
-  workspace: (projectId: string) => apiService.get<VariationWorkspace>(root, { projectId }),
+  workspace: async (projectId: string) => {
+    const value = await apiService.get<VariationWorkspace>(root, { projectId });
+    return { ...value, variations: value.variations.map(normalizeVariation) };
+  },
   save: (projectId: string, request: { id?: string | null; clientRequestId: string; contractId: string; approvedBoqVersionId: string; sourceType: VariationSourceType; siteInstructionId?: string | null; changeRequestId?: string | null; title: string; reason: string; variationType: string; scheduleImpactDays: number; rowVersion?: string | null; lines: SaveVariationLine[] }) => apiService.put<GovernedVariation>(`${root}?projectId=${encodeURIComponent(projectId)}`, request),
   uploadEvidence: (id: string, clientRequestId: string, title: string, file: File) => { const data = new FormData(); data.append('clientRequestId', clientRequestId); data.append('title', title); data.append('file', file); return apiService.post<VariationEvidence>(`${root}/${id}/evidence`, data); },
   submit: (id: string, request: VariationAction) => apiService.post<GovernedVariation>(`${root}/${id}/submit`, request),

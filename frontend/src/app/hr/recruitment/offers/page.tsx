@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,17 +25,28 @@ import { JOB_OFFER_STATUSES, type JobOfferStatus } from '@/types/hr/offers';
 const ALL = '__all__';
 const EXPIRING = '__expiring__';
 
+const PAGE_SIZE = 20;
+
 /**
- * Every offer in the tenant. ⚠ No general paged search on this controller — `getAll` is unfiltered
- * and unpaged, so the status and expiring views run their own purpose-built reads rather than
- * filtering client-side over one large list.
+ * Every offer in the tenant.
+ *
+ * ⚠ **G-10.3 (2026-09-15): the default view is paged now.** It used to call `getAll()` — unfiltered
+ * and unpaged, every offer in the tenant in one response, with no pager, no total and no disclosure
+ * of any kind. That was worse than the requisitions and vacancies lists, where the unbounded read
+ * only fires once a filter is chosen; here it was simply what loaded when the screen opened, and it
+ * made this the only recruitment list with no bound at all.
+ *
+ * The status and expiring views still run their own purpose-built unpaged reads, and say so below —
+ * the disclosure pattern the applications list established (§ 8.2 of the system guide).
  */
 export default function JobOffersPage() {
+  const router = useRouter();
   const [view, setView] = useState<string>(ALL);
+  const [page, setPage] = useState(1);
 
   const all = useQuery({
-    queryKey: ['hr', 'offers', 'all'],
-    queryFn: () => jobOfferService.getAll(),
+    queryKey: ['hr', 'offers', 'paged', page],
+    queryFn: () => jobOfferService.getPaged(page, PAGE_SIZE),
     enabled: view === ALL,
   });
 
@@ -51,7 +63,10 @@ export default function JobOffersPage() {
   });
 
   const active = view === ALL ? all : view === EXPIRING ? expiring : byStatus;
-  const rows = active.data ?? [];
+  // The paged read returns { items, totalCount, … }; the two filtered reads return a bare array.
+  const rows = view === ALL ? (all.data?.items ?? []) : ((active.data as any[]) ?? []);
+  const totalCount = all.data?.totalCount ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
     <div className="space-y-6 p-6">
@@ -62,7 +77,13 @@ export default function JobOffersPage() {
       />
 
       <div className="flex items-center gap-3">
-        <Select value={view} onValueChange={setView}>
+        <Select
+          value={view}
+          onValueChange={(v) => {
+            setView(v);
+            setPage(1);
+          }}
+        >
           <SelectTrigger className="w-[220px]">
             <SelectValue />
           </SelectTrigger>
@@ -114,7 +135,11 @@ export default function JobOffersPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((o) => (
-                  <TableRow key={o.id} className="cursor-pointer">
+                  <TableRow
+                    key={o.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/offers/${o.id}`)}
+                  >
                     <TableCell>
                       <Link
                         href={`/hr/recruitment/offers/${o.id}`}
@@ -146,6 +171,42 @@ export default function JobOffersPage() {
           )}
         </CardContent>
       </Card>
+
+      {view === ALL && totalCount > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            {totalCount} offer{totalCount === 1 ? '' : 's'} · page {page} of {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1 || all.isFetching}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages || all.isFetching}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* G-4.6 / G-5.8 / G-10.3 — the disclosure the applications list established. Choosing a
+          status or the expiring view switches to a dedicated endpoint that is not paged and
+          returns every matching row. That is the shape the API offers; saying so beats pretending
+          the view is bounded when it is not. */}
+      {view !== ALL && rows.length > 0 && (
+        <p className="text-sm text-muted-foreground">
+          This view uses an unpaged endpoint — all {rows.length} matching offers are shown at once.
+        </p>
+      )}
     </div>
   );
 }

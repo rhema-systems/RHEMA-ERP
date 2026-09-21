@@ -273,7 +273,7 @@ of secrecy.
   routes stay with the deferred separation module ([[hr-deferred-modules]]). Same boundary area 9
   drew. Probation termination will *write a separation record and reference it*, nothing more.
 - **Payroll.** Confirmation may change pay in reality; this area records the confirmation and
-  registers the money event in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`
+  registers the money event in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`
   ([[hr-finance-integration-split]], [[payroll-ownership-boundary]]).
 - **The appraisal route stays.** Area 5's probation recommendation handlers are not removed; they
   are converged onto this area's confirm/extend path (§3.4).
@@ -810,7 +810,7 @@ Owed elsewhere, deliberately:
 - **Separation/exit** still owns what happens after a *terminated* probation — entitlement
   computation, clearance gating, the non-disciplinary exit routes. This area records the decision and
   hands off ([[hr-deferred-modules]]).
-- **Payroll**: a confirmation may change pay. Registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`
+- **Payroll**: a confirmation may change pay. Registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`
   rather than invented here ([[hr-finance-integration-split]]).
 - **The email templates are not seeded.** `ProbationEmailTemplateSeeder` sits in
   `HrSeedOrchestrator.DeferredSteps` beside the recruitment one — *"Templates are not TDC-branded

@@ -1,5 +1,8 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+// ⚠ This file sits in ErpSystem.Application.Extensions, NOT under Services.HR, so LeaveYear
+// needs an explicit using — namespace lookup does not walk into an unrelated tree.
+using ErpSystem.Core.Services.HR;
 
 namespace ErpSystem.Application.Extensions
 {
@@ -32,10 +35,15 @@ namespace ErpSystem.Application.Extensions
             MinServiceMonthsToAccess = entity.MinServiceMonthsToAccess,
             CarryOverExpiryMonths = entity.CarryOverExpiryMonths,
             ForfeitUnusedAfterMonths = entity.ForfeitUnusedAfterMonths,
+            YearEndBasis = entity.YearEndBasis,
+            ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
             MandatoryAnnualLeave = entity.MandatoryAnnualLeave,
             EncashmentRateBasis = entity.EncashmentRateBasis,
             EncashmentRatePerDay = entity.EncashmentRatePerDay,
             EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
+            RequiresMedicalCertificate = entity.RequiresMedicalCertificate,
+            SelfCertificationDays = entity.SelfCertificationDays,
+            MedicalBoardThresholdDays = entity.MedicalBoardThresholdDays,
             IsActive = entity.IsActive
         };
 
@@ -60,10 +68,15 @@ namespace ErpSystem.Application.Extensions
             MinServiceMonthsToAccess = dto.MinServiceMonthsToAccess,
             CarryOverExpiryMonths = dto.CarryOverExpiryMonths,
             ForfeitUnusedAfterMonths = dto.ForfeitUnusedAfterMonths,
+            YearEndBasis = dto.YearEndBasis,
+            ProRateFirstYearEntitlement = dto.ProRateFirstYearEntitlement,
             MandatoryAnnualLeave = dto.MandatoryAnnualLeave,
             EncashmentRateBasis = dto.EncashmentRateBasis,
             EncashmentRatePerDay = dto.EncashmentRatePerDay,
-            EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth
+            EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth,
+            RequiresMedicalCertificate = dto.RequiresMedicalCertificate,
+            SelfCertificationDays = dto.SelfCertificationDays,
+            MedicalBoardThresholdDays = dto.MedicalBoardThresholdDays
         };
 
         public static List<LeaveTypeDto> ToDtoList(this IEnumerable<LeaveType> entities)
@@ -233,7 +246,11 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverId = dto.SecondRelieverId,
             Notes = dto.Notes,
             // PlannedBy is stamped by the service from the token (finish-plan lane 4).
-            Year = dto.Year
+            // ⚠ Year is NOT set here. It follows the dates (L-17), but WHICH year a date falls in
+            // depends on the tenant's leave year, and a static mapper cannot read settings. The
+            // service sets it on both the create and the update path — one owner rather than two
+            // that can disagree (entitlement plan C1).
+            Year = 0
         };
 
         public static List<LeavePlanDto> ToDtoList(this IEnumerable<LeavePlan> entities)
@@ -281,6 +298,30 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverEmployeeName = entity.SecondRelieverEmployee?.FullName,
             RelieverNotes = entity.RelieverNotes,
             LeavePlanId = entity.LeavePlanId,
+            ApprovedById = entity.ApprovedById,
+            ApprovedDate = entity.ApprovedDate,
+            RejectionReason = entity.RejectionReason,
+            SuggestedStartDate = entity.SuggestedStartDate,
+            SuggestedEndDate = entity.SuggestedEndDate,
+            ManagerSuggestionNotes = entity.ManagerSuggestionNotes,
+            OriginalStartDate = entity.OriginalStartDate,
+            OriginalEndDate = entity.OriginalEndDate,
+            RescheduledDate = entity.RescheduledDate,
+            RescheduledById = entity.RescheduledById,
+            RescheduleReason = entity.RescheduleReason,
+            RescheduleCount = entity.RescheduleCount,
+            ObservanceConfirmedDate = entity.ObservanceConfirmedDate,
+            ObservanceConfirmedById = entity.ObservanceConfirmedById,
+            MedicalBoardId = entity.MedicalBoardId,
+            RecallEffectiveDate = entity.RecallEffectiveDate,
+            PreRecallEndDate = entity.PreRecallEndDate,
+            RecalledDate = entity.RecalledDate,
+            RecalledById = entity.RecalledById,
+            RecallReason = entity.RecallReason,
+            DaysRestored = entity.DaysRestored,
+            // RescheduledByName / ObservanceConfirmedByName / RecalledByName are filled by the reads
+            // that need them: the actor columns are bare Guids (no navigation — see the entity's
+            // note on shadow FKs).
             ClosureDate = entity.ClosureDate,
             ClosureNotes = entity.ClosureNotes,
             CancellationDate = entity.CancellationDate,
@@ -356,7 +397,12 @@ namespace ErpSystem.Application.Extensions
             FileSizeBytes = entity.FileSizeBytes,
             UploadedDate = entity.UploadedDate,
             UploadedBy = entity.UploadedBy,
-            UploadedByName = entity.UploadedByEmployee?.FullName ?? string.Empty
+            UploadedByName = entity.UploadedByEmployee?.FullName ?? string.Empty,
+            // ⚠ Without this the DTO carried the field and nothing filled it, so every attachment
+            // read back as "Other" however it was uploaded — the gate refusing on the truth while
+            // the screen showed something else. Caught by slice 7, not by reading the code: the
+            // column, the entity, the DTO and the enum were all correct in isolation.
+            EvidenceKind = entity.EvidenceKind
         };
 
         public static List<LeaveRequestAttachmentDto> ToDtoList(this IEnumerable<LeaveRequestAttachment> entities)
@@ -375,6 +421,7 @@ namespace ErpSystem.Application.Extensions
             Year = entity.Year,
             DaysEncashed = entity.DaysEncashed,
             AmountPaid = entity.AmountPaid,
+            RateBasis = entity.RateBasis,
             Status = entity.Status,
             ProcessedDate = entity.ProcessedDate,
             ProcessedByEmployeeId = entity.ProcessedByEmployeeId,

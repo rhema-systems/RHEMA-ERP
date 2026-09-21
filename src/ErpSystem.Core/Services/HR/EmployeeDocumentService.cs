@@ -472,6 +472,112 @@ public class EmployeeDocumentService : IEmployeeDocumentService
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    //  DOCUMENTS THAT PERTAIN TO A GUARANTOR (round 2, lane A-6)
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // The signed form, an ID scan, a payslip — many per guarantor, each with a kind. The photograph
+    // stays as six columns on the row (one face); these are the papers. They speak the employee
+    // document vocabulary rather than minting a second one.
+
+    private IQueryable<EmployeeGuarantorDocument> QueryGuarantorDocuments(Guid tenantId) =>
+        _unitOfWork.Repository<EmployeeGuarantorDocument>().GetQueryable()
+            .AsNoTracking()
+            .Include(d => d.DocumentType)
+            .Include(d => d.UploadedBy)
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted);
+
+    private static EmployeeGuarantorDocumentDto MapGuarantorDocument(EmployeeGuarantorDocument d, DateOnly today) => new()
+    {
+        Id = d.Id,
+        GuarantorId = d.GuarantorId,
+        DocumentTypeId = d.DocumentTypeId,
+        DocumentTypeName = d.DocumentType?.Name,
+        Title = d.Title,
+        Description = d.Description,
+        IssuedOn = d.IssuedOn,
+        ExpiresOn = d.ExpiresOn,
+        IsExpired = d.ExpiresOn is DateOnly e && e < today,
+        FileName = d.FileName,
+        MimeType = d.MimeType,
+        FileSizeBytes = d.FileSizeBytes,
+        UploadedById = d.UploadedById,
+        UploadedByName = d.UploadedBy is null ? null : $"{d.UploadedBy.FirstName} {d.UploadedBy.LastName}".Trim(),
+        CreatedAt = d.CreatedAt,
+    };
+
+    public async Task<IEnumerable<EmployeeGuarantorDocumentDto>> GetGuarantorDocumentsAsync(
+        Guid guarantorId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var rows = await QueryGuarantorDocuments(tenantId)
+            .Where(d => d.GuarantorId == guarantorId)
+            .OrderByDescending(d => d.CreatedAt)
+            .ToListAsync(ct);
+        return rows.Select(d => MapGuarantorDocument(d, today)).ToList();
+    }
+
+    public async Task<EmployeeGuarantorDocument?> GetGuarantorDocumentEntityAsync(Guid id, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        return await _unitOfWork.Repository<EmployeeGuarantorDocument>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId && !d.IsDeleted, ct);
+    }
+
+    public async Task<EmployeeGuarantorDocumentDto> AttachGuarantorDocumentAsync(
+        Guid guarantorId, Guid documentTypeId, string? title, string? description,
+        DateOnly? issuedOn, DateOnly? expiresOn,
+        Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, string? mimeType, long? fileSizeBytes,
+        Guid? uploadedByEmployeeId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+
+        var guarantorExists = await _unitOfWork.Repository<EmployeeGuarantor>().GetQueryable()
+            .AnyAsync(g => g.Id == guarantorId && g.TenantId == tenantId && !g.IsDeleted, ct);
+        if (!guarantorExists)
+            throw new ArgumentException($"Guarantor with ID '{guarantorId}' not found.");
+
+        await RequireTypeAsync(tenantId, documentTypeId, ct);
+
+        var entity = new EmployeeGuarantorDocument
+        {
+            TenantId = tenantId,
+            GuarantorId = guarantorId,
+            DocumentTypeId = documentTypeId,
+            Title = title,
+            Description = description,
+            IssuedOn = issuedOn,
+            ExpiresOn = expiresOn,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
+            FileName = fileName,
+            MimeType = mimeType,
+            FileSizeBytes = fileSizeBytes,
+            UploadedById = uploadedByEmployeeId,
+        };
+
+        await _unitOfWork.Repository<EmployeeGuarantorDocument>().AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        var saved = await QueryGuarantorDocuments(tenantId).FirstAsync(d => d.Id == entity.Id, ct);
+        return MapGuarantorDocument(saved, DateOnly.FromDateTime(DateTime.UtcNow));
+    }
+
+    public async Task DeleteGuarantorDocumentAsync(Guid id, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _unitOfWork.Repository<EmployeeGuarantorDocument>().GetQueryable()
+            .FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId && !d.IsDeleted, ct)
+            ?? throw new ArgumentException($"Guarantor document with ID '{id}' not found.");
+
+        entity.IsDeleted = true;
+        await _unitOfWork.SaveChangesAsync(ct);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //  POSITION REQUIREMENTS
     // ═══════════════════════════════════════════════════════════════════════
 

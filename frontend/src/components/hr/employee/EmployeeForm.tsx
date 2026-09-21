@@ -24,6 +24,10 @@ import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { AddressFields } from '@/components/reference/AddressFields';
 import { employeeService } from '@/services/hr/employee.service';
 import { referenceDimensionService } from '@/services/hr/lookup.service';
+import { policySettingsService } from '@/services/hr/policy-settings.service';
+import { contractTypeService } from '@/services/hr/contract-type.service';
+import { disabilityTypeService } from '@/services/hr/disability-type.service';
+import { disabilityTypeOptions } from '@/types/hr/disability-type';
 import {
   GENDER_OPTIONS,
   MARITAL_STATUS_OPTIONS,
@@ -38,6 +42,9 @@ import type { Location, LocationLevel } from '@/types/hr/location';
 
 const opt = z.string().optional().or(z.literal(''));
 
+/** The disability picker's stand-in for an empty optional — a Radix Select item cannot carry ''. */
+const NO_DISABILITY_TYPE = '__none__';
+
 export const employeeSchema = z.object({
   employeeNumber: opt,
   firstName: z.string().min(1, 'First name is required').max(100),
@@ -51,6 +58,7 @@ export const employeeSchema = z.object({
   genderDescription: opt,
   hometown: opt,
   hasDisability: z.boolean(),
+  disabilityTypeId: opt,
   disabilityDescription: opt,
   bloodType: opt,
   isExpatriate: z.boolean(),
@@ -75,35 +83,29 @@ export const employeeSchema = z.object({
   employmentType: z.string().min(1),
   staffStatus: z.string().min(1),
   dateEmployed: opt,
+  // ⚠ Derived, not typed. The server settles the term against the POSITION and refuses a value
+  // that contradicts it, so the form holds whatever it is going to show and only SENDS it where the
+  // position is silent. Kept in the schema because the field is still editable in that case.
   probationPeriodDays: z.coerce.number().int('Must be a whole number').min(0),
+  /** Import mode only: somebody confirmed before this system existed. */
+  confirmationDate: z.string().optional().or(z.literal('')),
+  /** The kind of engagement the first contract records. Optional. */
+  contractTypeId: z.string().optional().or(z.literal('')),
   isFullTime: z.boolean(),
-  // Payroll membership gates the salary block below. The server enforces the same rule
-  // (EmployeeService.ValidatePayrollMembership); these refinements just say it before the round trip.
+  // Payroll MEMBERSHIP stays on the form: it is HR's fact and the create needs it to enrol the
+  // person. The amount and the five switches do not (round-2 plan Q-3) — all remuneration lives on
+  // the Salary tab, and a person is created with no pay basis; the reconciliation reports
+  // `NoPayBasis` until the tab is filled in.
   isOnPayroll: z.boolean(),
   offPayrollReason: opt,
   offPayrollNote: opt,
-  salary: opt,
   taxNumber: opt,
   socialSecurityNumber: opt,
   tinNumber: opt,
-  payTax: z.boolean(),
-  ssFund: z.boolean(),
-  grossUp: z.boolean(),
-  tier2Only: z.boolean(),
-  overtime: z.boolean(),
   badgeNumber: opt,
   notes: opt,
 }).superRefine((v, ctx) => {
-  if (v.isOnPayroll) {
-    const salary = v.salary?.trim() ? Number(v.salary) : null;
-    if (salary == null || !Number.isFinite(salary) || salary <= 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['salary'],
-        message: 'Enter the monthly basic salary, or take the employee off payroll.',
-      });
-    }
-  } else if (!v.offPayrollReason) {
+  if (!v.isOnPayroll && !v.offPayrollReason) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['offPayrollReason'],
@@ -127,6 +129,7 @@ export const emptyEmployee: EmployeeFormValues = {
   genderDescription: '',
   hometown: '',
   hasDisability: false,
+  disabilityTypeId: '',
   disabilityDescription: '',
   bloodType: '',
   isExpatriate: false,
@@ -148,19 +151,15 @@ export const emptyEmployee: EmployeeFormValues = {
   staffStatus: 'Active',
   dateEmployed: '',
   probationPeriodDays: 90,
+  confirmationDate: '',
+  contractTypeId: '',
   isFullTime: true,
   isOnPayroll: true,
   offPayrollReason: '',
   offPayrollNote: '',
-  salary: '',
   taxNumber: '',
   socialSecurityNumber: '',
   tinNumber: '',
-  payTax: false,
-  ssFund: false,
-  grossUp: false,
-  tier2Only: false,
-  overtime: false,
   badgeNumber: '',
   notes: '',
 };
@@ -171,7 +170,16 @@ interface EmployeeFormProps {
   locations: Location[];
   locationLevels: LocationLevel[];
   defaultValues: EmployeeFormValues;
-  onSubmit: (values: EmployeeFormValues) => Promise<void>;
+  /**
+   * @param meta.probationIsDerived
+   *   Whether the selected position states the probation term. ⚠ The page needs it because the
+   *   mapper must then send `null` rather than the number on screen — the server refuses a value
+   *   that contradicts the post, and the form is showing the post's own figure.
+   */
+  onSubmit: (
+    values: EmployeeFormValues,
+    meta: { probationIsDerived: boolean },
+  ) => Promise<void>;
   submitting: boolean;
   submitLabel: string;
   onCancel: () => void;
@@ -191,6 +199,15 @@ interface EmployeeFormProps {
    */
   importMode?: boolean;
   onImportModeChange?: (value: boolean) => void;
+  /**
+   * Whether this is a create rather than an edit.
+   *
+   * ⚠ The contract kind is only offered on a create, because that is the only path that opens a
+   * contract. On an edit the employee already HAS contracts and the kind belongs to whichever one
+   * is in force — the Contracts tab edits it. Offering the field here would be a control that
+   * looks like it changes something and does not.
+   */
+  isCreate?: boolean;
 }
 
 // Sort comparators: levels by number then name; everything else alphabetical.
@@ -303,7 +320,15 @@ export function EmployeeForm({
   showNumberingRule = false,
   importMode = false,
   onImportModeChange,
+  isCreate = false,
 }: EmployeeFormProps) {
+  // Round 3, lane P2: the disability catalogue the tick opens onto. Live rows only.
+  const { data: disabilityTypes } = useQuery({
+    queryKey: ['hr', 'disability-types', 'active'],
+    queryFn: () => disabilityTypeService.getActive(),
+  });
+  const disabilityOptions = useMemo(() => disabilityTypeOptions(disabilityTypes ?? []), [disabilityTypes]);
+
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema) as any,
     defaultValues,
@@ -357,6 +382,66 @@ export function EmployeeForm({
 
   const registerLabel =
     EMPLOYMENT_TYPE_OPTIONS.find((o) => o.value === employmentType)?.label.toLowerCase() ?? 'these';
+
+  // ── the probation term, which belongs to the POST ─────────────────────────
+  //
+  // ⚠ This box used to be a free number defaulted to 90, and 90 is nobody's probation at TDC:
+  // junior posts run three months, senior and management six, and 123 of 146 positions carry the
+  // term. Every create was overwriting a maintained figure with a form default. The server now
+  // settles it against the position and REFUSES a contradicting value, so the form shows what the
+  // post says and only opens the field where the post says nothing.
+  const policySettings = useQuery({
+    queryKey: ['hr', 'policy-settings'],
+    queryFn: () => policySettingsService.get(),
+  });
+
+  const positionProbationMonths = selectedPosition?.probationPeriodMonths ?? null;
+  const policyProbationMonths = policySettings.data?.defaultProbationMonths ?? null;
+
+  const probationFromPosition = positionProbationMonths != null && positionProbationMonths > 0;
+  const probationMonths = probationFromPosition
+    ? positionProbationMonths
+    : policyProbationMonths;
+
+  // The stored unit is days, and months × 30 is the conversion the hire path established.
+  const derivedProbationDays = probationMonths != null ? probationMonths * 30 : null;
+
+  // Editable only where the post is silent — then the company default stands unless somebody
+  // says otherwise for this person, which is the one case an override is a real answer.
+  const probationIsDerived = probationFromPosition;
+
+  useEffect(() => {
+    if (probationIsDerived && derivedProbationDays != null) {
+      form.setValue('probationPeriodDays', derivedProbationDays);
+    }
+  }, [probationIsDerived, derivedProbationDays, form]);
+
+  const dateEmployed = form.watch('dateEmployed');
+  const probationDaysShown = form.watch('probationPeriodDays');
+
+  // What the profile will show as "expected confirmation" — the same arithmetic the server does on
+  // read, put in front of whoever is filling the form in rather than discovered a quarter later.
+  const expectedConfirmation = useMemo(() => {
+    if (!dateEmployed || !probationDaysShown || probationDaysShown <= 0) return null;
+    const start = new Date(dateEmployed);
+    if (Number.isNaN(start.getTime())) return null;
+    start.setDate(start.getDate() + Number(probationDaysShown));
+    return start.toISOString().slice(0, 10);
+  }, [dateEmployed, probationDaysShown]);
+
+  const probationHint = !probationIsDerived
+    ? policyProbationMonths != null
+      ? `This position states no probation period, so the company default of ${policyProbationMonths} month(s) applies. Change it here only for this employee.`
+      : 'This position states no probation period.'
+    : `${positionProbationMonths} month(s), from the position${
+        expectedConfirmation ? ` — expected confirmation ${expectedConfirmation}` : ''
+      }. Change it on the position, not here.`;
+
+  const contractTypes = useQuery({
+    queryKey: ['hr', 'contract-types', 'active'],
+    queryFn: () => contractTypeService.getActive(),
+    enabled: isCreate,
+  });
   const numberIsIssued = showNumberingRule && !importMode && !!numberingRule?.autoGenerate;
 
   // A disabled input still submits whatever react-hook-form holds. Without this, typing a number
@@ -423,7 +508,7 @@ export function EmployeeForm({
 
   return (
     <Card>
-      <form onSubmit={form.handleSubmit(onSubmit)}>
+      <form onSubmit={form.handleSubmit((values) => onSubmit(values, { probationIsDerived }))}>
         <CardHeader>
           <CardTitle>Employee Details</CardTitle>
         </CardHeader>
@@ -477,6 +562,17 @@ export function EmployeeForm({
                 />
               </Field>
             </div>
+            {/* Only asked when it means something. The enum offered "Other" and then had nowhere
+                to say what other meant, which makes the option a dead end for whoever picks it.
+                Sits directly under Gender (demo feedback round 2, E-1) — it used to be two rows
+                away, beside Hometown, where nobody connected it with the dropdown. */}
+            {form.watch('gender') === 'Other' && (
+              <div className={GRID3}>
+                <Field label="Describe gender" htmlFor="genderDescription" className="lg:col-start-3">
+                  <Input id="genderDescription" {...form.register('genderDescription')} />
+                </Field>
+              </div>
+            )}
             <div className={GRID3}>
               <Field label="Date of Birth" htmlFor="dateOfBirth">
                 <Input id="dateOfBirth" type="date" {...form.register('dateOfBirth')} />
@@ -507,13 +603,6 @@ export function EmployeeForm({
               <Field label="Hometown" htmlFor="hometown">
                 <Input id="hometown" {...form.register('hometown')} />
               </Field>
-              {/* Only asked when it means something. The enum offered "Other" and then had nowhere
-                  to say what other meant, which makes the option a dead end for whoever picks it. */}
-              {form.watch('gender') === 'Other' && (
-                <Field label="Describe gender" htmlFor="genderDescription">
-                  <Input id="genderDescription" {...form.register('genderDescription')} />
-                </Field>
-              )}
             </div>
 
             {/* ⚠ The EMPLOYEE's own disability. The one on a dependant is a different fact about a
@@ -530,13 +619,36 @@ export function EmployeeForm({
                 </Label>
               </div>
               {form.watch('hasDisability') && (
-                <Field label="Disability" htmlFor="disabilityDescription">
-                  <Input
-                    id="disabilityDescription"
-                    placeholder="What the employee has told you, in their words where possible"
-                    {...form.register('disabilityDescription')}
-                  />
-                </Field>
+                <div className={GRID3}>
+                  {/* Round 3, lane P2 (register row E-5): tick → pick from the catalogue, notes beside. */}
+                  <Field label="Disability type" htmlFor="disabilityTypeId">
+                    <Select
+                      value={form.watch('disabilityTypeId') || NO_DISABILITY_TYPE}
+                      onValueChange={(v) => form.setValue('disabilityTypeId', v === NO_DISABILITY_TYPE ? '' : v)}
+                    >
+                      <SelectTrigger id="disabilityTypeId" data-testid="employee-disability-type">
+                        <SelectValue placeholder="Pick from the catalogue" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_DISABILITY_TYPE}>Not specified</SelectItem>
+                        {disabilityOptions.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <div className="sm:col-span-2">
+                    <Field label="Notes" htmlFor="disabilityDescription">
+                      <Input
+                        id="disabilityDescription"
+                        placeholder="In their words where possible — the accommodation needed, or a condition the list does not name"
+                        {...form.register('disabilityDescription')}
+                      />
+                    </Field>
+                  </div>
+                </div>
               )}
             </div>
           </Section>
@@ -772,8 +884,55 @@ export function EmployeeForm({
               </Field>
             </div>
             <div className={GRID3}>
-              <Field label="Probation (days)" htmlFor="probationPeriodDays" error={err('probationPeriodDays')}>
-                <Input id="probationPeriodDays" type="number" min={0} {...form.register('probationPeriodDays')} />
+              {/* A different axis from Employment Type above: that is the system's fixed set, this
+                  is the organisation's own vocabulary, and its duration dates the first contract. */}
+              {isCreate && (
+              <Field
+                label="Contract kind"
+                htmlFor="contractTypeId"
+                hint="What the appointment letter calls this engagement. Its duration dates the first contract."
+              >
+                <OptionalSelect
+                  id="contractTypeId"
+                  value={form.watch('contractTypeId') ?? ''}
+                  onChange={(v) => form.setValue('contractTypeId', v)}
+                  placeholder="Not stated"
+                  options={(contractTypes.data ?? []).map((t) => ({
+                    value: t.id,
+                    label: t.duration > 0 ? `${t.name} — ${t.duration} months` : `${t.name} — open-ended`,
+                  }))}
+                />
+              </Field>
+              )}
+              {/* ⚠ Import mode ONLY. A confirmation date is an outcome the probation record
+                  produces, with a letter behind it, and the server refuses it from a hire and from
+                  the ordinary employee edit. Somebody recorded from a register may have passed
+                  probation years before this system existed and has no record to confirm through. */}
+              {importMode && (
+                <Field
+                  label="Confirmation date"
+                  htmlFor="confirmationDate"
+                  hint="Only for staff already confirmed before this system. Leave blank if they are still on probation."
+                >
+                  <Input id="confirmationDate" type="date" {...form.register('confirmationDate')} />
+                </Field>
+              )}
+            </div>
+            <div className={GRID3}>
+              <Field
+                label="Probation (days)"
+                htmlFor="probationPeriodDays"
+                error={err('probationPeriodDays')}
+                hint={probationHint}
+              >
+                <Input
+                  id="probationPeriodDays"
+                  type="number"
+                  min={0}
+                  readOnly={probationIsDerived}
+                  disabled={probationIsDerived}
+                  {...form.register('probationPeriodDays')}
+                />
               </Field>
               <div className="grid grid-cols-2 gap-4 sm:col-span-2 lg:col-span-1 lg:self-end">
                 <SwitchRow
@@ -794,10 +953,10 @@ export function EmployeeForm({
 
           {/* Compensation & Tax */}
           <Section title="Compensation & Tax">
-            {/* Payroll membership decides what the rest of this section captures. Off-payroll
-                staff (consultants on invoice, interns on an allowance, secondees) keep their tax
-                identifiers — those are facts about the person — but have no salary and no payroll
-                switches, and the server refuses them if sent. */}
+            {/* Membership only. Off-payroll staff (consultants on invoice, interns on an
+                allowance, secondees) keep their tax identifiers — those are facts about the person.
+                The amount, the switches and the grade placement are the Salary tab's (round 2,
+                lane E1): a person is created with no pay basis and the tab is where it is given. */}
             <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
               <div className="sm:col-span-2 lg:col-span-4">
                 <SwitchRow
@@ -809,13 +968,6 @@ export function EmployeeForm({
                     if (v) {
                       form.setValue('offPayrollReason', '');
                       form.setValue('offPayrollNote', '');
-                    } else {
-                      form.setValue('salary', '');
-                      form.setValue('payTax', false);
-                      form.setValue('ssFund', false);
-                      form.setValue('grossUp', false);
-                      form.setValue('tier2Only', false);
-                      form.setValue('overtime', false);
                     }
                   }}
                 />
@@ -846,14 +998,11 @@ export function EmployeeForm({
                 </>
               )}
               {isOnPayroll && (
-                <Field
-                  label="Monthly basic salary (GHS)"
-                  htmlFor="salary"
-                  error={form.formState.errors.salary?.message}
-                  hint="Placement on a grade and notch is recorded on the Salary tab after saving."
-                >
-                  <Input id="salary" type="number" step="0.01" min={0} {...form.register('salary')} />
-                </Field>
+                <p className="text-xs text-muted-foreground sm:col-span-2 lg:col-span-4">
+                  The basic salary, payroll switches and grade placement are recorded on the Salary
+                  tab after saving. Until then the payroll reconciliation lists this person as having
+                  no pay basis.
+                </p>
               )}
               <Field label="Tax Number" htmlFor="taxNumber">
                 <Input id="taxNumber" {...form.register('taxNumber')} />
@@ -865,15 +1014,6 @@ export function EmployeeForm({
                 <Input id="tinNumber" {...form.register('tinNumber')} />
               </Field>
             </div>
-            {isOnPayroll && (
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-                <SwitchRow id="payTax" label="Pay Tax" checked={form.watch('payTax')} onChange={(v) => form.setValue('payTax', v)} />
-                <SwitchRow id="ssFund" label="SS Fund" checked={form.watch('ssFund')} onChange={(v) => form.setValue('ssFund', v)} />
-                <SwitchRow id="grossUp" label="Gross Up" checked={form.watch('grossUp')} onChange={(v) => form.setValue('grossUp', v)} />
-                <SwitchRow id="tier2Only" label="Tier 2 Only" checked={form.watch('tier2Only')} onChange={(v) => form.setValue('tier2Only', v)} />
-                <SwitchRow id="overtime" label="Overtime" checked={form.watch('overtime')} onChange={(v) => form.setValue('overtime', v)} />
-              </div>
-            )}
             {!isOnPayroll && (
               <p className="text-xs text-muted-foreground">
                 Not on payroll: no salary, payroll switches or grade placement are recorded. Switching

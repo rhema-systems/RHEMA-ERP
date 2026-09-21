@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Models;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -756,13 +757,18 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         // what gets invoiced), and it repairs any row created before that was maintained.
         await RecalculateTotalHoursAsync(entity.Id, userId, ct);
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        // A published definition may legitimately approve on submission (the single-step trap the
+        // summary above describes). With NO definition the engine reports "not configured" as
+        // Approved too, and the adapter cannot tell them apart - so the timesheet was approved,
+        // and invoiceable, without anyone looking at it. See HrWorkflowFallbackAuthority.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
 
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult, userId);
+        adapter.ApplySubmitOutcome(entity, submitOutcome, userId);
 
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -801,18 +807,18 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         if (currentUserId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, currentUserId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, currentUserId, action, decisionText);
-
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the decision.");
+        // Engine when a definition is published; the Attendance approve tier when none is - the
+        // tier ConsultantTimesheetsController already gates every other timesheet action on.
+        // Without this branch a timesheet submitted on an unconfigured tenant could not be decided
+        // at all: CanUserApproveAsync answers false with no instance to name an approver.
+        var decisionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, entity.Id, currentUserId,
+            action, decisionText,
+            (isReject ? "reject " : "approve ") + "a consultant timesheet",
+            HrPermissions.ApproveAttendance);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, employeeId, isReject ? decisionText : null);
+        adapter.ApplyApprovalOutcome(entity, decisionOutcome, employeeId, isReject ? decisionText : null);
 
         if (!string.IsNullOrWhiteSpace(decisionText))
             entity.Notes = decisionText;
@@ -825,7 +831,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
 
         _logger.LogInformation(
             "Timesheet {Number} decision '{Action}' processed by {UserId}; outcome {Outcome}",
-            entity.TimesheetNumber, action, currentUserId, workflowResult.Outcome);
+            entity.TimesheetNumber, action, currentUserId, decisionOutcome);
         return entity.ToDto();
     }
 

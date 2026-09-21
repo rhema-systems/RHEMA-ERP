@@ -33,6 +33,11 @@ public interface IPreEmploymentCheckService
     Task<bool> CompleteCheckAsync(Guid checkId, Guid completedByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<ReferenceCheckResponseDto>> GetReferenceResponsesByRefereeAsync(Guid refereeId, CancellationToken cancellationToken = default);
 
+    // Providers (round 3, lane G; D-14): which suppliers provide which checks
+    Task<IEnumerable<PreEmploymentCheckProviderServiceDto>> GetProviderServicesAsync(PreEmploymentCheckType? checkType = null, bool includeInactive = false, CancellationToken cancellationToken = default);
+    Task<IEnumerable<PreEmploymentCheckProviderServiceDto>> AddProviderServicesAsync(CreatePreEmploymentCheckProviderServicesDto dto, Guid createdByUserId, CancellationToken cancellationToken = default);
+    Task<bool> RemoveProviderServiceAsync(Guid id, CancellationToken cancellationToken = default);
+
     // Template application
     Task<PreEmploymentCheckDetailDto> ApplyTemplateAsync(Guid checkId, Guid templateId, Guid appliedByUserId, bool overwriteExisting = false, CancellationToken ct = default);
 

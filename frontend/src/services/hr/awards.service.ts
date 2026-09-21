@@ -138,6 +138,11 @@ class AwardsService {
     return apiService.get<PagedResult<EmployeeAwardSummary>>(`${this.base}/paged`, params);
   }
 
+  /** Every award conferred on one employee (`HR.Awards.Read`) — the profile's Awards tab (round 3, lane T3). */
+  getForEmployee(employeeId: string) {
+    return apiService.get<EmployeeAwardSummary[]>(`${this.base}/employee/${employeeId}`);
+  }
+
   // ── eligibility (D-9) ─────────────────────────────────────────────────────
 
   /**

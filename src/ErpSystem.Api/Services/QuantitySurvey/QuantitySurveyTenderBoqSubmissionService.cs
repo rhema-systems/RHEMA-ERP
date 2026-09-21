@@ -38,6 +38,7 @@ public sealed class QuantitySurveyTenderBoqSubmissionService : IQuantitySurveyTe
     private readonly IControlledFileUploadService _controlledFiles;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly ITimeLimitedDataProtector _templateProtector;
+    private readonly bool _externalSubmissionsEnabled;
 
     public QuantitySurveyTenderBoqSubmissionService(
         ApplicationDbContext db,
@@ -45,13 +46,17 @@ public sealed class QuantitySurveyTenderBoqSubmissionService : IQuantitySurveyTe
         IQuantitySurveyConfigurationService configuration,
         IControlledFileUploadService controlledFiles,
         ICentralDocumentRepositoryFileService centralDocuments,
-        IDataProtectionProvider dataProtectionProvider)
+        IDataProtectionProvider dataProtectionProvider,
+        IConfiguration? deploymentConfiguration = null)
     {
         _db = db;
         _currentUser = currentUser;
         _configuration = configuration;
         _controlledFiles = controlledFiles;
         _centralDocuments = centralDocuments;
+        _externalSubmissionsEnabled = (deploymentConfiguration?["QuantitySurvey:OptionalFeatures"] ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Contains("external-submissions", StringComparer.Ordinal);
         _templateProtector = dataProtectionProvider
             .CreateProtector("ErpSystem.QuantitySurvey.TenderBoqSubmission.Template.v1")
             .ToTimeLimitedDataProtector();
@@ -394,12 +399,21 @@ public sealed class QuantitySurveyTenderBoqSubmissionService : IQuantitySurveyTe
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        var hasProject = await _db.TenderBids.AsNoTracking()
+        var bidScope = await _db.TenderBids.AsNoTracking()
             .Where(item => item.Id == tenderBidId && item.TenantId == TenantId && !item.IsDeleted)
-            .Select(item => item.Tender.SourcePurchaseRequisition != null &&
-                            item.Tender.SourcePurchaseRequisition.ProjectId.HasValue)
+            .Select(item => new { item.BusinessPartnerId,
+                HasProject = item.Tender.SourcePurchaseRequisition != null &&
+                    item.Tender.SourcePurchaseRequisition.ProjectId.HasValue })
             .SingleOrDefaultAsync(cancellationToken);
-        if (!hasProject) return;
+        if (bidScope is null || !bidScope.HasProject) return;
+        await EnsureExternalOwnerAsync(bidScope.BusinessPartnerId, cancellationToken);
+
+        // Ordinary Procurement prices remain the default architecture route. Do not
+        // silently activate the optional QS exchange just because a PR has a project.
+        // Records that already entered that exchange retain their existing controls.
+        if (!_externalSubmissionsEnabled && !await _db.QuantitySurveyTenderBoqSubmissions.AsNoTracking()
+                .AnyAsync(item => item.TenderBidId == tenderBidId && item.TenantId == TenantId && !item.IsDeleted,
+                    cancellationToken)) return;
 
         var context = await LoadContextAsync(tenderBidId, requireExternalOwner: true, cancellationToken);
         var payload = PortalPayload(context);

@@ -25,17 +25,17 @@ public sealed class QuantitySurveyPaymentCertificatesController(
     public Task<IActionResult> Get(Guid id, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.GetAsync(id, token)));
 
-    [HttpPost, Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
+    [HttpPost, Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public Task<IActionResult> Generate([FromQuery] Guid projectId,
         [FromBody] GenerateQuantitySurveyPaymentCertificateRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.GenerateAsync(projectId, request, CorrelationId, token)));
 
-    [HttpPut("{id:guid}"), Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
+    [HttpPut("{id:guid}"), Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public Task<IActionResult> Update(Guid id,
         [FromBody] UpdateQuantitySurveyPaymentCertificateRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.UpdateAsync(id, request, CorrelationId, token)));
 
-    [HttpPost("{id:guid}/submit"), Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
+    [HttpPost("{id:guid}/submit"), Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public Task<IActionResult> Submit(Guid id,
         [FromBody] QuantitySurveyPaymentCertificateActionRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.SubmitAsync(id, request, CorrelationId, token)));
@@ -50,7 +50,7 @@ public sealed class QuantitySurveyPaymentCertificatesController(
         [FromBody] QuantitySurveyPaymentCertificateActionRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.RejectAsync(id, request, CorrelationId, token)));
 
-    [HttpPost("{id:guid}/handoff-ap"), Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
+    [HttpPost("{id:guid}/handoff-ap"), Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public Task<IActionResult> HandoffToAp(Guid id,
         [FromBody] QuantitySurveyPaymentCertificateActionRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.HandoffToApAsync(id, request, CorrelationId, token)));

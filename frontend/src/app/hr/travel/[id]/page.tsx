@@ -87,6 +87,7 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
   };
 
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'StaffTravelRequest',
     entityId: id,
     entityLabel: 'Travel Request',

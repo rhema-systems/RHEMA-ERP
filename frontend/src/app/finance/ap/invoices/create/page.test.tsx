@@ -12,7 +12,7 @@ vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 vi.mock('@tanstack/react-query', () => ({ useQuery: ({ queryKey, enabled }: { queryKey: string[]; enabled?: boolean }) => ({ data: enabled === false ? undefined : queryData[queryKey[0]], isLoading: false, isFetching: false, error: null }) }));
 vi.mock('@/components/finance/dimensions/source-document-dimension-panel', () => ({ SourceDocumentDimensionPanel: (props: unknown) => { dimensionPanel(props); return <div />; } }));
 vi.mock('@/services/financeCommonService', () => ({ paymentTermService: { getByApplicableTo: vi.fn().mockResolvedValue([]) } }));
-vi.mock('@/services/accountsPayableService', () => ({ accountsPayableService: { createInvoice: vi.fn(), updateInvoice: vi.fn(), getBudgetCells: vi.fn().mockResolvedValue([]) } }));
+vi.mock('@/services/accountsPayableService', () => ({ accountsPayableService: { createInvoice: vi.fn(), updateInvoice: vi.fn(), getInvoiceBudgetCells: vi.fn().mockResolvedValue([]) } }));
 Object.assign(globalThis, { React, ResizeObserver: class { observe() {} unobserve() {} disconnect() {} } });
 Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
 Object.defineProperty(Element.prototype, 'hasPointerCapture', { configurable: true, value: () => false });
@@ -21,15 +21,16 @@ Object.defineProperty(Element.prototype, 'releasePointerCapture', { configurable
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(accountsPayableService.getInvoiceBudgetCells).mockResolvedValue([]);
   delete queryData['vendor-invoice'];
   const accounts = [
     { id: 'ap', accountCode: '2100', accountNumber: '2100', accountName: 'Trade Payables', accountType: 'Liability', isControlAccount: true, allowDirectPosting: false },
     { id: 'expense', accountCode: '6100', accountNumber: '6100', accountName: 'Freight Purchases', accountType: 'Expense', isControlAccount: false, allowDirectPosting: true },
   ];
   Object.assign(queryData, {
-    'ap-invoice-suppliers': { items: [{ id: 'supplier', name: 'Freight Vendor', code: 'SUP-001', currency: 'GHS' }] },
+    'ap-invoice-entry-suppliers': { items: [{ id: 'supplier', name: 'Freight Vendor', code: 'SUP-001', currency: 'GHS' }] },
     'gl-accounts-active': { items: accounts }, 'inventory-items-active': [], warehouses: [], 'ap-purchase-orders': { items: [] },
-    'finance-settings': { baseCurrency: 'GHS' }, taxes: [{ id: 'wht', code: 'WHT7', name: 'Supplier WHT', rate: 7.5, isActive: true, applicability: 'Purchases', taxPayableAccountId: 'wht-account' }],
+    'finance-settings': { baseCurrency: 'GHS' }, taxes: [{ id: 'wht', code: 'WHT7', category: 'Withholding', name: 'Supplier WHT', rate: 7.5, isActive: true, applicability: 'Purchases', taxPayableAccountId: 'wht-account' }],
     'tax-groups-active': [{ id: 'vat', name: 'VAT Five', code: 'VAT5', components: [{ taxId: 'tax5', taxCode: 'VAT5', taxName: 'VAT Five', taxRate: 5, taxCategory: 'VAT', calculationOrder: 1, compoundBasis: 'Base' }] }],
     'ap-invoice-supplier-defaults': { businessPartnerId: 'supplier', withholdingDefault: { required: true, taxId: 'wht', rate: 7.5, taxPayableAccountId: 'wht-account' }, postingDefaults: { subjectToWithholdingDeduction: true, withholdingTaxRate: 7.5, defaultWithholdingTaxId: 'wht', defaultApAccountId: 'ap', defaultExpenseAccountId: 'expense', defaultTaxGroupId: 'vat', cashAccountSource: 'Chequebook' } },
   });
@@ -55,6 +56,29 @@ async function prepareInvoice(choice: 'Yes' | 'No' | 'Dismiss' = 'No') {
 }
 
 describe('new AP invoice visible supplier defaults', () => {
+  it('preserves a QS service certificate source and line identity while exposing expense and budget coding', async () => {
+    const lineId = '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8';
+    queryData['vendor-invoice'] = {
+      id: 'invoice', invoiceNumber: 'VI-QS-001', supplierId: 'supplier',
+      status: 'Draft', invoiceDate: '2026-09-20', dueDate: '2026-10-20', currencyCode: 'GHS', exchangeRate: 1,
+      isOpeningBalance: false, paymentTermsDays: 30, applySupplierWithholdingDefaults: false,
+      acceptedSupplyKind: 'WorksPaymentCertificate', acceptedSupplySourceId: 'certificate',
+      lineItems: [{ id: lineId, lineItemType: 'Service', glAccountId: 'expense', budgetEntryId: 'budget-cell', description: 'Approved QS certificate', quantity: 1, unitPrice: 100, unit: 'Certificate' }],
+    };
+    vi.mocked(accountsPayableService.getInvoiceBudgetCells).mockResolvedValue([{ budgetEntryId: 'budget-cell', dimensionAssignments: [], fiscalPeriodCode: '2026', functionalCurrencyCode: 'GHS', approvedAmount: 1000, postedActualAmount: 0, reservedAmount: 0, availableAmount: 1000 }] as never);
+    render(<VendorInvoiceFormPage editInvoiceId="invoice" />);
+    expect((await screen.findAllByText('Service / Works certificate')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(accountsPayableService.getInvoiceBudgetCells).toHaveBeenCalled());
+    await waitFor(() => expect(within(screen.getByText('GL Account').parentElement!).getAllByRole('combobox')).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(accountsPayableService.updateInvoice).toHaveBeenCalled());
+    expect(vi.mocked(accountsPayableService.updateInvoice).mock.calls[0][1]).toMatchObject({
+      acceptedSupplyKind: 'WorksPaymentCertificate', acceptedSupplySourceId: 'certificate',
+      lineItems: [expect.objectContaining({ id: lineId, lineItemType: 'Service', glAccountId: 'expense', budgetEntryId: 'budget-cell' })],
+      financeDimensions: { lines: [expect.objectContaining({ sourceLineId: lineId, accountId: 'expense' })] },
+    });
+    expect(accountsPayableService.createInvoice).not.toHaveBeenCalled();
+  });
   it('edits and submits server-resolved PO line dimensions with the same line identity', async () => {
     const lineId = '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8';
     queryData['vendor-invoice'] = {
@@ -114,7 +138,7 @@ describe('new AP invoice visible supplier defaults', () => {
   });
 
   it('uses saved supplier/PO timing even when the selected term catalogue now has different days', async () => {
-    const supplierData = queryData['ap-invoice-suppliers'] as { items: Array<{ paymentTermId?: string }> };
+    const supplierData = queryData['ap-invoice-entry-suppliers'] as { items: Array<{ paymentTermId?: string }> };
     supplierData.items[0].paymentTermId = 'net';
     Object.assign(queryData['ap-invoice-supplier-defaults'] as object, { paymentTermId: 'net', paymentTermsDays: 60 });
     vi.mocked(paymentTermService.getByApplicableTo).mockResolvedValue([{ id: 'net', code: 'NET30', name: 'Net 30', dueDays: 30 }] as PaymentTermListDto[]);
@@ -131,10 +155,10 @@ describe('new AP invoice visible supplier defaults', () => {
     await prepareInvoice('Yes');
     expect(screen.getByRole('switch', { name: 'Subject to withholding' })).toBeChecked();
     expect(screen.getByLabelText('WHT Rate (%)')).toHaveValue(7.5);
-    expect(screen.getByText('Withholding Tax Deduction (7.5%):')).toBeInTheDocument();
+    expect(screen.getByText('Estimated WHT at payment (7.5%):')).toBeInTheDocument();
     expect(screen.getByText(/-.*7\.50/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('WHT Rate (%)'), { target: { value: '5' } });
-    expect(screen.getByText('Withholding Tax Deduction (5%):')).toBeInTheDocument();
+    expect(screen.getByText('Estimated WHT at payment (5%):')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Record Invoice' }));
     await waitFor(() => expect(accountsPayableService.createInvoice).toHaveBeenCalled());
     expect(vi.mocked(accountsPayableService.createInvoice).mock.calls[0][0]).toMatchObject({ applySupplierWithholdingDefaults: true, withholdingTaxId: 'wht', withholdingTaxRate: 5, withholdingTaxRateOverride: 5, withholdingTaxAccountId: 'wht-account' });
@@ -157,7 +181,7 @@ describe('new AP invoice visible supplier defaults', () => {
   });
 
   it('asks for a fresh decision after changing supplier', async () => {
-    (queryData['ap-invoice-suppliers'] as { items: unknown[] }).items.push({ id: 'supplier-two', name: 'Second Vendor', code: 'SUP-002', currency: 'GHS' });
+    (queryData['ap-invoice-entry-suppliers'] as { items: unknown[] }).items.push({ id: 'supplier-two', name: 'Second Vendor', code: 'SUP-002', currency: 'GHS' });
     await prepareInvoice('Yes');
     fireEvent.click(screen.getByRole('combobox', { name: 'Supplier' }));
     fireEvent.click(await screen.findByText('Second Vendor'));

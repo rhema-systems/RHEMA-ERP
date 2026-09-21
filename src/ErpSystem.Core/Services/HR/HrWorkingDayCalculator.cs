@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.HR;
@@ -43,6 +44,20 @@ public interface IHrWorkingDayCalculator
     /// starting day. Zero when <paramref name="to"/> is on or before it.
     /// </summary>
     Task<int> CountWorkingDaysAsync(Guid tenantId, DateTime from, DateTime to, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every date the tenant does not work in <paramref name="from"/>..<paramref name="to"/>, because
+    /// a holiday covers it or stands in lieu of one. Weekends are NOT included — a caller that counts
+    /// weekends differently (leave types can be configured either way) decides that for itself.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so leave can share this module's one answer to "is this a holiday" instead of keeping
+    /// a second, looser one. Leave's own query matched on tenant alone, so it counted holidays from
+    /// every calendar including retired ones, and never saw a substitution date (closure plan
+    /// L-31/L-32).
+    /// </remarks>
+    Task<IReadOnlySet<DateOnly>> GetHolidayDatesAsync(
+        Guid tenantId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default);
 }
 
 public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
@@ -112,6 +127,16 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
     /// a holiday falls on a weekend — is treated as a non-working day too, because that is what it is
     /// for the employee trying to file an appeal.
     /// </remarks>
+    public async Task<IReadOnlySet<DateOnly>> GetHolidayDatesAsync(
+        Guid tenantId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default)
+    {
+        if (to < from) return new HashSet<DateOnly>();
+
+        var all = await LoadHolidaysAsync(tenantId, cancellationToken);
+        all.RemoveWhere(d => d < from || d > to);
+        return all;
+    }
+
     private async Task<HashSet<DateOnly>> LoadHolidaysAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var calendar = await _unitOfWork.Repository<HolidayCalendar>()
@@ -125,14 +150,23 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
 
         var holidays = await _unitOfWork.Repository<PublicHoliday>()
             .GetQueryable()
-            .Where(h => h.TenantId == tenantId && !h.IsDeleted && h.HolidayCalendarId == calendar.Id)
+            .Where(h => h.TenantId == tenantId && !h.IsDeleted && h.IsActive
+                     && h.HolidayCalendarId == calendar.Id)
             .ToListAsync(cancellationToken);
 
         foreach (var holiday in holidays)
         {
+            // An OPTIONAL holiday is a day the office is open and an employee may choose to take —
+            // so it is a working day, and taking it is leave like any other. Only Mandatory and
+            // SubstituteDay close the tenant. Before this, every holiday closed it regardless of
+            // what the observance type said, which made the setting decorative (closure plan L-33).
+            if (holiday.ObservanceType == HolidayObservanceType.Optional)
+                continue;
+
             for (var day = holiday.DateFrom; day <= holiday.DateTo; day = day.AddDays(1))
                 dates.Add(day);
 
+            // The working day given in lieu when a holiday falls on a weekend is not worked either.
             if (holiday.SubstitutionDate is DateOnly substitute)
                 dates.Add(substitute);
         }

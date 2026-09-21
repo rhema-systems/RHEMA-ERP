@@ -14,7 +14,9 @@ import { toast } from 'sonner';
 import { evaluationTemplateService, EvaluationTemplate, CreateEvaluationTemplateDto, UpdateEvaluationTemplateDto, CreateEvaluationTemplateCriterionDto } from '@/services/evaluationTemplateService';
 import { evaluationCriteriaService, EvaluationCriterion } from '@/services/evaluationCriteriaService';
 
-const CATEGORIES = ['General', 'Construction', 'IT', 'Services', 'Goods', 'Consultancy'];
+// Use the exact procurement category values used by tender matching; retain
+// legacy values so existing templates can still be viewed and edited.
+const CATEGORIES = ['Goods', 'Works', 'TechnicalServices', 'ConsultancyServices', 'GeneralServices', 'General', 'Construction', 'IT', 'Services', 'Consultancy'];
 const TENDER_TYPES = ['RFQ', 'RFP', 'ITB', 'EOI'];
 const SCORING_METHODS = ['WeightedAverage', 'SimpleAverage', 'PassFail', 'QCBS'];
 
@@ -58,7 +60,7 @@ export default function EvaluationTemplatesPage() {
     templateName: '',
     templateCode: '',
     description: '',
-    category: 'General',
+    category: 'Goods',
     tenderType: 'RFQ',
     isDefault: false,
     isActive: true,
@@ -255,7 +257,7 @@ export default function EvaluationTemplatesPage() {
       templateName: '',
       templateCode: '',
       description: '',
-      category: 'General',
+      category: 'Goods',
       tenderType: 'RFQ',
       isDefault: false,
       isActive: true,

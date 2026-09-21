@@ -77,6 +77,7 @@ export default function AppraisalTemplateDetailPage() {
    * which affordances are worth offering for the status we can see locally.
    */
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'AppraisalTemplate',
     entityId: id,
     entityLabel: 'Appraisal Template',

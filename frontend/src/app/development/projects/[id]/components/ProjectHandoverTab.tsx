@@ -1,5 +1,5 @@
-import { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import React, { type Dispatch, type SetStateAction, useMemo, useState } from 'react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import type {
   CreateProjectHandoverItemDto,
   CreateProjectUnitHandoverBatchDto,
   ProjectDetailDto,
+  ProjectHandoverItemDto,
   ProjectUnitDto,
 } from '@/services/projectService';
 
@@ -31,6 +32,9 @@ type ProjectHandoverTabProps = {
   onDeleteHandoverBatch: (unitHandoverBatchId: string) => Promise<void>;
   onAddCommissioningItem: () => void;
   onDeleteCommissioningItem: (commissioningItemId: string) => void;
+  editingHandoverItemId: string | null;
+  onEditHandoverItem: (item: ProjectHandoverItemDto) => void;
+  onCancelHandoverEdit: () => void;
   onAddHandoverItem: () => void;
   onDeleteHandoverItem: (handoverItemId: string) => void;
 };
@@ -53,6 +57,9 @@ export function ProjectHandoverTab({
   onDeleteHandoverBatch,
   onAddCommissioningItem,
   onDeleteCommissioningItem,
+  editingHandoverItemId,
+  onEditHandoverItem,
+  onCancelHandoverEdit,
   onAddHandoverItem,
   onDeleteHandoverItem,
 }: ProjectHandoverTabProps) {
@@ -360,7 +367,7 @@ export function ProjectHandoverTab({
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-lg border p-4 space-y-4">
-            <div className="font-medium">Add Handover Item</div>
+            <div className="font-medium">{editingHandoverItemId ? 'Edit Handover Item' : 'Add Handover Item'}</div>
             <div className="grid gap-4 md:grid-cols-4">
               <div className="grid gap-2 md:col-span-2">
                 <Label>Title</Label>
@@ -441,10 +448,11 @@ export function ProjectHandoverTab({
                 <Textarea rows={2} value={handoverDraft.notes || ''} onChange={(event) => setHandoverDraft((current) => ({ ...current, notes: event.target.value || undefined }))} />
               </div>
             </div>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              {editingHandoverItemId && <Button variant="outline" onClick={onCancelHandoverEdit}>Cancel edit</Button>}
               <Button disabled={!handoverDraft.title?.trim()} onClick={onAddHandoverItem}>
                 <Plus className="mr-2 h-4 w-4" />
-                Add Handover Item
+                {editingHandoverItemId ? 'Save handover changes' : 'Add Handover Item'}
               </Button>
             </div>
           </div>
@@ -479,9 +487,14 @@ export function ProjectHandoverTab({
                     </div>
                     {item.notes ? <div className="text-sm text-muted-foreground whitespace-pre-wrap">{item.notes}</div> : null}
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => onDeleteHandoverItem(item.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => onEditHandoverItem(item)}>
+                      <Pencil className="mr-2 h-4 w-4" />Edit handover
+                    </Button>
+                    <Button aria-label={`Delete handover ${item.title}`} variant="ghost" size="sm" onClick={() => onDeleteHandoverItem(item.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}

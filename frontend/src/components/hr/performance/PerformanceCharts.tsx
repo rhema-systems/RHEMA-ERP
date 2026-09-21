@@ -19,18 +19,52 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
  * The three charts the performance analytics screens draw.
  *
  * **Each is a single series**, so none of them carries a legend or a colour key: the category
- * name on the axis is the identity, and the value is written next to the mark. Colour comes from
- * the design system's `--chart-1`, which is already stepped for light and dark, rather than from
- * a per-row colour — the API sends one for grade rows, but it is a rotating decorative palette
- * that would encode nothing here.
+ * name on the axis is the identity, and the value is written next to the mark. One colour for
+ * every mark, rather than a per-row one — the API sends a colour on grade rows, but it is a
+ * rotating decorative palette that would encode nothing here.
  *
  * ⚠ Every one of these reads is derived from `overallScore`, which is not set until HR signs an
  * appraisal off. Empty is the normal state for most of a cycle, so each chart says so in words
  * rather than drawing an empty axis.
  */
 
-const SERIES = 'var(--chart-1)';
-const AXIS_TICK = { fontSize: 12, fill: 'hsl(var(--muted-foreground))' };
+/**
+ * The series colour, formerly `var(--chart-1)`.
+ *
+ * Despite the name, `--chart-1` is not a light/dark step of one hue: globals.css defines it as
+ * `oklch(0.646 0.222 41.116)` (orange) in light and `oklch(0.488 0.243 264.376)` (violet-blue) in
+ * dark, so these charts changed hue with the theme. It is slot 1 of the validated categorical
+ * palette now — the same blue the recruitment and training analytics screens use — checked against
+ * this app's own card surfaces (`#ffffff` light, `#202020` dark) rather than the reference
+ * palette's: both steps clear the lightness band, the chroma floor and 3:1 contrast.
+ *
+ * It travels as a CSS custom property because a colour held in a JS constant cannot follow the
+ * theme; `.dark` is the only selector needed, since next-themes runs with `attribute="class"` and
+ * `enableSystem` and so resolves even the "system" setting to a real class on `<html>`.
+ */
+const PALETTE_CSS = `
+.pf-viz { --pf-series: #2a78d6; }
+.dark .pf-viz { --pf-series: #3987e5; }
+`;
+
+const SERIES = 'var(--pf-series)';
+
+/**
+ * `var(--muted-foreground)`, not `hsl(var(--muted-foreground))`.
+ *
+ * This app's theme tokens hold whole colour values (`oklch(0.556 0 0)`, `#a3a3a3`), not the bare
+ * `H S% L%` triplets that the `hsl()` wrapper expects. Wrapping one produces a declaration the
+ * browser discards without a warning, so these ticks were falling back to SVG's default black fill
+ * — invisible against a dark card, and never the muted grey they were written to be.
+ */
+const AXIS_TICK = { fontSize: 12, fill: 'var(--muted-foreground)' };
+
+/**
+ * The hover band behind a bar, which is also its hit target. Drawn from `--muted-foreground` at low
+ * alpha rather than `--muted`: the latter is a near-white grey, so on a light card it would be
+ * invisible at any opacity, which is how this started as `hsl(var(--muted))` and went unnoticed.
+ */
+const BAR_CURSOR = { fill: 'var(--muted-foreground)', opacity: 0.12 };
 
 interface TooltipEntry {
   name?: string;
@@ -97,32 +131,39 @@ export function DistributionBars({
   }
 
   return (
-    <ResponsiveContainer width="100%" height={Math.max(height, data.length * 34 + 40)}>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 32, bottom: 4, left: 8 }}>
-        <CartesianGrid horizontal={false} strokeDasharray="3 3" className="stroke-muted" />
-        <XAxis type="number" tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} />
-        <YAxis
-          type="category"
-          dataKey="label"
-          width={150}
-          tick={AXIS_TICK}
-          tickLine={false}
-          axisLine={false}
-        />
-        <Tooltip content={<ChartTooltip />} cursor={{ fill: 'hsl(var(--muted))', opacity: 0.4 }} />
-        <Bar dataKey="count" name={valueName} fill={SERIES} radius={[0, 4, 4, 0]} barSize={18}>
-          {data.map((d) => (
-            <Cell key={d.label} />
-          ))}
-          <LabelList
-            dataKey="count"
-            position="right"
-            className="fill-muted-foreground"
-            fontSize={12}
+    <>
+      <style>{PALETTE_CSS}</style>
+      <ResponsiveContainer
+        className="pf-viz"
+        width="100%"
+        height={Math.max(height, data.length * 34 + 40)}
+      >
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 32, bottom: 4, left: 8 }}>
+          <CartesianGrid horizontal={false} strokeDasharray="3 3" className="stroke-muted" />
+          <XAxis type="number" tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} />
+          <YAxis
+            type="category"
+            dataKey="label"
+            width={150}
+            tick={AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
           />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+          <Tooltip content={<ChartTooltip />} cursor={BAR_CURSOR} />
+          <Bar dataKey="count" name={valueName} fill={SERIES} radius={[0, 4, 4, 0]} barSize={18}>
+            {data.map((d) => (
+              <Cell key={d.label} />
+            ))}
+            <LabelList
+              dataKey="count"
+              position="right"
+              className="fill-muted-foreground"
+              fontSize={12}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </>
   );
 }
 
@@ -155,29 +196,32 @@ export function PerformanceTrendChart({
   }
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} margin={{ top: 12, right: 24, bottom: 4, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-        <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} />
-        <YAxis domain={[0, 100]} tick={AXIS_TICK} tickLine={false} axisLine={false} width={40} />
-        <Tooltip content={<ChartTooltip />} />
-        <Line
-          type="monotone"
-          dataKey="score"
-          name="Overall score"
-          stroke={SERIES}
-          strokeWidth={2}
-          dot={{ r: 4, strokeWidth: 2 }}
-          activeDot={{ r: 6 }}
-        >
-          <LabelList
+    <>
+      <style>{PALETTE_CSS}</style>
+      <ResponsiveContainer className="pf-viz" width="100%" height={height}>
+        <LineChart data={data} margin={{ top: 12, right: 24, bottom: 4, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+          <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} />
+          <YAxis domain={[0, 100]} tick={AXIS_TICK} tickLine={false} axisLine={false} width={40} />
+          <Tooltip content={<ChartTooltip />} />
+          <Line
+            type="monotone"
             dataKey="score"
-            position="top"
-            className="fill-muted-foreground"
-            fontSize={12}
-          />
-        </Line>
-      </LineChart>
-    </ResponsiveContainer>
+            name="Overall score"
+            stroke={SERIES}
+            strokeWidth={2}
+            dot={{ r: 4, strokeWidth: 2 }}
+            activeDot={{ r: 6 }}
+          >
+            <LabelList
+              dataKey="score"
+              position="top"
+              className="fill-muted-foreground"
+              fontSize={12}
+            />
+          </Line>
+        </LineChart>
+      </ResponsiveContainer>
+    </>
   );
 }

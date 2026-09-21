@@ -53,7 +53,6 @@ import {
   appraisalTemplateService,
 } from '@/services/hr/appraisal.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { APPRAISAL_TARGET_TYPE_OPTIONS } from '@/types/hr/appraisal';
 import type {
@@ -67,6 +66,7 @@ import type {
 } from '@/types/hr/appraisal';
 import { scopeLabel } from '@/lib/hr/appraisal-scope';
 import { humanizeEnum } from '@/lib/hr/attendance-format';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 /**
  * One appraisal cycle, end to end.
@@ -235,10 +235,6 @@ export default function AppraisalCycleDetailPage() {
     queryKey: ['hr', 'organization-levels'],
     queryFn: () => organizationLevelService.getAll(),
   });
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
   const { data: positions } = useQuery({
     queryKey: ['hr', 'positions', 'active'],
     queryFn: () => employeePositionService.getActive(),
@@ -247,10 +243,6 @@ export default function AppraisalCycleDetailPage() {
   const levelOptions = useMemo(
     () => (levels ?? []).map((l) => ({ value: l.id, label: l.name })),
     [levels],
-  );
-  const unitOptions = useMemo(
-    () => (units ?? []).map((u) => ({ value: u.id, label: u.name })),
-    [units],
   );
   const positionOptions = useMemo(
     () => (positions ?? []).map((p) => ({ value: p.id, label: p.title })),
@@ -589,22 +581,7 @@ export default function AppraisalCycleDetailPage() {
                   required
                   options={APPRAISAL_TARGET_TYPE_OPTIONS}
                 />
-                <SelectField
-                  form={form}
-                  name="organizationLevelId"
-                  label="Organisation level"
-                  options={levelOptions}
-                  allowEmpty
-                  emptyLabel="Not set"
-                />
-                <SelectField
-                  form={form}
-                  name="organizationUnitId"
-                  label="Organisation unit"
-                  options={unitOptions}
-                  allowEmpty
-                  emptyLabel="Not set"
-                />
+                <OrganizationUnitPickerField form={form} name="organizationUnitId" levelName="organizationLevelId" label="Organisation unit" levelLabel="Organisation level" allowEmpty emptyLabel="Not set" allowAnyLevel="Not set" />
                 <SelectField
                   form={form}
                   name="positionId"
@@ -720,22 +697,7 @@ export default function AppraisalCycleDetailPage() {
                         allowEmpty
                         emptyLabel="Not set"
                       />
-                      <SelectField
-                        form={form}
-                        name="organizationUnitId"
-                        label="Organisation unit"
-                        options={unitOptions}
-                        allowEmpty
-                        emptyLabel="Not set"
-                      />
-                      <SelectField
-                        form={form}
-                        name="organizationLevelId"
-                        label="Organisation level"
-                        options={levelOptions}
-                        allowEmpty
-                        emptyLabel="Not set"
-                      />
+                      <OrganizationUnitPickerField form={form} name="organizationUnitId" levelName="organizationLevelId" label="Organisation unit" levelLabel="Organisation level" allowEmpty emptyLabel="Not set" allowAnyLevel="Not set" />
                       <TextareaField
                         form={form}
                         name="reason"

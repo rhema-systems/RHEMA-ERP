@@ -65,6 +65,8 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { GOAL_PRIORITY_OPTIONS } from '@/types/hr/goals';
 import type { GoalPriority, UnitGoal, UnitGoalListItem } from '@/types/hr/goals';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 /**
  * Unit goals — a company goal taken up by one org unit, or an objective a unit sets for
@@ -167,10 +169,6 @@ export default function UnitGoalsPage() {
     enabled: !!cycleId,
   });
 
-  const unitOptions = useMemo(
-    () => (units ?? []).map((u) => ({ value: u.id, label: u.name })),
-    [units],
-  );
   const companyGoalOptions = useMemo(
     () => (companyGoals ?? []).map((g) => ({ value: g.id, label: g.title })),
     [companyGoals],
@@ -346,26 +344,18 @@ export default function UnitGoalsPage() {
                 </div>
               </div>
               <div className="w-[200px] space-y-2">
-                <Label htmlFor="orgUnit">Org unit</Label>
-                <Select
-                  value={orgUnitId}
-                  onValueChange={(v) => {
-                    setOrgUnitId(v);
+                <OrganizationUnitPicker
+                  value={orgUnitId === ANY ? '' : orgUnitId}
+                  onChange={(id) => {
+                    setOrgUnitId(id || ANY);
                     setPage(1);
                   }}
-                >
-                  <SelectTrigger id="orgUnit">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ANY}>All units</SelectItem>
-                    {unitOptions.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  allowNone="All units"
+                  levelLabel="Level"
+                  unitLabel="Org unit"
+                  idPrefix="unit-goals-scope"
+                  className="flex flex-wrap items-end gap-4"
+                />
               </div>
               <div className="w-[160px] space-y-2">
                 <Label htmlFor="priority">Priority</Label>
@@ -582,13 +572,7 @@ export default function UnitGoalsPage() {
               }
             />
             <FieldRow>
-              <SelectField
-                form={form}
-                name="organizationUnitId"
-                label="Organisation unit"
-                required
-                options={unitOptions}
-              />
+              <OrganizationUnitPickerField form={form} name="organizationUnitId" label="Organisation unit" required />
               <SelectField
                 form={form}
                 name="priority"

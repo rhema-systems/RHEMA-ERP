@@ -1,4 +1,7 @@
 using System.ComponentModel.DataAnnotations;
+using System.Reflection;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using FluentAssertions;
@@ -8,6 +11,40 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementContractActivationGatePolicyTests
 {
+    [Fact]
+    public async Task EmptyEvidenceReachesTheConfiguredReadinessChecks()
+    {
+        // This validator checks supplied references; EvaluateAsync determines which
+        // references the effective policy requires. No repository is needed for none.
+        var constructor = typeof(ProcurementContractActivationService).GetConstructors().Single();
+        var service = constructor.Invoke(new object?[constructor.GetParameters().Length]);
+        var validate = typeof(ProcurementContractActivationService).GetMethod(
+            "ValidateEvidenceAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var result = await (Task<List<ProcurementContractActivationEvidence>>)validate.Invoke(
+            service, new object[] { new Contract(), Array.Empty<ProcurementContractActivationEvidenceRequest>(), CancellationToken.None })!;
+
+        result.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(ProcurementContractActivationCheckStatus.Passed, true)]
+    [InlineData(ProcurementContractActivationCheckStatus.NotRequired, true)]
+    [InlineData(ProcurementContractActivationCheckStatus.Pending, false)]
+    [InlineData(ProcurementContractActivationCheckStatus.Failed, false)]
+    public void MissingOrInvalidConfiguredEvidenceStillBlocksReadiness(
+        ProcurementContractActivationCheckStatus status, bool expected)
+    {
+        var ready = typeof(ProcurementContractActivationService).GetMethod(
+            "IsReady", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var checks = new[] { new ProcurementContractActivationCheckDto {
+            Key = "signed-contract", Label = "Signed contract", Status = status,
+            Code = "CONTRACT_ACTIVATION_EVIDENCE_REQUIRED", IsRequired = true,
+            Message = "Configured evidence check"
+        } };
+
+        ((bool)ready.Invoke(null, new object[] { checks })!).Should().Be(expected);
+    }
+
     [Theory]
     [InlineData("PR_AUTHORITY_POLICY_NOT_EFFECTIVE")]
     [InlineData("PR_AUTHORITY_NOT_CONFIGURED")]

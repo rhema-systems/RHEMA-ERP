@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { SalaryScalePicker, type SalaryScaleSelection } from '@/components/hr/common/SalaryScalePicker';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import { movementService } from '@/services/hr/movement.service';
 import { employeeService } from '@/services/hr/employee.service';
@@ -106,6 +107,15 @@ export default function NewMovementPage() {
 
   const newPosition = positions.find((p) => p.id === newPositionId);
 
+  // The new placement on the scale (round 3, lane H). Grade follows the chosen position until the
+  // user picks otherwise; the notch amount is offered as the new salary when none is typed yet.
+  const [scale, setScale] = useState<SalaryScaleSelection>({ gradeId: '', levelId: '', notchId: '' });
+  useEffect(() => {
+    const g = newPosition?.salaryGradeId ?? '';
+    if (g && !scale.gradeId) setScale({ gradeId: g, levelId: '', notchId: '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newPosition?.salaryGradeId]);
+
   // Secondments and acting appointments are temporary by definition; tick it for the user rather
   // than letting a permanent secondment be raised by omission.
   useEffect(() => {
@@ -137,7 +147,11 @@ export default function NewMovementPage() {
         newLocationId: employee.locationId ?? null,
         newSupervisorId: values.newSupervisorId || null,
         newSalary: Number(values.newSalary) || 0,
-        newSalaryGradeId: newPosition.salaryGradeId ?? null,
+        // Round 3, lane H: the placement the movement writes at implementation. The grade defaults
+        // to the position's; the notch is the user's — it is what the person will be paid.
+        newSalaryGradeId: scale.gradeId || newPosition.salaryGradeId || null,
+        newSalaryLevelId: scale.levelId || null,
+        newSalaryNotchId: scale.notchId || null,
 
         reason: values.reason,
         justification: values.justification || null,
@@ -313,6 +327,23 @@ export default function NewMovementPage() {
               label="New reporting line"
               placeholder="Who they will report to"
             />
+
+            <div className="space-y-2 md:col-span-2">
+              <SalaryScalePicker
+                value={scale}
+                onChange={setScale}
+                idPrefix="movement-scale"
+                gradeLabel="New salary grade"
+                onResolved={(r) => {
+                  if (r.amount && !Number(form.getValues('newSalary'))) form.setValue('newSalary', r.amount);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Implementing the movement places the employee here on the effective date; the
+                previous placement ends the day before. Leave the notch empty to place on the grade
+                alone.
+              </p>
+            </div>
 
             <div className="space-y-2">
               <Label htmlFor="newSalary">

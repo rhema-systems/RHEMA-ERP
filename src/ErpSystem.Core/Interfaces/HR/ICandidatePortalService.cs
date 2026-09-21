@@ -71,7 +71,8 @@ public interface ICandidatePortalService
     /// </summary>
     Task<JobCandidateDocumentDto> AddDocumentAsync(Guid userId, JobCandidateDocumentType documentType,
         string fileName, string filePath, Guid tenantId, CancellationToken ct = default,
-        Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null);
+        Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null,
+        string? description = null);
 
     /// <summary>Delete a document that belongs to this candidate.</summary>
     Task DeleteDocumentAsync(Guid userId, Guid documentId, Guid tenantId, CancellationToken ct = default);

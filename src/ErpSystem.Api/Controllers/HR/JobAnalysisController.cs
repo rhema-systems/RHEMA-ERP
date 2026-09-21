@@ -1,3 +1,5 @@
+using ErpSystem.Api.Services.HR;
+using ErpSystem.Api.Services.Spreadsheets;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
@@ -192,13 +194,20 @@ public class JobAnalysisController : ControllerBase
         return CreatedAtAction(nameof(GetJobDescription), new { id = created.Id }, created);
     }
 
+    /// <summary>Copy a description — onto the same position (a "(Copy)" draft) or, with a body naming <c>targetPositionId</c>, onto another (round 3, lane J1).</summary>
     [Authorize(Policy = HrPermissions.JobArchitectureWritePolicy)]
     [HttpPost("descriptions/{id:guid}/clone")]
-    public async Task<ActionResult<JobDescriptionDto>> CloneJobDescription(Guid id)
+    public async Task<ActionResult<JobDescriptionDto>> CloneJobDescription(Guid id, [FromBody] CloneJobDescriptionDto? dto)
     {
-        var created = await _jobDescriptionService.CloneAsync(id, GetCurrentEmployeeId());
+        var created = await _jobDescriptionService.CloneAsync(id, GetCurrentEmployeeId(), dto?.TargetPositionId);
         return CreatedAtAction(nameof(GetJobDescription), new { id = created.Id }, created);
     }
+
+    /// <summary>Bring the position's effective skill and certification requirements onto the description (round 3, lane J1). Idempotent.</summary>
+    [Authorize(Policy = HrPermissions.JobArchitectureWritePolicy)]
+    [HttpPost("descriptions/{id:guid}/import-position-requirements")]
+    public async Task<ActionResult<PositionRequirementsImportResultDto>> ImportPositionRequirements(Guid id)
+        => Ok(await _jobDescriptionService.ImportPositionRequirementsAsync(id));
 
     private Guid? GetCurrentEmployeeId()
     {
@@ -601,10 +610,36 @@ public class JobAnalysisController : ControllerBase
 
     #region Valuation
 
+    /// <summary>What the role is worth. Safe — computes and returns, changes nothing.</summary>
     [Authorize(Policy = HrPermissions.JobArchitectureReadPolicy)]
     [HttpGet("descriptions/{jobDescriptionId:guid}/valuation")]
     public async Task<ActionResult<JobValuationSummaryDto>> GetValuation(Guid jobDescriptionId)
         => Ok(await _jobDescriptionService.GetValuationAsync(jobDescriptionId));
+
+    /// <summary>Works the valuation out and stores it on the job description.</summary>
+    /// <remarks>
+    /// ⚠ The GET above did this until 2026-09-07, which made every retry, refetch and cache
+    /// revalidation an UPDATE — and stamped the record's <c>UpdatedAt</c> each time, approved
+    /// documents included. Storing an estimate is an act: it is a POST, it is gated on Write
+    /// rather than Read, and it refuses an approved description like every other edit does.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.JobArchitectureWritePolicy)]
+    [HttpPost("descriptions/{jobDescriptionId:guid}/valuation")]
+    public async Task<ActionResult<JobValuationSummaryDto>> RecalculateValuation(Guid jobDescriptionId)
+        => Ok(await _jobDescriptionService.RecalculateValuationAsync(jobDescriptionId));
+
+    /// <summary>
+    /// The author's proposed grade (round 3, lane J2; D-11): the suggestion is the system's, this is
+    /// the human's answer to it. Null clears the proposal back to the suggestion. Answers the fresh
+    /// valuation so the screen re-renders from one read.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.JobArchitectureWritePolicy)]
+    [HttpPut("descriptions/{jobDescriptionId:guid}/proposed-grade")]
+    public async Task<ActionResult<JobValuationSummaryDto>> SetProposedGrade(Guid jobDescriptionId, [FromBody] SetProposedSalaryGradeDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _jobDescriptionService.SetProposedSalaryGradeAsync(jobDescriptionId, dto));
+    }
 
     #endregion
 
@@ -741,6 +776,121 @@ public class JobAnalysisController : ControllerBase
     [HttpGet("budgets/organization-unit/{organizationUnitId:guid}/current")]
     public async Task<ActionResult<ManpowerBudgetDto?>> GetCurrentOrganizationUnitBudget(Guid organizationUnitId)
         => Ok(await _manpowerBudgetService.GetCurrentBudgetForOrganizationUnitAsync(organizationUnitId));
+
+    /// <summary>
+    /// What the system knows about a unit's subtree before a budget is typed for it (round 2b, R2):
+    /// serving headcount, estimated salary cost, exits due in the period, each post against its
+    /// establishment. The create form pre-fills from it; the detail page shows it live.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("budgets/planning-baseline")]
+    public async Task<ActionResult<ManpowerPlanningBaselineDto>> GetPlanningBaseline(
+        [FromQuery] Guid organizationUnitId,
+        [FromQuery] DateOnly periodStart,
+        [FromQuery] DateOnly periodEnd,
+        CancellationToken cancellationToken)
+    {
+        if (organizationUnitId == Guid.Empty) return BadRequest("organizationUnitId is required.");
+        return Ok(await _manpowerBudgetService.GetPlanningBaselineAsync(organizationUnitId, periodStart, periodEnd, cancellationToken));
+    }
+
+    /// <summary>"The salary that goes with this position": the grade it carries, for the line picker (round 2b, R3).</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("positions/{positionId:guid}/salary-reference")]
+    public async Task<ActionResult<PositionSalaryReferenceDto>> GetPositionSalaryReference(Guid positionId, CancellationToken cancellationToken)
+        => Ok(await _manpowerBudgetService.GetPositionSalaryReferenceAsync(positionId, cancellationToken));
+
+    /// <summary>Every position's establishment in one read (round 2b, R4a) — the admin screen used one call per position.</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("establishment")]
+    public async Task<ActionResult<IEnumerable<PositionEstablishmentResultDto>>> GetEstablishmentList(
+        [FromQuery] Guid? organizationUnitId, CancellationToken cancellationToken)
+        => Ok(await _manpowerBudgetService.GetEstablishmentListAsync(organizationUnitId, cancellationToken));
+
+    /// <summary>"Use the position establishment to initiate the budget" (round 2b, R4a): a Draft with a line per post.</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetWritePolicy)]
+    [HttpPost("budgets/from-establishment")]
+    public async Task<ActionResult<ManpowerBudgetDetailDto>> CreateBudgetFromEstablishment(
+        [FromBody] CreateManpowerBudgetFromEstablishmentDto dto, CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var created = await _manpowerBudgetService.CreateFromEstablishmentAsync(dto, cancellationToken);
+        return CreatedAtAction(nameof(GetBudget), new { id = created.Id }, created);
+    }
+
+    /// <summary>Adds posts from the establishment to a draft budget; lines already on it are left alone (R4a).</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetWritePolicy)]
+    [HttpPost("budgets/{id:guid}/lines/from-establishment")]
+    public async Task<ActionResult<AddLinesFromEstablishmentResultDto>> AddLinesFromEstablishment(
+        Guid id, [FromQuery] bool includeUnestablished = true, CancellationToken cancellationToken = default)
+        => Ok(await _manpowerBudgetService.AddLinesFromEstablishmentAsync(id, includeUnestablished, cancellationToken));
+
+    private const string XlsxContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    /// <summary>The budget's posts against the establishment as an Excel workbook to edit and import back (round 2b, R4b).</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("budgets/{id:guid}/establishment-workbook")]
+    public async Task<IActionResult> ExportEstablishmentWorkbook(Guid id, CancellationToken cancellationToken)
+    {
+        var model = await _manpowerBudgetService.GetEstablishmentWorkbookModelAsync(id, cancellationToken);
+        var bytes = ManpowerBudgetWorkbooks.Build(model);
+        return File(bytes, XlsxContentType, $"{model.BudgetNumber} establishment.xlsx");
+    }
+
+    /// <summary>
+    /// Imports an edited establishment workbook onto a Draft/Rejected budget (round 2b, R4b). Every
+    /// row is checked first; if any row has a problem the answer is 422 with the rows named and
+    /// NOTHING is written. Not the document gate: the package is inspected as a spreadsheet, the
+    /// way Finance's journal batches and QS's BoQs are, and nothing is stored.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetWritePolicy)]
+    [HttpPost("budgets/{id:guid}/establishment-workbook")]
+    [RequestSizeLimit(15_728_640)]
+    [ProducesResponseType(typeof(ManpowerBudgetWorkbookImportResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ManpowerBudgetWorkbookImportResultDto), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ManpowerBudgetWorkbookImportResultDto>> ImportEstablishmentWorkbook(
+        Guid id, IFormFile? file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "Select the establishment workbook (.xlsx) exported from this budget." });
+        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Only the .xlsx workbook exported from this budget can be imported." });
+
+        byte[] bytes;
+        await using (var ms = new MemoryStream())
+        {
+            await file.CopyToAsync(ms, cancellationToken);
+            bytes = ms.ToArray();
+        }
+        try
+        {
+            SpreadsheetSecurityInspector.ValidateXlsxPackage(bytes, maximumWorksheets: 4);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        var read = ManpowerBudgetWorkbooks.Read(bytes);
+        if (read.FileRejected || read.Import == null)
+            return BadRequest(new { message = read.FileErrors.FirstOrDefault() ?? "The workbook could not be read.", errors = read.FileErrors });
+
+        var result = await _manpowerBudgetService.ImportEstablishmentWorkbookAsync(id, read.Import, cancellationToken);
+        return result.Applied ? Ok(result) : UnprocessableEntity(result);
+    }
+
+    /// <summary>Approved budget lines a requisition for this position may draw down from (round 2b, R5). Any internal user: the requester's picker.</summary>
+    [Authorize(Policy = "InternalOnly")]
+    [HttpGet("budgets/lines/for-position/{positionId:guid}")]
+    public async Task<ActionResult<IEnumerable<BudgetLineForRequisitionDto>>> GetLinesForPosition(
+        Guid positionId, [FromQuery] int? fiscalYear, CancellationToken cancellationToken)
+        => Ok(await _manpowerBudgetService.GetLinesForPositionAsync(positionId, fiscalYear, cancellationToken));
+
+    /// <summary>Approved and pending recruitment costs against the budget's recruitment envelope (round 2b, R6).</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("budgets/{id:guid}/recruitment-spend")]
+    public async Task<ActionResult<RecruitmentSpendDto>> GetRecruitmentSpend(Guid id, CancellationToken cancellationToken)
+        => Ok(await _manpowerBudgetService.GetRecruitmentSpendAsync(id, cancellationToken));
 
     [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
     [HttpGet("budgets/pending-approvals")]

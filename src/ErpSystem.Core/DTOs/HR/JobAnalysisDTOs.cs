@@ -58,6 +58,12 @@ public class JobDescriptionDto : BaseDto
     public Guid? SuggestedSalaryGradeId { get; set; }
     public string? SuggestedSalaryGradeName { get; set; }
     public string? ValuationNotes { get; set; }
+    // Round 3, lane J2 (D-11): the author's proposal beside the suggestion, and the post's actual grade.
+    public Guid? ProposedSalaryGradeId { get; set; }
+    public string? ProposedSalaryGradeName { get; set; }
+    public string? ProposedSalaryGradeNote { get; set; }
+    public Guid? PositionSalaryGradeId { get; set; }
+    public string? PositionSalaryGradeName { get; set; }
 
     // Authority & financial limits
     public DecisionAuthorityLevel? AutonomyLevel { get; set; }
@@ -209,8 +215,17 @@ public class CreateJobDescriptionDto : CreateDtoBase
     /// <summary>Staff level (MGT / SNR / JNR) the role is graded against.</summary>
     public Guid? StaffLevelId { get; set; }
 
-    /// <summary>Payroll-owned salary grade suggested by the valuation. Read-only reference.</summary>
+    /// <summary>
+    /// Payroll-owned salary grade suggested by the valuation. Read-only: accepted for wire
+    /// compatibility and IGNORED on write since round 3, lane J2 — the valuation is the only writer.
+    /// </summary>
     public Guid? SuggestedSalaryGradeId { get; set; }
+
+    /// <summary>The author's proposed grade (round 3, lane J2; D-11). Must be one of the tenant's live grades.</summary>
+    public Guid? ProposedSalaryGradeId { get; set; }
+
+    [MaxLength(500)]
+    public string? ProposedSalaryGradeNote { get; set; }
 
     /// <summary>Union the role falls under when <see cref="IsBargainingUnitRole"/> is set.</summary>
     public Guid? UnionId { get; set; }
@@ -225,6 +240,11 @@ public class CreateJobDescriptionDto : CreateDtoBase
 
     public RoleCriticalityLevel? RoleCriticality { get; set; }
 
+    /// <summary>
+    /// ⚠ IGNORED on write since round 3, lane J2 (decision D-9): the intrinsic value is DERIVED —
+    /// the sum of the values on the job's qualifications and competencies. Kept so an old client's
+    /// payload still binds.
+    /// </summary>
     public decimal? RoleIntrinsicValue { get; set; }
 
     public decimal? IndustryBenchmarkSalary { get; set; }
@@ -266,7 +286,19 @@ public class UpdateJobDescriptionDto : UpdateDtoBase
     [MaxLength(2000)]
     public string JobSummary { get; set; } = string.Empty;
 
-    public JobDescriptionStatus Status { get; set; }
+    /// <summary>
+    /// The status the caller believes the record is in. Optional, and never written.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was non-nullable and it WAS written, which made an omitted status corrupting rather
+    /// than harmless: <c>Draft = 1</c>, so a body without it bound to <b>0</b> — a value no member
+    /// of the enum holds. A record left on 0 is not authorable and not submittable, so it can never
+    /// move again; only a duplicate escapes it. Nullable now, so omitting it means "I am not
+    /// saying", and <see cref="ErpSystem.Core.Services.HR.JobDescriptionService"/> refuses a value
+    /// that contradicts the record rather than acting on it. Status is moved by submitting,
+    /// reviewing or approving — never by an edit.
+    /// </remarks>
+    public JobDescriptionStatus? Status { get; set; }
     public DateTime? NextReviewDate { get; set; }
     public int ReviewCycleMonths { get; set; }
 
@@ -276,9 +308,14 @@ public class UpdateJobDescriptionDto : UpdateDtoBase
     public RoleCriticalityLevel? RoleCriticality { get; set; }
     [Range(0, double.MaxValue)]
     public decimal? IndustryBenchmarkSalary { get; set; }
+    /// <summary>Read-only since round 3, lane J2 — accepted and IGNORED; the valuation writes it.</summary>
     public Guid? SuggestedSalaryGradeId { get; set; }
     [MaxLength(2000)]
     public string? ValuationNotes { get; set; }
+    /// <summary>The author's proposed grade (round 3, lane J2; D-11). Null clears the proposal back to the suggestion.</summary>
+    public Guid? ProposedSalaryGradeId { get; set; }
+    [MaxLength(500)]
+    public string? ProposedSalaryGradeNote { get; set; }
 
     // Authority & financial limits
     public DecisionAuthorityLevel? AutonomyLevel { get; set; }
@@ -350,6 +387,21 @@ public class ApproveJobDescriptionDto
 /// <summary>
 /// DTO for creating a new version of job description
 /// </summary>
+/// <summary>Body of <c>POST descriptions/{id}/clone</c> (round 3, lane J1). Empty = a copy on the same position.</summary>
+public class CloneJobDescriptionDto
+{
+    /// <summary>Copy onto another position: the copy takes that position's staff level, keeps the title, starts its own version line, and carries no reporting relationships.</summary>
+    public Guid? TargetPositionId { get; set; }
+}
+
+/// <summary>What <c>POST descriptions/{id}/import-position-requirements</c> did.</summary>
+public class PositionRequirementsImportResultDto
+{
+    public int CompetenciesAdded { get; set; }
+    public int QualificationsAdded { get; set; }
+    public int AlreadyPresent { get; set; }
+}
+
 public class CreateJobDescriptionVersionDto
 {
     [Required]
@@ -494,6 +546,9 @@ public class JobQualificationDto : BaseDto
     public string TypeName => Type.ToString();
     public Guid? QualificationId { get; set; }
     public string? QualificationName { get; set; }
+    /// <summary>Round 3, lane J1: the credential catalogue link (lane C2's column, unreachable until now).</summary>
+    public Guid? CertificationId { get; set; }
+    public string? CertificationName { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public bool IsRequired { get; set; }
@@ -516,9 +571,16 @@ public class CreateJobQualificationDto : CreateDtoBase
 
     public Guid? QualificationId { get; set; }
 
-    [Required]
+    /// <summary>A credential from the certification catalogue; the title is mirrored from it when blank.</summary>
+    public Guid? CertificationId { get; set; }
+
+    /// <summary>
+    /// Round 3, lane J1: OPTIONAL. The rule is "a catalogue id or a title" — a row linked to the
+    /// qualification or certification catalogue takes the catalogue's name when the title is blank;
+    /// a row with no link must be titled. Checked in the service.
+    /// </summary>
     [MaxLength(200)]
-    public string Title { get; set; } = string.Empty;
+    public string? Title { get; set; }
 
     [MaxLength(1000)]
     public string Description { get; set; } = string.Empty;
@@ -537,14 +599,32 @@ public class CreateJobQualificationDto : CreateDtoBase
 /// </summary>
 public class UpdateJobQualificationDto : UpdateDtoBase
 {
+    /// <summary>
+    /// The responsibility this row hangs off, within its own job description. Null detaches it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was missing from this DTO entirely, so an attachment made on create could never be
+    /// moved or cleared — and, because the screen knew that, it hid the control on edit rather than
+    /// offering a change the API would silently discard. Like every other field here it REPLACES:
+    /// a payload that omits it detaches the row.
+    /// </remarks>
+    public Guid? JobResponsibilityId { get; set; }
+
     [Required]
     public QualificationType Type { get; set; }
 
     public Guid? QualificationId { get; set; }
 
-    [Required]
+    /// <summary>A credential from the certification catalogue; the title is mirrored from it when blank.</summary>
+    public Guid? CertificationId { get; set; }
+
+    /// <summary>
+    /// Round 3, lane J1: OPTIONAL. The rule is "a catalogue id or a title" — a row linked to the
+    /// qualification or certification catalogue takes the catalogue's name when the title is blank;
+    /// a row with no link must be titled. Checked in the service.
+    /// </summary>
     [MaxLength(200)]
-    public string Title { get; set; } = string.Empty;
+    public string? Title { get; set; }
 
     [MaxLength(1000)]
     public string Description { get; set; } = string.Empty;
@@ -597,9 +677,9 @@ public class CreateJobCompetencyDto : CreateDtoBase
     public Guid? SkillId { get; set; }
     public Guid? CompetencyId { get; set; }
 
-    [Required]
+    /// <summary>Round 3, lane J1: OPTIONAL — a skill or competency from the catalogue names the row when this is blank; a row with no link must be named. Checked in the service.</summary>
     [MaxLength(200)]
-    public string CompetencyName { get; set; } = string.Empty;
+    public string? CompetencyName { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }
@@ -621,12 +701,23 @@ public class CreateJobCompetencyDto : CreateDtoBase
 /// </summary>
 public class UpdateJobCompetencyDto : UpdateDtoBase
 {
+    /// <summary>
+    /// The responsibility this row hangs off, within its own job description. Null detaches it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was missing from this DTO entirely, so an attachment made on create could never be
+    /// moved or cleared — and, because the screen knew that, it hid the control on edit rather than
+    /// offering a change the API would silently discard. Like every other field here it REPLACES:
+    /// a payload that omits it detaches the row.
+    /// </remarks>
+    public Guid? JobResponsibilityId { get; set; }
+
     public Guid? SkillId { get; set; }
     public Guid? CompetencyId { get; set; }
 
-    [Required]
+    /// <summary>Round 3, lane J1: OPTIONAL — a skill or competency from the catalogue names the row when this is blank; a row with no link must be named. Checked in the service.</summary>
     [MaxLength(200)]
-    public string CompetencyName { get; set; } = string.Empty;
+    public string? CompetencyName { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }
@@ -797,6 +888,23 @@ public class CreateManpowerBudgetDto : CreateDtoBase
 /// </summary>
 public class UpdateManpowerBudgetDto : UpdateDtoBase
 {
+    /// <summary>
+    /// The scope — fiscal year, unit, level — editable while the budget is still its author's
+    /// (Draft or Rejected). Round 2b, lane R1: the create form collected all three and the edit
+    /// could change none of them, so a budget drafted against the wrong unit had to be deleted and
+    /// typed again.
+    /// </summary>
+    /// <remarks>
+    /// All three are optional and <b>null means unchanged</b> — the rest of this DTO is a REPLACE,
+    /// but callers written before R1 send no scope and must not have their year wiped. When the
+    /// unit changes and no level is named, the level follows the unit.
+    /// </remarks>
+    [Range(2000, 2100)]
+    public int? FiscalYear { get; set; }
+
+    public Guid? OrganizationLevelId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+
     [Required]
     public DateTime PeriodStartDate { get; set; }
 
@@ -844,10 +952,26 @@ public class UpdateManpowerBudgetDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal TrainingBudget { get; set; }
 
-    [Range(0, double.MaxValue)]
-    public decimal ActualSpent { get; set; }
+    // ⚠ `ActualSpent` is no longer accepted here (round 2b, lane R1). It was the one figure the
+    // create form never asked for and the correction dialog never sent, so every correction wrote
+    // 0 over it; and it is the one figure that can only come from Finance's actuals
+    // (HR-FINANCE-INTEGRATION-BACKLOG, area 17/18). Nothing in HR types it now. An old client that
+    // still sends it is ignored, not refused.
 
-    public ManpowerBudgetStatus Status { get; set; }
+    /// <summary>
+    /// The status the caller believes the budget is in. Optional, and never written.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The twin of the job description's own status hole, and unlike that one it had a caller.
+    /// It was non-nullable and assigned unconditionally, and the "Correct the budget" dialog on the
+    /// manpower budget screen does not send it — <c>Draft = 1</c>, so every correction would have
+    /// written <b>0</b>, and <c>SubmitForApprovalAsync</c> admits Draft only. A corrected budget
+    /// could then never be submitted, which closes FR-HR-135's chain and with it the approved
+    /// establishment that depends on it (D-2). No row was ever damaged only because the table is
+    /// still empty (ErpSystemDB, 2026-09-06: 0 budgets) — the correction dialog is newer than the
+    /// data. Status is moved by submit, approve and reject; never by an edit.
+    /// </remarks>
+    public ManpowerBudgetStatus? Status { get; set; }
 
     [MaxLength(2000)]
     public string? BusinessJustification { get; set; }
@@ -938,6 +1062,316 @@ public class PositionEstablishmentResultDto
 }
 
 /// <summary>Why a manpower budget was refused.</summary>
+/// <summary>
+/// What the system knows about a unit before anyone types a budget for it (round 2b, lane R2):
+/// who is on strength, what they cost, who is due to leave in the period, and where each post
+/// stands against its establishment. The demo asked "which values on the form can be
+/// automatically specified?" — these are the ones, and the form pre-fills from them.
+/// </summary>
+/// <remarks>
+/// <para><b>The unit and everything under it.</b> A budget for a division covers its departments,
+/// so every figure here is over the subtree, walked by <c>ParentUnitId</c> (seeded units carry no
+/// <c>Path</c>). <see cref="UnitIds"/> says which units that was.</para>
+/// <para><b>One serving predicate</b> — <c>HrServingEmployees</c>; see its remarks for the three
+/// older answers this deliberately does not reuse.</para>
+/// <para><b>Salary cost is an estimate.</b> It is the sum of each serving employee's basic pay as
+/// <c>HrBasicPay</c> resolves it without a payroll read (notch, else level mid-point, else the flat
+/// figure on the record). <see cref="EmployeesWithoutPay"/> says how many contributed nothing.</para>
+/// <para><b>Exits due</b> are retirements falling in the period (the compulsory age, honouring a
+/// gender-specific override, or an explicit retirement date), fixed-term contracts scheduled to
+/// end in it, and separations already raised and not yet completed. Terminations nobody has
+/// raised yet cannot be known; the screen says so. A person appearing in two lists is counted
+/// once in <see cref="ExitsDueTotal"/>.</para>
+/// </remarks>
+public class ManpowerPlanningBaselineDto
+{
+    public Guid OrganizationUnitId { get; set; }
+    public string OrganizationUnitName { get; set; } = string.Empty;
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+
+    /// <summary>Always true: the figures are over the unit and its descendants.</summary>
+    public bool IncludesDescendantUnits => true;
+    public List<Guid> UnitIds { get; set; } = new();
+
+    public int CurrentHeadcount { get; set; }
+    public decimal CurrentSalaryCost { get; set; }
+    public int EmployeesWithoutPay { get; set; }
+    public string SalaryCostNote { get; set; } = string.Empty;
+
+    public List<ManpowerPlanningExitDto> RetirementsDue { get; set; } = new();
+    public List<ManpowerPlanningExitDto> ContractExpiriesDue { get; set; } = new();
+    public List<ManpowerPlanningExitDto> SeparationsInFlight { get; set; } = new();
+
+    /// <summary>Distinct employees across the three lists.</summary>
+    public int ExitsDueTotal { get; set; }
+    public int SuggestedPlannedTerminations => ExitsDueTotal;
+
+    public List<ManpowerPlanningPositionDto> Positions { get; set; } = new();
+}
+
+/// <summary>One person expected to leave in the period, and why.</summary>
+public class ManpowerPlanningExitDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public Guid PositionId { get; set; }
+    public string? PositionTitle { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    /// <summary><c>Retirement</c>, <c>ContractExpiry</c> or <c>Separation</c>.</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Retirement date, contract end date, or the separation's last working day.</summary>
+    public DateOnly? Date { get; set; }
+
+    /// <summary>True when the date is already past and the person is still on strength — a backlog, not a projection.</summary>
+    public bool IsOverdue { get; set; }
+
+    /// <summary>A separation already raised for this person (so the sweep would skip them).</summary>
+    public bool HasSeparation { get; set; }
+    public string? SeparationNumber { get; set; }
+    public string? SeparationStatus { get; set; }
+}
+
+/// <summary>One post in the subtree: where it stands, and what the arithmetic suggests.</summary>
+/// <remarks>
+/// ⚠ <see cref="Gap"/> is <b>null, not zero, for an unestablished post</b>. Its
+/// <c>ExpectedHeadcount</c> is the column default (1 for 132 of 146 live positions) and means
+/// nothing; a gap computed from it would be a phantom. Only <c>EstablishmentApprovedOn</c> makes
+/// the number real — the same rule every enforcement path uses.
+/// </remarks>
+public class ManpowerPlanningPositionDto
+{
+    public Guid PositionId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Code { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+    public Guid? SalaryGradeId { get; set; }
+
+    public int Filled { get; set; }
+    public int ExpectedHeadcount { get; set; }
+    public bool IsEstablished { get; set; }
+    public int? Gap { get; set; }
+
+    /// <summary>People in this post who appear in the exits-due lists.</summary>
+    public int ExitsDue { get; set; }
+
+    /// <summary>Mean monthly basic pay of the people in the post (the planning estimate), and its sum.</summary>
+    public decimal CurrentAverageSalary { get; set; }
+    public decimal CurrentSalaryCost { get; set; }
+
+    /// <summary><c>max(0, Gap) + ExitsDue</c>: what it would take to be at establishment at the end of the period.</summary>
+    public int SuggestedNewHires { get; set; }
+}
+
+/// <summary>"The salary that goes with this position" (round 2b, R3): the grade the post carries, if any.</summary>
+public class PositionSalaryReferenceDto
+{
+    public Guid PositionId { get; set; }
+    public string PositionTitle { get; set; } = string.Empty;
+    public bool HasGrade => SalaryGradeId != null;
+    public Guid? SalaryGradeId { get; set; }
+    public string? GradeCode { get; set; }
+    public string? GradeName { get; set; }
+    public decimal? MinSalary { get; set; }
+    public decimal? MaxSalary { get; set; }
+    /// <summary>The scale's tiers for this tenant, so a picker knows whether to show the level.</summary>
+    public SalaryStructureTiers Tiers { get; set; }
+}
+
+/// <summary>
+/// "Use the position establishment to initiate the budget" (round 2b, R4a): a Draft budget for a
+/// unit and year, with one line per post in the subtree, pre-filled from the planning baseline.
+/// </summary>
+public class CreateManpowerBudgetFromEstablishmentDto
+{
+    [Required]
+    public Guid OrganizationUnitId { get; set; }
+
+    [Required]
+    [Range(2000, 2100)]
+    public int FiscalYear { get; set; }
+
+    [Required]
+    public DateOnly PeriodStart { get; set; }
+
+    [Required]
+    public DateOnly PeriodEnd { get; set; }
+
+    /// <summary>
+    /// Also draft a line for posts nobody has established. Their gap is unknown, so such a line
+    /// plans only the exits due; the budget's approval is what establishes them. Default true.
+    /// </summary>
+    public bool IncludeUnestablished { get; set; } = true;
+
+    [MaxLength(2000)]
+    public string? BusinessJustification { get; set; }
+}
+
+/// <summary>What "add posts from the establishment" did to a draft budget.</summary>
+public class AddLinesFromEstablishmentResultDto
+{
+    public int Added { get; set; }
+    public int AlreadyOnBudget { get; set; }
+    public int SkippedUnestablished { get; set; }
+    public List<ManpowerBudgetLineDto> Lines { get; set; } = new();
+}
+
+/// <summary>
+/// What has been spent, and asked to be spent, against a manpower budget's recruitment envelope
+/// (round 2b, R6, decision D-5): the approved recruitment costs on every requisition drawing down
+/// from the budget's lines, the costs recorded but not yet signed, and what is left.
+/// </summary>
+/// <remarks>
+/// ⚠ A read, not a write: <c>ManpowerBudget.ActualSpent</c> stays untouched — it is Finance's
+/// actuals to fill (HR-FINANCE-INTEGRATION-BACKLOG, area 17/18). An envelope of <b>0</b> means
+/// "not set" (a budget drafted from the establishment leaves the money for the holder), and such
+/// a budget constrains nothing.
+/// </remarks>
+public class RecruitmentSpendDto
+{
+    public Guid BudgetId { get; set; }
+    public string BudgetNumber { get; set; } = string.Empty;
+    public decimal RecruitmentBudget { get; set; }
+    public bool EnvelopeSet => RecruitmentBudget > 0;
+    /// <summary>Σ base-currency amount of Approved costs across the budget's requisitions.</summary>
+    public decimal Approved { get; set; }
+    /// <summary>Σ base-currency amount of Recorded (not yet decided) costs.</summary>
+    public decimal Pending { get; set; }
+    public decimal Remaining => RecruitmentBudget - Approved;
+    public BudgetEnforcementMode Mode { get; set; }
+    public string ModeName => Mode.ToString();
+    public List<RecruitmentSpendByRequisitionDto> ByRequisition { get; set; } = new();
+}
+
+public class RecruitmentSpendByRequisitionDto
+{
+    public Guid RequisitionId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public string? PositionTitle { get; set; }
+    public decimal Approved { get; set; }
+    public decimal Pending { get; set; }
+}
+
+// ── round 2b, R4b: the establishment workbook ──────────────────────────────────────────────
+// "Export the establishment to Excel, edit it, import it back onto the budget." The model the
+// Api layer renders (ClosedXML lives there, not in Core) and the rows it reads back. The import
+// is ALL-OR-NOTHING and Draft/Rejected only; rows are matched by the hidden Position Id the
+// export wrote, never by title.
+
+public class ManpowerBudgetWorkbookModelDto
+{
+    public Guid BudgetId { get; set; }
+    public string BudgetNumber { get; set; } = string.Empty;
+    public int FiscalYear { get; set; }
+    public string StatusName { get; set; } = string.Empty;
+    public string OrganizationUnitName { get; set; } = string.Empty;
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    /// <summary>Draft or Rejected: the only states an import will be accepted in.</summary>
+    public bool Editable { get; set; }
+    public List<ManpowerBudgetWorkbookRowDto> Rows { get; set; } = new();
+    /// <summary>Every active notch on the tenant's scale, for the Notch column's list.</summary>
+    public List<ManpowerBudgetWorkbookNotchDto> Notches { get; set; } = new();
+}
+
+public class ManpowerBudgetWorkbookRowDto
+{
+    public Guid PositionId { get; set; }
+    public string? Code { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? OrganizationUnitName { get; set; }
+    // the establishment as of the export (read-only columns)
+    public bool IsEstablished { get; set; }
+    public int ExpectedHeadcount { get; set; }
+    public int Filled { get; set; }
+    public int? Gap { get; set; }
+    public int ExitsDue { get; set; }
+    public int SuggestedNewHires { get; set; }
+    public string? GradeCode { get; set; }
+    // the line, when the post is on the budget (editable columns)
+    public bool OnBudget { get; set; }
+    public Guid? LineId { get; set; }
+    public int? PlannedCount { get; set; }
+    public int? PlannedNewPositions { get; set; }
+    public decimal? PlannedAverageSalary { get; set; }
+    public string? PlannedSalarySourceName { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+    public string? NotchLabel { get; set; }
+    public int? Quarter { get; set; }
+    public string? PriorityName { get; set; }
+    public bool? IsCritical { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class ManpowerBudgetWorkbookNotchDto
+{
+    public Guid Id { get; set; }
+    /// <summary>What the cell shows: <c>M2 · L1 · notch 3 (4,500.00)</c>.</summary>
+    public string Label { get; set; } = string.Empty;
+    public string GradeCode { get; set; } = string.Empty;
+    public string LevelCode { get; set; } = string.Empty;
+    public int NotchNumber { get; set; }
+    public decimal Amount { get; set; }
+}
+
+/// <summary>What the reader found in an uploaded workbook. Cell-level read errors travel with it so one round shows everything.</summary>
+public class ManpowerBudgetWorkbookImportDto
+{
+    /// <summary>From the hidden <c>_meta</c> sheet — must be the budget the file is imported onto.</summary>
+    public Guid BudgetId { get; set; }
+    public int Version { get; set; }
+    public List<ManpowerBudgetWorkbookImportRowDto> Rows { get; set; } = new();
+    public List<ManpowerBudgetWorkbookRowErrorDto> ReadErrors { get; set; } = new();
+}
+
+public class ManpowerBudgetWorkbookImportRowDto
+{
+    public int RowNumber { get; set; }
+    public Guid? PositionId { get; set; }
+    public string? PositionText { get; set; }
+    public int? PlannedCount { get; set; }
+    public int? PlannedNewPositions { get; set; }
+    public decimal? PlannedAverageSalary { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+    /// <summary>The notch cell's text when it matched nothing on the Lists sheet.</summary>
+    public string? NotchText { get; set; }
+    public int? Quarter { get; set; }
+    public string? PriorityText { get; set; }
+    public bool? IsCritical { get; set; }
+    public string? Notes { get; set; }
+
+    /// <summary>Anything typed in an editable cell. A row with nothing typed is left alone (and never creates a line).</summary>
+    public bool HasEntries =>
+        PlannedCount.HasValue || PlannedNewPositions.HasValue || PlannedAverageSalary.HasValue || SalaryNotchId.HasValue
+        || NotchText != null || Quarter.HasValue || PriorityText != null || IsCritical.HasValue || Notes != null;
+}
+
+public class ManpowerBudgetWorkbookRowErrorDto
+{
+    public int Row { get; set; }
+    public string? Column { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+public class ManpowerBudgetWorkbookImportResultDto
+{
+    /// <summary>False when any row had an error: NOTHING was written.</summary>
+    public bool Applied { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int Created { get; set; }
+    public int Updated { get; set; }
+    public int Unchanged { get; set; }
+    /// <summary>Rows not on the budget with nothing typed in them.</summary>
+    public int Skipped { get; set; }
+    public List<ManpowerBudgetWorkbookRowErrorDto> Errors { get; set; } = new();
+    public List<ManpowerBudgetLineDto> Lines { get; set; } = new();
+}
+
 public class RejectManpowerBudgetDto
 {
     public string? Reason { get; set; }
@@ -967,6 +1401,21 @@ public class ManpowerBudgetLineDto : BaseDto
     public string PositionTitle { get; set; } = string.Empty;
     public Guid? JobDescriptionId { get; set; }
     public string? JobDescriptionNumber { get; set; }
+
+    // Where the planned salary came from (round 2b, R3)
+    public Guid? SalaryGradeId { get; set; }
+    public string? SalaryGradeCode { get; set; }
+    public string? SalaryGradeName { get; set; }
+    public Guid? SalaryLevelId { get; set; }
+    public string? SalaryLevelCode { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+    public int? SalaryNotchNumber { get; set; }
+    public PlannedSalarySource PlannedSalarySource { get; set; }
+    public string PlannedSalarySourceName => PlannedSalarySource.ToString();
+
+    /// <summary>Posts on live requisitions drawing down from this line, and what is left (round 2b, R5, D-8). Filled by the list read.</summary>
+    public int RequisitionedCount { get; set; }
+    public int Remaining { get; set; }
     
     // Current
     public int CurrentCount { get; set; }
@@ -998,6 +1447,18 @@ public class ManpowerBudgetLineDto : BaseDto
 /// </summary>
 public class CreateManpowerBudgetLineDto : CreateDtoBase
 {
+    /// <summary>
+    /// Grade → (level) → notch on the salary scale (round 2b, R3; all optional). The service
+    /// checks each belongs to the one above and to this tenant. With no
+    /// <see cref="PlannedAverageSalary"/> the amount is read from the deepest one named — notch
+    /// amount, else level mid-point, else grade minimum — and the source recorded; with one, the
+    /// figure is kept as typed and the source is <c>Manual</c>. Naming neither is refused.
+    /// <c>PlannedTotalCost</c> is IGNORED since R3: the server computes average × planned count.
+    /// </summary>
+    public Guid? SalaryGradeId { get; set; }
+    public Guid? SalaryLevelId { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+
     [Required]
     public Guid ManpowerBudgetId { get; set; }
 
@@ -1032,8 +1493,9 @@ public class CreateManpowerBudgetLineDto : CreateDtoBase
     [Range(0, int.MaxValue)]
     public int PlannedEliminations { get; set; }
 
+    /// <summary>Null = read it from the scale (grade/level/notch). A value = typed, kept as is, source <c>Manual</c>.</summary>
     [Range(0, double.MaxValue)]
-    public decimal PlannedAverageSalary { get; set; }
+    public decimal? PlannedAverageSalary { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal PlannedTotalCost { get; set; }
@@ -1055,6 +1517,11 @@ public class CreateManpowerBudgetLineDto : CreateDtoBase
 /// </summary>
 public class UpdateManpowerBudgetLineDto : UpdateDtoBase
 {
+    /// <summary>As on the create DTO: the place on the scale, all optional, checked for consistency; the total is computed.</summary>
+    public Guid? SalaryGradeId { get; set; }
+    public Guid? SalaryLevelId { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+
     [Required]
     [Range(0, int.MaxValue)]
     public int CurrentCount { get; set; }
@@ -1081,8 +1548,9 @@ public class UpdateManpowerBudgetLineDto : UpdateDtoBase
     [Range(0, int.MaxValue)]
     public int PlannedEliminations { get; set; }
 
+    /// <summary>Null = read it from the scale (grade/level/notch). A value = typed, kept as is, source <c>Manual</c>.</summary>
     [Range(0, double.MaxValue)]
-    public decimal PlannedAverageSalary { get; set; }
+    public decimal? PlannedAverageSalary { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal PlannedTotalCost { get; set; }
@@ -1574,8 +2042,11 @@ public class NameCountDto
 #region Job Valuation DTOs
 
 /// <summary>
-/// Computed job-evaluation summary: rolls up per-item monetary values + role intrinsic value
-/// into an estimated salary range and a suggested salary grade.
+/// Computed job-evaluation summary (round 3, lane J2; decisions D-9 and D-11): the job's intrinsic
+/// value is DERIVED — Σ qualification values + Σ competency values — blended with the typed
+/// industry benchmark, banded ±10 %, and matched to a salary grade whose band contains the
+/// midpoint. No band → no suggestion, and a sentence saying so. The author's PROPOSED grade and
+/// the position's ACTUAL grade travel beside the suggestion so the three are never confused.
 /// </summary>
 public class JobValuationSummaryDto
 {
@@ -1584,8 +2055,12 @@ public class JobValuationSummaryDto
 
     public decimal TotalQualificationValue { get; set; }
     public decimal TotalCompetencyValue { get; set; }
-    public decimal RoleIntrinsicValue { get; set; }
-    public decimal TotalEstimatedValue => TotalQualificationValue + TotalCompetencyValue + RoleIntrinsicValue;
+    /// <summary>Derived: the two totals above. The typed figure of old is no longer an input (D-9).</summary>
+    public decimal RoleIntrinsicValue => TotalQualificationValue + TotalCompetencyValue;
+    public bool IsIntrinsicValueDerived => true;
+    /// <summary>What an author typed before the value became derived — informational, no longer counted.</summary>
+    public decimal? LegacyTypedIntrinsicValue { get; set; }
+    public decimal TotalEstimatedValue => TotalQualificationValue + TotalCompetencyValue;
 
     public RoleCriticalityLevel? RoleCriticality { get; set; }
     public string? RoleCriticalityName => RoleCriticality?.ToString();
@@ -1598,11 +2073,38 @@ public class JobValuationSummaryDto
     public string? SuggestedSalaryGradeName { get; set; }
     public decimal? SuggestedGradeMinSalary { get; set; }
     public decimal? SuggestedGradeMaxSalary { get; set; }
+    /// <summary>"Band" when the grade's min/max were used, "Notches" when its notch amounts stood in for a blank band; null when nothing matched.</summary>
+    public string? SuggestedGradeBasis { get; set; }
+    /// <summary>The matcher's one sentence: which band contains the midpoint, or that none does and which is nearest.</summary>
+    public string? SuggestedGradeNote { get; set; }
+    /// <summary>When no band contains the midpoint: the closest one, as information — never written as the suggestion.</summary>
+    public Guid? NearestSalaryGradeId { get; set; }
+    public string? NearestSalaryGradeName { get; set; }
+    public decimal? NearestGradeMinSalary { get; set; }
+    public decimal? NearestGradeMaxSalary { get; set; }
+
+    /// <summary>The author's proposal (D-11): defaults to the suggestion when the valuation is stored; theirs afterwards.</summary>
+    public Guid? ProposedSalaryGradeId { get; set; }
+    public string? ProposedSalaryGradeName { get; set; }
+    public string? ProposedSalaryGradeNote { get; set; }
+
+    /// <summary>The post's actual grade, from the position — payroll's fact, shown for comparison.</summary>
+    public Guid? PositionSalaryGradeId { get; set; }
+    public string? PositionSalaryGradeName { get; set; }
 
     public string? ValuationNotes { get; set; }
 
     public List<JobValuationLineDto> QualificationLines { get; set; } = new();
     public List<JobValuationLineDto> CompetencyLines { get; set; } = new();
+}
+
+/// <summary>The author's proposed grade for a job description (round 3, lane J2; D-11). Null clears the proposal back to the suggestion.</summary>
+public class SetProposedSalaryGradeDto
+{
+    public Guid? ProposedSalaryGradeId { get; set; }
+
+    [MaxLength(500)]
+    public string? ProposedSalaryGradeNote { get; set; }
 }
 
 /// <summary>A single valued item (qualification or competency) in the valuation breakdown.</summary>

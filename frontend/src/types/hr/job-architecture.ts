@@ -338,6 +338,12 @@ export interface JobDescription {
   suggestedSalaryGradeId?: string | null;
   suggestedSalaryGradeName?: string | null;
   valuationNotes?: string | null;
+  /** Round 3, lane J2 (D-11): the author's proposal beside the suggestion, and the post's actual grade. */
+  proposedSalaryGradeId?: string | null;
+  proposedSalaryGradeName?: string | null;
+  proposedSalaryGradeNote?: string | null;
+  positionSalaryGradeId?: string | null;
+  positionSalaryGradeName?: string | null;
   autonomyLevel?: DecisionAuthorityLevel | null;
   decisionMakingScope?: string | null;
   financialAuthorityLimit?: number | null;
@@ -371,6 +377,8 @@ export interface JobDescriptionSummary {
   versionNumber: number;
   effectiveDate: string;
   status: JobDescriptionStatus;
+  /** The enum's NAME, as `JobDescriptionSummaryDto.StatusName` computes it. */
+  statusName?: string;
   nextReviewDate?: string | null;
 }
 
@@ -407,6 +415,9 @@ export interface JobQualification {
   qualificationId?: string | null;
   /** Resolved from the qualification catalogue; null when `qualificationId` is unset. */
   qualificationName?: string | null;
+  /** Round 3, lane J1: the credential catalogue link and its resolved name. */
+  certificationId?: string | null;
+  certificationName?: string | null;
   title: string;
   description: string;
   isRequired: boolean;
@@ -622,7 +633,9 @@ export interface CreateJobQualification {
   type: QualificationType;
   /** Optional link to the qualification catalogue; `title` still carries the wording. */
   qualificationId?: string | null;
-  title: string;
+  certificationId?: string | null;
+  /** Optional since round 3 (J1): a catalogue link (qualification or certification) names the row when this is blank. */
+  title?: string | null;
   description: string;
   isRequired: boolean;
   jobSpecificRequirements?: string | null;
@@ -630,7 +643,12 @@ export interface CreateJobQualification {
 }
 
 /** ⚠ `jobResponsibilityId` is absent — the link is fixed at creation. */
-export interface UpdateJobQualification extends Omit<CreateJobQualification, 'jobResponsibilityId'> {
+/**
+ * ⚠ `jobResponsibilityId` is part of an update now — it was omitted here because the C# DTO did not
+ * declare it, which made the attachment permanent once made. Like every field on these DTOs it
+ * REPLACES: omit it and the row is detached from its responsibility.
+ */
+export interface UpdateJobQualification extends CreateJobQualification {
   id: string;
 }
 
@@ -638,7 +656,8 @@ export interface CreateJobCompetency {
   jobResponsibilityId?: string | null;
   skillId?: string | null;
   competencyId?: string | null;
-  competencyName: string;
+  /** Optional since round 3 (J1): a skill or competency link names the row when this is blank. */
+  competencyName?: string | null;
   description?: string | null;
   type: CompetencyType;
   requiredLevel: ProficiencyLevel;
@@ -647,7 +666,8 @@ export interface CreateJobCompetency {
 }
 
 /** ⚠ `jobResponsibilityId` is absent — the link is fixed at creation. */
-export interface UpdateJobCompetency extends Omit<CreateJobCompetency, 'jobResponsibilityId'> {
+/** ⚠ Carries `jobResponsibilityId` for the same reason as {@link UpdateJobQualification}. */
+export interface UpdateJobCompetency extends CreateJobCompetency {
   id: string;
 }
 
@@ -769,25 +789,91 @@ export interface CreateJobDescription {
   jobLevelId?: string | null;
   staffLevelId?: string | null;
   suggestedSalaryGradeId?: string | null;
+  /**
+   * ⚠ On both the create and the update DTO, and on neither form. It is here so an edit can carry
+   * it back unchanged — `UpdateEntity` replaces every column, so omitting it nulls it.
+   */
+  intendedEmploymentType?: string | null;
   unionId?: string | null;
   isBargainingUnitRole?: boolean;
   occupationCode?: string | null;
   essentialFunctionsSummary?: string | null;
   roleCriticality?: RoleCriticalityLevel | null;
+  /** ⚠ IGNORED by the server since round 3, lane J2 (D-9): the intrinsic value is derived. Carried for the replace-style PUT only. */
   roleIntrinsicValue?: number | null;
   industryBenchmarkSalary?: number | null;
   valuationNotes?: string | null;
+  /** The author's proposed grade (D-11). Must travel on every PUT — `UpdateEntity` replaces the column. */
+  proposedSalaryGradeId?: string | null;
+  proposedSalaryGradeNote?: string | null;
   autonomyLevel?: DecisionAuthorityLevel | null;
   decisionMakingScope?: string | null;
   financialAuthorityLimit?: number | null;
   approvalAuthorityNotes?: string | null;
 }
 
-/** ⚠ `id` is required and must match the route — the API compares them. */
+/**
+ * ⚠ `id` is required and must match the route — the API compares them.
+ *
+ * ⚠ `status` is NOT a transition. The API never writes it (submit, review and approve own it) and
+ * refuses a value that contradicts the record, so send back the one that was read. It is required
+ * here rather than optional because the update is a REPLACE: a caller assembling this payload is
+ * round-tripping a whole document, and a status it cannot state is a document it has not read.
+ */
 export interface UpdateJobDescription extends CreateJobDescription {
   id: string;
   status: JobDescriptionStatus;
   nextReviewDate?: string | null;
+}
+
+/** One qualification or competency, with the money the organisation attaches to it for this role. */
+export interface JobValuationLine {
+  id: string;
+  name: string;
+  monetaryValue?: number | null;
+}
+
+/**
+ * What a job valuation works out. See `jobArchitectureService.getValuation` — ⚠ reading this
+ * WRITES the estimate back onto the job description.
+ */
+export interface JobValuationSummary {
+  jobDescriptionId: string;
+  jobTitle: string;
+  totalQualificationValue: number;
+  totalCompetencyValue: number;
+  /** DERIVED since round 3, lane J2 (D-9): the two totals above. Nothing types it any more. */
+  roleIntrinsicValue: number;
+  isIntrinsicValueDerived: boolean;
+  /** What an author typed before the value became derived — informational, no longer counted. */
+  legacyTypedIntrinsicValue?: number | null;
+  /** Server-computed: qualifications + competencies. */
+  totalEstimatedValue: number;
+  roleCriticality?: RoleCriticalityLevel | null;
+  roleCriticalityName?: string | null;
+  industryBenchmarkSalary?: number | null;
+  estimatedSalaryLow?: number | null;
+  estimatedSalaryHigh?: number | null;
+  suggestedSalaryGradeId?: string | null;
+  suggestedSalaryGradeName?: string | null;
+  suggestedGradeMinSalary?: number | null;
+  suggestedGradeMaxSalary?: number | null;
+  /** 'Band' | 'Notches' | null — what the suggestion's range was read from. */
+  suggestedGradeBasis?: string | null;
+  /** The matcher's one sentence: which band contains the midpoint, or that none does and which is nearest. */
+  suggestedGradeNote?: string | null;
+  nearestSalaryGradeId?: string | null;
+  nearestSalaryGradeName?: string | null;
+  nearestGradeMinSalary?: number | null;
+  nearestGradeMaxSalary?: number | null;
+  proposedSalaryGradeId?: string | null;
+  proposedSalaryGradeName?: string | null;
+  proposedSalaryGradeNote?: string | null;
+  positionSalaryGradeId?: string | null;
+  positionSalaryGradeName?: string | null;
+  valuationNotes?: string | null;
+  qualificationLines: JobValuationLine[];
+  competencyLines: JobValuationLine[];
 }
 
 export interface JobAnalytics {
@@ -1011,6 +1097,42 @@ export interface ManpowerBudget {
   rejectionReason?: string | null;
 }
 
+/** "Use the position establishment to initiate the budget" (round 2b, R4a). */
+export interface CreateManpowerBudgetFromEstablishment {
+  organizationUnitId: string;
+  fiscalYear: number;
+  periodStart: string;
+  periodEnd: string;
+  includeUnestablished?: boolean;
+  businessJustification?: string | null;
+}
+
+export interface AddLinesFromEstablishmentResult {
+  added: number;
+  alreadyOnBudget: number;
+  skippedUnestablished: number;
+  lines: ManpowerBudgetLine[];
+}
+
+export interface ManpowerBudgetDetail extends ManpowerBudget {
+  budgetLines: ManpowerBudgetLine[];
+}
+
+export type PlannedSalarySource = 'Notch' | 'LevelMidpoint' | 'GradeMinimum' | 'Manual';
+
+/** "The salary that goes with this position": the grade the post carries, if any (R3). */
+export interface PositionSalaryReference {
+  positionId: string;
+  positionTitle: string;
+  hasGrade: boolean;
+  salaryGradeId?: string | null;
+  gradeCode?: string | null;
+  gradeName?: string | null;
+  minSalary?: number | null;
+  maxSalary?: number | null;
+  tiers: 'GradeAndNotch' | 'GradeLevelAndNotch' | string;
+}
+
 export interface ManpowerBudgetLine {
   id: string;
   tenantId: string;
@@ -1019,6 +1141,19 @@ export interface ManpowerBudgetLine {
   positionTitle: string;
   jobDescriptionId?: string | null;
   jobDescriptionNumber?: string | null;
+  /** Where the planned salary came from (round 2b, R3). */
+  salaryGradeId?: string | null;
+  salaryGradeCode?: string | null;
+  salaryGradeName?: string | null;
+  salaryLevelId?: string | null;
+  salaryLevelCode?: string | null;
+  salaryNotchId?: string | null;
+  salaryNotchNumber?: number | null;
+  plannedSalarySource: PlannedSalarySource;
+  plannedSalarySourceName?: string;
+  /** Posts on live requisitions drawing down from this line, and what is left (R5, D-8). */
+  requisitionedCount: number;
+  remaining: number;
   currentCount: number;
   currentFilled: number;
   currentVacant: number;
@@ -1027,7 +1162,9 @@ export interface ManpowerBudgetLine {
   plannedCount: number;
   plannedNewPositions: number;
   plannedEliminations: number;
+  /** On a write, null = read it from the scale; a number = typed (Manual). */
   plannedAverageSalary: number;
+  /** Computed by the server (average × planned count) — never send it. */
   plannedTotalCost: number;
   quarter?: number | null;
   targetFillDate?: string | null;
@@ -1052,6 +1189,63 @@ export interface PositionEstablishment {
   isEstablished: boolean;
 }
 
+/**
+ * The planning baseline (round 2b, R2): what the system knows about a unit's subtree before a
+ * budget is typed. The form pre-fills from it; the detail page shows it live.
+ */
+export interface ManpowerPlanningExit {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  positionId: string;
+  positionTitle?: string | null;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  kind: 'Retirement' | 'ContractExpiry' | 'Separation' | string;
+  date?: string | null;
+  isOverdue: boolean;
+  hasSeparation: boolean;
+  separationNumber?: string | null;
+  separationStatus?: string | null;
+}
+
+export interface ManpowerPlanningPosition {
+  positionId: string;
+  title: string;
+  code?: string | null;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  salaryGradeId?: string | null;
+  filled: number;
+  expectedHeadcount: number;
+  isEstablished: boolean;
+  /** ⚠ null for an unestablished post — its headcount is the column default and means nothing. */
+  gap?: number | null;
+  exitsDue: number;
+  suggestedNewHires: number;
+}
+
+export interface ManpowerPlanningBaseline {
+  organizationUnitId: string;
+  organizationUnitName: string;
+  periodStart: string;
+  periodEnd: string;
+  includesDescendantUnits: boolean;
+  unitIds: string[];
+  currentHeadcount: number;
+  /** An estimate — see `salaryCostNote`. */
+  currentSalaryCost: number;
+  employeesWithoutPay: number;
+  salaryCostNote: string;
+  retirementsDue: ManpowerPlanningExit[];
+  contractExpiriesDue: ManpowerPlanningExit[];
+  separationsInFlight: ManpowerPlanningExit[];
+  /** Distinct people across the three lists. */
+  exitsDueTotal: number;
+  suggestedPlannedTerminations: number;
+  positions: ManpowerPlanningPosition[];
+}
+
 /** One row of a batch assessment that did not land, and why. */
 export interface BatchAssessmentError {
   employeeCompetencyId?: string | null;
@@ -1070,4 +1264,55 @@ export interface BatchAssessmentResult {
   succeeded: number;
   failed: number;
   errors: BatchAssessmentError[];
+}
+
+// ── round 2b, R6: recruitment spend against a budget's envelope ────────────────────────
+// A READ over approved/pending requisition costs; `actualSpent` on the budget stays Finance's.
+// `recruitmentBudget` of 0 means the envelope was never set and constrains nothing.
+
+export interface RecruitmentSpendByRequisition {
+  requisitionId: string;
+  requisitionNumber: string;
+  positionTitle?: string | null;
+  approved: number;
+  pending: number;
+}
+
+export interface RecruitmentSpend {
+  budgetId: string;
+  budgetNumber: string;
+  recruitmentBudget: number;
+  envelopeSet: boolean;
+  approved: number;
+  pending: number;
+  remaining: number;
+  mode: number;
+  modeName: 'Off' | 'Warn' | 'Block' | string;
+  byRequisition: RecruitmentSpendByRequisition[];
+}
+
+// ── round 2b, R4b: the establishment workbook round-trip ──────────────────────────────────
+
+export interface ManpowerBudgetWorkbookRowError {
+  row: number;
+  column?: string | null;
+  message: string;
+}
+
+/** 200 when `applied`; 422 with the same shape (and `applied: false`) when any row had a problem — nothing written. */
+export interface ManpowerBudgetWorkbookImportResult {
+  applied: boolean;
+  message: string;
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  errors: ManpowerBudgetWorkbookRowError[];
+  lines: ManpowerBudgetLine[];
+}
+
+/** Round 3, lane J2 (D-11): the author's proposed grade. Null follows the suggestion. */
+export interface SetProposedSalaryGradeRequest {
+  proposedSalaryGradeId: string | null;
+  proposedSalaryGradeNote: string | null;
 }

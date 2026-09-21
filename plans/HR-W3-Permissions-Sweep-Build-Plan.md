@@ -65,7 +65,7 @@ there.
   anonymous verify link. The legacy root `EmployeesController` (`api/Employees`) is swept too.
 - **D-5 · `PayrollController.cs` is NOT edited** (87 bare actions, `api/hr/payroll`) — payroll is
   another developer's module (`payroll-ownership-boundary`). The exact one-line change is recorded
-  in `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` for the payroll owner; until it lands,
+  in `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` for the payroll owner; until it lands,
   area 26 must treat payroll as exposed.
 - **D-6 · The rest of the API is measured, recorded, not edited.** Bare `[Authorize]` outside HR
   is other teams' surface; counts per module go into the cross-module defects doc as the area-26

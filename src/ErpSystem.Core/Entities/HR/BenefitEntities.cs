@@ -71,6 +71,18 @@ public class EmployeeBenefitEnrollment : TenantEntity
     /// <summary>Provenance link to the position entitlement that generated this enrollment, if any.</summary>
     public Guid? SourcePositionBenefitId { get; set; }
 
+    /// <summary>
+    /// Provenance link to the BENEFIT GROUP that gave the position this entitlement, where it came
+    /// through a group rather than an individual row (round 2, lane C3). Exactly one of this and
+    /// <see cref="SourcePositionBenefitId"/> is set on a position-sourced enrollment.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Deliberately a bare id with NO foreign key and NO navigation. It is a record of where the
+    /// enrollment came from, not a live reference: the group may later be retired or its membership
+    /// changed, and neither should be blocked by, or silently rewrite, an enrollment already made.
+    /// </remarks>
+    public Guid? SourceBenefitGroupId { get; set; }
+
     /// <summary>Resolved monetary or Benefit-in-Kind value of the benefit for this employee.</summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal AssessedValue { get; set; }

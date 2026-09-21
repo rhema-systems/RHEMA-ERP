@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/finance-posting.ts",
+    "src/services/hr/finance-posting.service.ts",
+    "src/components/hr/common/FinancePostingCard.tsx",
+    "src/components/hr/travel/TravelFinancePanel.tsx",
+    "src/app/administration/hr/settings/finance-posting/page.tsx",
+    "src/app/administration/hr/settings/page.tsx",
+    "src/app/hr/medical/claims/[id]/page.tsx",
+    "src/app/hr/travel/claims/[id]/page.tsx",
+    "src/app/hr/separations/[id]/page.tsx",
+    "src/app/hr/assets/surcharges/[id]/page.tsx",
+    "src/app/hr/discipline/[id]/page.tsx",
+    "src/components/hr/discipline/SanctionsPanel.tsx",
+    "src/app/hr/service-bonds/page.tsx",
+    "src/components/hr/recruitment/RequisitionCostsPanel.tsx",
+    "src/components/hr/medical/PremiumRecordsPanel.tsx",
+    "src/components/hr/medical/InsuranceClaimsPanel.tsx",
+    "src/app/hr/medical/nhis/page.tsx",
+    "src/app/hr/safety/incidents/[id]/page.tsx",
+    "src/app/hr/recruitment/requisitions/[id]/page.tsx",
+    "src/config/hr-setup-nav.ts"
+  ]
+}

@@ -1,5 +1,7 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -20,17 +22,21 @@ public class SalaryNotchesController : ControllerBase
 {
     private const string ReadOnlyMessage =
         "Salary notches are defined in Payroll and mirrored into HR. Edit them in Payroll " +
-        "(Administration → HR → Payroll → Grades Setup); changes appear here automatically.";
+        "(Administration → HR → Payroll → Grades Setup); changes appear here automatically. " +
+        "To maintain the structure in HR instead, set the salary structure source to HR under HR policy settings.";
 
     private readonly ISalaryNotchService _salaryNotchService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICompanyHrPolicySettingsService _policySettings;
     private readonly ILogger<SalaryNotchesController> _logger;
 
     public SalaryNotchesController(
         ISalaryNotchService salaryNotchService,
         ICurrentUserService currentUserService,
+        ICompanyHrPolicySettingsService policySettings,
         ILogger<SalaryNotchesController> logger)
     {
+        _policySettings = policySettings;
         _salaryNotchService = salaryNotchService;
         _currentUserService = currentUserService;
         _logger = logger;
@@ -67,39 +73,78 @@ public class SalaryNotchesController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Not supported — add the notch in Payroll instead.
-    /// </summary>
+    /// <summary>Adds a notch to a level. 409 while Payroll is the structure source.</summary>
     [HttpPost]
     [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
+    [ProducesResponseType(typeof(SalaryNotchDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public IActionResult Create([FromBody] CreateSalaryNotchDto dto) => MirrorIsReadOnly();
+    public async Task<ActionResult<SalaryNotchDto>> Create([FromBody] CreateSalaryNotchDto dto, CancellationToken cancellationToken)
+    {
+        if (!await IsHrMasteredAsync(cancellationToken)) return MirrorIsReadOnly();
+        try
+        {
+            var created = await _salaryNotchService.CreateNotchAsync(GetTenantIdOrThrow(), dto, cancellationToken);
+            return StatusCode(StatusCodes.Status201Created, created);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { return ClientError(ex); }
+    }
 
-    /// <summary>
-    /// Not supported — change the notch amount in Payroll instead.
-    /// </summary>
+    /// <summary>Updates a notch. 409 while Payroll is the structure source.</summary>
     [HttpPut("{notchId:guid}")]
     [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
+    [ProducesResponseType(typeof(SalaryNotchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public IActionResult Update(Guid notchId, [FromBody] UpdateSalaryNotchDto dto) => MirrorIsReadOnly();
+    public async Task<ActionResult<SalaryNotchDto>> Update(Guid notchId, [FromBody] UpdateSalaryNotchDto dto, CancellationToken cancellationToken)
+    {
+        if (!await IsHrMasteredAsync(cancellationToken)) return MirrorIsReadOnly();
+        dto.Id = notchId;
+        try { return Ok(await _salaryNotchService.UpdateNotchAsync(GetTenantIdOrThrow(), dto, cancellationToken)); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { return ClientError(ex); }
+    }
 
-    /// <summary>
-    /// Not supported — a notch's active state follows its payroll definition.
-    /// </summary>
+    /// <summary>Activates or retires a notch. 409 while Payroll is the structure source.</summary>
     [HttpPut("{notchId:guid}/active")]
     [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
+    [ProducesResponseType(typeof(SalaryNotchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public IActionResult SetActive(Guid notchId, [FromQuery] bool isActive) => MirrorIsReadOnly();
+    public async Task<ActionResult<SalaryNotchDto>> SetActive(Guid notchId, [FromQuery] bool isActive, CancellationToken cancellationToken)
+    {
+        if (!await IsHrMasteredAsync(cancellationToken)) return MirrorIsReadOnly();
+        try { return Ok(await _salaryNotchService.SetNotchActiveAsync(GetTenantIdOrThrow(), notchId, isActive, cancellationToken)); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { return ClientError(ex); }
+    }
 
-    /// <summary>
-    /// Not supported — remove the notch in Payroll; the mirror deactivates it on the next sync.
-    /// </summary>
+    /// <summary>Deletes a notch. 409 while Payroll is the structure source.</summary>
     [HttpDelete("{notchId:guid}")]
     [Authorize(Policy = HrPermissions.CompensationAdminPolicy)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public IActionResult Delete(Guid notchId) => MirrorIsReadOnly();
+    public async Task<IActionResult> Delete(Guid notchId, CancellationToken cancellationToken)
+    {
+        if (!await IsHrMasteredAsync(cancellationToken)) return MirrorIsReadOnly();
+        try { return await _salaryNotchService.DeleteNotchAsync(GetTenantIdOrThrow(), notchId, cancellationToken) ? NoContent() : NotFound(); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException) { return ClientError(ex); }
+    }
+
+    // ── Lane G: the 409 is conditional on who maintains the structure ─────────
+    //
+    // ⚠ While Payroll is the source (the default) every write answers 409 exactly as before —
+    // the row would be overwritten by the next projection. While HR is the source the projection is
+    // off and the same actions call the service that always existed behind them.
+    private async Task<bool> IsHrMasteredAsync(CancellationToken cancellationToken)
+        => (await _policySettings.GetAsync(cancellationToken)).SalaryStructureSource == SalaryStructureSource.Hr;
 
     private ObjectResult MirrorIsReadOnly() => Conflict(new { message = ReadOnlyMessage });
+
+    private ActionResult ClientError(Exception ex) => ex switch
+    {
+        ArgumentException => NotFound(new { message = ex.Message }),
+        InvalidOperationException => BadRequest(new { message = ex.Message }),
+        UnauthorizedAccessException => Unauthorized(new { message = ex.Message }),
+        _ => StatusCode(StatusCodes.Status500InternalServerError, "An unexpected error occurred."),
+    };
+
 
     private Guid GetTenantIdOrThrow()
         => _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");

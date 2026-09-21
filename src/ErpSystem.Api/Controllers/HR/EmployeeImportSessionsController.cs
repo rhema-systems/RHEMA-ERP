@@ -20,7 +20,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// accepting a staff number as given bypasses the numbering rule; in a manual register (TDC's) an
 /// HR officer types the number with write anyway, and the bulk path advances the counter past every
 /// number it loads, so the rule is not bypassed here.</para>
-/// <para>See <c>docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md</c>.</para>
+/// <para>See <c>docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md</c>.</para>
 /// </remarks>
 [ApiController]
 [Route("api/hr/employees/import-sessions")]

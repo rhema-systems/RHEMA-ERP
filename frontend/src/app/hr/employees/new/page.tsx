@@ -54,10 +54,16 @@ export default function NewEmployeePage() {
     queryFn: () => locationLevelService.getAll(),
   });
 
-  const handleSubmit = async (values: EmployeeFormValues) => {
+  const handleSubmit = async (
+    values: EmployeeFormValues,
+    meta: { probationIsDerived: boolean },
+  ) => {
     setSubmitting(true);
     try {
-      const request = employeeFormToRequest(values);
+      const request = employeeFormToRequest(values, {
+        probationIsDerived: meta.probationIsDerived,
+        importMode,
+      });
       if (importMode) {
         await employeeService.importExisting(request);
       } else {
@@ -110,6 +116,7 @@ export default function NewEmployeePage() {
           submitLabel={importMode ? 'Record Employee' : 'Create Employee'}
           onCancel={() => router.push('/hr/employees')}
           showNumberingRule
+          isCreate
           importMode={importMode}
           onImportModeChange={setImportMode}
         />

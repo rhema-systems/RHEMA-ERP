@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Reference;
+﻿using ErpSystem.Core.DTOs.Reference;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Reference;
 using ErpSystem.Core.Enums;
@@ -73,6 +73,21 @@ public interface IGeographyService
     /// the record already said rather than blanking it.</para>
     /// </remarks>
     Task<(string? Region, string? City)> GetAddressSnapshotAsync(Guid geoAreaId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Which country an area belongs to, through its scheme. Null when the area cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Exists so a consumer that stores <c>CountryId</c> BESIDE <c>GeoAreaId</c> can keep the
+    /// two from contradicting each other. Every scheme names exactly one country
+    /// (<see cref="GeoScheme.CountryId"/>), so the answer is always derivable and never a guess.</para>
+    ///
+    /// <para>⚠ Added in round 2 lane D2. Until then nothing checked the pair at all: an employee
+    /// could be filed as living in Nigeria while pointing at a Ghanaian district, and the City and
+    /// Region snapshots — written from the area — would then disagree with the country on the same
+    /// record. See <see cref="GeoAddressSnapshot"/>, which is where the rule is applied.</para>
+    /// </remarks>
+    Task<Guid?> GetCountryForAreaAsync(Guid geoAreaId, CancellationToken ct = default);
 
     /// <summary>
     /// Resolve a name to an area, by name then by alias. Used by imports and by backfill, which is
@@ -716,6 +731,21 @@ public class GeographyService : IGeographyService
         var city = NameAtDepth(3) ?? NameAtDepth(2);
 
         return (region, city);
+    }
+
+    public async Task<Guid?> GetCountryForAreaAsync(Guid geoAreaId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+
+        // One hop, not the ancestor chain: every area names its scheme directly, and the scheme
+        // names the country. Walking to the root would answer the same question more slowly and
+        // would fail on an area whose parent row is missing.
+        return await _unitOfWork.Repository<GeoArea>().GetQueryable()
+            .AsNoTracking()
+            .Where(a => a.Id == geoAreaId && a.TenantId == tenantId && !a.IsDeleted)
+            .Join(_unitOfWork.Repository<GeoScheme>().GetQueryable().Where(sc => !sc.IsDeleted),
+                  a => a.SchemeId, sc => sc.Id, (a, sc) => (Guid?)sc.CountryId)
+            .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>Broadest first, ending with the area itself.</summary>

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle } from 'lucide-react';
@@ -26,6 +28,34 @@ import { leavePlanService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import type { LeavePlan, LeaveRelieverClash } from '@/types/hr/leave-request';
 import { DateField, FieldRow, SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
+
+/**
+ * The plan's sub-type. Its own component because `renderFields` runs inside a render callback and a
+ * query there would be a conditionally-called hook. The payload and `toForm` have always carried
+ * `leaveSubTypeId`; the dialog simply never offered it, so a plan could not name the variant of
+ * leave it was for (closure plan L-16). Hidden when the chosen type has no sub-types.
+ */
+function PlanSubTypeField({ form }: { form: any }) {
+  const leaveTypeId = form.watch('leaveTypeId') || '';
+
+  const { data: subTypes } = useQuery({
+    queryKey: ['hr', 'leave-types', leaveTypeId, 'sub-types', 'active'],
+    queryFn: () => leaveTypeService.getSubTypes(leaveTypeId, true),
+    enabled: !!leaveTypeId,
+  });
+
+  if (!leaveTypeId || !subTypes?.length) return null;
+
+  return (
+    <SelectField
+      form={form}
+      name="leaveSubTypeId"
+      label="Sub-type"
+      options={subTypes.map((st) => ({ value: st.id, label: st.subTypeName }))}
+      allowEmpty
+    />
+  );
+}
 
 const currentYear = new Date().getFullYear();
 const years = [currentYear + 1, currentYear, currentYear - 1];
@@ -143,6 +173,7 @@ function RelieverCell({ plan }: { plan: LeavePlan }) {
  * employee then accepts or declines.
  */
 export default function LeavePlansPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [year, setYear] = useState(String(currentYear));
@@ -205,7 +236,10 @@ export default function LeavePlansPage() {
   };
 
   // Who planned it is stamped server-side from the token: PlannedBy is an Employee foreign key,
-  // and the login's user id this screen used to send was never one.
+  // and the login's user id this screen used to send was never one. The plan's YEAR is likewise
+  // derived server-side from its start date — this screen used to send the list filter's year, so a
+  // January plan raised from the December list was filed under 2026 and then shown by neither
+  // (closure plan L-17).
   const toPayload = (v: FormValues) => ({
     employeeId: v.employeeId,
     leaveTypeId: v.leaveTypeId,
@@ -215,7 +249,6 @@ export default function LeavePlansPage() {
     relieverId: v.relieverId || null,
     secondRelieverId: v.secondRelieverId || null,
     notes: v.notes || null,
-    year: Number(year),
     organizationLevelId: null,
     organizationUnitId: null,
     positionId: null,
@@ -260,6 +293,27 @@ export default function LeavePlansPage() {
         create={(_p, v) => leavePlanService.create(toPayload(v))}
         update={(_p, id, v) => leavePlanService.update(id, toPayload(v))}
         actions={[
+          {
+            // The planning cycle's missing last step. `LeaveRequest.LeavePlanId` has existed since
+            // the port and nothing wrote it, so an approved plan dead-ended here and the employee
+            // re-keyed the dates they had already agreed (closure plan L-9 / R-1). Offered only on
+            // an APPROVED plan that has not been spent; the server enforces both again.
+            label: 'Raise the leave request',
+            visible: (p) => p.status === 'Approved' && !p.raisedLeaveRequestId,
+            run: async (p) => {
+              const q = new URLSearchParams({
+                planId: p.id,
+                employeeId: p.employeeId,
+                leaveTypeId: p.leaveTypeId,
+                startDate: (p.suggestedStartDate ?? p.startDate)?.slice(0, 10) ?? '',
+                endDate: (p.suggestedEndDate ?? p.endDate)?.slice(0, 10) ?? '',
+              });
+              if (p.leaveSubTypeId) q.set('leaveSubTypeId', p.leaveSubTypeId);
+              if (p.relieverId) q.set('relieverId', p.relieverId);
+              if (p.secondRelieverId) q.set('secondRelieverId', p.secondRelieverId);
+              router.push(`/hr/leave/requests/new?${q.toString()}`);
+            },
+          },
           {
             label: 'Submit for approval',
             visible: (p) => p.status === 'Draft',
@@ -329,6 +383,21 @@ export default function LeavePlansPage() {
                 : '—',
           },
           { header: 'Reliever', cell: (p) => <RelieverCell plan={p} /> },
+          {
+            header: 'Request',
+            cell: (p) =>
+              p.raisedLeaveRequestId ? (
+                <Link
+                  href={`/hr/leave/requests/${p.raisedLeaveRequestId}`}
+                  className="text-primary underline-offset-2 hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {p.raisedLeaveRequestNumber ?? 'View'}
+                </Link>
+              ) : (
+                '—'
+              ),
+          },
           { header: 'Status', cell: (p) => <StatusBadge status={p.status} /> },
         ]}
         schema={schema}
@@ -364,6 +433,7 @@ export default function LeavePlansPage() {
               required
               options={(leaveTypes ?? []).map((t) => ({ value: t.id, label: t.name }))}
             />
+            <PlanSubTypeField form={form} />
             <FieldRow>
               <DateField form={form} name="startDate" label="Start date" required />
               <DateField form={form} name="endDate" label="End date" required />

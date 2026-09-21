@@ -1,6 +1,7 @@
 'use client';
 
 import type { FieldValues } from 'react-hook-form';
+import { useEmployeeProfile } from '@/components/hr/employee/EmployeeProfileContext';
 import {
   ResourceCollectionTab,
   type CollectionAction,
@@ -14,7 +15,7 @@ export type SubResourceAction<TItem> = CollectionAction<TItem>;
 
 type Inherited<TItem, TForm extends FieldValues> = Omit<
   ResourceCollectionTabProps<TItem, TForm>,
-  'parentId' | 'queryKey' | 'invalidateKeys' | 'dialogHint'
+  'parentId' | 'queryKey' | 'invalidateKeys' | 'dialogHint' | 'subjectLabel'
 >;
 
 export interface EmployeeSubResourceTabProps<TItem, TForm extends FieldValues>
@@ -35,6 +36,10 @@ export function EmployeeSubResourceTab<TItem, TForm extends FieldValues>({
   singular,
   ...rest
 }: EmployeeSubResourceTabProps<TItem, TForm>) {
+  // The name comes by context from the profile page (round 3, lane P1); a tab mounted anywhere
+  // else still renders, with the anonymous wording it always had.
+  const subject = useEmployeeProfile();
+  const subjectLabel = subject && subject.id === employeeId ? subject.fullName : null;
   return (
     <ResourceCollectionTab<TItem, TForm>
       {...rest}
@@ -42,7 +47,12 @@ export function EmployeeSubResourceTab<TItem, TForm extends FieldValues>({
       parentId={employeeId}
       queryKey={['hr', 'employees', employeeId, queryKey]}
       invalidateKeys={[['hr', 'employees', employeeId, 'details']]}
-      dialogHint={`Add a new ${singular} to this employee's profile.`}
+      subjectLabel={subjectLabel}
+      dialogHint={
+        subjectLabel
+          ? `Add a new ${singular} to ${subjectLabel}'s profile.`
+          : `Add a new ${singular} to this employee's profile.`
+      }
     />
   );
 }

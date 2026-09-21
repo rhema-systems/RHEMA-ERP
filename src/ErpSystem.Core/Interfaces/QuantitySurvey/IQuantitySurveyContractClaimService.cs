@@ -8,9 +8,11 @@ public interface IQuantitySurveyContractClaimService
     Task<QuantitySurveyContractClaimWorkspaceDto> GetWorkspaceAsync(Guid projectId, bool external, CancellationToken token = default);
     Task<QuantitySurveyContractClaimDto> GetAsync(Guid id, bool external, CancellationToken token = default);
     Task<QuantitySurveyContractClaimDto> SaveExternalAsync(Guid projectId, SaveQuantitySurveyContractClaimRequest request, string correlationId, CancellationToken token = default);
+    Task<QuantitySurveyContractClaimDto> SaveInternalAsync(Guid projectId, SaveQuantitySurveyContractClaimRequest request, string correlationId, CancellationToken token = default);
     Task<QuantitySurveyContractClaimEvidenceDto> UploadEvidenceAsync(Guid id, Guid clientRequestId, string title, string fileName, string contentType, long fileSize, Func<Stream> openRead, bool external, string correlationId, CancellationToken token = default);
     Task<CentralDocumentRepositoryContent> OpenEvidenceAsync(Guid id, Guid evidenceId, bool external, CancellationToken token = default);
     Task<QuantitySurveyContractClaimDto> SubmitExternalAsync(Guid id, QuantitySurveyContractClaimActionRequest request, string correlationId, CancellationToken token = default);
+    Task<QuantitySurveyContractClaimDto> SubmitInternalAsync(Guid id, QuantitySurveyContractClaimActionRequest request, string correlationId, CancellationToken token = default);
     Task<QuantitySurveyContractClaimDto> VetAsync(Guid id, VetQuantitySurveyContractClaimRequest request, string correlationId, CancellationToken token = default);
     Task<QuantitySurveyContractClaimDto> SubmitApprovalAsync(Guid id, QuantitySurveyContractClaimActionRequest request, string correlationId, CancellationToken token = default);
     Task<QuantitySurveyContractClaimDto> DecideAsync(Guid id, QuantitySurveyContractClaimActionRequest request, bool approve, string correlationId, CancellationToken token = default);

@@ -644,7 +644,7 @@ pre-authorisations, referrals, appointments) · hub card + sidebar entry.
 
 ## 9. Open questions for TDC
 
-✅ **Added to `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` as item 7, 2026-08-17** — "How does TDC actually
+✅ **Added to `docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md` as item 7, 2026-08-17** — "How does TDC actually
 pay for medical treatment?" It asks for the rough share of spend across NHIS, insurer-billed and
 out-of-pocket reimbursement, and whether employees are expected to claim money back at all.
 

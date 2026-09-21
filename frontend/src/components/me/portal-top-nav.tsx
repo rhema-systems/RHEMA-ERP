@@ -143,7 +143,13 @@ const NAV_GROUPS: NavGroup[] = [
     icon: Building2,
     links: [
       { label: 'Staff Directory', href: '/me/directory' },
+      // ⚠ TWO different things, deliberately side by side. "My Team" is the people who report to
+      // me on the org chart (area 25); "My Teams" is the working groups and committees I sit on,
+      // which in a matrix organisation is usually several and rarely the same people. Naming one
+      // of them something else would be worse than the near-collision — these are the words the
+      // business uses. Round 2, lane F1.
       { label: 'My Team', href: '/me/team' },
+      { label: 'My Teams', href: '/me/teams' },
     ],
   },
   {

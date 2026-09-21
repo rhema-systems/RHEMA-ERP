@@ -3,7 +3,7 @@
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileText, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Camera, FileText, Loader2, Paperclip, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,10 +18,14 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { GatedPhoto, PhotoDialog } from '@/components/hr/common/PhotoDialog';
 import { UnionForm, type UnionFormValues } from '@/components/hr/unions/UnionForm';
 import { AgreementDialog } from '@/components/hr/unions/AgreementDialog';
+import { UnionContactsPanel } from '@/components/hr/unions/UnionContactsPanel';
+import { UnionDocumentsPanel } from '@/components/hr/unions/UnionDocumentsPanel';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { unionService } from '@/services/hr/union.service';
 import type {
@@ -37,24 +41,36 @@ const STATUS_STYLES: Record<CollectiveBargainingAgreementStatus, string> = {
 };
 
 /**
- * A union and the collective agreements negotiated with it.
+ * A union: its collective agreements, the people we deal with there, its files, its logo.
  *
  * ⚠ The status badge reads `agreement.status` from the server and never re-derives it. `isActive` is
  * a flag somebody sets and nothing clears — an agreement that ran 2019-2021 still reads
  * `isActive: true` today — so "in force" is a question about two dates as well, answered once on
  * the server so every screen answers it the same way.
+ *
+ * Round 3, lane U: the Contacts tab holds `UnionContact` rows (an employee or an external person,
+ * with a role; one primary) and the union's contact trio on the Details tab becomes a read-only
+ * mirror of the primary once any contact exists (D-8). The Documents tab holds the files — the
+ * signed copy of an agreement is a document of kind CollectiveAgreement naming that agreement.
+ * The logo is a gated image on the header, fetched with the bearer token, never a public URL.
  */
 export default function UnionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { hasAnyRole } = useAuth();
+  // Writes are HR.Employee.Write (SuperAdmin / TenantAdmin / HR); document delete is HR.Employee.Admin.
+  const canWrite = hasAnyRole(['SuperAdmin', 'TenantAdmin', 'HR']);
+  const canDeleteDocuments = hasAnyRole(['SuperAdmin', 'TenantAdmin']);
 
   const [submitting, setSubmitting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<CollectiveBargainingAgreement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CollectiveBargainingAgreement | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [logoOpen, setLogoOpen] = useState(false);
+  const [logoVersion, setLogoVersion] = useState(0);
 
   const { data: union, isLoading, isError } = useQuery({
     queryKey: ['hr', 'unions', id],
@@ -132,6 +148,10 @@ export default function UnionDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   const agreements = union.agreements ?? [];
+  const contacts = union.contacts ?? [];
+  const documents = union.documents ?? [];
+  const primary = union.primaryContact ?? null;
+  const logoEndpoint = unionService.logoEndpoint(id);
 
   return (
     <div className="space-y-6 p-6 max-w-5xl mx-auto">
@@ -147,10 +167,49 @@ export default function UnionDetailPage({ params }: { params: Promise<{ id: stri
         backHref="/administration/hr/unions"
       />
 
+      {/* The face of the union: logo, code, the primary contact. */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-4 p-4">
+          <GatedPhoto
+            endpoint={logoEndpoint}
+            enabled={union.hasLogo}
+            version={logoVersion}
+            alt={`${union.name} logo`}
+            className="h-16 w-16"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{union.name}</span>
+              {union.code && <Badge variant="outline">{union.code}</Badge>}
+              {!union.isActive && <Badge variant="secondary">Inactive</Badge>}
+            </div>
+            <p className="text-sm text-muted-foreground" data-testid="union-primary-contact">
+              {primary
+                ? `${primary.displayName} · ${primary.role}${primary.email ? ` · ${primary.email}` : ''}${!primary.email && primary.phone ? ` · ${primary.phone}` : ''}`
+                : union.contactPerson || union.contactEmail || union.contactPhone
+                  ? [union.contactPerson, union.contactEmail, union.contactPhone].filter(Boolean).join(' · ')
+                  : 'No contact recorded yet.'}
+            </p>
+          </div>
+          {canWrite && (
+            <Button variant="outline" size="sm" onClick={() => setLogoOpen(true)}>
+              <Camera className="mr-2 h-4 w-4" />
+              {union.hasLogo ? 'Change logo' : 'Add logo'}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
       <Tabs defaultValue="agreements">
         <TabsList>
           <TabsTrigger value="agreements">
             Agreements{agreements.length ? ` (${agreements.length})` : ''}
+          </TabsTrigger>
+          <TabsTrigger value="contacts">
+            Contacts{contacts.length ? ` (${contacts.length})` : ''}
+          </TabsTrigger>
+          <TabsTrigger value="documents">
+            Documents{documents.length ? ` (${documents.length})` : ''}
           </TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
@@ -162,18 +221,20 @@ export default function UnionDetailPage({ params }: { params: Promise<{ id: stri
                 <CardTitle>Collective bargaining agreements</CardTitle>
                 <CardDescription>
                   Newest first. An agreement with no expiry date is open-ended and never lapses on
-                  its own.
+                  its own. The signed copy is filed on the Documents tab against its agreement.
                 </CardDescription>
               </div>
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditing(null);
-                  setDialogOpen(true);
-                }}
-              >
-                <Plus className="mr-2 h-4 w-4" /> Add agreement
-              </Button>
+              {canWrite && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditing(null);
+                    setDialogOpen(true);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Add agreement
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
               <div className="rounded-md border">
@@ -213,6 +274,12 @@ export default function UnionDetailPage({ params }: { params: Promise<{ id: stri
                                   {agreement.summary}
                                 </span>
                               )}
+                              {agreement.documentCount > 0 && (
+                                <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                                  <Paperclip className="h-3 w-3" />
+                                  {agreement.documentCount} file{agreement.documentCount === 1 ? '' : 's'} on the Documents tab
+                                </span>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
@@ -225,28 +292,30 @@ export default function UnionDetailPage({ params }: { params: Promise<{ id: stri
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setEditing(agreement);
-                                  setDialogOpen(true);
-                                }}
-                              >
-                                <Pencil className="h-4 w-4" />
-                                <span className="sr-only">Edit</span>
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive hover:text-destructive"
-                                onClick={() => setDeleteTarget(agreement)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">Delete</span>
-                              </Button>
-                            </div>
+                            {canWrite && (
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditing(agreement);
+                                    setDialogOpen(true);
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                  <span className="sr-only">Edit</span>
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-destructive hover:text-destructive"
+                                  onClick={() => setDeleteTarget(agreement)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  <span className="sr-only">Delete</span>
+                                </Button>
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))
@@ -256,6 +325,26 @@ export default function UnionDetailPage({ params }: { params: Promise<{ id: stri
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="contacts" className="mt-4">
+          <UnionContactsPanel
+            unionId={id}
+            unionName={union.name}
+            canWrite={canWrite}
+            onChanged={refresh}
+          />
+        </TabsContent>
+
+        <TabsContent value="documents" className="mt-4">
+          <UnionDocumentsPanel
+            unionId={id}
+            unionName={union.name}
+            agreements={agreements}
+            canWrite={canWrite}
+            canDelete={canDeleteDocuments}
+            onChanged={refresh}
+          />
         </TabsContent>
 
         <TabsContent value="details" className="mt-4">
@@ -269,6 +358,7 @@ export default function UnionDetailPage({ params }: { params: Promise<{ id: stri
               contactPhone: union.contactPhone ?? '',
               isActive: union.isActive,
             }}
+            contactsMirrored={contacts.length > 0}
             onSubmit={handleSave}
             submitting={submitting}
             submitLabel="Save Changes"
@@ -286,13 +376,31 @@ export default function UnionDetailPage({ params }: { params: Promise<{ id: stri
         onSaved={refresh}
       />
 
+      <PhotoDialog
+        open={logoOpen}
+        onOpenChange={setLogoOpen}
+        title="Union logo"
+        description="Shown on the register and the union's record. Fetched through the gate, never a public link."
+        endpoint={logoEndpoint}
+        hasPhoto={union.hasLogo}
+        upload={(file) => unionService.uploadLogo(id, file)}
+        onUploaded={async () => {
+          setLogoVersion((v) => v + 1);
+          await refresh();
+        }}
+        subjectLabel={`${union.name} logo`}
+        canWrite={canWrite}
+      />
+
       <ConfirmationDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="Delete agreement"
         description={
           deleteTarget
-            ? `Delete “${deleteTarget.title}”? The record of what was agreed will be gone.`
+            ? deleteTarget.documentCount > 0
+              ? `“${deleteTarget.title}” has ${deleteTarget.documentCount} file(s) filed against it on the Documents tab. Remove those first.`
+              : `Delete “${deleteTarget.title}”? The record of what was agreed will be gone.`
             : ''
         }
         confirmText="Delete"

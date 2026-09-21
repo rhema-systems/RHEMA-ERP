@@ -20,17 +20,27 @@ import {
   type QualificationType,
 } from '@/types/hr/job-architecture';
 import { childKey, idOrNull, labelFor, nullIfBlank, optionalNumber, type ChildPanelProps } from './shared';
+import { certificationService } from '@/services/hr/certification.service';
 
-const schema = z.object({
-  type: z.string().min(1, 'Choose a type'),
-  qualificationId: z.string().optional(),
-  title: z.string().trim().min(1, 'The title is required').max(200),
-  description: z.string().max(1000),
-  isRequired: z.boolean(),
-  jobSpecificRequirements: z.string().max(500).optional(),
-  monetaryValue: optionalNumber(0),
-  jobResponsibilityId: z.string().optional(),
-});
+// Round 3, lane J1: the title is optional — a catalogue link (qualification or certification)
+// names the row when it is blank; a row with no link must be titled. The server holds the same rule.
+const schema = z
+  .object({
+    type: z.string().min(1, 'Choose a type'),
+    qualificationId: z.string().optional(),
+    certificationId: z.string().optional(),
+    title: z.string().trim().max(200),
+    description: z.string().max(1000),
+    isRequired: z.boolean(),
+    jobSpecificRequirements: z.string().max(500).optional(),
+    monetaryValue: optionalNumber(0),
+    jobResponsibilityId: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.title && !idOrNull(v.qualificationId) && !idOrNull(v.certificationId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['title'], message: 'Give it a title, or pick one from a catalogue' });
+    }
+  });
 
 type Form = z.infer<typeof schema>;
 
@@ -48,11 +58,14 @@ const empty: Form = {
 /**
  * What the holder must have: education, experience, certifications, licences, languages.
  *
- * ⚠ **The responsibility link is create-only.** `CreateJobQualificationDto` carries
- * `jobResponsibilityId`; `UpdateJobQualificationDto` does not declare it at all. So a qualification
- * can be pinned to one responsibility when it is added and never afterwards moved or unpinned —
- * the field is shown on add and hidden on edit, because rendering it on edit would offer a change
- * the API silently discards.
+ * ⚠ **The responsibility link is what makes the row an argument, not a wish.** Attaching a
+ * qualification to a responsibility says the job needs it BECAUSE of that accountability; leaving
+ * it on the job as a whole is a legitimate answer, not an empty field.
+ *
+ * It was create-only until 2026-09-07 — `UpdateJobQualificationDto` did not declare the field, so
+ * an attachment could never be moved or cleared, and the panel hid the control on edit rather than
+ * offer a change the API discarded in silence. It is on the update DTO now, and the API refuses a
+ * responsibility belonging to a DIFFERENT job description, which nothing checked before.
  *
  * ⚠ **`title` is what people read; `qualificationId` is what a rule can match on.** The catalogue
  * link is optional and the title is required, so a row can name a degree the catalogue has never
@@ -76,7 +89,15 @@ export function QualificationsPanel({
     enabled: !!jobDescriptionId,
   });
 
-  const catalogueOptions = (catalogue ?? []).map((q) => ({
+    const { data: certifications } = useQuery({
+    queryKey: ['hr', 'certifications', 'active', 'for-jd'],
+    queryFn: () => certificationService.getAll({ activeOnly: true }),
+  });
+  const certificationOptions = (certifications ?? []).map((c) => ({
+    value: c.id,
+    label: c.certifyingBodyAbbreviation ? `${c.name} (${c.certifyingBodyAbbreviation})` : c.name,
+  }));
+const catalogueOptions = (catalogue ?? []).map((q) => ({
     value: q.id,
     label: q.shortCode ? `${q.name} (${q.shortCode})` : q.name,
   }));
@@ -88,6 +109,8 @@ export function QualificationsPanel({
         ? `${r.responsibilityDescription.slice(0, 80)}…`
         : r.responsibilityDescription,
   }));
+
+  const responsibilityLabels = new Map(responsibilityOptions.map((o) => [o.value, o.label]));
 
   return (
     <ResourceCollectionTab<JobQualification, Form>
@@ -106,7 +129,8 @@ export function QualificationsPanel({
           jobResponsibilityId: idOrNull(v.jobResponsibilityId),
           type: v.type as QualificationType,
           qualificationId: idOrNull(v.qualificationId),
-          title: v.title.trim(),
+          certificationId: idOrNull(v.certificationId),
+          title: v.title.trim() || null,
           description: (v.description ?? '').trim(),
           isRequired: v.isRequired,
           jobSpecificRequirements: nullIfBlank(v.jobSpecificRequirements),
@@ -115,9 +139,11 @@ export function QualificationsPanel({
       }
       update={(_id, qualificationId, v) =>
         jobArchitectureService.updateQualification(qualificationId, {
+          jobResponsibilityId: idOrNull(v.jobResponsibilityId),
           type: v.type as QualificationType,
           qualificationId: idOrNull(v.qualificationId),
-          title: v.title.trim(),
+          certificationId: idOrNull(v.certificationId),
+          title: v.title.trim() || null,
           description: (v.description ?? '').trim(),
           isRequired: v.isRequired,
           jobSpecificRequirements: nullIfBlank(v.jobSpecificRequirements),
@@ -131,11 +157,26 @@ export function QualificationsPanel({
       }
       getId={(q) => q.id}
       columns={[
-        { header: 'Qualification', cell: (q) => q.title },
+        { header: 'Qualification', cell: (q) => q.title || q.certificationName || q.qualificationName || '—' },
         { header: 'Type', cell: (q) => labelFor(QUALIFICATION_TYPES, q.type) },
         {
           header: 'Catalogue',
           cell: (q) => <span className="text-muted-foreground">{q.qualificationName || '—'}</span>,
+        },
+        {
+          // ⚠ The attachment was write-only: it could be set on add and appeared nowhere
+          // afterwards — not in the list, and not in the dialog, which hid the field on edit. The
+          // responsibility is WHY a qualification is required, so a job description that cannot
+          // show the link cannot be read as an argument. The name is resolved client-side from the
+          // list already fetched for the picker; the DTO carries only the id.
+          header: 'For responsibility',
+          cell: (q) => (
+            <span className="text-muted-foreground">
+              {q.jobResponsibilityId
+                ? responsibilityLabels.get(q.jobResponsibilityId) ?? 'Another responsibility'
+                : 'The job as a whole'}
+            </span>
+          ),
         },
         {
           header: '',
@@ -148,6 +189,7 @@ export function QualificationsPanel({
       toForm={(q) => ({
         type: q.type,
         qualificationId: q.qualificationId ?? '',
+        certificationId: q.certificationId ?? '',
         title: q.title,
         description: q.description ?? '',
         isRequired: q.isRequired,
@@ -155,7 +197,7 @@ export function QualificationsPanel({
         monetaryValue: q.monetaryValue ?? null,
         jobResponsibilityId: q.jobResponsibilityId ?? '',
       })}
-      renderFields={(form, editing) => (
+      renderFields={(form) => (
         <>
           <FieldRow>
             <SelectField form={form} name="type" label="Type" required options={QUALIFICATION_TYPES} />
@@ -170,12 +212,23 @@ export function QualificationsPanel({
             />
           </FieldRow>
 
+          {(form.watch('type') === 'Certification' || form.watch('type') === 'License') && (
+            <SelectField
+              form={form}
+              name="certificationId"
+              label="From the certification catalogue"
+              allowEmpty
+              emptyLabel="Not in the catalogue"
+              placeholder="Optional"
+              options={certificationOptions}
+            />
+          )}
+
           <TextField
             form={form}
             name="title"
             label="Title"
-            required
-            placeholder="e.g. Bachelor's degree in Accounting"
+            placeholder="Optional when picked from a catalogue — e.g. Bachelor's degree in Accounting"
           />
           <TextareaField
             form={form}
@@ -208,8 +261,10 @@ export function QualificationsPanel({
             />
           </FieldRow>
 
-          {/* Create-only: the update DTO has no such field, so editing it would change nothing. */}
-          {!editing && responsibilityOptions.length > 0 && (
+          {/* Editable now: `JobResponsibilityId` reached the update DTO on 2026-09-07. The API
+              refuses a responsibility from ANOTHER job description, so the options are this
+              document's own and nothing else. */}
+          {responsibilityOptions.length > 0 && (
             <SelectField
               form={form}
               name="jobResponsibilityId"
@@ -220,12 +275,10 @@ export function QualificationsPanel({
               options={responsibilityOptions}
             />
           )}
-          {editing && (
-            <p className="text-xs text-muted-foreground">
-              Which responsibility a qualification belongs to is fixed when it is added. To move it,
-              remove it and add it again.
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            Why the job needs it. Leave it on the job as a whole when it is not there for one
+            particular accountability.
+          </p>
         </>
       )}
     />

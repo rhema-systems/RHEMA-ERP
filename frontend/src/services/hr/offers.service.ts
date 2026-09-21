@@ -39,7 +39,11 @@ import type {
   UpdatePreEmploymentCheckTemplate,
   UpdatePreEmploymentCheckTemplateItem,
   UpdateReferenceCheckResponse,
+  PreEmploymentCheckProviderService,
+  CreatePreEmploymentCheckProviderServices,
+  PreEmploymentCheckType,
 } from '@/types/hr/offers';
+import type { HrPagedResult } from '@/types/hr/recruitment';
 
 /**
  * api/job-offers — the terms, their approval, the issue to the candidate and the response.
@@ -58,9 +62,24 @@ class JobOfferService {
 
   // ── queries ──────────────────────────────────────────────────────────────
 
-  /** ⚠ Unpaged and unfiltered — the whole tenant's offers. Filter client-side. */
+  /**
+   * ⚠ Unpaged and unfiltered — the whole tenant's offers.
+   *
+   * Prefer {@link getPaged} for anything a person looks at. This was the offers screen's **default**
+   * view until 2026-09-15 (G-10.3): opening the screen fetched every offer in the tenant in one
+   * response, with no pager, no total and no disclosure — the only recruitment list with no bound
+   * at all. Kept for callers that genuinely need every row.
+   */
   getAll(): Promise<JobOfferSummary[]> {
     return apiService.get<JobOfferSummary[]>(this.baseUrl);
+  }
+
+  /** One page of the tenant's offers, newest first. */
+  getPaged(pageNumber = 1, pageSize = 20): Promise<HrPagedResult<JobOfferSummary>> {
+    return apiService.get<HrPagedResult<JobOfferSummary>>(`${this.baseUrl}/paged`, {
+      pageNumber,
+      pageSize,
+    });
   }
 
   getById(id: string): Promise<JobOffer> {
@@ -329,6 +348,23 @@ class JobHireService {
  */
 class PreEmploymentCheckService {
   private readonly baseUrl = '/pre-employment-checks';
+
+  // ── providers (round 3, lane G; D-14): which suppliers provide which checks ──
+
+  getProviders(checkType?: PreEmploymentCheckType, includeInactive = false): Promise<PreEmploymentCheckProviderService[]> {
+    return apiService.get<PreEmploymentCheckProviderService[]>(`${this.baseUrl}/providers`, {
+      ...(checkType ? { checkType } : {}),
+      ...(includeInactive ? { includeInactive: true } : {}),
+    });
+  }
+
+  addProviders(payload: CreatePreEmploymentCheckProviderServices): Promise<PreEmploymentCheckProviderService[]> {
+    return apiService.post<PreEmploymentCheckProviderService[]>(`${this.baseUrl}/providers`, payload);
+  }
+
+  removeProvider(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/providers/${id}`);
+  }
 
   getById(id: string): Promise<PreEmploymentCheck> {
     return apiService.get<PreEmploymentCheck>(`${this.baseUrl}/${id}`);

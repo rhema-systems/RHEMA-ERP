@@ -9,6 +9,7 @@
  * text stays for the tail.
  */
 
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -69,7 +70,7 @@ export default function CertifyingBodiesPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Certifying Bodies"
-        description="Organisations that certify a skill — institutes, boards and awarding bodies."
+        description="Organisations that certify a skill — institutes, boards and awarding bodies. Each issues the certifications catalogued under it."
         backHref="/administration/hr"
       />
 
@@ -101,6 +102,20 @@ export default function CertifyingBodiesPage() {
               ),
           },
           { header: 'Status', cell: (b) => <StatusBadge active={b.isActive} /> },
+          {
+            // Round 2, lane C2 (S-2): the credentials this body issues live in the certification
+            // catalogue, filtered to the body — the second half of the body → certification cascade.
+            header: 'Certifications',
+            cell: (b) => (
+              <Link
+                href={`/administration/hr/certifications?bodyId=${b.id}`}
+                className="text-primary underline-offset-4 hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Certifications issued
+              </Link>
+            ),
+          },
         ]}
         schema={bodySchema as any}
         emptyForm={emptyBody}

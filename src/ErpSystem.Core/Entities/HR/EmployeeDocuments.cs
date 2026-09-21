@@ -136,6 +136,71 @@ public class EmployeeDocument : TenantEntity
 }
 
 /// <summary>
+/// A file that belongs to a GUARANTOR — the signed guarantor form, an ID scan, a payslip, a letter
+/// of undertaking (demo feedback round 2, E-12: "upload picture of the guarantor and any documents
+/// pertaining to the guarantor").
+/// </summary>
+/// <remarks>
+/// <para><b>Why a collection, when the photograph is six columns on the row.</b> A guarantor has
+/// exactly one face and any number of papers. The photo is one-per-row; the papers are many, each
+/// with a kind and possibly an expiry (an ID scan expires, a signed undertaking does not), which is
+/// the same shape as <see cref="EmployeeDocument"/> — so this table mirrors it and speaks the same
+/// <see cref="EmployeeDocumentType"/> vocabulary rather than minting a second one.</para>
+///
+/// <para><b>Why not rows on <see cref="EmployeeDocument"/> with a guarantor id.</b> The employee's
+/// file is the employee's; a guarantor's payslip on it would answer "what does this employee hold"
+/// with another person's papers, and the compliance read would count it. Different subject,
+/// different table.</para>
+///
+/// <para><b>Three ids, never a path.</b> <c>EmployeeGuarantor.GuarantorFormPath</c> is the legacy
+/// caller-supplied sink this table retires; it stays readable and is no longer writable.</para>
+/// </remarks>
+public class EmployeeGuarantorDocument : TenantEntity
+{
+    public Guid GuarantorId { get; set; }
+
+    [ForeignKey(nameof(GuarantorId))]
+    public virtual EmployeeGuarantor Guarantor { get; set; } = null!;
+
+    public Guid DocumentTypeId { get; set; }
+
+    [ForeignKey(nameof(DocumentTypeId))]
+    public virtual EmployeeDocumentType DocumentType { get; set; } = null!;
+
+    [MaxLength(250)]
+    public string? Title { get; set; }
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public DateOnly? IssuedOn { get; set; }
+
+    public DateOnly? ExpiresOn { get; set; }
+
+    // ── The file, through the gate ────────────────────────────────────────────
+
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? DocumentRecordId { get; set; }
+
+    public Guid? DocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? FileName { get; set; }
+
+    [MaxLength(150)]
+    public string? MimeType { get; set; }
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>Who put it there, stamped from the token — a parameter, never a DTO field.</summary>
+    public Guid? UploadedById { get; set; }
+
+    [ForeignKey(nameof(UploadedById))]
+    public virtual Employee? UploadedBy { get; set; }
+}
+
+/// <summary>
 /// A document a position requires its holder to have on file (FRD, Employee Master feedback: "no
 /// mandatory documents against a position").
 /// </summary>

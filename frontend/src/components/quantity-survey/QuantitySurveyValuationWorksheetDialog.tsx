@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Calculator,
   CheckCircle2,
@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -74,6 +75,7 @@ export function QuantitySurveyValuationWorksheetDialog({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [lookups, setLookups] = useState<ValuationWorksheetLookups>({
     approvedBoqVersions: [],
     contractors: [],
@@ -215,6 +217,7 @@ export function QuantitySurveyValuationWorksheetDialog({
     if (request.current?.fingerprint !== fingerprint)
       request.current = { fingerprint, id: crypto.randomUUID() };
     setSaving(true);
+    setActionError(null);
     try {
       const saved = await service.save(interimValuationId, {
         clientRequestId: request.current.id,
@@ -226,11 +229,9 @@ export function QuantitySurveyValuationWorksheetDialog({
       request.current = undefined;
       toast.success('Valuation worksheet saved and reconciled.');
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Failed to save valuation worksheet'
-      );
+      const message = error instanceof Error ? error.message : 'Failed to save valuation worksheet';
+      setActionError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -244,6 +245,7 @@ export function QuantitySurveyValuationWorksheetDialog({
       return;
     }
     setSaving(true);
+    setActionError(null);
     try {
       const updated = await service[action](worksheet.id, {
         clientRequestId: crypto.randomUUID(),
@@ -259,13 +261,15 @@ export function QuantitySurveyValuationWorksheetDialog({
           : action === 'submitApproval'
             ? 'Valuation submitted for approval.'
             : action === 'approve'
-              ? 'Valuation approved and certificate-ready.'
+              ? updated.certificateReady
+                ? 'Valuation approved and certificate-ready.'
+                : 'Review recorded. The valuation is awaiting the next approval step.'
               : 'Valuation rejected.'
       );
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : 'The valuation action failed'
-      );
+      const message = error instanceof Error ? error.message : 'The valuation action failed';
+      setActionError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -277,6 +281,7 @@ export function QuantitySurveyValuationWorksheetDialog({
       return;
     }
     setSaving(true);
+    setActionError(null);
     try {
       await service.addEvidence(projectId, worksheet.id, {
         clientRequestId: crypto.randomUUID(),
@@ -289,9 +294,9 @@ export function QuantitySurveyValuationWorksheetDialog({
       await loadWorksheet(boqVersionId);
       toast.success('Evidence scanned and retained in the central DMS.');
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : 'Evidence upload failed'
-      );
+      const message = error instanceof Error ? error.message : 'Evidence upload failed';
+      setActionError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -354,7 +359,9 @@ export function QuantitySurveyValuationWorksheetDialog({
       <DialogContent className="flex max-h-[92vh] max-w-[96vw] flex-col overflow-hidden xl:max-w-[1500px]">
         <DialogHeader>
           <DialogTitle>Line valuation worksheet</DialogTitle>
+          <DialogDescription>Review measured quantities, supporting evidence and the current valuation before submitting for approval.</DialogDescription>
         </DialogHeader>
+        {actionError && <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{actionError}</div>}
         {loading ? (
           <div className="p-8 text-center text-sm text-muted-foreground">
             Loading recorded measurements and prior certificates…

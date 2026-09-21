@@ -45,6 +45,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  FinancePostingCard,
+  FinancePostingInlineStatus,
+} from '@/components/hr/common/FinancePostingCard';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
@@ -384,6 +388,8 @@ export default function AssetSurchargeDetailPage() {
                     <TableHead>How</TableHead>
                     <TableHead>Reference</TableHead>
                     <TableHead>Recorded by</TableHead>
+                    {/* Each recovery row is its own money event — one posting per recovery. */}
+                    <TableHead className="w-[1%] whitespace-nowrap">Finance</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -394,6 +400,9 @@ export default function AssetSurchargeDetailPage() {
                       <TableCell>{r.methodName}</TableCell>
                       <TableCell>{r.reference ?? '—'}</TableCell>
                       <TableCell>{r.recordedByName ?? '—'}</TableCell>
+                      <TableCell>
+                        <FinancePostingInlineStatus sourceDocumentId={r.id} />
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -402,6 +411,13 @@ export default function AssetSurchargeDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* What Finance holds for the charge itself: the receivable on approval, the write-off on
+          waiver. The recoveries post one row each — see the Finance column in the table above. */}
+      <FinancePostingCard
+        sourceDocumentId={id}
+        invalidateKeys={[['hr', 'assets', 'surcharge', id]]}
+      />
 
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && close()}>
         <DialogContent>

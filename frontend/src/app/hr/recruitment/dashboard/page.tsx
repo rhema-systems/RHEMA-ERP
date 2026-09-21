@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, TriangleAlert } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +22,7 @@ import { recruitmentDashboardService } from '@/services/hr/recruitment-dashboard
  * picture: pipeline shape, what needs attention this week, and what's arriving.
  */
 export default function RecruitmentDashboardPage() {
+  const router = useRouter();
   const { data, isLoading, isError } = useQuery({
     queryKey: ['hr', 'recruitment-dashboard'],
     queryFn: () => recruitmentDashboardService.get(),
@@ -122,7 +124,11 @@ export default function RecruitmentDashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {data.recentApplications.map((a) => (
-                    <TableRow key={a.applicationId}>
+<TableRow
+                      key={a.applicationId}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => router.push(`/hr/recruitment/applications/${a.applicationId}`)}
+                    >
                       <TableCell>
                         <Link
                           href={`/hr/recruitment/applications/${a.applicationId}`}
@@ -165,7 +171,11 @@ export default function RecruitmentDashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {data.upcomingInterviews.map((i) => (
-                    <TableRow key={i.interviewId}>
+<TableRow
+                      key={i.interviewId}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => router.push(`/hr/recruitment/interviews/${i.interviewId}`)}
+                    >
                       <TableCell>
                         <Link href={`/hr/recruitment/interviews/${i.interviewId}`} className="hover:underline">
                           {i.vacancyTitle}
@@ -209,7 +219,11 @@ export default function RecruitmentDashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {data.hiresStartingSoon.map((h) => (
-                    <TableRow key={h.hireId}>
+<TableRow
+                      key={h.hireId}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => router.push(`/hr/recruitment/hires/${h.hireId}`)}
+                    >
                       <TableCell>
                         <Link href={`/hr/recruitment/hires/${h.hireId}`} className="hover:underline">
                           {h.candidateName}
@@ -250,7 +264,11 @@ export default function RecruitmentDashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {data.expiringOffers.map((o) => (
-                    <TableRow key={o.offerId}>
+<TableRow
+                      key={o.offerId}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => router.push(`/hr/recruitment/offers/${o.offerId}`)}
+                    >
                       <TableCell>
                         <Link href={`/hr/recruitment/offers/${o.offerId}`} className="hover:underline">
                           {o.candidateName}
@@ -289,7 +307,11 @@ export default function RecruitmentDashboardPage() {
               </TableHeader>
               <TableBody>
                 {data.deadlineApproachingVacancies.map((v) => (
-                  <TableRow key={v.vacancyId}>
+<TableRow
+                    key={v.vacancyId}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/vacancies/${v.vacancyId}`)}
+                  >
                     <TableCell>
                       <Link href={`/hr/recruitment/vacancies/${v.vacancyId}`} className="hover:underline">
                         {v.jobTitle} ({v.vacancyNumber})

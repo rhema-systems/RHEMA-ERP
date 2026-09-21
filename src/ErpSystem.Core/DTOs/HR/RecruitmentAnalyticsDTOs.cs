@@ -9,6 +9,13 @@ namespace ErpSystem.Core.DTOs.HR;
 public sealed class RecruitmentAnalyticsDto
 {
     public int    Year     { get; set; }
+
+    /// <summary>
+    /// The tenant's base currency — the one every money field on this DTO has been converted into.
+    /// Read from Finance, deliberately not from a cost row: the rows carry the currency the invoice
+    /// was raised in, and labelling a converted total with one of those is how a cedi figure ends up
+    /// captioned "USD".
+    /// </summary>
     public string Currency { get; set; } = "GHS";
 
     // ── Headline KPIs ────────────────────────────────────────────────────────

@@ -55,6 +55,11 @@ class BankService {
     return apiService.get<BankBranch[]>(`/hr/banks/${bankId}/branches`);
   }
 
+  /** Only branches an account may still be opened at — what the employee bank tab offers. */
+  getActiveBranches(bankId: string) {
+    return apiService.get<BankBranch[]>(`/hr/banks/${bankId}/branches/active`);
+  }
+
   createBranch(bankId: string, payload: CreateBankBranch) {
     return apiService.post<BankBranch>(`/hr/banks/${bankId}/branches`, payload);
   }

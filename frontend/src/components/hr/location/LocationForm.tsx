@@ -24,12 +24,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import Link from 'next/link';
-import type { Location, LocationLevel, LocationStructureSummary } from '@/types/hr/location';
+import type { LocationLevel, LocationStructureSummary } from '@/types/hr/location';
 import type { Country } from '@/types/hr/country';
 import type { GeofenceZoneSummary } from '@/types/hr/attendance';
 import { GeoPicker } from '@/components/hr/common/geo/GeoPicker';
 import { isValidLat, isValidLng, parsePolygonJson, toNumberOrNull } from '@/components/hr/common/geo/geo';
 import { AddressFields } from '@/components/reference/AddressFields';
+import { LocationPicker } from '@/components/hr/common/LocationPicker';
 
 const NONE = 'none';
 const opt = z.string().max(500).optional().or(z.literal(''));
@@ -110,7 +111,6 @@ export const emptyLocation: LocationFormValues = {
 interface LocationFormProps {
   structures: LocationStructureSummary[];
   levels: LocationLevel[];
-  locations: Location[];
   countries: Country[];
   /** Geofence zones the location may be linked to. Managed under Attendance › Geofence Zones. */
   zones?: GeofenceZoneSummary[];
@@ -126,7 +126,6 @@ interface LocationFormProps {
 export function LocationForm({
   structures,
   levels,
-  locations,
   countries,
   zones = [],
   defaultValues,
@@ -143,7 +142,8 @@ export function LocationForm({
 
   const structureId = form.watch('structureId');
   const levelId = form.watch('locationLevelId');
-  const parentValue = form.watch('parentLocationId') || NONE;
+  const parentLocationId = form.watch('parentLocationId') || '';
+  const selectedLevel = levels.find((l) => l.id === levelId);
 
   // The pin, as the map sees it: only when both fields hold a usable number.
   const latNumber = toNumberOrNull(form.watch('latitude'));
@@ -180,20 +180,19 @@ export function LocationForm({
   const levelsForStructure = levels
     .filter((l) => l.structureId === structureId)
     .sort((a, b) => a.levelNumber - b.levelNumber || a.name.localeCompare(b.name));
-  const parentOptions = locations
-    .filter((l) => l.structureId === structureId && l.id !== excludeId)
-    .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleStructureChange = (value: string) => {
+    if (value === structureId) return;
     form.setValue('structureId', value, { shouldValidate: true });
-    // Clear level/parent that no longer belong to the chosen structure.
-    if (!levels.some((l) => l.id === levelId && l.structureId === value)) {
-      form.setValue('locationLevelId', '', { shouldValidate: true });
-    }
-    const parentId = form.getValues('parentLocationId');
-    if (parentId && !locations.some((l) => l.id === parentId && l.structureId === value)) {
-      form.setValue('parentLocationId', '');
-    }
+    // A level and a parent belong to a structure; a new structure means choosing both again.
+    form.setValue('locationLevelId', '', { shouldValidate: true });
+    form.setValue('parentLocationId', '');
+  };
+
+  const handleLevelChange = (value: string) => {
+    form.setValue('locationLevelId', value, { shouldValidate: true });
+    // The parent must sit exactly one level up, so a new level means a new parent.
+    if (value !== levelId) form.setValue('parentLocationId', '');
   };
 
   const err = (name: keyof LocationFormValues) =>
@@ -209,7 +208,7 @@ export function LocationForm({
           {/* Placement */}
           <section className="space-y-4">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Placement</h3>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="structureId">Structure</Label>
                 <Select value={structureId || undefined} onValueChange={handleStructureChange}>
@@ -232,7 +231,7 @@ export function LocationForm({
                 <Select
                   value={levelId || undefined}
                   disabled={!structureId}
-                  onValueChange={(v) => form.setValue('locationLevelId', v, { shouldValidate: true })}
+                  onValueChange={handleLevelChange}
                 >
                   <SelectTrigger id="locationLevelId">
                     <SelectValue placeholder={structureId ? 'Select a level' : 'Select a structure first'} />
@@ -251,27 +250,39 @@ export function LocationForm({
                 </Select>
                 {err('locationLevelId') && <p className="text-sm text-red-500">{err('locationLevelId')}</p>}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="parentLocationId">Parent Location</Label>
-                <Select
-                  value={parentValue}
-                  disabled={!structureId}
-                  onValueChange={(v) => form.setValue('parentLocationId', v === NONE ? '' : v)}
-                >
-                  <SelectTrigger id="parentLocationId">
-                    <SelectValue placeholder="None (root location)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>None (root location)</SelectItem>
-                    {parentOptions.map((l) => (
-                      <SelectItem key={l.id} value={l.id}>
-                        {l.name}
-                        {l.levelName ? ` · ${l.levelName}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            </div>
+
+            {/*
+              Demo feedback round 2, O-5: the parent is chosen level-first, like a unit's. The
+              location rule is stricter than the unit rule (X-11) — the parent must sit EXACTLY
+              one level up — so the level select holds a single entry, which the picker selects.
+              It is still rendered so this screen and the unit screen look and behave alike.
+            */}
+            <div className="space-y-2 rounded-md border p-4">
+              <Label>Parent location</Label>
+              {!selectedLevel ? (
+                <p className="text-sm text-muted-foreground">Choose the structure and level first.</p>
+              ) : selectedLevel.levelNumber <= 1 ? (
+                <p className="text-sm text-muted-foreground">
+                  &quot;{selectedLevel.name}&quot; is the root level, so this location sits at the top of
+                  its structure and has no parent.
+                </p>
+              ) : (
+                <LocationPicker
+                  idPrefix="parent-location"
+                  value={parentLocationId}
+                  onChange={(id) =>
+                    form.setValue('parentLocationId', id, { shouldValidate: true, shouldDirty: true })
+                  }
+                  structureId={structureId}
+                  exactLevelNumber={selectedLevel.levelNumber - 1}
+                  excludeSubtreeOf={excludeId}
+                  levelLabel="Parent level"
+                  locationLabel="Parent location"
+                  noLevelsMessage="No level sits one tier above this one in its structure."
+                  hint={`A location's parent must be exactly one level up — L${selectedLevel.levelNumber - 1} for "${selectedLevel.name}".`}
+                />
+              )}
             </div>
           </section>
 

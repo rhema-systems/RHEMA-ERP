@@ -47,8 +47,8 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { safetyTrainingService } from '@/services/hr/safety-training.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import type { SheTrainingPlan } from '@/types/hr/safety-training';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 /**
  * SHE training workspace: the annual/quarterly plans, the 30-day upcoming-program strip
@@ -88,10 +88,6 @@ export default function SafetyTrainingPage() {
   const { data: expiring = [] } = useQuery({
     queryKey: ['hr', 'safety-training', 'expiring-certs'],
     queryFn: () => safetyTrainingService.getExpiringCertificates(30),
-  });
-  const { data: orgUnits = [] } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
   });
 
   const form = useForm<PlanForm>({ resolver: zodResolver(planSchema) });
@@ -386,14 +382,7 @@ export default function SafetyTrainingPage() {
               <NumberField form={form} name="year" label="Year" required />
               <NumberField form={form} name="quarter" label="Quarter (1–4, optional)" />
             </FieldRow>
-            <SelectField
-              form={form}
-              name="organizationUnitId"
-              label="Organization unit"
-              allowEmpty
-              emptyLabel="Company-wide"
-              options={orgUnits.map((u) => ({ value: u.id, label: u.name }))}
-            />
+            <OrganizationUnitPickerField form={form} name="organizationUnitId" label="Organization unit" allowEmpty emptyLabel="Company-wide" />
             <EmployeePickerField form={form} name="preparedById" label="Prepared by" required />
             <TextareaField form={form} name="notes" label="Notes" rows={2} />
             <DialogFooter>

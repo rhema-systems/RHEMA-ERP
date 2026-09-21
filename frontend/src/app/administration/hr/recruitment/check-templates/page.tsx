@@ -23,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { CheckProvidersPanel } from '@/components/hr/recruitment/CheckProvidersPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { preEmploymentCheckTemplateService } from '@/services/hr/offers.service';
@@ -97,6 +98,9 @@ export default function PreEmploymentCheckTemplatesPage() {
           ) : undefined
         }
       />
+
+      {/* Round 3, lane G (D-14): the suppliers behind the checks, set up once and offered by type. */}
+      <CheckProvidersPanel canManage={isHr} />
 
       <Card>
         <CardContent className="p-0">

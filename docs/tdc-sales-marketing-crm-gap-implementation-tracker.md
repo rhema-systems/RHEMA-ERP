@@ -1,6 +1,6 @@
 # TDC Sales, Marketing, And CRM Gap Implementation Tracker
 
-Last updated: 2026-07-17
+Last updated: 2026-09-21
 
 ## Purpose
 
@@ -440,6 +440,19 @@ These anchors justify the baseline classifications; they are not proof of final 
 | 2026-07-17 | Questionnaire row reconciliation | Passed | All 56 answered rows were mapped to requirement IDs, implementation tasks, and acceptance scenarios. Fifty-five rows are explicitly Must Have; the segmentation yes/no row has a blank priority while its definition row is Must Have. |
 | 2026-07-17 | Live implementation revalidation | Passed | Lead/customer models, CRM aggregation, campaign ROI, account health/readiness/risk/collaboration/service, EHC ticket/problem linkage, Sales agreements/allocations, workflow adapters, Finance touchpoints, frontend routes, and services were re-inspected. |
 | 2026-07-17 | Tracker integrity review | Passed | Added canonical-customer configuration/task/scenario coverage, resolved the previously referenced but undefined `SMC-0114`, and confirmed source-row traceability to the implementation ledger. |
+
+## Deferred CRM Follow-ups — Property Enquiries
+
+Recorded 2026-09-21 at the user's request. These are notes for the later CRM implementation phase; no runtime changes are authorized by this note and neither item is implemented or accepted yet.
+
+| Task ID | Status | Current gap | Later implementation and verification |
+| --- | --- | --- | --- |
+| SMC-FU-001 | Not started — deferred to CRM phase | Property enquiry messages, notes and status events feed CRM activities, but activities created or edited directly in CRM do not appear back in the linked enquiry conversation/history. | Reflect relevant CRM engagements back into the linked enquiry through existing CRM/EHC services. Preserve actor, timestamps and source linkage; respect internal/customer-visible distinctions and tenant/access rules. Prevent synchronization loops and duplicates on retries. Verify activity creation/update from CRM and existing enquiry-to-CRM synchronization together. |
+| SMC-FU-002 | Not started — deferred to CRM phase | Reassigning a property enquiry does not update the assignee on its existing linked CRM Lead and Opportunity. | Synchronize linked CRM ownership when the enquiry assignee changes. Resolve clearing/reassignment and intentional independent CRM ownership behavior during that slice, rather than introducing a rigid rule now. Preserve record IDs/history, enforce authorized tenant-scoped assignment, and verify repeated saves do not create duplicate CRM records. |
+
+Baseline from the 20 September code review: an enquiry assigned to active organizational unit `UNIT-MKT` (currently **Marketing Unit**) and moved out of **New** creates its linked Qualified Lead and Qualification-stage Opportunity during assignment/status save. Closed Won requires the separate **Hand off to Estate** action; successful Estate acceptance resolves the enquiry, while final Closed remains a Helpdesk transition. Preserve this existing flow when implementing the follow-ups.
+
+Starting code anchors: `src/ErpSystem.Core/Services/Ehc/EhcTicketService.cs` (`SynchronizePropertyEnquiryCrmAsync`, assignment and transition handlers), `src/ErpSystem.Core/Services/Crm/CrmService.cs` (activity create/update), and `src/ErpSystem.Api/Controllers/Ehc/EhcPropertyEnquiriesController.cs` (Estate handoff and resolution).
 
 ## Tracker Maintenance
 

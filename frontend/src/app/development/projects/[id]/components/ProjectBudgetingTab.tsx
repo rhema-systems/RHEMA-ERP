@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { Download, Save } from 'lucide-react';
 import type { BusinessPartnerDto } from '@/services/businessPartnerService';
-import type { ContractDto } from '@/services/contractService';
+import type { ProjectContractLookupDto } from '@/services/projectService';
 import type { InventoryItemDto, UnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { ProjectPackageDialogs } from '@/components/projects/ProjectPackageDialogs';
 import { Button } from '@/components/ui/button';
@@ -32,7 +32,7 @@ type ProjectBudgetingTabProps = {
   project: ProjectDetailDto;
   commercialSummary: ProjectCommercialSummaryDto | null;
   activeBusinessPartners: BusinessPartnerDto[];
-  activeContracts: ContractDto[];
+  activeContracts: ProjectContractLookupDto[];
   tenders: ProjectTenderLookupDto[];
   procurementPlanItems: ProjectProcurementPlanItemLookupDto[];
   purchaseRequisitions: ProjectPurchaseRequisitionLookupDto[];

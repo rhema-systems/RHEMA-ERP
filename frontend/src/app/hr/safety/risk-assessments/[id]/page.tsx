@@ -40,7 +40,7 @@ import {
 } from '@/components/hr/safety/RiskBadge';
 import { safetyRiskAssessmentService } from '@/services/hr/safety-risk-assessment.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import {
   SHE_RISK_ASSESSMENT_TYPE_OPTIONS,
   SHE_RISK_ASSESSMENT_STATUS_OPTIONS,
@@ -162,10 +162,6 @@ export default function RiskAssessmentDetailPage() {
     queryFn: () => locationService.getAll(),
   });
 
-  const { data: orgUnits = [] } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
 
   const editForm = useForm<EditForm>({ resolver: zodResolver(editSchema) as any });
   const approveForm = useForm<ApproveForm>({
@@ -614,13 +610,7 @@ export default function RiskAssessmentDetailPage() {
                 <TextField form={editForm} name="specificActivity" label="Specific activity" />
               </FieldRow>
               <FieldRow>
-                <SelectField
-                  form={editForm}
-                  name="organizationUnitId"
-                  label="Organization unit"
-                  allowEmpty
-                  options={orgUnits.map((u) => ({ value: u.id, label: u.name }))}
-                />
+                <OrganizationUnitPickerField form={editForm} name="organizationUnitId" label="Organization unit" allowEmpty />
                 <SelectField
                   form={editForm}
                   name="status"

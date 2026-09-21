@@ -128,8 +128,41 @@ public class JobApplicationController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        var created = await _service.CreateAsync(dto, tenantId.Value, employeeId.Value);
-        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        try
+        {
+            var created = await _service.CreateAsync(dto, tenantId.Value, employeeId.Value);
+            return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The rule in its own words (GlobalExceptionHandlingMiddleware discards the message).
+            return UnprocessableEntity(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// HR corrects how an application arrived (round 3, lane A; register row R-4): the source, and
+    /// the advert it came through. No update DTO existed before, so a wrongly recorded source
+    /// could never be put right.
+    /// </summary>
+    [HttpPatch("{id:guid}/source")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<JobApplicationDto>> UpdateSource(Guid id, [FromBody] UpdateJobApplicationSourceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        try
+        {
+            return Ok(await _service.UpdateSourceAsync(id, dto, employeeId.Value));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{id:guid}")]

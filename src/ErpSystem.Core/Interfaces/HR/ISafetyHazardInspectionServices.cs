@@ -83,6 +83,32 @@ public interface ISheInspectionChecklistService
     Task<SheInspectionChecklistItemDto> AddItemAsync(CreateSheInspectionChecklistItemDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
     Task<SheInspectionChecklistItemDto> UpdateItemAsync(UpdateSheInspectionChecklistItemDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> DeleteItemAsync(Guid itemId, CancellationToken cancellationToken = default);
+
+    // ── Builder (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
+    /// <summary>Validates the structure and freezes it; retires the previous version if it is still published.</summary>
+    Task<SheInspectionChecklistDto> PublishAsync(Guid id, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistDto> RetireAsync(Guid id, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>Deep-clones a published/retired template into Draft Version+1 under the same number.</summary>
+    Task<SheInspectionChecklistDto> CreateNewVersionAsync(Guid id, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistFieldDto> AddFieldAsync(CreateSheInspectionChecklistFieldDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistFieldDto> UpdateFieldAsync(UpdateSheInspectionChecklistFieldDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteFieldAsync(Guid fieldId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistSectionDto> AddSectionAsync(CreateSheInspectionChecklistSectionDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistSectionDto> UpdateSectionAsync(UpdateSheInspectionChecklistSectionDto dto, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>Deletes the section and its items.</summary>
+    Task<bool> DeleteSectionAsync(Guid sectionId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistOutcomeDto> AddOutcomeAsync(CreateSheInspectionChecklistOutcomeDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistOutcomeDto> UpdateOutcomeAsync(UpdateSheInspectionChecklistOutcomeDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteOutcomeAsync(Guid outcomeId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistSignatoryDto> AddSignatoryAsync(CreateSheInspectionChecklistSignatoryDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistSignatoryDto> UpdateSignatoryAsync(UpdateSheInspectionChecklistSignatoryDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteSignatoryAsync(Guid signatoryId, CancellationToken cancellationToken = default);
+    /// <summary>Replace-set reorders: the body is every child id in its new order; a missing or foreign id is refused.</summary>
+    Task<SheInspectionChecklistDto> ReorderFieldsAsync(Guid id, SheChecklistReorderDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistDto> ReorderSectionsAsync(Guid id, SheChecklistReorderDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistDto> ReorderSectionItemsAsync(Guid sectionId, SheChecklistReorderDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistDto> ReorderOutcomesAsync(Guid id, SheChecklistReorderDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheInspectionChecklistDto> ReorderSignatoriesAsync(Guid id, SheChecklistReorderDto dto, Guid userId, CancellationToken cancellationToken = default);
 }
 
 // ============================================================================
@@ -122,4 +148,18 @@ public interface ISafetyInspectionService
 
     Task<SafetyInspectionDocumentDto> AddDocumentAsync(CreateSafetyInspectionDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
+
+    // ── Checklist run (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
+    /// <summary>Materialises a published template's items onto an inspection that has none yet.</summary>
+    Task<SafetyInspectionDto> ApplyChecklistAsync(Guid inspectionId, ApplySafetyInspectionChecklistDto dto, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>Bulk answer: each item's status (validated against its section kind) and remarks.</summary>
+    Task<SafetyInspectionDto> SaveResponsesAsync(Guid inspectionId, IReadOnlyList<SafetyInspectionResponseDto> responses, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>Replace-set of the header field values, type-checked per field.</summary>
+    Task<SafetyInspectionDto> SaveFieldValuesAsync(Guid inspectionId, IReadOnlyList<SafetyInspectionFieldValueWriteDto> values, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    /// <summary>The live score over the current answers, without persisting.</summary>
+    Task<SafetyInspectionScoreDto> GetScoreAsync(Guid inspectionId, CancellationToken cancellationToken = default);
+    /// <summary>Gate + persist: every item assessed, required fields filled, outcome confirmed; totals written; status advanced.</summary>
+    Task<SafetyInspectionDto> CompleteAsync(Guid inspectionId, CompleteSafetyInspectionDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<SafetyInspectionSignatureDto> AddSignatureAsync(Guid inspectionId, CreateSafetyInspectionSignatureDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteSignatureAsync(Guid signatureId, CancellationToken cancellationToken = default);
 }

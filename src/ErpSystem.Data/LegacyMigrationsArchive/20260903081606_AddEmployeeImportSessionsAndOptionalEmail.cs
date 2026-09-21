@@ -11,7 +11,7 @@ namespace ErpSystem.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Email is optional from here on (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md §4, decision 1,
+            // Email is optional from here on (docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md §4, decision 1,
             // 2026-09-03). Two things EF cannot know about:
             //  1. The old NormalizeEmail wrote '' for blank. The new unique index is filtered on
             //     NOT NULL, and '' is not NULL — two blanks would still collide. Convert them first.

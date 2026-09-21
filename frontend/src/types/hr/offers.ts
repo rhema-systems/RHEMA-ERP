@@ -24,6 +24,12 @@
  *
  * ⚠ `Rejected` means *an approver* turned the offer down and it is resubmittable — it is not the
  * candidate declining, which is `Declined`. Two different people saying no at two different points.
+ *
+ * ⚠ `Superseded` is what a version becomes when a revision replaces it (G-10.2, added 2026-09-15).
+ * Distinct from `Withdrawn`, which is the organisation taking a live offer back — nobody revoked a
+ * superseded version, better terms simply replaced it. `Expired` is now written too, by the nightly
+ * recruitment sweep (G-2.4); before that job existed no offer ever reached it, so the analytics
+ * screen's Expired bucket was structurally zero and the lapsed offers sat in Pending instead.
  */
 export const JOB_OFFER_STATUSES = [
   'Draft',
@@ -39,6 +45,7 @@ export const JOB_OFFER_STATUSES = [
   'ConditionallyAccepted',
   'ChecksCleared',
   'Rejected',
+  'Superseded',
 ] as const;
 export type JobOfferStatus = (typeof JOB_OFFER_STATUSES)[number];
 
@@ -431,6 +438,8 @@ export interface PreEmploymentCheckItem {
   /** `name` when set, otherwise the check type — the server computes it. */
   displayName: string;
   serviceProviderName?: string | null;
+  /** The supplier behind the provider name, when it is one (round 3, lane G; D-14). */
+  serviceProviderSupplierId?: string | null;
   status: CheckItemStatus;
   statusName: string;
   requestedDate?: string | null;
@@ -480,6 +489,8 @@ export interface CreatePreEmploymentCheckItem {
   checkType: PreEmploymentCheckType;
   name?: string | null;
   serviceProviderName?: string | null;
+  /** A Procurement supplier (round 3, lane G); the server mirrors its name into `serviceProviderName`. */
+  serviceProviderSupplierId?: string | null;
   instructions?: string | null;
   isMandatory: boolean;
   isBlockingOnFail: boolean;
@@ -497,6 +508,7 @@ export interface CreatePreEmploymentCheck {
 export interface UpdatePreEmploymentCheckItem {
   name?: string | null;
   serviceProviderName?: string | null;
+  serviceProviderSupplierId?: string | null;
   status: CheckItemStatus;
   requestedDate?: string | null;
   receivedDate?: string | null;
@@ -576,10 +588,31 @@ export interface PreEmploymentCheckTemplateItem {
   checkType: PreEmploymentCheckType;
   checkTypeName: string;
   defaultServiceProvider?: string | null;
+  /** The supplier behind the default provider, when it is one (round 3, lane G; D-14). */
+  defaultServiceProviderSupplierId?: string | null;
   instructions?: string | null;
   isMandatory: boolean;
   isBlockingOnFail: boolean;
   expectedDays?: number | null;
+}
+
+/** A supplier that provides one kind of check (round 3, lane G; D-14) — the check-type → provider cascade reads these. */
+export interface PreEmploymentCheckProviderService {
+  id: string;
+  supplierId: string;
+  supplierCode: string;
+  supplierName: string;
+  supplierIsActive: boolean;
+  checkType: PreEmploymentCheckType;
+  checkTypeName: string;
+  notes?: string | null;
+  isActive: boolean;
+}
+
+export interface CreatePreEmploymentCheckProviderServices {
+  supplierId: string;
+  checkTypes: PreEmploymentCheckType[];
+  notes?: string | null;
 }
 
 export interface PreEmploymentCheckTemplate {
@@ -599,6 +632,8 @@ export interface PreEmploymentCheckTemplateDetail extends PreEmploymentCheckTemp
 export interface CreatePreEmploymentCheckTemplateItem {
   checkType: PreEmploymentCheckType;
   defaultServiceProvider?: string | null;
+  /** A Procurement supplier (round 3, lane G); the server mirrors its name into `defaultServiceProvider`. */
+  defaultServiceProviderSupplierId?: string | null;
   instructions?: string | null;
   isMandatory: boolean;
   isBlockingOnFail: boolean;

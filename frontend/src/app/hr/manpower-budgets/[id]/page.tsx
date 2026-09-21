@@ -1,30 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Banknote, CheckCircle2, Loader2, Pencil, Plus, Send, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, Banknote, CheckCircle2, Download, Loader2, Pencil, Plus, Send, Trash2, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -35,13 +29,30 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { PlanningBaselinePanel } from '@/components/hr/manpower/PlanningBaselinePanel';
+import {
+  BudgetLineDialog,
+  budgetLineFormFromLine,
+  budgetLinePayload,
+  emptyBudgetLineForm,
+  type BudgetLineFormState,
+} from '@/components/hr/manpower/BudgetLineDialog';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
+import type { ManpowerBudgetWorkbookImportResult } from '@/types/hr/job-architecture';
+import { staffRequisitionService } from '@/services/hr/recruitment.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { workflowApiService } from '@/services/workflow-api.service';
 
 const fmtMoney = (v?: number | null) =>
   v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
+
+const SOURCE_LABEL: Record<string, string> = {
+  Notch: 'from the notch',
+  LevelMidpoint: 'level mid-point',
+  GradeMinimum: 'grade minimum',
+  Manual: 'entered by hand',
+};
 
 const STATUS_TONE: Record<string, string> = {
   Draft: 'bg-slate-100 text-slate-700',
@@ -59,33 +70,28 @@ export default function ManpowerBudgetDetailPage() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const [addingLine, setAddingLine] = useState(false);
-  const [line, setLine] = useState({ positionId: '', plannedCount: 1, plannedAverageSalary: 0, isCritical: false });
+  const [line, setLine] = useState<BudgetLineFormState>(() => emptyBudgetLineForm());
   /**
    * ⚠ The budget and its lines could be created, submitted and approved — and never corrected.
    * A figure typed wrongly could only be fixed by deleting the line and adding it again, and the
    * budget's own totals not at all. Both edits are Write-tier; both DELETES are
    * `HR.ManpowerBudget.Admin`, established by a 403 rather than assumed.
    *
-   * ⚠ The budget update is a REPLACE: the DTO names every figure, so the dialog seeds from the
-   * budget and sends the whole set. Omitting a field writes a zero over it.
+   * Round 2b, lane R1: the budget's own correction moved off this page. The "Correct" dialog here
+   * showed 12 of the create form's 17 fields and — because the update is a REPLACE — silently
+   * zeroed the five it did not show (promotions, transfers, actual spend, and it could not change
+   * the year or unit at all). The edit page shares one form with the create page, so what can be
+   * typed on creation can be corrected afterwards. Line corrections stay here.
    */
-  const [editingBudget, setEditingBudget] = useState<null | {
-    periodStartDate: string; periodEndDate: string;
-    currentHeadcount: string; currentSalaryCost: string;
-    plannedHeadcount: string; plannedSalaryCost: string;
-    plannedNewHires: string; plannedTerminations: string;
-    salaryBudget: string; benefitsBudget: string; recruitmentBudget: string; trainingBudget: string;
-    businessJustification: string;
-  }>(null);
-  const [editingLine, setEditingLine] = useState<null | {
-    id: string; positionTitle: string;
-    currentCount: string; currentFilled: string; currentVacant: string;
-    currentAverageSalary: string; currentTotalCost: string;
-    plannedCount: string; plannedNewPositions: string; plannedEliminations: string;
-    plannedAverageSalary: string; priority: string; isCritical: boolean; notes: string;
-  }>(null);
+  const [rejectReason, setRejectReason] = useState<string | null>(null);
+  // Round 2b, R3: one dialog for add and correct (`BudgetLineDialog`), with the salary read
+  // from the scale — grade pre-selected from the position, notch chosen, figure filled and its
+  // source recorded. Every stored field is now editable (quarter, target date, priority, notes).
+  const [editingLine, setEditingLine] = useState<null | { id: string; positionTitle: string; form: BudgetLineFormState }>(null);
   const [removingLine, setRemovingLine] = useState<{ id: string; title: string } | null>(null);
   const [removingBudget, setRemovingBudget] = useState(false);
+  // R4a: pull the posts of the budget's subtree onto it; lines already here are never touched.
+  const [addingFromEstablishment, setAddingFromEstablishment] = useState(false);
 
   const { data: budget, isLoading } = useQuery({
     queryKey: ['manpower-budget', id],
@@ -116,6 +122,54 @@ export default function ManpowerBudgetDetailPage() {
     queryFn: () => employeePositionService.getAll(),
   });
 
+  // The planning baseline, recomputed live for the budget's own unit and period (R2). It is
+  // labelled "as of today": a budget written in January and read in November will differ from
+  // it, and the live figure is the true one.
+  const baselineArgs = budget?.organizationUnitId && budget.periodStartDate && budget.periodEndDate
+    ? { unit: budget.organizationUnitId, start: budget.periodStartDate.slice(0, 10), end: budget.periodEndDate.slice(0, 10) }
+    : null;
+  const baseline = useQuery({
+    queryKey: ['manpower-baseline', baselineArgs?.unit, baselineArgs?.start, baselineArgs?.end],
+    queryFn: () => jobArchitectureService.getPlanningBaseline(baselineArgs!.unit, baselineArgs!.start, baselineArgs!.end),
+    enabled: !!baselineArgs,
+    staleTime: 60 * 1000,
+  });
+
+  // Round 2b, R6: what the requisitions on this budget have spent against its recruitment
+  // envelope. Approved costs count; recorded ones are shown as pending. Only meaningful once
+  // the budget is in force, so it is only asked for then.
+  const spend = useQuery({
+    queryKey: ['manpower-budget-spend', id],
+    queryFn: () => jobArchitectureService.getRecruitmentSpend(id),
+    enabled: !!budget && (budget.status === 'Approved' || budget.status === 'Active'),
+    staleTime: 30 * 1000,
+  });
+
+  // Round 2b, R4b: the establishment round-trip through Excel. The export is a download; the
+  // import answers 200 (applied) or 422 (nothing written, rows named) with the same shape, and
+  // both land in the result dialog.
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [importResult, setImportResult] = useState<ManpowerBudgetWorkbookImportResult | null>(null);
+  const [importing, setImporting] = useState(false);
+  const onWorkbookChosen = async (file: File | null) => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const r = await jobArchitectureService.importEstablishmentWorkbook(id, file);
+      setImportResult(r);
+      toast.success(r.message);
+      qc.invalidateQueries({ queryKey: ['manpower-budget', id] });
+      qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+    } catch (e: any) {
+      const body = e?.response;
+      if (body && typeof body === 'object' && 'applied' in body) setImportResult(body as ManpowerBudgetWorkbookImportResult);
+      else toast.error(body?.message ?? e?.message ?? 'The workbook could not be imported.');
+    } finally {
+      setImporting(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  };
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['manpower-budget', id] });
     qc.invalidateQueries({ queryKey: ['manpower-budgets'] });
@@ -145,6 +199,10 @@ export default function ManpowerBudgetDetailPage() {
 
   const status = (budget.statusName ?? budget.status) as string;
   const isDraft = status === 'Draft';
+  const isRejected = status === 'Rejected';
+  const isApproved = status === 'Approved' || status === 'Active';
+  // A rejected budget is the author's again: correct it and resubmit (the server allows both).
+  const canEdit = isDraft || isRejected;
   const canApprove = workflow?.canCurrentUserApprove === true;
   const lineCount = lines?.length ?? 0;
 
@@ -156,31 +214,43 @@ export default function ManpowerBudgetDetailPage() {
         backHref="/hr/manpower-budgets"
         actions={
           <div className="flex flex-wrap gap-2">
-            {isDraft && (
+            {canEdit && (
               <Button
                 variant="outline"
-                onClick={() =>
-                  setEditingBudget({
-                    periodStartDate: budget.periodStartDate?.slice(0, 10) ?? '',
-                    periodEndDate: budget.periodEndDate?.slice(0, 10) ?? '',
-                    currentHeadcount: String(budget.currentHeadcount ?? 0),
-                    currentSalaryCost: String(budget.currentSalaryCost ?? 0),
-                    plannedHeadcount: String(budget.plannedHeadcount ?? 0),
-                    plannedSalaryCost: String(budget.plannedSalaryCost ?? 0),
-                    plannedNewHires: String(budget.plannedNewHires ?? 0),
-                    plannedTerminations: String(budget.plannedTerminations ?? 0),
-                    salaryBudget: String(budget.salaryBudget ?? 0),
-                    benefitsBudget: String(budget.benefitsBudget ?? 0),
-                    recruitmentBudget: String(budget.recruitmentBudget ?? 0),
-                    trainingBudget: String(budget.trainingBudget ?? 0),
-                    businessJustification: budget.businessJustification ?? '',
-                  })
-                }
+                onClick={() => router.push(`/hr/manpower-budgets/${id}/edit`)}
                 disabled={busy !== null}
               >
                 <Pencil className="mr-2 h-4 w-4" />
-                Correct
+                Edit
               </Button>
+            )}
+            <Button
+              variant="outline"
+              disabled={busy !== null}
+              onClick={() =>
+                jobArchitectureService.exportEstablishmentWorkbook(id, budget.budgetNumber)
+                  .catch((e: any) => toast.error(e?.response?.message ?? e?.message ?? 'The export failed.'))
+              }
+              title="The unit's establishment with this budget's lines, as an Excel workbook"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export to Excel
+            </Button>
+            {canEdit && (
+              <>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="hidden"
+                  onChange={(e) => onWorkbookChosen(e.target.files?.[0] ?? null)}
+                />
+                <Button variant="outline" disabled={busy !== null || importing} onClick={() => fileInput.current?.click()}
+                  title="Import the workbook exported from this budget, with the yellow columns edited">
+                  {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                  Import from Excel
+                </Button>
+              </>
             )}
             {isDraft && (
               <Button variant="outline" disabled={busy !== null} onClick={() => setRemovingBudget(true)}>
@@ -188,16 +258,19 @@ export default function ManpowerBudgetDetailPage() {
                 Delete
               </Button>
             )}
-            {isDraft && (
+            {canEdit && (
               <Button
-                onClick={() => run('submit', () => jobArchitectureService.submitBudget(id), 'Submitted for approval')}
+                onClick={() =>
+                  run('submit', () => jobArchitectureService.submitBudget(id),
+                    isRejected ? 'Resubmitted for approval' : 'Submitted for approval')
+                }
                 // ⚠ An empty budget authorises no posts, and the API refuses it. Disabling here
                 // means the refusal is explained before it happens rather than after.
                 disabled={busy !== null || lineCount === 0}
                 title={lineCount === 0 ? 'Add at least one budget line first' : undefined}
               >
                 {busy === 'submit' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                Submit for approval
+                {isRejected ? 'Resubmit for approval' : 'Submit for approval'}
               </Button>
             )}
             {canApprove && (
@@ -211,17 +284,9 @@ export default function ManpowerBudgetDetailPage() {
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                   Approve
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    run(
-                      'reject',
-                      () => jobArchitectureService.rejectBudgetOnWorkflow(id, 'Not approved'),
-                      'Budget rejected',
-                    )
-                  }
-                  disabled={busy !== null}
-                >
+                {/* The reason is stored (area 17 slice 7) — but this button sent the constant
+                    "Not approved" for every rejection, so the column never held one. */}
+                <Button variant="outline" onClick={() => setRejectReason('')} disabled={busy !== null}>
                   <XCircle className="mr-2 h-4 w-4" />
                   Reject
                 </Button>
@@ -263,14 +328,146 @@ export default function ManpowerBudgetDetailPage() {
         <Stat label="Total budget" value={fmtMoney(budget.totalBudget)} hint="salary + benefits + recruitment + training" />
       </div>
 
+      {spend.data && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Recruitment spend</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {spend.data.envelopeSet ? (
+              <p>
+                <span className="font-semibold">{fmtMoney(spend.data.approved)}</span> approved of a{' '}
+                <span className="font-semibold">{fmtMoney(spend.data.recruitmentBudget)}</span> recruitment envelope
+                {' · '}
+                <span className={spend.data.remaining < 0 ? 'font-semibold text-destructive' : ''}>
+                  {spend.data.remaining < 0 ? `${fmtMoney(-spend.data.remaining)} over` : `${fmtMoney(spend.data.remaining)} left`}
+                </span>
+                {spend.data.pending > 0 && <> · {fmtMoney(spend.data.pending)} recorded, awaiting HR approval</>}
+                <span className="ml-2 text-xs text-muted-foreground">enforcement: {spend.data.modeName}</span>
+              </p>
+            ) : (
+              <p className="text-muted-foreground">
+                No recruitment envelope is set on this budget, so the costs below are not constrained by it.
+                {spend.data.approved > 0 && <> {fmtMoney(spend.data.approved)} has been approved so far.</>}
+              </p>
+            )}
+            {spend.data.byRequisition.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Requisition</TableHead>
+                    <TableHead>Position</TableHead>
+                    <TableHead className="text-right">Approved</TableHead>
+                    <TableHead className="text-right">Pending</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {spend.data.byRequisition.map((r) => (
+                    <TableRow key={r.requisitionId}>
+                      <TableCell>
+                        <a className="underline-offset-2 hover:underline" href={`/hr/recruitment/requisitions/${r.requisitionId}`}>{r.requisitionNumber}</a>
+                      </TableCell>
+                      <TableCell>{r.positionTitle ?? '—'}</TableCell>
+                      <TableCell className="text-right">{fmtMoney(r.approved)}</TableCell>
+                      <TableCell className="text-right">{r.pending > 0 ? fmtMoney(r.pending) : '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-xs text-muted-foreground">No requisition on this budget has recorded a cost yet.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Round 2b, lane R1: "the full details specified on the creation form don't display in the
+          edit view". Every field the form takes is shown here, grouped the way the form groups
+          them. ⚠ `actualSpent` and `variance` are still NOT shown — nothing writes them, and a
+          permanent zero presented as a variance would be inventing news. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader><CardTitle>Scope</CardTitle></CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              <Field label="Fiscal year" value={budget.fiscalYear} />
+              <Field label="Period" value={`${fmtDate(budget.periodStartDate)} – ${fmtDate(budget.periodEndDate)}`} />
+              <Field label="Organisation unit" value={budget.organizationUnitName ?? '—'} />
+              <Field label="Organisation level" value={budget.organizationLevelName ?? '—'} />
+            </dl>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Headcount</CardTitle></CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
+              <Field label="Current" value={budget.currentHeadcount} />
+              <Field label="Planned" value={budget.plannedHeadcount} />
+              <Field label="New hires" value={budget.plannedNewHires} />
+              <Field label="Terminations" value={budget.plannedTerminations} />
+              <Field label="Promotions" value={budget.plannedPromotions} />
+              <Field label="Transfers" value={budget.plannedTransfers} />
+            </dl>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Money</CardTitle></CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              <Field label="Current salary cost" value={fmtMoney(budget.currentSalaryCost)} />
+              <Field label="Planned salary cost" value={fmtMoney(budget.plannedSalaryCost)} />
+              <Field label="Salary budget" value={fmtMoney(budget.salaryBudget)} />
+              <Field label="Benefits budget" value={fmtMoney(budget.benefitsBudget)} />
+              <Field label="Recruitment budget" value={fmtMoney(budget.recruitmentBudget)} />
+              <Field label="Training budget" value={fmtMoney(budget.trainingBudget)} />
+              <Field label="Total budget" value={<span className="font-semibold">{fmtMoney(budget.totalBudget)}</span>} />
+            </dl>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Justification and decision</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div>
+              <div className="text-muted-foreground">Business justification</div>
+              <p className="mt-1 whitespace-pre-wrap">{budget.businessJustification || '—'}</p>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <Field label="Approved by" value={budget.approvedByName ?? '—'} />
+              <Field label="Approved on" value={fmtDate(budget.approvalDate)} />
+              {workflow?.hasActiveInstance && workflow.currentStepName && (
+                <Field label="Awaiting" value={workflow.currentStepName} />
+              )}
+            </dl>
+          </CardContent>
+        </Card>
+      </div>
+
+      <PlanningBaselinePanel
+        baseline={baseline.data}
+        loading={!!baselineArgs && baseline.isLoading}
+        error={baseline.isError ? 'The planning baseline could not be loaded.' : undefined}
+        idle={!baselineArgs}
+        title="Planning baseline, as of today"
+        onRefresh={baselineArgs ? () => baseline.refetch() : undefined}
+        compareTo={{ currentHeadcount: budget.currentHeadcount, plannedTerminations: budget.plannedTerminations }}
+      />
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Budget lines</CardTitle>
-          {isDraft && (
-            <Button variant="outline" size="sm" onClick={() => setAddingLine(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add line
-            </Button>
+          {canEdit && (
+            <div className="flex gap-2">
+              {budget.organizationUnitId && (
+                <Button variant="outline" size="sm" onClick={() => setAddingFromEstablishment(true)} disabled={busy !== null}>
+                  <Banknote className="mr-2 h-4 w-4" />
+                  Add posts from the establishment
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setAddingLine(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add line
+              </Button>
+            </div>
           )}
         </CardHeader>
         <CardContent>
@@ -285,12 +482,15 @@ export default function ManpowerBudgetDetailPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Position</TableHead>
+                  <TableHead>On the scale</TableHead>
                   <TableHead className="text-right">Filled</TableHead>
                   <TableHead className="text-right">Planned</TableHead>
                   <TableHead className="text-right">Average salary</TableHead>
                   <TableHead className="text-right">Total cost</TableHead>
                   <TableHead>Priority</TableHead>
-                  {isDraft && <TableHead />}
+                  {/* R5: what requisitions have drawn down from the line, and what is left. */}
+                  <TableHead className="text-right">Requisitioned</TableHead>
+                  {(isDraft || isApproved) && <TableHead />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -302,13 +502,44 @@ export default function ManpowerBudgetDetailPage() {
                         <Badge className="ml-2 bg-rose-100 text-rose-800">Critical</Badge>
                       )}
                     </TableCell>
+                    <TableCell className="text-sm">
+                      {l.salaryGradeCode
+                        ? [l.salaryGradeCode, l.salaryLevelCode && l.salaryLevelCode !== l.salaryGradeCode ? `level ${l.salaryLevelCode}` : null, l.salaryNotchNumber ? `notch ${l.salaryNotchNumber}` : null].filter(Boolean).join(' · ')
+                        : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell className="text-right">{l.currentFilled}</TableCell>
                     <TableCell className="text-right font-medium">{l.plannedCount}</TableCell>
-                    <TableCell className="text-right">{fmtMoney(l.plannedAverageSalary)}</TableCell>
+                    <TableCell className="text-right">
+                      {fmtMoney(l.plannedAverageSalary)}
+                      <div className="text-xs text-muted-foreground">{SOURCE_LABEL[l.plannedSalarySource] ?? l.plannedSalarySourceName}</div>
+                    </TableCell>
                     <TableCell className="text-right">{fmtMoney(l.plannedTotalCost)}</TableCell>
                     <TableCell>
                       <Badge variant="outline">{l.priority}</Badge>
                     </TableCell>
+                    <TableCell className="text-right">
+                      {l.requisitionedCount}
+                      <div className="text-xs text-muted-foreground">{l.remaining > 0 ? `${l.remaining} left` : 'nothing left'}</div>
+                    </TableCell>
+                    {isApproved && (
+                      <TableCell className="text-right">
+                        {/* "Out of the recruitment budget you can be raising requisitions." */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy !== null || l.remaining <= 0}
+                          title={l.remaining <= 0 ? 'Nothing left on this line' : 'Raise a requisition drawing down what is left'}
+                          onClick={() =>
+                            run('raise a requisition', async () => {
+                              const req = await staffRequisitionService.createFromBudgetLine(l.id);
+                              router.push(`/hr/recruitment/requisitions/${req.id}`);
+                            }, 'Requisition drafted')
+                          }
+                        >
+                          Raise requisition
+                        </Button>
+                      </TableCell>
+                    )}
                     {isDraft && (
                       <TableCell className="text-right">
                         <Button
@@ -316,22 +547,7 @@ export default function ManpowerBudgetDetailPage() {
                           variant="ghost"
                           title="Correct this line"
                           onClick={() =>
-                            setEditingLine({
-                              id: l.id,
-                              positionTitle: l.positionTitle ?? 'this line',
-                              currentCount: String(l.currentCount ?? 0),
-                              currentFilled: String(l.currentFilled ?? 0),
-                              currentVacant: String(l.currentVacant ?? 0),
-                              currentAverageSalary: String(l.currentAverageSalary ?? 0),
-                              currentTotalCost: String(l.currentTotalCost ?? 0),
-                              plannedCount: String(l.plannedCount ?? 0),
-                              plannedNewPositions: String(l.plannedNewPositions ?? 0),
-                              plannedEliminations: String(l.plannedEliminations ?? 0),
-                              plannedAverageSalary: String(l.plannedAverageSalary ?? 0),
-                              priority: l.priority ?? 'Medium',
-                              isCritical: Boolean(l.isCritical),
-                              notes: l.notes ?? '',
-                            })
+                            setEditingLine({ id: l.id, positionTitle: l.positionTitle ?? 'this line', form: budgetLineFormFromLine(l) })
                           }
                         >
                           <Pencil className="h-4 w-4" />
@@ -360,265 +576,78 @@ export default function ManpowerBudgetDetailPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={addingLine} onOpenChange={setAddingLine}>
+      <BudgetLineDialog
+        open={addingLine}
+        onOpenChange={(o) => { setAddingLine(o); if (!o) setLine(emptyBudgetLineForm()); }}
+        title="Add a budget line"
+        positions={positions ?? []}
+        value={line}
+        onChange={setLine}
+        busy={busy !== null}
+        onSubmit={async () => {
+          await run('add the line', () => jobArchitectureService.addBudgetLine(id, budgetLinePayload(line)), 'Line added');
+          qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+          setAddingLine(false);
+          setLine(emptyBudgetLineForm());
+        }}
+      />
+
+      <Dialog open={rejectReason !== null} onOpenChange={(o) => !o && setRejectReason(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add a budget line</DialogTitle>
+            <DialogTitle>Reject this budget</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4">
-            <div className="space-y-2">
-              <Label>Position *</Label>
-              <Select value={line.positionId} onValueChange={(v) => setLine({ ...line, positionId: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a position" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(positions ?? []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Posts authorised *</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={line.plannedCount}
-                  onChange={(e) => setLine({ ...line, plannedCount: Number(e.target.value) })}
-                />
-                {/* The API refuses a budget that establishes fewer posts than are already filled. */}
-                <p className="text-xs text-muted-foreground">
-                  Cannot be fewer than the number already in post.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Average salary</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={line.plannedAverageSalary}
-                  onChange={(e) => setLine({ ...line, plannedAverageSalary: Number(e.target.value) })}
-                />
-              </div>
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="mbRejectReason">Why it is being sent back *</Label>
+            <Textarea
+              id="mbRejectReason"
+              rows={4}
+              value={rejectReason ?? ''}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="What the budget holder needs to change before resubmitting."
+            />
+            <p className="text-xs text-muted-foreground">
+              The reason is kept on the budget so the holder can act on it.
+            </p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddingLine(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setRejectReason(null)}>Cancel</Button>
             <Button
-              disabled={!line.positionId || busy !== null}
+              variant="destructive"
+              disabled={busy !== null || !(rejectReason ?? '').trim()}
               onClick={async () => {
-                await run(
-                  'add the line',
-                  () =>
-                    jobArchitectureService.addBudgetLine(id, {
-                      positionId: line.positionId,
-                      plannedCount: line.plannedCount,
-                      plannedNewPositions: line.plannedCount,
-                      plannedEliminations: 0,
-                      plannedAverageSalary: line.plannedAverageSalary,
-                      plannedTotalCost: line.plannedAverageSalary * line.plannedCount,
-                      currentCount: 0,
-                      currentFilled: 0,
-                      currentVacant: 0,
-                      currentAverageSalary: 0,
-                      currentTotalCost: 0,
-                      priority: 'Medium',
-                      isCritical: line.isCritical,
-                    }),
-                  'Line added',
-                );
-                qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
-                setAddingLine(false);
-                setLine({ positionId: '', plannedCount: 1, plannedAverageSalary: 0, isCritical: false });
+                const reason = (rejectReason ?? '').trim();
+                await run('reject', () => jobArchitectureService.rejectBudgetOnWorkflow(id, reason), 'Budget rejected');
+                setRejectReason(null);
               }}
             >
-              Add
+              Reject
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ⚠ A REPLACE, not a patch: the DTO names every figure, so the dialog seeds from the budget
-          and sends the whole set back. Leaving one out writes a zero over it. */}
-      <Dialog open={editingBudget !== null} onOpenChange={(o) => !o && setEditingBudget(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Correct the budget</DialogTitle>
-          </DialogHeader>
-          {editingBudget && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mbFrom">Period from</Label>
-                <Input id="mbFrom" type="date" value={editingBudget.periodStartDate}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, periodStartDate: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbTo">Period to</Label>
-                <Input id="mbTo" type="date" value={editingBudget.periodEndDate}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, periodEndDate: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbCurHead">Headcount today</Label>
-                <Input id="mbCurHead" type="number" min={0} value={editingBudget.currentHeadcount}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, currentHeadcount: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbPlanHead">Headcount planned</Label>
-                <Input id="mbPlanHead" type="number" min={0} value={editingBudget.plannedHeadcount}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, plannedHeadcount: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbCurCost">Salary cost today</Label>
-                <Input id="mbCurCost" type="number" min={0} value={editingBudget.currentSalaryCost}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, currentSalaryCost: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbPlanCost">Salary cost planned</Label>
-                <Input id="mbPlanCost" type="number" min={0} value={editingBudget.plannedSalaryCost}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, plannedSalaryCost: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbHires">New hires planned</Label>
-                <Input id="mbHires" type="number" min={0} value={editingBudget.plannedNewHires}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, plannedNewHires: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbTerms">Terminations planned</Label>
-                <Input id="mbTerms" type="number" min={0} value={editingBudget.plannedTerminations}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, plannedTerminations: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbSalary">Salary budget</Label>
-                <Input id="mbSalary" type="number" min={0} value={editingBudget.salaryBudget}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, salaryBudget: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbBenefits">Benefits budget</Label>
-                <Input id="mbBenefits" type="number" min={0} value={editingBudget.benefitsBudget}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, benefitsBudget: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbRecruit">Recruitment budget</Label>
-                <Input id="mbRecruit" type="number" min={0} value={editingBudget.recruitmentBudget}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, recruitmentBudget: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mbTraining">Training budget</Label>
-                <Input id="mbTraining" type="number" min={0} value={editingBudget.trainingBudget}
-                  onChange={(e) => setEditingBudget({ ...editingBudget, trainingBudget: e.target.value })} />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingBudget(null)}>Cancel</Button>
-            <Button
-              disabled={busy !== null}
-              onClick={async () => {
-                if (!editingBudget) return;
-                await run(
-                  'correct the budget',
-                  () =>
-                    jobArchitectureService.updateBudget(id, {
-                      id,
-                      periodStartDate: new Date(editingBudget.periodStartDate).toISOString(),
-                      periodEndDate: new Date(editingBudget.periodEndDate).toISOString(),
-                      currentHeadcount: Number(editingBudget.currentHeadcount || 0),
-                      currentSalaryCost: Number(editingBudget.currentSalaryCost || 0),
-                      plannedHeadcount: Number(editingBudget.plannedHeadcount || 0),
-                      plannedSalaryCost: Number(editingBudget.plannedSalaryCost || 0),
-                      plannedNewHires: Number(editingBudget.plannedNewHires || 0),
-                      plannedTerminations: Number(editingBudget.plannedTerminations || 0),
-                      salaryBudget: Number(editingBudget.salaryBudget || 0),
-                      benefitsBudget: Number(editingBudget.benefitsBudget || 0),
-                      recruitmentBudget: Number(editingBudget.recruitmentBudget || 0),
-                      trainingBudget: Number(editingBudget.trainingBudget || 0),
-                      businessJustification: editingBudget.businessJustification || null,
-                    }),
-                  'Budget corrected',
-                );
-                setEditingBudget(null);
-              }}
-            >
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={editingLine !== null} onOpenChange={(o) => !o && setEditingLine(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Correct the line for {editingLine?.positionTitle}</DialogTitle>
-          </DialogHeader>
-          {editingLine && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mlPlanned">Posts planned</Label>
-                <Input id="mlPlanned" type="number" min={0} value={editingLine.plannedCount}
-                  onChange={(e) => setEditingLine({ ...editingLine, plannedCount: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mlNew">New posts</Label>
-                <Input id="mlNew" type="number" min={0} value={editingLine.plannedNewPositions}
-                  onChange={(e) => setEditingLine({ ...editingLine, plannedNewPositions: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mlFilled">Filled today</Label>
-                <Input id="mlFilled" type="number" min={0} value={editingLine.currentFilled}
-                  onChange={(e) => setEditingLine({ ...editingLine, currentFilled: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mlAvg">Average salary</Label>
-                <Input id="mlAvg" type="number" min={0} value={editingLine.plannedAverageSalary}
-                  onChange={(e) => setEditingLine({ ...editingLine, plannedAverageSalary: e.target.value })} />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingLine(null)}>Cancel</Button>
-            <Button
-              disabled={busy !== null}
-              onClick={async () => {
-                if (!editingLine) return;
-                const plannedCount = Number(editingLine.plannedCount || 0);
-                const plannedAverageSalary = Number(editingLine.plannedAverageSalary || 0);
-                await run(
-                  'correct the line',
-                  () =>
-                    jobArchitectureService.updateBudgetLine(editingLine.id, {
-                      id: editingLine.id,
-                      currentCount: Number(editingLine.currentCount || 0),
-                      currentFilled: Number(editingLine.currentFilled || 0),
-                      currentVacant: Number(editingLine.currentVacant || 0),
-                      currentAverageSalary: Number(editingLine.currentAverageSalary || 0),
-                      currentTotalCost: Number(editingLine.currentTotalCost || 0),
-                      plannedCount,
-                      plannedNewPositions: Number(editingLine.plannedNewPositions || 0),
-                      plannedEliminations: Number(editingLine.plannedEliminations || 0),
-                      plannedAverageSalary,
-                      // Kept consistent with the figures above rather than left stale.
-                      plannedTotalCost: plannedAverageSalary * plannedCount,
-                      priority: editingLine.priority as any,
-                      isCritical: editingLine.isCritical,
-                      notes: editingLine.notes || null,
-                    }),
-                  'Line corrected',
-                );
-                qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
-                setEditingLine(null);
-              }}
-            >
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {editingLine && (
+        <BudgetLineDialog
+          open
+          onOpenChange={(o) => !o && setEditingLine(null)}
+          title={`Correct the line for ${editingLine.positionTitle}`}
+          positions={positions ?? []}
+          value={editingLine.form}
+          onChange={(form) => setEditingLine({ ...editingLine, form })}
+          busy={busy !== null}
+          positionLocked
+          onSubmit={async () => {
+            await run(
+              'correct the line',
+              () => jobArchitectureService.updateBudgetLine(editingLine.id, { id: editingLine.id, ...budgetLinePayload(editingLine.form) }),
+              'Line corrected',
+            );
+            qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+            setEditingLine(null);
+          }}
+        />
+      )}
 
       <ConfirmationDialog
         open={removingLine !== null}
@@ -636,6 +665,61 @@ export default function ManpowerBudgetDetailPage() {
       />
 
       <ConfirmationDialog
+        open={addingFromEstablishment}
+        onOpenChange={setAddingFromEstablishment}
+        title="Add posts from the establishment?"
+        description="Every post in the unit and the units under it that is not yet on this budget gets a line: posts authorised from the establishment, new posts from the gap and the exits due, the salary from the scale. Lines already here are left exactly as they are."
+        confirmText="Add posts"
+        onConfirm={async () => {
+          await run('add posts from the establishment', async () => {
+            const r = await jobArchitectureService.addLinesFromEstablishment(id, true);
+            toast.message(`${r.added} added · ${r.alreadyOnBudget} already on the budget`);
+          }, 'Posts added');
+          qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+          setAddingFromEstablishment(false);
+        }}
+      />
+
+      <Dialog open={importResult !== null} onOpenChange={(o) => { if (!o) setImportResult(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{importResult?.applied ? 'Workbook imported' : 'Workbook not imported'}</DialogTitle>
+            <DialogDescription>{importResult?.message}</DialogDescription>
+          </DialogHeader>
+          {importResult && importResult.applied && (
+            <p className="text-sm">
+              {importResult.created} line(s) added · {importResult.updated} updated · {importResult.unchanged} unchanged · {importResult.skipped} row(s) left alone
+            </p>
+          )}
+          {importResult && importResult.errors.length > 0 && (
+            <div className="max-h-80 overflow-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">Row</TableHead>
+                    <TableHead className="w-40">Column</TableHead>
+                    <TableHead>Problem</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {importResult.errors.map((e, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{e.row}</TableCell>
+                      <TableCell>{e.column ?? '—'}</TableCell>
+                      <TableCell>{e.message}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setImportResult(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmationDialog
         open={removingBudget}
         onOpenChange={setRemovingBudget}
         title="Delete this budget?"
@@ -647,6 +731,15 @@ export default function ManpowerBudgetDetailPage() {
           router.push('/hr/manpower-budgets');
         }}
       />
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5">{value}</dd>
     </div>
   );
 }

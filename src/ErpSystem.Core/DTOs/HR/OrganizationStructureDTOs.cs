@@ -194,6 +194,12 @@ public class OrganizationUnitDto : BaseDto
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? AccountCode { get; set; }
+
+    /// <summary>
+    /// The chart-of-accounts row this unit is charged to (round 2, lane B2). <c>AccountCode</c>
+    /// above is its snapshot, taken when the unit was last saved.
+    /// </summary>
+    public Guid? FinanceAccountId { get; set; }
     public string? Description { get; set; }
     public Guid OrganizationLevelId { get; set; }
     public string? LevelName { get; set; }
@@ -220,6 +226,15 @@ public class CreateOrganizationUnitDto : CreateDtoBase
 
     [MaxLength(100)]
     public string? AccountCode { get; set; }
+    /// <summary>
+    /// The chart-of-accounts row to charge this unit to (round 2, lane B2; plan § 6.2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set the service OVERWRITES <c>AccountCode</c> with the account's own code, so
+    /// the two cannot disagree. Left null, <c>AccountCode</c> keeps whatever free text it is sent —
+    /// which is how every unit that predates this lane goes on working.
+    /// </remarks>
+    public Guid? FinanceAccountId { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }
@@ -235,6 +250,29 @@ public class CreateOrganizationUnitDto : CreateDtoBase
     public int Sequence { get; set; } = 1;
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// The day the unit's initial placement (and its first head, if one is named) took effect.
+    /// Today when omitted.
+    /// </summary>
+    /// <remarks>
+    /// Demo feedback round 2, O-3a/O-3b: creating a unit wrote no history row at all, so a unit's
+    /// log began with its first restructure and said nothing about where it started. The initial
+    /// placement is now recorded on create, effective-dated by the caller — a structure entered
+    /// after the fact can carry the date it really took effect.
+    /// </remarks>
+    public DateOnly? EffectiveFrom { get; set; }
+
+    /// <summary>Set only when the initial arrangement is already known to have ended.</summary>
+    public DateOnly? EffectiveTo { get; set; }
+
+    /// <summary>Why the unit was created, on the initial history row.</summary>
+    [MaxLength(500)]
+    public string? ChangeReason { get; set; }
+
+    /// <summary>Anything else worth recording against the initial row (memo, minute, approval).</summary>
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
 }
 
 /// <summary>
@@ -251,6 +289,15 @@ public class UpdateOrganizationUnitDto : UpdateDtoBase
 
     [MaxLength(100)]
     public string? AccountCode { get; set; }
+    /// <summary>
+    /// The chart-of-accounts row to charge this unit to (round 2, lane B2; plan § 6.2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set the service OVERWRITES <c>AccountCode</c> with the account's own code, so
+    /// the two cannot disagree. Left null, <c>AccountCode</c> keeps whatever free text it is sent —
+    /// which is how every unit that predates this lane goes on working.
+    /// </remarks>
+    public Guid? FinanceAccountId { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }
@@ -279,6 +326,19 @@ public class UpdateOrganizationUnitDto : UpdateDtoBase
     /// </remarks>
     [MaxLength(500)]
     public string? ChangeReason { get; set; }
+
+    /// <summary>
+    /// The day a reparent or change of head performed by this update took effect. Today when
+    /// omitted; ignored, like <see cref="ChangeReason"/>, when the update records no history.
+    /// </summary>
+    public DateOnly? EffectiveFrom { get; set; }
+
+    /// <summary>Set only when the new arrangement is already known to have ended.</summary>
+    public DateOnly? EffectiveTo { get; set; }
+
+    /// <summary>Anything else worth recording on the history row(s) this update writes.</summary>
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
 }
 
 /// <summary>
@@ -291,8 +351,24 @@ public class OrganizationUnitSummaryDto
     public string Code { get; set; } = string.Empty;
     public Guid OrganizationLevelId { get; set; }
     public string? LevelName { get; set; }
+
+    /// <summary>
+    /// The level's tier number and structure, so a picker can rank units without a second read.
+    /// </summary>
+    /// <remarks>
+    /// Demo feedback round 2, X-10: the level→unit cascading picker has to offer only units at a
+    /// tier ABOVE the one being placed (a lower number), within the same structure. Neither fact
+    /// was on this DTO, so every screen either listed every unit flat or fetched the levels too.
+    /// </remarks>
+    public int LevelNumber { get; set; }
+    public Guid StructureId { get; set; }
     public Guid? ParentUnitId { get; set; }
     public string? ParentUnitName { get; set; }
+
+    /// <summary>
+    /// <c>/ancestor/…/self</c>. Lets a picker exclude a unit's own subtree when re-parenting it.
+    /// </summary>
+    public string Path { get; set; } = string.Empty;
     public bool IsActive { get; set; }
 }
 
@@ -377,6 +453,7 @@ public class OrganizationUnitHistoryDto : BaseDto
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
     public string? ChangeReason { get; set; }
+    public string? Notes { get; set; }
 
     /// <summary>
     /// What kind of change this row records: <c>Restructure</c>, <c>Leadership Change</c> or <c>Other</c>.
@@ -389,6 +466,73 @@ public class OrganizationUnitHistoryDto : BaseDto
     /// filter predicate is written against too.
     /// </remarks>
     public string ChangeType { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// The user-supplied part of a history row: when the arrangement took effect, when (if already
+/// known) it ended, and anything beyond the reason worth keeping. Carried by the move and
+/// change-head requests; the create and update DTOs carry the same three fields inline.
+/// </summary>
+/// <remarks>
+/// Demo feedback round 2, O-3b. <c>EffectiveFrom</c> was always "today" — a restructure minuted
+/// last month and entered this morning was dated this morning — and <c>EffectiveTo</c> was only
+/// ever written by the next row in the series. Both are now the caller's to state; the series
+/// rule still closes an open row when the caller does not.
+/// </remarks>
+public class OrganizationUnitHistoryStampDto
+{
+    public DateOnly? EffectiveFrom { get; set; }
+    public DateOnly? EffectiveTo { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// A change-log entry recorded by hand: something the structure's writers cannot express — a
+/// renaming minuted by the board, a merger recorded before the units were rebuilt, a correction
+/// to the record. It moves no parent and appoints no head, so it classifies as <c>Other</c>.
+/// </summary>
+/// <remarks>
+/// Admin-tier on purpose. The log stayed unwritable by hand until demo feedback round 2 asked
+/// for the dates to be the user's; a hand-written row needs a reason, which is why
+/// <see cref="ChangeReason"/> is required here and optional on the system-written rows.
+/// </remarks>
+public class CreateOrganizationUnitHistoryDto : CreateDtoBase
+{
+    [Required]
+    public Guid OrganizationUnitId { get; set; }
+
+    [Required]
+    public DateOnly EffectiveFrom { get; set; }
+
+    public DateOnly? EffectiveTo { get; set; }
+
+    [Required]
+    [MaxLength(500)]
+    public string ChangeReason { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Corrects the dates, reason and notes of an existing row. The four ids that say WHAT changed
+/// are not editable — a row that says something different from what happened is corrected by
+/// recording what happened, not by rewriting the record.
+/// </summary>
+public class UpdateOrganizationUnitHistoryDto : UpdateDtoBase
+{
+    [Required]
+    public DateOnly EffectiveFrom { get; set; }
+
+    public DateOnly? EffectiveTo { get; set; }
+
+    [MaxLength(500)]
+    public string? ChangeReason { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
 }
 
 /// <summary>
@@ -808,6 +952,18 @@ public class LocationSummaryDto
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? LevelName { get; set; }
+
+    /// <summary>
+    /// Structure, level and tier number, so the location picker can cascade level → location
+    /// the way the unit picker does (demo feedback round 2, O-5 / X-10).
+    /// </summary>
+    public Guid StructureId { get; set; }
+    public Guid LocationLevelId { get; set; }
+    public int LevelNumber { get; set; }
+    public Guid? ParentLocationId { get; set; }
+
+    /// <summary><c>/ancestor/…/self</c>, for excluding a location's own subtree when re-parenting it.</summary>
+    public string Path { get; set; } = string.Empty;
     public string? City { get; set; }
     public string? CountryName { get; set; }
     public bool IsActive { get; set; }

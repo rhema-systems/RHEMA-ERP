@@ -40,7 +40,8 @@ public sealed class QuantitySurveyPaymentCertificateService(
     IDocumentOutputService documentOutput,
     IControlledFileUploadService controlledFiles,
     ICentralDocumentRepositoryFileService centralDocuments,
-    IProcurementBudgetCommitmentLifecycleService budgetCommitments) : IQuantitySurveyPaymentCertificateService
+    IProcurementBudgetCommitmentLifecycleService budgetCommitments,
+    IApSupplierIdentityService supplierIdentity) : IQuantitySurveyPaymentCertificateService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -482,9 +483,15 @@ public sealed class QuantitySurveyPaymentCertificateService(
         if (taxableBase < 0m)
             throw Conflict("The certificate tax snapshot exceeds its net payable amount.");
 
+        // This is the purpose-authorized handoff of an approved Works certificate.
+        // Finance owns the tenant-safe, idempotent partner-to-supplier projection; normal
+        // invoice entry still cannot implicitly onboard an unlinked contractor.
+        var supplier = await supplierIdentity.ResolveByBusinessPartnerAsync(contract.BusinessPartnerId, token);
+        if (supplier.BusinessPartnerId != contract.BusinessPartnerId || supplier.SupplierId == Guid.Empty)
+            throw Conflict("The Finance supplier identity does not match the certificate's contractor.");
         var invoice = await vendorInvoices.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = contract.BusinessPartnerId,
+            SupplierId = supplier.SupplierId,
             SupplierInvoiceNumber = entity.CertificateNumber,
             InvoiceDate = entity.IssueDate,
             ReceivedDate = DateTime.UtcNow,
@@ -577,14 +584,14 @@ public sealed class QuantitySurveyPaymentCertificateService(
             await controlledFiles.DeleteAsync(TenantId, upload.Record.Id, UserId, token);
             throw Conflict("The generated certificate failed its central integrity scan.");
         }
-        var metadataAccessProfile = await db.CentralDocumentMetadataTemplates.AsNoTracking()
+        var metadataTemplate = await db.CentralDocumentMetadataTemplates.AsNoTracking()
             .Where(value => value.TenantId == TenantId &&
                 value.Id == entity.CertificateMetadataTemplateId &&
                 value.TemplateCode == entity.CertificateMetadataTemplateCodeSnapshot &&
                 value.IsActive && value.PublishedAt.HasValue && !value.IsDeleted)
-            .Select(value => value.AccessProfile)
+            .Select(value => new { value.AccessProfile, value.DocumentType })
             .SingleOrDefaultAsync(token);
-        if (string.IsNullOrWhiteSpace(metadataAccessProfile))
+        if (metadataTemplate is null || string.IsNullOrWhiteSpace(metadataTemplate.AccessProfile))
         {
             await controlledFiles.DeleteAsync(TenantId, upload.Record.Id, UserId, token);
             throw Conflict("The frozen payment-certificate metadata template is no longer published and available.");
@@ -598,15 +605,18 @@ public sealed class QuantitySurveyPaymentCertificateService(
                 FileUploadRecordId = upload.Record.Id, SourceModule = "QuantitySurvey",
                 SourceLabel = "Quantity Survey payment certificate", SourceEntityType = nameof(ProjectPaymentCertificate),
                 SourceRecordId = entity.Id, SourceRecordReference = entity.CertificateNumber,
-                Title = entity.Title, DocumentType = "PaymentCertificate",
+                Title = entity.Title, DocumentType = metadataTemplate.DocumentType,
                 MetadataTemplateCode = entity.CertificateMetadataTemplateCodeSnapshot,
-                AccessProfile = metadataAccessProfile, VersionStatus = "Approved", RequirePublishedGovernance = true,
+                AccessProfile = metadataTemplate.AccessProfile, VersionStatus = "Approved", RequirePublishedGovernance = true,
                 ChangeSummary = "Approved QS payment certificate generated from frozen valuation and policy lineage.",
                 MetadataValues =
                 [
                     new("projectId", "Project ID", entity.ProjectId.ToString(), "guid"),
                     new("valuationWorksheetId", "Valuation worksheet ID", entity.QuantitySurveyValuationWorksheetId?.ToString(), "guid"),
                     new("certificateNumber", "Certificate number", entity.CertificateNumber),
+                    new("contractId", "Contract ID", entity.ContractId?.ToString(), "guid"),
+                    new("recordReference", "Certificate reference", entity.CertificateNumber ?? entity.Id.ToString()),
+                    new("evidenceDate", "Certificate issue date", entity.IssueDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), "date"),
                     new("checksumSha256", "Checksum SHA-256", checksum)
                 ]
             }, token);
@@ -614,6 +624,9 @@ public sealed class QuantitySurveyPaymentCertificateService(
         catch { await controlledFiles.DeleteAsync(TenantId, upload.Record.Id, UserId, token); throw; }
         try
         {
+            // Central upload/registration shares this context and can advance aggregate rowversions.
+            db.ChangeTracker.Clear();
+            entity = await RequiredAsync(id, true, token);
             var before = Snapshot(entity);
             entity.CentralDocumentRecordId = document.DocumentRecordId;
             entity.CentralDocumentVersionId = document.DocumentVersionId;
