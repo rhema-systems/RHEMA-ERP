@@ -151,6 +151,7 @@ try {
         'Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
         'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
         'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState',
+        'Move-AtomicEvidenceFile',
         'Get-DisposableTargetMigrationState')) {
         $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
             $node.Name -eq $functionName }, $true))
@@ -559,8 +560,9 @@ exit 0
     }
     if (-not $text.Contains('function Replace-OrdinalIgnoreCase') -or
         $text -match '\.Replace\([^\r\n]+,[^\r\n]+,[^\r\n]+\)' -or
-        $text -match '\.Contains\([^\r\n]+,\s*\[StringComparison\]') {
-        throw 'Disposable reset retains a PowerShell 7-only String API call that cannot run on the VPS Windows PowerShell runtime.'
+        $text -match '\.Contains\([^\r\n]+,\s*\[StringComparison\]' -or
+        $text -match '\[System\.IO\.File\]::Move\([^\r\n]+,[^\r\n]+,[^\r\n]+\)') {
+        throw 'Disposable reset retains a PowerShell 7-only API call that cannot run on the VPS Windows PowerShell runtime.'
     }
     $resetStartedIndex = $reset.IndexOf("Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'", [StringComparison]::Ordinal)
     $invokeBoundaryIndex = $reset.IndexOf("Invoke-SqlWithSanitizedEvidence `$databaseTarget.Builder 'master' '' `$destructiveSqlPath", [StringComparison]::Ordinal)
