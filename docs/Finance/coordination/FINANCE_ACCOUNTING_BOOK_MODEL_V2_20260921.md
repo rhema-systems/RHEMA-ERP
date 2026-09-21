@@ -55,12 +55,13 @@ Migration `20260921154920_AccountingBookModelV2` has been authored and reviewed 
 - Added a combined Delta ledger inquiry and UI that labels posted base journals as `Inherited` and Delta journals as `Adjustment`, without duplicating base postings.
 - Added V2 create/edit UX for Delta posting windows and Parallel replication/opening/translation settings.
 - Corrected Primary-to-Parallel conversion to persist and apply the source-to-target multiplier (`InverseRate` under the current legacy exchange-rate storage contract).
+- Made zero-opening Parallel evidence use the Parallel book currency rather than the tenant currency, and added explicit UI warnings explaining the historical transactions excluded by each replication cutoff/opening choice.
 
 ## Verification evidence
 
 - `dotnet build src/ErpSystem.Api/ErpSystem.Api.csproj --no-restore`: passed, 0 errors (repository warnings remain).
 - Frontend `npm run type-check` filtered to changed Finance files: no changed-file errors; the repository-wide command still reports unrelated baseline TypeScript failures.
-- V2-focused backend suite: 6 passed, covering Primary creation prohibition, multi-Delta aggregation/order, historical Delta ledger labels, protected Parallel accounts, missing-rate atomic rollback, and immutable translated replication.
+- V2-focused backend suite: 6 passed in the combined run, plus the 4-test model suite passed after adding USD zero-opening currency coverage. Coverage includes Primary creation prohibition, multi-Delta aggregation/order, historical Delta ledger labels, protected Parallel accounts, missing-rate atomic rollback, and immutable translated replication.
 - Delta ledger/report frontend tests: 4 passed across 2 files.
 - Targeted `AccountingBookPeriodInitializationC4Tests`: 20 passed; 3 legacy assertions fail because they require removed behavior (per-book close readiness, Primary lifecycle transitions, and inactive derived mappings). These tests must be replaced with V2 assertions.
 - No migration was applied and no database was reset.

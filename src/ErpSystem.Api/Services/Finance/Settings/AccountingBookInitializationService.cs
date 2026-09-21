@@ -71,9 +71,10 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             .ToListAsync(cancellationToken);
         var latest = balances.GroupBy(item => item.AccountId).ToDictionary(group => group.Key,
             group => group.OrderByDescending(item => item.FiscalPeriod.EndDate).ThenByDescending(item => item.FiscalPeriod.PeriodNumber).First().ClosingBalance);
+        var initializationCurrency = book.FunctionalCurrencyCode ?? tenantCurrency;
         return new AccountingBookInitializationPreparationDto { AccountingBookId = book.Id, AccountingBookCode = book.Code, Mode = parsedMode.ToString(),
             CutoffDate = cutoffDate.Date, CutoffFiscalPeriodId = cutoffPeriod.Id, CutoffFiscalPeriodCode = cutoffPeriod.PeriodCode,
-            SourceAccountingBookId = source?.Id, SourceAccountingBookCode = source?.Code, FunctionalCurrencyCode = tenantCurrency,
+            SourceAccountingBookId = source?.Id, SourceAccountingBookCode = source?.Code, FunctionalCurrencyCode = initializationCurrency,
             Accounts = mappings.Select(item => new AccountingBookInitializationPreparationLineDto { AccountId = item.AccountId,
                 AccountNumber = item.Account.AccountNumber, AccountName = item.Account.AccountName, AccountClassificationId = item.AccountClassificationId!.Value,
                 AccountClassificationCode = item.AccountClassification!.Code, AuthoritativeSignedBalance = latest.GetValueOrDefault(item.AccountId) }).ToList() };
@@ -559,10 +560,12 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             throw new InvalidOperationException("Initialization contains non-zero evidence for an account that was not effective at the cutoff.");
         var tenantCurrency = await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId).Select(item => item.BaseCurrency).SingleOrDefaultAsync(ct);
         if (tenantCurrency is not { Length: 3 } || tenantCurrency.Any(ch => ch is < 'A' or > 'Z')) throw new InvalidOperationException("Canonical tenant functional-currency authority is required.");
+        var initializationCurrency = book.FunctionalCurrencyCode ?? tenantCurrency;
         foreach (var line in lines)
         {
             line.CurrencyCode = line.CurrencyCode?.Trim() ?? string.Empty;
-            if (!string.Equals(line.CurrencyCode, tenantCurrency, StringComparison.Ordinal)) throw new InvalidOperationException("Every opening line must use the exact tenant functional currency.");
+            if (!string.Equals(line.CurrencyCode, initializationCurrency, StringComparison.Ordinal))
+                throw new InvalidOperationException("Every opening line must use the exact initialized-book functional currency.");
             if (line.OpeningDebit < 0 || line.OpeningCredit < 0 || line.OpeningDebit > 0 && line.OpeningCredit > 0) throw new InvalidOperationException("Opening debit/credit evidence is invalid.");
         }
         var authorityBook = source ?? book;

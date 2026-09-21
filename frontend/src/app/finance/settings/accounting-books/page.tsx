@@ -1560,6 +1560,30 @@ export default function AccountingBooksSettingsPage() {
                     </Select>
                   </div>
                 )}
+                {form.parallelOpeningMode === 'ZeroOpening' && (
+                  <Alert className="sm:col-span-2 border-amber-300 bg-amber-50 text-amber-950">
+                    <AlertTitle>Earlier Primary activity will not be copied</AlertTitle>
+                    <AlertDescription>
+                      This Parallel book starts at zero. Primary journals dated before the replication start date remain outside this foreign-currency ledger. Use governed opening conversion or historical replay when that history must be represented.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {form.parallelOpeningMode === 'GovernedOpeningConversion' && (
+                  <Alert className="sm:col-span-2">
+                    <AlertTitle>Opening balances will be translated</AlertTitle>
+                    <AlertDescription>
+                      The approved Primary closing balances at the cutoff will establish this book&apos;s opening; automatic transaction replication begins after that cutoff.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {form.parallelOpeningMode === 'HistoricalReplay' && (
+                  <Alert className="sm:col-span-2">
+                    <AlertTitle>Full rate history required</AlertTitle>
+                    <AlertDescription>
+                      Every replayed Primary journal requires an approved rate for its accounting date. Missing rate evidence blocks activation rather than silently excluding transactions.
+                    </AlertDescription>
+                  </Alert>
+                )}
               </>
             )}
             <div className="sm:col-span-2">

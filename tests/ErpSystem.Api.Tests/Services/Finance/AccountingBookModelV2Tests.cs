@@ -109,6 +109,7 @@ public sealed class AccountingBookModelV2Tests
     {
         await using var db = Context();
         var tenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "V2", Name = "V2", BaseCurrency = "GHS", Status = TenantStatus.Active });
         var primary = Book(tenantId, "BASE", AccountingBookType.PrimaryFull, null, AccountingBookLifecycleStatus.Active);
         var parallel = Book(tenantId, "USD_PARALLEL", AccountingBookType.ParallelFull, primary.Id, AccountingBookLifecycleStatus.Configuring);
         parallel.FunctionalCurrencyCode = "USD";
@@ -122,6 +123,13 @@ public sealed class AccountingBookModelV2Tests
         AddPrimaryMapping(db, tenantId, primary, asset, "ASSET");
         AddPrimaryMapping(db, tenantId, primary, equity, "EQUITY");
         AddPrimaryMapping(db, tenantId, primary, expense, "OTHER_EXPENSE");
+        db.FiscalPeriods.Add(new FiscalPeriod
+        {
+            TenantId = tenantId, FiscalYearId = Guid.NewGuid(), PeriodName = "December 2025",
+            PeriodCode = "2025-12", PeriodNumber = 12, PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2025, 12, 31),
+            PeriodDays = 31, PeriodStatus = "Closed", IsClosed = true
+        });
         await db.SaveChangesAsync();
 
         var service = new AccountingBookInitializationService(
@@ -135,6 +143,11 @@ public sealed class AccountingBookModelV2Tests
             || item.Id == parallel.CurrencyRoundingAccountId).ToListAsync();
         protectedAccounts.Should().HaveCount(2).And.OnlyContain(item => item.IsSystemAccount && !item.AllowDirectPosting);
         (await db.AccountAccountingBooks.CountAsync(item => item.AccountingBookId == parallel.Id)).Should().Be(5);
+
+        var preparation = await service.PrepareAsync(parallel.Id, nameof(AccountingBookInitializationMode.IndependentOpeningBalances),
+            new DateTime(2025, 12, 31), null);
+        preparation.FunctionalCurrencyCode.Should().Be("USD");
+        preparation.Accounts.Should().HaveCount(5).And.OnlyContain(item => item.AuthoritativeSignedBalance == 0m);
     }
 
     private static AccountingBook Book(Guid tenantId, string code, AccountingBookType type, Guid? baseId,
