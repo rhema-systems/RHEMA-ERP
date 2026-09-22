@@ -305,8 +305,21 @@ public class TransitionJobVacancyDto
     public int? NumberOfInterviewRounds { get; set; }
     public DateOnly? TargetStartDate { get; set; }
     public bool IsSalaryVisible { get; set; }
-    public EmploymentType EmploymentType { get; set; }
-    public WorkMode WorkMode { get; set; }
+    /// <summary>The employment type, or null to leave it as it is.</summary>
+    /// <remarks>
+    /// ⚠ <b>Nullable, and that is the fix.</b> These two were non-nullable with no initialiser,
+    /// unlike <see cref="CreateJobVacancyDto"/> which defaults them. A transition payload that did
+    /// not mention them therefore bound to <c>default</c> = <b>0</b> — a value outside BOTH enums,
+    /// since <c>EmploymentType.Permanent</c> is 1 and <c>WorkMode.OnSite</c> is 1 — and the mapper
+    /// wrote it. Publishing a vacancy through the API without restating every field silently erased
+    /// its employment type and work mode, and <c>JobOfferService.CreateAsync</c> then copied the
+    /// garbage onto every offer raised from it. The UI never hit this because it posts a full
+    /// update payload; a harness sending only what it meant to change did.
+    /// </remarks>
+    public EmploymentType? EmploymentType { get; set; }
+
+    /// <inheritdoc cref="EmploymentType"/>
+    public WorkMode? WorkMode { get; set; }
     public decimal? SalaryRangeMin { get; set; }
     public decimal? SalaryRangeMax { get; set; }
     [MaxLength(10)]
@@ -6805,4 +6818,77 @@ public class PanelistScorecardWorklistDto
     /// screen that offers a scorecard on one is offering a 422.
     /// </summary>
     public bool IsOpen => Status != JobInterviewStatus.Cancelled && Status != JobInterviewStatus.Completed;
+}
+
+// ── The offer defaults proposal (round 4, lane G) ───────────────────────────────────────────────
+
+/// <summary>
+/// What the system proposes for a new offer, and — for every value — where it came from.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this exists.</b> The offer create path already filled several gaps
+/// <i>server-side at save time</i>: probation and notice months fell back to the position's, weekly
+/// hours to 20 or 40, the position snapshot and the benefit list were seeded outright. All of that
+/// happened <b>after</b> HR pressed Save, invisibly — so the form showed empty boxes, HR typed
+/// values that were then silently overridden or silently defaulted, and nobody could see which
+/// number was theirs and which was the system's.</para>
+///
+/// <para>This read moves the proposal to <b>before</b> the form is filled in. Every value is
+/// editable; every value carries its source in <see cref="Sources"/> so the screen can say
+/// <i>"14 days — from the offer validity policy"</i> under the box.</para>
+///
+/// <para>⚠ <b><see cref="Sources"/> carries an entry only where a value was actually resolved.</b>
+/// A field the system could not derive comes back null with <b>no</b> source line, rather than a
+/// sentence explaining a number that is not there. Rendering a source for an absent value would be
+/// the same fault as an empty criterion scoring full marks: an unanswerable question dressed up as
+/// an answer.</para>
+/// </remarks>
+public class JobOfferDefaultsDto
+{
+    public Guid JobApplicationId { get; set; }
+    public string ApplicationNumber { get; set; } = string.Empty;
+    public string CandidateName { get; set; } = string.Empty;
+    public string VacancyNumber { get; set; } = string.Empty;
+    public string PositionTitle { get; set; } = string.Empty;
+    public string DepartmentName { get; set; } = string.Empty;
+    public string EmploymentTypeName { get; set; } = string.Empty;
+
+    // ── placement ──
+    public Guid? LocationLevelId { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
+
+    // ── terms ──
+    public int? ContractDurationMonths { get; set; }
+    public int? ProbationPeriodMonths { get; set; }
+    public int? NoticePeriodMonths { get; set; }
+    public int? AnnualLeaveDays { get; set; }
+    public decimal? WeeklyHours { get; set; }
+    public bool IsConditional { get; set; }
+    public DateOnly? ProposedStartDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+
+    // ── money ──
+    public Guid? SalaryGradeId { get; set; }
+    public string? SalaryGradeName { get; set; }
+    public decimal? SalaryGradeMin { get; set; }
+    public decimal? SalaryGradeMax { get; set; }
+    public Guid? SalaryLevelId { get; set; }
+    public string? SalaryLevelName { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+    public int? SalaryNotchNumber { get; set; }
+    public decimal? BaseSalary { get; set; }
+    public string? CurrencyCode { get; set; }
+
+    /// <summary>
+    /// camelCase field name → the one-line explanation of where that value came from. Only
+    /// populated for values that were actually resolved.
+    /// </summary>
+    public Dictionary<string, string> Sources { get; set; } = new();
+
+    /// <summary>
+    /// Things the system could not propose and the reason, so the screen can say what HR has to
+    /// supply by hand rather than leaving a silently empty box.
+    /// </summary>
+    public List<string> Unresolved { get; set; } = new();
 }

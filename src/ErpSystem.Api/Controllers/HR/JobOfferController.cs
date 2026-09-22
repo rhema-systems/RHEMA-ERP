@@ -151,6 +151,25 @@ public class JobOfferController : ControllerBase
     // CRUD
     // =========================================================================
 
+    /// <summary>
+    /// What the system proposes for a new offer against this application, and where each value
+    /// came from (round 4, lane G1).
+    /// </summary>
+    /// <remarks>
+    /// <para>Writes nothing. Every value is a starting point the recruiter may overwrite; the
+    /// server’s own rules still run on create and still win.</para>
+    ///
+    /// <para>⚠ Gated on the WRITE policy, not the read one — it is the first step of raising an
+    /// offer, and it discloses the post’s salary band and the requisition’s terms.</para>
+    /// </remarks>
+    [HttpGet("defaults")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    [ProducesResponseType(typeof(JobOfferDefaultsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<JobOfferDefaultsDto>> GetDefaults(
+        [FromQuery] Guid applicationId, CancellationToken ct = default)
+        => Ok(await _service.GetDefaultsAsync(applicationId, ct));
+
     [HttpPost]
     [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobOfferDto>> Create([FromBody] CreateJobOfferDto dto)

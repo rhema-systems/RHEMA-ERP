@@ -4292,6 +4292,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 ReviewDueLeadDays              = 30,
                 ContractExpiryLeadDays         = 60,
                 ProbationEndLeadDays           = 30,
+                // Round 4, D-10 — how long an offer stays open when HR sets no expiry.
+                OfferValidityDays              = 14,
                 // Round 2, lane C2 — the certification sweep's default lead time.
                 CertificationExpiryLeadDays    = 60,
                 // Round 2, lane F2 — a committee action item is a thing somebody does on Tuesday,

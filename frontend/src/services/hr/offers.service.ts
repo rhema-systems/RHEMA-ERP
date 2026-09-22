@@ -1,6 +1,7 @@
 import { apiService } from '../api.service';
 import { hrDocumentService } from './hr-document.service';
 import type {
+  JobOfferDefaults,
   ApplyCheckTemplate,
   CheckItemStatus,
   ConfirmHireStart,
@@ -119,6 +120,17 @@ class JobOfferService {
    * employment type, work mode) is taken from the application's vacancy and position, and the DTO
    * refuses any unmapped member with a 400 rather than dropping it silently.
    */
+  /**
+   * What the system proposes for a new offer against this application, with the source of every
+   * value (round 4, lane G1). **Writes nothing** — call it as often as the form needs.
+   *
+   * ⚠ Gated on the recruitment WRITE permission, not the read one: it is the first step of
+   * raising an offer and it discloses the post’s salary band.
+   */
+  getDefaults(applicationId: string): Promise<JobOfferDefaults> {
+    return apiService.get<JobOfferDefaults>(`${this.baseUrl}/defaults`, { applicationId });
+  }
+
   create(payload: CreateJobOffer): Promise<JobOffer> {
     return apiService.post<JobOffer>(this.baseUrl, payload);
   }

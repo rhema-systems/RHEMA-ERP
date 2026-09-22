@@ -910,6 +910,42 @@ seconds: noisy in the log, harmless to correctness, and not the cause of anythin
 
 ---
 
+### Lane G — offer defaults and currency · BUILT 2026-09-22, verification in progress
+
+Harness: `dev-harness/hr-recruitment/run-round4-g.mjs`. Migration:
+`20260922084439_AddOfferValidityDays` (guarded SQL; applied to `ErpSystemDB_UAT`).
+
+**Built as planned** — G1 the defaults endpoint, G2 the form seeded from it with the source of
+every value shown, G3 the currency picker and server-side validation, and D-10 `OfferValidityDays`.
+
+**Changed during the build, with reasons:**
+
+| | Planned | Built | Why |
+|---|---|---|---|
+| Annual leave from "the entitlement for the grade/employment type" | a grade-keyed rule | **the annual leave type’s standard days** | There is no entitlement keyed on grade or employment type in this system. Inventing one would put a number on the offer letter that nothing downstream honours. The source line says which leave type it came from, rather than implying a grade rule that does not exist. |
+| `NdaRequired`/`IsConditional` from the position | both | **`IsConditional` only, derived** | The position has neither flag. `IsConditional` is derived from the post requiring a licence, certification or guarantor — an offer conditional on producing them — and the source line explains why the box arrived ticked. `NdaRequired` has no source at all, so it is left alone rather than guessed. |
+| Currency validation on "create, update and add-benefit" | three paths | **four** | `UpdateBenefitAsync` takes a currency too. Three guarded paths and one unguarded one is not three quarters of a control; it is a control with a door next to it. On that path the check runs BEFORE the assignment, because the entity is tracked. |
+| — | not planned | **`Sources` omits unresolved values entirely** | A caption under an empty box is the same fault as an empty criterion scoring full marks — an unanswerable question dressed as an answer. Unresolved fields are named in `Unresolved` instead, and the form lists them as *"You will need to supply these"*. |
+
+**⚠ Defect 31 — publishing a vacancy through the API erased its employment type and work mode.**
+`TransitionJobVacancyDto.EmploymentType` and `WorkMode` were non-nullable **with no initialiser**,
+unlike `CreateJobVacancyDto` which defaults them. A transition payload that did not mention them
+bound to `default` = **0** — a value outside BOTH enums, since `EmploymentType.Permanent` is 1 and
+`WorkMode.OnSite` is 1 — and the mapper wrote it unconditionally. `JobOfferService.CreateAsync`
+then copies `vacancy.EmploymentType` onto every offer raised from that vacancy, where it drives
+weekly hours and the contract-duration prompt.
+
+Both fields are now nullable on the transition payload and applied only when supplied, so *"not
+mentioned"* stays distinguishable from *"set to zero"*. The UI never hit this because it posts a
+full update payload; a harness sending only what it meant to change did.
+
+⚠ **The weekly-hours VALUE was right — 40 — so a value-only assertion would have passed.** What
+failed was the source line: *"Standard hours for a **0** contract"*. That is the argument for
+making a defaults endpoint state its provenance rather than just its numbers: the provenance is
+checkable, and it caught a data-corruption bug two lanes away from anything this lane touched.
+
+---
+
 ## 9. What the neighbouring suites actually said
 
 ### 9.1 Three harness defects, two of them expensive

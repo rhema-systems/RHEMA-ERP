@@ -38,6 +38,9 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int ContractExpiryLeadDays { get; set; }
     public int ProbationEndLeadDays { get; set; }
 
+    /// <summary>How long an offer stays open when HR sets no expiry (round 4, D-10).</summary>
+    public int OfferValidityDays { get; set; }
+
     /// <summary>
     /// How many days ahead of its due date a team task reminds its assignee (round 2, lane F2).
     /// </summary>
@@ -150,6 +153,10 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(0, 3650)] public int ReviewDueLeadDays { get; set; } = 30;
     [Range(0, 3650)] public int ContractExpiryLeadDays { get; set; } = 60;
     [Range(0, 3650)] public int ProbationEndLeadDays { get; set; } = 30;
+
+    // Round 4, D-10. Range starts at 1, not 0: zero would mean an offer expires the day it is
+    // raised, which is never what anybody means by "how long is this open for".
+    [Range(1, 3650)] public int OfferValidityDays { get; set; } = 14;
 
     // Round 2, lane F2. Range matches the entity's — a task cannot usefully remind more than a
     // year ahead, and 0 means "only once it is due".

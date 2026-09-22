@@ -276,8 +276,10 @@ public static class RecruitmentMappingExtensions
         entity.NumberOfInterviewRounds = dto.NumberOfInterviewRounds;
         entity.TargetStartDate = dto.TargetStartDate;
         entity.IsSalaryVisible = dto.IsSalaryVisible;
-        entity.EmploymentType = dto.EmploymentType;
-        entity.WorkMode = dto.WorkMode;
+        // ⚠ Only when supplied. Both are nullable on the transition payload precisely so that
+        // "not mentioned" stays distinguishable from "set to zero" — zero is outside both enums.
+        if (dto.EmploymentType.HasValue) entity.EmploymentType = dto.EmploymentType.Value;
+        if (dto.WorkMode.HasValue) entity.WorkMode = dto.WorkMode.Value;
         entity.SalaryRangeMin = dto.SalaryRangeMin;
         entity.SalaryRangeMax = dto.SalaryRangeMax;
         entity.SalaryCurrencyCode = dto.SalaryCurrencyCode;

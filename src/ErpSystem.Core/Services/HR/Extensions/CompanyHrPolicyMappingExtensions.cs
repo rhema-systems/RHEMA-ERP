@@ -31,6 +31,7 @@ public static class CompanyHrPolicyMappingExtensions
             ReviewDueLeadDays              = entity.ReviewDueLeadDays,
             ContractExpiryLeadDays         = entity.ContractExpiryLeadDays,
             ProbationEndLeadDays           = entity.ProbationEndLeadDays,
+            OfferValidityDays              = entity.OfferValidityDays,
             TeamTaskReminderLeadDays       = entity.TeamTaskReminderLeadDays,
             SalaryChangeRequiresApproval   = entity.SalaryChangeRequiresApproval,
             CertificationExpiryLeadDays    = entity.CertificationExpiryLeadDays,
@@ -98,6 +99,7 @@ public static class CompanyHrPolicyMappingExtensions
         entity.ReviewDueLeadDays              = dto.ReviewDueLeadDays;
         entity.ContractExpiryLeadDays         = dto.ContractExpiryLeadDays;
         entity.ProbationEndLeadDays           = dto.ProbationEndLeadDays;
+        entity.OfferValidityDays              = dto.OfferValidityDays;
         entity.TeamTaskReminderLeadDays       = dto.TeamTaskReminderLeadDays;
         entity.SalaryChangeRequiresApproval   = dto.SalaryChangeRequiresApproval;
         entity.CertificationExpiryLeadDays    = dto.CertificationExpiryLeadDays;

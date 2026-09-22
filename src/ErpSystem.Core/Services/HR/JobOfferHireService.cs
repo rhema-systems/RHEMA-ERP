@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Requisition;
+using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
@@ -36,6 +37,8 @@ public class JobOfferService : IJobOfferService
     private readonly IEmailService _email;
     private readonly ITemplatedEmailService _templatedEmail;
     private readonly string _portalBaseUrl;
+    private readonly ICompanyHrPolicySettingsService _policySettings;
+    private readonly HrCurrencyBridge _currencies;
 
     public JobOfferService(
         IJobOfferRepository offerRepository,
@@ -51,7 +54,9 @@ public class JobOfferService : IJobOfferService
         ILogger<JobOfferService> logger,
         IEmailService email,
         ITemplatedEmailService templatedEmail,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ICompanyHrPolicySettingsService policySettings,
+        HrCurrencyBridge currencies)
     {
         _offerRepository         = offerRepository;
         _benefitRepository       = benefitRepository;
@@ -66,6 +71,8 @@ public class JobOfferService : IJobOfferService
         _logger                  = logger;
         _email                   = email;
         _templatedEmail          = templatedEmail;
+        _policySettings          = policySettings;
+        _currencies              = currencies;
         // No localhost fallback: this URL goes into offer emails sent to real candidates. A missing
         // config value must fail at startup, not silently mail every candidate a link to localhost.
         _portalBaseUrl           = configuration["CandidatePortal:PortalUrl"]
@@ -121,6 +128,19 @@ public class JobOfferService : IJobOfferService
     /// message blamed the salary rather than the missing configuration. An absent band means the
     /// grade has nothing to say about the number, not that the number is wrong.</para>
     /// </summary>
+    /// <summary>
+    /// Refuses a currency Finance does not hold (round 4, lane G3, § 3 defect 14).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The offer path was the one money-bearing HR surface that never called this. Travel,
+    /// guarantors, succession and requisition costs all validate through the same bridge; an offer
+    /// accepted a hand-typed <c>CurrencyCode</c> of up to ten characters and printed it on the
+    /// letter. <c>optional: true</c> because the column is genuinely nullable — an offer may state
+    /// no salary at all — but a PRESENT code still has to be real.
+    /// </remarks>
+    private Task RequireKnownCurrencyAsync(string? code, CancellationToken ct) =>
+        _currencies.RequireKnownCurrencyAsync(code, ct, optional: true);
+
     private static void EnsureSalaryWithinBand(JobOffer offer)
     {
         if (!offer.BaseSalary.HasValue) return;
@@ -236,6 +256,235 @@ public class JobOfferService : IJobOfferService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// What the system proposes for a new offer against this application, with the source of every
+    /// value (round 4, lane G1). Writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this is a separate read rather than more defaulting inside
+    /// <see cref="CreateAsync"/>.</b> Create already fills gaps — probation and notice from the
+    /// position, weekly hours from the employment type, the whole position snapshot and benefit
+    /// list — but it does so <i>after</i> Save, invisibly. HR saw empty boxes, typed numbers that
+    /// were then silently overridden, and could not tell which value was theirs. Proposing before
+    /// the form is filled in is the same information arriving in time to be useful.</para>
+    ///
+    /// <para>⚠ <b>Nothing here is authoritative and nothing here is enforced.</b> Every value is a
+    /// starting point the recruiter may overwrite; the server's own rules — the salary band check,
+    /// the position snapshot, the status gate — still run on create and still win. A default that
+    /// could not be resolved comes back <b>null with no source line</b>, and is named in
+    /// <c>Unresolved</c> instead, so the screen says what HR must supply rather than showing an
+    /// empty box with a confident caption under it.</para>
+    /// </remarks>
+    public async Task<JobOfferDefaultsDto> GetDefaultsAsync(
+        Guid applicationId, CancellationToken cancellationToken = default)
+    {
+        // ⚠ No role check here. This controller gates every action with
+        // [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)], unlike JobInterviewService
+        // whose rule is per record. Adding a second, different gate in the service would mean two
+        // places to change and one of them forgotten.
+        var tenantId = GetTenantId();
+
+        // A wider read than GetForOfferSeedingAsync: the defaults need the REQUISITION (for the
+        // location and the required-by date) and the grade's level/notch ladder, neither of which
+        // the create path loads. Kept separate rather than widening that query, which runs on every
+        // create and would carry the extra joins for nothing.
+        var application = await _unitOfWork.Repository<JobApplication>().GetQueryable()
+            .Include(a => a.JobCandidate)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position).ThenInclude(p => p!.SalaryGrade)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position).ThenInclude(p => p!.OrganizationUnit)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r!.Location)
+            .FirstOrDefaultAsync(a => a.Id == applicationId && a.TenantId == tenantId && !a.IsDeleted,
+                cancellationToken);
+
+        if (application is null)
+            throw new ArgumentException($"Application '{applicationId}' not found.");
+
+        var vacancy = application.JobVacancy;
+        var position = vacancy?.Position;
+        var requisition = vacancy?.Requisition;
+        var settings = await _policySettings.GetForTenantAsync(tenantId, cancellationToken);
+
+        var dto = new JobOfferDefaultsDto
+        {
+            JobApplicationId = application.Id,
+            ApplicationNumber = application.ApplicationNumber,
+            CandidateName = application.JobCandidate?.FullName ?? string.Empty,
+            VacancyNumber = vacancy?.VacancyNumber ?? string.Empty,
+            PositionTitle = position?.Title ?? string.Empty,
+            DepartmentName = position?.OrganizationUnit?.Name ?? string.Empty,
+            EmploymentTypeName = vacancy?.EmploymentType.ToString() ?? string.Empty,
+        };
+
+        void Source(string field, string why) => dto.Sources[field] = why;
+
+        // ── placement: the requisition said where the post sits ──────────────────────────────
+        if (requisition?.LocationId is { } locationId)
+        {
+            dto.LocationId = locationId;
+            dto.LocationLevelId = requisition.LocationLevelId;
+            dto.LocationName = requisition.Location?.Name;
+            Source("locationId", $"From the requisition {requisition.RequisitionNumber}");
+        }
+        else
+        {
+            dto.Unresolved.Add("Duty station — the requisition behind this vacancy names none.");
+        }
+
+        // ── terms from the position ──────────────────────────────────────────────────────────
+        if (position?.ProbationPeriodMonths is { } probation)
+        {
+            dto.ProbationPeriodMonths = probation;
+            Source("probationPeriodMonths", $"The {position.Title} post's probation period");
+        }
+        else if (settings.DefaultProbationMonths > 0)
+        {
+            dto.ProbationPeriodMonths = settings.DefaultProbationMonths;
+            Source("probationPeriodMonths", "The organisation's default probation period");
+        }
+
+        if (position?.NoticePeriodMonths is { } notice)
+        {
+            dto.NoticePeriodMonths = notice;
+            Source("noticePeriodMonths", $"The {position.Title} post's notice period");
+        }
+
+        // ⚠ Mirrors CreateAsync's own fallback exactly (20 part-time, 40 otherwise). If the two
+        // ever disagree, the form would propose one number and the save would store another.
+        var employmentType = vacancy?.EmploymentType ?? EmploymentType.Permanent;
+        dto.WeeklyHours = employmentType == EmploymentType.PartTime ? 20m : 40m;
+        Source("weeklyHours", $"Standard hours for a {Prettify(employmentType.ToString())} contract");
+
+        // A duration belongs to a contract that ends. Proposing 12 months against a permanent post
+        // is worse than proposing nothing.
+        if (employmentType is EmploymentType.Contract or EmploymentType.Temporary or EmploymentType.Internship)
+        {
+            dto.Unresolved.Add(
+                $"Contract duration — a {Prettify(employmentType.ToString())} appointment needs one, " +
+                "and nothing in the requisition states it.");
+        }
+
+        // ── annual leave ─────────────────────────────────────────────────────────────────────
+        // ⚠ From the ANNUAL leave type's standard entitlement, not from a grade-specific rule:
+        // this system has no entitlement keyed on grade or employment type, and inventing one here
+        // would put a number on the offer letter that nothing downstream honours.
+        var annualLeave = await _unitOfWork.Repository<LeaveType>().GetQueryable()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive
+                     && t.DefaultDaysPerYear > 0
+                     && (t.Name.Contains("Annual") || t.Code == "AL"))
+            .OrderBy(t => t.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (annualLeave is not null)
+        {
+            dto.AnnualLeaveDays = annualLeave.DefaultDaysPerYear;
+            Source("annualLeaveDays", $"The standard entitlement for {annualLeave.Name}");
+        }
+        else
+        {
+            dto.Unresolved.Add("Annual leave days — no active annual leave type carries a standard entitlement.");
+        }
+
+        // ── conditional on pre-employment checks ─────────────────────────────────────────────
+        // Derived, not stored: the position has no IsConditional flag, but a post that demands a
+        // licence, a certification or a guarantor is one whose offer is conditional on producing
+        // them. Stated as a source so HR can see why the box arrived ticked.
+        if (position is not null &&
+            (position.RequiresLicense || position.RequiresCertification || position.RequiresGuarantor))
+        {
+            var needs = new List<string>();
+            if (position.RequiresLicense) needs.Add("a licence");
+            if (position.RequiresCertification) needs.Add("a certification");
+            if (position.RequiresGuarantor) needs.Add("a guarantor");
+            dto.IsConditional = true;
+            Source("isConditional", $"The post requires {Join(needs)}");
+        }
+
+        // ── dates ────────────────────────────────────────────────────────────────────────────
+        if (requisition is not null)
+        {
+            dto.ProposedStartDate = DateOnly.FromDateTime(requisition.DesiredStartDate);
+            Source("proposedStartDate", $"The date requisition {requisition.RequisitionNumber} asked for");
+        }
+
+        // D-10. An offer with no expiry never lapses: it sits Issued while the candidate takes
+        // another job and the vacancy stays notionally filled.
+        dto.ExpiryDate = DateTime.UtcNow.Date.AddDays(settings.OfferValidityDays);
+        Source("expiryDate", $"{settings.OfferValidityDays} days, from the offer validity policy");
+
+        // ── money: the grade's ladder, most specific rung first ──────────────────────────────
+        if (position?.SalaryGrade is { } grade)
+        {
+            dto.SalaryGradeId = grade.Id;
+            dto.SalaryGradeName = grade.Name;
+            dto.SalaryGradeMin = grade.MinSalary;
+            dto.SalaryGradeMax = grade.MaxSalary;
+
+            var entryLevel = await _unitOfWork.Repository<SalaryLevel>().GetQueryable()
+                .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.IsActive && l.SalaryGradeId == grade.Id)
+                .OrderBy(l => l.Sequence)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (entryLevel is not null)
+            {
+                dto.SalaryLevelId = entryLevel.Id;
+                dto.SalaryLevelName = entryLevel.Name;
+
+                var firstNotch = await _unitOfWork.Repository<SalaryNotch>().GetQueryable()
+                    .Where(n => n.TenantId == tenantId && !n.IsDeleted && n.IsActive
+                             && n.SalaryLevelId == entryLevel.Id)
+                    .OrderBy(n => n.NotchNumber)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                // The ladder: an exact notch amount beats a level midpoint beats the grade floor.
+                // Each rung is a real number somebody set; the fallback only ever gets less precise,
+                // never invented.
+                if (firstNotch is not null)
+                {
+                    dto.SalaryNotchId = firstNotch.Id;
+                    dto.SalaryNotchNumber = firstNotch.NotchNumber;
+                    dto.BaseSalary = firstNotch.SalaryAmount;
+                    Source("baseSalary",
+                        $"{grade.Name} · {entryLevel.Name} · notch {firstNotch.NotchNumber}");
+                }
+                else
+                {
+                    dto.BaseSalary = entryLevel.MidSalary;
+                    Source("baseSalary", $"Midpoint of {grade.Name} · {entryLevel.Name} — the level has no notches");
+                }
+
+                Source("salaryLevelId", $"Entry level of {grade.Name}");
+            }
+            else
+            {
+                dto.BaseSalary = grade.MinSalary;
+                Source("baseSalary", $"Minimum of {grade.Name} — the grade has no levels");
+            }
+        }
+        else
+        {
+            dto.Unresolved.Add("Base salary — the post carries no salary grade, so there is no band to start from.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.DefaultCurrencyCode))
+        {
+            dto.CurrencyCode = settings.DefaultCurrencyCode;
+            Source("currencyCode", "The organisation's default currency");
+        }
+
+        return dto;
+    }
+
+    private static string Prettify(string pascal) =>
+        System.Text.RegularExpressions.Regex.Replace(pascal, "(?<!^)([A-Z])", " $1");
+
+    private static string Join(IReadOnlyList<string> parts) => parts.Count switch
+    {
+        0 => string.Empty,
+        1 => parts[0],
+        2 => $"{parts[0]} and {parts[1]}",
+        _ => $"{string.Join(", ", parts.Take(parts.Count - 1))} and {parts[^1]}",
+    };
+
     public async Task<JobOfferDto> CreateAsync(CreateJobOfferDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         var current = GetTenantId();
@@ -283,6 +532,9 @@ public class JobOfferService : IJobOfferService
         if (position is null)
             throw new InvalidOperationException(
                 "The vacancy behind this application has no position, so the offer has no role to describe.");
+
+        // Round 4, lane G3: a hand-typed currency is refused before anything is written.
+        await RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
 
         // Build entity from the client-supplied negotiated fields
         var entity = createDto.ToEntity(current, createdByUserId);
@@ -370,6 +622,7 @@ public class JobOfferService : IJobOfferService
         // \u26a0 Validated AFTER the update is applied. This check used to run first, so it tested the
         // salary already on the record and never the one being saved \u2014 the band guard that create
         // enforces was a no-op on every edit.
+        await RequireKnownCurrencyAsync(entity.CurrencyCode, cancellationToken);
         EnsureSalaryWithinBand(entity);
 
         await _offerRepository.UpdateAsync(entity);
@@ -795,6 +1048,8 @@ public class JobOfferService : IJobOfferService
         if (offer.OfferStatus != JobOfferStatus.Draft && offer.OfferStatus != JobOfferStatus.PendingApproval)
             throw new InvalidOperationException("Benefits can only be added to a Draft or Pending-Approval offer.");
 
+        await RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
+
         var benefit = new JobOfferBenefit
         {
             TenantId = current,
@@ -836,6 +1091,9 @@ public class JobOfferService : IJobOfferService
         if (updateDto.BenefitName != null)  benefit.BenefitName  = updateDto.BenefitName.Trim();
         if (updateDto.Description != null)  benefit.Description  = updateDto.Description;
         if (updateDto.MonetaryValue.HasValue) benefit.MonetaryValue = updateDto.MonetaryValue;
+        // ⚠ Checked BEFORE the assignment. The entity is tracked, so validating afterwards would
+        // leave a refused code sitting on it for whatever else the request goes on to save.
+        await RequireKnownCurrencyAsync(updateDto.CurrencyCode, cancellationToken);
         if (updateDto.CurrencyCode != null)  benefit.CurrencyCode  = updateDto.CurrencyCode.ToUpperInvariant();
         if (updateDto.IsMonetary.HasValue)   benefit.IsMonetary    = updateDto.IsMonetary.Value;
         if (updateDto.DisplayOrder.HasValue) benefit.DisplayOrder  = updateDto.DisplayOrder.Value;

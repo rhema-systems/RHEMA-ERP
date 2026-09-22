@@ -109,6 +109,25 @@ public class CompanyHrPolicySettings : TenantEntity
     public int ProbationEndLeadDays { get; set; } = 30;
 
     /// <summary>
+    /// How long a job offer stays open, in days, when HR does not set an expiry by hand
+    /// (round 4, decision D-10). Default 14.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>This is a default, not a cap.</b> It seeds <c>ExpiryDate</c> on the offer
+    /// defaults endpoint so the form arrives with a sensible date already in it; HR may change it,
+    /// and a longer or shorter one is accepted. What it fixes is that an offer previously arrived
+    /// with <b>no</b> expiry at all unless somebody remembered to type one, and an offer with no
+    /// expiry never lapses — it sits Issued indefinitely while the candidate takes another job.</para>
+    ///
+    /// <para>Non-nullable with a real default, like <c>CertificationExpiryLeadDays</c>: it is in the
+    /// HasData seed and the migration adds it with a DEFAULT, so no tenant's row is left at zero.
+    /// ⚠ Zero here would mean "expires the day it is raised", which is the recurring trap in this
+    /// module — a scaffolded value type defaults to zero and zero is almost never the real default.</para>
+    /// </remarks>
+    [Range(1, 3650)]
+    public int OfferValidityDays { get; set; } = 14;
+
+    /// <summary>
     /// How far ahead of a credential's expiry the certification sweep warns, when the catalogue
     /// row sets no lead time of its own (round 2, lane C2).
     /// </summary>
