@@ -30,6 +30,7 @@ import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitP
 import { CertificationPicker } from '@/components/hr/common/CertificationPicker';
 import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
 import { employeePositionService } from '@/services/hr/employee-position.service';
+import { preEmploymentCheckTemplateService } from '@/services/hr/offers.service';
 import { SKILL_LEVEL_OPTIONS, type EmployeePosition } from '@/types/hr/position';
 import type { StaffLevelListItem } from '@/types/hr/staff-level';
 import type { SalaryGrade } from '@/types/hr/salary';
@@ -76,6 +77,7 @@ export const employeePositionSchema = z.object({
   requiredGuarantorAmount: z.string().optional().or(z.literal('')),
   requiredGuarantorCurrencyCode: z.string().optional().or(z.literal('')),
   requiresLicense: z.boolean(),
+  preEmploymentCheckTemplateId: z.string().nullable(),
   isActive: z.boolean(),
   skillRequirements: z.array(
     z.object({
@@ -219,6 +221,7 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
   requiredGuarantorAmount: '',
   requiredGuarantorCurrencyCode: '',
   requiresLicense: false,
+  preEmploymentCheckTemplateId: null,
   isActive: true,
   skillRequirements: [],
   positionBenefits: [],
@@ -330,6 +333,13 @@ export function EmployeePositionForm({
   const workMode = form.watch('workMode');
   const requiresCertification = form.watch('requiresCertification');
   const requiresGuarantor = form.watch('requiresGuarantor');
+  // The check sets a post can start an offer from. HR-only setup data; an empty list simply means
+  // the picker offers only "Use the organisation default", which is a legitimate state.
+  const checkTemplates = useQuery({
+    queryKey: ['hr', 'pre-employment-check-templates'],
+    queryFn: () => preEmploymentCheckTemplateService.getAll(),
+  });
+
   const requiresLicense = form.watch('requiresLicense');
   const isActive = form.watch('isActive');
   const staffLevelValue = form.watch('staffLevelId') || NONE;
@@ -982,6 +992,38 @@ export function EmployeePositionForm({
                 checked={requiresLicense}
                 onCheckedChange={(v) => form.setValue('requiresLicense', v)}
               />
+            </div>
+            {/* Round 4, lane H1. The check set an offer for this post starts from. ⚠ Leaving it
+                unset does not mean "no checks": the offer falls back to the tenant’s SINGLE active
+                template, and seeds nothing when there are several, because an offer letter tells a
+                candidate what to produce and guessing between templates would commit the company
+                to checks nobody chose. */}
+            <div className="space-y-1.5">
+              <Label htmlFor="preEmploymentCheckTemplateId">Pre-employment checks</Label>
+              <Select
+                value={form.watch('preEmploymentCheckTemplateId') ?? 'none'}
+                onValueChange={(v) =>
+                  form.setValue('preEmploymentCheckTemplateId', v === 'none' ? null : v)
+                }
+              >
+                <SelectTrigger id="preEmploymentCheckTemplateId">
+                  <SelectValue placeholder="Use the organisation default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Use the organisation default</SelectItem>
+                  {(checkTemplates.data ?? [])
+                    .filter((t) => t.isActive)
+                    .map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Seeded onto an offer when it is raised, and printed on the offer letter as what the
+                candidate must produce.
+              </p>
             </div>
             <div className="flex items-center justify-between">
               <Label htmlFor="isActive">Active</Label>

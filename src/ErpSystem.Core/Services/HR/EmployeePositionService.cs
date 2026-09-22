@@ -219,6 +219,7 @@ public class EmployeePositionService : IEmployeePositionService
             RequiredGuarantorAmount = createDto.RequiredGuarantorAmount,
             RequiredGuarantorCurrencyCode = createDto.RequiredGuarantorCurrencyCode,
             RequiresLicense = createDto.RequiresLicense,
+            PreEmploymentCheckTemplateId = createDto.PreEmploymentCheckTemplateId,
             StaffLevelId = createDto.StaffLevelId,
             ReportsToPositionId = createDto.ReportsToPositionId,
             ProbationPeriodMonths = createDto.ProbationPeriodMonths,
@@ -322,6 +323,7 @@ public class EmployeePositionService : IEmployeePositionService
         position.RequiredGuarantorAmount = updateDto.RequiredGuarantorAmount;
         position.RequiredGuarantorCurrencyCode = updateDto.RequiredGuarantorCurrencyCode;
         position.RequiresLicense = updateDto.RequiresLicense;
+        position.PreEmploymentCheckTemplateId = updateDto.PreEmploymentCheckTemplateId;
         position.ExpectedHeadcount = updateDto.ExpectedHeadcount;
         position.MinimumExperienceYears = updateDto.MinimumExperienceYears;
         position.MinimumAge = updateDto.MinimumAge;
@@ -406,6 +408,8 @@ public class EmployeePositionService : IEmployeePositionService
             RequiredGuarantorAmount = position.RequiredGuarantorAmount,
             RequiredGuarantorCurrencyCode = position.RequiredGuarantorCurrencyCode,
             RequiresLicense = position.RequiresLicense,
+            PreEmploymentCheckTemplateId = position.PreEmploymentCheckTemplateId,
+            PreEmploymentCheckTemplateName = position.PreEmploymentCheckTemplate?.Name,
             IsActive = position.IsActive,
             EmployeeCount = 0,
             SkillRequirements = position.SkillRequirements

@@ -534,6 +534,10 @@ public static class RecruitmentEmailCatalog
                 T("NdaRequired", "Truthy when a non-disclosure agreement is required (shows the NDA clause).", "true"),
                 T("IsConditional", "Truthy when the offer is conditional (shows conditions-precedent block).", "true"),
                 T("ConditionsList", "Pre-built HTML <ul> of pre-employment conditions; shown when conditional.", "<ul><li>Satisfactory references</li></ul>"),
+                // Round 4, lane H3. The same list, offered to EVERY letter rather than only a
+                // conditional one — a permanent appointment still asks for references and a medical.
+                T("HasPreEmploymentChecks", "Truthy when the offer carries a pre-employment check set.", "true"),
+                T("PreEmploymentChecklist", "⚠ Raw HTML — the checks the candidate must produce, with instructions and expected turnaround.", "<ul><li>Police clearance</li></ul>"),
                 T("AdditionalTerms", "Free-text additional terms; block hidden when empty.", "Relocation assistance provided."),
                 T("ExpiryDate", "Offer expiry date; acceptance clause hidden when empty.", "Friday, 25 July 2026"),
                 T("AcceptanceInstructions", "How to accept the offer.", "Sign and return one copy of this letter, or accept via the candidate portal."),
@@ -601,9 +605,9 @@ public static class RecruitmentEmailCatalog
   {{#if BenefitsList}}<h3 style='font-size:0.95rem;color:#1e3a8a;border-bottom:1px solid #e5e7eb;padding-bottom:0.25rem;margin:1.25rem 0 0.5rem'>4. Benefits</h3>
   {{{BenefitsList}}}{{/if}}
 
-  {{#if IsConditional}}<h3 style='font-size:0.95rem;color:#b45309;border-bottom:1px solid #fde68a;padding-bottom:0.25rem;margin:1.25rem 0 0.5rem'>Conditions Precedent</h3>
-  <p style='font-size:13px'>This offer is conditional upon satisfactory completion of the following pre-employment checks:</p>
-  {{{ConditionsList}}}{{/if}}
+  {{#if HasPreEmploymentChecks}}<h3 style='font-size:0.95rem;color:#b45309;border-bottom:1px solid #fde68a;padding-bottom:0.25rem;margin:1.25rem 0 0.5rem'>{{#if IsConditional}}Conditions Precedent{{else}}Pre-employment Requirements{{/if}}</h3>
+  <p style='font-size:13px'>{{#if IsConditional}}This offer is conditional upon satisfactory completion of the following pre-employment checks:{{else}}Please arrange the following before your start date. They do not affect this offer, but your appointment cannot be finalised until they are complete:{{/if}}</p>
+  {{{PreEmploymentChecklist}}}{{/if}}
 
   {{#if NdaRequired}}<p style='font-size:13px;margin:1rem 0 0'>Your employment is subject to your signing the company's Non-Disclosure Agreement.</p>{{/if}}
   {{#if AdditionalTerms}}<h3 style='font-size:0.95rem;color:#1e3a8a;border-bottom:1px solid #e5e7eb;padding-bottom:0.25rem;margin:1.25rem 0 0.5rem'>Additional Terms</h3>

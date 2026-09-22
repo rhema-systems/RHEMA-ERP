@@ -7,8 +7,10 @@
 > | **A** | **DONE** — 45 ×2, `run-round4-a.mjs`, committed `10bb1d4f` |
 > | **C** | **BUILT** — 46 assertions, `run-round4-c.mjs`; staged, not yet committed |
 > | **F** | **DONE** — 103 ×2, `run-round4-f.mjs`; both migrations applied to UAT; every neighbouring suite re-run at baseline |
+> | **G** | **DONE** — 41 ×2, `run-round4-g.mjs`; committed |
+> | **H** | **DONE** — 36 ×2, `run-round4-h.mjs`; staged |
 >
-> Thirteen lanes remain after F. Recommended next: **G**, then **H**, then **B**.
+> Eleven lanes remain after H. Recommended next: **B**, then D, E, I, L, J, M, K, N, O.
 >
 > **Neighbouring suites after lane F**, all at baseline:
 >
@@ -943,6 +945,96 @@ full update payload; a harness sending only what it meant to change did.
 failed was the source line: *"Standard hours for a **0** contract"*. That is the argument for
 making a defaults endpoint state its provenance rather than just its numbers: the provenance is
 checkable, and it caught a data-corruption bug two lanes away from anything this lane touched.
+
+---
+
+### Lane H — the pre-employment checklist in the offer letter · BUILT 2026-09-22
+
+Harness: `dev-harness/hr-recruitment/run-round4-h.mjs`. Migration:
+`20260922094205_AddPositionPreEmploymentCheckTemplate` (guarded SQL; applied to `ErpSystemDB_UAT`).
+
+**Built as planned** — H1 seeds the check set at offer creation from the post’s template, H2 deletes
+the five invented conditions and renders the real items with what the candidate must produce, H3
+renders the list for every offer under a heading that changes with `IsConditional`, H4 updates the
+shipped `OfferLetter` body.
+
+**⚠ The assertion this lane turns on is a NEGATIVE one.** The letter used to print five conditions
+whenever no check set existed — *"Satisfactory employment references"*, *"Verification of stated
+qualifications"*, *"Confirmation of the right to work"*, *"Satisfactory background / criminal-record
+check"*, *"Medical fitness assessment"* — naming things the system does not track, cannot chase and
+will never mark complete. A candidate was told the offer depended on five requirements that existed
+nowhere but in that paragraph. The harness asserts all five ABSENT from the non-conditional letter,
+the conditional letter, and the no-check-set case, because a letter printing real items looks
+identical whether or not the fallback still lurks until you go looking for what it used to say.
+
+**Changed during the build, with reasons:**
+
+| | Planned | Built | Why |
+|---|---|---|---|
+| "falling back to the single active default" | a default template | **literally the single active one** | `PreEmploymentCheckTemplate` has no `IsDefault`, only `IsActive`. With several active it seeds NOTHING rather than picking: an offer letter commits the company, in writing, to what a candidate must produce, and HR would only discover a guess after the letter was sent. |
+| — | not planned | **a post pointing at a retired template falls through to the tenant rule** | Rather than silently seeding nothing, which would look identical to "this post needs no checks". |
+| — | not planned | **the harness creates its own position** | ⚠ The position update payload is a replace-set: skills, benefits and certifications are collections, so a PUT that omits them deletes every row. Hanging one field on a demo position would have stripped it. |
+
+**⚠ Defect 32 — self-inflicted, and of a shape this plan already names.** `PreEmploymentCheckTemplateName`
+was added to `EmployeePositionDto` and the mapper read `position.PreEmploymentCheckTemplate?.Name`,
+but the navigation was in none of the repository’s seven reads — so the field was **declared and
+never populated**. That is exactly § 3 defect 15 (`OrientationAudienceRuleDto.TargetEntityName`,
+*"declared and never mapped, so the rules list can never show a name"*), reproduced while the plan
+describing it was open. Caught at 35/36 on the first pass. The `Include` went onto **all seven**
+reads, not the one the harness touched: a field that resolves on the detail read and returns null
+on the list read is the same defect wearing a hat.
+
+**A correction to the template work.** The shipped letter block first used `{{#if IsNotConditional}}`,
+a token that does not exist. Reading `EmailTemplateRenderer` showed the engine supports nesting AND
+`{{else}}`, so the block uses `{{else}}` and needs no new token. `{{ConditionsList}}` keeps its old
+meaning — conditional offers only — so a template a client has already reworded goes on behaving as
+it did.
+
+**Parked blocker #1 is cleared.** `AcceptConditionallyAsync` refuses an offer with no check set,
+correctly, because the condition in *"conditionally accepted"* IS the check set. Seeding one at
+creation is what stops the refusal being a dead end; the harness proves a conditional acceptance now
+succeeds with nobody hand-building anything.
+
+---
+
+### Neighbouring suites after lane H — and three things they said
+
+Recruitment, all at baseline: `run-round4-f` 103, `-g` 41, `-a` 45, `-c` 46, `-h` 36 ×2; `run-k` 81,
+`run-v` 72, `run-a` 44, `run-c1` 96, `run-c2` 89, `run-candidate-country` 43; `slice-b` 174/176,
+`slice-c` 188/190, `slice-e` 101/105, `slice-f` 69/69; `run-lane5b` 32/34.
+
+`hr-jobarch` was run too, because lane H’s fix for defect 32 put an `Include` on **all seven**
+position reads and that is the suite which exercises them. Twenty of its runners pass with zero
+failures, including the heavy ones (`slice13` 229, `slice14` 114, `slice15` 83).
+
+**⚠ A stale assertion that INVERTED.** `run-r7` failed on
+`ok(procurementDoor !== 200, "Procurement’s own supplier list is not usable")` — an assertion that
+**pinned cross-module defect #1**, Procurement’s `SuppliersController` failing to activate.
+Procurement repaired it; `GET /api/Suppliers?page=1&pageSize=1` now answers **200**, verified
+directly with an admin token. So the suite reported a regression on the day somebody fixed
+something.
+
+That is the failure mode of encoding another team’s bug as your own expectation: it inverts the
+moment they repair it, and the signal arrives labelled backwards. The assertion now asserts 200
+(`run-r7` 42/0) and defect #1 is marked **RESOLVED 2026-09-22** in
+`../integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`, with the original account kept as the
+evidence the fix was needed. **Assert what should be true; record what is broken in the register.**
+
+**⚠ Seven `hr-jobarch` runners CRASH, for at least two distinct causes, and are NOT chased here.**
+
+| Runner(s) | Symptom | What is known |
+|---|---|---|
+| `run-slice0`, and probably its siblings | **409** — *"This tenant approves job descriptions through the workflow engine. Approve it from the workflow queue instead."* | The `Job Description Approval` definition was published **2026-09-20 16:00**, two days before lane H. The suite calls the direct-approve endpoint the product now correctly refuses. The product is right; the suite predates the wiring. |
+| `run-r3` | `TypeError: Cannot read properties of undefined (reading ‘id’)` | A fixture assumption, a different cause entirely. Not diagnosed. |
+| `run-r4b`, `run-slice1`, `-2`, `-3`, `-9` | crash | Cause not established individually. |
+
+⚠ **Honest limit on this claim:** these were not run BEFORE lane H, so it cannot be said by
+measurement that they predate it. What can be said is that lane H’s diff touches no `JobAnalysis`,
+`JobDescription` or `Workflow` file — the twelve changed files are offers, positions, the letter and
+docs — and that the 409’s cause is dated two days earlier. Recorded rather than assumed away.
+
+**Owed:** route those seven through the workflow queue, or retire the direct-approve path from
+them. That is a `hr-jobarch` job, not a round 4 lane.
 
 ---
 

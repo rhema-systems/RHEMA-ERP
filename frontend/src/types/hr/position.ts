@@ -99,6 +99,15 @@ export interface EmployeePosition {
   requiredGuarantorAmount?: number | null;
   requiredGuarantorCurrencyCode?: string | null;
   requiresLicense: boolean;
+  /**
+   * The pre-employment check set an offer for this post starts from (round 4, lane H1).
+   *
+   * ⚠ Null does NOT mean "no checks". The offer falls back to the tenant’s **single** active
+   * template, and seeds nothing where there are several — an offer letter commits the company
+   * to what the candidate must produce, so it will not guess between templates.
+   */
+  preEmploymentCheckTemplateName?: string | null;
+  preEmploymentCheckTemplateId?: string | null;
   isActive: boolean;
   employeeCount: number;
   skillRequirements: PositionSkillRequirement[];
@@ -139,6 +148,14 @@ export interface CreateEmployeePositionRequest {
   requiredGuarantorAmount?: number | null;
   requiredGuarantorCurrencyCode?: string | null;
   requiresLicense: boolean;
+  /**
+   * The pre-employment check set an offer for this post starts from (round 4, lane H1).
+   *
+   * ⚠ Null does NOT mean "no checks". The offer falls back to the tenant’s **single** active
+   * template, and seeds nothing where there are several — an offer letter commits the company
+   * to what the candidate must produce, so it will not guess between templates.
+   */
+  preEmploymentCheckTemplateId?: string | null;
   skillRequirements: PositionSkillRequirementInput[];
   positionBenefits: PositionBenefitInput[];
   /**

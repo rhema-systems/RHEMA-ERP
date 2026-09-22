@@ -129,6 +129,36 @@ public class JobOfferService : IJobOfferService
     /// grade has nothing to say about the number, not that the number is wrong.</para>
     /// </summary>
     /// <summary>
+    /// The check set an offer for this post starts from: the post’s own template, else the
+    /// tenant’s single active one (round 4, lane H1).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>"Single" is literal, and deliberately so.</b> With no post-level template and several
+    /// active ones, this returns null rather than picking. An offer letter is a commitment to a
+    /// candidate about what they must produce; listing checks nobody chose is worse than listing
+    /// none, because HR would have to notice the letter was wrong AFTER it was sent. One active
+    /// template is an unambiguous house standard; three is a decision somebody has to make.
+    /// </remarks>
+    private async Task<PreEmploymentCheckTemplate?> ResolveCheckTemplateAsync(
+        EmployeePosition? position, Guid tenantId, CancellationToken ct)
+    {
+        var templates = _unitOfWork.Repository<PreEmploymentCheckTemplate>().GetQueryable()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive);
+
+        if (position?.PreEmploymentCheckTemplateId is { } chosen)
+        {
+            var own = await templates.Include(t => t.Items)
+                .FirstOrDefaultAsync(t => t.Id == chosen, ct);
+            if (own is not null) return own;
+            // The post names a template that has since been retired or deleted. Fall through to
+            // the tenant default rather than silently seeding nothing.
+        }
+
+        var active = await templates.Include(t => t.Items).Take(2).ToListAsync(ct);
+        return active.Count == 1 ? active[0] : null;
+    }
+
+    /// <summary>
     /// Refuses a currency Finance does not hold (round 4, lane G3, § 3 defect 14).
     /// </summary>
     /// <remarks>
@@ -596,6 +626,52 @@ public class JobOfferService : IJobOfferService
 
             if (seededBenefits.Count > 0)
                 await _benefitRepository.AddRangeAsync(seededBenefits);
+        }
+
+        // --- Seed the PRE-EMPLOYMENT CHECK SET (round 4, lane H1) -------------------------
+        //
+        // ⚠ This is what stops AcceptConditionallyAsync being a dead end. That method refuses an
+        // offer with no check set — correctly, because the condition in "conditionally accepted" IS
+        // the check set — but nothing ever created one, so HR had to know to open a tab, build a
+        // set by hand and add every item before a conditional acceptance would be taken at all.
+        // The refusal was honest; the absence of a set was the defect.
+        //
+        // Mirrors PreEmploymentCheckService.ApplyTemplateAsync’s field mapping. Kept here rather
+        // than calling that service so offer creation does not take a dependency on the check
+        // service, which is the same call CreateAsync already makes for the benefit lines.
+        var checkTemplate = await ResolveCheckTemplateAsync(position, current, cancellationToken);
+        if (checkTemplate is not null)
+        {
+            var checkSet = new PreEmploymentCheck
+            {
+                TenantId = current,
+                JobOfferId = entity.Id,
+                OverallStatus = PreEmploymentCheckStatus.Pending,
+                Notes = $"Started from the “{checkTemplate.Name}” check set.",
+                CreatedBy = createdByUserId.ToString(),
+            };
+            await _unitOfWork.Repository<PreEmploymentCheck>().AddAsync(checkSet);
+
+            var checkItems = (checkTemplate.Items ?? new List<PreEmploymentCheckTemplateItem>())
+                .Where(t => !t.IsDeleted)
+                .Select(t => new PreEmploymentCheckItem
+                {
+                    TenantId = current,
+                    PreEmploymentCheckId = checkSet.Id,
+                    CheckType = t.CheckType,
+                    ServiceProviderName = t.DefaultServiceProvider,
+                    ServiceProviderSupplierId = t.DefaultServiceProviderSupplierId,
+                    Instructions = t.Instructions,
+                    IsMandatory = t.IsMandatory,
+                    IsBlockingOnFail = t.IsBlockingOnFail,
+                    ExpectedDays = t.ExpectedDays,
+                    Status = CheckItemStatus.Pending,
+                    CreatedBy = createdByUserId.ToString(),
+                })
+                .ToList();
+
+            if (checkItems.Count > 0)
+                await _unitOfWork.Repository<PreEmploymentCheckItem>().AddRangeAsync(checkItems);
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);

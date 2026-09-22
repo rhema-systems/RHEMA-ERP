@@ -22,7 +22,7 @@ file carrying the defect received no change in this range.
 
 | # | Defect | Status after merge #8 | Evidence |
 |---|---|---|---|
-| 1 | Procurement `SuppliersController` dead | **Open** | `SupplierRepositories.cs` + controller untouched |
+| 1 | Procurement `SuppliersController` dead | **RESOLVED 2026-09-22** | `GET /api/Suppliers?page=1&pageSize=1` answers **200** where it answered 400; verified directly with an admin token and by `hr-jobarch/run-r7`, whose assertion pinned the 400 and began failing because the defect is gone |
 | 2 | Finance currency conversion inverted | **RESOLVED** | PR #99 `finance-fx-seed-contract` transposed the seed (`Rate=12.5`, `InverseRate=0.08`) and documented the contract; both directions re-derived against `CurrencyService.ConvertAsync` |
 | 3 | Workflow conditional routing never routes | **Open** | `WorkflowDefinitionServiceAdapter:686` still `JsonSerializer.Serialize`s the condition; `WorkflowConditionEvaluator` untouched, still parses it as an expression |
 | 4 | Inventory frontend type errors | **Partly resolved** | duplicate `isStockingUnit` gone (1 declaration); a full re-count is impossible while #20 aborts the compiler |
@@ -84,6 +84,14 @@ and end step; it must create and process its approval before the workflow comple
 that avoided single-step definitions for this reason can stop working around it, after re-testing.
 
 ## 1. Procurement — `SuppliersController` is entirely non-functional
+
+> **✅ RESOLVED 2026-09-22.** `GET /api/Suppliers?page=1&pageSize=1` now answers **200**. Found by
+> `hr-jobarch/run-r7`, whose assertion asserted the 400 — so the suite started failing precisely
+> *because* Procurement fixed it. ⚠ An assertion that pins somebody else’s defect inverts on the
+> day they repair it: it then reports a regression where there is an improvement. The assertion has
+> been rewritten to assert the correct behaviour, with this note as the record of why it changed.
+>
+> The account below is kept as written, because it is the evidence the fix was needed.
 
 **Severity: blocking.** Found 2026-08-17 while retiring HR travel's duplicate vendor master onto
 Procurement's `Supplier` (area 12, slice 3).

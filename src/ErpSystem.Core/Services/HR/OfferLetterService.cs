@@ -76,9 +76,11 @@ public sealed class OfferLetterService : IOfferLetterService
         // Enrichment sources not carried on the offer itself.
         var jobDescription = await LoadJobDescriptionAsync(offer.PositionId, offer.TenantId, cancellationToken);
         var payComponents = await LoadAllowanceComponentsAsync(offer.PositionId, offer.TenantId, cancellationToken);
-        var preCheck = offer.IsConditional
-            ? await LoadPreEmploymentCheckAsync(offer.Id, offer.TenantId, cancellationToken)
-            : null;
+        // ⚠ Loaded for EVERY offer, not only conditional ones (round 4, lane H3). A permanent
+        // appointment still asks the candidate to produce references, a certificate and a medical;
+        // those are pre-employment REQUIREMENTS whether or not the offer is legally conditional on
+        // them, and the letter is where the candidate finds out what to bring.
+        var preCheck = await LoadPreEmploymentCheckAsync(offer.Id, offer.TenantId, cancellationToken);
 
         var (salaryTable, baseSalaryLine, grossSalaryLine) = BuildSalaryBreakdown(offer, payComponents, currency);
 
@@ -132,7 +134,15 @@ public sealed class OfferLetterService : IOfferLetterService
             // Clauses.
             ["NdaRequired"]    = offer.NdaRequired ? "true" : null,
             ["IsConditional"]  = offer.IsConditional ? "true" : null,
-            ["ConditionsList"] = offer.IsConditional ? BuildConditionsList(preCheck) : null,
+            // ⚠ ConditionsList keeps its old meaning — conditional offers only — so a template a
+            // client has already reworded goes on behaving as it did.
+            ["ConditionsList"] = offer.IsConditional ? BuildChecklist(preCheck) : null,
+
+            // Round 4, lane H3. The same list, offered to every letter. A template chooses which
+            // it uses; the shipped default uses this one under a heading that changes with
+            // IsConditional — "Conditions of this offer" versus "Pre-employment requirements".
+            ["HasPreEmploymentChecks"]  = HasChecks(preCheck) ? "true" : null,
+            ["PreEmploymentChecklist"]  = HasChecks(preCheck) ? BuildChecklist(preCheck) : null,
             ["AdditionalTerms"] = NullIfBlank(offer.AdditionalTerms),
 
             // Acceptance & signature.
@@ -292,24 +302,56 @@ public sealed class OfferLetterService : IOfferLetterService
         return sb.ToString();
     }
 
-    private static string BuildConditionsList(PreEmploymentCheck? preCheck)
-    {
-        var items = preCheck?.Items?.Where(i => !i.IsDeleted).ToList();
+    private static bool HasChecks(PreEmploymentCheck? preCheck) =>
+        preCheck?.Items?.Any(i => !i.IsDeleted) == true;
 
-        var labels = (items is { Count: > 0 })
-            ? items.Select(i => !string.IsNullOrWhiteSpace(i.Name) ? i.Name! : Prettify(i.CheckType.ToString()))
-            : new[]
-            {
-                "Satisfactory employment references",
-                "Verification of stated qualifications",
-                "Confirmation of the right to work",
-                "Satisfactory background / criminal-record check",
-                "Medical fitness assessment",
-            };
+    /// <summary>
+    /// The pre-employment checks this offer actually carries — what the candidate must produce.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ This used to invent five conditions</b> (round 4 § 3 defect 12). When no check
+    /// set existed it printed "Satisfactory employment references", "Verification of stated
+    /// qualifications", "Confirmation of the right to work", "Satisfactory background /
+    /// criminal-record check" and "Medical fitness assessment" — a list the system does not track,
+    /// cannot chase and will never mark complete. The candidate was told the offer depended on
+    /// five things that existed nowhere but in that paragraph.</para>
+    ///
+    /// <para>It now prints the real items or nothing at all, and lane H1 makes "nothing at all"
+    /// rare by seeding a set from the post’s template when the offer is raised.</para>
+    ///
+    /// <para>Each item carries what the candidate needs to act: the instructions, whether it is
+    /// mandatory, and how long it usually takes. Names-only was the other half of the defect —
+    /// "Police clearance" tells somebody what is wanted but not what to do about it.</para>
+    /// </remarks>
+    private static string BuildChecklist(PreEmploymentCheck? preCheck)
+    {
+        var items = preCheck?.Items?
+            .Where(i => !i.IsDeleted)
+            // Mandatory first — the ones that hold the appointment up should be read first.
+            .OrderByDescending(i => i.IsMandatory)
+            .ThenBy(i => i.Name ?? i.CheckType.ToString())
+            .ToList();
+
+        if (items is not { Count: > 0 }) return string.Empty;
 
         var sb = new StringBuilder("<ul style='margin:0.25rem 0 0.75rem;padding-left:1.25rem;font-size:13px'>");
-        foreach (var label in labels)
-            sb.Append($"<li>{HtmlEncode(label)}</li>");
+        foreach (var item in items)
+        {
+            var label = !string.IsNullOrWhiteSpace(item.Name) ? item.Name! : Prettify(item.CheckType.ToString());
+            sb.Append("<li style='margin-bottom:0.3rem'>").Append(HtmlEncode(label));
+
+            var notes = new List<string>();
+            if (!item.IsMandatory) notes.Add("if applicable");
+            if (item.ExpectedDays is > 0) notes.Add($"allow about {item.ExpectedDays} day{(item.ExpectedDays == 1 ? "" : "s")}");
+            if (notes.Count > 0)
+                sb.Append(" <span style='color:#6b7280'>(").Append(HtmlEncode(string.Join("; ", notes))).Append(")</span>");
+
+            if (!string.IsNullOrWhiteSpace(item.Instructions))
+                sb.Append("<div style='color:#4b5563;font-size:12px;margin-top:0.1rem'>")
+                  .Append(HtmlEncode(item.Instructions!.Trim())).Append("</div>");
+
+            sb.Append("</li>");
+        }
         sb.Append("</ul>");
         return sb.ToString();
     }

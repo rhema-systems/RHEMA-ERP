@@ -3027,6 +3027,10 @@ public class EmployeePositionDto
     public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; }
 
+    /// <summary>The pre-employment check set an offer for this post starts from (round 4, H1).</summary>
+    public Guid? PreEmploymentCheckTemplateId { get; set; }
+    public string? PreEmploymentCheckTemplateName { get; set; }
+
     public bool IsActive { get; set; }
 
     public int EmployeeCount { get; set; }
@@ -3102,6 +3106,9 @@ public class CreateEmployeePositionDto : IValidatableObject
     [MaxLength(3)]
     public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; } = false;
+
+    /// <summary>The pre-employment check set an offer for this post starts from (round 4, H1).</summary>
+    public Guid? PreEmploymentCheckTemplateId { get; set; }
 
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
     public ICollection<CreateEmployeePositionBenefitDto> PositionBenefits { get; set; } = new List<CreateEmployeePositionBenefitDto>();
@@ -3189,6 +3196,9 @@ public class UpdateEmployeePositionDto : IValidatableObject
     [MaxLength(3)]
     public string? RequiredGuarantorCurrencyCode { get; set; }
     public bool RequiresLicense { get; set; } = false;
+
+    /// <summary>The pre-employment check set an offer for this post starts from (round 4, H1).</summary>
+    public Guid? PreEmploymentCheckTemplateId { get; set; }
     public bool IsActive { get; set; } = true;
 
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();

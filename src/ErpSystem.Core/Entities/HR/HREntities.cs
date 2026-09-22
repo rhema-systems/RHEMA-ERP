@@ -1031,6 +1031,24 @@ public class EmployeePosition : TenantEntity
 
     public bool RequiresLicense { get; set; }
 
+    /// <summary>
+    /// The pre-employment check set an offer for this post starts from (round 4, lane H1).
+    /// </summary>
+    /// <remarks>
+    /// <para>Null means "no post-specific set" — an offer then falls back to the tenant’s single
+    /// active template, and to nothing at all if there is none or if there are several. ⚠ It does
+    /// NOT guess between templates: picking one of three arbitrarily would put checks on an offer
+    /// letter that nobody chose, and the letter is a commitment to the candidate.</para>
+    ///
+    /// <para>Why it matters beyond convenience: <c>AcceptConditionallyAsync</c> refuses an offer
+    /// with no check set, because the condition in "conditionally accepted" IS the check set.
+    /// Seeding one at offer creation is what stops that refusal being a dead end.</para>
+    /// </remarks>
+    public Guid? PreEmploymentCheckTemplateId { get; set; }
+
+    [ForeignKey(nameof(PreEmploymentCheckTemplateId))]
+    public virtual ErpSystem.Core.Entities.HR.Recruitment.PreEmploymentCheckTemplate? PreEmploymentCheckTemplate { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     // Navigation Properties
