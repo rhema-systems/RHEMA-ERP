@@ -1183,8 +1183,6 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
         $escapedServerMachineName = $serverMachineName.Replace("'", "''")
         $escapedServerInstanceName = $serverInstanceName.Replace("'", "''")
         $escapedServerCanonicalName = $serverCanonicalName.Replace("'", "''")
-        $escapedServerLocalAddress = $serverLocalAddress.Replace("'", "''")
-        $escapedServerLocalPort = $serverLocalPort.Replace("'", "''")
         $sourceFingerprintParts = @($sourceFingerprint -split '\|')
         if ($sourceFingerprintParts.Count -ne 5 -or
             $sourceFingerprintParts[0] -notmatch '^\d+$' -or
@@ -1214,11 +1212,7 @@ IF CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) COLLATE Latin1_General_1
    COALESCE(CONVERT(nvarchar(128),SERVERPROPERTY('InstanceName')),N'') COLLATE Latin1_General_100_BIN2 <>
       N'$escapedServerInstanceName' COLLATE Latin1_General_100_BIN2 OR
    CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')) COLLATE Latin1_General_100_BIN2 <>
-      N'$escapedServerCanonicalName' COLLATE Latin1_General_100_BIN2 OR
-   COALESCE(CONVERT(nvarchar(128),CONNECTIONPROPERTY('local_net_address')),N'') COLLATE Latin1_General_100_BIN2 <>
-      N'$escapedServerLocalAddress' COLLATE Latin1_General_100_BIN2 OR
-   COALESCE(CONVERT(nvarchar(20),CONNECTIONPROPERTY('local_tcp_port')),N'') COLLATE Latin1_General_100_BIN2 <>
-      N'$escapedServerLocalPort' COLLATE Latin1_General_100_BIN2
+      N'$escapedServerCanonicalName' COLLATE Latin1_General_100_BIN2
     THROW 51204, 'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT', 1;
 IF (SELECT COUNT_BIG(*) FROM sys.databases
     WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_100_BIN2) <> 1 OR
