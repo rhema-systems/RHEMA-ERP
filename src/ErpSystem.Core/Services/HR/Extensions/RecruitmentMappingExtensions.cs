@@ -2034,6 +2034,7 @@ public static class RecruitmentMappingExtensions
             Weight = entity.Weight,
             MinScore = entity.MinScore,
             MaxScore = entity.MaxScore,
+            ScoringGuide = entity.ScoringGuide,
             QuestionTypeId = entity.QuestionTypeId,
             QuestionTypeName = entity.QuestionType?.TypeName ?? string.Empty,
             IsActive = entity.IsActive,
@@ -2049,6 +2050,7 @@ public static class RecruitmentMappingExtensions
             Weight = dto.Weight,
             MinScore = dto.MinScore,
             MaxScore = dto.MaxScore,
+            ScoringGuide = dto.ScoringGuide,
             QuestionTypeId = dto.QuestionTypeId,
             IsActive = dto.IsActive,
             CreatedBy = userId.ToString(),
@@ -2061,6 +2063,7 @@ public static class RecruitmentMappingExtensions
         entity.Weight = dto.Weight;
         entity.MinScore = dto.MinScore;
         entity.MaxScore = dto.MaxScore;
+        entity.ScoringGuide = dto.ScoringGuide;
         entity.QuestionTypeId = dto.QuestionTypeId;
         entity.IsActive = dto.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -2561,6 +2564,7 @@ public static class RecruitmentMappingExtensions
             Weight = entity.Question?.Weight ?? 0,
             MinScore = entity.Question?.MinScore ?? 0,
             MaxScore = entity.Question?.MaxScore ?? 0,
+            ScoringGuide = entity.Question?.ScoringGuide,
             DisplayOrder = entity.DisplayOrder,
         };
     }
@@ -2611,6 +2615,9 @@ public static class RecruitmentMappingExtensions
             EvaluationDate = entity.EvaluationDate,
             IsFinalized = entity.IsFinalized,
             FinalizedDate = entity.FinalizedDate,
+            ScoreSource = entity.ScoreSource,
+            FiledByHrOnBehalfOfEmployeeId = entity.FiledByHrOnBehalfOfEmployeeId,
+            FiledByHrOnBehalfOfName = entity.FiledByHrOnBehalfOf?.FullName,
         };
     }
 
@@ -2640,6 +2647,9 @@ public static class RecruitmentMappingExtensions
             EvaluationDate = entity.EvaluationDate,
             IsFinalized = entity.IsFinalized,
             FinalizedDate = entity.FinalizedDate,
+            ScoreSource = entity.ScoreSource,
+            FiledByHrOnBehalfOfEmployeeId = entity.FiledByHrOnBehalfOfEmployeeId,
+            FiledByHrOnBehalfOfName = entity.FiledByHrOnBehalfOf?.FullName,
             ScoreEntries = entity.ScoreEntries.Select(e => e.ToDto()).ToList(),
         };
     }

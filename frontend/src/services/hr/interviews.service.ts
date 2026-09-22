@@ -17,6 +17,8 @@ import type {
   InterviewQuestionPresetSummary,
   InterviewQuestionType,
   InterviewQuestionTypeSummary,
+  InterviewPaper,
+  InterviewPaperRequest,
   InterviewScoreDraft,
   InterviewSlotPlan,
   JobInterview,
@@ -31,6 +33,7 @@ import type {
   JobInterviewSummary,
   JobInterviewee,
   PanelistAvailabilityCheck,
+  PanelistScorecardWorklistItem,
   PanelistAvailabilityQuery,
   QuestionPlanPreview,
   RescheduleJobInterview,
@@ -273,6 +276,36 @@ class JobInterviewService {
     return apiService.post<InterviewSlotPlan>(`${this.baseUrl}/${interviewId}/slots/apply`, {
       ...plan,
       interviewId,
+    });
+  }
+
+  /**
+   * The caller's own scorecard worklist — the sessions they sit on, the candidates on each, and how
+   * far their own card for each has got. Backs `/me/panel` (round 4, lane F5).
+   *
+   * ⚠ Takes the employee from the token, like `getMyPanelSlots`. Returns the caller's **own** cards
+   * only; a colleague's mark never appears on it.
+   */
+  getMyScorecardWorklist(): Promise<PanelistScorecardWorklistItem[]> {
+    return apiService.get<PanelistScorecardWorklistItem[]>(`${this.baseUrl}/me/scorecard-worklist`);
+  }
+
+  // ── The printed paper (round 4, lane F) ──────────────────────────────────
+
+  /**
+   * The interview paper as HTML, ready to print.
+   *
+   * ⚠ Gated on **read** access, not on HR — a panelist on this interview may print their own
+   * sheets. That is the point of the sheet: it goes to the person doing the scoring.
+   *
+   * `intervieweeIds` goes over the wire as a repeated query key, which is what `[FromQuery] Guid[]`
+   * binds; `apiService` already serialises an array that way.
+   */
+  getPaper(interviewId: string, request: InterviewPaperRequest = {}): Promise<InterviewPaper> {
+    return apiService.get<InterviewPaper>(`${this.baseUrl}/${interviewId}/paper`, {
+      variant: request.variant ?? 'ScoreSheet',
+      panelistId: request.panelistId ?? undefined,
+      intervieweeIds: request.intervieweeIds?.length ? request.intervieweeIds : undefined,
     });
   }
 

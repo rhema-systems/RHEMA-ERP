@@ -430,6 +430,57 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
     background: white !important;
     color: black !important;
   }
+
+  /* The interview paper (round 4, lane F). Follows the HR *letter* family, not the payslip or the
+     inspection sheet: those pin themselves to a fixed 210×297mm box because each is one page by
+     construction, whereas a paper is multi-page by construction — one sheet per candidate per
+     panelist, a dozen of them off one print. Pinning it would clip every sheet after the first. */
+  body.printing-hr-interview-paper > * {
+    visibility: hidden;
+  }
+
+  body.printing-hr-interview-paper .hr-interview-paper-print-root,
+  body.printing-hr-interview-paper .hr-interview-paper-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-hr-interview-paper .hr-interview-paper-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    box-shadow: none;
+    border: none;
+    background: white !important;
+    color: black !important;
+  }
+
+  body.printing-hr-interview-paper .hr-interview-paper-no-print {
+    display: none !important;
+  }
+
+  /* Each sheet is its own page. `break-after` is the modern property and `page-break-after` the one
+     older print engines honour; both are set because a sheet running onto the next candidate's page
+     is the single failure this document cannot tolerate — a panelist would score the wrong person.
+     The last sheet is exempt, or every print ends on a blank page. */
+  body.printing-hr-interview-paper .interview-paper-sheet {
+    break-after: page;
+    page-break-after: always;
+    break-inside: auto;
+  }
+
+  body.printing-hr-interview-paper .interview-paper-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  /* A question and its score box must not be split across a page boundary — an empty box at the top
+     of a page belongs to a question the marker can no longer see. */
+  body.printing-hr-interview-paper .interview-paper-sheet tr,
+  body.printing-hr-interview-paper .interview-paper-sheet .interview-paper-keep {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }
 @keyframes mobile-scanner-sweep {
   0%, 100% {

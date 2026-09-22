@@ -276,7 +276,10 @@ export default function InterviewDetailPage() {
         </TabsContent>
 
         <TabsContent value="scores" className="mt-4">
-          <InterviewScoresPanel interview={data} />
+          {/* `canManage` decides whether the panel is blinded, not what it may fetch — the server
+              narrows the read either way (round 4, lane F5). It is passed so the screen can say the
+              view is narrowed instead of reporting an empty list. */}
+          <InterviewScoresPanel interview={data} canManage={canManage} />
         </TabsContent>
       </Tabs>
 

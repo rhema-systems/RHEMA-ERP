@@ -968,7 +968,16 @@ public class JobCandidateDto : BaseDto
     public string FirstName { get; set; } = string.Empty;
     public string? MiddleName { get; set; }
     public string LastName { get; set; } = string.Empty;
-    public string FullName => $"{FirstName} {MiddleName ?? string.Empty} {LastName}".Trim();
+    /// <remarks>
+    /// ⚠ <b>A second copy of the entity's expression, and it had the same bug.</b> Fixing
+    /// <c>JobCandidate.FullName</c> alone left this one rendering the double space, so the paged
+    /// application read (which goes through the entity) and the candidate read (which goes through
+    /// here) disagreed about the same person's name — caught by slice B, whose assertion compares
+    /// the two. Keep the two in step, or delete this one in favour of the entity's.
+    /// </remarks>
+    public string FullName => string.IsNullOrWhiteSpace(MiddleName)
+        ? $"{FirstName} {LastName}".Trim()
+        : $"{FirstName} {MiddleName} {LastName}".Trim();
     public DateTime DateOfBirth { get; set; }
     public Gender Gender { get; set; }
     public string GenderName => Gender.ToString();
@@ -2250,6 +2259,8 @@ public class JobInterviewQuestionDetailDto : BaseDto
     public int Weight { get; set; }
     public int MinScore { get; set; }
     public int MaxScore { get; set; }
+    /// <summary>What a good answer sounds like. Printed on the paper scoring sheet when set.</summary>
+    public string? ScoringGuide { get; set; }
     public Guid QuestionTypeId { get; set; }
     public string QuestionTypeName { get; set; } = string.Empty;
     public bool IsActive { get; set; }
@@ -2269,6 +2280,13 @@ public class CreateJobInterviewQuestionDetailDto : CreateDtoBase
 
     [Range(1, 100)]
     public int MaxScore { get; set; } = 10;
+
+    /// <summary>
+    /// What a good answer sounds like — printed beside the question on the paper scoring sheet.
+    /// Optional; a question that needs no guidance should not carry an empty heading on every sheet.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? ScoringGuide { get; set; }
 
     [Required]
     public Guid QuestionTypeId { get; set; }
@@ -2290,6 +2308,10 @@ public class UpdateJobInterviewQuestionDetailDto : UpdateDtoBase
 
     [Range(1, 100)]
     public int MaxScore { get; set; }
+
+    /// <inheritdoc cref="CreateJobInterviewQuestionDetailDto.ScoringGuide"/>
+    [MaxLength(2000)]
+    public string? ScoringGuide { get; set; }
 
     [Required]
     public Guid QuestionTypeId { get; set; }
@@ -3083,6 +3105,11 @@ public class JobInterviewSelectedQuestionDto : BaseDto
     public int Weight { get; set; }
     public int MinScore { get; set; }
     public int MaxScore { get; set; }
+    /// <summary>
+    /// What a good answer sounds like. Carried here because this is the shape the printed scoring
+    /// sheet renders from — the drawn questions, not the bank.
+    /// </summary>
+    public string? ScoringGuide { get; set; }
     public int DisplayOrder { get; set; }
 }
 
@@ -3120,6 +3147,37 @@ public class JobInterviewScoreSummaryDto : BaseDto
     public DateTime EvaluationDate { get; set; }
     public bool IsFinalized { get; set; }
     public DateTime? FinalizedDate { get; set; }
+
+    /// <summary>
+    /// Typed by the panelist, or transcribed by HR from a signed paper sheet. Null on scorecards
+    /// recorded before this was tracked — which is not a claim that they were filed online.
+    /// </summary>
+    public InterviewScoreSource? ScoreSource { get; set; }
+
+    /// <summary>
+    /// The HR person who filed it on the panelist's behalf. Null when the panelist did.
+    /// ⚠ An <b>employee</b> id — see the entity's note on why it is not a user id.
+    /// </summary>
+    public Guid? FiledByHrOnBehalfOfEmployeeId { get; set; }
+
+    /// <summary>Their name, when the read loaded it. Null when nobody filed on anybody's behalf.</summary>
+    public string? FiledByHrOnBehalfOfName { get; set; }
+
+    /// <summary>
+    /// A one-line statement of provenance for the screen, so the badge does not have to be
+    /// reassembled from three nullable fields at every call site.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It says <i>filed on their behalf</i>, not <i>transcribed from a signed sheet</i>. The paper
+    /// sheet is how this normally happens and is what the screen offers, but the only thing the
+    /// server actually witnessed is that somebody other than the panelist pressed the button. An
+    /// audit line should claim exactly that and no more.
+    /// </remarks>
+    public string? FiledOnBehalfNote => ScoreSource == InterviewScoreSource.PaperSheet
+        ? string.IsNullOrWhiteSpace(FiledByHrOnBehalfOfName)
+            ? $"Filed by HR on behalf of {PanelistName}"
+            : $"Filed by {FiledByHrOnBehalfOfName} on behalf of {PanelistName}"
+        : null;
 }
 
 public class JobInterviewScoreSummaryDetailDto : JobInterviewScoreSummaryDto
@@ -3143,6 +3201,12 @@ public class CreateJobInterviewScoreSummaryDto : CreateDtoBase
 
     public DateTime EvaluationDate { get; set; } = DateTime.UtcNow;
     public List<CreateJobInterviewScoreEntryDto> ScoreEntries { get; set; } = new();
+
+    // ⚠ There is deliberately NO ScoreSource here. Provenance is derived by the service from who is
+    // calling — a panelist filing their own card is Online, anyone filing somebody else's is not —
+    // because a source the client could assert freely would be worth nothing in an audit, and a
+    // field the server ignores reads to the next developer as a control that exists when it does
+    // not. The "from a paper sheet" mode on the scorecard screen is a workflow, not a flag.
 }
 
 public class FinalizeInterviewScoreDto
@@ -6597,4 +6661,148 @@ public class OfferLetterDto
 
     /// <summary>Rendered, self-contained HTML document body suitable for display and print-to-PDF.</summary>
     public string HtmlBody { get; set; } = string.Empty;
+}
+
+// ── The printed interview paper (round 4, lane F) ───────────────────────────────────────────────
+
+/// <summary>Which paper to print.</summary>
+public enum InterviewPaperVariant
+{
+    /// <summary>One sheet per candidate per panelist, with score boxes. The thing that gets signed.</summary>
+    ScoreSheet = 1,
+
+    /// <summary>
+    /// The drawn questions alone, for the panel to read beforehand. No score boxes.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This one reveals the questions, so it stays behind the same per-record gate as everything
+    /// else on the interview. A blank scoring sheet leaks nothing; a question list does.
+    /// </remarks>
+    Questions = 2,
+
+    /// <summary>The cover page — panel and timetable — followed by every scoring sheet.</summary>
+    Pack = 3,
+}
+
+/// <summary>The rendered paper. HTML the client prints; there is no PDF by design.</summary>
+public class InterviewPaperDto
+{
+    public Guid InterviewId { get; set; }
+    public string InterviewNumber { get; set; } = string.Empty;
+    public string JobTitle { get; set; } = string.Empty;
+    public InterviewPaperVariant Variant { get; set; }
+
+    /// <summary>How many physical sheets this will print — so the screen can say so before it does.</summary>
+    public int SheetCount { get; set; }
+
+    /// <summary>
+    /// The whole document. Each sheet is a <c>&lt;section class='interview-paper-sheet'&gt;</c>
+    /// carrying its own page break, so the print stylesheet has something to hang on.
+    /// </summary>
+    public string HtmlBody { get; set; } = string.Empty;
+}
+
+// ── The panelist's own scorecard worklist (round 4, lane F5) ────────────────────────────────────
+
+/// <summary>
+/// Where one of the caller's scorecards has got to. Derived, not stored.
+/// </summary>
+public enum PanelistScorecardState
+{
+    /// <summary>Nothing saved at all.</summary>
+    NotStarted = 1,
+
+    /// <summary>A private draft exists. Nobody else can see it, and it does not count as filed.</summary>
+    Draft = 2,
+
+    /// <summary>A scorecard is saved and visible to the panel, but not yet signed off.</summary>
+    Saved = 3,
+
+    /// <summary>Signed off. It can no longer be changed.</summary>
+    SignedOff = 4,
+}
+
+/// <summary>One candidate the caller has to score, and how far they have got.</summary>
+/// <remarks>
+/// ⚠ Carries the <b>caller's own</b> card only. A colleague's mark never appears here, whatever the
+/// blind-scoring rule would allow elsewhere — this is a to-do list, and a to-do list showing
+/// somebody else's answer is the anchoring problem with a different shape.
+/// </remarks>
+public class PanelistScorecardCandidateDto
+{
+    public Guid IntervieweeId { get; set; }
+    public Guid JobApplicationId { get; set; }
+    public string CandidateName { get; set; } = string.Empty;
+    public string ApplicationNumber { get; set; } = string.Empty;
+
+    /// <summary>Their slot, when the day was apportioned. Null means "sometime in the session".</summary>
+    public TimeSpan? SlotStartTime { get; set; }
+    public TimeSpan? SlotEndTime { get; set; }
+
+    /// <summary>Whether they turned up. Null before the day.</summary>
+    public bool? CandidateAttended { get; set; }
+
+    public Guid? ScoreSummaryId { get; set; }
+    public PanelistScorecardState State { get; set; } = PanelistScorecardState.NotStarted;
+    public decimal? TotalWeightedScore { get; set; }
+    public JobInterviewRecommendation? Recommendation { get; set; }
+    public string? RecommendationName => Recommendation?.ToString();
+
+    /// <summary>True once nothing further is owed for this candidate.</summary>
+    public bool IsComplete => State == PanelistScorecardState.SignedOff;
+}
+
+/// <summary>
+/// One interview the caller sits on, with the candidates they owe a scorecard for.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this exists</b> (round 4, lane F5). A panelist's diary listed interview <i>numbers</i>
+/// and nothing else, while describing itself as "the scorecards you owe" — so the only route to a
+/// scorecard ran through HR's desk screen and a tab. This is the read that lets the portal keep
+/// that promise: who you are seeing, when, and what you still owe.</para>
+///
+/// <para>⚠ <b>Takes the employee from the token</b>, like <c>me/panelist-slots</c>. The id-bearing
+/// twin would mean the client fetching its own employee id and handing it back, which is the shape
+/// that produced this module's authorization holes.</para>
+/// </remarks>
+public class PanelistScorecardWorklistDto
+{
+    public Guid InterviewId { get; set; }
+    public string InterviewNumber { get; set; } = string.Empty;
+    public string JobTitle { get; set; } = string.Empty;
+    public string VacancyNumber { get; set; } = string.Empty;
+    public int Round { get; set; }
+
+    public JobInterviewType Type { get; set; }
+    public string TypeName => Type.ToString();
+    public InterviewMode Mode { get; set; }
+    public string ModeName => Mode.ToString();
+    public JobInterviewStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+
+    public DateOnly ScheduledDate { get; set; }
+    public TimeSpan StartTime { get; set; }
+    public TimeSpan EndTime { get; set; }
+    public string? LocationOrLink { get; set; }
+
+    /// <summary>The caller's own seat on this panel — the id the scorecard is filed against.</summary>
+    public Guid PanelistId { get; set; }
+    public JobInterviewPanelistRole Role { get; set; }
+    public string RoleName => Role.ToString();
+    public bool IsRequired { get; set; }
+    public bool IsConfirmed { get; set; }
+
+    /// <summary>Whether this session has a question plan the panel can be held to.</summary>
+    public bool HasQuestionPlan { get; set; }
+
+    public List<PanelistScorecardCandidateDto> Candidates { get; set; } = new();
+
+    /// <summary>How many scorecards are still owed. Zero is the state a panelist is working towards.</summary>
+    public int OutstandingCount => Candidates.Count(c => !c.IsComplete);
+
+    /// <summary>
+    /// Whether anything can still be filed. A cancelled or completed session is read-only, and a
+    /// screen that offers a scorecard on one is offering a 422.
+    /// </summary>
+    public bool IsOpen => Status != JobInterviewStatus.Cancelled && Status != JobInterviewStatus.Completed;
 }

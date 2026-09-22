@@ -242,7 +242,15 @@ public class PhysicianDto : BaseDto
     public string LastName { get; set; } = string.Empty;
     public string? MiddleName { get; set; }
     public string? Title { get; set; }
-    public string FullName => $"{Title} {FirstName} {MiddleName ?? ""} {LastName}".Trim();
+    /// <remarks>
+    /// ⚠ Same defect as <c>JobCandidateDto.FullName</c> carried, found by the same sweep: the
+    /// previous form <c>$"{Title} {FirstName} {MiddleName ?? ""} {LastName}".Trim()</c> left a
+    /// double space wherever an optional part was absent, and <c>.Trim()</c> only strips the ends.
+    /// A physician with no title and no middle name rendered with <i>two</i> such gaps.
+    /// </remarks>
+    public string FullName =>
+        string.Join(" ", new[] { Title, FirstName, MiddleName, LastName }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
     public string? Specialization { get; set; }
     public string? MedicalLicenseNumber { get; set; }
     public DateTime? LicenseExpiryDate { get; set; }

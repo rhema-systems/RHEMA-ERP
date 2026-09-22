@@ -2260,6 +2260,29 @@ public enum JobInterviewRecommendation
     StrongNoHire = 5
 }
 
+/// <summary>
+/// How a scorecard reached the system (round 4, lane F4).
+/// </summary>
+/// <remarks>
+/// A panel that scored on paper hands HR a signed sheet, and HR types it in. The record that comes
+/// out is indistinguishable from one the panelist typed themselves unless the difference is stored,
+/// which is why this exists: the scorecard remains the panelist's verdict either way, but the
+/// keystrokes were somebody else's and an audit trail should not quietly claim otherwise.
+/// </remarks>
+public enum InterviewScoreSource
+{
+    /// <summary>The panelist filed it themselves, in the product.</summary>
+    [Description("Filed online")]
+    Online = 1,
+
+    /// <summary>
+    /// Transcribed by HR from a signed paper sheet. <c>FiledByHrOnBehalfOfUserId</c> names who
+    /// typed it.
+    /// </summary>
+    [Description("From a paper sheet")]
+    PaperSheet = 2
+}
+
 public enum JobShortlistingCriteriaType
 {
     [Description("Qualification")]

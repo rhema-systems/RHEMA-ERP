@@ -111,6 +111,17 @@ public interface IJobInterviewPanelistRepository : IGenericRepository<JobIntervi
     /// <summary>Returns all interviews the given employee is panelising, with interview details loaded.</summary>
     Task<IEnumerable<JobInterviewPanelist>> GetByEmployeeIdAsync(Guid employeeId);
 
+    /// <summary>
+    /// The same seats, but with each interview's <b>interviewees and their candidates</b> loaded —
+    /// the read behind a panelist's scorecard worklist (round 4, lane F5).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Separate from <see cref="GetByEmployeeIdAsync"/> rather than added to it. That one backs
+    /// the panel diary, which renders interview numbers; widening it would pull every candidate on
+    /// every session a person has ever sat on into a read that displays none of them.
+    /// </remarks>
+    Task<IEnumerable<JobInterviewPanelist>> GetWorklistByEmployeeIdAsync(Guid employeeId);
+
     Task<JobInterviewPanelist?> GetByConfirmationTokenAsync(string token);
 }
 
@@ -194,6 +205,17 @@ public interface IJobInterviewScoreSummaryRepository : IGenericRepository<JobInt
     /// <summary>Returns all score summaries submitted by an internal panelist.</summary>
     Task<IEnumerable<JobInterviewScoreSummary>> GetByInternalPanelistIdAsync(Guid panelistId);
 
+    /// <summary>
+    /// The same, for several seats at once — one query for a whole worklist rather than one per
+    /// session (round 4, lane F5).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Batched deliberately. Round 4 § 3 defect 10 is a per-employee repository call made inside
+    /// a loop in this very area; building the panelist worklist the obvious way would have been the
+    /// same mistake with a different collection.
+    /// </remarks>
+    Task<IEnumerable<JobInterviewScoreSummary>> GetByInternalPanelistIdsAsync(IReadOnlyCollection<Guid> panelistIds);
+
     /// <summary>Returns all score summaries submitted by an external panelist.</summary>
     Task<IEnumerable<JobInterviewScoreSummary>> GetByExternalPanelistIdAsync(Guid externalPanelistId);
 
@@ -235,6 +257,19 @@ public interface IJobInterviewScoreDraftRepository : IGenericRepository<JobInter
         Guid intervieweeId,
         Guid? internalPanelistId,
         Guid? externalPanelistId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Which interviewees these seats hold a draft for — one query for a whole worklist
+    /// (round 4, lane F5).
+    /// </summary>
+    /// <remarks>
+    /// Returns ids rather than drafts: the worklist only needs to know that a draft exists, and a
+    /// draft carries the panelist's unfinished private marks and comments. Loading them to answer a
+    /// yes/no question would put them on the wire for every candidate on every session.
+    /// </remarks>
+    Task<IReadOnlyList<Guid>> GetIntervieweeIdsWithDraftAsync(
+        IReadOnlyCollection<Guid> internalPanelistIds,
         CancellationToken ct = default);
 }
 

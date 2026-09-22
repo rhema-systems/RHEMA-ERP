@@ -185,6 +185,13 @@ public interface IJobInterviewService
     /// behind most of the authorization holes this module has had.
     /// </summary>
     Task<IEnumerable<JobInterviewPanelistDto>> GetMyPanelistSlotsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The caller's own scorecard worklist: each session they sit on, the candidates on it, and how
+    /// far their own card for each has got (round 4, lane F5). Only the caller's own cards.
+    /// </summary>
+    Task<IEnumerable<PanelistScorecardWorklistDto>> GetMyScorecardWorklistAsync(
+        CancellationToken cancellationToken = default);
     Task<IEnumerable<JobIntervieweeDto>> GetInterviewsByApplicationAsync(Guid applicationId, CancellationToken cancellationToken = default);
 
     // Score summaries

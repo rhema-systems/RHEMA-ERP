@@ -1,7 +1,31 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status: LANE A DONE 2026-09-21** (45 ×2, `hr-recruitment/run-round4-a.mjs`, committed
-> `10bb1d4f`). Fifteen lanes remain. Next in order: **C** (interview slot apportionment).
+> **Status 2026-09-21 — A done, C and F built.**
+>
+> | Lane | State |
+> |---|---|
+> | **A** | **DONE** — 45 ×2, `run-round4-a.mjs`, committed `10bb1d4f` |
+> | **C** | **BUILT** — 46 assertions, `run-round4-c.mjs`; staged, not yet committed |
+> | **F** | **DONE** — 103 ×2, `run-round4-f.mjs`; both migrations applied to UAT; every neighbouring suite re-run at baseline |
+>
+> Thirteen lanes remain after F. Recommended next: **G**, then **H**, then **B**.
+>
+> **Neighbouring suites after lane F**, all at baseline:
+>
+> | Suite | Result | Baseline | |
+> |---|---|---|---|
+> | `run-c1` · `run-c2` | 96/96 · 89/89 | same | ✅ |
+> | `run-round4-a` · `run-round4-c` | 45/45 · 46/46 | same | ✅ |
+> | `run-k` · `run-v` · `run-a` · `run-candidate-country` | 81 · 72 · 44 · 43 | same | ✅ |
+> | `slice-b` · `slice-c` · `slice-e` · `slice-f` | 174/176 · 188/190 · 101/105 · 69/69 | same | ✅ |
+> | `run-lane5b` | 32/34 | 32/34 | ✅ the recorded stale admin-gate |
+>
+> ⚠ `slice-b` came back **173/176 before the second name fix** — one below baseline. Its failing
+> assertion **expected the double space** (`expected "E2EA  Cand507766"`), so a stale assertion had
+> encoded defect 29 as the contract and would have defended it indefinitely. It was left untouched
+> and passed on its own once both name paths agreed, which is the proof that wanted having. That one
+> assertion is the entire argument for *"fewer assertions with zero failures is a regression
+> signal"*.
 >
 > **Verified on `ErpSystemDB_UAT`, not the dev database** — see § 9. The dev database is on the
 > pre-baseline chain (562 history rows, last `AddLeaveYearStartMonth`) and cannot take the current
@@ -790,6 +814,99 @@ so it carries the branded shell and HR can reword it without a deployment.
 ⚠ **The happy path is not harness-proven and cannot be**: the token exists only in the mailbox. The
 refusal paths are (bogus token 400, missing token 400, resend neutral for an unknown address **and**
 for a non-candidate). A browser walk against a deployment with SMTP configured is owed.
+
+---
+
+### Lane F — the printed interview paper · DONE 2026-09-22 · 103 assertions ×2
+
+Harness: `dev-harness/hr-recruitment/run-round4-f.mjs` (103 assertions). Migrations:
+`20260921224126_AddInterviewQuestionScoringGuide` and `20260921231628_AddInterviewScoreProvenance`
+(both guarded SQL; both applied to `ErpSystemDB_UAT`).
+
+**Built as planned** — F1/F1b/F1c/F2/F3/F4: the paper service rendering three variants from an
+HR-editable `Interviews` catalogue, the question table carrying weight *and* band *and* the
+achievable weighted total, `ScoringGuide` on the question bank, the print route with its own body
+class, and offline score entry recorded rather than silently attributed.
+
+**Changed during the build, with reasons:**
+
+| | Planned | Built | Why |
+|---|---|---|---|
+| `FiledByHrOnBehalfOfUserId` | a user id | **`FiledByHrOnBehalfOfEmployeeId`**, an Employee FK with a navigation | The value reaching the service is `_currentUser.EmployeeId`, passed into a parameter the controller family calls `createdByUserId`. A `...UserId` column holding an employee id is a trap that surfaces the day somebody joins it to `AspNetUsers`. HR's actor columns are employee references throughout. |
+| `ScoreSource` on the create DTO | client-supplied | **no DTO field at all; derived in `EnsureCanScoreAsAsync`** | A provenance the caller can assert is worth nothing in an audit, and a DTO field the server ignores reads as a control that exists when it does not. The gate already knows the only fact that settles it — whether the caller *is* the panelist. |
+| — | not planned | **the pack was double-wrapping its sheets** | `RenderScoreSheetsAsync` returned already-joined HTML and the pack joined it again: six sheets nested inside one section, the page break in the wrong place, `SheetCount` reading 8. The question list was not wrapped at all, so it reported 0. Both fixed by joining exactly once, in the caller. |
+| — | not planned | **a false claim in my own comment** | I wrote that `GetWithFullDetailsAsync` omits external panelists. It does not — `WithSummaryNavigations` includes them. Dropped the redundant repository round-trip; kept the soft-delete filter, which an EF `Include` does not apply. |
+
+**Lane F5 — the panelist's own scorecard, added after review.** Not in the plan. A panelist's only
+route to a scorecard ran through HR's interview desk and its Candidates tab — three clicks and a tab
+— while `/me/panel` listed interview *numbers* and described itself as *"the scorecards you owe"*.
+Built: `GET api/job-interviews/me/scorecard-worklist`, a worklist `/me/panel`, and
+`/me/panel/[interviewId]/score/[intervieweeId]`.
+
+⚠ **The scorecard form was extracted into one shared component before the second route was added.**
+The earlier decision against a portal scorecard (recorded on `/me/panel`) warned it would mean *"two
+scorecard forms against one upsert endpoint, which is how a scorecard gets silently replaced"* — an
+objection to two *implementations*, not two *routes*. `InterviewScorecardForm` says so; do not fork it.
+
+**Blind scoring — decided, then built.** Every score read was gated on *read* access, so any panelist
+could read a colleague's totals, recommendation and private comments before filing their own. Now
+blinded until they file, per **candidate** rather than per interview. ⚠ **Four** read paths leaked,
+not one: the list, the card by id, its `/entries`, and `finalized-scores` — blinding only the list
+would have been theatre, since the ids are in the DOM of any screen that ever showed it. HR is never
+blinded, because HR files on a panelist's behalf and must see what is already recorded. The HR desk's
+Scores tab now says the view is narrowed instead of claiming *"The panel has not scored this
+candidate"*, which for a blinded panelist may be flatly false.
+
+**⚠ Defect 28 — found while verifying, pre-existing, not lane F's.**
+`JobApplicationRepository.GetWithFullDetailsAsync` loads **eight collection navigations** under EF's
+default `SingleQuery`, so they are LEFT JOINed into one result set whose row count is their product.
+On `ErpSystemDB_UAT` every `POST /api/job-applications` returned **500 after exactly 30,287ms** — the
+command timeout — on the post-create re-read, *with the row already written*. Live session
+inspection settled it: `status=running`, **no wait type, no blocker**; pure query-processor CPU, not
+contention. EF logs `MultipleCollectionIncludeWarning` on the line above the failure and names the
+fix. `.AsSplitQuery()` applied there and to `GetAllWithFullDetailsByVacancyIdAsync`, which is worse —
+it is the **scoring engine's** read, so the product is multiplied again by the vacancy's application
+count, and a timeout there would read as *"shortlisting is broken"* rather than as a slow query.
+Already house practice in 15 repository files, one of which records the same lesson: *"four
+collection includes is the 8060-byte single-query shape that 500'd"*.
+
+**⚠ Defect 29 — `JobCandidate.FullName` printed a double space.** It was
+`$"{FirstName} {MiddleName ?? ""} {LastName}".Trim()`, and `.Trim()` strips the *ends*, not the gap
+left in the middle — so every candidate without a middle name rendered as *"Yaaba&#160;&#160;Nkrumah"*
+on every screen, and on the printed scoring sheet a panel signs. `Employee.FullName` has always
+branched on the middle name correctly; `JobCandidate` was the odd one out of the five `FullName`
+definitions in the entity layer, and now matches.
+
+Found by the lane F harness at 99/101 on its first pass. It also exposed a **weak test**: the
+harness's `has()` collapsed whitespace in the haystack but not in the needle, so the comparison
+could only ever pass while the data happened to be clean. Fixed at the helper, not at the call site.
+
+⚠ **Fixing the entity alone was not enough, and the neighbour sweep is what proved it.**
+`JobCandidateDto.FullName` carried a **second copy** of the same expression, so the paged
+application read (which goes through the entity) and the candidate read (which goes through the DTO)
+then disagreed about the same person's name — which is precisely what `slice-b` compares. A sweep
+for the pattern found a third: `PhysicianDto.FullName` in Medical, worse again at
+`{Title} {First} {Middle} {Last}`, leaving *two* gaps for a physician with neither. All three are
+fixed and the pattern now returns zero matches across the solution.
+
+The other first-pass failure was in the harness, not the product, and is worth recording because it
+is the exact confusion the column rename exists to prevent: the assertion compared
+`filedByHrOnBehalfOfEmployeeId` against the **user** id. It now asserts both directions — equal to
+the employee id, *and not* equal to the user id — so a future change that swaps them cannot pass
+quietly.
+
+**Two wrong diagnoses on the way, recorded because the reasoning is the reusable part.** I first read
+the log as showing the notification backlog had drained — it had not; the log was quiet *between*
+30-second cycles. I then blamed the backlog for starving the query, narrowed the dispatcher with
+`Notifications__PropertyEnquiriesOnly=true`, got zero email failures, and watched the timeout
+reproduce identically. Neither guess survived contact with `sys.dm_exec_requests`. **Look at what the
+session is waiting on before theorising about what else is running.**
+
+**Environment notes.** ⚠ Staging has no user secrets, so `JwtSettings__SecretKey` must be passed in
+or every login 400s — documented in `../operations/HR-VERIFICATION-HARNESS-GUIDE.md` §2.1, and hit
+anyway by extracting the key from `appsettings.json`, where it is an empty string. Separately, UAT
+carries **930 notifications still in the retry cycle** with no SMTP configured, cycling every 30
+seconds: noisy in the log, harmless to correctness, and not the cause of anything above.
 
 ---
 

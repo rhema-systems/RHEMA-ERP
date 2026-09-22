@@ -653,6 +653,12 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IJobInterviewQuestionBankService, JobInterviewQuestionBankService>();
         services.AddScoped<IInterviewQuestionPresetService, InterviewQuestionPresetService>();
         services.AddScoped<IJobInterviewService, JobInterviewService>();
+        // Round 4, lane F — the printed scoring sheet. ⚠ The catalogue registration below it is not
+        // optional: without it TemplatedEmailService has no fallback for the Interviews module and
+        // every paper throws rather than rendering its shipped default.
+        services.AddScoped<IInterviewPaperService, InterviewPaperService>();
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
+            ErpSystem.Core.Services.HR.Recruitment.InterviewPaperEmailEventCatalog>();
         services.AddScoped<IJobOfferService, JobOfferService>();
         services.AddScoped<IOfferLetterService, OfferLetterService>();
         services.AddScoped<IJobHireService, JobHireService>();

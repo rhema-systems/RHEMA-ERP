@@ -4,6 +4,7 @@ using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ErpSystem.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260921224126_AddInterviewQuestionScoringGuide")]
+    partial class AddInterviewQuestionScoringGuide
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -64424,9 +64427,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ExternalPanelistId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("FiledByHrOnBehalfOfEmployeeId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<DateTime?>("FinalizedDate")
                         .HasColumnType("datetime2");
 
@@ -64448,9 +64448,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("Recommendation")
                         .HasColumnType("int");
 
-                    b.Property<int?>("ScoreSource")
-                        .HasColumnType("int");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -64470,8 +64467,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ExternalPanelistId")
                         .HasDatabaseName("IX_ScoreSummary_ExternalPanelistId");
-
-                    b.HasIndex("FiledByHrOnBehalfOfEmployeeId");
 
                     b.HasIndex("InternalPanelistId")
                         .HasDatabaseName("IX_ScoreSummary_InternalPanelistId");
@@ -198782,10 +198777,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("ExternalPanelistId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "FiledByHrOnBehalfOf")
-                        .WithMany()
-                        .HasForeignKey("FiledByHrOnBehalfOfEmployeeId");
-
                     b.HasOne("ErpSystem.Core.Entities.HR.Recruitment.JobInterviewPanelist", "InternalPanelist")
                         .WithMany("ScoreSummaries")
                         .HasForeignKey("InternalPanelistId")
@@ -198804,8 +198795,6 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("ExternalPanelist");
-
-                    b.Navigation("FiledByHrOnBehalfOf");
 
                     b.Navigation("InternalPanelist");
 

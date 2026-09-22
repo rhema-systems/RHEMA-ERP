@@ -439,7 +439,20 @@ public class JobInterviewService : IJobInterviewService
     /// The client used to name the panelist in the payload (or the query string, for drafts), so any
     /// authenticated user could submit — or read — a scorecard in someone else's name.
     /// </summary>
-    private async Task EnsureCanScoreAsAsync(Guid intervieweeId, Guid? internalPanelistId, Guid? externalPanelistId)
+    /// <returns>
+    /// How the resulting scorecard reached the system (round 4, lane F4) —
+    /// <see cref="InterviewScoreSource.Online"/> when the caller <i>is</i> the panelist, and
+    /// <see cref="InterviewScoreSource.PaperSheet"/> when somebody is filing on their behalf.
+    /// </returns>
+    /// <remarks>
+    /// ⚠ <b>Provenance is decided here and nowhere else, and the client cannot influence it.</b>
+    /// This method already knows the only fact that settles it — whether the caller is the panelist
+    /// — so the answer comes back with the authorization rather than being asserted in the payload
+    /// and trusted. A card HR types in is a real card; it is just not one the panelist typed, and an
+    /// audit trail that cannot tell the difference is not an audit trail.
+    /// </remarks>
+    private async Task<InterviewScoreSource> EnsureCanScoreAsAsync(
+        Guid intervieweeId, Guid? internalPanelistId, Guid? externalPanelistId)
     {
         if (internalPanelistId is null && externalPanelistId is null)
             throw new InvalidOperationException("A scorecard must name the panelist it belongs to.");
@@ -456,8 +469,10 @@ public class JobInterviewService : IJobInterviewService
             if (panelist.JobInterviewId != interviewee.JobInterviewId)
                 throw new InvalidOperationException("That panelist does not sit on this candidate's interview.");
 
-            if (IsHr) return;
-            if (panelist.EmployeeId == CallerEmployeeId) return;
+            // Checked BEFORE the HR branch: an HR user who also sits on this panel is filing their
+            // own card, and stamping it "on behalf of" would be wrong about the one person it names.
+            if (panelist.EmployeeId == CallerEmployeeId) return InterviewScoreSource.Online;
+            if (IsHr) return InterviewScoreSource.PaperSheet;
 
             throw new UnauthorizedAccessException("You can only score as yourself.");
         }
@@ -466,8 +481,74 @@ public class JobInterviewService : IJobInterviewService
         if (external.JobInterviewId != interviewee.JobInterviewId)
             throw new InvalidOperationException("That panelist does not sit on this candidate's interview.");
 
-        // External associates have no login, so only HR can record on their behalf.
+        // External associates have no login, so only HR can record on their behalf — which makes
+        // every external scorecard a filing on somebody's behalf, by construction.
         EnsureHr("record scores for an external panelist");
+        return InterviewScoreSource.PaperSheet;
+    }
+
+    // ── Blind scoring (round 4, lane F5) ─────────────────────────────────────
+
+    /// <summary>
+    /// Narrows a candidate's scorecards to what the caller may see: their own always, everybody
+    /// else's only once they have filed their own.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why.</b> Every score read on this controller was gated on <i>read</i> access — "HR,
+    /// or a panelist on this interview" — so any panelist could open the Scores tab and read a
+    /// colleague's totals, recommendation and private comments <i>before</i> filing their own. A
+    /// panel member who looks first is anchored by whoever filed before them, which is the one
+    /// thing a panel of independent assessors exists to avoid.</para>
+    ///
+    /// <para><b>⚠ The unit is the CANDIDATE, not the interview.</b> A panelist who has filed for
+    /// Ada but not for Kwame sees the panel's cards for Ada and none for Kwame. Blinding per
+    /// interview would either unblind Kwame the moment Ada was scored, or keep Ada blind until the
+    /// whole day was done — and the anchoring risk is per person being judged.</para>
+    ///
+    /// <para><b>HR is never blinded</b>, because HR files on a panelist's behalf from a paper sheet
+    /// and has to see what is already recorded to know whether they are correcting or duplicating.
+    /// Nor is the panel blinded after the fact: once their own card is in, the full set opens, which
+    /// is the calibration conversation this is meant to protect rather than prevent.</para>
+    /// </remarks>
+    private async Task<List<JobInterviewScoreSummary>> ApplyBlindScoringAsync(
+        Guid interviewId, List<JobInterviewScoreSummary> cards)
+    {
+        if (IsHr) return cards;
+
+        var seat = await GetCallerPanelistAsync(interviewId);
+        // No seat and not HR means the read gate let an external or service caller through; there is
+        // no "own card" to measure against, so nothing is narrowed here rather than silently emptied.
+        if (seat is null) return cards;
+
+        return cards.Any(c => c.InternalPanelistId == seat.Id)
+            ? cards
+            : cards.Where(c => c.InternalPanelistId == seat.Id).ToList();
+    }
+
+    /// <summary>
+    /// The same rule for a card reached by its own id, where there is nothing to narrow — so it
+    /// refuses instead.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Without this, blinding the list read would be theatre: the ids are in the DOM of any screen
+    /// that ever showed the list, and <c>score-summaries/{id}</c> and its <c>/entries</c> sibling
+    /// would hand the card straight back.
+    /// </remarks>
+    private async Task EnsureCanSeeScoreCardAsync(Guid interviewId, JobInterviewScoreSummary card)
+    {
+        if (IsHr) return;
+
+        var seat = await GetCallerPanelistAsync(interviewId);
+        if (seat is null) return;
+        if (card.InternalPanelistId == seat.Id) return;
+
+        var tenantId = GetTenantId();
+        var hasFiledOwn = (await _scoreSummaryRepository.GetByIntervieweeIdAsync(card.JobIntervieweeId))
+            .Any(c => c.TenantId == tenantId && !c.IsDeleted && c.InternalPanelistId == seat.Id);
+
+        if (!hasFiledOwn)
+            throw new UnauthorizedAccessException(
+                "Scoring is blind until you have filed your own scorecard for this candidate.");
     }
 
     private async Task<string> GenerateInterviewNumberAsync(CancellationToken cancellationToken = default)
@@ -2178,7 +2259,8 @@ public class JobInterviewService : IJobInterviewService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         var interviewee = await GetOwnedIntervieweeAsync(createDto.JobIntervieweeId);
-        await EnsureCanScoreAsAsync(createDto.JobIntervieweeId, createDto.InternalPanelistId, createDto.ExternalPanelistId);
+        var scoreSource = await EnsureCanScoreAsAsync(
+            createDto.JobIntervieweeId, createDto.InternalPanelistId, createDto.ExternalPanelistId);
 
         // 1. One scorecard per panelist per candidate. There is no update endpoint, so without this a
         //    corrected submission simply piled a second scorecard on top of the first and every
@@ -2196,10 +2278,25 @@ public class JobInterviewService : IJobInterviewService
         var entries = await BuildScoreEntriesAsync(
             interviewee, createDto.ScoreEntries, current, createdByUserId, cancellationToken);
 
+        // Who filed it, recorded on every write — including a replacement, because the person who
+        // corrects a scorecard is the person who is claiming it now. An upsert that kept the first
+        // filer's provenance would say the panelist typed a card HR later rewrote.
+        //
+        // ⚠ `CallerEmployeeId`, not the `createdByUserId` parameter. They hold the same value today
+        // — the controller passes `_currentUser.EmployeeId` into a parameter the whole family calls
+        // `createdByUserId` — but the column is an EMPLOYEE reference and should be read from
+        // something that says employee. Taking it from the misnamed parameter is how the next
+        // refactor of that signature silently writes a user id into an employee FK.
+        var filedOnBehalfOf = scoreSource == InterviewScoreSource.PaperSheet
+            ? CallerEmployeeId
+            : null;
+
         JobInterviewScoreSummary entity;
         if (existing is null)
         {
             entity = createDto.ToEntity(current, createdByUserId);
+            entity.ScoreSource = scoreSource;
+            entity.FiledByHrOnBehalfOfEmployeeId = filedOnBehalfOf;
             await _scoreSummaryRepository.AddAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
@@ -2209,6 +2306,8 @@ public class JobInterviewService : IJobInterviewService
             entity.Recommendation = createDto.Recommendation;
             entity.Comments       = createDto.Comments;
             entity.EvaluationDate = createDto.EvaluationDate;
+            entity.ScoreSource    = scoreSource;
+            entity.FiledByHrOnBehalfOfEmployeeId = filedOnBehalfOf;
             entity.UpdatedAt      = DateTime.UtcNow;
             entity.UpdatedBy      = createdByUserId.ToString();
 
@@ -2317,8 +2416,12 @@ public class JobInterviewService : IJobInterviewService
         var interviewee = await GetOwnedIntervieweeAsync(intervieweeId);
         await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
         var tenantId = GetTenantId();
-        var entities = await _scoreSummaryRepository.GetByIntervieweeIdAsync(intervieweeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
+        var entities = (await _scoreSummaryRepository.GetByIntervieweeIdAsync(intervieweeId))
+            .Where(e => e.TenantId == tenantId)
+            .ToList();
+
+        var visible = await ApplyBlindScoringAsync(interviewee.JobInterviewId, entities);
+        return visible.Select(e => e.ToDto());
     }
 
     public async Task<JobInterviewScoreSummaryDetailDto> GetScoreSummaryDetailAsync(Guid scoreSummaryId, CancellationToken cancellationToken = default)
@@ -2329,6 +2432,7 @@ public class JobInterviewService : IJobInterviewService
 
         var interviewee = await GetOwnedIntervieweeAsync(entity.JobIntervieweeId);
         await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
+        await EnsureCanSeeScoreCardAsync(interviewee.JobInterviewId, entity);
         return entity.ToDetailDto();
     }
 
@@ -2409,6 +2513,120 @@ public class JobInterviewService : IJobInterviewService
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
+    /// <summary>
+    /// The caller's own scorecard worklist — each session they sit on, the candidates on it, and how
+    /// far their own card for each has got (round 4, lane F5).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this read exists.</b> A panelist's only route to a scorecard ran through HR's
+    /// interview desk screen and its Candidates tab, and the portal diary listed interview
+    /// <i>numbers</i> while describing itself as "the scorecards you owe". This is what lets the
+    /// portal keep that promise.</para>
+    ///
+    /// <para>⚠ <b>Only the caller's own cards.</b> A colleague's mark never appears here, even for
+    /// a candidate the caller has already filed for and could therefore see elsewhere. A worklist
+    /// showing somebody else's answer is the anchoring problem in a different shape.</para>
+    ///
+    /// <para>⚠ <b>Three queries, not three per session.</b> The seats, then every card across those
+    /// seats, then which of them hold a draft — round 4 § 3 defect 10 is a per-row repository call
+    /// made inside a loop in this very service.</para>
+    /// </remarks>
+    public async Task<IEnumerable<PanelistScorecardWorklistDto>> GetMyScorecardWorklistAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var employeeId = CallerEmployeeId;
+        if (employeeId is null || employeeId == Guid.Empty)
+            throw new UnauthorizedAccessException("Your user account is not linked to an employee record.");
+
+        var tenantId = GetTenantId();
+
+        var seats = (await _panelistRepository.GetWorklistByEmployeeIdAsync(employeeId.Value))
+            .Where(p => p.TenantId == tenantId && p.JobInterview is not null && !p.JobInterview.IsDeleted)
+            .ToList();
+        if (seats.Count == 0) return Array.Empty<PanelistScorecardWorklistDto>();
+
+        var seatIds = seats.Select(p => p.Id).ToList();
+
+        var cards = (await _scoreSummaryRepository.GetByInternalPanelistIdsAsync(seatIds))
+            .Where(c => c.TenantId == tenantId)
+            .ToList();
+        // One card per (seat, candidate) — the create path upserts on exactly that pair.
+        var cardBySeatAndCandidate = cards
+            .GroupBy(c => (Seat: c.InternalPanelistId!.Value, Candidate: c.JobIntervieweeId))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.UpdatedAt ?? c.CreatedAt).First());
+
+        var draftedFor = (await _draftRepository
+                .GetIntervieweeIdsWithDraftAsync(seatIds, cancellationToken))
+            .ToHashSet();
+
+        var worklist = new List<PanelistScorecardWorklistDto>();
+        foreach (var seat in seats)
+        {
+            var interview = seat.JobInterview!;
+
+            var candidates = (interview.Interviewees ?? new List<JobInterviewee>())
+                .Where(ie => !ie.IsDeleted && ie.TenantId == tenantId)
+                // Slotted candidates first and in time order, then the unslotted — the order the
+                // panel will actually see people, which is the only order that helps in the room.
+                .OrderBy(ie => ie.SlotStartTime.HasValue ? 0 : 1)
+                .ThenBy(ie => ie.SlotStartTime ?? TimeSpan.Zero)
+                .ThenBy(ie => ie.JobApplication?.JobCandidate?.FullName)
+                .Select(ie =>
+                {
+                    cardBySeatAndCandidate.TryGetValue((seat.Id, ie.Id), out var card);
+                    return new PanelistScorecardCandidateDto
+                    {
+                        IntervieweeId = ie.Id,
+                        JobApplicationId = ie.JobApplicationId,
+                        CandidateName = ie.JobApplication?.JobCandidate?.FullName ?? "Candidate",
+                        ApplicationNumber = ie.JobApplication?.ApplicationNumber ?? string.Empty,
+                        SlotStartTime = ie.SlotStartTime,
+                        SlotEndTime = ie.SlotEndTime,
+                        CandidateAttended = ie.CandidateAttended,
+                        ScoreSummaryId = card?.Id,
+                        TotalWeightedScore = card?.TotalWeightedScore,
+                        Recommendation = card?.Recommendation,
+                        // ⚠ A draft is NOT a filed card: it is private, it does not unblind the
+                        // panel, and it leaves the scorecard still owed. Collapsing the two would
+                        // let a panelist's own to-do list tell them they were finished.
+                        State = card is null
+                            ? (draftedFor.Contains(ie.Id)
+                                ? PanelistScorecardState.Draft
+                                : PanelistScorecardState.NotStarted)
+                            : card.IsFinalized
+                                ? PanelistScorecardState.SignedOff
+                                : PanelistScorecardState.Saved,
+                    };
+                })
+                .ToList();
+
+            worklist.Add(new PanelistScorecardWorklistDto
+            {
+                InterviewId = interview.Id,
+                InterviewNumber = interview.InterviewNumber,
+                JobTitle = interview.JobVacancy?.JobTitle ?? "Interview",
+                VacancyNumber = interview.JobVacancy?.VacancyNumber ?? string.Empty,
+                Round = interview.Round,
+                Type = interview.Type,
+                Mode = interview.Mode,
+                Status = interview.Status,
+                ScheduledDate = interview.ScheduledDate,
+                StartTime = interview.StartTime,
+                EndTime = interview.EndTime,
+                LocationOrLink = interview.LocationOrLink,
+                PanelistId = seat.Id,
+                Role = seat.Role,
+                IsRequired = seat.IsRequired,
+                IsConfirmed = seat.IsConfirmed,
+                HasQuestionPlan = (interview.Questions ?? new List<JobInterviewQuestion>())
+                    .Any(q => !q.IsDeleted),
+                Candidates = candidates,
+            });
+        }
+
+        return worklist;
+    }
+
     public async Task<IEnumerable<JobInterviewPanelistDto>> GetInterviewsByPanelistAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         // Reading someone else's interview diary is HR's; reading your own goes through /me above, which
@@ -2454,8 +2672,14 @@ public class JobInterviewService : IJobInterviewService
         var interviewee = await GetOwnedIntervieweeAsync(intervieweeId);
         await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
         var tenantId = GetTenantId();
-        var entities = await _scoreSummaryRepository.GetFinalizedForIntervieweeAsync(intervieweeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
+        // ⚠ Blinded too. "Finalized" is not a lesser read — a signed-off card is the strongest
+        // anchor there is, and this endpoint would otherwise be the way round the rule.
+        var entities = (await _scoreSummaryRepository.GetFinalizedForIntervieweeAsync(intervieweeId))
+            .Where(e => e.TenantId == tenantId)
+            .ToList();
+
+        var visible = await ApplyBlindScoringAsync(interviewee.JobInterviewId, entities);
+        return visible.Select(e => e.ToDto());
     }
 
     public async Task<IEnumerable<JobInterviewScoreEntryDto>> GetScoreEntriesAsync(Guid scoreSummaryId, CancellationToken cancellationToken = default)
@@ -2463,6 +2687,7 @@ public class JobInterviewService : IJobInterviewService
         var summary = await GetOwnedScoreSummaryAsync(scoreSummaryId);
         var interviewee = await GetOwnedIntervieweeAsync(summary.JobIntervieweeId);
         await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
+        await EnsureCanSeeScoreCardAsync(interviewee.JobInterviewId, summary);
         var entities = await _scoreEntryRepository.GetBySummaryIdAsync(scoreSummaryId);
         return entities.Where(e => e.TenantId == summary.TenantId).Select(e => e.ToDto());
     }

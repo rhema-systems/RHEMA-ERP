@@ -33,11 +33,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class JobInterviewController : ControllerBase
 {
     private readonly IJobInterviewService _service;
+    private readonly IInterviewPaperService _paper;
     private readonly ICurrentUserService _currentUser;
 
-    public JobInterviewController(IJobInterviewService service, ICurrentUserService currentUser)
+    public JobInterviewController(
+        IJobInterviewService service,
+        IInterviewPaperService paper,
+        ICurrentUserService currentUser)
     {
         _service = service;
+        _paper = paper;
         _currentUser = currentUser;
     }
 
@@ -261,6 +266,24 @@ public class JobInterviewController : ControllerBase
     public async Task<ActionResult<IEnumerable<JobInterviewPanelistDto>>> GetMyPanelistSlots()
         => Ok(await _service.GetMyPanelistSlotsAsync());
 
+    /// <summary>
+    /// The caller's own scorecard worklist — every session they sit on, the candidates on it, and
+    /// how far their own card for each has got.
+    /// </summary>
+    /// <remarks>
+    /// <para>Round 4, lane F5. The route the portal uses so a panelist can find and file their own
+    /// scorecards without going through HR's interview desk and its Candidates tab, which was the
+    /// only path that existed.</para>
+    ///
+    /// <para>⚠ Returns the caller's <b>own</b> cards only, never a colleague's — separately from the
+    /// blind-scoring rule on the score reads, and regardless of it.</para>
+    /// </remarks>
+    [HttpGet("me/scorecard-worklist")]
+    [ProducesResponseType(typeof(IEnumerable<PanelistScorecardWorklistDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<PanelistScorecardWorklistDto>>> GetMyScorecardWorklist(
+        CancellationToken ct = default)
+        => Ok(await _service.GetMyScorecardWorklistAsync(ct));
+
     // =========================================================================
     // EXTERNAL PANELISTS
     // =========================================================================
@@ -412,6 +435,37 @@ public class JobInterviewController : ControllerBase
         dto.IntervieweeId = intervieweeId;
         await _service.UpdateIntervieweeSlotAsync(dto);
         return Ok(new { message = "Slot time updated." });
+    }
+
+    /// <summary>
+    /// The printed interview paper — the scoring sheets, the question list, or the whole pack.
+    /// </summary>
+    /// <remarks>
+    /// <para>Returns HTML the client prints. There is deliberately no PDF: a scoring sheet is
+    /// written on and signed, so the browser's own print is the target, and the wording lives in an
+    /// HR-editable template rather than in a document builder.</para>
+    ///
+    /// <para>⚠ Gated on <b>read</b> access, not <c>EnsureHr</c> — the panelist who needs the sheet
+    /// is not the person who manages the session. The service applies
+    /// <c>EnsureCanReadInterviewAsync</c>: HR, or a panelist on this interview.</para>
+    /// </remarks>
+    [HttpGet("{interviewId:guid}/paper")]
+    [ProducesResponseType(typeof(InterviewPaperDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<InterviewPaperDto>> GetPaper(
+        Guid interviewId,
+        [FromQuery] InterviewPaperVariant variant = InterviewPaperVariant.ScoreSheet,
+        [FromQuery] Guid? panelistId = null,
+        [FromQuery] Guid[]? intervieweeIds = null,
+        CancellationToken ct = default)
+    {
+        // The paper reads the interview, so the same per-record rule applies. Asked here rather
+        // than duplicated in the paper service, which has no business knowing about panels.
+        await _service.GetByIdAsync(interviewId);
+
+        return Ok(await _paper.GenerateAsync(
+            interviewId, variant, panelistId,
+            intervieweeIds is { Length: > 0 } ? intervieweeIds : null, ct));
     }
 
     /// <summary>

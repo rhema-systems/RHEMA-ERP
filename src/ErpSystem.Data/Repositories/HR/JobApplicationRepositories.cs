@@ -81,9 +81,26 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
             .FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted);
     }
 
+    /// <remarks>
+    /// ⚠ <b><c>AsSplitQuery</c> is load-bearing.</b> This loads eight collection navigations —
+    /// shortlisting criteria values, the candidate's qualifications, skills and languages, stage
+    /// histories, test results, interview slots and communications. Under EF's default
+    /// <c>SingleQuery</c> they are LEFT JOINed into one result set, so the row count is their
+    /// product rather than their sum, and the query processor spends its time materialising a
+    /// cartesian explosion.
+    ///
+    /// <para>Measured on <c>ErpSystemDB_UAT</c> 2026-09-21: every <c>POST /api/job-applications</c>
+    /// returned <b>500 after exactly 30,287ms</b> — the command timeout — on the post-create
+    /// re-read, with the row already written. The session showed <c>status=running</c>, no wait
+    /// type and no blocker: pure CPU, not contention. EF logs
+    /// <c>MultipleCollectionIncludeWarning</c> on the line above the failure and names this fix.
+    /// Same lesson as <c>SafetyEmergencyGovernanceRepositories</c>, which records four collection
+    /// includes 500ing on the 8060-byte single-query shape.</para>
+    /// </remarks>
     public async Task<JobApplication?> GetWithFullDetailsAsync(Guid id)
     {
         return await _dbSet
+            .AsSplitQuery()
             .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
             .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .Include(a => a.JobVacancy).ThenInclude(v => v.ShortlistingCriteria).ThenInclude(c => c.Values)
@@ -115,9 +132,15 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 
     public async Task<IEnumerable<JobApplication>> GetAllWithFullDetailsByVacancyIdAsync(Guid vacancyId)
     {
-        // Single query that loads every navigation property required by the scoring engine —
-        // same shape as GetWithFullDetailsAsync but scoped to the whole vacancy.
+        // Loads every navigation property required by the scoring engine — same shape as
+        // GetWithFullDetailsAsync but scoped to the whole vacancy.
+        //
+        // ⚠ AsSplitQuery for the same reason, and more urgently: this one returns MANY
+        // applications, so the cartesian product of six collection navigations is multiplied again
+        // by the vacancy's application count. It is the scoring engine's read — the one place a
+        // 30-second timeout would look like "shortlisting is broken" rather than like a slow query.
         return await _dbSet
+            .AsSplitQuery()
             .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
             .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .Include(a => a.JobVacancy).ThenInclude(v => v.ShortlistingCriteria).ThenInclude(c => c.Values)

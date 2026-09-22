@@ -1,12 +1,14 @@
 'use client';
 
 import { useQueries } from '@tanstack/react-query';
-import { ClipboardCheck, Loader2 } from 'lucide-react';
+import { ClipboardCheck, EyeOff, Loader2 } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { humanizeEnum } from '@/lib/hr/attendance-format';
+import { useAuth } from '@/hooks/use-auth';
 import { jobInterviewService } from '@/services/hr/interviews.service';
 import type { JobInterviewDetail, JobInterviewScoreSummary } from '@/types/hr/interviews';
 
@@ -20,8 +22,22 @@ import type { JobInterviewDetail, JobInterviewScoreSummary } from '@/types/hr/in
  *
  * Draft cards are shown alongside signed ones and marked as such — a card that has not been
  * finalised is the panelist's working note, not their verdict.
+ *
+ * ⚠ **Scoring is blind until you file your own** (round 4, lane F5). For a panelist who has not yet
+ * filed for a candidate, the server returns only their own card — so this screen must say the view
+ * is narrowed rather than report an empty list. "No scorecards yet" would be a plain lie to the one
+ * person it is shown to, and it is the same shape as the orientation sessions dropdown that
+ * rendered a 403 identically to an empty result. HR is never blinded.
  */
-export function InterviewScoresPanel({ interview }: { interview: JobInterviewDetail }) {
+export function InterviewScoresPanel({
+  interview,
+  canManage = false,
+}: {
+  interview: JobInterviewDetail;
+  /** True for HR, who see every card. A panelist sees a blinded view until they file. */
+  canManage?: boolean;
+}) {
+  const { user } = useAuth();
   const results = useQueries({
     queries: interview.interviewees.map((ie) => ({
       queryKey: ['hr', 'interview-scores', ie.id],
@@ -30,6 +46,12 @@ export function InterviewScoresPanel({ interview }: { interview: JobInterviewDet
   });
 
   const loading = results.some((r) => r.isLoading);
+
+  // The caller's own seat, if they sit on this panel. External assessors have no login, so only the
+  // internal panel can ever be the viewer.
+  const mySeatId = interview.panelists.find(
+    (p) => p.employeeId === (user as any)?.employeeId,
+  )?.id;
 
   if (interview.interviewees.length === 0) {
     return (
@@ -59,18 +81,38 @@ export function InterviewScoresPanel({ interview }: { interview: JobInterviewDet
         const cards: JobInterviewScoreSummary[] = results[index]?.data ?? [];
         const signed = cards.filter((c) => c.isFinalized).length;
 
+        // Blinded when the viewer is a panelist on this interview who has not filed for THIS
+        // candidate. The server has already narrowed the list; this only decides what to say about
+        // it. ⚠ Never claim "nobody has scored" in this state — it may well be false.
+        const blinded =
+          !canManage && !!mySeatId && !cards.some((c) => c.internalPanelistId === mySeatId);
+
         return (
           <Card key={candidate.id}>
             <CardHeader>
               <CardTitle className="text-base">{candidate.candidateName}</CardTitle>
               <CardDescription>
-                {cards.length === 0
-                  ? 'No scorecards yet.'
-                  : `${cards.length} scorecard${cards.length === 1 ? '' : 's'}, ${signed} signed off.`}
+                {blinded
+                  ? 'Hidden until you file your own scorecard for this candidate.'
+                  : cards.length === 0
+                    ? 'No scorecards yet.'
+                    : `${cards.length} scorecard${cards.length === 1 ? '' : 's'}, ${signed} signed off.`}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              {cards.length === 0 ? (
+              {blinded ? (
+                <div className="px-6 pb-6">
+                  <Alert>
+                    <EyeOff className="h-4 w-4" />
+                    <AlertDescription>
+                      Scoring is blind. Whatever the rest of the panel have recorded stays hidden
+                      until you file your own scorecard for {candidate.candidateName} — so your mark
+                      is yours. The full set opens the moment you do, for the panel&rsquo;s own
+                      comparison.
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              ) : cards.length === 0 ? (
                 <div className="px-6 pb-6 text-sm text-muted-foreground">
                   The panel has not scored this candidate.
                 </div>
@@ -93,6 +135,14 @@ export function InterviewScoresPanel({ interview }: { interview: JobInterviewDet
                           {card.internalPanelistName ?? card.externalPanelistName ?? 'Panelist'}
                           {card.externalPanelistId && (
                             <span className="ml-2 text-xs text-muted-foreground">external</span>
+                          )}
+                          {/* Round 4, lane F4. Shown only when the server says somebody else filed
+                              it — a null source means the card predates this being tracked, which
+                              is not the same claim as "the panelist typed it". */}
+                          {card.scoreSource === 'PaperSheet' && (
+                            <p className="mt-0.5 text-xs font-normal text-muted-foreground">
+                              filed by HR on their behalf
+                            </p>
                           )}
                         </TableCell>
                         <TableCell>{card.totalRawScore}</TableCell>

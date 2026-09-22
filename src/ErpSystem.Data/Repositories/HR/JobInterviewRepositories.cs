@@ -246,6 +246,22 @@ public class JobInterviewPanelistRepository : GenericRepository<JobInterviewPane
             .ToListAsync();
     }
 
+    /// <inheritdoc />
+    public async Task<IEnumerable<JobInterviewPanelist>> GetWorklistByEmployeeIdAsync(Guid employeeId)
+    {
+        return await WithSummaryNavigations()
+            .Include(p => p.JobInterview).ThenInclude(i => i.JobVacancy).ThenInclude(v => v.Position)
+            .Include(p => p.JobInterview).ThenInclude(i => i.Interviewees)
+                .ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
+            .Include(p => p.JobInterview).ThenInclude(i => i.Questions)
+            .Where(p => p.EmployeeId == employeeId && !p.IsDeleted)
+            // Newest first: a panelist's outstanding work is almost always the session they have
+            // just sat in, and the tail is history they scroll to rather than look for.
+            .OrderByDescending(p => p.JobInterview.ScheduledDate)
+            .ThenByDescending(p => p.JobInterview.StartTime)
+            .ToListAsync();
+    }
+
     public async Task<JobInterviewPanelist?> GetByConfirmationTokenAsync(string token)
         => await WithSummaryNavigations()
             .FirstOrDefaultAsync(p => p.ConfirmationToken == token && !p.IsDeleted);
@@ -409,12 +425,17 @@ public class JobInterviewScoreSummaryRepository : GenericRepository<JobInterview
     /// reads had the panelists but not the candidate, the by-panelist reads had the candidate but not
     /// the panelists, and <c>ExternalAssociate</c> was never included anywhere — so an external
     /// panelist's scorecard always came back with a blank name on every endpoint.
+    ///
+    /// <para>Round 4 lane F4 adds <c>FiledByHrOnBehalfOf</c>, for the same reason: the provenance
+    /// note names the person who filed the card, and without the include it would name nobody on
+    /// every read while the id sat right there in the row.</para>
     /// </summary>
     private IQueryable<JobInterviewScoreSummary> WithSummaryNavigations() =>
         _dbSet
             .Include(s => s.JobInterviewee).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
             .Include(s => s.InternalPanelist).ThenInclude(p => p!.Employee)
-            .Include(s => s.ExternalPanelist).ThenInclude(p => p!.ExternalAssociate);
+            .Include(s => s.ExternalPanelist).ThenInclude(p => p!.ExternalAssociate)
+            .Include(s => s.FiledByHrOnBehalfOf);
 
     public override async Task<JobInterviewScoreSummary?> GetByIdAsync(Guid id)
         => await WithSummaryNavigations().FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
@@ -431,6 +452,23 @@ public class JobInterviewScoreSummaryRepository : GenericRepository<JobInterview
     {
         return await WithSummaryNavigations()
             .Where(s => s.InternalPanelistId == panelistId && !s.IsDeleted)
+            .OrderByDescending(s => s.CreatedAt)
+            .ToListAsync();
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<JobInterviewScoreSummary>> GetByInternalPanelistIdsAsync(
+        IReadOnlyCollection<Guid> panelistIds)
+    {
+        // An empty IN () is valid SQL here but pointless work; more to the point, EF translates it
+        // to a constant-false predicate and still round-trips.
+        if (panelistIds is null || panelistIds.Count == 0)
+            return Array.Empty<JobInterviewScoreSummary>();
+
+        return await WithSummaryNavigations()
+            .Where(s => s.InternalPanelistId != null
+                     && panelistIds.Contains(s.InternalPanelistId.Value)
+                     && !s.IsDeleted)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
     }
@@ -550,6 +588,25 @@ public class JobInterviewScoreDraftRepository
             d.InternalPanelistId == internalPanelistId &&
             d.ExternalPanelistId == externalPanelistId &&
             !d.IsDeleted, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Guid>> GetIntervieweeIdsWithDraftAsync(
+        IReadOnlyCollection<Guid> internalPanelistIds,
+        CancellationToken ct = default)
+    {
+        if (internalPanelistIds is null || internalPanelistIds.Count == 0)
+            return Array.Empty<Guid>();
+
+        // Projected to ids in the database: the worklist asks whether a draft exists, and the draft
+        // itself holds the panelist's unfinished marks and comments.
+        return await _dbSet
+            .Where(d => d.InternalPanelistId != null
+                     && internalPanelistIds.Contains(d.InternalPanelistId.Value)
+                     && !d.IsDeleted)
+            .Select(d => d.JobIntervieweeId)
+            .Distinct()
+            .ToListAsync(ct);
     }
 }
 

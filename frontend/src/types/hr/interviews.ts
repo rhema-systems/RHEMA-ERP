@@ -133,6 +133,8 @@ export interface InterviewQuestion {
   weight: number;
   minScore: number;
   maxScore: number;
+  /** What a good answer sounds like. Printed beside the question on the paper scoring sheet. */
+  scoringGuide?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt?: string | null;
@@ -144,6 +146,7 @@ export interface CreateInterviewQuestion {
   weight: number;
   minScore: number;
   maxScore: number;
+  scoringGuide?: string | null;
   isActive: boolean;
 }
 
@@ -422,6 +425,13 @@ export interface JobInterviewSelectedQuestion {
   weight: number;
   minScore: number;
   maxScore: number;
+  /**
+   * Read live from the bank question, like `questionText`, `weight` and the band beside it — the
+   * drawn row holds only the reference. Editing the guide changes what an already-drawn question
+   * prints, which is what you want for guidance and is worth knowing before rewording one
+   * mid-campaign.
+   */
+  scoringGuide?: string | null;
   displayOrder: number;
 }
 
@@ -508,6 +518,26 @@ export interface JobInterviewScoreSummary {
   evaluationDate: string;
   isFinalized: boolean;
   finalizedDate?: string | null;
+  /**
+   * How the card reached the system (round 4, lane F4). **Derived by the server from who called**,
+   * never sent by the client — a provenance the caller could assert is worth nothing.
+   *
+   * ⚠ Null means "recorded before this was tracked", which is *not* the same as `Online`. Do not
+   * render a null as "filed online".
+   */
+  scoreSource?: 'Online' | 'PaperSheet' | null;
+  /**
+   * The HR person who filed it on the panelist's behalf. Null when the panelist filed it.
+   *
+   * ⚠ An **employee** id, not a user id. HR's actor columns are employee references throughout,
+   * and the value the service stores is `_currentUser.EmployeeId` — despite reaching it through a
+   * parameter the controller family calls `createdByUserId`.
+   */
+  filedByHrOnBehalfOfEmployeeId?: string | null;
+  /** Their name, when the read loaded it. */
+  filedByHrOnBehalfOfName?: string | null;
+  /** A ready-made provenance line, or null when the panelist filed it themselves. */
+  filedOnBehalfNote?: string | null;
 }
 
 export interface JobInterviewScoreSummaryDetail extends JobInterviewScoreSummary {
@@ -719,4 +749,99 @@ export interface InterviewSlotPlan {
   /** First free time of day after the window. Null when everybody fits. The DATE is the user's. */
   firstFreeAfterWindow?: string | null;
   summary: string;
+}
+
+// ── The printed interview paper (round 4, lane F) ───────────────────────────
+
+/**
+ * Which paper to print.
+ *
+ * ⚠ These are the server enum's *names*, not numbers. The API serialises enums as strings, and
+ * model-binds a query value back by name, so the same literal travels in both directions.
+ */
+export type InterviewPaperVariant = 'ScoreSheet' | 'Questions' | 'Pack';
+
+/**
+ * The rendered paper. HTML the client prints; there is deliberately no PDF — a scoring sheet is
+ * written on and signed, so the browser's own print is the target, and the wording belongs to an
+ * HR-editable template rather than to a document builder in C#.
+ */
+export interface InterviewPaper {
+  interviewId: string;
+  interviewNumber: string;
+  jobTitle: string;
+  variant: InterviewPaperVariant;
+  /** How many physical sheets this prints — said before the print dialog opens, not after. */
+  sheetCount: number;
+  /** Each sheet is a `<section class="interview-paper-sheet">` carrying its own page break. */
+  htmlBody: string;
+}
+
+/** The filters the paper endpoint accepts. Both narrow; omitting both prints everything. */
+export interface InterviewPaperRequest {
+  variant?: InterviewPaperVariant;
+  /** Print only this panelist's sheets. Omit for one per panelist per candidate. */
+  panelistId?: string | null;
+  /** Print only these candidates. Omit for everyone booked in, in slot order. */
+  intervieweeIds?: string[];
+}
+
+// ── The panelist's own scorecard worklist (round 4, lane F5) ────────────────
+
+/** Where one of the caller's own scorecards has got to. Derived by the server, not stored. */
+export type PanelistScorecardState = 'NotStarted' | 'Draft' | 'Saved' | 'SignedOff';
+
+/**
+ * One candidate the caller has to score.
+ *
+ * ⚠ Carries the **caller's own** card only. A colleague's mark never appears here, even for a
+ * candidate the caller has already filed for and could therefore see on the interview's Scores tab.
+ */
+export interface PanelistScorecardCandidate {
+  intervieweeId: string;
+  jobApplicationId: string;
+  candidateName: string;
+  applicationNumber: string;
+  /** Their slot, when the day was apportioned. Null means "sometime in the session". */
+  slotStartTime?: string | null;
+  slotEndTime?: string | null;
+  /** Whether they turned up. Null before the day. */
+  candidateAttended?: boolean | null;
+  scoreSummaryId?: string | null;
+  state: PanelistScorecardState;
+  totalWeightedScore?: number | null;
+  recommendation?: JobInterviewRecommendation | null;
+  recommendationName?: string | null;
+  /** True once nothing further is owed. ⚠ A draft is NOT complete — it is private and unfiled. */
+  isComplete: boolean;
+}
+
+/** One interview the caller sits on, with the scorecards they owe on it. */
+export interface PanelistScorecardWorklistItem {
+  interviewId: string;
+  interviewNumber: string;
+  jobTitle: string;
+  vacancyNumber: string;
+  round: number;
+  type: JobInterviewType;
+  typeName: string;
+  mode: InterviewMode;
+  modeName: string;
+  status: JobInterviewStatus;
+  statusName: string;
+  scheduledDate: string;
+  startTime: string;
+  endTime: string;
+  locationOrLink?: string | null;
+  /** The caller's own seat — the id a scorecard is filed against, and the paper filter. */
+  panelistId: string;
+  role: JobInterviewPanelistRole;
+  roleName: string;
+  isRequired: boolean;
+  isConfirmed: boolean;
+  hasQuestionPlan: boolean;
+  candidates: PanelistScorecardCandidate[];
+  outstandingCount: number;
+  /** False once the session is Completed or Cancelled — nothing further can be filed. */
+  isOpen: boolean;
 }

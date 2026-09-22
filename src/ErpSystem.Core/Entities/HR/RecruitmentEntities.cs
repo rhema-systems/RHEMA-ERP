@@ -768,8 +768,18 @@ public class JobCandidate : TenantEntity
 	[MaxLength(100)]
 	public string LastName { get; set; } = string.Empty;
 
+    /// <remarks>
+    /// ⚠ <c>.Trim()</c> is not enough on its own: it strips the ends, not the gap left in the
+    /// middle. The previous form — <c>$"{FirstName} {MiddleName ?? ""} {LastName}".Trim()</c> —
+    /// rendered every candidate without a middle name as <i>"Yaaba&#160;&#160;Nkrumah"</i>, a
+    /// double space, on every screen and on the printed interview scoring sheet somebody signs.
+    /// Caught by the round 4 lane F harness. <c>Employee.FullName</c> has always had it right and
+    /// this now matches it.
+    /// </remarks>
     [NotMapped]
-    public string FullName => $"{FirstName} {MiddleName ?? string.Empty} {LastName}".Trim();
+    public string FullName => string.IsNullOrWhiteSpace(MiddleName)
+        ? $"{FirstName} {LastName}".Trim()
+        : $"{FirstName} {MiddleName} {LastName}".Trim();
 
     public DateTime DateOfBirth { get; set; }
     public Gender Gender { get; set; }
@@ -1780,9 +1790,25 @@ public class JobInterviewQuestionDetail : TenantEntity
     public int Weight { get; set; } = 1;
 	
 	public int MinScore { get; set; } = 1;
-	
+
 	public int MaxScore { get; set; } = 10;
-	
+
+    /// <summary>
+    /// What a good answer sounds like — printed beside the question on the paper scoring sheet.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Added in round 4 lane C's sibling, F, because the bank held a question, a weight and
+    /// a band and <b>nothing about how to judge the answer</b>. On screen that gap is invisible: the
+    /// person scoring usually wrote the question. On paper, handed to a panelist who did not, a
+    /// question marked out of ten with no guidance is ten marks awarded on instinct — and the
+    /// weighted total then reads as precision it does not have.</para>
+    ///
+    /// <para>Optional, and printed only when set: a question that genuinely needs no guidance should
+    /// not carry an empty heading on every sheet.</para>
+    /// </remarks>
+    [MaxLength(2000)]
+    public string? ScoringGuide { get; set; }
+
     public Guid QuestionTypeId { get; set; }
  
     [ForeignKey(nameof(QuestionTypeId))]
@@ -2141,6 +2167,40 @@ public class JobInterviewScoreSummary : TenantEntity
     public bool IsFinalized { get; set; }
 
     public DateTime? FinalizedDate { get; set; }
+
+    /// <summary>
+    /// How this scorecard reached the system — typed by the panelist, or transcribed by HR from a
+    /// signed paper sheet (round 4, lane F4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Nullable, and that is deliberate.</b> Null means "recorded before this was tracked",
+    /// which is not the same claim as <see cref="InterviewScoreSource.Online"/>. Defaulting the
+    /// existing rows to Online would assert of every historical scorecard that the panelist typed
+    /// it themselves — a fact nobody checked, written into an audit trail. New rows always carry a
+    /// value; the service supplies one on every write path.
+    /// </remarks>
+    public InterviewScoreSource? ScoreSource { get; set; }
+
+    /// <summary>
+    /// The HR person who filed this on the panelist's behalf. Null when the panelist filed it.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>An EMPLOYEE id, not an ApplicationUser id</b>, and the name says so. The round 4
+    /// plan called this <c>FiledByHrOnBehalfOfUserId</c> — but the value that reaches the service is
+    /// <c>_currentUser.EmployeeId</c>, passed into a parameter the controller family misleadingly
+    /// calls <c>createdByUserId</c>. A column named <c>...UserId</c> holding an employee id is a
+    /// trap that only shows up the day somebody joins it to <c>AspNetUsers</c> and gets nothing.
+    /// HR's actor columns are employee references throughout (<c>ApprovedById</c> and the rest), so
+    /// this follows the house convention rather than inventing a second one.</para>
+    ///
+    /// <para>Why a column at all, when <c>CreatedBy</c> exists: a scorecard is <b>upserted</b>. A
+    /// correction rewrites <c>UpdatedBy</c> and leaves <c>CreatedBy</c> pointing at whoever happened
+    /// to be first, so provenance inferred from those two is wrong exactly when it matters.</para>
+    /// </remarks>
+    public Guid? FiledByHrOnBehalfOfEmployeeId { get; set; }
+
+    [ForeignKey(nameof(FiledByHrOnBehalfOfEmployeeId))]
+    public virtual Employee? FiledByHrOnBehalfOf { get; set; }
 
     public virtual ICollection<JobInterviewScoreEntry> ScoreEntries { get; set; } = new List<JobInterviewScoreEntry>();
 
