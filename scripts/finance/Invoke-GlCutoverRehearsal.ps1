@@ -276,12 +276,18 @@ function Write-AtomicNativeCommandEvidence([string]$evidenceFile, [string[]]$san
 function Invoke-NativeWithEvidence([string]$filePath, [string[]]$arguments, [string]$evidenceFile,
     [switch]$AllowFailure) {
     $priorNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    $priorErrorActionPreference = $ErrorActionPreference
     try {
         $PSNativeCommandUseErrorActionPreference = $false
+        # Windows PowerShell 5.1 promotes native stderr records under Stop before
+        # the exit code and retained evidence can be processed. Capture them as
+        # ordinary command output, then enforce the native exit code below.
+        $ErrorActionPreference = 'Continue'
         $output = @(& $filePath @arguments 2>&1)
         $exitCode = $LASTEXITCODE
     }
     finally {
+        $ErrorActionPreference = $priorErrorActionPreference
         $PSNativeCommandUseErrorActionPreference = $priorNativeErrorPreference
     }
 

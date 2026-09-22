@@ -161,6 +161,17 @@ if ($upText -match '\bDrop(?:Table|Column|ForeignKey|Index|PrimaryKey|UniqueCons
     $upText -match '\bUpdateData\s*\(') {
     throw 'The zero-to-current baseline contains predecessor-dependent drop/update operations.'
 }
+$procedureCaseCreate = $upText.IndexOf('name: "ProcedureCases"', [StringComparison]::Ordinal)
+$organizationLevelCreate = $upText.IndexOf('name: "OrganizationLevels"', [StringComparison]::Ordinal)
+$organizationUnitCreate = $upText.IndexOf('name: "OrganizationUnits"', [StringComparison]::Ordinal)
+$procedureLevelForeignKey = $upText.LastIndexOf('name: "FK_ProcedureCases_OrganizationLevels_OrganizationLevelId"', [StringComparison]::Ordinal)
+$procedureUnitForeignKey = $upText.LastIndexOf('name: "FK_ProcedureCases_OrganizationUnits_OrganizationUnitId"', [StringComparison]::Ordinal)
+if ($procedureCaseCreate -lt 0 -or $organizationLevelCreate -le $procedureCaseCreate -or
+    $organizationUnitCreate -le $organizationLevelCreate -or
+    $procedureLevelForeignKey -le $organizationLevelCreate -or
+    $procedureUnitForeignKey -le $organizationUnitCreate) {
+    throw 'ProcedureCases organization foreign keys must be added only after both principal tables exist.'
+}
 if ([regex]::Matches($upText, 'ArchivedGovernanceBaselineSql\.Apply\(migrationBuilder\)').Count -ne 1 -or
     [regex]::Matches($upText, 'FinanceC1C8BaselineAuthoritySql\.Apply\(migrationBuilder\)').Count -ne 1 -or
     $upText.IndexOf('ArchivedGovernanceBaselineSql.Apply(migrationBuilder)', [StringComparison]::Ordinal) -ge
@@ -407,6 +418,20 @@ if ($GeneratedSqlPath) {
         [regex]::Matches($_, '(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?TRIGGER\s+').Count -gt 1
     }).Count -ne 0) {
         throw 'Generated zero-to-current SQL combines multiple trigger definitions in one executable batch.'
+    }
+    $createdTablePositions = @{}
+    foreach ($createdTable in [regex]::Matches($generatedSql,
+        '(?im)^\s*CREATE\s+TABLE\s+(?:(?:\[dbo\]|dbo)\.)?\[(?<name>[^\]]+)\]')) {
+        $createdTablePositions[$createdTable.Groups['name'].Value] = $createdTable.Index
+    }
+    $lateForeignKeyPrincipals = @([regex]::Matches($generatedSql,
+        '(?im)\bREFERENCES\s+(?:(?:\[dbo\]|dbo)\.)?\[(?<name>[^\]]+)\]') | Where-Object {
+            $principalName = $_.Groups['name'].Value
+            $createdTablePositions.ContainsKey($principalName) -and
+            [int]$createdTablePositions[$principalName] -gt $_.Index
+        } | ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)
+    if ($lateForeignKeyPrincipals.Count -ne 0) {
+        throw "Generated zero-to-current SQL references principal tables before creation: $($lateForeignKeyPrincipals -join ',')."
     }
     if ([regex]::Matches($generatedSql,'(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?FUNCTION\s+(?:\[dbo\]|dbo)\.(?:\[(?:InventoryAdjustmentExpectedLineValue|InventoryAdjustmentExpectedUnitCost|WorkflowApprovalEntityKey|WorkflowApprovalRequiredAtSubmission|fn_ProcurementRfqSourceLineIdentity)\]|(?:InventoryAdjustmentExpectedLineValue|InventoryAdjustmentExpectedUnitCost|WorkflowApprovalEntityKey|WorkflowApprovalRequiredAtSubmission|fn_ProcurementRfqSourceLineIdentity))').Count -ne 5 -or
         [regex]::Matches($generatedSql,'(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+\[dbo\]\.\[vw_ProcurementReceiptDocumentReconciliation\]').Count -ne 1 -or

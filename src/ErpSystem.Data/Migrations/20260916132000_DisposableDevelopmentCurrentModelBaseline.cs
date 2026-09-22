@@ -5706,18 +5706,6 @@ namespace ErpSystem.Data.Migrations
                         principalTable: "Tenants",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_ProcedureCases_OrganizationLevels_OrganizationLevelId",
-                        column: x => x.OrganizationLevelId,
-                        principalTable: "OrganizationLevels",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_ProcedureCases_OrganizationUnits_OrganizationUnitId",
-                        column: x => x.OrganizationUnitId,
-                        principalTable: "OrganizationUnits",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -54814,6 +54802,22 @@ namespace ErpSystem.Data.Migrations
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                 });
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_ProcedureCases_OrganizationLevels_OrganizationLevelId",
+                table: "ProcedureCases",
+                column: "OrganizationLevelId",
+                principalTable: "OrganizationLevels",
+                principalColumn: "Id",
+                onDelete: ReferentialAction.Restrict);
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_ProcedureCases_OrganizationUnits_OrganizationUnitId",
+                table: "ProcedureCases",
+                column: "OrganizationUnitId",
+                principalTable: "OrganizationUnits",
+                principalColumn: "Id",
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.CreateTable(
                 name: "PayPeriods",
