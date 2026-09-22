@@ -1698,6 +1698,11 @@ public class JobHireService : IJobHireService
     private readonly IPayrollMembershipService _payrollMembership;
     private readonly IEmployeeService _employees;
 
+    // Round 4, lane I: a confirmed start is the hire trigger for orientation, and the moment the
+    // onboarding plan the entities always promised is created.
+    private readonly IOrientationEnrollmentTriggerService _orientationTriggers;
+    private readonly IOnboardingTemplateApplicabilityService _onboardingTemplates;
+
     public JobHireService(
         IJobHireRecordRepository hireRepository,
         IJobOfferRepository offerRepository,
@@ -1716,8 +1721,12 @@ public class JobHireService : IJobHireService
         IStaffNumberService staffNumbers,
         IPayrollMembershipService payrollMembership,
         IEmployeeService employees,
+        IOrientationEnrollmentTriggerService orientationTriggers,
+        IOnboardingTemplateApplicabilityService onboardingTemplates,
         ILogger<JobHireService> logger)
     {
+        _orientationTriggers      = orientationTriggers;
+        _onboardingTemplates      = onboardingTemplates;
         _staffNumbers             = staffNumbers;
         _payrollMembership        = payrollMembership;
         _employees                = employees;
@@ -2270,6 +2279,23 @@ public class JobHireService : IJobHireService
             var hired = await _employeeRepository.GetByIdAsync(hiredEmployeeId);
             if (hired != null)
                 await _payrollMembership.EnsurePayrollProfileAsync(hired, cancellationToken);
+
+            // Round 4, lane I — both after the commit and best-effort, like payroll above: the hire
+            // stands whatever orientation or onboarding make of it. The orientation hook decides
+            // for itself whether any OnHire rule is due (an internal hire linked to an employee of
+            // long standing is not a new hire, and none will be).
+            await _orientationTriggers.OnEmployeeHiredAsync(hiredEmployeeId, cancellationToken);
+
+            // The onboarding plan RecruitmentEntities has always said is "generated from an
+            // OnboardingPlanTemplate when a HireRecord is confirmed" — until now it was not. Only for
+            // an employee THIS hire created: the template is chosen by placement, and a linked
+            // (internal) employee still carries their old placement at this point — choosing by it
+            // would hand them the onboarding plan for the job they are leaving.
+            if (!linkedEmployeeId.HasValue && entity.ActualStartDate is { } started)
+                await _onboardingTemplates.CreatePlanOnHireAsync(
+                    entity.TenantId, hiredEmployeeId, started,
+                    _currentUserProvider.UserId == Guid.Empty ? confirmedByUserId : _currentUserProvider.UserId,
+                    cancellationToken);
         }
 
         return true;

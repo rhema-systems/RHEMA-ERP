@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { OnboardingTemplateAudiencePanel } from '@/components/hr/orientation/OnboardingTemplateAudiencePanel';
 import {
   TextField,
   NumberField,
@@ -147,6 +148,8 @@ export default function OnboardingTemplateDetailPage() {
           },
         ]}
       />
+
+      <OnboardingTemplateAudiencePanel templateId={id} isDefault={template.isDefault} />
 
       <ResourceCollectionTab<OnboardingTaskTemplate, TaskTemplateForm>
         parentId={id}

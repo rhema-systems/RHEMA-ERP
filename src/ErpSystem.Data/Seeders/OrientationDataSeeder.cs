@@ -330,7 +330,8 @@ public class OrientationDataSeeder
                 ProgramId = onboarding.Id,
                 RuleName = "All new hires on joining",
                 Description = "Auto-enrol every new employee 1 day after their hire date.",
-                TargetType = OrientationAudienceScope.NewHires,
+                TargetType = HrAudienceTargetType.AllEmployees,
+                Population = OrientationAudiencePopulation.NewHires,
                 Trigger = OrientationEnrollmentTrigger.OnHire,
                 EnrollmentDelayDays = 1,
                 IsInclusive = true,
@@ -346,9 +347,13 @@ public class OrientationDataSeeder
                 TenantId = tenantId,
                 ProgramId = compliance.Id,
                 RuleName = "All employees annually",
-                Description = "Auto-enrol all employees for the annual compliance refresh.",
-                TargetType = OrientationAudienceScope.AllEmployees,
-                Trigger = OrientationEnrollmentTrigger.Scheduled,
+                Description = "Enrol all employees for the annual compliance refresh, by hand: press Enrol audience now on the programme.",
+                TargetType = HrAudienceTargetType.AllEmployees,
+                // ⚠ Manual, not Scheduled (round 4 lane I). Since rules fire, a scheduled rule on
+                // everyone is a tenant-wide enrolment on the first night — it put all 1,135 active
+                // UAT employees on this programme in three seconds. A demo seed must not do that
+                // unasked; HR runs it deliberately, with the preview, from the programme's rules tab.
+                Trigger = OrientationEnrollmentTrigger.Manual,
                 EnrollmentDelayDays = 0,
                 IsInclusive = true,
                 IsActive = true,

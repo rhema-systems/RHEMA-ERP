@@ -27,6 +27,11 @@ import type {
   OnboardingAssetCreateRequest,
   OnboardingAssetUpdateRequest,
 } from '@/types/hr/onboarding';
+import type {
+  HrAudienceTargetType,
+  OnboardingPlanTemplateAudience,
+  OnboardingTemplateApplicability,
+} from '@/types/hr/orientation';
 
 /**
  * Onboarding plan templates. Backend route: api/onboarding-plan-templates. HR-only.
@@ -97,6 +102,37 @@ class OnboardingPlanTemplateService {
 
   removeTaskTemplate(taskTemplateId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/task-templates/${taskTemplateId}`);
+  }
+
+  // ── Who a template is for (round 4, lane I4) ──────────────────────────────
+
+  getAudiences(templateId: string): Promise<OnboardingPlanTemplateAudience[]> {
+    return apiService.get<OnboardingPlanTemplateAudience[]>(`${this.baseUrl}/${templateId}/audiences`);
+  }
+
+  addAudience(
+    templateId: string,
+    data: { targetType: HrAudienceTargetType; targetEntityId?: string | null; isInclusive: boolean },
+  ): Promise<OnboardingPlanTemplateAudience> {
+    return apiService.post<OnboardingPlanTemplateAudience>(`${this.baseUrl}/${templateId}/audiences`, data);
+  }
+
+  removeAudience(templateId: string, audienceId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/${templateId}/audiences/${audienceId}`);
+  }
+
+  /** Which template a placement (or an employee's current placement) would get, and why. */
+  getApplicable(query: {
+    employeeId?: string;
+    positionId?: string;
+    organizationUnitId?: string;
+    organizationLevelId?: string;
+    locationId?: string;
+  }): Promise<OnboardingTemplateApplicability> {
+    const qs = new URLSearchParams(
+      Object.entries(query).filter(([, v]) => !!v) as [string, string][],
+    ).toString();
+    return apiService.get<OnboardingTemplateApplicability>(`${this.baseUrl}/applicable${qs ? `?${qs}` : ''}`);
   }
 }
 

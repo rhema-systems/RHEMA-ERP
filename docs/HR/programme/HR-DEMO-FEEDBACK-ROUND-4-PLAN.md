@@ -15,13 +15,15 @@
 > | **E-a** | **DONE** — 141 ×2, `run-round4-e.mjs`; migration `AddRecruitmentTestEngine` applied to UAT; all 18 neighbouring suites at baseline. E1–E5. **The harness found two defects in the lane's own code** — § 8 |
 > | **E-b** | **DONE** — 86 ×2, `run-round4-e6.mjs`; migration `AddRecruitmentTestSittingMode` applied to UAT; E-a still 141 and all 18 neighbours at baseline; demo scenario `052-recruitment-tests` idempotent, `verify-tables` recruitment 74/74. E6 + E7 — § 8 |
 > | *email links* | **DONE** — every candidate-facing CTA in the recruitment catalogue pointed at a non-existent page since 2026-08-31; six repointed, **two confirmation pages built**. § 8 |
+> | **I** | **DONE** — 100 ×2, `hr-orientation/run-round4-i.mjs`; migration `AddOrientationTriggers` applied to UAT. I1–I5: audience rules on the shared HR axis + populations, typed picker + reach, triggers that fire (hire, movement, publish, nightly), onboarding template applicability + a plan on hire, the "why" diagnostic. **Two demo-data incidents of my own, both reversed** — § 8 |
+> | **I-b** | **NEXT** — re-enrolment for recurring programmes (the user's call, 2026-09-22: build after I is verified) |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). Next: I, L, J, M, K, N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete.** Next: I-b (recurrence), then L, J, M, K, N, O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
 > all three are still outstanding.
@@ -1591,6 +1593,90 @@ in the audit column, and the same shape this repo has recorded before — *a col
 `...UserId` holding an employee id*. Lane E's own ledger writer does not go through that door and
 stamps both correctly (`CreatedById` = user, `MarkedById` = employee). Not fixed: it is another
 lane's door, and changing it touches the controller, the parameter name and existing rows.
+
+---
+
+### Lane I — triggers that fire · DONE 2026-09-22 · 100 assertions ×2
+
+Harness: `dev-harness/hr-orientation/run-round4-i.mjs`, blocks A–H. Migration
+`20260922225423_AddOrientationTriggers` (guarded SQL; applied to `ErpSystemDB_UAT`; history row,
+table, five columns and the rule remap verified in SQL). The PDF's question — *do the triggers
+fire?* — had the answer **no**: `OrientationEnrollmentTrigger` was written by the seeder and read by
+nothing, audience rules had no resolver, and an onboarding plan was created only by a person.
+
+**What was built.**
+
+| | |
+|---|---|
+| **I1** | Rules target the shared `HrAudienceTargetType` through `IHrAudienceResolver` (a unit includes the units beneath it), narrowed by a new `Population` — new hires (employed ≤ 90 days), management (heads a unit or manages someone), contractors (contract, fixed-term, consultant, freelance). "New hires in Operations" was not expressible before. `OrientationAudienceScope` survives only as the programme's descriptive label. |
+| **I2** | A typed target picker (the level→unit and level→location cascades, levels, positions, the employee search) replacing the free-text GUID box; targets validated server-side (a position's id under "unit" is now a 422); `TargetEntityName` filled at last (§ 3 defect 15); a live reach line on the form and a *Reach today* column, both proven against an independent SQL count. |
+| **I3** | `OrientationEnrollmentTriggerService`: **OnHire** from `EmployeeService.CreateEmployeeAsync` (the form and the import) and `ConfirmStartAsync`; **OnTransfer/OnPromotion** from `StaffMovementService.ImplementAsync`; **OnProgramPublish** from the status change; **Scheduled** plus a catch-up of every dated rule in a nightly `OrientationTriggerBackgroundService`, **registered in the same change**; **Manual** only from HR's new *Enrol audience now* (preview first). Each automatic enrollment records its rule, event and date (`AudienceRuleId`, `TriggerEvent`, `TriggerDate`). |
+| **I4** | `OnboardingPlanTemplateAudience` + `OnboardingTemplateApplicabilityService`: most specific wins (position 100 › own unit 90, one less per level up › level 40 › location 30 › everyone 10 › the default template 0), exclusions veto, ties flagged `IsAmbiguous`; `GET …/applicable`; and **a plan created automatically when a hire's start is confirmed**, with `TemplateSelectionReason` — making true what `RecruitmentEntities.cs` had always claimed. |
+| **I5** | *Orientation → Enrollment Triggers*: for one employee, per programme, the verdict (enrolled, enrols tonight, waiting for its date, waiting on a prerequisite, excluded, window lapsed, only when HR enrols, not in the audience…) with the reason, every rule's match and window, and which onboarding template their plan would come from. |
+
+**Rules the triggers run on — each a decision taken inside the lane.**
+
+| | Rule | Why |
+|---|---|---|
+| 1 | A dated trigger fires on or after its date + delay, and **not more than 30 days later** | Catches a late-entered hire, a failed hook and a rule added after the event — and stops an import of the existing workforce, or a brand-new rule, reaching back into history (asserted: a 2015 hire fires nothing). |
+| 2 | **Hire rules count from the employment date only** — no fallback | The record's creation date was the first stand-in; on UAT every one of the 221 active employees without an employment date was a harness fixture from the last three days, and it would have enrolled 250 people instead of 29. The diagnostic tells HR to set the date. |
+| 3 | **Any earlier enrollment blocks a rule — including one HR withdrew** | A rule must never put back somebody a person took off; it is also what makes every re-run harmless (asserted twice). |
+| 4 | Exclusions apply **whatever trigger they were written against** | "Never auto-enrol contractors" should not need repeating per trigger. |
+| 5 | A **mandatory** prerequisite holds back an automatic enrollment; a manual one is not gated | Automation is not a judgement. The sweep enrols them the first night after they complete it (asserted: the gate lifts). |
+| 6 | Movement mapping: transfer, lateral move, secondment → OnTransfer; promotion → OnPromotion; demotion, acting, redesignation fire nothing | A transfer orientation is about arriving somewhere new. |
+| 7 | The onboarding plan on hire is created **only for an employee the hire created** | A linked internal hire still carries their old placement at that moment, and would be handed the plan for the job they are leaving. |
+| 8 | Templates target **organisation level, not grade** (the plan said `gradeId`) | Grade is payroll's axis and not one the shared audience model has. |
+
+**⚠ Two incidents on the UAT demo data — both mine, both reversed with the user's agreement.**
+
+1. **The seeded "All employees annually" rule enrolled all 1,135 active employees** into
+   ORI-CMP-001 on the harness's first tenant sweep. I had said its onboarding prerequisite would hold
+   them back; the seeder made that prerequisite **advisory**, and I had not checked the flag. The
+   1,135 rows (one transaction, count-checked, no dependants) were removed and the rule — on UAT and
+   in `OrientationDataSeeder` — is now **Manual**: HR enrols that audience deliberately, with the
+   preview. *A scheduled rule on "everyone" is a tenant-wide enrolment; that is what it says.*
+2. **Scenario 145 created 445 onboarding plans (4,005 tasks) for harness fixtures.** It had died on
+   "Invalid time value" since fixtures began receiving `TDC/` numbers (sqlcmd prints a null date as
+   the *text* `NULL`); my first repair — "require a real date" — admitted 791 dated fixtures on
+   probation. Stopped within two minutes, the rows removed, and the scenario now takes the six
+   starters the books name by the marker the demo workforce seeder stamps
+   (`CreatedBy = 'TdcDemoWorkforceSeeder'`, exactly six on UAT).
+
+**What verifying it found in the lane's own code.** The diagnostic told a person held back by a
+mandatory prerequisite under a **manual** rule that they would be enrolled "when HR enrols" — sending
+HR to a button the same run proved enrols nobody (E12). The prerequisite is now reported as the
+blocker whatever the trigger (E14/E14b). The harness also polluted itself between runs (earlier
+runs' fixture templates tied with the current one — the product flagged the tie correctly); it now
+clears its fixture template audiences before and after.
+
+**Also for the record.**
+
+- **The migration remaps the two existing rules exactly once**, inside the guard that adds
+  `Population`; job-grade and custom rules (none on UAT) are switched off with a plain-language
+  note. Down maps the targets back: a scratch Down→Up without it turned a unit rule into
+  "everyone".
+- **HR holds orientation Read and Write but not Admin**, so *Run tonight's sweep now* is gated to
+  admins and hidden from HR.
+- **UAT side effect:** "New Employee Onboarding" now carries 39 automatic hire enrolments — the 29
+  demo people employed on 2026-09-20, plus the harness's backdated fixture hires.
+
+**Neighbouring suites.** All 20 recruitment suites and `hr-company-schedule/run-round4-d` exactly at
+their recorded baselines. `hr-orientation/run.mjs` **107/107** and `run-lane6-feedback` **20/20**
+— after repairing their fixture, which had supplied a staff number since the 2026-09-10 register
+change and so could not mint one actor. Three below baseline, each explained and pre-existing:
+`hr-movements/run-h` 32/33 (§ 9.1's "Accounts Officer" — established for 1, now 616 in post);
+`hr-employee-import` 69/76 and 48/52 (its 2026-09-03 assertions predate the register's
+staff-number format warning and round 3's salary-change approval rule; the commit runs clean and the
+API log carries no trigger failure).
+
+**Owed.**
+
+| | Item | State |
+|---|---|---|
+| **I-b** | Re-enrolment of recurring programmes (`IsRecurring`/`RecurrenceFrequency`): today "any earlier enrollment" blocks last year's refresher | **next — the user's decision 2026-09-22** |
+| | Browser walk of the rule form (typed picker, reach line), the template audience panel and the diagnostic | not done — no browser automation |
+| | A concurrent hook and sweep could in principle both enrol one person (no unique index on programme + employee; existing data may hold duplicates) | recorded, not built |
+| | `EnrollAsync`/`BulkEnrollAsync` stamp a **user id** into `EnrolledByEmployeeId` | recorded — the "…Id holding the wrong kind of id" shape again; not this lane's door |
 
 ---
 

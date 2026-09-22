@@ -16,12 +16,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class OnboardingPlanTemplateController : ControllerBase
 {
     private readonly IOnboardingPlanTemplateService _service;
+    private readonly IOnboardingTemplateApplicabilityService _applicability;
     private readonly ICurrentUserService _currentUser;
 
     public OnboardingPlanTemplateController(
-        IOnboardingPlanTemplateService service, ICurrentUserService currentUser)
+        IOnboardingPlanTemplateService service,
+        IOnboardingTemplateApplicabilityService applicability,
+        ICurrentUserService currentUser)
     {
         _service = service;
+        _applicability = applicability;
         _currentUser = currentUser;
     }
 
@@ -45,14 +49,55 @@ public class OnboardingPlanTemplateController : ControllerBase
         => Ok(await _service.GetWithTaskTemplatesAsync(id));
 
     // ⚠ Removed: GET position/{positionId}. It took a position id and ignored it, returning every
-    // active template — OnboardingPlanTemplate has no link to a position, and the only position on the
-    // graph (OnboardingTaskTemplate.OwnerPositionId) says who *performs* a task, not who a template is
-    // *for*. Answering it properly needs template applicability rules, modelled on the
-    // OrientationAudienceRule shape this module already uses (TargetType / TargetEntityId /
-    // IsInclusive), so that onboarding can be scoped by grade, org unit and location too — not just
-    // position. That endpoint should arrive as GET /applicable?positionId=&orgUnitId=&gradeId=, so
-    // reinstating this one-dimensional route now would only bake in the wrong shape.
-    // Callers pick a template from `all`, or fall back to `default`.
+    // active template — OnboardingPlanTemplate had no link to a position. This comment asked for
+    // template applicability rules on the OrientationAudienceRule shape and a GET /applicable; round 4
+    // lane I4 built both, below. The one change from what it asked: an organisation LEVEL rather than
+    // a grade, because grade is payroll's axis and not one the shared HR audience model has.
+
+    /// <summary>
+    /// Which template a placement would get, and why — every candidate with its score, so the
+    /// answer can be argued with. Pass <c>employeeId</c> to use a person's current placement;
+    /// otherwise any of the four (an offer may not know the location yet).
+    /// </summary>
+    [HttpGet("applicable")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
+    public async Task<ActionResult<OnboardingTemplateApplicabilityDto>> GetApplicable(
+        [FromQuery] Guid? employeeId,
+        [FromQuery] Guid? positionId,
+        [FromQuery] Guid? organizationUnitId,
+        [FromQuery] Guid? organizationLevelId,
+        [FromQuery] Guid? locationId)
+    {
+        if (_currentUser.TenantId is not { } tenantId) return BadRequest("Tenant context could not be resolved.");
+        return Ok(employeeId is { } id
+            ? await _applicability.FindApplicableForEmployeeAsync(tenantId, id)
+            : await _applicability.FindApplicableAsync(tenantId, positionId, organizationUnitId, organizationLevelId, locationId));
+    }
+
+    /// <summary>Who a template is for. None means it is chosen by hand only, unless it is the default.</summary>
+    [HttpGet("{id:guid}/audiences")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
+    public async Task<ActionResult<IReadOnlyList<OnboardingPlanTemplateAudienceDto>>> GetAudiences(Guid id)
+        => Ok(await _applicability.GetAudiencesAsync(id));
+
+    [HttpPost("{id:guid}/audiences")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    public async Task<ActionResult<OnboardingPlanTemplateAudienceDto>> AddAudience(
+        Guid id, [FromBody] CreateOnboardingPlanTemplateAudienceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!Guid.TryParse(_currentUser.UserId, out var userId)) return BadRequest("Your user could not be resolved.");
+        return Ok(await _applicability.AddAudienceAsync(id, dto, userId));
+    }
+
+    [HttpDelete("{id:guid}/audiences/{audienceId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    public async Task<IActionResult> RemoveAudience(Guid id, Guid audienceId)
+    {
+        if (!Guid.TryParse(_currentUser.UserId, out var userId)) return BadRequest("Your user could not be resolved.");
+        await _applicability.RemoveAudienceAsync(id, audienceId, userId);
+        return NoContent();
+    }
 
     [HttpGet("default")]
     [Authorize(Policy = HrPermissions.OrientationReadPolicy)]

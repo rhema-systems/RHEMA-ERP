@@ -408,6 +408,7 @@ public static class OrientationMappingExtensions
             Description = entity.Description,
             TargetType = entity.TargetType,
             TargetEntityId = entity.TargetEntityId,
+            Population = entity.Population,
             Trigger = entity.Trigger,
             EnrollmentDelayDays = entity.EnrollmentDelayDays,
             IsInclusive = entity.IsInclusive,
@@ -425,6 +426,7 @@ public static class OrientationMappingExtensions
             Description = dto.Description,
             TargetType = dto.TargetType,
             TargetEntityId = dto.TargetEntityId,
+            Population = dto.Population,
             Trigger = dto.Trigger,
             EnrollmentDelayDays = dto.EnrollmentDelayDays,
             IsInclusive = dto.IsInclusive,
@@ -439,6 +441,7 @@ public static class OrientationMappingExtensions
         entity.Description = dto.Description;
         entity.TargetType = dto.TargetType;
         entity.TargetEntityId = dto.TargetEntityId;
+        entity.Population = dto.Population;
         entity.Trigger = dto.Trigger;
         entity.EnrollmentDelayDays = dto.EnrollmentDelayDays;
         entity.IsInclusive = dto.IsInclusive;
@@ -702,6 +705,9 @@ public static class OrientationMappingExtensions
             EmployeeId = entity.EmployeeId,
             EnrollmentStatus = entity.EnrollmentStatus,
             EnrollmentSource = entity.EnrollmentSource,
+            AudienceRuleId = entity.AudienceRuleId,
+            TriggerEvent = entity.TriggerEvent,
+            TriggerDate = entity.TriggerDate,
             EnrolledAt = entity.EnrolledAt,
             EnrolledByEmployeeId = entity.EnrolledByEmployeeId,
             StartedAt = entity.StartedAt,
@@ -747,6 +753,10 @@ public static class OrientationMappingExtensions
             EnrolledAt = entity.EnrolledAt,
             CompletedAt = entity.CompletedAt,
             NextDueDate = entity.NextDueDate,
+            EnrollmentSource = entity.EnrollmentSource,
+            AudienceRuleId = entity.AudienceRuleId,
+            TriggerEvent = entity.TriggerEvent,
+            TriggerDate = entity.TriggerDate,
         };
     }
 

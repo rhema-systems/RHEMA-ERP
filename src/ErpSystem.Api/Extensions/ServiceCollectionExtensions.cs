@@ -2626,6 +2626,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // (IRecruitmentLifecycleSweepService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.RecruitmentLifecycleSweepBackgroundService>();
 
+            // Orientation triggers (round 4, lane I3): nightly — scheduled audience rules, plus the
+            // dated ones (hire, transfer, promotion) whose day has come or whose event hook failed.
+            // Before this, OrientationEnrollmentTrigger was written by the seeder and read by
+            // nothing. Logic is scoped (IOrientationEnrollmentTriggerService.RunSweepForTenantAsync)
+            // so POST api/orientation-programs/triggers/run shares it.
+            // ⚠ Registered in the same change as the service, because two HR sweeps here were not.
+            services.AddHostedService<ErpSystem.Api.Services.HR.OrientationTriggerBackgroundService>();
+
             // Team reminder engine (round 2, lane F2): daily sweep — a task due within the tenant's
             // lead time, a task already overdue, an objective past its date, a meeting tomorrow, and
             // terms of reference lapsing within thirty days. Sweep logic is scoped

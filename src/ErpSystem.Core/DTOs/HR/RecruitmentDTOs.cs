@@ -4586,6 +4586,10 @@ public class OnboardingPlanDto : BaseDto
     public Guid? OnboardingCoordinatorId { get; set; }
     public string? OnboardingCoordinatorName { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>Set when the system created the plan on hire confirmation: which template and why
+    /// (round 4, lane I4). Null on a plan a person created.</summary>
+    public string? TemplateSelectionReason { get; set; }
     public int TotalTasks { get; set; }
     public int CompletedTasks { get; set; }
     public int OverdueTasks { get; set; }

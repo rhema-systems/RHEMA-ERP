@@ -487,10 +487,19 @@ public class OrientationAudienceRuleDto : BaseDto
     public string RuleName { get; set; } = string.Empty;
     public string? Description { get; set; }
 
-    public OrientationAudienceScope TargetType { get; set; }
+    /// <summary>Where the people sit — the shared HR audience axis (round 4, lane I1).</summary>
+    public HrAudienceTargetType TargetType { get; set; }
     public string TargetTypeName => TargetType.ToString();
     public Guid? TargetEntityId { get; set; }
+
+    /// <summary>
+    /// The unit, level, position, location or employee's name. Declared from the start and never
+    /// filled until lane I2 — the rules list could only ever show a GUID.
+    /// </summary>
     public string? TargetEntityName { get; set; }
+
+    /// <summary>Which of the people at the target the rule means.</summary>
+    public OrientationAudiencePopulation Population { get; set; }
 
     public OrientationEnrollmentTrigger Trigger { get; set; }
     public string TriggerName => Trigger.ToString();
@@ -498,6 +507,10 @@ public class OrientationAudienceRuleDto : BaseDto
     public int EnrollmentDelayDays { get; set; }
     public bool IsInclusive { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>How many active employees this rule reaches today, target and population together.
+    /// Filled on the list read; an exclusion's reach is the number it keeps out.</summary>
+    public int? ReachCount { get; set; }
 }
 
 public class CreateOrientationAudienceRuleDto : CreateDtoBase
@@ -513,9 +526,11 @@ public class CreateOrientationAudienceRuleDto : CreateDtoBase
     public string? Description { get; set; }
 
     [Required]
-    public OrientationAudienceScope TargetType { get; set; }
+    public HrAudienceTargetType TargetType { get; set; }
 
     public Guid? TargetEntityId { get; set; }
+
+    public OrientationAudiencePopulation Population { get; set; } = OrientationAudiencePopulation.Anyone;
 
     [Required]
     public OrientationEnrollmentTrigger Trigger { get; set; }
@@ -535,9 +550,11 @@ public class UpdateOrientationAudienceRuleDto : UpdateDtoBase
     public string? Description { get; set; }
 
     [Required]
-    public OrientationAudienceScope TargetType { get; set; }
+    public HrAudienceTargetType TargetType { get; set; }
 
     public Guid? TargetEntityId { get; set; }
+
+    public OrientationAudiencePopulation Population { get; set; } = OrientationAudiencePopulation.Anyone;
 
     [Required]
     public OrientationEnrollmentTrigger Trigger { get; set; }
@@ -888,6 +905,11 @@ public class EmployeeOrientationDto : BaseDto
     public OrientationEnrollmentSource EnrollmentSource { get; set; }
     public string EnrollmentSourceName => EnrollmentSource.ToString();
 
+    /// <summary>Round 4, lane I3: the audience rule, event and date behind an automatic enrollment.</summary>
+    public Guid? AudienceRuleId { get; set; }
+    public OrientationEnrollmentTrigger? TriggerEvent { get; set; }
+    public DateOnly? TriggerDate { get; set; }
+
     public DateTime EnrolledAt { get; set; }
     public Guid? EnrolledByEmployeeId { get; set; }
     public string? EnrolledByName { get; set; }
@@ -945,6 +967,12 @@ public class EmployeeOrientationSummaryDto
     public DateTime EnrolledAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime? NextDueDate { get; set; }
+
+    // Round 4, lane I3 — how the person came to be on it.
+    public OrientationEnrollmentSource EnrollmentSource { get; set; }
+    public Guid? AudienceRuleId { get; set; }
+    public OrientationEnrollmentTrigger? TriggerEvent { get; set; }
+    public DateOnly? TriggerDate { get; set; }
 }
 
 public class CreateEmployeeOrientationDto : CreateDtoBase

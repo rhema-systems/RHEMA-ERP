@@ -629,6 +629,11 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEmployeeOrientationService, EmployeeOrientationService>();
         services.AddScoped<IOrientationNotificationService, OrientationNotificationService>();
         services.AddScoped<IOrientationDashboardService, OrientationDashboardService>();
+
+        // Round 4, lane I — the audience rules made to fire, and onboarding templates made to
+        // choose themselves. The nightly host is registered in ServiceCollectionExtensions.
+        services.AddScoped<IOrientationEnrollmentTriggerService, OrientationEnrollmentTriggerService>();
+        services.AddScoped<IOnboardingTemplateApplicabilityService, OnboardingTemplateApplicabilityService>();
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();
         services.AddScoped<IStaffTravelBookingService, StaffTravelBookingService>();

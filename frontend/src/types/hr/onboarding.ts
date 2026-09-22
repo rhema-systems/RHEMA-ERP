@@ -350,6 +350,8 @@ export interface OnboardingPlan extends AuditFields {
   onboardingCoordinatorId?: string | null;
   onboardingCoordinatorName?: string | null;
   notes?: string | null;
+  /** Set when the system created the plan on hire confirmation: which template, and why (round 4, lane I4). */
+  templateSelectionReason?: string | null;
   totalTasks: number;
   completedTasks: number;
   overdueTasks: number;

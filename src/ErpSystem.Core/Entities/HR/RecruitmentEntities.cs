@@ -3092,11 +3092,52 @@ public class OnboardingPlanTemplate : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
  
+    /// <summary>
+    /// The fallback: used when a hire's start is confirmed and no template's <see cref="Audiences"/>
+    /// reach them. At most one per tenant.
+    /// </summary>
     public bool IsDefault { get; set; }
- 
+
     public bool IsActive { get; set; } = true;
- 
+
     public virtual ICollection<OnboardingTaskTemplate> TaskTemplates { get; set; } = new List<OnboardingTaskTemplate>();
+
+    /// <summary>
+    /// Who this template is for (round 4, lane I4). A template with none is chosen by hand only,
+    /// unless it is the <see cref="IsDefault"/> fallback.
+    /// </summary>
+    public virtual ICollection<OnboardingPlanTemplateAudience> Audiences { get; set; } = new List<OnboardingPlanTemplateAudience>();
+}
+
+/// <summary>
+/// One statement of who an onboarding plan template applies to (round 4, lane I4).
+/// </summary>
+/// <remarks>
+/// <para><b>The shape two comments had always described.</b> The template's own summary said it
+/// "can be assigned to new hires based on job family, department, or grade", and
+/// <see cref="OnboardingPlan"/> said it was "generated from an OnboardingPlanTemplate when a
+/// HireRecord is confirmed" — and nothing stored who a template was for, so neither was true.
+/// <c>OnboardingTemplateApplicabilityService</c> reads these rows and states which template wins
+/// and why.</para>
+///
+/// <para><b>Same axis as every other HR audience</b> — <see cref="HrAudienceTargetType"/>, where a
+/// unit includes the units beneath it. The <c>Employee</c> axis is refused: a template is chosen
+/// before the hire is an employee.</para>
+/// </remarks>
+public class OnboardingPlanTemplateAudience : TenantEntity
+{
+    public Guid PlanTemplateId { get; set; }
+
+    [ForeignKey(nameof(PlanTemplateId))]
+    public virtual OnboardingPlanTemplate PlanTemplate { get; set; } = null!;
+
+    public HrAudienceTargetType TargetType { get; set; }
+
+    /// <summary>The position, unit, level or location. Null only for AllEmployees.</summary>
+    public Guid? TargetEntityId { get; set; }
+
+    /// <summary>False makes this row an exclusion: a hire it matches never gets the template.</summary>
+    public bool IsInclusive { get; set; } = true;
 }
  
 // =============================================================================
@@ -3153,6 +3194,12 @@ public class OnboardingTaskTemplate : TenantEntity
 /// The onboarding plan instance created for a specific new hire.
 /// Generated from an OnboardingPlanTemplate when a HireRecord is confirmed.
 /// </summary>
+/// <remarks>
+/// ⚠ That second sentence was false until round 4 lane I4 — plans were only ever created by a
+/// person pressing a button. <c>JobOfferHireService.ConfirmStartAsync</c> now creates one from the
+/// applicable template after the hire commits, and <see cref="TemplateSelectionReason"/> says why
+/// that template.
+/// </remarks>
 public class OnboardingPlan : TenantEntity
 {
     public Guid EmployeeId { get; set; }
@@ -3185,7 +3232,15 @@ public class OnboardingPlan : TenantEntity
  
     [MaxLength(2000)]
     public string? Notes { get; set; }
- 
+
+    /// <summary>
+    /// Set when the SYSTEM created this plan on hire confirmation: which template it chose and on
+    /// what grounds ("Position: Estates Officer"; "the default template — no audience matched").
+    /// Null on a plan a person created.
+    /// </summary>
+    [MaxLength(500)]
+    public string? TemplateSelectionReason { get; set; }
+
     public virtual ICollection<OnboardingTask> Tasks { get; set; } = new List<OnboardingTask>();
     public virtual ICollection<OnboardingAsset> Assets { get; set; } = new List<OnboardingAsset>();
 }

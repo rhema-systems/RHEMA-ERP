@@ -9885,6 +9885,13 @@ public enum OrientationPriority
 /// <summary>
 /// Which employee population an orientation program targets.
 /// </summary>
+/// <remarks>
+/// ⚠ Since round 4 lane I this is a DESCRIPTIVE label on the programme only. Audience rules — the
+/// part that actually enrols people — target through <see cref="HrAudienceTargetType"/> plus
+/// <see cref="OrientationAudiencePopulation"/>, because a single value from this list could not say
+/// "new hires in one unit", and <see cref="JobGrade"/> / <see cref="Custom"/> named axes no resolver
+/// could ever evaluate.
+/// </remarks>
 public enum OrientationAudienceScope
 {
     AllEmployees = 1,
@@ -9896,6 +9903,46 @@ public enum OrientationAudienceScope
     Management = 7,
     Contractors = 8,
     Custom = 99
+}
+
+/// <summary>
+/// Which kind of person an orientation audience rule reaches, layered ON TOP of its target
+/// (round 4, lane I1).
+/// </summary>
+/// <remarks>
+/// <para><b>Why this is a second axis and not more members of the target enum.</b> An audience
+/// rule used to be ONE <see cref="OrientationAudienceScope"/> value, so "new hires" and "the
+/// Operations unit" were alternatives — "new hires in Operations" could not be said at all. The
+/// target now comes from the shared <see cref="HrAudienceTargetType"/> (where a person sits) and
+/// this says who, of the people there, the rule means. The two are intersected.</para>
+///
+/// <para>Each is DERIVED from data the system already holds, never typed in:</para>
+/// <list type="bullet">
+///   <item><see cref="NewHires"/> — employed within the last 90 days
+///   (<c>OrientationTriggerWindows.NewHireWindowDays</c>).</item>
+///   <item><see cref="Management"/> — heads an organisation unit, or has at least one active
+///   direct report.</item>
+///   <item><see cref="Contractors"/> — employed on a Contract, Fixed-term, Consultant or
+///   Freelance basis.</item>
+/// </list>
+///
+/// <para>⚠ <see cref="Anyone"/> is <c>0</c> on purpose: it is the value every rule that predates
+/// this column means, so a <c>DEFAULT 0</c> is the true value for existing rows rather than the
+/// non-member this module has tripped over before.</para>
+/// </remarks>
+public enum OrientationAudiencePopulation
+{
+    /// <summary>Everyone the target reaches.</summary>
+    Anyone = 0,
+
+    /// <summary>Only people employed within the new-hire window.</summary>
+    NewHires = 1,
+
+    /// <summary>Only people who head a unit or manage someone.</summary>
+    Management = 2,
+
+    /// <summary>Only contract, fixed-term, consultant and freelance staff.</summary>
+    Contractors = 3
 }
 
 /// <summary>
@@ -10323,10 +10370,11 @@ public enum HrLetterRequestStatus
 /// <para><c>OrganizationUnit</c> includes CHILD units: announcing something to "Operations" and
 /// having it miss every team inside Operations is never what the sender meant.</para>
 ///
-/// <para>Note that <c>OrientationAudienceRule</c> models the same idea and has no resolver
-/// anywhere — its rules are stored and never expanded. If orientation's audience rules are ever
-/// made to work, they should come through the resolver this enum belongs to rather than growing
-/// a second one.</para>
+/// <para><c>OrientationAudienceRule</c> models the same idea and, until round 4 lane I, had no
+/// resolver anywhere — its rules were stored and never expanded. They now use this enum for their
+/// target and come through <c>IHrAudienceResolver</c>, as this note used to ask; the orientation-
+/// only notions (new hires, management, contractors) became <c>OrientationAudiencePopulation</c>,
+/// layered on top rather than added here.</para>
 /// </remarks>
 public enum HrAudienceTargetType
 {

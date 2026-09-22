@@ -5,6 +5,10 @@
 // notifications,dashboard} and api/employee-orientations. Each service names its own.
 
 import type { AuditFields } from './common';
+// The shared HR audience axis (announcements, policies, and since round 4 lane I orientation).
+import type { HrAudienceTargetType } from '@/services/hr/announcements.service';
+
+export type { HrAudienceTargetType };
 
 const opts = <T extends string>(entries: [T, string][]) =>
   entries.map(([value, label]) => ({ value, label }));
@@ -284,6 +288,36 @@ export const ORIENTATION_ENROLLMENT_TRIGGER_OPTIONS = opts<OrientationEnrollment
   ['Manual', 'Manual'],
 ]);
 
+/**
+ * What each trigger actually does since round 4 lane I made them fire — shown under the picker, so
+ * the choice is made knowing its consequence rather than from a label.
+ */
+export const ORIENTATION_TRIGGER_HINTS: Record<OrientationEnrollmentTrigger, string> = {
+  OnHire: 'When an employee is created — the form, the import or a confirmed hire. Counts the delay from the employment date.',
+  OnTransfer: 'When a transfer, lateral move or secondment is implemented. Counts the delay from its effective date.',
+  OnPromotion: 'When a promotion is implemented. Counts the delay from its effective date.',
+  OnProgramPublish: 'Once, when the programme is made Active. Afterwards only “Enrol audience now” runs it.',
+  Scheduled: 'Every night: anyone the rule reaches who is not yet on the programme.',
+  Manual: 'Only when HR presses “Enrol audience now” on this programme.',
+};
+
+/** Hire, transfer and promotion have a date a delay can count from; the rest enrol immediately. */
+export const DATED_TRIGGERS: OrientationEnrollmentTrigger[] = ['OnHire', 'OnTransfer', 'OnPromotion'];
+
+/** Who, of the people at the target, a rule means — derived from data, never typed in. */
+export type OrientationAudiencePopulation = 'Anyone' | 'NewHires' | 'Management' | 'Contractors';
+
+export const ORIENTATION_AUDIENCE_POPULATION_OPTIONS: {
+  value: OrientationAudiencePopulation;
+  label: string;
+  hint: string;
+}[] = [
+  { value: 'Anyone', label: 'Anyone there', hint: 'Everyone the target reaches.' },
+  { value: 'NewHires', label: 'New hires', hint: 'Employed within the last 90 days.' },
+  { value: 'Management', label: 'Management', hint: 'Heads a unit, or has at least one direct report.' },
+  { value: 'Contractors', label: 'Contractors', hint: 'Contract, fixed-term, consultant or freelance staff.' },
+];
+
 export type OrientationQuestionType = 'SingleChoice' | 'MultiSelect' | 'TrueFalse' | 'FreeText';
 
 export const ORIENTATION_QUESTION_TYPE_OPTIONS = opts<OrientationQuestionType>([
@@ -448,30 +482,178 @@ export interface OrientationPrerequisiteCreateRequest {
   notes?: string | null;
 }
 
+/**
+ * An audience rule. Since round 4 lane I the target is the shared HR audience axis (the same one
+ * announcements use) and `population` narrows it; the old single `OrientationAudienceScope` value
+ * is now only a descriptive label on the programme.
+ */
 export interface OrientationAudienceRule extends AuditFields {
   tenantId: string;
   programId: string;
   programTitle?: string | null;
   ruleName: string;
   description?: string | null;
-  targetType: OrientationAudienceScope;
+  targetType: HrAudienceTargetType;
   targetEntityId?: string | null;
+  /** "Organisation unit: Operations and the units beneath it" — resolved by the server. */
+  targetEntityName?: string | null;
+  population: OrientationAudiencePopulation;
   trigger: OrientationEnrollmentTrigger;
   enrollmentDelayDays: number;
   isInclusive: boolean;
   isActive: boolean;
+  /** Active employees the rule reaches today (for an exclusion, the number it keeps out). */
+  reachCount?: number | null;
 }
 
 export interface OrientationAudienceRuleCreateRequest {
   programId: string;
   ruleName: string;
   description?: string | null;
-  targetType: OrientationAudienceScope;
+  targetType: HrAudienceTargetType;
   targetEntityId?: string | null;
+  population: OrientationAudiencePopulation;
   trigger: OrientationEnrollmentTrigger;
   enrollmentDelayDays: number;
   isInclusive: boolean;
   isActive: boolean;
+}
+
+export interface OrientationAudienceReach {
+  count: number;
+  description: string;
+}
+
+/** What one run of the rules did — or, on a preview, would do. */
+export interface OrientationTriggerRunResult {
+  trigger: string;
+  isPreview: boolean;
+  asOf: string;
+  programsEvaluated: number;
+  rulesEvaluated: number;
+  enrolled: number;
+  alreadyEnrolled: number;
+  excluded: number;
+  waitingOnPrerequisite: number;
+  error?: string | null;
+  /** At most 500 rows; the counts above are complete. */
+  enrolments: {
+    enrollmentId?: string | null;
+    employeeId: string;
+    employeeName?: string | null;
+    employeeNumber?: string | null;
+    programId: string;
+    programTitle: string;
+    ruleId: string;
+    ruleName: string;
+    triggerEvent: OrientationEnrollmentTrigger;
+    triggerDate?: string | null;
+  }[];
+}
+
+export type OrientationTriggerVerdict =
+  | 'WouldEnrolNow'
+  | 'Enrolled'
+  | 'Excluded'
+  | 'WaitingForDate'
+  | 'WindowLapsed'
+  | 'WaitingOnPrerequisite'
+  | 'OnlyWhenHrEnrols'
+  | 'NoTriggeringEvent'
+  | 'NotInAudience'
+  | 'ProgramNotActive';
+
+export interface OrientationRuleDiagnosis {
+  ruleId: string;
+  ruleName: string;
+  isInclusive: boolean;
+  isActive: boolean;
+  trigger: OrientationEnrollmentTrigger;
+  targetType: HrAudienceTargetType;
+  targetName?: string | null;
+  population: OrientationAudiencePopulation;
+  enrollmentDelayDays: number;
+  matchesTarget: boolean;
+  matchesPopulation: boolean;
+  triggerDate?: string | null;
+  firesFrom?: string | null;
+  firesUntil?: string | null;
+  timing: 'Due' | 'NotYet' | 'Lapsed' | 'NoEvent' | 'Nightly' | 'AtPublish' | 'OnlyByHr';
+  explanation: string;
+}
+
+export interface OrientationProgramDiagnosis {
+  programId: string;
+  programCode: string;
+  programTitle: string;
+  programStatus: OrientationProgramStatus;
+  verdict: OrientationTriggerVerdict;
+  explanation: string;
+  enrollmentId?: string | null;
+  enrollmentStatus?: string | null;
+  enrollmentSource?: string | null;
+  enrolledByRuleName?: string | null;
+  missingPrerequisites: string[];
+  rules: OrientationRuleDiagnosis[];
+}
+
+/** "Which rules would fire for this employee, and why" (lane I5). */
+export interface OrientationTriggerDiagnosis {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  isActive: boolean;
+  asOf: string;
+  hireDate?: string | null;
+  organizationUnitName?: string | null;
+  organizationLevelName?: string | null;
+  positionTitle?: string | null;
+  locationName?: string | null;
+  employmentType: string;
+  populations: string[];
+  recentMovements: {
+    movementId: string;
+    movementNumber: string;
+    movementType: string;
+    trigger: OrientationEnrollmentTrigger;
+    effectiveDate: string;
+  }[];
+  programs: OrientationProgramDiagnosis[];
+  onboarding?: OnboardingTemplateApplicability | null;
+  onboardingPlanId?: string | null;
+  onboardingPlanTemplateName?: string | null;
+  onboardingPlanSelectionReason?: string | null;
+}
+
+// ── Onboarding template applicability (lane I4) ───────────────────────────────
+
+export interface OnboardingPlanTemplateAudience {
+  id: string;
+  planTemplateId: string;
+  targetType: HrAudienceTargetType;
+  targetEntityId?: string | null;
+  targetEntityName?: string | null;
+  isInclusive: boolean;
+}
+
+export interface OnboardingTemplateCandidate {
+  templateId: string;
+  templateName: string;
+  isDefault: boolean;
+  matchedOn: string;
+  matchedTargetName?: string | null;
+  specificity: number;
+  isExcluded: boolean;
+  excludedBy?: string | null;
+}
+
+export interface OnboardingTemplateApplicability {
+  templateId?: string | null;
+  templateName?: string | null;
+  reason: string;
+  matchedOn: string;
+  isAmbiguous: boolean;
+  candidates: OnboardingTemplateCandidate[];
 }
 
 export interface OrientationAudienceRuleUpdateRequest
@@ -925,6 +1107,11 @@ export interface EmployeeOrientationSummary {
   enrolledAt: string;
   completedAt?: string | null;
   nextDueDate?: string | null;
+  /** Round 4, lane I3 — how the person came to be on it. */
+  enrollmentSource?: OrientationEnrollmentSource;
+  audienceRuleId?: string | null;
+  triggerEvent?: OrientationEnrollmentTrigger | null;
+  triggerDate?: string | null;
 }
 
 export interface EmployeeOrientation extends AuditFields {
@@ -939,6 +1126,9 @@ export interface EmployeeOrientation extends AuditFields {
   employeeNumber?: string | null;
   enrollmentStatus: OrientationEnrollmentStatus;
   enrollmentSource: OrientationEnrollmentSource;
+  audienceRuleId?: string | null;
+  triggerEvent?: OrientationEnrollmentTrigger | null;
+  triggerDate?: string | null;
   enrolledAt: string;
   enrolledByEmployeeId?: string | null;
   enrolledByName?: string | null;

@@ -254,6 +254,11 @@ public class OrientationPrerequisite : TenantEntity
 /// A rule defining who should be enrolled in a program and what triggers it
 /// (e.g. all new hires in a department, on hire date + N days).
 /// </summary>
+/// <remarks>
+/// <para><b>These rules fire since round 4, lane I.</b> Before it they were stored and read by
+/// nothing — <c>OrientationEnrollmentTriggerService</c> is the evaluator, and its remarks carry the
+/// full semantics (windows, exclusions, prerequisites, de-duplication).</para>
+/// </remarks>
 public class OrientationAudienceRule : TenantEntity
 {
     public Guid ProgramId { get; set; }
@@ -265,20 +270,38 @@ public class OrientationAudienceRule : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    public OrientationAudienceScope TargetType { get; set; }
+    /// <summary>
+    /// Where the people this rule reaches sit — the shared HR audience axis, expanded by
+    /// <c>IHrAudienceResolver</c> (an organisation unit includes every unit beneath it).
+    /// </summary>
+    /// <remarks>
+    /// Was <see cref="OrientationAudienceScope"/> until round 4 lane I; the migration
+    /// <c>AddOrientationTriggers</c> mapped the stored values across.
+    /// </remarks>
+    public HrAudienceTargetType TargetType { get; set; } = HrAudienceTargetType.AllEmployees;
 
     /// <summary>
-    /// Id of the target entity (OrganizationUnitId, JobGradeId, LocationId, EmployeeId, …)
-    /// referenced by <see cref="TargetType"/>. Null = applies to all employees.
+    /// The unit, level, position, location or employee <see cref="TargetType"/> names. Null only
+    /// for <see cref="HrAudienceTargetType.AllEmployees"/>.
     /// </summary>
     public Guid? TargetEntityId { get; set; }
 
+    /// <summary>Which of the people at the target the rule means — intersected with it.</summary>
+    public OrientationAudiencePopulation Population { get; set; } = OrientationAudiencePopulation.Anyone;
+
     public OrientationEnrollmentTrigger Trigger { get; set; }
 
-    /// <summary>How many days after the trigger the enrollment should be created.</summary>
+    /// <summary>
+    /// How many days after the trigger's date the enrollment should be created. Applies to the
+    /// DATED triggers — hire, transfer, promotion; a publish, a scheduled sweep or HR's "enrol now"
+    /// has no date to count from, so it enrols immediately.
+    /// </summary>
     public int EnrollmentDelayDays { get; set; }
 
-    /// <summary>True = include this audience, false = exclude it.</summary>
+    /// <summary>
+    /// True = include this audience, false = exclude it. An exclusion applies to EVERY trigger of
+    /// its programme — "never auto-enrol the board" should not need repeating per trigger.
+    /// </summary>
     public bool IsInclusive { get; set; } = true;
 
     public bool IsActive { get; set; } = true;
@@ -442,6 +465,22 @@ public class EmployeeOrientation : TenantEntity
 
     public DateTime EnrolledAt { get; set; } = DateTime.UtcNow;
     public Guid? EnrolledByEmployeeId { get; set; }
+
+    // ── Why an automatic enrollment exists (round 4, lane I) ─────────────────
+    // Written only when EnrollmentSource is AutoRule. Without them an automatic enrollment is a
+    // row nobody can account for: "why am I on this?" had no answer but reading code.
+
+    /// <summary>The audience rule that enrolled this person. No FK: a rule may be deleted later
+    /// and the enrollment must keep saying what created it.</summary>
+    public Guid? AudienceRuleId { get; set; }
+
+    /// <summary>What fired — hire, transfer, promotion, publish, the scheduled sweep, or HR's
+    /// "enrol the audience now" (<see cref="OrientationEnrollmentTrigger.Manual"/>).</summary>
+    public OrientationEnrollmentTrigger? TriggerEvent { get; set; }
+
+    /// <summary>The date the trigger counted from — the hire date, or the movement's effective
+    /// date. Null for the undated triggers.</summary>
+    public DateOnly? TriggerDate { get; set; }
 
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }

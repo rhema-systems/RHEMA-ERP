@@ -28,6 +28,10 @@ public class EmployeeService : IEmployeeService
     private readonly ILogger<EmployeeService> _logger;
     private readonly IDisabilityTypeService _disabilityTypes; // round 3, lane P2
 
+    // Round 4, lane I3: an employee being created is the OnHire trigger. The form, the import and
+    // anything else that creates an employee through this service fire it here, once.
+    private readonly IOrientationEnrollmentTriggerService _orientationTriggers;
+
     public EmployeeService(
         IEmployeeRepository employeeRepository,
         IOrganizationUnitRepository organizationUnitRepository,
@@ -43,8 +47,10 @@ public class EmployeeService : IEmployeeService
         ICompanyHrPolicySettingsService policySettings,
         IPositionNamedSetService namedSets,
         ILogger<EmployeeService> logger,
-        IDisabilityTypeService disabilityTypes)
+        IDisabilityTypeService disabilityTypes,
+        IOrientationEnrollmentTriggerService orientationTriggers)
     {
+        _orientationTriggers = orientationTriggers;
         _currencies = currencies;
         _staffNumbers = staffNumbers;
         _payrollMembership = payrollMembership;
@@ -556,6 +562,12 @@ public class EmployeeService : IEmployeeService
         // today, and a failed enrolment is reported by the reconciliation read, not by failing
         // the hire. Create-only — see PayrollMembershipService.
         await _payrollMembership.EnsurePayrollProfileAsync(employeeEntity, cancellationToken);
+
+        // Round 4, lane I3 — the OnHire orientation rules. Also after the commit and best-effort
+        // (the trigger service logs and swallows its own failure). An imported employee whose
+        // employment date is years back is due for no rule, so importing the existing workforce
+        // enrols nobody; see OrientationTriggerWindows.CatchUpDays.
+        await _orientationTriggers.OnEmployeeHiredAsync(employeeEntity.Id, cancellationToken);
 
         var created = await _employeeRepository.GetByIdWithDetailsAsync(employeeEntity.Id);
         if (created == null) throw new InvalidOperationException("Employee created but could not be reloaded.");

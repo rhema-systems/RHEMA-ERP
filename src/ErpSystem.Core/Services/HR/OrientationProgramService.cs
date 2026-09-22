@@ -21,6 +21,7 @@ public class OrientationProgramService : IOrientationProgramService
     private readonly IOrientationAssessmentOptionRepository _optionRepository;
     private readonly IEmployeeOrientationRepository _enrollmentRepository;
     private readonly IOrientationSessionRepository _sessionRepository;
+    private readonly IOrientationEnrollmentTriggerService _triggers;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<OrientationProgramService> _logger;
@@ -35,6 +36,7 @@ public class OrientationProgramService : IOrientationProgramService
         IOrientationAssessmentOptionRepository optionRepository,
         IEmployeeOrientationRepository enrollmentRepository,
         IOrientationSessionRepository sessionRepository,
+        IOrientationEnrollmentTriggerService triggers,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<OrientationProgramService> logger)
@@ -48,6 +50,7 @@ public class OrientationProgramService : IOrientationProgramService
         _optionRepository = optionRepository;
         _enrollmentRepository = enrollmentRepository;
         _sessionRepository = sessionRepository;
+        _triggers = triggers;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -315,6 +318,7 @@ public class OrientationProgramService : IOrientationProgramService
     public async Task<bool> ChangeStatusAsync(ChangeOrientationProgramStatusDto changeDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedProgramAsync(changeDto.ProgramId);
+        var wasActive = entity.Status == OrientationProgramStatus.Active;
 
         entity.Status = changeDto.NewStatus;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -323,6 +327,13 @@ public class OrientationProgramService : IOrientationProgramService
         await _programRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Orientation program {Code} status changed to {Status}", entity.ProgramCode, changeDto.NewStatus);
+
+        // Round 4, lane I3: publishing is a trigger. The screen has always told HR that making a
+        // programme Active means "its audience rules start firing"; until now nothing fired.
+        // After the status commit, best-effort — the publish stands whatever the rules do.
+        if (!wasActive && entity.Status == OrientationProgramStatus.Active)
+            await _triggers.OnProgramPublishedAsync(entity.Id, null, cancellationToken);
+
         return true;
     }
 
@@ -478,29 +489,77 @@ public class OrientationProgramService : IOrientationProgramService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await EnsureProgramExistsAsync(createDto.ProgramId);
+        await ValidateAudienceRuleAsync(tenantId, createDto.TargetType, createDto.TargetEntityId,
+            createDto.Population, createDto.Trigger, createDto.EnrollmentDelayDays, cancellationToken);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _audienceRuleRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return (await DescribeRulesAsync(tenantId, [entity], cancellationToken))[0];
     }
 
     public async Task<IEnumerable<OrientationAudienceRuleDto>> GetAudienceRulesAsync(Guid programId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _audienceRuleRepository.GetByProgramIdAsync(programId))
+        var rules = (await _audienceRuleRepository.GetByProgramIdAsync(programId))
             .Where(r => r.TenantId == tenantId)
-            .Select(r => r.ToDto());
+            .ToList();
+        return await DescribeRulesAsync(tenantId, rules, cancellationToken);
     }
 
     public async Task<OrientationAudienceRuleDto> UpdateAudienceRuleAsync(UpdateOrientationAudienceRuleDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAudienceRuleAsync(updateDto.Id);
+        await ValidateAudienceRuleAsync(entity.TenantId, updateDto.TargetType, updateDto.TargetEntityId,
+            updateDto.Population, updateDto.Trigger, updateDto.EnrollmentDelayDays, cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _audienceRuleRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return (await DescribeRulesAsync(entity.TenantId, [entity], cancellationToken))[0];
+    }
+
+    /// <summary>
+    /// Round 4, lane I2: a rule's target must be something the resolver can evaluate. The target id
+    /// used to be a free-text GUID box, so a rule could name a unit that did not exist — or a
+    /// position's id under "unit" — and silently reach nobody for ever.
+    /// </summary>
+    private async Task ValidateAudienceRuleAsync(
+        Guid tenantId, HrAudienceTargetType targetType, Guid? targetEntityId,
+        OrientationAudiencePopulation population, OrientationEnrollmentTrigger trigger, int delayDays,
+        CancellationToken cancellationToken)
+    {
+        await _triggers.ValidateTargetAsync(tenantId, targetType, targetEntityId, allowEmployee: true, cancellationToken);
+
+        if (!Enum.IsDefined(population))
+            throw new InvalidOperationException($"'{(int)population}' is not an audience population.");
+        if (!Enum.IsDefined(trigger))
+            throw new InvalidOperationException($"'{(int)trigger}' is not an enrollment trigger.");
+        if (delayDays < 0)
+            throw new InvalidOperationException("The enrollment delay cannot be negative.");
+        if (delayDays > 0 && !OrientationTriggerWindows.IsDated(trigger))
+            throw new InvalidOperationException(
+                "A delay only applies to hire, transfer and promotion rules — the others have no date to count from. Set it to 0.");
+    }
+
+    /// <summary>
+    /// The rules as the list shows them: the target's NAME (§ 3 defect 15 — declared on the DTO and
+    /// never mapped, so the list could only ever show a GUID) and how many people each reaches today.
+    /// </summary>
+    private async Task<List<OrientationAudienceRuleDto>> DescribeRulesAsync(
+        Guid tenantId, List<OrientationAudienceRule> rules, CancellationToken cancellationToken)
+    {
+        var names = await _triggers.ResolveTargetNamesAsync(tenantId,
+            rules.Select(r => (r.TargetType, r.TargetEntityId)), cancellationToken);
+        var reach = await _triggers.CountRuleReachAsync(tenantId, rules, cancellationToken);
+
+        return rules.Select(r =>
+        {
+            var dto = r.ToDto();
+            dto.TargetEntityName = HrAudienceTargets.Describe(r.TargetType, r.TargetEntityId, names);
+            dto.ReachCount = reach.TryGetValue(r.Id, out var n) ? n : null;
+            return dto;
+        }).ToList();
     }
 
     public async Task<bool> DeleteAudienceRuleAsync(Guid ruleId, CancellationToken cancellationToken = default)

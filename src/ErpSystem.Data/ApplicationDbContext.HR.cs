@@ -334,6 +334,7 @@ public partial class ApplicationDbContext
     public DbSet<PreEmploymentCheckProviderService> PreEmploymentCheckProviderServices { get; set; } = null!;
     public DbSet<ReferenceCheckResponse> ReferenceCheckResponses { get; set; } = null!;
     public DbSet<OnboardingPlanTemplate> OnboardingPlanTemplates { get; set; } = null!;
+    public DbSet<OnboardingPlanTemplateAudience> OnboardingPlanTemplateAudiences { get; set; } = null!;
     public DbSet<OnboardingTaskTemplate> OnboardingTaskTemplates { get; set; } = null!;
     public DbSet<OnboardingPlan> OnboardingPlans { get; set; } = null!;
     public DbSet<OnboardingTask> OnboardingTasks { get; set; } = null!;
@@ -9183,6 +9184,18 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // Round 4, lane I4: who a template is for.
+        builder.Entity<OnboardingPlanTemplateAudience>(entity =>
+        {
+            entity.HasIndex(x => x.PlanTemplateId).HasDatabaseName("IX_OnboardingTemplateAudience_TemplateId");
+            entity.Property(x => x.TargetType).HasConversion<int>();
+
+            entity.HasOne(x => x.PlanTemplate)
+                .WithMany(x => x.Audiences)
+                .HasForeignKey(x => x.PlanTemplateId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<OnboardingTaskTemplate>(entity =>
         {
             entity.HasIndex(x => x.PlanTemplateId).HasDatabaseName("IX_OnboardingTaskTemplate_PlanId");
@@ -12841,6 +12854,9 @@ private void ConfigureOrientationEntities(ModelBuilder builder)
 
             entity.Property(x => x.TargetType).HasConversion<int>();
             entity.Property(x => x.Trigger).HasConversion<int>();
+            // Round 4, lane I1. Anyone (0) is what every pre-existing rule meant.
+            entity.Property(x => x.Population).HasConversion<int>()
+                .HasDefaultValue(OrientationAudiencePopulation.Anyone);
 
             entity.HasOne(x => x.Program)
                 .WithMany(x => x.AudienceRules)
@@ -12914,6 +12930,9 @@ private void ConfigureOrientationEntities(ModelBuilder builder)
             entity.Property(x => x.EnrollmentStatus).HasConversion<int>();
             entity.Property(x => x.EnrollmentSource).HasConversion<int>();
             entity.Property(x => x.CompletionStatus).HasConversion<int>();
+            // Round 4, lane I3: which rule and event created an automatic enrollment.
+            entity.Property(x => x.TriggerEvent).HasConversion<int?>();
+            entity.HasIndex(x => x.AudienceRuleId);
 
             entity.HasOne(x => x.Program)
                 .WithMany(x => x.Enrollments)

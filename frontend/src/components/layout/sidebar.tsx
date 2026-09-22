@@ -143,6 +143,7 @@ import {
   Recycle,
   Plane,
   Layers3,
+  Zap,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -1592,6 +1593,8 @@ export const navigationItems: NavItem[] = [
               { title: 'Dashboard', href: '/hr/orientation/dashboard', icon: LayoutDashboard, permissions: ['HR.Orientation.Read'] },
               { title: 'Sessions', href: '/hr/orientation/sessions', icon: CalendarClock, permissions: ['HR.Orientation.Read'] },
               { title: 'Enrollments', href: '/hr/orientation/enrollments', icon: Users, permissions: ['HR.Orientation.Read'] },
+              // Round 4, lane I5: "which rules would fire for this person, and why".
+              { title: 'Enrollment Triggers', href: '/hr/orientation/triggers', icon: Zap, permissions: ['HR.Orientation.Read'] },
               // My Orientation re-homed to the portal (/me/orientation).
               { title: 'Onboarding Plans', href: '/hr/orientation/onboarding', icon: ListChecks, permissions: ['HR.Orientation.Read'] },
               { title: 'Task Queues', href: '/hr/orientation/onboarding/queues', icon: ClipboardCheck, permissions: ['HR.Orientation.Read'] },
