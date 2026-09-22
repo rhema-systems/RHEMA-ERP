@@ -2195,6 +2195,28 @@ public enum RecruitmentSittingStatus
     Cancelled = 6,
 }
 
+/// <summary>
+/// How a recruitment test was sat (round 4, lane E6).
+/// </summary>
+/// <remarks>
+/// ⚠ Recorded rather than inferred. A script the candidate submitted themselves and one HR typed in
+/// from paper are different kinds of evidence, and a recruitment decision can be challenged: the
+/// record must say which without anybody having to reason it out of which columns happen to be null.
+/// </remarks>
+public enum RecruitmentSittingMode
+{
+    /// <summary>Sat in the careers portal, submitted by the candidate, marked by the server.</summary>
+    [Description("Online")]
+    Online = 1,
+
+    /// <summary>
+    /// Sat on the printed paper; what the candidate ticked, and the marks for their written answers,
+    /// entered by HR. The closed questions are still marked by the server against the key.
+    /// </summary>
+    [Description("On paper")]
+    Paper = 2,
+}
+
 public enum JobInterviewType
 {
     /// <summary>Initial short conversation to verify basics. Format is set via InterviewMode.</summary>

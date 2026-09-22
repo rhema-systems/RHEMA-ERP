@@ -5997,6 +5997,11 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasDatabaseName("IX_RecruitmentTestSitting_Assignment_Application_Attempt");
 
             entity.Property(x => x.Status).HasConversion<int>();
+            // ⚠ The DEFAULT is Online in the MODEL as well as the migration, so a database rebuilt
+            // from the model and one migrated to it carry the same constraint.
+            entity.Property(x => x.Mode)
+                .HasConversion<int>()
+                .HasDefaultValue(RecruitmentSittingMode.Online);
             entity.Property(x => x.AutoScore).HasPrecision(8, 2);
             entity.Property(x => x.ManualScore).HasPrecision(8, 2);
             entity.Property(x => x.FinalScore).HasPrecision(8, 2);

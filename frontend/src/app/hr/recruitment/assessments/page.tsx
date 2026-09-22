@@ -7,9 +7,11 @@ import {
   CalendarClock,
   ClipboardCheck,
   ClipboardList,
+  ClipboardPen,
   Loader2,
   Mail,
   Plus,
+  Printer,
   RotateCcw,
   Trash2,
 } from 'lucide-react';
@@ -37,6 +39,7 @@ import { useToast } from '@/hooks/use-toast';
 import { recruitmentTestService as tests } from '@/services/hr/recruitment-test.service';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
 import {
+  RECRUITMENT_SITTING_MODE_LABELS,
   RECRUITMENT_SITTING_STATUS_LABELS,
   type RecruitmentSittingStatus,
 } from '@/types/hr/recruitment-tests';
@@ -282,6 +285,10 @@ export default function RecruitmentAssessmentsPage() {
                             <Badge variant={STATUS_VARIANT[sitting.status]}>
                               {RECRUITMENT_SITTING_STATUS_LABELS[sitting.status]}
                             </Badge>
+                            {/* ⚠ How it was sat is evidence in its own right — say so on the row. */}
+                            {sitting.mode === 'Paper' && (
+                              <Badge variant="outline">{RECRUITMENT_SITTING_MODE_LABELS.Paper}</Badge>
+                            )}
                             {sitting.status === 'Marked' && !sitting.jobApplicantTestResultId && (
                               <Badge variant="outline">Not in the ledger</Badge>
                             )}
@@ -324,7 +331,7 @@ export default function RecruitmentAssessmentsPage() {
                       <TableHead>Window</TableHead>
                       <TableHead className="text-right">Sat</TableHead>
                       <TableHead>Invited</TableHead>
-                      <TableHead className="w-[160px]" />
+                      <TableHead className="w-[230px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -372,6 +379,20 @@ export default function RecruitmentAssessmentsPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-end gap-1">
+                            <Button variant="ghost" size="icon" title="Print named papers for a sitting session" asChild>
+                              <Link
+                                href={`/hr/recruitment/assessments/paper?testId=${assignment.recruitmentTestId}&variant=QuestionPaper&assignmentId=${assignment.id}`}
+                              >
+                                <Printer className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                            <Button variant="ghost" size="icon" title="Record a script sat on paper" asChild>
+                              <Link
+                                href={`/hr/recruitment/assessments/record?assignmentId=${assignment.id}&testId=${assignment.recruitmentTestId}`}
+                              >
+                                <ClipboardPen className="h-4 w-4" />
+                              </Link>
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"

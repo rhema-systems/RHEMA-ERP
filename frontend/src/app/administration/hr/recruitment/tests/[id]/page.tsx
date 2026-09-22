@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -8,10 +9,12 @@ import {
   CheckCircle2,
   Eye,
   FileQuestion,
+  KeyRound,
   Loader2,
   Lock,
   Pencil,
   Plus,
+  Printer,
   Trash2,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -142,6 +145,20 @@ export default function RecruitmentTestBuilderPage() {
             <Badge variant={test.isActive ? 'default' : 'secondary'}>
               {test.isActive ? 'Active' : 'Draft'}
             </Badge>
+            {/* Lane E6. A blank paper and the key print from here; named papers for a sitting
+                session print from the assignment, where the candidates are known. */}
+            <Button variant="outline" asChild>
+              <Link href={`/hr/recruitment/assessments/paper?testId=${test.id}&variant=QuestionPaper`}>
+                <Printer className="mr-2 h-4 w-4" />
+                Paper
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href={`/hr/recruitment/assessments/paper?testId=${test.id}&variant=MarkingKey`}>
+                <KeyRound className="mr-2 h-4 w-4" />
+                Marking key
+              </Link>
+            </Button>
             <Button
               variant={test.isActive ? 'outline' : 'default'}
               disabled={setActive.isPending}

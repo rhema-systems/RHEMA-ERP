@@ -65,6 +65,14 @@ export const RECRUITMENT_SITTING_STATUS_LABELS: Record<RecruitmentSittingStatus,
 
 export type JobApplicantTestType = 'Written' | 'Practical';
 
+/** How a sitting was sat. Recorded, not inferred — see the backend enum. */
+export type RecruitmentSittingMode = 'Online' | 'Paper';
+
+export const RECRUITMENT_SITTING_MODE_LABELS: Record<RecruitmentSittingMode, string> = {
+  Online: 'Online',
+  Paper: 'On paper',
+};
+
 // ── authoring ─────────────────────────────────────────────────────────────────
 
 export interface RecruitmentTestQuestionOption {
@@ -245,6 +253,9 @@ export interface RecruitmentTestSitting {
   attemptNumber: number;
   status: RecruitmentSittingStatus;
   statusName: string;
+  /** Online, or sat on paper and entered by HR. */
+  mode: RecruitmentSittingMode;
+  modeName: string;
   startedAt?: string | null;
   submittedAt?: string | null;
   mustSubmitBy?: string | null;
@@ -383,4 +394,71 @@ export interface CandidateSittingResult {
   passed?: boolean | null;
   timedOut: boolean;
   message: string;
+}
+
+// ── offline — the printed paper, and a paper sitting entered by HR (lane E6) ────
+
+export type RecruitmentTestPaperVariant = 'QuestionPaper' | 'MarkingKey';
+
+export interface RecruitmentTestPaper {
+  testId: string;
+  testCode: string;
+  testName: string;
+  variant: RecruitmentTestPaperVariant;
+  variantName: string;
+  /** How many papers will print — say so before the dialog opens. */
+  sheetCount: number;
+  /** Server-composed HTML; every token value is encoded on the server. */
+  htmlBody: string;
+}
+
+export interface RecruitmentTestPaperRequest {
+  variant?: RecruitmentTestPaperVariant;
+  /** Question paper only: one NAMED paper per candidate this assignment reaches. */
+  assignmentId?: string | null;
+  /** Narrows the named papers — a reprint for one candidate. */
+  applicationIds?: string[];
+}
+
+export interface PaperAnswerPayload {
+  questionId: string;
+  /** What was TICKED — never a mark. The key marks closed questions. */
+  selectedOptionIds: string[];
+  numericAnswer?: string | null;
+  freeTextAnswer?: string | null;
+  /** ⚠ Written answers ONLY. A mark on a closed question is refused by the server. */
+  pointsAwarded?: number | null;
+  markerComment?: string | null;
+}
+
+export interface RecordPaperSittingPayload {
+  assignmentId: string;
+  jobApplicationId: string;
+  /** When it was SAT — checked against the assignment's window, not today. */
+  satOn: string;
+  venue?: string | null;
+  /** ⚠ An EMPLOYEE id. */
+  invigilatedById?: string | null;
+  markerNotes?: string | null;
+  answers: PaperAnswerPayload[];
+}
+
+export interface RecruitmentTestAssignmentCandidate {
+  jobApplicationId: string;
+  applicationNumber: string;
+  candidateName: string;
+  attemptsUsed: number;
+  attemptsAllowed: number;
+  lastSittingId?: string | null;
+  lastStatus?: RecruitmentSittingStatus | null;
+  lastStatusName?: string | null;
+  lastMode?: RecruitmentSittingMode | null;
+  lastModeName?: string | null;
+  /** Only once finalised. */
+  lastScorePercent?: number | null;
+  passed?: boolean | null;
+  hasOpenOnlineAttempt: boolean;
+  canRecordPaperSitting: boolean;
+  /** Why not, in the server's words. */
+  blockedReason?: string | null;
 }

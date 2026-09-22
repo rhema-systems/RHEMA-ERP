@@ -13,7 +13,7 @@
 > | **D-1** | **DONE** — 58 ×2, `run-round4-d.mjs`; migration `AddInterviewPanelClashOverrideAndRoomBooking` applied to UAT. D1–D4 + D8, the recruitment half |
 > | **D-2** | **DONE** — 39 ×2, `hr-company-schedule/run-round4-d.mjs`; migration `AddCompanyEventOriginalWindowAndUniqueNumbers` applied to UAT. D5–D7 |
 > | **E-a** | **DONE** — 141 ×2, `run-round4-e.mjs`; migration `AddRecruitmentTestEngine` applied to UAT; all 18 neighbouring suites at baseline. E1–E5. **The harness found two defects in the lane's own code** — § 8 |
-> | *(E-b)* | **NOT STARTED** — E6 printable paper + offline entry, E7 demo seed + coverage manifest |
+> | **E-b** | **DONE** — 86 ×2, `run-round4-e6.mjs`; migration `AddRecruitmentTestSittingMode` applied to UAT; E-a still 141 and all 18 neighbours at baseline; demo scenario `052-recruitment-tests` idempotent, `verify-tables` recruitment 74/74. E6 + E7 — § 8 |
 > | *email links* | **DONE** — every candidate-facing CTA in the recruitment catalogue pointed at a non-existent page since 2026-08-31; six repointed, **two confirmation pages built**. § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
@@ -21,8 +21,7 @@
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> E-a is verified. Next: **E-b** (E6 printable paper + offline entry, E7 demo seed), then I, L,
-> J, M, K, N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). Next: I, L, J, M, K, N, O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
 > all three are still outstanding.
@@ -1462,9 +1461,79 @@ whole paper.
 
 | | Item | State |
 |---|---|---|
-| **E-b** | E6 — printable paper + marking key + offline results entry | not started |
-| | E7 — demo aptitude test seed + coverage-manifest rows | not started |
-| **Walk** | E4 end to end in the careers portal, including refresh mid-test (§ 5, item 2) | not done |
+| **E-b** | E6 — printable paper + marking key + offline results entry | **done** — see the E-b entry below |
+| | E7 — demo aptitude test seed + coverage-manifest rows | **done** — see the E-b entry below |
+| **Walk** | E4 end to end in the careers portal, including refresh mid-test (§ 5, item 2) | not done — the demo seed leaves Elikem Attipoe's paper unsat for exactly this |
+
+---
+
+### Lane E-b — the printed paper, the paper sitting, the demo seed · DONE 2026-09-22 · 86 assertions ×2
+
+Harness: `dev-harness/hr-recruitment/run-round4-e6.mjs` (blocks P–T). Migration:
+`20260922212045_AddRecruitmentTestSittingMode` (guarded SQL, named `DEFAULT 1`; applied to
+`ErpSystemDB_UAT` — every one of the 44 existing sittings reads Online). Lane E-a's 141 unchanged; all
+18 neighbouring suites at the baselines listed in the E-a entry.
+
+**E6 — offline, as built.**
+
+- **The printed paper and the marking key** follow lane F's house pattern exactly: server-composed
+  HTML from an HR-editable `RecruitmentTests` template catalogue, printed by the browser, **reusing lane
+  F's print stylesheet** rather than copying it (two print stylesheets drift). The question paper prints
+  blank, or one named paper per candidate an assignment reaches, in **surname order** for the sign-in
+  desk. The key carries the correct choices, expected numbers, marking notes, and the rules the server
+  applies online.
+- **A paper sitting** — `POST api/hr/recruitment/tests/sittings/paper` — takes what the candidate
+  **ticked**, never a mark, and the server marks it with the **same marker** the portal uses, against the
+  whole paper. Written answers take the marker's marks, and the sitting finalises in the same call: the
+  ledger row says *"Sat on paper … entered by HR"* and carries the venue and the invigilator (an
+  employee id — the ledger's `InvigilatedById` is an Employee FK).
+- **Who an assignment reaches** — `GET …/assignments/{id}/candidates` — with each candidate's attempts,
+  latest result and, when a paper sitting cannot be recorded, why.
+- Screens: `/hr/recruitment/assessments/paper` and `/record`, reached from the builder, from every
+  assignment row, and from a mode badge on each sitting.
+
+**Decisions taken inside the lane.**
+
+| | Decision | Why |
+|---|---|---|
+| 1 | **How a sitting was sat is a COLUMN** (`Mode`), not inferred | A candidate's own submission and a script typed in by HR are different kinds of evidence, and a recruitment decision can be challenged. "No access token" would have worked as a signal and nobody should have to know it. |
+| 2 | **A printed paper is never shuffled**, even when the paper shuffles online | One marking key has to fit every script in the pile; per-candidate shuffles would each need their own key. |
+| 3 | **Double ticks and words-in-a-number are RECORDED**, and marked wrong by the key | A candidate can do both on paper. Refusing them would force HR to "correct" the script on the way in. |
+| 4 | **Every written answer must carry its mark** on entry | The script has been marked by hand before it is typed in; an unmarked essay would publish a score missing the essay. |
+| 5 | **The window is judged by the date it was SAT**, not the day it is entered | A paper sat on the last day and typed in the next week is on time. |
+| 6 | **Refused over a running online attempt** | Two live attempts would finalise in either order, and the ledger row belongs to the last one finalised. |
+| 7 | **The entry screen shows the paper WITHOUT the answers** (the candidate projection) | Whoever types a script in should record what was ticked, not look at the key while doing it. |
+| 8 | **One reach rule, extracted** — `RecruitmentTestReach` | The printer and the portal both ask "which applications does this assignment reach"; two copies of the live-status list is how a withdrawn candidate gets printed a paper the portal would refuse. Lane B's extraction, for the same reason. |
+
+**E7 — the demo seed.** `hr-demo-smoke/scenarios/052-recruitment-tests.mjs`, after 050. A TDC
+*"Numerical and Verbal Reasoning"* paper (8 questions, 20 marks, three sections) on **VAC-000021,
+Estates Officer — Housing** — the live-pipeline vacancy at Shortlisting, which has criteria and is not
+walked by a runbook. Weighted at **30%**. Three scripts entered as sat on paper: **95%**, **50% — a pass
+exactly on the mark**, and **45%**, whose blank question still counts towards the total. **Elikem Attipoe**,
+the demo careers account, is on the vacancy with the paper **unsat**, so a presenter can sit it live and
+watch it land in the marking queue. Idempotent: a second run created nothing (1 paper, 1 assignment,
+3 sittings, 3 ledger rows). Seven manifest rows added; the 634 existing rows unchanged;
+`verify-tables --area recruitment` reads **74 of 74** required tables holding data.
+⚠ **No invitation email is sent** — the demo candidates carry real-looking gmail.com addresses.
+
+**Found on the way.**
+
+- ⚠ **`PUT /job-vacancies` writes all 25 of its fields** — an omitted one is nulled. The demo seed and
+  both lane E harnesses now round-trip every field and the seed refuses to PUT if the read lacks one.
+  Lane E-a's harness had been sending eleven and nulling the rest on its fixture vacancy; harmless there,
+  but the pattern gets copied.
+- **`register-candidate` carries `SensitivePolicy`** — 5 a minute, by IP for an anonymous caller. Two
+  back-to-back runs of a suite that signs up four candidates collide; both lane E suites now wait the
+  window out on a 429.
+
+**Owed, and recorded rather than built:**
+
+- **An untimed paper opened online and never submitted blocks a paper sitting for good.** A timed one
+  expires on the sweep; an untimed one has no clock, and there is no HR action to cancel an attempt. The
+  roster says so in words (*"ask the candidate to submit it"*). A cancel-attempt action is the fix if it
+  ever bites.
+- **E4's browser walk** (§ 5 item 2) — still not done; the seed is ready for it.
+- **A runbook page for the test engine** — lane P's.
 
 ---
 

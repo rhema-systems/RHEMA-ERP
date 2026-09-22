@@ -282,6 +282,16 @@ public class RecruitmentTestSitting : TenantEntity
 
     public RecruitmentSittingStatus Status { get; set; } = RecruitmentSittingStatus.NotStarted;
 
+    /// <summary>
+    /// Online, or sat on paper and entered by HR (lane E6).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Defaults to <see cref="RecruitmentSittingMode.Online"/> in the database as well as here, so
+    /// every sitting that existed before this column did reads as what it was. An enum whose zero is
+    /// not a member must never be left to EF's scaffolded <c>DEFAULT 0</c> — see the migration.
+    /// </remarks>
+    public RecruitmentSittingMode Mode { get; set; } = RecruitmentSittingMode.Online;
+
     /// <summary>What the closed questions scored, marked by the server.</summary>
     public decimal? AutoScore { get; set; }
 

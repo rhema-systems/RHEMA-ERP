@@ -415,6 +415,10 @@ public class RecruitmentTestSittingDto : BaseDto
     public RecruitmentSittingStatus Status { get; set; }
     public string StatusName => Status.ToString();
 
+    /// <summary>Online, or sat on paper and entered by HR. See <see cref="RecruitmentSittingMode"/>.</summary>
+    public RecruitmentSittingMode Mode { get; set; }
+    public string ModeName => Mode.ToString();
+
     public DateTime? StartedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
     public DateTime? MustSubmitBy { get; set; }
@@ -473,6 +477,128 @@ public class FinaliseSittingDto
     [Required] public Guid SittingId { get; set; }
 
     [MaxLength(2000)] public string? MarkerNotes { get; set; }
+}
+
+#endregion
+
+#region Offline — the printed paper, and a paper sitting entered by HR (lane E6)
+
+/// <summary>Which printed document.</summary>
+public enum RecruitmentTestPaperVariant
+{
+    /// <summary>
+    /// What the candidate writes on: every question, tick boxes, answer lines. No answers.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Never shuffled, even when the paper shuffles online. One marking key has to fit every
+    /// script in the pile; shuffled papers would each need their own, and a marker working from the
+    /// wrong key marks every answer against somebody else's question.
+    /// </remarks>
+    QuestionPaper = 1,
+
+    /// <summary>The marker's copy: the right answers, the expected numbers, the marking notes.</summary>
+    MarkingKey = 2,
+}
+
+public class RecruitmentTestPaperDto
+{
+    public Guid TestId { get; set; }
+    public string TestCode { get; set; } = string.Empty;
+    public string TestName { get; set; } = string.Empty;
+    public RecruitmentTestPaperVariant Variant { get; set; }
+    public string VariantName => Variant.ToString();
+
+    /// <summary>How many physical papers this will print — stated before the dialog opens.</summary>
+    public int SheetCount { get; set; }
+
+    /// <summary>
+    /// The whole document. Each paper is a <c>&lt;section class='interview-paper-sheet'&gt;</c>, the
+    /// hook the shared printed-paper stylesheet hangs its page breaks on (lane F's).
+    /// </summary>
+    public string HtmlBody { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A script sat on paper, entered by HR — what the candidate ticked, and the marks for their written
+/// answers.
+/// </summary>
+/// <remarks>
+/// <para>⚠ The closed questions are entered as WHAT WAS TICKED, never as a mark. The server marks them
+/// against the key by exactly the rules an online sitting gets — the denominator is every question on
+/// the paper, multi-answer questions are exact set equality — so a paper script and an online one are
+/// marked the same way and cannot drift apart.</para>
+///
+/// <para>⚠ Every written answer must carry its mark. A paper sitting is entered from a script that has
+/// already been marked by hand; leaving an essay unmarked here would publish a score missing the
+/// essay, which is the one thing finalisation exists to prevent.</para>
+/// </remarks>
+public class RecordPaperSittingDto
+{
+    [Required] public Guid AssignmentId { get; set; }
+    [Required] public Guid JobApplicationId { get; set; }
+
+    /// <summary>When the candidate sat the paper. Checked against the assignment's window.</summary>
+    [Required] public DateTime SatOn { get; set; }
+
+    [MaxLength(500)] public string? Venue { get; set; }
+
+    /// <summary>⚠ An EMPLOYEE id — the ledger's <c>InvigilatedById</c> is a foreign key to Employees.</summary>
+    public Guid? InvigilatedById { get; set; }
+
+    [MaxLength(2000)] public string? MarkerNotes { get; set; }
+
+    public List<PaperAnswerDto> Answers { get; set; } = new();
+}
+
+public class PaperAnswerDto
+{
+    [Required] public Guid QuestionId { get; set; }
+
+    /// <summary>What was ticked. On paper a candidate CAN tick two boxes on a one-answer question;
+    /// record what they did, and the key marks it wrong.</summary>
+    public List<Guid> SelectedOptionIds { get; set; } = new();
+
+    [MaxLength(100)] public string? NumericAnswer { get; set; }
+
+    /// <summary>A written answer's text, if HR chooses to transcribe it. Optional — the script is the record.</summary>
+    [MaxLength(4000)] public string? FreeTextAnswer { get; set; }
+
+    /// <summary>
+    /// ⚠ WRITTEN ANSWERS ONLY. A mark supplied for a closed question is refused — the key marks those,
+    /// and a typed mark there would be the marker overriding the key.
+    /// </summary>
+    [Range(0, 100)] public decimal? PointsAwarded { get; set; }
+
+    [MaxLength(1000)] public string? MarkerComment { get; set; }
+}
+
+/// <summary>One candidate an assignment reaches, and where they stand with it.</summary>
+public class RecruitmentTestAssignmentCandidateDto
+{
+    public Guid JobApplicationId { get; set; }
+    public string ApplicationNumber { get; set; } = string.Empty;
+    public string CandidateName { get; set; } = string.Empty;
+
+    public int AttemptsUsed { get; set; }
+    public int AttemptsAllowed { get; set; }
+
+    public Guid? LastSittingId { get; set; }
+    public RecruitmentSittingStatus? LastStatus { get; set; }
+    public string? LastStatusName => LastStatus?.ToString();
+    public RecruitmentSittingMode? LastMode { get; set; }
+    public string? LastModeName => LastMode?.ToString();
+
+    /// <summary>Set only once the latest attempt is finalised — a figure still missing an essay is not one.</summary>
+    public decimal? LastScorePercent { get; set; }
+    public bool? Passed { get; set; }
+
+    /// <summary>True while an online attempt is running — a paper sitting cannot be recorded over it.</summary>
+    public bool HasOpenOnlineAttempt { get; set; }
+
+    public bool CanRecordPaperSitting { get; set; }
+
+    /// <summary>Why not, in words. Carried rather than left to the screen to work out.</summary>
+    public string? BlockedReason { get; set; }
 }
 
 #endregion

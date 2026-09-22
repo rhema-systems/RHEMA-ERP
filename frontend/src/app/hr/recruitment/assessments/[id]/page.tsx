@@ -16,6 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { recruitmentTestService as tests } from '@/services/hr/recruitment-test.service';
 import {
   RECRUITMENT_QUESTION_TYPE_LABELS,
+  RECRUITMENT_SITTING_MODE_LABELS,
   RECRUITMENT_SITTING_STATUS_LABELS,
   type SittingAnswer,
 } from '@/types/hr/recruitment-tests';
@@ -124,9 +125,12 @@ export default function SittingMarkingPage() {
         description={`${sitting.testName} · ${sitting.applicationNumber} · attempt ${sitting.attemptNumber}`}
         backHref="/hr/recruitment/assessments"
         actions={
-          <Badge variant={sitting.status === 'Expired' ? 'destructive' : 'default'}>
-            {RECRUITMENT_SITTING_STATUS_LABELS[sitting.status]}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline">{RECRUITMENT_SITTING_MODE_LABELS[sitting.mode] ?? sitting.mode}</Badge>
+            <Badge variant={sitting.status === 'Expired' ? 'destructive' : 'default'}>
+              {RECRUITMENT_SITTING_STATUS_LABELS[sitting.status]}
+            </Badge>
+          </div>
         }
       />
 

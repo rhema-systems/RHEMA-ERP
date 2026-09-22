@@ -28,10 +28,12 @@ namespace ErpSystem.Api.Controllers.HR;
 public class RecruitmentTestController : ControllerBase
 {
     private readonly IRecruitmentTestService _service;
+    private readonly IRecruitmentTestPaperService _paper;
 
-    public RecruitmentTestController(IRecruitmentTestService service)
+    public RecruitmentTestController(IRecruitmentTestService service, IRecruitmentTestPaperService paper)
     {
         _service = service;
+        _paper = paper;
     }
 
     // ── Papers ─────────────────────────────────────────────────────────────────
@@ -52,6 +54,24 @@ public class RecruitmentTestController : ControllerBase
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<CandidateSittingDto>> Preview(Guid id, CancellationToken ct)
         => Ok(await _service.PreviewTestAsync(id, ct));
+
+    /// <summary>
+    /// The printed paper (lane E6): the question paper — blank, or one named paper per candidate an
+    /// assignment reaches — or the marking key.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Read-gated like the authoring reads, which already show the answers. The key reveals every
+    /// one of them; it is not a document for anybody who could not already open the builder.
+    /// </remarks>
+    [HttpGet("{id:guid}/paper")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<RecruitmentTestPaperDto>> GetPaper(
+        Guid id,
+        [FromQuery] RecruitmentTestPaperVariant variant = RecruitmentTestPaperVariant.QuestionPaper,
+        [FromQuery] Guid? assignmentId = null,
+        [FromQuery] Guid[]? applicationIds = null,
+        CancellationToken ct = default)
+        => Ok(await _paper.GenerateAsync(id, variant, assignmentId, applicationIds, ct));
 
     [HttpPost]
     [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
@@ -155,6 +175,13 @@ public class RecruitmentTestController : ControllerBase
     public async Task<ActionResult<int>> Invite(Guid id, CancellationToken ct)
         => Ok(await _service.InviteAsync(id, ct));
 
+    /// <summary>Everybody an assignment reaches, and where each stands with it.</summary>
+    [HttpGet("assignments/{id:guid}/candidates")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<IEnumerable<RecruitmentTestAssignmentCandidateDto>>> GetAssignmentCandidates(
+        Guid id, CancellationToken ct)
+        => Ok(await _service.GetAssignmentCandidatesAsync(id, ct));
+
     [HttpPost("assignments/{id:guid}/extra-attempt")]
     [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentTestAssignmentDto>> GrantExtraAttempt(
@@ -178,6 +205,16 @@ public class RecruitmentTestController : ControllerBase
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<RecruitmentTestSittingDto>> GetSitting(Guid id, CancellationToken ct)
         => Ok(await _service.GetSittingAsync(id, ct));
+
+    /// <summary>
+    /// Records a script sat on the printed paper — what was ticked, and the written marks — and
+    /// finalises it in the same call (lane E6).
+    /// </summary>
+    [HttpPost("sittings/paper")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<RecruitmentTestSittingDto>> RecordPaperSitting(
+        [FromBody] RecordPaperSittingDto dto, CancellationToken ct)
+        => Ok(await _service.RecordPaperSittingAsync(dto, ct));
 
     [HttpPost("sittings/answers/{answerId:guid}/mark")]
     [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]

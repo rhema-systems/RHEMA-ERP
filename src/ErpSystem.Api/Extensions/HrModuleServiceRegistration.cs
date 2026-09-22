@@ -667,6 +667,12 @@ public static class HrModuleServiceRegistration
         // Round 4, lane E: the recruitment test engine — authoring, sitting, marking, and the
         // ledger row that finally gives JobVacancy.TestScoreWeight something to blend.
         services.AddScoped<IRecruitmentTestService, RecruitmentTestService>();
+        // Lane E6 — the printed paper and marking key. ⚠ The catalogue line is not optional: without
+        // it TemplatedEmailService has no fallback for the RecruitmentTests module and every paper
+        // throws rather than rendering its shipped default. Lane F's interview paper has the same pair.
+        services.AddScoped<IRecruitmentTestPaperService, RecruitmentTestPaperService>();
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
+            ErpSystem.Core.Services.HR.Recruitment.RecruitmentTestPaperEmailEventCatalog>();
         services.AddScoped<IJobApplicationService, JobApplicationService>();
         services.AddSingleton<IApplicationSnapshotService, ApplicationSnapshotService>();
         services.AddScoped<IApplicationPipelineService, ApplicationPipelineService>();

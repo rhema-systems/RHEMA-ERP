@@ -731,6 +731,290 @@ public class RecruitmentTestService : IRecruitmentTestService
         return MapSitting(await RequireOwnedSittingAsync(sitting.Id, cancellationToken));
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  E6 — OFFLINE: WHO AN ASSIGNMENT REACHES, AND A PAPER SITTING ENTERED BY HR
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public async Task<IEnumerable<RecruitmentTestAssignmentCandidateDto>> GetAssignmentCandidatesAsync(
+        Guid assignmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var now = DateTime.UtcNow;
+
+        var assignment = await AssignmentsWithNavigations()
+            .FirstOrDefaultAsync(a => a.Id == assignmentId && a.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException($"Test assignment '{assignmentId}' not found.");
+
+        var applications = await ResolveAssignmentApplicationsAsync(assignment, cancellationToken);
+        var applicationIds = applications.Select(a => a.Id).ToList();
+
+        var sittings = await _unitOfWork.Repository<RecruitmentTestSitting>().GetQueryable()
+            .Where(x => x.TenantId == tenantId
+                     && x.RecruitmentTestAssignmentId == assignment.Id
+                     && applicationIds.Contains(x.JobApplicationId)
+                     && x.Status != RecruitmentSittingStatus.Cancelled)
+            .ToListAsync(cancellationToken);
+
+        var allowed = assignment.Test.MaxAttempts + assignment.ExtraAttemptsGranted;
+        var untimed = assignment.Test.DurationMinutes is null;
+
+        return applications
+            .OrderBy(a => a.JobCandidate?.LastName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(a => a.JobCandidate?.FirstName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Select(a =>
+            {
+                var mine = sittings.Where(x => x.JobApplicationId == a.Id).OrderBy(x => x.AttemptNumber).ToList();
+                var last = mine.LastOrDefault();
+                var open = mine.Any(x => IsOpenOnline(x, now));
+
+                // ⚠ Only a FINALISED attempt has a figure. One still waiting on its essay is not a
+                // score, and the column would otherwise show a number the ledger does not hold.
+                var finalised = last is { JobApplicantTestResultId: not null };
+
+                var blocked = open
+                    ? untimed
+                        ? "An online attempt is open, and this paper has no time limit, so it will not close by itself. Ask the candidate to submit it first."
+                        : "An online attempt is still running. It must be submitted, or run out of time, before a paper sitting can be recorded."
+                    : mine.Count >= allowed
+                        ? (allowed == 1 ? "Has already sat this test." : $"Has used all {allowed} attempts.")
+                          + " Grant a re-sit to record another."
+                        : null;
+
+                return new RecruitmentTestAssignmentCandidateDto
+                {
+                    JobApplicationId = a.Id,
+                    ApplicationNumber = a.ApplicationNumber,
+                    CandidateName = a.JobCandidate?.FullName ?? string.Empty,
+                    AttemptsUsed = mine.Count,
+                    AttemptsAllowed = allowed,
+                    LastSittingId = last?.Id,
+                    LastStatus = last?.Status,
+                    LastMode = last?.Mode,
+                    LastScorePercent = finalised ? last!.ScorePercent : null,
+                    Passed = finalised ? last!.Passed : null,
+                    HasOpenOnlineAttempt = open,
+                    CanRecordPaperSitting = blocked is null,
+                    BlockedReason = blocked,
+                };
+            })
+            .ToList();
+    }
+
+    public async Task<RecruitmentTestSittingDto> RecordPaperSittingAsync(
+        RecordPaperSittingDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var now = DateTime.UtcNow;
+
+        var assignment = await AssignmentsWithNavigations()
+            .FirstOrDefaultAsync(a => a.Id == dto.AssignmentId && a.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException($"Test assignment '{dto.AssignmentId}' not found.");
+
+        var paper = await _testRepository.GetWithFullPaperAsync(assignment.RecruitmentTestId, cancellationToken)
+            ?? throw new ArgumentException("The paper behind that assignment could not be found.");
+
+        var application = await _unitOfWork.Repository<JobApplication>().GetQueryable()
+            .FirstOrDefaultAsync(a => a.Id == dto.JobApplicationId && a.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException($"Application '{dto.JobApplicationId}' not found.");
+
+        // ⚠ The SAME reach rule the portal uses to let a candidate start. A result is not recorded
+        // against an application that is withdrawn, rejected or already hired.
+        if (!RecruitmentTestReach.Reaches(assignment, application))
+            throw new InvalidOperationException(
+                "This test is not assigned to that candidate, or their application is no longer live "
+                + "(withdrawn, rejected or hired), and a result is not recorded against a closed application.");
+
+        // ── when: inside the window, and not in the future ────────────────────
+        //
+        // ⚠ Checked against the date it was SAT, not today. A paper sat on the last day of the window
+        // and typed in the week after is on time; one sat after the window closed is not, whenever it
+        // is entered.
+        var satOn = AsUtc(dto.SatOn)!.Value;
+
+        if (satOn > now.AddMinutes(5))
+            throw new InvalidOperationException(
+                "A sitting cannot be recorded for a date that has not happened yet.");
+
+        if (assignment.OpensAt is { } opens && satOn < opens)
+            throw new InvalidOperationException(
+                $"This test opened on {opens:d MMMM yyyy}; a paper sat before then cannot be recorded against it.");
+
+        if (assignment.ClosesAt is { } closes && satOn > closes)
+            throw new InvalidOperationException(
+                $"This test closed on {closes:d MMMM yyyy}; a paper sat after that cannot be recorded against it.");
+
+        // ── attempts: a paper attempt is an attempt ───────────────────────────
+        var sittings = await _unitOfWork.Repository<RecruitmentTestSitting>().GetQueryable()
+            .Where(x => x.TenantId == tenantId
+                     && x.RecruitmentTestAssignmentId == assignment.Id
+                     && x.JobApplicationId == application.Id
+                     && x.Status != RecruitmentSittingStatus.Cancelled)
+            .ToListAsync(cancellationToken);
+
+        // ⚠ Not over a running online attempt. Two live attempts at one paper would be finalised in
+        // whichever order they finished, and the ledger row belongs to the LAST one finalised — so the
+        // result shown could silently be the attempt HR did not mean.
+        if (sittings.Any(x => IsOpenOnline(x, now)))
+            throw new InvalidOperationException(
+                paper.DurationMinutes is null
+                    ? "This candidate has an online attempt open, and the paper has no time limit, so it will not "
+                      + "close by itself. Ask them to submit it before a paper sitting is recorded."
+                    : "This candidate has an online attempt still running. Let it be submitted, or run out of "
+                      + "time, before a paper sitting is recorded.");
+
+        var allowed = paper.MaxAttempts + assignment.ExtraAttemptsGranted;
+        if (sittings.Count >= allowed)
+            throw new InvalidOperationException(
+                (allowed == 1 ? "This candidate has already sat this test." : $"This candidate has used all {allowed} attempts.")
+                + " Grant a re-sit, with the reason, before recording another.");
+
+        // ── what was ticked, and the written marks ────────────────────────────
+        var questions = paper.Questions.Where(q => !q.IsDeleted).ToDictionary(q => q.Id);
+        ValidatePaperAnswers(dto.Answers ?? new List<PaperAnswerDto>(), questions);
+
+        if (dto.InvigilatedById is { } invigilatorId && invigilatorId != Guid.Empty)
+        {
+            // ⚠ The ledger's InvigilatedById is a foreign key to Employees. Checked here so a bad id
+            // is a sentence, not a constraint violation after the sitting has been written.
+            var known = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Employee>().GetQueryable()
+                .AnyAsync(e => e.Id == invigilatorId && e.TenantId == tenantId, cancellationToken);
+            if (!known)
+                throw new ArgumentException("That invigilator is not an employee of this organisation.");
+        }
+
+        var sitting = new RecruitmentTestSitting
+        {
+            TenantId = tenantId,
+            RecruitmentTestAssignmentId = assignment.Id,
+            Assignment = assignment,
+            JobApplicationId = application.Id,
+            AttemptNumber = sittings.Count + 1,
+            Mode = RecruitmentSittingMode.Paper,
+            StartedAt = satOn,
+            SubmittedAt = satOn,
+            Status = RecruitmentSittingStatus.AwaitingMarking,
+            CreatedById = ActorUserId,
+        };
+
+        await _unitOfWork.Repository<RecruitmentTestSitting>().AddAsync(sitting);
+
+        // ⚠ The closed questions are marked by the SAME marker the portal uses, against the whole
+        // paper — the denominator rule, exact set equality, numbers compared as numbers. A paper
+        // script and an online one cannot be marked two different ways.
+        var submitted = (dto.Answers ?? new List<PaperAnswerDto>()).ToDictionary(
+            a => a.QuestionId,
+            a => new SubmittedAnswer(
+                a.QuestionId,
+                (a.SelectedOptionIds ?? new List<Guid>()).Distinct().ToList(),
+                string.IsNullOrWhiteSpace(a.FreeTextAnswer) ? null : a.FreeTextAnswer.Trim(),
+                string.IsNullOrWhiteSpace(a.NumericAnswer) ? null : a.NumericAnswer.Trim()));
+
+        await ApplyMarksAsync(sitting, paper, submitted, cancellationToken);
+
+        // The written answers, as the marker marked them on the script.
+        foreach (var answer in sitting.Answers.Where(a =>
+                     !a.IsDeleted && a.Question.QuestionType == RecruitmentQuestionType.FreeText))
+        {
+            var entry = dto.Answers!.First(x => x.QuestionId == answer.RecruitmentTestQuestionId);
+            answer.PointsAwarded = entry.PointsAwarded!.Value;
+            answer.IsCorrect = entry.PointsAwarded > 0;
+            answer.IsManuallyMarked = true;
+            answer.MarkerComment = string.IsNullOrWhiteSpace(entry.MarkerComment) ? null : entry.MarkerComment.Trim();
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await FinaliseCoreAsync(sitting, dto.MarkerNotes, ActorEmployeeId, cancellationToken,
+            venue: string.IsNullOrWhiteSpace(dto.Venue) ? null : dto.Venue.Trim(),
+            invigilatedById: dto.InvigilatedById is { } i && i != Guid.Empty ? (Guid?)i : null);
+
+        _logger.LogInformation(
+            "Paper sitting recorded for application {Number}: attempt {Attempt} of '{Test}', {Score}%.",
+            application.ApplicationNumber, sitting.AttemptNumber, paper.Name, sitting.ScorePercent);
+
+        return MapSitting(await RequireOwnedSittingAsync(sitting.Id, cancellationToken));
+    }
+
+    /// <summary>
+    /// Refuses a paper entry that could not have come off a real script — naming the question by the
+    /// number PRINTED on the paper, since that is what the person typing is looking at.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ What it deliberately does NOT refuse: two boxes ticked on a one-answer question, or words in a
+    /// numeric answer. A candidate can do both on paper. The entry records what they did, and the key
+    /// marks it wrong — refusing it would force HR to "correct" the script before entering it.
+    /// </remarks>
+    private static void ValidatePaperAnswers(
+        IReadOnlyList<PaperAnswerDto> answers,
+        IReadOnlyDictionary<Guid, RecruitmentTestQuestion> questions)
+    {
+        // Numbered as the printed paper numbers them: authoring order, from 1.
+        var printed = questions.Values
+            .OrderBy(q => q.DisplayOrder).ThenBy(q => q.CreatedAt)
+            .Select((q, index) => (q.Id, Number: index + 1))
+            .ToDictionary(x => x.Id, x => x.Number);
+
+        var seen = new HashSet<Guid>();
+
+        foreach (var answer in answers)
+        {
+            if (!questions.TryGetValue(answer.QuestionId, out var q))
+                throw new InvalidOperationException("One of the answers is for a question that is not on this paper.");
+
+            var n = printed[q.Id];
+            if (!seen.Add(q.Id))
+                throw new InvalidOperationException($"Question {n} is entered twice. Enter each question once.");
+
+            var chosen = answer.SelectedOptionIds ?? new List<Guid>();
+
+            if (q.QuestionType == RecruitmentQuestionType.FreeText)
+            {
+                if (chosen.Count > 0 || !string.IsNullOrWhiteSpace(answer.NumericAnswer))
+                    throw new InvalidOperationException($"Question {n} is a written answer; it has no boxes and no number.");
+
+                if (answer.PointsAwarded is { } awarded && (awarded < 0 || awarded > q.Points))
+                    throw new InvalidOperationException(
+                        $"Question {n} is worth {q.Points:0.##} mark(s); {awarded:0.##} cannot be awarded for it.");
+                continue;
+            }
+
+            // ⚠ The one refusal that protects the key: a closed question is marked BY the key.
+            if (answer.PointsAwarded is not null)
+                throw new InvalidOperationException(
+                    $"Question {n} is marked by the key, not by hand. Enter what the candidate ticked and the key "
+                    + "will mark it — a typed mark there would be the marker overriding the key.");
+
+            if (q.QuestionType == RecruitmentQuestionType.Numeric)
+            {
+                if (chosen.Count > 0)
+                    throw new InvalidOperationException($"Question {n} asks for a number; it has no boxes to tick.");
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(answer.NumericAnswer))
+                throw new InvalidOperationException($"Question {n} is answered by ticking boxes, not with a number.");
+
+            var valid = q.Options.Where(o => !o.IsDeleted).Select(o => o.Id).ToHashSet();
+            if (chosen.Any(id => !valid.Contains(id)))
+                throw new InvalidOperationException($"A box entered for question {n} is not one of its choices.");
+        }
+
+        var unmarked = questions.Values
+            .Where(q => q.QuestionType == RecruitmentQuestionType.FreeText
+                     && !answers.Any(a => a.QuestionId == q.Id && a.PointsAwarded is not null))
+            .Select(q => printed[q.Id])
+            .OrderBy(x => x)
+            .ToList();
+
+        if (unmarked.Count > 0)
+            throw new InvalidOperationException(
+                (unmarked.Count == 1
+                    ? $"The written answer to question {unmarked[0]} has no mark."
+                    : $"The written answers to questions {string.Join(", ", unmarked)} have no mark.")
+                + " A paper sitting is entered from a marked script — give every written answer its mark, "
+                + "0 where nothing was written.");
+    }
+
     public async Task<int> ExpireOverdueSittingsAsync(
         Guid tenantId, DateTime now, Guid? actingUserId, CancellationToken cancellationToken = default)
     {
@@ -810,7 +1094,7 @@ public class RecruitmentTestService : IRecruitmentTestService
         {
             foreach (var application in applications)
             {
-                if (!AssignmentReaches(assignment, application)) continue;
+                if (!RecruitmentTestReach.Reaches(assignment, application)) continue;
 
                 var mine = sittings
                     .Where(s => s.RecruitmentTestAssignmentId == assignment.Id
@@ -880,7 +1164,7 @@ public class RecruitmentTestService : IRecruitmentTestService
             .Where(a => a.TenantId == tenantId && a.JobCandidateId == candidateId)
             .ToListAsync(cancellationToken);
 
-        var mine = applications.FirstOrDefault(a => AssignmentReaches(assignment, a))
+        var mine = applications.FirstOrDefault(a => RecruitmentTestReach.Reaches(assignment, a))
             ?? throw new ArgumentException("That assessment could not be found.");
 
         var paper = await _testRepository.GetWithFullPaperAsync(assignment.RecruitmentTestId, cancellationToken)
@@ -1077,7 +1361,9 @@ public class RecruitmentTestService : IRecruitmentTestService
         RecruitmentTestSitting sitting,
         string? markerNotes,
         Guid? markedByEmployeeId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? venue = null,
+        Guid? invigilatedById = null)
     {
         var now = DateTime.UtcNow;
 
@@ -1110,7 +1396,7 @@ public class RecruitmentTestService : IRecruitmentTestService
         if (sitting.Status != RecruitmentSittingStatus.Expired)
             sitting.Status = RecruitmentSittingStatus.Marked;
 
-        await WriteLedgerRowAsync(sitting, test, markedByEmployeeId, now, cancellationToken);
+        await WriteLedgerRowAsync(sitting, test, markedByEmployeeId, now, venue, invigilatedById, cancellationToken);
 
         await _unitOfWork.Repository<RecruitmentTestSitting>().UpdateAsync(sitting);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1139,6 +1425,8 @@ public class RecruitmentTestService : IRecruitmentTestService
         RecruitmentTest test,
         Guid? markedByEmployeeId,
         DateTime now,
+        string? venue,
+        Guid? invigilatedById,
         CancellationToken cancellationToken)
     {
         var repo = _unitOfWork.Repository<JobApplicantTestResult>();
@@ -1167,10 +1455,15 @@ public class RecruitmentTestService : IRecruitmentTestService
                     .FirstOrDefaultAsync(r => r.Id == prior && r.TenantId == sitting.TenantId, cancellationToken);
         }
 
-        var remarks = sitting.Status == RecruitmentSittingStatus.Expired
-            ? $"Sat online (attempt {sitting.AttemptNumber}) — the time allowed elapsed and the paper " +
-              "was marked on the answers saved before it."
-            : $"Sat online (attempt {sitting.AttemptNumber}).";
+        // ⚠ The remark says HOW the result was produced — a candidate's own submission and a script
+        // typed in by HR are different kinds of evidence, and this row is what a challenge reads.
+        var remarks = sitting.Mode == RecruitmentSittingMode.Paper
+            ? $"Sat on paper (attempt {sitting.AttemptNumber}) and entered by HR; the closed questions " +
+              "were marked against the key."
+            : sitting.Status == RecruitmentSittingStatus.Expired
+                ? $"Sat online (attempt {sitting.AttemptNumber}) — the time allowed elapsed and the paper " +
+                  "was marked on the answers saved before it."
+                : $"Sat online (attempt {sitting.AttemptNumber}).";
 
         if (!string.IsNullOrWhiteSpace(sitting.MarkerNotes))
             remarks = $"{remarks} {sitting.MarkerNotes}";
@@ -1208,6 +1501,13 @@ public class RecruitmentTestService : IRecruitmentTestService
         // it, which is the honest answer to "who marked this".
         existing.MarkedById = markedByEmployeeId;
         existing.MarkedDate = now;
+
+        // Where and under whom, for a paper sitting — the ledger has always had the columns, because
+        // offline tests are what it was built for. Assigned on every write, not only when supplied:
+        // the row stands for the LATEST attempt, and an online re-sit of a paper attempt was not sat
+        // in the room the paper was.
+        existing.Venue = venue;
+        existing.InvigilatedById = invigilatedById;
 
         // ⚠ Add OR update, never both. Calling Update on a row that has not been inserted puts the
         // tracker into Modified and EF then issues an UPDATE against a row that does not exist.
@@ -1794,26 +2094,14 @@ public class RecruitmentTestService : IRecruitmentTestService
         return null;
     }
 
-    /// <summary>Whether a vacancy-wide or per-application assignment reaches this application.</summary>
-    private static bool AssignmentReaches(RecruitmentTestAssignment assignment, JobApplication application)
-        => assignment.JobApplicationId == application.Id
-        || (assignment.JobVacancyId is { } vacancyId
-            && application.JobVacancyId == vacancyId
-            && IsLive(application.Status));
+    // Which applications an assignment reaches lives in RecruitmentTestReach, shared with the
+    // printed paper — two copies of "which statuses are live" is how a withdrawn candidate gets
+    // printed a paper the portal would refuse them.
 
-    /// <summary>
-    /// ⚠ The statuses a vacancy-wide test reaches. Inviting a rejected candidate to sit an aptitude
-    /// test is the kind of mistake that ends up on social media.
-    /// </summary>
-    private static bool IsLive(ApplicationStatus status)
-        => status is ApplicationStatus.New
-                  or ApplicationStatus.Submitted
-                  or ApplicationStatus.UnderReview
-                  or ApplicationStatus.Shortlisted
-                  or ApplicationStatus.AssessmentPending
-                  or ApplicationStatus.InterviewScheduled
-                  or ApplicationStatus.InterviewCompleted
-                  or ApplicationStatus.Waitlisted;
+    /// <summary>An online attempt still running: in progress, and inside its clock if it has one.</summary>
+    private static bool IsOpenOnline(RecruitmentTestSitting sitting, DateTime now)
+        => sitting.Status == RecruitmentSittingStatus.InProgress
+        && (sitting.MustSubmitBy is null || sitting.MustSubmitBy > now);
 
     private async Task<List<JobApplication>> ResolveAssignmentApplicationsAsync(
         RecruitmentTestAssignment assignment, CancellationToken cancellationToken)
@@ -1831,7 +2119,7 @@ public class RecruitmentTestService : IRecruitmentTestService
 
         return assignment.JobApplicationId is not null
             ? rows
-            : rows.Where(a => IsLive(a.Status)).ToList();
+            : rows.Where(a => RecruitmentTestReach.IsLive(a.Status)).ToList();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2067,6 +2355,7 @@ public class RecruitmentTestService : IRecruitmentTestService
             TestName = s.Assignment?.Test?.Name ?? string.Empty,
             AttemptNumber = s.AttemptNumber,
             Status = s.Status,
+            Mode = s.Mode,
             StartedAt = AsUtc(s.StartedAt),
             SubmittedAt = AsUtc(s.SubmittedAt),
             MustSubmitBy = AsUtc(s.MustSubmitBy),

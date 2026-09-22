@@ -14,8 +14,12 @@ import type {
   FinaliseSittingPayload,
   GrantExtraAttemptPayload,
   MarkFreeTextAnswerPayload,
+  RecordPaperSittingPayload,
   RecruitmentTest,
   RecruitmentTestAssignment,
+  RecruitmentTestAssignmentCandidate,
+  RecruitmentTestPaper,
+  RecruitmentTestPaperRequest,
   RecruitmentTestQuestion,
   RecruitmentTestSection,
   RecruitmentTestSitting,
@@ -44,6 +48,19 @@ class RecruitmentTestService {
   /** The paper exactly as a candidate is served it — proof that the answers are not in the payload. */
   preview(id: string): Promise<CandidateSitting> {
     return apiService.get<CandidateSitting>(`${this.baseUrl}/${id}/preview`);
+  }
+
+  /**
+   * The printed paper — the question paper (blank, or one named paper per candidate an assignment
+   * reaches) or the marking key. ⚠ The key reveals every answer.
+   */
+  getPaper(testId: string, request: RecruitmentTestPaperRequest = {}): Promise<RecruitmentTestPaper> {
+    return apiService.get<RecruitmentTestPaper>(`${this.baseUrl}/${testId}/paper`, {
+      variant: request.variant ?? 'QuestionPaper',
+      ...(request.assignmentId ? { assignmentId: request.assignmentId } : {}),
+      // Repeated keys — the shape the API binds a Guid[] from.
+      ...(request.applicationIds?.length ? { applicationIds: request.applicationIds } : {}),
+    } as Record<string, unknown>);
   }
 
   createTest(payload: CreateRecruitmentTestPayload): Promise<RecruitmentTest> {
@@ -121,6 +138,13 @@ class RecruitmentTestService {
     return apiService.post<number>(`${this.baseUrl}/assignments/${id}/invite`, {});
   }
 
+  /** Everybody an assignment reaches, and whether a paper sitting can be recorded for each. */
+  getAssignmentCandidates(assignmentId: string): Promise<RecruitmentTestAssignmentCandidate[]> {
+    return apiService.get<RecruitmentTestAssignmentCandidate[]>(
+      `${this.baseUrl}/assignments/${assignmentId}/candidates`,
+    );
+  }
+
   grantExtraAttempt(payload: GrantExtraAttemptPayload): Promise<RecruitmentTestAssignment> {
     return apiService.post<RecruitmentTestAssignment>(
       `${this.baseUrl}/assignments/${payload.assignmentId}/extra-attempt`,
@@ -139,6 +163,14 @@ class RecruitmentTestService {
 
   getSitting(id: string): Promise<RecruitmentTestSitting> {
     return apiService.get<RecruitmentTestSitting>(`${this.baseUrl}/sittings/${id}`);
+  }
+
+  /**
+   * Records a script sat on paper and finalises it in the same call. Closed questions carry what was
+   * ticked; written answers carry their marks.
+   */
+  recordPaperSitting(payload: RecordPaperSittingPayload): Promise<RecruitmentTestSitting> {
+    return apiService.post<RecruitmentTestSitting>(`${this.baseUrl}/sittings/paper`, payload);
   }
 
   markAnswer(payload: MarkFreeTextAnswerPayload): Promise<RecruitmentTestSitting> {

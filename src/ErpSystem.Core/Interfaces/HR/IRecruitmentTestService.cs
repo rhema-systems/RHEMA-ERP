@@ -137,6 +137,31 @@ public interface IRecruitmentTestService
     Task<RecruitmentTestSittingDto> FinaliseSittingAsync(
         FinaliseSittingDto dto, CancellationToken cancellationToken = default);
 
+    // ── E6 — offline ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Everybody an assignment reaches, with the attempts they have used and whether a paper
+    /// sitting can be recorded for them — and, when not, why.
+    /// </summary>
+    Task<IEnumerable<RecruitmentTestAssignmentCandidateDto>> GetAssignmentCandidatesAsync(
+        Guid assignmentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records a script sat on the printed paper: what was ticked, and the written marks.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ The closed questions are marked by the SAME marker an online sitting uses, against the
+    /// whole paper, so a paper script and an online one cannot be marked differently. The sitting is
+    /// finalised in the same call — ledger row written, application re-scored — because it is
+    /// entered from a script that has already been marked.</para>
+    ///
+    /// <para>⚠ It counts as an attempt, it is refused over a running online attempt, and it must have
+    /// been sat inside the assignment's window — judged by the date it was SAT, not the day it is
+    /// typed in.</para>
+    /// </remarks>
+    Task<RecruitmentTestSittingDto> RecordPaperSittingAsync(
+        RecordPaperSittingDto dto, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Marks every sitting whose clock ran out while nobody was looking.
     /// </summary>
