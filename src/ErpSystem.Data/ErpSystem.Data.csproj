@@ -38,11 +38,15 @@
     -->
     <Compile Remove="LegacyMigrationsArchive\**\*.cs" />
     <!--
-      These 27 migrations were merged after the disposable baseline cutover but
-      carry older timestamps. Their schema is already present in the baseline,
-      so compiling them would place duplicate operations before the baseline.
+      These migrations were merged after the disposable baseline cutover but
+      carry older timestamps. Their original EF metadata remains excluded so
+      they cannot execute before the baseline. The guarded implementation files
+      are compiled for the post-baseline reconciliation migration, which replays
+      any schema that the baseline did not actually contain.
     -->
     <Compile Remove="SupersededMigrationsArchive\**\*.cs" />
+    <Compile Include="SupersededMigrationsArchive\PreBaselineLateMerges\*.cs"
+             Exclude="SupersededMigrationsArchive\PreBaselineLateMerges\*.Designer.cs;SupersededMigrationsArchive\PreBaselineLateMerges\20260915093000_AddProcedureCaseOrganizationScope.cs" />
   </ItemGroup>
 
 </Project>

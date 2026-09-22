@@ -10,7 +10,9 @@ $migrationDirectory = Join-Path $repositoryRoot 'src\ErpSystem.Data\Migrations'
 $archiveDirectory = Join-Path $repositoryRoot 'src\ErpSystem.Data\LegacyMigrationsArchive'
 $supersededDirectory = Join-Path $repositoryRoot 'src\ErpSystem.Data\SupersededMigrationsArchive\PreBaselineLateMerges'
 $baselineId = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
+$reconciliationId = '20260922210000_ReconcilePreBaselineLateMerges'
 $baselinePath = Join-Path $migrationDirectory "$baselineId.cs"
+$reconciliationPath = Join-Path $migrationDirectory "$reconciliationId.cs"
 $designerPath = Join-Path $migrationDirectory "$baselineId.Designer.cs"
 $snapshotPath = Join-Path $migrationDirectory 'ApplicationDbContextModelSnapshot.cs'
 $authorityPath = Join-Path $migrationDirectory 'FinanceC1C8BaselineAuthoritySql.cs'
@@ -22,7 +24,7 @@ $archivedPettyPath = Join-Path $archiveDirectory '20260907033000_AlignPettyPurch
 $inspectorProject = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\ArchivedMigrationSqlInspector.csproj'
 $inspectorSource = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\Program.cs'
 
-foreach ($requiredPath in @($dataProject,$baselinePath,$designerPath,$snapshotPath,$authorityPath,$governancePath,
+foreach ($requiredPath in @($dataProject,$baselinePath,$reconciliationPath,$designerPath,$snapshotPath,$authorityPath,$governancePath,
     $governanceManifestPath,$archivedCheckModelPath,$inspectorProject,$inspectorSource,$archivedC8Path,$archivedPettyPath,
     (Join-Path $archiveDirectory 'README.md'),(Join-Path $supersededDirectory 'README.md'))) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
@@ -33,6 +35,8 @@ foreach ($requiredPath in @($dataProject,$baselinePath,$designerPath,$snapshotPa
 $projectText = Get-Content -Raw -LiteralPath $dataProject
 if ($projectText -notmatch '<Compile Remove="LegacyMigrationsArchive\\\*\*\\\*\.cs"\s*/>' -or
     $projectText -notmatch '<Compile Remove="SupersededMigrationsArchive\\\*\*\\\*\.cs"\s*/>' -or
+    $projectText -notmatch '<Compile Include="SupersededMigrationsArchive\\PreBaselineLateMerges\\\*\.cs"' -or
+    $projectText -notmatch 'Exclude="SupersededMigrationsArchive\\PreBaselineLateMerges\\\*\.Designer\.cs;SupersededMigrationsArchive\\PreBaselineLateMerges\\20260915093000_AddProcedureCaseOrganizationScope\.cs"' -or
     $projectText -match 'TdcFastEfBuild|RejectEfToolingBuild') {
     throw 'The legacy and superseded migration archives are not cleanly excluded from normal EF compilation.'
 }
@@ -72,6 +76,22 @@ $supersededIds = @($supersededSources | Where-Object Name -notlike '*.Designer.c
 if ($supersededSources.Count -ne 53 -or $supersededIds.Count -ne 27 -or
     ($supersededIds -join "`n") -cne (($expectedSupersededIds | Sort-Object) -join "`n")) {
     throw 'The exact 27 late-merged pre-baseline migrations are not preserved in the superseded archive.'
+}
+
+$reconciliationText = Get-Content -Raw -LiteralPath $reconciliationPath
+$expectedReplayClasses = @($expectedSupersededIds | Where-Object {
+    $_ -ne '20260915093000_AddProcedureCaseOrganizationScope'
+} | ForEach-Object { $_ -replace '^\d{14}_', '' })
+foreach ($className in $expectedReplayClasses) {
+    if ($reconciliationText -notmatch (':\s*' + [regex]::Escape($className) + '\b')) {
+        throw "The post-baseline reconciliation does not replay $className."
+    }
+}
+if ($expectedReplayClasses.Count -ne 26 -or
+    [regex]::Matches($reconciliationText, '\.Apply\(migrationBuilder\);').Count -ne 26 -or
+    $reconciliationText -notmatch ('\[Migration\("' + [regex]::Escape($reconciliationId) + '"\)\]') -or
+    $reconciliationText -match ':\s*AddProcedureCaseOrganizationScope\b') {
+    throw 'The post-baseline reconciliation must replay exactly the 26 guarded omissions and leave the baseline-owned ProcedureCases scope alone.'
 }
 
 $archivedSources = @(Get-ChildItem -LiteralPath $archiveDirectory -File -Filter '*.cs')
@@ -143,6 +163,7 @@ $compiledMigrationIds = @(Get-ChildItem -LiteralPath $migrationDirectory -File -
     if ($match.Success) { $match.Groups['id'].Value }
 } | Sort-Object)
 if ($compiledMigrationIds.Count -lt 1 -or $compiledMigrationIds[0] -cne $baselineId -or
+    $compiledMigrationIds -cnotcontains $reconciliationId -or
     @($compiledMigrationIds | Sort-Object -Unique).Count -ne $compiledMigrationIds.Count) {
     throw "Compiled migration discovery does not start with the unique disposable-development baseline: $($compiledMigrationIds -join ',')."
 }
@@ -456,7 +477,7 @@ if ($GeneratedSqlPath) {
 }
 
 Write-Host "PASS: compiled EF migration chain starts at $baselineId and contains $($compiledMigrationIds.Count) unique ordered migrations"
-Write-Host 'PASS: exact 27 late-merged pre-baseline migrations are preserved outside EF compilation'
+Write-Host 'PASS: exact 27 late-merged sources are preserved; 26 guarded bodies replay once after the baseline without original EF metadata'
 Write-Host 'PASS: complete 607-migration source chain retained as an uncompiled recoverable archive'
 Write-Host 'PASS: exact reviewed D3 migration/designer/snapshot hashes are preserved separately from the merged baseline'
 Write-Host 'PASS: zero-to-current Up has no predecessor-dependent drops/updates'
