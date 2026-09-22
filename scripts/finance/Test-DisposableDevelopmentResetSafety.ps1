@@ -601,6 +601,21 @@ exit 0
         throw 'Durable RESET_STARTED phase is not atomically written before the destructive SQL call.'
     }
     $singleUserIndex = $reset.IndexOf('ALTER DATABASE [RhemaERP] SET SINGLE_USER', [StringComparison]::Ordinal)
+    $destructiveSqlStart = $reset.IndexOf('$destructiveSql = @"', [StringComparison]::Ordinal)
+    $destructiveSqlEnd = $reset.IndexOf('"@', $destructiveSqlStart, [StringComparison]::Ordinal)
+    if ($destructiveSqlStart -lt 0 -or $destructiveSqlEnd -le $destructiveSqlStart) {
+        throw 'Could not isolate the disposable reset destructive SQL boundary.'
+    }
+    $destructiveSqlContract = $reset.Substring($destructiveSqlStart, $destructiveSqlEnd - $destructiveSqlStart)
+    foreach ($serverIdentityProperty in @("SERVERPROPERTY('MachineName')","SERVERPROPERTY('InstanceName')","SERVERPROPERTY('ServerName')")) {
+        if (-not $destructiveSqlContract.Contains($serverIdentityProperty)) {
+            throw "Destructive SQL boundary does not recheck $serverIdentityProperty."
+        }
+    }
+    if ($destructiveSqlContract.Contains("CONNECTIONPROPERTY('local_net_address')") -or
+        $destructiveSqlContract.Contains("CONNECTIONPROPERTY('local_tcp_port')")) {
+        throw 'Destructive SQL boundary compares transport-specific connection properties across different clients.'
+    }
     $finalHistoryIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_HISTORY_DRIFT', [StringComparison]::Ordinal)
     $finalFingerprintIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT', [StringComparison]::Ordinal)
     if ($singleUserIndex -lt 0 -or $finalHistoryIndex -le $singleUserIndex -or
