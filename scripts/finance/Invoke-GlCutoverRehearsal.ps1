@@ -568,6 +568,21 @@ function Assert-LocalDisposableSqlServer([string]$dataSource) {
     }
 }
 
+function Test-LocalMachineIpAddress([string]$address) {
+    if ([string]::IsNullOrWhiteSpace($address)) { return $true }
+
+    [System.Net.IPAddress]$parsedAddress = $null
+    if (-not [System.Net.IPAddress]::TryParse($address.Trim(), [ref]$parsedAddress)) { return $false }
+    if ([System.Net.IPAddress]::IsLoopback($parsedAddress)) { return $true }
+
+    foreach ($networkInterface in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+        foreach ($unicastAddress in $networkInterface.GetIPProperties().UnicastAddresses) {
+            if ($parsedAddress.Equals($unicastAddress.Address)) { return $true }
+        }
+    }
+    return $false
+}
+
 function Assert-DisposableServerSideLocality([string]$dataSource, [string]$sqlMachineName,
     [string]$sqlInstanceName, [string]$sqlServerName, [string]$sqlLocalAddress, [string]$sqlLocalPort,
     [string]$executingMachineName) {
@@ -597,9 +612,8 @@ function Assert-DisposableServerSideLocality([string]$dataSource, [string]$sqlMa
         -not [string]::Equals($requestedPort, $sqlLocalPort, [StringComparison]::Ordinal)) {
         throw 'ResetDisposableDevelopment SQL TCP port does not exactly match the requested local endpoint.'
     }
-    if (-not [string]::IsNullOrWhiteSpace($sqlLocalAddress) -and
-        $sqlLocalAddress -notin @('127.0.0.1','::1')) {
-        throw 'ResetDisposableDevelopment SQL connection did not terminate on a loopback endpoint.'
+    if (-not (Test-LocalMachineIpAddress $sqlLocalAddress)) {
+        throw 'ResetDisposableDevelopment SQL connection did not terminate on an endpoint assigned to the executing host.'
     }
 }
 

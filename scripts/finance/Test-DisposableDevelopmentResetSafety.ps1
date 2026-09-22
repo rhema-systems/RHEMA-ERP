@@ -149,7 +149,8 @@ try {
         'Invoke-SqlWithSanitizedEvidence','Get-DisposableBackupFileName','Join-DisposableBackupPath',
         'Write-AtomicTextFile','Write-MigrationHistoryEvidence','Read-MigrationHistoryEvidence',
         'Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
-        'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
+        'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Test-LocalMachineIpAddress',
+        'Assert-DisposableServerSideLocality',
         'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState',
         'Get-BoundedApiBuildArguments','Move-AtomicEvidenceFile',
         'Get-DisposableTargetMigrationState')) {
@@ -468,12 +469,32 @@ exit 0
     Write-Host 'PASS: actual recovery helper preserves phase-04 hash and marks mutated current bytes unverified'
 
     Assert-DisposableServerSideLocality 'localhost' 'LOCALHOST' '' 'LOCALHOST' '' '' 'localhost'
+    Assert-DisposableServerSideLocality 'tcp:localhost,1433' 'LOCALHOST' '' 'LOCALHOST' '127.0.0.1' '1433' 'localhost'
+    $localUnicastAddress = @([System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+        ForEach-Object { $_.GetIPProperties().UnicastAddresses } |
+        ForEach-Object { $_.Address } |
+        Where-Object { -not [System.Net.IPAddress]::IsLoopback($_) } |
+        Select-Object -First 1)
+    if ($localUnicastAddress.Count -eq 1) {
+        Assert-DisposableServerSideLocality 'tcp:localhost,1433' 'LOCALHOST' '' 'LOCALHOST' `
+            $localUnicastAddress[0].ToString() '1433' 'localhost'
+    }
+    if (Test-LocalMachineIpAddress 'not-an-ip-address') {
+        throw 'Malformed SQL endpoint address was accepted as local.'
+    }
+    $remoteDocumentationAddress = @('192.0.2.1','198.51.100.1','203.0.113.1') |
+        Where-Object { -not (Test-LocalMachineIpAddress $_) } |
+        Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($remoteDocumentationAddress)) {
+        throw 'Could not select a nonlocal documentation address for the locality refusal test.'
+    }
     foreach ($case in @(
         @('remote engine','localhost','REMOTEHOST','','REMOTEHOST','','','LOCALHOST'),
         @('named-instance drift','localhost\SQLEXPRESS','LOCALHOST','','LOCALHOST','','','LOCALHOST'),
         @('server-name alias drift','localhost','LOCALHOST','','STALE_ALIAS','','','LOCALHOST'),
         @('port-forward drift','localhost,1433','LOCALHOST','','LOCALHOST','127.0.0.1','1555','LOCALHOST'),
-        @('non-loopback endpoint','tcp:localhost,1433','LOCALHOST','','LOCALHOST','10.10.1.20','1433','LOCALHOST'))) {
+        @('remote endpoint','tcp:localhost,1433','LOCALHOST','','LOCALHOST',$remoteDocumentationAddress,'1433','LOCALHOST'),
+        @('malformed endpoint','tcp:localhost,1433','LOCALHOST','','LOCALHOST','not-an-ip-address','1433','LOCALHOST'))) {
         $refused = $false
         try { Assert-DisposableServerSideLocality $case[1] $case[2] $case[3] $case[4] $case[5] $case[6] $case[7] }
         catch { $refused = $true }
@@ -490,7 +511,7 @@ exit 0
         "446|20260902140000_Good|1|9|28`nsecret")) {
         if (Test-DisposableSourceFingerprint $invalidFingerprint) { throw 'Invalid source fingerprint was accepted.' }
     }
-    Write-Host 'PASS: server-side host/instance/endpoint and restricted fingerprint helpers refuse synthetic ambiguity'
+    Write-Host 'PASS: server-side host/instance/local-address endpoint and restricted fingerprint helpers refuse synthetic ambiguity'
 
     $start = $text.IndexOf('function Invoke-DisposableDevelopmentReset', [StringComparison]::Ordinal)
     $end = $text.IndexOf("if (`$Mode -eq 'ResetDisposableDevelopment')", $start, [StringComparison]::Ordinal)
