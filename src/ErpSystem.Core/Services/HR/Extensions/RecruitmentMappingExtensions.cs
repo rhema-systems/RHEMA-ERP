@@ -998,6 +998,17 @@ public static class RecruitmentMappingExtensions
             NationalIdTypeId = dto.NationalIdTypeId,
             NationalIdNumber = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim(),
             NationalIdExpiryDate = dto.NationalIdExpiryDate,
+            // Round 4, lane B: HR can record what it knows about a pool member. Until now these
+            // were portal-only, so the pool's own rubric scored HR-entered candidates on three
+            // fields HR had no box for.
+            Headline = string.IsNullOrWhiteSpace(dto.Headline) ? null : dto.Headline.Trim(),
+            ProfessionalSummary = string.IsNullOrWhiteSpace(dto.ProfessionalSummary) ? null : dto.ProfessionalSummary.Trim(),
+            CurrentJobTitle = string.IsNullOrWhiteSpace(dto.CurrentJobTitle) ? null : dto.CurrentJobTitle.Trim(),
+            CurrentEmployer = string.IsNullOrWhiteSpace(dto.CurrentEmployer) ? null : dto.CurrentEmployer.Trim(),
+            TotalYearsExperience = dto.TotalYearsExperience,
+            NoticePeriodDays = dto.NoticePeriodDays,
+            AvailableFrom = dto.AvailableFrom,
+            PreferredWorkArrangement = dto.PreferredWorkArrangement,
             IsInTalentPool = dto.IsInTalentPool,
             TalentPoolAddedDate = dto.IsInTalentPool ? DateTime.UtcNow : null,
             CreatedBy = userId.ToString(),
@@ -1031,6 +1042,17 @@ public static class RecruitmentMappingExtensions
         entity.LinkedInProfile = dto.LinkedInProfile;
         entity.PortfolioUrl = dto.PortfolioUrl;
         entity.GitHubUrl = dto.GitHubUrl;
+        // Round 4, lane B - see the create mapper. This DTO replaces the record wholesale, so an
+        // omitted field CLEARS it; that is the contract the rest of this mapper already follows,
+        // and the candidate form sends all of them on every save.
+        entity.Headline = string.IsNullOrWhiteSpace(dto.Headline) ? null : dto.Headline.Trim();
+        entity.ProfessionalSummary = string.IsNullOrWhiteSpace(dto.ProfessionalSummary) ? null : dto.ProfessionalSummary.Trim();
+        entity.CurrentJobTitle = string.IsNullOrWhiteSpace(dto.CurrentJobTitle) ? null : dto.CurrentJobTitle.Trim();
+        entity.CurrentEmployer = string.IsNullOrWhiteSpace(dto.CurrentEmployer) ? null : dto.CurrentEmployer.Trim();
+        entity.TotalYearsExperience = dto.TotalYearsExperience;
+        entity.NoticePeriodDays = dto.NoticePeriodDays;
+        entity.AvailableFrom = dto.AvailableFrom;
+        entity.PreferredWorkArrangement = dto.PreferredWorkArrangement;
         if (dto.IsInTalentPool && !entity.IsInTalentPool)
             entity.TalentPoolAddedDate = DateTime.UtcNow;
         entity.IsInTalentPool = dto.IsInTalentPool;
@@ -1653,6 +1675,10 @@ public static class RecruitmentMappingExtensions
             CandidateName = entity.JobCandidate?.FullName ?? string.Empty,
             CandidateEmail = entity.JobCandidate?.Email ?? string.Empty,
             CandidatePhone = entity.JobCandidate?.Phone ?? string.Empty,
+            // Round 4, lane B5. False when the navigation was not loaded, which is the honest
+            // answer for a read that cannot see the candidate: the screen then shows initials
+            // rather than firing a request that would 404.
+            CandidateHasPhoto = entity.JobCandidate?.HasPhotoOnFile() ?? false,
             ApplicationDate = entity.ApplicationDate,
             Status = entity.Status,
             Source = entity.Source,
@@ -1708,6 +1734,7 @@ public static class RecruitmentMappingExtensions
             JobCandidateId = entity.JobCandidateId,
             CandidateName = entity.JobCandidate?.FullName ?? string.Empty,
             CandidateEmail = entity.JobCandidate?.Email ?? string.Empty,
+            CandidateHasPhoto = entity.JobCandidate?.HasPhotoOnFile() ?? false,
             ApplicationDate = entity.ApplicationDate,
             Status = entity.Status,
             Source = entity.Source,
@@ -1744,6 +1771,10 @@ public static class RecruitmentMappingExtensions
             CandidateName = entity.JobCandidate?.FullName ?? string.Empty,
             CandidateEmail = entity.JobCandidate?.Email ?? string.Empty,
             CandidatePhone = entity.JobCandidate?.Phone ?? string.Empty,
+            // Round 4, lane B5. False when the navigation was not loaded, which is the honest
+            // answer for a read that cannot see the candidate: the screen then shows initials
+            // rather than firing a request that would 404.
+            CandidateHasPhoto = entity.JobCandidate?.HasPhotoOnFile() ?? false,
             ApplicationDate = entity.ApplicationDate,
             Status = entity.Status,
             Source = entity.Source,

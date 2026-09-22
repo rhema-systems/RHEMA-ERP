@@ -7,13 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   DateField,
   FieldRow,
+  // ⚠ NumberField, not `TextField type="number"` — TextField's `type` union is text|email|tel only.
+  NumberField,
   SelectField,
   SwitchField,
   TextField,
 } from '@/components/hr/employee/tabs/fields';
 import { AddressCascadeField } from '@/components/hr/employee/tabs/address-fields';
 import { identificationTypeService } from '@/services/hr/lookup.service';
-import { GENDERS } from '@/types/hr/recruitment-pipeline';
+import { humanizeEnum } from '@/lib/hr/attendance-format';
+import { GENDERS, PREFERRED_WORK_ARRANGEMENTS } from '@/types/hr/recruitment-pipeline';
 
 export const candidateSchema = z.object({
   firstName: z.string().min(1, 'First name is required').max(100),
@@ -47,6 +50,17 @@ export const candidateSchema = z.object({
   nationalIdTypeId: z.string().optional().nullable(),
   nationalIdNumber: z.string().max(50).optional().nullable(),
   nationalIdExpiryDate: z.string().optional().nullable(),
+  // Round 4, lane B - the professional profile HR could not record. See the card below.
+  headline: z.string().max(300).optional().nullable(),
+  professionalSummary: z.string().max(4000).optional().nullable(),
+  currentJobTitle: z.string().max(200).optional().nullable(),
+  currentEmployer: z.string().max(200).optional().nullable(),
+  // Kept as strings: an <input type="number"> yields '' for empty, and coercing '' to 0 would
+  // record "no experience" for "not asked". The page maps '' to null on the way out.
+  totalYearsExperience: z.string().optional().nullable(),
+  noticePeriodDays: z.string().optional().nullable(),
+  availableFrom: z.string().optional().nullable(),
+  preferredWorkArrangement: z.string().optional().nullable(),
   isInTalentPool: z.boolean(),
 }).refine((v) => !v.nationalIdNumber?.trim() || !!v.nationalIdTypeId, {
   message: 'Say which document the number is from',
@@ -83,17 +97,31 @@ export const emptyCandidate: CandidateFormValues = {
   nationalIdTypeId: null,
   nationalIdNumber: null,
   nationalIdExpiryDate: null,
+  headline: null,
+  professionalSummary: null,
+  currentJobTitle: null,
+  currentEmployer: null,
+  totalYearsExperience: null,
+  noticePeriodDays: null,
+  availableFrom: null,
+  // 'Any' is the entity's default and means "no preference stated". The pool rubric scores it as
+  // genuine flexibility rather than as a match, which is the G-13.2 distinction.
+  preferredWorkArrangement: 'Any',
   isInTalentPool: false,
 };
 
 /**
  * The editable half of a candidate record.
  *
- * ⚠ Deliberately does **not** cover headline, current role, expected salary, notice period,
- * preferred work arrangement or work-authorization status. Those are on the read DTO but not on
- * `CreateJobCandidateDto`/`UpdateJobCandidateDto` — they belong to the candidate, who supplies them
- * through the portal or an external application. Saving from HR leaves them as they were; adding
- * inputs for them here would silently discard what the user typed.
+ * ⚠ Round 4, lane B: the professional profile and availability are now HERE as well as on the
+ * candidate's portal profile. They used to be portal-only, on the reasoning that they belong to the
+ * candidate — which is right for someone who applied online and wrong for everybody else. A career
+ * fair, a referral and an unsolicited CV all reach the talent pool through HR typing them in, and
+ * the pool's own match rubric scores on experience, work arrangement and availability. So the
+ * people HR knew most about scored lowest, because HR had nowhere to put what it knew.
+ *
+ * ⚠ Still not covered: expected salary and work-authorization status. Those remain candidate-only
+ * and the DTOs do not carry them, so an input here would silently discard what was typed.
  */
 export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFormValues> }) {
   // ⚠ Round 4, lane A: the country list is no longer fetched here. AddressCascadeField owns the
@@ -187,6 +215,36 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
               <TextField form={form} name="nationality" label="Nationality" />
             </FieldRow>
           </AddressCascadeField>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Professional profile</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <FieldRow>
+            <TextField form={form} name="headline" label="Headline" />
+            <NumberField form={form} name="totalYearsExperience" label="Years of experience" />
+          </FieldRow>
+          <FieldRow>
+            <TextField form={form} name="currentJobTitle" label="Current job title" />
+            <TextField form={form} name="currentEmployer" label="Current employer" />
+          </FieldRow>
+          <FieldRow>
+            <DateField form={form} name="availableFrom" label="Available from" />
+            <NumberField form={form} name="noticePeriodDays" label="Notice period (days)" />
+          </FieldRow>
+          <FieldRow>
+            <SelectField
+              form={form}
+              name="preferredWorkArrangement"
+              label="Preferred work arrangement"
+              options={PREFERRED_WORK_ARRANGEMENTS.map((w) => ({ value: w, label: humanizeEnum(w) }))}
+            />
+            <div />
+          </FieldRow>
+          <TextField form={form} name="professionalSummary" label="Professional summary" />
         </CardContent>
       </Card>
 

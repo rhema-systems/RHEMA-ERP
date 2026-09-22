@@ -2076,7 +2076,20 @@ public enum ApplicationSource
     Other = 10,
 
     [Description("Internal Portal")]
-    InternalPortal = 11
+    InternalPortal = 11,
+
+    /// <summary>
+    /// Sourced from the candidate talent pool: HR screened pooled candidates against a vacancy's
+    /// criteria and invited them to apply (round 4, lane B).
+    /// </summary>
+    /// <remarks>
+    /// Distinct from every other member in that the application was not initiated by the candidate.
+    /// It is worth its own member rather than being folded into Other, because "how many of our
+    /// hires came out of the pool we keep warm?" is exactly the question the pool exists to answer,
+    /// and Other cannot answer it.
+    /// </remarks>
+    [Description("Talent Pool")]
+    TalentPool = 12
 }
 
 public enum JobCandidateDocumentType

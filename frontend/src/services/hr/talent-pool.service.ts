@@ -20,6 +20,10 @@ import type {
   TalentPoolCandidate,
   TalentPoolFilter,
   TalentPoolPagedResult,
+  TalentPoolBookInterviewPayload,
+  TalentPoolInviteToApplyPayload,
+  TalentPoolScreenRequest,
+  TalentPoolScreenResult,
   TalentPoolStatus,
   TalentPoolVacancyMatch,
 } from '@/types/hr/talent-pool';
@@ -78,6 +82,45 @@ class TalentPoolService {
       `${this.baseUrl}/candidates/${candidateId}/match-vacancies`,
       { topN },
     );
+  }
+
+  // -- screening by the vacancy's real criteria, and acting on it (round 4, lane B) -------------
+
+  /**
+   * Scores pooled candidates against a vacancy's own shortlisting criteria, through the same
+   * engine that scores applications.
+   *
+   * WARNING: POST, though it writes nothing. It carries a filter (and, on the ad-hoc door, a whole
+   * criteria set), which is a body rather than a query string.
+   *
+   * WARNING: refuses with 400 when the vacancy has no criteria. That is the useful answer - the
+   * alternative is a full table of dashes reading as "the pool is useless".
+   */
+  screenAgainstVacancy(vacancyId: string, request: TalentPoolScreenRequest = {}): Promise<TalentPoolScreenResult> {
+    return apiService.post<TalentPoolScreenResult>(`${this.baseUrl}/screen/${vacancyId}`, request);
+  }
+
+  /** "Who do we have who could do this?", asked before any vacancy exists. */
+  screenAdHoc(request: TalentPoolScreenRequest): Promise<TalentPoolScreenResult> {
+    return apiService.post<TalentPoolScreenResult>(`${this.baseUrl}/screen`, request);
+  }
+
+  /** Opens an application for each candidate and emails them. Partial - read every row's message. */
+  inviteToApply(payload: TalentPoolInviteToApplyPayload): Promise<TalentPoolBulkResult> {
+    return apiService.post<TalentPoolBulkResult>(`${this.baseUrl}/invite-to-apply`, {
+      sendEmail: true,
+      ...payload,
+    });
+  }
+
+  /**
+   * Books each candidate into an existing interview session.
+   *
+   * WARNING: requires an application against that interview's vacancy - invite first. A candidate
+   * without one comes back as a skipped row saying so, not as a failure of the whole call.
+   */
+  bookForInterview(payload: TalentPoolBookInterviewPayload): Promise<TalentPoolBulkResult> {
+    return apiService.post<TalentPoolBulkResult>(`${this.baseUrl}/book-interview`, payload);
   }
 
   // ── segments ─────────────────────────────────────────────────────────────

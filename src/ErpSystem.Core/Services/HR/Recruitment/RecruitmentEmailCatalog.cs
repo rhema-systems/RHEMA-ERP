@@ -46,6 +46,18 @@ public static class RecruitmentEmailCatalog
         /// something that leaves the building is the employer's, not a developer's.
         /// </remarks>
         public const string CandidateAccountActivation = "CandidateAccountActivation";
+
+        /// <summary>
+        /// Sent when HR screens the talent pool against a vacancy and asks a pooled candidate to
+        /// apply for it - round 4, lane B.
+        /// </summary>
+        /// <remarks>
+        /// The only recruitment email the candidate did not set in motion themselves. They gave
+        /// their details once, possibly a year ago, for a different role; this is the organisation
+        /// coming back to them. The wording matters more than most, which is why it is a template
+        /// HR owns rather than a string in a service.
+        /// </remarks>
+        public const string TalentPoolInvitation = "TalentPoolInvitation";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -548,6 +560,62 @@ public static class RecruitmentEmailCatalog
                 // in force, which is also what happens after a seal is withdrawn.
                 T("SignatureImageUrl", "Authorised signature image, embedded; hidden when none is in force.", ""),
                 T("CompanySealImageUrl", "Company seal image, embedded; hidden when none is in force.", ""),
+            }
+        });
+
+
+        // -- 13. Talent-pool invitation ------------------------------------------
+        // Round 4, lane B. HR screened the pool against a vacancy's real criteria and is asking
+        // somebody who already trusted them with their details to come back for this one.
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.TalentPoolInvitation,
+            Name = "Talent Pool Invitation",
+            Category = "Application",
+            Description =
+                "Sent when HR invites a pooled candidate to apply for a specific vacancy. Unlike every "
+                + "other recruitment email, the candidate did not start this exchange - they may have "
+                + "joined the pool long ago and for a different role - so the letter says who is writing, "
+                + "why this role, and how to stop hearing from us.",
+            DefaultSubject = "We think you fit: {{JobTitle}} at {{CompanyName}}",
+            DefaultHtmlBody = Shell(GreenGradient, "An opening we think suits you",
+                @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
+  <p>
+    You are on <strong>{{CompanyName}}</strong>'s talent register, and a role has just opened that
+    looks like a fit for the experience you shared with us.
+  </p>
+  <div style='background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:1rem 0'>
+    <div style='font-size:1.125rem;font-weight:700;color:#111827'>{{JobTitle}}</div>
+    <div style='color:#6b7280;font-size:0.875rem;margin-top:0.25rem'>Reference: {{VacancyNumber}}</div>
+    {{#if ClosingDate}}<div style='margin-top:0.75rem;font-size:0.875rem'>
+      <strong>Applications close:</strong> {{ClosingDate}}
+    </div>{{/if}}
+    {{#if ApplicationNumber}}<div style='margin-top:0.75rem;font-size:0.875rem'>
+      <strong>Your reference:</strong> {{ApplicationNumber}}
+    </div>{{/if}}
+  </div>
+  {{#if InvitationNote}}<p style='white-space:pre-wrap'>{{InvitationNote}}</p>{{/if}}
+  <p>
+    We have opened an application for you so nothing is lost - please review it, attach anything you
+    would like us to see, and confirm you want to be considered.
+  </p>" +
+                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "Review my application") + @"
+  <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>
+    You are receiving this because you asked to be kept on our talent register. If you would rather
+    not hear about openings, reply to this message and we will take you off it.
+  </p>"),
+            Tokens = new()
+            {
+                T("CandidateName", "The pooled candidate's full name.", "Ada Boahen"),
+                T("CompanyName", "The employer's name, from the company profile.", "Tema Development Corporation"),
+                T("JobTitle", "The vacancy being offered.", "Senior Accountant"),
+                T("VacancyNumber", "The vacancy's reference.", "VAC-000042"),
+                T("ApplicationNumber", "The application opened on the candidate's behalf; hidden when none.", "APP-000311"),
+                T("ClosingDate", "The application deadline; the whole line is hidden when the vacancy has none.", "Friday, 10 October 2026"),
+                T("InvitationNote", "What the recruiter typed when inviting; hidden when they typed nothing.",
+                  "Your work at Ghana Ports looked directly relevant to this one."),
+                PortalUrlToken,
             }
         });
 

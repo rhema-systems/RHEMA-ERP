@@ -1233,6 +1233,40 @@ public class CreateJobCandidateDto : CreateDtoBase, IValidatableObject
 
     public DateTime? NationalIdExpiryDate { get; set; }
 
+    // ── Professional profile and availability ────────────────────────────────
+    //
+    // Round 4, lane B. These were writable ONLY through the candidate's own portal profile, while
+    // the talent pool's match rubric scores on three of them and the pool list has a column for two.
+    // So a candidate HR typed in by hand — which is how a career fair, a referral and an
+    // unsolicited CV all reach the pool — could never rank above the "nothing on file" tier,
+    // whatever HR knew about them, and there was no box to put it in.
+    //
+    // ⚠ This is the shape G-13.2 warned about from the other side: the rubric was corrected so that
+    // silence stops scoring like a match, which is right — and then the only people who could break
+    // the silence were the candidates themselves.
+
+    [MaxLength(300)]
+    public string? Headline { get; set; }
+
+    [MaxLength(4000)]
+    public string? ProfessionalSummary { get; set; }
+
+    [MaxLength(200)]
+    public string? CurrentJobTitle { get; set; }
+
+    [MaxLength(200)]
+    public string? CurrentEmployer { get; set; }
+
+    [Range(0, 60)]
+    public int? TotalYearsExperience { get; set; }
+
+    [Range(0, 1825)]
+    public int? NoticePeriodDays { get; set; }
+
+    public DateTime? AvailableFrom { get; set; }
+
+    public ErpSystem.Core.Enums.PreferredWorkArrangement PreferredWorkArrangement { get; set; }
+
     public bool IsInTalentPool { get; set; }
 }
 
@@ -1353,6 +1387,29 @@ public class UpdateJobCandidateDto : UpdateDtoBase, IValidatableObject
     public string? NationalIdNumber { get; set; }
 
     public DateTime? NationalIdExpiryDate { get; set; }
+
+    /// <inheritdoc cref="CreateJobCandidateDto.Headline"/>
+    [MaxLength(300)]
+    public string? Headline { get; set; }
+
+    [MaxLength(4000)]
+    public string? ProfessionalSummary { get; set; }
+
+    [MaxLength(200)]
+    public string? CurrentJobTitle { get; set; }
+
+    [MaxLength(200)]
+    public string? CurrentEmployer { get; set; }
+
+    [Range(0, 60)]
+    public int? TotalYearsExperience { get; set; }
+
+    [Range(0, 1825)]
+    public int? NoticePeriodDays { get; set; }
+
+    public DateTime? AvailableFrom { get; set; }
+
+    public ErpSystem.Core.Enums.PreferredWorkArrangement PreferredWorkArrangement { get; set; }
 
     public bool IsInTalentPool { get; set; }
 }
@@ -1776,6 +1833,18 @@ public class JobApplicationDto : BaseDto
     public string CandidateName { get; set; } = string.Empty;
     public string CandidateEmail { get; set; } = string.Empty;
     public string CandidatePhone { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the candidate has a photograph on file, so a screen can show a face beside the name
+    /// (round 4, lane B5).
+    /// </summary>
+    /// <remarks>
+    /// &#9888; A flag, not the image. Photographs go through the gated
+    /// <c>GET api/job-candidates/{id}/photo</c> like every other controlled upload; this exists so a
+    /// list of thirty applications does not fire thirty requests that will each come back 404.
+    /// </remarks>
+    public bool CandidateHasPhoto { get; set; }
+
     public DateTime ApplicationDate { get; set; }
     public ApplicationStatus Status { get; set; }
     public string StatusName => FormatApplicationStatus(Status);
@@ -1840,6 +1909,10 @@ public class JobApplicationSummaryDto
     public Guid JobCandidateId { get; set; }
     public string CandidateName { get; set; } = string.Empty;
     public string CandidateEmail { get; set; } = string.Empty;
+
+    /// <inheritdoc cref="JobApplicationDto.CandidateHasPhoto"/>
+    public bool CandidateHasPhoto { get; set; }
+
     public DateTime ApplicationDate { get; set; }
     public ApplicationStatus Status { get; set; }
     public string StatusName => JobApplicationDto.FormatApplicationStatus(Status);
@@ -5655,6 +5728,10 @@ public class PipelineApplicationListItemDto
     public string ApplicationNumber { get; set; } = string.Empty;
     public string CandidateName { get; set; } = string.Empty;
     public string CandidateEmail { get; set; } = string.Empty;
+
+    /// <inheritdoc cref="JobApplicationDto.CandidateHasPhoto"/>
+    public bool CandidateHasPhoto { get; set; }
+
     public ApplicationStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public ApplicationSource Source { get; set; }
@@ -6515,6 +6592,23 @@ public class TalentPoolFilterDto
     public DateTime? AvailableBefore    { get; set; }
     public bool?    OverdueForReview    { get; set; }
     public int?     DormantMoreThanDays { get; set; }
+
+    /// <summary>
+    /// Where they are, by the geography tree: an area matches candidates recorded in it AND
+    /// anywhere beneath it (round 4, lane B2).
+    /// </summary>
+    /// <remarks>
+    /// <para>Subtree containment, not equality, for the same reason the Location criterion works
+    /// that way: "who do we have in Greater Accra?" must find the person recorded in Tema, and
+    /// nobody types the region when the cascade offers them the district.</para>
+    ///
+    /// <para>&#9888; A candidate with only a typed city is NOT matched. The text fallback belongs
+    /// to scoring, where a criterion carries the area's name to compare against; a filter has no
+    /// such name and guessing at one would quietly widen the answer. Use the search box for a
+    /// typed city.</para>
+    /// </remarks>
+    public Guid?    GeoAreaId           { get; set; }
+
     public int      PageNumber          { get; set; } = 1;
     public int      PageSize            { get; set; } = 25;
     public string   SortBy              { get; set; } = "LastName";
@@ -6648,6 +6742,198 @@ public class TalentPoolPagedResultDto
     public int  Page        { get; set; }
     public int  PageSize    { get; set; }
     public int  TotalPages  => (int)Math.Ceiling((double)TotalCount / PageSize);
+}
+
+// -- Screening the pool by real criteria (round 4, lane B) ---------------------------------------
+
+/// <summary>
+/// One criterion in an ad-hoc screen - the same shape a vacancy's criterion has, minus the vacancy.
+/// </summary>
+/// <remarks>
+/// Resolved and validated by the SAME <c>IShortlistingCriteriaResolver</c> a saved criterion goes
+/// through, so a mandatory Gender, a numeric criterion with no bound, a list criterion with no
+/// values and an area that is not on the tree are refused here exactly as they are on a vacancy.
+/// Nothing is written: the rows exist for the length of the request.
+/// </remarks>
+public class AdHocScreeningCriterionDto
+{
+    [Required]
+    [MaxLength(100)]
+    public string CriteriaName { get; set; } = string.Empty;
+
+    [Required]
+    public JobShortlistingCriteriaType Type { get; set; }
+
+    [MaxLength(500)]
+    public string? RequiredValue { get; set; }
+
+    public decimal? MinValue { get; set; }
+    public decimal? MaxValue { get; set; }
+    public bool IsMandatory { get; set; }
+
+    public MandatoryMatchMode MatchMode { get; set; } = MandatoryMatchMode.AnyMatched;
+    public ValueMatchStrategy MatchStrategy { get; set; } = ValueMatchStrategy.Exact;
+
+    [Range(1, 100)]
+    public int Weight { get; set; } = 1;
+
+    public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
+
+    /// <summary>The accepted values, as the whole set - same rules as a saved criterion.</summary>
+    public List<ShortlistingCriteriaValueInputDto>? Values { get; set; }
+}
+
+/// <summary>
+/// What to screen: which slice of the pool, how many rows back, and - for the ad-hoc door - the
+/// criteria to screen by.
+/// </summary>
+/// <remarks>
+/// <para>The filter is the ordinary <see cref="TalentPoolFilterDto"/> the pool list already uses,
+/// so "screen the people I am looking at" needs no second filter vocabulary. Its paging fields are
+/// ignored: screening reads the whole matching set and <see cref="TopN"/> trims the ANSWER, which
+/// is a different question from paging the list.</para>
+///
+/// <para>&#9888; <see cref="IncludeNonMatching"/> defaults to true deliberately. A screen that
+/// silently dropped everyone who failed a mandatory criterion would answer "nobody in the pool is
+/// close", and a recruiter would have no way to see the near miss they might waive. The rows carry
+/// the verdict; hiding them is the reader's choice, not the engine's.</para>
+/// </remarks>
+public class TalentPoolScreenRequestDto
+{
+    public TalentPoolFilterDto? Filter { get; set; }
+
+    [Range(1, 500)]
+    public int TopN { get; set; } = 50;
+
+    public bool IncludeNonMatching { get; set; } = true;
+
+    /// <summary>
+    /// The ad-hoc criteria, for <c>POST api/talent-pool/screen</c>. Ignored by the by-vacancy door,
+    /// which reads the vacancy's own live criteria - the whole point being that the pool is judged
+    /// by what the vacancy actually says.
+    /// </summary>
+    public List<AdHocScreeningCriterionDto>? Criteria { get; set; }
+}
+
+/// <summary>One pool member, scored against the criteria the request named.</summary>
+public class TalentPoolScreenRowDto
+{
+    public Guid    CandidateId     { get; set; }
+    public string  CandidateName   { get; set; } = string.Empty;
+    public string  CandidateNumber { get; set; } = string.Empty;
+    public string  Email           { get; set; } = string.Empty;
+    public string? Headline        { get; set; }
+    public string? City            { get; set; }
+    public Guid?   GeoAreaId       { get; set; }
+    public int?    TotalYearsExperience { get; set; }
+    public string? PreferredWorkArrangementName { get; set; }
+    public DateTime? AvailableFrom { get; set; }
+    public bool    HasPhoto        { get; set; }
+    public bool    IsInTalentPool  { get; set; }
+
+    /// <summary>
+    /// The criteria score out of <see cref="CriteriaScoreMax"/>, or null when nothing about this
+    /// candidate could be measured.
+    /// </summary>
+    /// <remarks>
+    /// &#9888; Null and 0 mean different things and are rendered differently. 0 is "measured, and
+    /// missed everything"; null is "the criteria asked questions this record cannot answer".
+    /// Collapsing them would put a candidate nobody knows anything about at the bottom of the list
+    /// beside one who was checked and genuinely does not fit - or, if the fallback went the other
+    /// way, at the top. Both are the fault this module keeps having to remove.
+    /// </remarks>
+    public decimal? CriteriaScore   { get; set; }
+
+    public decimal CriteriaScoreMax { get; set; } = 100m;
+
+    /// <summary>False when a criterion marked mandatory was missed - the score is then 0.</summary>
+    public bool AllMandatoryPassed  { get; set; } = true;
+
+    /// <summary>The weight actually measured; criteria left out of the score do not count here.</summary>
+    public decimal TotalWeight      { get; set; }
+
+    /// <summary>Whether this candidate already has an application against the screened vacancy.</summary>
+    public bool AlreadyApplied      { get; set; }
+
+    public List<CriterionScoreResult> Breakdown { get; set; } = new();
+}
+
+/// <summary>The answer to a screen: what was screened, against what, and who came back.</summary>
+public class TalentPoolScreenResultDto
+{
+    /// <summary>Null for an ad-hoc screen, which is not about any one vacancy.</summary>
+    public Guid?   VacancyId     { get; set; }
+    public string? VacancyNumber { get; set; }
+    public string? JobTitle      { get; set; }
+
+    /// <summary>How many pool members the filter selected, before <c>TopN</c> trimmed the answer.</summary>
+    public int ScreenedCount  { get; set; }
+
+    /// <summary>How many were scored at all - a member nothing could be measured about is not one.</summary>
+    public int ScoredCount    { get; set; }
+
+    /// <summary>How many met every mandatory criterion.</summary>
+    public int QualifiedCount { get; set; }
+
+    /// <summary>
+    /// The criteria the screen actually ran, named and weighted, so a reader can see what the score
+    /// is made of without opening the vacancy.
+    /// </summary>
+    public List<ScreeningCriterionSummaryDto> Criteria { get; set; } = new();
+
+    public List<TalentPoolScreenRowDto> Rows { get; set; } = new();
+}
+
+/// <summary>A criterion as it was applied to a screen - what it measures, and how heavily.</summary>
+public class ScreeningCriterionSummaryDto
+{
+    public Guid?  CriteriaId   { get; set; }
+    public string CriteriaName { get; set; } = string.Empty;
+    public JobShortlistingCriteriaType Type { get; set; }
+    public string TypeName     => Type.ToString();
+    public bool   IsMandatory  { get; set; }
+    public int    Weight       { get; set; }
+    public string? AcceptedValues { get; set; }
+}
+
+/// <summary>Invite pool members to apply for a vacancy - the first of lane B's two bulk acts.</summary>
+public class TalentPoolInviteToApplyDto
+{
+    [Required]
+    public Guid JobVacancyId { get; set; }
+
+    [Required]
+    [MinLength(1)]
+    public List<Guid> CandidateIds { get; set; } = new();
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    /// <summary>
+    /// Whether the candidate is emailed. Default true; the send is best-effort and never fails the
+    /// application it belongs to, exactly as the other recruitment notifications are.
+    /// </summary>
+    public bool SendEmail { get; set; } = true;
+}
+
+/// <summary>Book pool members into an existing interview session - the second bulk act.</summary>
+/// <remarks>
+/// &#9888; Requires each candidate to already have an application against that interview's vacancy.
+/// Decision Q2: shortlisting and interviewing belong to an application, and manufacturing one
+/// silently here would lose the trail of who decided to consider this person and when. A candidate
+/// with no application is skipped with a reason that says to invite them first.
+/// </remarks>
+public class TalentPoolBookInterviewDto
+{
+    [Required]
+    public Guid JobInterviewId { get; set; }
+
+    [Required]
+    [MinLength(1)]
+    public List<Guid> CandidateIds { get; set; } = new();
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
 }
 
 #endregion

@@ -639,12 +639,18 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffSecondmentService, StaffSecondmentService>();
         services.AddScoped<IStaffActingAppointmentService, StaffActingAppointmentService>();
         services.AddScoped<IEmployeeCareerPathService, EmployeeCareerPathService>();
+        // Round 4, lane B. The criterion-value rules and the scoring engine are shared by the
+        // vacancy path and the talent-pool screen, so neither can drift from the other.
+        services.AddScoped<ErpSystem.Core.Services.HR.Recruitment.IShortlistingCriteriaResolver,
+            ErpSystem.Core.Services.HR.Recruitment.ShortlistingCriteriaResolver>();
         services.AddScoped<IJobVacancyService, JobVacancyService>();
         services.AddScoped<IJobPostingService, JobPostingService>();
         services.AddScoped<IRecruitmentPipelineService, RecruitmentPipelineService>();
         services.AddScoped<IJobCandidateService, JobCandidateService>();
         services.AddScoped<ICandidateTalentSegmentService, CandidateTalentSegmentService>();
         services.AddScoped<ICandidateEngagementEventService, CandidateEngagementEventService>();
+        // Round 4, lane B: screening the pool by a vacancy's criteria, then acting on the result.
+        services.AddScoped<ITalentPoolScreeningService, TalentPoolScreeningService>();
         services.AddScoped<IJobApplicationService, JobApplicationService>();
         services.AddSingleton<IApplicationSnapshotService, ApplicationSnapshotService>();
         services.AddScoped<IApplicationPipelineService, ApplicationPipelineService>();

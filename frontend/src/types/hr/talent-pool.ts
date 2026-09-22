@@ -3,8 +3,14 @@
 // DTOs in RecruitmentDTOs.cs, source-verified 2026-08-30 — a type guessed from an endpoint name
 // is fiction that type-checks.
 
-import type { JobCandidate } from '@/types/hr/recruitment-pipeline';
+import type { CriterionScore, JobCandidate } from '@/types/hr/recruitment-pipeline';
 import { TALENT_POOL_STATUSES, type TalentPoolStatus } from '@/types/hr/recruitment-pipeline';
+import type {
+  MandatoryMatchMode,
+  ShortlistingComparisonOperator,
+  ShortlistingCriteriaType,
+  ValueMatchStrategy,
+} from '@/types/hr/recruitment';
 
 export { TALENT_POOL_STATUSES };
 export type { TalentPoolStatus };
@@ -155,6 +161,14 @@ export interface TalentPoolFilter {
   availableBefore?: string;
   overdueForReview?: boolean;
   dormantMoreThanDays?: number;
+  /**
+   * An area on the geography tree. Matches candidates recorded in it AND anywhere beneath it
+   * (round 4, lane B2) - pick Greater Accra and the person recorded in Tema comes back.
+   *
+   * WARNING: a candidate with only a typed city is NOT matched; the server has no name to compare
+   * against here. Use `search` for a typed city.
+   */
+  geoAreaId?: string;
   pageNumber?: number;
   pageSize?: number;
   sortBy?: TalentPoolSortKey;
@@ -237,6 +251,12 @@ export interface TalentPoolVacancyMatch {
   preferredWorkArrangementName?: string | null;
   availableFrom?: string | null;
   matchScore: number;
+  /**
+   * The highest the 40/30/20 fit rubric can award - 90, not 100. Sent by the server since G-13.2
+   * and simply missing from this type until round 4 lane B4, so every screen rendered the score
+   * bare and nobody could tell whether 65 was good.
+   */
+  matchScoreMax: number;
   matchReasons: string[];
 }
 
@@ -251,4 +271,99 @@ export interface CandidateVacancyMatch {
   numberOfPositions: number;
   matchScore: number;
   matchReasons: string[];
+}
+
+
+// -- Screening the pool by real criteria (round 4, lane B) ------------------------------------
+//
+// WARNING: distinct from `TalentPoolVacancyMatch` above, and shown BESIDE it rather than merged
+// into it (decision D-7). The match score is a blind 40/30/20 rubric over experience, work mode and
+// availability, out of 90. The criteria score is the vacancy's OWN shortlisting criteria run
+// through the same engine that scores applications, out of 100. They answer different questions and
+// averaging them would answer neither.
+
+/** One criterion in an ad-hoc screen - mirrors `AdHocScreeningCriterionDto`. */
+export interface AdHocScreeningCriterion {
+  criteriaName: string;
+  type: ShortlistingCriteriaType;
+  requiredValue?: string | null;
+  minValue?: number | null;
+  maxValue?: number | null;
+  isMandatory: boolean;
+  matchMode?: MandatoryMatchMode;
+  matchStrategy?: ValueMatchStrategy;
+  weight: number;
+  comparisonOperator?: ShortlistingComparisonOperator | null;
+  values?: { referenceId?: string | null; label?: string | null }[] | null;
+}
+
+export interface TalentPoolScreenRequest {
+  filter?: TalentPoolFilter;
+  /** How many rows come back. The whole filtered set is scored; this trims the answer. */
+  topN?: number;
+  /** Default true - a near miss the recruiter might waive is worth seeing. */
+  includeNonMatching?: boolean;
+  /** Ad-hoc door only; the by-vacancy door reads the vacancy's own criteria. */
+  criteria?: AdHocScreeningCriterion[];
+}
+
+export interface ScreeningCriterionSummary {
+  criteriaId?: string | null;
+  criteriaName: string;
+  type: ShortlistingCriteriaType;
+  typeName: string;
+  isMandatory: boolean;
+  weight: number;
+  acceptedValues?: string | null;
+}
+
+export interface TalentPoolScreenRow {
+  candidateId: string;
+  candidateName: string;
+  candidateNumber: string;
+  email: string;
+  headline?: string | null;
+  city?: string | null;
+  geoAreaId?: string | null;
+  totalYearsExperience?: number | null;
+  preferredWorkArrangementName?: string | null;
+  availableFrom?: string | null;
+  hasPhoto: boolean;
+  isInTalentPool: boolean;
+  /**
+   * WARNING: `null` is NOT zero. Zero means "measured, and missed everything"; null means the
+   * criteria asked questions this record cannot answer. Render them differently - a `?? 0` here
+   * puts a candidate nobody knows anything about beside one who was checked and genuinely does
+   * not fit.
+   */
+  criteriaScore: number | null;
+  criteriaScoreMax: number;
+  allMandatoryPassed: boolean;
+  totalWeight: number;
+  alreadyApplied: boolean;
+  breakdown: CriterionScore[];
+}
+
+export interface TalentPoolScreenResult {
+  vacancyId?: string | null;
+  vacancyNumber?: string | null;
+  jobTitle?: string | null;
+  screenedCount: number;
+  scoredCount: number;
+  qualifiedCount: number;
+  criteria: ScreeningCriterionSummary[];
+  rows: TalentPoolScreenRow[];
+}
+
+export interface TalentPoolInviteToApplyPayload {
+  jobVacancyId: string;
+  candidateIds: string[];
+  notes?: string | null;
+  sendEmail?: boolean;
+}
+
+export interface TalentPoolBookInterviewPayload {
+  jobInterviewId: string;
+  candidateIds: string[];
+  notes?: string | null;
 }

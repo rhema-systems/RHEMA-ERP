@@ -57,6 +57,10 @@ export const APPLICATION_SOURCES = [
   'NewspaperAd',
   'Other',
   'InternalPortal',
+  // Round 4, lane B. Written by the server when HR invites a pooled candidate to apply; it is in
+  // the list so the "Record an application" and "Correct the source" dialogs can show what the
+  // server already stores, not so a recruiter picks it by hand.
+  'TalentPool',
 ] as const;
 export type ApplicationSource = (typeof APPLICATION_SOURCES)[number];
 
@@ -425,6 +429,24 @@ export interface CreateJobCandidate {
   nationalIdTypeId?: string | null;
   nationalIdNumber?: string | null;
   nationalIdExpiryDate?: string | null;
+  /**
+   * The professional profile and availability — round 4, lane B.
+   *
+   * ⚠ These were readable on the candidate DTO and writable ONLY through the candidate's own
+   * portal profile, while the talent pool's match rubric scores on three of them. So a candidate
+   * HR typed in — a career fair, a referral, an unsolicited CV — could never rank above the
+   * "nothing on file" tier, whatever HR knew, and there was no box to put it in.
+   *
+   * ⚠ Sent on EVERY save. The update replaces the record wholesale, so omitting one clears it.
+   */
+  headline?: string | null;
+  professionalSummary?: string | null;
+  currentJobTitle?: string | null;
+  currentEmployer?: string | null;
+  totalYearsExperience?: number | null;
+  noticePeriodDays?: number | null;
+  availableFrom?: string | null;
+  preferredWorkArrangement?: PreferredWorkArrangement;
   isInTalentPool: boolean;
 }
 
@@ -606,6 +628,14 @@ export interface JobApplicationSummary {
   jobCandidateId: string;
   candidateName: string;
   candidateEmail: string;
+  /**
+   * Whether the candidate has a photograph on file (round 4, lane B5).
+   *
+   * ⚠ A flag, not the image. Feed it to `GatedPhoto`'s `enabled` so a list of thirty applications
+   * does not fire thirty requests that each come back 404 — the photograph itself streams through
+   * the gated `jobCandidateService.photoUrl(candidateId)`.
+   */
+  candidateHasPhoto: boolean;
   applicationDate: string;
   status: ApplicationStatus;
   statusName: string;
@@ -798,6 +828,15 @@ export interface CriterionScore {
   rawScore: number;
   weightedScore: number;
   notes?: string | null;
+  /**
+   * False for a criterion the engine did not score — `Other`, an empty one, an unanswerable
+   * numeric bound. Its weight is left out of the total, so it neither lifts nor lowers the
+   * candidate (round 3 lane K, extended by round 4 lane A).
+   *
+   * ⚠ Server-sent since lane A and simply absent from this type until lane B, so `passed: true`
+   * on such a row reads as a pass it never was. Check this before the tick.
+   */
+  autoEvaluated?: boolean;
 }
 
 export interface ApplicationAutoScore {
@@ -1039,6 +1078,8 @@ export interface PipelineApplicationListItem {
   applicationNumber: string;
   candidateName: string;
   candidateEmail: string;
+  /** @see JobApplicationSummary.candidateHasPhoto — a flag, not the image (round 4, lane B5). */
+  candidateHasPhoto: boolean;
   status: ApplicationStatus;
   statusName: string;
   source: ApplicationSource;

@@ -1,16 +1,22 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-21 — A done, C and F built.**
+> **Status 2026-09-22 — A, C, F, G, H, B done.**
 >
 > | Lane | State |
 > |---|---|
 > | **A** | **DONE** — 45 ×2, `run-round4-a.mjs`, committed `10bb1d4f` |
-> | **C** | **BUILT** — 46 assertions, `run-round4-c.mjs`; staged, not yet committed |
-> | **F** | **DONE** — 103 ×2, `run-round4-f.mjs`; both migrations applied to UAT; every neighbouring suite re-run at baseline |
+> | **C** | **DONE** — 46 ×2, `run-round4-c.mjs` |
+> | **F** | **DONE** — 103 ×2, `run-round4-f.mjs`; both migrations applied to UAT |
 > | **G** | **DONE** — 41 ×2, `run-round4-g.mjs`; committed |
-> | **H** | **DONE** — 36 ×2, `run-round4-h.mjs`; staged |
+> | **H** | **DONE** — 36 ×2, `run-round4-h.mjs` |
+> | **B** | **DONE** — 95 ×2, `run-round4-b.mjs`; **no migration**; all 16 neighbouring suites at baseline |
 >
-> Eleven lanes remain after H. Recommended next: **B**, then D, E, I, L, J, M, K, N, O.
+> Ten lanes remain after B. Recommended next: **D**, then E, I, L, J, M, K, N, O.
+>
+> ⚠ **Lane B moved the scoring engine.** `ScoringCandidateView` and `EvaluateCriterion` were private
+> members of `JobApplicationService`; they are now `ShortlistingEvaluator` in
+> `Services/HR/Recruitment/`, and the criterion-value resolver is `ShortlistingCriteriaResolver`.
+> Anything that scores an application or validates a criterion goes through those two files now.
 >
 > **Neighbouring suites after lane F**, all at baseline:
 >
@@ -1036,6 +1042,120 @@ docs — and that the 409’s cause is dated two days earlier. Recorded rather t
 **Owed:** route those seven through the workflow queue, or retire the direct-approve path from
 them. That is a `hr-jobarch` job, not a round 4 lane.
 
+### Lane B — the talent pool, screened and acted on · DONE 2026-09-22 · 95 assertions ×2
+
+Harness: `dev-harness/hr-recruitment/run-round4-b.mjs`. **No migration** — the only
+schema-adjacent change is `ApplicationSource.TalentPool = 12`, a new member of an enum stored as an
+int. Verified on `ErpSystemDB_UAT`.
+
+**Built as planned** — `POST talent-pool/screen/{vacancyId}` and `POST talent-pool/screen`, the five
+unwired filters plus a geography-subtree location filter, `invite-to-apply` and `book-interview`,
+the criteria score beside the fit score, and the candidate photograph on the application screens.
+
+**The structural move, which is the lane's real content.** B1 says the screen must run "the **same**
+`EvaluateCriterion`". That was only achievable by making it structurally true:
+
+| Moved | From | To |
+|---|---|---|
+| `ScoringCandidateView`, `EvaluateCriterion` and their nine helpers | private members of `JobApplicationService` | `Services/HR/Recruitment/ShortlistingEvaluator.cs` |
+| the aggregation loop — evaluate-all, a mandatory miss scores 0, nothing measurable scores **null** | inline in `EvaluateLoadedApplicationScoreAsync` | `ShortlistingEvaluator.Score` |
+| `ResolveCriterionValuesAsync`, `MirrorLabels`, `RequireScorableCriterion` | private members of `JobVacancyService` | `Services/HR/Recruitment/ShortlistingCriteriaResolver.cs` |
+
+Every rule, comment and lane A repair moved verbatim. The harness asserts the claim directly: the
+same pool member is given an application against the same vacancy, scored through
+`JobApplicationService`, and the two numbers must be equal. That single assertion is what would
+catch the two paths drifting; the other 94 would not.
+
+The resolver move is what makes the ad-hoc screen refuse what a vacancy refuses — a mandatory
+Gender, a numeric criterion with no bound, a list criterion with no values, an area off the tree.
+Four assertions, one per refusal, all 422.
+
+**Changed during the build, with reasons:**
+
+| | Planned | Built | Why |
+|---|---|---|---|
+| B5 | "No backend work" | **`CandidateHasPhoto` added to three read projections** | `GatedPhoto` takes an `enabled` flag precisely so a list does not fire one request per row that will 404. Without the flag a 30-row pipeline board issues 30 doomed requests. The pipeline board is a *different* projection from the application DTOs, so the flag had to go on all three or the board falls back to initials for everybody. |
+| — | not planned | **the professional profile becomes HR-writable** | `TotalYearsExperience`, `PreferredWorkArrangement`, `AvailableFrom`, `Headline` and three siblings were writable **only through the candidate's own portal profile** — while the pool's match rubric scores on three of them and the pool list has a column for two. A career fair, a referral and an unsolicited CV all reach the pool by HR typing them in, so **the people HR knew most about could never rank above the "nothing on file" tier**, and there was no box to put it in. This is G-13.2 seen from the other side: the rubric was corrected so silence stops scoring like a match, and then the only people who could break the silence were the candidates. Added to HR's create/update DTOs, both mappers and the candidate form. Expected salary and work-authorization status stay candidate-only — the DTOs do not carry them and an input would discard what was typed. |
+| screen with no criteria | not specified | **refused, 422** | The alternative is a full table of "Not measurable" against every pool member, which reads as *"the pool is useless"* rather than *"this vacancy has not said what it wants yet"*. The refusal names the tab that fixes it. |
+| `invite-to-apply` on a closed vacancy | not specified | **refused for the whole request, 422** | `CreateAsync` deliberately does not check vacancy status — it is the door a late walk-in is recorded through, and that is a judgement call. An **invitation** is not: writing to somebody asking them to apply for a filled post is the organisation embarrassing itself in the candidate's inbox. A property of the vacancy, so the request fails rather than each row. |
+| `book-interview` for a candidate who has not applied | "requires an application" | **skipped per row, with a reason naming the button above it** | Decision Q2. Manufacturing an application would lose the record of who decided this person should be considered. |
+| criteria score `null` | not specified | **rendered as "Not measurable", never as 0** | Three states, not two: 0 is *measured and missed everything*; null is *the criteria asked questions this record cannot answer*. A `?? 0` anywhere in the chain puts an unknown beside a demonstrated miss. Carried through the DTO, the TS type, both panels and the ranking, which sorts null last. |
+
+**Two product findings, recorded not fixed:**
+
+1. **`TransitionJobVacancyDto` clears `CustomAdvertTitle` on a partial payload.** The DTO mirrors
+   the update payload — it is a full replace — and its own doc comment already records this trap for
+   `EmploymentType` and `WorkMode`, **which were made nullable so that an omitted value means "leave
+   it"**. `CustomAdvertTitle` is `string?` where null genuinely means "clear it", so a caller has no
+   way to say "leave it" and publishing a vacancy without restating the title erases it. The vacancy
+   then has no title at all, and the invitation email and engagement-event subject read
+   *"Invited to apply:  (VAC-000131)"* — a blank where the role should be. The UI posts a full
+   payload, so it never shows there. **This is the same defect one field over, left behind by the fix
+   that named it.** Found because lane B is the first suite to assert on a vacancy's title; lane A's
+   fixture has been silently clearing it too. Not fixed here — making null mean "leave it" removes
+   the ability to clear a title, which is a contract change other suites depend on.
+
+2. **Parked blocker 1 survived lane H.** `run-g` still dies on `accept-conditionally`, and the cause
+   is now exact: *"A conditional acceptance needs the checks it is conditional on."* Lane H seeds the
+   check set at offer creation **from the position's check template**, so a position with no template
+   still produces an offer that cannot be conditionally accepted. Whether that is the intended design
+   or a gap is lane H's call. `slice-d` aborts at 75/98 on the same wall, and `run.mjs` is still on
+   blocker 2 (the Staff Requisition workflow not routing multi-step) — unchanged, lane D's
+   neighbourhood.
+
+**A harness defect, and it is § 9.1's trap arriving by a different road.**
+
+`setup.mjs` — shared by **every** suite in this folder — asked for
+`/api/Workflow/definitions?pageSize=500`. The listing caps `pageSize` at **100** server-side and
+pages on **`page`**, not `pageNumber` (which is silently ignored and returns page 1 again). This
+tenant now carries **127** definitions, and `Staff Requisition Approval` sits at row 101. So setup
+read the first 100, found nothing, and printed *"expected exactly one active StaffRequisition
+definition, found 0 — run publish-requisition-definition.mjs"*.
+
+That is the **same message and the same wrong remedy** as § 9.1, from a different cause: publishing a
+second definition would have left the tenant with two active ones and the engine's choice between
+them unspecified. § 9.1's fix normalised the entity-type key; **a truncated read defeats any amount
+of normalising.** Setup now walks every page against `metadata.totalCount`, and the failure message
+carries *how many definitions it actually read* — without that number a missing definition and a
+truncated listing are indistinguishable, and only one of them has that remedy.
+
+**Three harness assertions were wrong, and saying which matters:**
+
+- six refusals expected **400**; the area's `[RecruitmentBusinessRules]` filter maps
+  `InvalidOperationException` to **422** throughout, which lane A already asserted for its country
+  clash. My expectation, not the product's contract.
+- `alreadyApplied === false` was asserted on the candidate the B1 cross-check had just given an
+  application to. True is correct; the assertion was testing the fixture's memory.
+- the pipeline auto-advance was asserted on a fresh application. `TDC Standard Recruitment` marks its
+  stages **non-skippable**, so `MoveApplicationToStageAsync` throws *"Stage 'Application Review'
+  cannot be skipped"*, `AutoAdvanceToStageTypeAsync` swallows it into a warning, and the booking
+  still succeeds. ⚠ **That swallow is right** — a candidate booked into a session should not be
+  un-booked because the pipeline has an opinion about ordering — but it makes the advance
+  **best effort**, and asserting the landing without walking the earlier stages asserts something the
+  product never promised. The fixture now attaches the default pipeline, walks the application
+  through every stage before Interview, re-books, and asserts the landing **by name**.
+
+**Neighbouring suites — all sixteen at baseline.** The engine moved, so everything that scores an
+application is a regression candidate; `run-k` and `slice-e` are the two that exercise it hardest.
+
+| Suite | Result | Baseline | |
+|---|---|---|---|
+| `run-round4-a` · `-c` · `-f` · `-g` · `-h` | 45 · 46 · 103 · 41 · 36 | same | ✅ |
+| `run-k` (scoring) · `run-v` (segments) | **81/81** · **72/72** | same | ✅ the two that exercise the moved engine |
+| `run-a` · `run-c1` · `run-c2` · `run-candidate-country` | 44 · 96 · 89 · 43 | same | ✅ |
+| `slice-b` · `slice-c` · `slice-e` · `slice-f` | 174/176 · 188/190 · 101/105 · 69/69 | same | ✅ the § 9.2 stale assertions |
+| `run-lane5b` | 32/34 | 32/34 | ✅ the recorded stale admin-gate |
+
+**Frontend:** type-checked against a scoped `tsconfig` over the 13 touched files (the project-wide
+`tsc` still crashes — HR-CLOSURE-LEDGER 2026-08-30). Four real errors found and fixed:
+`TextField`'s `type` union is `text|email|tel` and will not take `number` (`NumberField` exists);
+the interviews service exports `jobInterviewService`, not `interviewsService`.
+
+**Not walked in a browser.** The Screen tab, the ad-hoc criteria builder and the two bulk actions
+have no browser walk — the same standing gap this module carries elsewhere.
+
+---
+
 ---
 
 ## 9. What the neighbouring suites actually said
@@ -1092,7 +1212,7 @@ engine — `run-k` and lane V — match their baselines exactly.
 
 | # | Blocker | Owner |
 |---|---|---|
-| 1 | `accept-conditionally` refuses without a pre-employment check set, blocking `run-g` and `slice-d`. The rule is correct and documented; the suites predate it. | **Lane H** fixes the cause by seeding the check set at offer creation. |
+| 1 | `accept-conditionally` refuses without a pre-employment check set, blocking `run-g` and `slice-d`. The rule is correct and documented; the suites predate it. | ~~**Lane H** fixes the cause by seeding the check set at offer creation.~~ ⚠ **Re-measured 2026-09-22 after lane B: still blocked.** `run-g` dies on the same 422 and `slice-d` aborts at 75/98. Lane H seeds the set **from the position's check template**, so a position without one still produces an offer that cannot be conditionally accepted. Whether that is the design or a gap is **lane H's** call. |
 | 2 | **The Staff Requisition workflow is not routing multi-step.** The definition is `Published`, active, three steps — yet submit creates no instance and HR's single approval completes it, so `run.mjs`'s TRAP-1 assertion fires. This is the *"the definitions listing asks a different question from the engine"* trap. | **Lane D's neighbourhood.** Not to be patched blind — read the engine's lookup first. |
 
 Neither is in lane A's diff: nothing there touches requisitions, the workflow engine, offers or

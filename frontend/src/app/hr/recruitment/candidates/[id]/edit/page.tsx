@@ -17,7 +17,7 @@ import {
 } from '@/components/hr/recruitment/CandidateFormFields';
 import { useToast } from '@/hooks/use-toast';
 import { jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
-import type { Gender } from '@/types/hr/recruitment-pipeline';
+import type { Gender, PreferredWorkArrangement } from '@/types/hr/recruitment-pipeline';
 
 export default function EditCandidatePage() {
   const router = useRouter();
@@ -68,6 +68,17 @@ export default function EditCandidatePage() {
       nationalIdTypeId: data.nationalIdTypeId ?? null,
       nationalIdNumber: data.nationalIdNumber ?? null,
       nationalIdExpiryDate: data.nationalIdExpiryDate?.slice(0, 10) ?? null,
+      // Round 4, lane B. Seeded so an edit that does not touch them does not clear them — this
+      // DTO replaces the record wholesale. The two numbers are strings on the form: '' is "not
+      // asked", which is a different answer from 0.
+      headline: data.headline ?? null,
+      professionalSummary: data.professionalSummary ?? null,
+      currentJobTitle: data.currentJobTitle ?? null,
+      currentEmployer: data.currentEmployer ?? null,
+      totalYearsExperience: data.totalYearsExperience != null ? String(data.totalYearsExperience) : null,
+      noticePeriodDays: data.noticePeriodDays != null ? String(data.noticePeriodDays) : null,
+      availableFrom: data.availableFrom?.slice(0, 10) ?? null,
+      preferredWorkArrangement: data.preferredWorkArrangement ?? 'Any',
       isInTalentPool: data.isInTalentPool,
     });
   }, [data, form]);
@@ -94,6 +105,14 @@ export default function EditCandidatePage() {
         nationalIdTypeId: values.nationalIdTypeId || null,
         nationalIdNumber: values.nationalIdNumber?.trim() || null,
         nationalIdExpiryDate: values.nationalIdExpiryDate || null,
+        headline: values.headline?.trim() || null,
+        professionalSummary: values.professionalSummary?.trim() || null,
+        currentJobTitle: values.currentJobTitle?.trim() || null,
+        currentEmployer: values.currentEmployer?.trim() || null,
+        totalYearsExperience: values.totalYearsExperience ? Number(values.totalYearsExperience) : null,
+        noticePeriodDays: values.noticePeriodDays ? Number(values.noticePeriodDays) : null,
+        availableFrom: values.availableFrom || null,
+        preferredWorkArrangement: (values.preferredWorkArrangement || 'Any') as PreferredWorkArrangement,
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['hr', 'candidate', id] });
