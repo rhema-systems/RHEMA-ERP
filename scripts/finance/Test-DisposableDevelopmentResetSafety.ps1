@@ -13,8 +13,14 @@ $temporaryRoots = [System.Collections.Generic.List[string]]::new()
 $priorPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
 
 function Invoke-Refusal([string]$name, [string]$expected, [string[]]$arguments) {
-    $output = & pwsh -NoProfile -File $script -Mode ResetDisposableDevelopment @arguments 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0) { throw "Safety case '$name' unexpectedly succeeded." }
+    $priorErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & pwsh -NoProfile -File $script -Mode ResetDisposableDevelopment @arguments 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $priorErrorActionPreference }
+    if ($exitCode -eq 0) { throw "Safety case '$name' unexpectedly succeeded." }
     if ($output -notmatch [regex]::Escape($expected)) {
         throw "Safety case '$name' did not return '$expected'. Output: $output"
     }
@@ -146,7 +152,8 @@ try {
     $migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
     foreach ($functionName in @('Replace-OrdinalIgnoreCase','ConvertTo-SanitizedEvidenceLine','Get-SqlEvidenceTokens',
         'Assert-UniqueOrderedSqlEvidenceTokens','Invoke-Native','Assert-SqlcmdOutputWidth','Invoke-Sql',
-        'Invoke-SqlWithSanitizedEvidence','Get-DisposableBackupFileName','Join-DisposableBackupPath',
+        'Invoke-SqlWithSanitizedEvidence','Write-AtomicNativeCommandEvidence','Invoke-NativeWithEvidence',
+        'Get-DisposableBackupFileName','Join-DisposableBackupPath',
         'Write-AtomicTextFile','Write-MigrationHistoryEvidence','Read-MigrationHistoryEvidence',
         'Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
         'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Test-LocalMachineIpAddress',
@@ -165,6 +172,28 @@ try {
         throw 'Windows PowerShell-compatible SHA-256 helper returned an unexpected digest.'
     }
     Write-Host 'PASS: text SHA-256 helper returns the standard digest without modern static crypto APIs'
+    $script:sensitiveEvidenceTokens = [System.Collections.Generic.List[string]]::new()
+    $failedNativeEvidence = Join-Path (New-ExternalEvidencePath 'FAILED_NATIVE') 'failed-native.log'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $failedNativeEvidence) | Out-Null
+    $failedNativeRefused = $false
+    $failedNativeFailure = ''
+    try {
+        $null = Invoke-NativeWithEvidence 'cmd.exe' @('/d','/c','echo expected-native-stderr 1>&2 & exit /b 17') `
+            $failedNativeEvidence
+    }
+    catch {
+        $failedNativeRefused = $true
+        $failedNativeFailure = $_.Exception.Message
+    }
+    if (-not (Test-Path -LiteralPath $failedNativeEvidence -PathType Leaf)) {
+        throw "Failed native command did not retain its evidence artifact: $failedNativeFailure"
+    }
+    $failedNativeLines = @(Get-Content -LiteralPath $failedNativeEvidence | ForEach-Object { $_.Trim() })
+    if (-not $failedNativeRefused -or $failedNativeLines -notcontains 'expected-native-stderr' -or
+        $failedNativeLines -notcontains 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=17|COMMAND=cmd.exe') {
+        throw 'Failed native command did not retain sanitized output and its exact failure marker.'
+    }
+    Write-Host 'PASS: failed native command retains evidence before enforcing its exit code'
     $historyRoot = New-ExternalEvidencePath 'MIGRATION_HISTORY'
     New-Item -ItemType Directory -Path $historyRoot | Out-Null
     $emptyHistoryPath = Join-Path $historyRoot 'source-migration-history.txt'
