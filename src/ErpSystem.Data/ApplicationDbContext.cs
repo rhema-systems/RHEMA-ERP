@@ -10253,9 +10253,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(item => item.GisSyncStatus).HasDefaultValue("NotLinked");
             entity.Property(item => item.AreaSquareMeters).HasPrecision(18, 4);
             entity.Property(item => item.AreaValue).HasPrecision(18, 4);
-            entity.Property(item => item.GroundRentPayable).HasColumnType("decimal(18,2)");
-            entity.Property(item => item.GroundRentRatePerAcre).HasColumnType("decimal(18,2)");
-            entity.Property(item => item.GroundRentComputed).HasColumnType("decimal(18,3)");
+            entity.Property(item => item.GroundRentPayable).HasColumnType("decimal(18,4)");
+            entity.Property(item => item.GroundRentRatePerAcre).HasColumnType("decimal(18,4)");
+            entity.Property(item => item.GroundRentComputed).HasColumnType("decimal(18,4)");
             entity.Property(item => item.ValuationAmount).HasPrecision(18, 2);
             entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
             entity.Property(item => item.ExternalSalePrice).HasPrecision(18, 2);
@@ -10281,9 +10281,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(item => item.AllocatedCost).HasPrecision(18, 2);
             entity.Property(item => item.CostPerAcre).HasPrecision(18, 2);
             entity.Property(item => item.TargetSalePrice).HasPrecision(18, 2);
-            entity.Property(item => item.GroundRentPayable).HasColumnType("decimal(18,2)");
-            entity.Property(item => item.GroundRentRatePerAcre).HasColumnType("decimal(18,2)");
-            entity.Property(item => item.GroundRentComputed).HasColumnType("decimal(18,3)");
+            entity.Property(item => item.GroundRentPayable).HasColumnType("decimal(18,4)");
+            entity.Property(item => item.GroundRentRatePerAcre).HasColumnType("decimal(18,4)");
+            entity.Property(item => item.GroundRentComputed).HasColumnType("decimal(18,4)");
             entity.Property(item => item.ParentLandAssetReference).HasMaxLength(120);
             entity.Property(item => item.ParentFixedAssetReference).HasMaxLength(120);
             entity.Property(item => item.ChildFixedAssetReference).HasMaxLength(120);
