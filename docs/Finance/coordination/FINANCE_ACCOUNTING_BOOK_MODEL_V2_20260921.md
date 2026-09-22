@@ -37,7 +37,7 @@ Implement the stakeholder-approved accounting-book model:
 
 ## Current status
 
-`CUTOVER_REHEARSAL_PASSED`
+`CUTOVER_CANDIDATE_PROVISIONED`
 
 ## Migration state
 
@@ -72,15 +72,19 @@ Migrations `20260921154920_AccountingBookModelV2` and `20260921174134_Accounting
 - Fresh A4 migration plus `seed-db` passed. Direct SQL verification found exactly 3 canonical active books, 3 approved balanced initialization packages, 2 protected non-postable Parallel control accounts, 1 approved default routing policy with 10 rules, and 6 active protected statement layouts.
 - `seed-finance-baseline` reran successfully without duplicates. `seed-finance-demo-dimensions` reran twice and produced 22 values across 6 dimensions with zero duplicate codes.
 - Rehearsal correction: Finance protected layouts were previously filtered to retired book codes and invoked before baseline activation. The canonical codes are now `BASE`, `IFRS_ADJUSTMENTS`, and `USD_PARALLEL`, and protected-layout seeding runs after baseline activation.
+- Read-only assessment of the retained `RhemaERP` development/demo database found four applied migrations, five active legacy books, two balanced draft journals with 12 draft transaction lines, no posting events, five approved zero-balance initialization packages, and legacy exchange-rate direction such as `GHS/USD = 12.5`. Because there is no posted Finance activity, a fresh database is safer than an in-place conversion; the two drafts remain preserved in the original database.
+- Provisioned the separate non-destructive cutover candidate `RHEMAERP_BOOKV2_CUTOVER_20260922`; the existing `RhemaERP` database was not reset, dropped, migrated, or repointed.
+- The cutover candidate passed the complete seven-migration chain and `seed-db`. Finance-specific baseline provisioning passed twice and Finance demo-dimension provisioning passed twice, demonstrating idempotency.
+- Direct cutover-candidate reconciliation found exactly three active canonical books (`BASE`, `IFRS_ADJUSTMENTS`, `USD_PARALLEL`), three approved and balanced zero-opening packages, two protected non-direct-posting USD Parallel control accounts, one approved routing policy with ten rules, six active protected statement layouts, 22 values across six transaction dimensions with no duplicate codes, canonical `GHS/USD = 0.08` with reciprocal `12.5`, and zero journals, transactions, or posting events.
+- Post-provisioning source verification reconfirmed that `RhemaERP` remains at four migrations with five books and its two draft journals intact.
 - Targeted `AccountingBookPeriodInitializationC4Tests`: 20 passed; 3 legacy assertions fail because they require removed behavior (per-book close readiness, Primary lifecycle transitions, and inactive derived mappings). These tests must be replaced with V2 assertions.
-- No migration was applied and no database was reset.
+- No migration was applied to the retained `RhemaERP` database and no database was reset or dropped.
 
 ## Open implementation slices
 
-- Replace remaining legacy accounting-book assertions that still expect per-book periods or Primary lifecycle transitions.
 - Replace the remaining legacy accounting-book assertions that intentionally encode removed per-book period and Primary lifecycle behavior.
-- Choose and execute the separately governed live/demo database strategy: fresh reset or reviewed data conversion. The rehearsal does not authorize either automatically.
+- Repoint and restart a deliberately selected API/frontend runtime against the verified cutover candidate only after confirming that the operator wants to leave the preserved legacy demo database and its two drafts behind.
 
 ## Next authorized action
 
-Preserve the passing A4 rehearsal evidence and prepare the live/demo cutover decision. Do not apply either migration to the live/demo database without a separate target-specific action.
+Use `RHEMAERP_BOOKV2_CUTOVER_20260922` as the verified fresh cutover candidate. Keep `RhemaERP` preserved as rollback/reference evidence. Runtime repointing and restart remain a separate, explicit operational action; neither has been performed.
