@@ -161,6 +161,10 @@ try {
         }
         . ([ScriptBlock]::Create($functionAst[0].Extent.Text))
     }
+    if ((Get-TextSha256 'abc') -cne 'BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD') {
+        throw 'Windows PowerShell-compatible SHA-256 helper returned an unexpected digest.'
+    }
+    Write-Host 'PASS: text SHA-256 helper returns the standard digest without modern static crypto APIs'
     $historyRoot = New-ExternalEvidencePath 'MIGRATION_HISTORY'
     New-Item -ItemType Directory -Path $historyRoot | Out-Null
     $emptyHistoryPath = Join-Path $historyRoot 'source-migration-history.txt'
