@@ -670,8 +670,14 @@ function Get-DisposableBackupPath($databaseTarget, [string]$backupMediaId) {
 
 function Get-TextSha256([string]$value) {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
-    $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
-    [Convert]::ToHexString($hash)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha256.ComputeHash($bytes)
+    }
+    finally {
+        $sha256.Dispose()
+    }
+    ([System.BitConverter]::ToString($hash) -replace '-', '')
 }
 
 function Get-DisposableMaterialBackupState([string]$path) {
