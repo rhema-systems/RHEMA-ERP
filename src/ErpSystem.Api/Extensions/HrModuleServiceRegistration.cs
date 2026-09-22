@@ -658,6 +658,19 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAutoScoringService, AutoScoringService>();
         services.AddScoped<IJobInterviewQuestionBankService, JobInterviewQuestionBankService>();
         services.AddScoped<IInterviewQuestionPresetService, InterviewQuestionPresetService>();
+        // ── Round 4, lane D1 — where a panelist may already be ──────────────────────────────
+        //
+        // ⚠ SEVEN sources, and every one of them must be here. A source that is written and not
+        // registered contributes nothing, and the clash check then answers "free" — the exact
+        // failure the interface exists to stop, reappearing as a DI omission. The check reports
+        // `sourcesConsulted` so a missing registration is visible rather than silent.
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.InterviewPanelCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.LeaveCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.TravelCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.CompanyEventCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.RoomBookingCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.TrainingCommitmentSource>();
+        services.AddScoped<IPanelistCommitmentSource, ErpSystem.Core.Services.HR.Recruitment.ClosureCommitmentSource>();
         services.AddScoped<IJobInterviewService, JobInterviewService>();
         // Round 4, lane F — the printed scoring sheet. ⚠ The catalogue registration below it is not
         // optional: without it TemplatedEmailService has no fallback for the Interviews module and

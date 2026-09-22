@@ -9,9 +9,16 @@
 > | **F** | **DONE** — 103 ×2, `run-round4-f.mjs`; both migrations applied to UAT |
 > | **G** | **DONE** — 41 ×2, `run-round4-g.mjs`; committed |
 > | **H** | **DONE** — 36 ×2, `run-round4-h.mjs` |
-> | **B** | **DONE** — 95 ×2, `run-round4-b.mjs`; **no migration**; all 16 neighbouring suites at baseline |
+> | **B** | **DONE** — 96 ×2, `run-round4-b.mjs`; **no migration**; all 16 neighbouring suites at baseline |
+> | **D-1** | **DONE** — 58 ×2, `run-round4-d.mjs`; migration `AddInterviewPanelClashOverrideAndRoomBooking` applied to UAT. D1–D4 + D8, the recruitment half |
+> | **D-2** | **NEXT** — D5–D7: the organizer screens, event notifications, the four Company Schedule defects |
 >
-> Ten lanes remain after B. Recommended next: **D**, then E, I, L, J, M, K, N, O.
+> ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
+> times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
+> the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
+> immediately, and the lane is not done until it lands.
+>
+> After D-2: E, I, L, J, M, K, N, O.
 >
 > ⚠ **Lane B moved the scoring engine.** `ScoringCandidateView` and `EvaluateCriterion` were private
 > members of `JobApplicationService`; they are now `ShortlistingEvaluator` in
@@ -1153,6 +1160,111 @@ the interviews service exports `jobInterviewService`, not `interviewsService`.
 
 **Not walked in a browser.** The Screen tab, the ad-hoc criteria builder and the two bulk actions
 have no browser walk — the same standing gap this module carries elsewhere.
+
+---
+
+### Lane D-1 — the clash check made real · DONE 2026-09-22 · 58 assertions ×2
+
+Harness: `dev-harness/hr-recruitment/run-round4-d.mjs`. Migration:
+`20260922122130_AddInterviewPanelClashOverrideAndRoomBooking` (guarded SQL; applied to
+`ErpSystemDB_UAT`). Covers **D1, D2, D3, D4 and D8**; D5–D7 are lane D-2.
+
+**Built as planned.** `IPanelistCommitmentSource` with seven registered implementations, the check
+made binding on all three write paths with a recorded override, `GET suggest-slots`, and
+`JobInterview.RoomBookingId`.
+
+**The four new sources are the point.** The old check knew about other interviews, leave and travel.
+It now also reads **meetings the panelist PARTICIPATES in** — the company-schedule module's own
+`HasConflictingEventAsync` checks the *organizer* only, and a board meeting has one organiser and
+twelve attendees, every one of whom read as free — **room bookings**, **training nominations**, and
+**closures + public holidays**.
+
+**Hard vs soft is the whole design.** Hard means confirmed **and** time-precise: another interview, a
+Confirmed room booking, a Confirmed meeting this person accepted. Those refuse. Everything else
+warns, and the reason is not squeamishness — leave and travel are recorded by the **DAY** and cannot
+answer "is the 09:00 hour free?". A check that refused on them would have the system overruling
+somebody about their own time on evidence that does not reach the question. The harness's most
+important assertion is therefore a **negative** one: *"a SOFT clash does NOT refuse the schedule"*.
+It is easy to write a check that blocks everything and call it strict.
+
+**Changed during the build, with reasons:**
+
+| | Planned | Built | Why |
+|---|---|---|---|
+| the availability DTO | three typed lists (`interviewConflicts`, `leaveConflicts`, `travelConflicts`) | **one `commitments` list** | Seven sources now and more later. A named list per source means editing the DTO, the TS type and every screen each time the organisation learns to track something else. `slice-c` asserts only the row count and the 403, so nothing moved. |
+| — | not planned | **`sourcesConsulted` on the result** | A source that is written and never registered in DI contributes nothing, and the check then answers **"free"** — the exact failure the interface exists to stop, reappearing as a DI omission. It is invisible unless the result says which sources answered. The harness asserts the count **and** the seven names; that assertion is the only thing standing between a forgotten `AddScoped` and a silent wrong answer. |
+| — | not planned | **a row for every panelist, including the clear ones** | The external half used to emit a row only where there was a conflict, so a panel of three externals with one clash rendered as one row. "Checked and clear" and "not checked" must not look the same. |
+| — | not planned | **one interview per room booking** | D8 gives an interview a booking to hold. Two interviews pointing at the same hold would be the double-booking the hold exists to prevent, arriving from inside recruitment. Refused, naming the interview that already holds it. |
+| a hard clash refuses | — | **and a reason given where there is NO clash is discarded** | A record saying somebody overrode a clash that never existed is worse than no record. Asserted. |
+
+**A defect of my own, caught by the harness asserting the right thing.** The interview mapper reads
+`RoomBooking?.Room?.RoomName`, and I never added the `Include` — so `roomName` and
+`roomBookingNumber` came back **null on every read** while `roomBookingId` was set. That is the
+"declared and populated by nothing" shape this round keeps recording, produced while writing the
+lane that records it. It survived only because the first draft of the assertion checked the id;
+asserting the **name** found it immediately. Fixed by including `RoomBooking.Room` on
+`WithSummaryNavigations`.
+
+**What the harness got wrong, and what each mistake was:**
+
+- **The reschedule test moved the wrong interview.** It moved a session whose panel was B onto a
+  window occupied by A, and the create succeeded — correctly, B was free. *"A reschedule onto an
+  occupied window is refused"* is only true of a window occupied **for that panel**, and the fixture
+  has to arrange that. The first version asserted the product was broken when it was right.
+- **Event creation forces its own state.** `CompanyScheduleService` sets `Status = Scheduled` and
+  `InvitationStatus = Sent` whatever the payload says. The fixture set `Confirmed`/`Accepted` in the
+  create body and then asserted a hard clash — asserting its own hopes. It now goes through
+  `approve` and `participants/respond`, which is also what proves the hardness rule reads live state
+  rather than what was posted.
+- **Several leave types require a reliever**, and the create is refused. A real product rule, so the
+  fixture picks a type it does not apply to rather than working around it by naming an arbitrary
+  reliever.
+- **The room fixture was not repeatable.** It booked a fixed window on the tenant's first bookable
+  room; the second run hit *"There is a conflicting booking for this time slot"* — the room module's
+  blocking check doing its job on the first run's leftovers. The fixture now creates a room of its
+  own per run, which also removes the dependence on the tenant having a bookable room at all.
+
+⚠ The assertion count went **48 → 58** on that last fix, because the failing room booking had been
+short-circuiting the whole D8 block. *Fewer assertions with zero failures is a regression signal* —
+and so is a suite that reports 48 when it should report 58.
+
+**`run-round4-c` broke, correctly, and was repaired rather than overridden.** Lane C creates several
+interviews on one day with the same panelist. That was harmless while the check was advisory; D3
+made it bind, so the second session was refused and the suite died. **The product is right and the
+suite predates the rule.** Each session now gets its own day — deliberately **not** an override
+reason, which would have worked but would have meant lane C could no longer notice if the clash
+check broke, and would have written a false *"somebody decided to double-book"* record onto fixtures
+that are really about slot arithmetic. Back to 46/46.
+
+**Neighbouring suites — all at baseline.**
+
+| Suite | Result | Baseline | |
+|---|---|---|---|
+| `run-round4-a` · `-b` · `-c` · `-f` · `-g` · `-h` | 45 · **96** · 46 · 103 · 41 · 36 | same (b +1, see below) | ✅ |
+| `run-k` · `run-v` | 81 · 72 | same | ✅ |
+| `run-a` · `run-c1` · `run-c2` · `run-candidate-country` | 44 · 96 · 89 · 43 | same | ✅ |
+| `slice-b` · `slice-c` · `slice-e` · `slice-f` | 174/176 · 188/190 · **101/105** · 69/69 | same | ✅ |
+| `run-lane5b` | 32/34 | 32/34 | ✅ recorded stale admin-gate |
+
+**⚠ `slice-e` came back 99/105 — two below baseline — and it was MY fixture litter, not lane D.**
+
+`run-round4-b` mints four talent-pool members per run and left every one of them in the pool. Six
+runs, twenty-four squatters, all with experience on file — and `slice-e` asks the vacancy-match
+endpoint for its top 50 and looks for its own candidate in the answer. It was pushed out.
+
+slice-e's assertion is **not** at fault: it already asks for 50 and searches by id. The fault is a
+suite that creates pool members and does not take them out again. `run-round4-b` now removes its
+four at the end (96 assertions, up from 95), the twenty-four already left behind were removed
+through the real door, and slice-e is back to 101/105 exactly.
+
+⚠ The candidates themselves are kept — they carry applications, engagement events and an interview
+booking, and deleting them would delete the evidence the suite just created. What must not persist
+is the **pool membership**, which is what every pool read ranks. ⚠ The removal needs an
+**employee-linked** user: `admin` is not one, and the pool doors answer *"Tenant context could not be
+resolved"* for it.
+
+**Not walked in a browser:** the rewritten availability panel and the "when is everyone free?"
+suggestions.
 
 ---
 

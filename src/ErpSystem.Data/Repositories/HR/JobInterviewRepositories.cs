@@ -124,7 +124,12 @@ public class JobInterviewRepository : GenericRepository<JobInterview>, IJobInter
             .Include(i => i.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .Include(i => i.Interviewees).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
             .Include(i => i.Panelists).ThenInclude(p => p.Employee)
-            .Include(i => i.ExternalPanelists).ThenInclude(ep => ep.ExternalAssociate);
+            .Include(i => i.ExternalPanelists).ThenInclude(ep => ep.ExternalAssociate)
+            // ⚠ Round 4, lane D8. `ToDto` reads `RoomBooking?.Room?.RoomName`, so without this the
+            // room name and booking number came back null on EVERY read while `roomBookingId` was
+            // set — a field declared and populated by nothing, which is the shape this round keeps
+            // recording. Caught by the lane D harness asserting the name rather than just the id.
+            .Include(i => i.RoomBooking).ThenInclude(b => b.Room);
 
     // GET /{id} and every write response map through ToDto, which reads VacancyNumber and JobTitle off
     // the vacancy navigation — the generic base loaded neither.

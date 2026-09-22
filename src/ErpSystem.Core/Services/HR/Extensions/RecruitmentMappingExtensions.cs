@@ -2241,6 +2241,14 @@ public static class RecruitmentMappingExtensions
             IntervieweeCount = entity.Interviewees?.Count ?? 0,
             PanelistCount = (entity.Panelists?.Count ?? 0) + (entity.ExternalPanelists?.Count ?? 0),
             QuestionPresetId = entity.QuestionPresetId,
+            // Round 4, lane D. The room is only named where the read Included the booking; a null
+            // name beside a non-null id means "not loaded", not "no room".
+            RoomBookingId            = entity.RoomBookingId,
+            RoomName                 = entity.RoomBooking?.Room?.RoomName,
+            RoomBookingNumber        = entity.RoomBooking?.BookingNumber,
+            PanelClashOverrideReason = entity.PanelClashOverrideReason,
+            PanelClashOverrideDetail = entity.PanelClashOverrideDetail,
+            PanelClashOverriddenAt   = entity.PanelClashOverriddenAt,
         };
     }
 

@@ -1,4 +1,4 @@
-using ErpSystem.Api.Filters;
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -80,9 +80,18 @@ public class JobInterviewController : ControllerBase
         => Ok(await _service.GetByRoundAsync(vacancyId, round));
 
     /// <summary>
-    /// Advisory availability check for a proposed interview slot: overlapping interviews the panelists
-    /// already sit on, plus approved/pending leave and travel. Non-blocking — surfaced as a UI warning.
+    /// What every panelist is already committed to during a proposed window.
     /// </summary>
+    /// <remarks>
+    /// <para>⚠ Round 4, lane D. This was three sources — other interviews, leave, travel — and
+    /// purely advisory. It now fans out over every registered <c>IPanelistCommitmentSource</c>
+    /// (meetings the panelist is a participant of, room bookings, training nominations, closures and
+    /// public holidays as well), and the WRITE paths enforce it: a hard clash refuses a create,
+    /// update or reschedule unless <c>panelClashOverrideReason</c> is supplied.</para>
+    ///
+    /// <para>Reading it remains advisory, which is what this endpoint is for — the screen shows the
+    /// clash before the recruiter commits to a time.</para>
+    /// </remarks>
     [HttpGet("panelist-availability")]
     public async Task<ActionResult<PanelistAvailabilityCheckDto>> CheckPanelistAvailability(
         [FromQuery] List<Guid> panelistIds,
@@ -95,6 +104,36 @@ public class JobInterviewController : ControllerBase
         => Ok(await _service.CheckPanelistAvailabilityAsync(
             panelistIds ?? new List<Guid>(), externalPanelistIds ?? new List<Guid>(),
             date, start, end, excludeInterviewId, ct));
+
+    /// <summary>
+    /// Round 4, D4 — when IS the whole panel free? Walks the range and returns the windows where
+    /// nobody has a hard commitment.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A slot carrying SOFT conflicts is still suggested, flagged rather than hidden: a window
+    /// where a panelist is nominally on leave is one HR may well want, and day-granular evidence is
+    /// not grounds for the system to withhold it.
+    /// </remarks>
+    [HttpGet("suggest-slots")]
+    public async Task<ActionResult<List<PanelSlotSuggestionDto>>> SuggestSlots(
+        [FromQuery] List<Guid> panelistIds,
+        [FromQuery] List<Guid> externalPanelistIds,
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        [FromQuery] TimeSpan dayStart,
+        [FromQuery] TimeSpan dayEnd,
+        [FromQuery] int durationMinutes,
+        [FromQuery] Guid? excludeInterviewId,
+        [FromQuery] int maxSuggestions,
+        CancellationToken ct)
+        => Ok(await _service.SuggestPanelSlotsAsync(
+            panelistIds ?? new List<Guid>(), externalPanelistIds ?? new List<Guid>(),
+            from, to,
+            dayStart == default ? new TimeSpan(9, 0, 0) : dayStart,
+            dayEnd == default ? new TimeSpan(17, 0, 0) : dayEnd,
+            durationMinutes <= 0 ? 60 : durationMinutes,
+            excludeInterviewId,
+            maxSuggestions <= 0 ? 20 : maxSuggestions, ct));
 
     // =========================================================================
     // INTERVIEW CRUD

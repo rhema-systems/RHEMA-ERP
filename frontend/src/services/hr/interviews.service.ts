@@ -12,13 +12,13 @@ import type {
   CreateJobInterview,
   CreateJobInterviewQuestionPlan,
   CreateJobInterviewScoreSummary,
+  InterviewPaper,
+  InterviewPaperRequest,
   InterviewQuestion,
   InterviewQuestionPreset,
   InterviewQuestionPresetSummary,
   InterviewQuestionType,
   InterviewQuestionTypeSummary,
-  InterviewPaper,
-  InterviewPaperRequest,
   InterviewScoreDraft,
   InterviewSlotPlan,
   JobInterview,
@@ -32,9 +32,11 @@ import type {
   JobInterviewStatus,
   JobInterviewSummary,
   JobInterviewee,
+  PanelSlotSuggestion,
+  PanelSlotSuggestionQuery,
   PanelistAvailabilityCheck,
-  PanelistScorecardWorklistItem,
   PanelistAvailabilityQuery,
+  PanelistScorecardWorklistItem,
   QuestionPlanPreview,
   RescheduleJobInterview,
   SaveInterviewScoreDraft,
@@ -114,6 +116,25 @@ class JobInterviewService {
     if (query.externalPanelistIds?.length) params.externalPanelistIds = query.externalPanelistIds;
     if (query.excludeInterviewId) params.excludeInterviewId = query.excludeInterviewId;
     return apiService.get<PanelistAvailabilityCheck>(`${this.baseUrl}/panelist-availability`, params);
+  }
+
+  /**
+   * Round 4, D4 — the windows in a range where the WHOLE panel is free.
+   *
+   * ⚠ A slot carrying soft conflicts still comes back, flagged. Filtering those out client-side
+   * would throw away the windows HR most often wants: the ones where the only obstacle is a
+   * day-granular record that may not apply to the hour.
+   */
+  suggestSlots(query: PanelSlotSuggestionQuery): Promise<PanelSlotSuggestion[]> {
+    const params: Record<string, unknown> = { from: query.from, to: query.to };
+    if (query.panelistIds?.length) params.panelistIds = query.panelistIds;
+    if (query.externalPanelistIds?.length) params.externalPanelistIds = query.externalPanelistIds;
+    if (query.dayStart) params.dayStart = query.dayStart;
+    if (query.dayEnd) params.dayEnd = query.dayEnd;
+    if (query.durationMinutes) params.durationMinutes = query.durationMinutes;
+    if (query.excludeInterviewId) params.excludeInterviewId = query.excludeInterviewId;
+    if (query.maxSuggestions) params.maxSuggestions = query.maxSuggestions;
+    return apiService.get<PanelSlotSuggestion[]>(`${this.baseUrl}/suggest-slots`, params);
   }
 
   // ── scheduling ───────────────────────────────────────────────────────────

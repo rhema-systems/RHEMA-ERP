@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Enums;
 
@@ -1943,6 +1944,49 @@ public class JobInterview : TenantEntity
     /// break that runs past midnight or two that overlap.</para>
     /// </remarks>
     public string? BreaksJson { get; set; }
+
+    // ── Round 4, lane D — the panel clash check made binding, and the room actually held ────────
+
+    /// <summary>
+    /// The room this interview HOLDS, rather than the one its <see cref="LocationOrLink"/> mentions.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ D8. <c>LocationOrLink</c> is free text: typing "Board room" into it books nothing,
+    /// reserves nothing and is invisible to the room's own double-booking check — so two interviews
+    /// and a meeting could all name the same room for the same hour and every screen would look
+    /// fine. With a booking, the room module's existing blocking check does the work.</para>
+    ///
+    /// <para>Optional, because a virtual interview has no room and an interview held somewhere the
+    /// register does not cover is a normal state, not an error.</para>
+    /// </remarks>
+    public Guid? RoomBookingId { get; set; }
+
+    [ForeignKey(nameof(RoomBookingId))]
+    public virtual RoomBooking? RoomBooking { get; set; }
+
+    /// <summary>
+    /// Why this interview was scheduled over a panelist's confirmed commitment (decision D-5).
+    /// </summary>
+    /// <remarks>
+    /// <para>A hard clash refuses the write unless a reason is given; the reason lands here, with
+    /// who gave it and when. Following the requisition-budget precedent — the override exists
+    /// because a recruiter who knows the panelist swapped a meeting should not be blocked by the
+    /// system's second-hand information, and the price of that is that the decision is on record.</para>
+    ///
+    /// <para>⚠ Written only when a hard clash was actually present. A reason typed on an interview
+    /// with no clash is discarded: a record of overriding something that never existed is worse
+    /// than no record at all.</para>
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? PanelClashOverrideReason { get; set; }
+
+    /// <summary>What was overridden, captured at the moment it was, so the record survives the diary changing.</summary>
+    [MaxLength(2000)]
+    public string? PanelClashOverrideDetail { get; set; }
+
+    public Guid? PanelClashOverriddenById { get; set; }
+
+    public DateTime? PanelClashOverriddenAt { get; set; }
 
 	public virtual ICollection<JobInterviewee> Interviewees { get; set; } = new List<JobInterviewee>();
     public virtual ICollection<JobInterviewPanelist> Panelists { get; set; } = new List<JobInterviewPanelist>();

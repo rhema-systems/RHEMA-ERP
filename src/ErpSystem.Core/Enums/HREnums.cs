@@ -8091,6 +8091,61 @@ public enum EventVisibility
     Confidential = 5
 }
 
+/// <summary>
+/// What kind of thing is standing between a panelist and a proposed interview window
+/// (round 4, lane D1).
+/// </summary>
+public enum CommitmentKind
+{
+    [Description("Interview")]
+    Interview = 1,
+
+    [Description("Leave")]
+    Leave = 2,
+
+    [Description("Travel")]
+    Travel = 3,
+
+    [Description("Meeting or event")]
+    Event = 4,
+
+    [Description("Room booking")]
+    RoomBooking = 5,
+
+    [Description("Training")]
+    Training = 6,
+
+    [Description("Business closure")]
+    Closure = 7,
+
+    [Description("Public holiday")]
+    Holiday = 8,
+}
+
+/// <summary>
+/// Whether a clash refuses the schedule or merely warns about it (round 4, decision D-5).
+/// </summary>
+/// <remarks>
+/// <para><b>Hard</b> is a commitment that is both confirmed and time-precise: another interview, a
+/// Confirmed room booking, a Confirmed event this person accepted. Scheduling over it would
+/// double-book a real person at a real hour, so it is refused unless the recruiter supplies an
+/// override reason, which is recorded on the interview.</para>
+///
+/// <para><b>Soft</b> is everything the system knows but should not overrule: leave and travel, which
+/// are recorded by the DAY and cannot say whether the 09:00 hour is free; a Tentative booking; a
+/// training nomination, which is a plan rather than an attendance; a closure or a public holiday,
+/// which say the office is shut, not that the person is unavailable. A recruiter who knows the
+/// panelist swapped a meeting should not be stopped by the system's second-hand information.</para>
+/// </remarks>
+public enum CommitmentHardness
+{
+    [Description("Warns")]
+    Soft = 1,
+
+    [Description("Refuses")]
+    Hard = 2,
+}
+
 public enum EventStatus
 {
     [Description("Scheduled")]

@@ -2555,6 +2555,23 @@ public class JobInterviewDto : BaseDto
     public int IntervieweeCount { get; set; }
     public int PanelistCount { get; set; }
     public Guid? QuestionPresetId { get; set; }
+
+    // ── Round 4, lane D ────────────────────────────────────────────────────────
+
+    /// <inheritdoc cref="CreateJobInterviewDto.RoomBookingId"/>
+    public Guid? RoomBookingId { get; set; }
+
+    /// <summary>The held room's name and booking number, so the screen need not fetch the booking.</summary>
+    public string? RoomName { get; set; }
+    public string? RoomBookingNumber { get; set; }
+
+    /// <summary>
+    /// Set when this interview was scheduled over a panelist's confirmed commitment. Null is the
+    /// ordinary case; a value means somebody decided, and said why.
+    /// </summary>
+    public string? PanelClashOverrideReason { get; set; }
+    public string? PanelClashOverrideDetail { get; set; }
+    public DateTime? PanelClashOverriddenAt { get; set; }
 }
 
 public class JobInterviewSummaryDto
@@ -2627,6 +2644,27 @@ public class CreateJobInterviewDto : CreateDtoBase
     public List<Guid>? PanelistEmployeeIds { get; set; }
     public List<Guid>? ExternalPanelistAssociateIds { get; set; }
     public Guid? QuestionPresetId { get; set; }
+
+    /// <summary>
+    /// Why this interview may be scheduled despite a panelist's confirmed commitment
+    /// (round 4, D3; decision D-5).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Without it a HARD clash REFUSES the write — the check stopped being advisory in round 4.
+    /// Supplying it schedules anyway and records the reason, who gave it and what was overridden,
+    /// on the interview. A reason supplied where there is no clash is discarded.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? PanelClashOverrideReason { get; set; }
+
+    /// <summary>
+    /// The room to HOLD for this interview, booked through the meeting-room register (D8).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Distinct from <c>LocationOrLink</c>, which is free text and reserves nothing. A room named
+    /// only in that box is invisible to the room's own double-booking check.
+    /// </remarks>
+    public Guid? RoomBookingId { get; set; }
 }
 
 public sealed class ApplicationSlotEntry
@@ -2669,6 +2707,13 @@ public class UpdateJobInterviewDto : UpdateDtoBase
     [MaxLength(2000)]
     public string? Instructions { get; set; }
     public Guid? QuestionPresetId { get; set; }
+
+    /// <inheritdoc cref="CreateJobInterviewDto.PanelClashOverrideReason"/>
+    [MaxLength(1000)]
+    public string? PanelClashOverrideReason { get; set; }
+
+    /// <inheritdoc cref="CreateJobInterviewDto.RoomBookingId"/>
+    public Guid? RoomBookingId { get; set; }
 }
 
 public class RescheduleJobInterviewDto
@@ -2691,6 +2736,13 @@ public class RescheduleJobInterviewDto
     [Required]
     [MaxLength(2000)]
     public string RescheduleReason { get; set; } = string.Empty;
+
+    /// <inheritdoc cref="CreateJobInterviewDto.PanelClashOverrideReason"/>
+    [MaxLength(1000)]
+    public string? PanelClashOverrideReason { get; set; }
+
+    /// <inheritdoc cref="CreateJobInterviewDto.RoomBookingId"/>
+    public Guid? RoomBookingId { get; set; }
 }
 
 public class CancelJobInterviewDto
@@ -2711,22 +2763,99 @@ public class CancelJobInterviewDto
 /// </summary>
 public class PanelistAvailabilityCheckDto
 {
+    /// <summary>True when anyone has anything at all — hard or soft.</summary>
     public bool HasConflicts { get; set; }
+
+    /// <summary>
+    /// True when at least one clash is HARD, which is what makes a schedule refuse without an
+    /// override reason (round 4, decision D-5).
+    /// </summary>
+    public bool HasHardConflicts { get; set; }
+
+    /// <summary>
+    /// Which sources actually answered, so an empty result can be told from an unregistered source.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Diagnostic, and load-bearing for that reason. A commitment source that exists but was never
+    /// registered contributes nothing and the check cheerfully reports "free" — the exact failure
+    /// this lane exists to remove, reappearing as a DI omission. If a source you expect is missing
+    /// from this list, it is not wired up.
+    /// </remarks>
+    public List<string> SourcesConsulted { get; set; } = new();
+
     public List<PanelistAvailabilityDto> Panelists { get; set; } = new();
 }
 
 /// <summary>Per-panelist conflict breakdown for the proposed slot.</summary>
+/// <remarks>
+/// ⚠ Round 4, lane D1. The three typed lists — interviews, leave, travel — were replaced by one
+/// <see cref="Commitments"/> list. There are seven sources now and there will be more; a DTO with a
+/// named list per source needs editing every time the organisation learns to track something else,
+/// and the screen needs editing with it.
+/// </remarks>
 public class PanelistAvailabilityDto
 {
     /// <summary>Employee id for internal panelists, or associate id for external panelists.</summary>
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
-    /// <summary>True when this row is an external associate (interview-overlap only; no leave/travel tracked).</summary>
+
+    /// <summary>
+    /// True when this row is an external associate. Only the sources keyed on an interview or a
+    /// company-wide closure can speak about them — there is no leave, travel or training on file.
+    /// </summary>
     public bool IsExternal { get; set; }
+
     public bool HasConflicts { get; set; }
-    public List<PanelistInterviewConflictDto> InterviewConflicts { get; set; } = new();
-    public List<PanelistLeaveConflictDto> LeaveConflicts { get; set; } = new();
-    public List<PanelistTravelConflictDto> TravelConflicts { get; set; } = new();
+    public bool HasHardConflicts { get; set; }
+
+    public List<PanelistCommitmentDto> Commitments { get; set; } = new();
+}
+
+/// <summary>One thing standing between this panelist and the proposed window.</summary>
+public class PanelistCommitmentDto
+{
+    public CommitmentKind Kind { get; set; }
+    public string KindName => Kind.ToString();
+
+    public CommitmentHardness Hardness { get; set; }
+    public string HardnessName => Hardness.ToString();
+
+    /// <summary>What a recruiter reads — "Interview panel for Senior Accountant".</summary>
+    public string Label { get; set; } = string.Empty;
+
+    public DateTime Start { get; set; }
+    public DateTime End { get; set; }
+
+    /// <summary>
+    /// True when the source records whole days, so the times above are the day's bounds rather than
+    /// a real window. Leave, travel, closures and all-day events.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The screen must not print a day-granular commitment as "09:00–11:00" — that is a precision
+    /// the record does not have, and it is why these are soft.
+    /// </remarks>
+    public bool IsDayGranular { get; set; }
+
+    /// <summary>The record's own number, where it has one, so a recruiter can go and look.</summary>
+    public string? Reference { get; set; }
+}
+
+/// <summary>
+/// A window in which the whole panel is free — the answer to "then when?" (round 4, D4).
+/// </summary>
+/// <remarks>
+/// ⚠ A slot is suggested when no panelist has a HARD commitment. Soft ones do not exclude it but
+/// are reported on it: a slot where somebody is nominally on leave is still a slot HR may want, and
+/// hiding it would be the system making that call on day-granular evidence.
+/// </remarks>
+public class PanelSlotSuggestionDto
+{
+    public DateOnly Date { get; set; }
+    public TimeSpan StartTime { get; set; }
+    public TimeSpan EndTime { get; set; }
+
+    public bool HasSoftConflicts { get; set; }
+    public string? SoftConflictSummary { get; set; }
 }
 
 public class PanelistInterviewConflictDto

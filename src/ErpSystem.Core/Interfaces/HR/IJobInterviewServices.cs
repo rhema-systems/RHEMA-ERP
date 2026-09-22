@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -71,6 +71,19 @@ public interface IJobInterviewService
         IReadOnlyList<Guid> panelistEmployeeIds, IReadOnlyList<Guid> externalAssociateIds,
         DateOnly date, TimeSpan start, TimeSpan end,
         Guid? excludeInterviewId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Round 4, D4 — the windows in a date range where the WHOLE panel is free.
+    /// </summary>
+    /// <remarks>
+    /// A clash check that only says no is half a tool. Soft commitments do not exclude a window but
+    /// are reported on it, so HR can take a slot where somebody is nominally on leave.
+    /// </remarks>
+    Task<List<PanelSlotSuggestionDto>> SuggestPanelSlotsAsync(
+        IReadOnlyList<Guid> panelistEmployeeIds, IReadOnlyList<Guid> externalAssociateIds,
+        DateOnly fromDate, DateOnly toDate, TimeSpan dayStart, TimeSpan dayEnd,
+        int durationMinutes, Guid? excludeInterviewId, int maxSuggestions = 20,
+        CancellationToken cancellationToken = default);
 
     // CRUD
     Task<JobInterviewDto> CreateAsync(CreateJobInterviewDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
