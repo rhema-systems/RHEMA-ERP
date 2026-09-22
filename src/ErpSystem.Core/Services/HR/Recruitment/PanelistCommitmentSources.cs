@@ -44,9 +44,12 @@ public sealed class InterviewPanelCommitmentSource : IPanelistCommitmentSource
     public async Task<IReadOnlyList<PanelistCommitment>> GetCommitmentsAsync(
         PanelistCommitmentQuery q, CancellationToken ct = default)
     {
-        var date = q.Date;
-        var start = q.WindowStart.TimeOfDay;
-        var end = q.WindowEnd.TimeOfDay;
+        // ⚠ Round 4, D5. Filter by DATE RANGE in the query and by the precise window in memory.
+        // A clash check asks about one window on one day; the personal diary asks about a fortnight.
+        // Comparing times in SQL only works when the range is a single day — across days, 09:00 on
+        // Tuesday is not "after" 17:00 on Monday by time-of-day alone.
+        var from = q.FromDate;
+        var to = q.ToDate;
         var results = new List<PanelistCommitment>();
 
         // ⚠ ONE query for every panelist, not one per panelist (§ 3 defect 10). The old code called
@@ -63,12 +66,13 @@ public sealed class InterviewPanelCommitmentSource : IPanelistCommitmentSource
                          && p.JobInterview.TenantId == q.TenantId
                          && p.JobInterview.Id != q.ExcludeInterviewId
                          && Blocking.Contains(p.JobInterview.Status)
-                         && p.JobInterview.ScheduledDate == date
-                         && p.JobInterview.StartTime < end
-                         && p.JobInterview.EndTime > start)
+                         && p.JobInterview.ScheduledDate >= from
+                         && p.JobInterview.ScheduledDate <= to)
                 .ToListAsync(ct);
 
-            results.AddRange(rows.Select(p => Describe(p.EmployeeId, false, p.JobInterview!, date)));
+            results.AddRange(rows
+                .Select(p => Describe(p.EmployeeId, false, p.JobInterview!))
+                .Where(c => q.Overlaps(c.Start, c.End)));
         }
 
         if (q.ExternalAssociateIds.Count > 0)
@@ -82,20 +86,22 @@ public sealed class InterviewPanelCommitmentSource : IPanelistCommitmentSource
                          && p.JobInterview.TenantId == q.TenantId
                          && p.JobInterview.Id != q.ExcludeInterviewId
                          && Blocking.Contains(p.JobInterview.Status)
-                         && p.JobInterview.ScheduledDate == date
-                         && p.JobInterview.StartTime < end
-                         && p.JobInterview.EndTime > start)
+                         && p.JobInterview.ScheduledDate >= from
+                         && p.JobInterview.ScheduledDate <= to)
                 .ToListAsync(ct);
 
-            results.AddRange(rows.Select(p => Describe(p.AssociateId, true, p.JobInterview!, date)));
+            results.AddRange(rows
+                .Select(p => Describe(p.AssociateId, true, p.JobInterview!))
+                .Where(c => q.Overlaps(c.Start, c.End)));
         }
 
         return results;
     }
 
-    private static PanelistCommitment Describe(Guid subjectId, bool isExternal, JobInterview i, DateOnly date)
+    private static PanelistCommitment Describe(Guid subjectId, bool isExternal, JobInterview i)
     {
-        var day = date.ToDateTime(TimeOnly.MinValue);
+        // ⚠ The interview's OWN date, not the query's — over a range they are not the same day.
+        var day = i.ScheduledDate.ToDateTime(TimeOnly.MinValue);
         var title = string.IsNullOrWhiteSpace(i.JobVacancy?.JobTitle) ? "an interview" : i.JobVacancy!.JobTitle;
         return new PanelistCommitment(
             subjectId, isExternal, CommitmentKind.Interview, CommitmentHardness.Hard,
@@ -128,14 +134,15 @@ public sealed class LeaveCommitmentSource : IPanelistCommitmentSource
         PanelistCommitmentQuery q, CancellationToken ct = default)
     {
         if (q.EmployeeIds.Count == 0) return Array.Empty<PanelistCommitment>();
-        var date = q.Date;
+        var from = q.FromDate;
+        var to = q.ToDate;
 
         var rows = await _unitOfWork.Repository<LeaveRequest>().GetQueryable()
             .Include(l => l.LeaveType)
             .Where(l => q.EmployeeIds.Contains(l.EmployeeId)
                      && l.TenantId == q.TenantId && !l.IsDeleted
                      && Active.Contains(l.Status)
-                     && l.StartDate <= date && l.EndDate >= date)
+                     && l.StartDate <= to && l.EndDate >= from)
             .ToListAsync(ct);
 
         return rows.Select(l => new PanelistCommitment(
@@ -164,13 +171,14 @@ public sealed class TravelCommitmentSource : IPanelistCommitmentSource
         PanelistCommitmentQuery q, CancellationToken ct = default)
     {
         if (q.EmployeeIds.Count == 0) return Array.Empty<PanelistCommitment>();
-        var date = q.Date;
+        var from = q.FromDate;
+        var to = q.ToDate;
 
         var rows = await _unitOfWork.Repository<StaffTravelRequest>().GetQueryable()
             .Where(t => q.EmployeeIds.Contains(t.EmployeeId)
                      && t.TenantId == q.TenantId && !t.IsDeleted
                      && Active.Contains(t.Status)
-                     && t.TravelStartDate <= date && t.TravelEndDate >= date)
+                     && t.TravelStartDate <= to && t.TravelEndDate >= from)
             .ToListAsync(ct);
 
         return rows.Select(t => new PanelistCommitment(
@@ -208,8 +216,8 @@ public sealed class CompanyEventCommitmentSource : IPanelistCommitmentSource
         if (q.EmployeeIds.Count == 0) return Array.Empty<PanelistCommitment>();
 
         // A whole-day span, because an all-day event carries no times and must still be found.
-        var dayStart = q.Date.ToDateTime(TimeOnly.MinValue);
-        var dayEnd = q.Date.ToDateTime(TimeOnly.MaxValue);
+        var dayStart = q.DayStart;
+        var dayEnd = q.DayEnd;
 
         var rows = await _unitOfWork.Repository<EventParticipant>().GetQueryable()
             .Include(p => p.Event)
@@ -228,11 +236,11 @@ public sealed class CompanyEventCommitmentSource : IPanelistCommitmentSource
         foreach (var p in rows)
         {
             var ev = p.Event!;
-            var (start, end) = WindowOf(ev, q.Date);
+            // ⚠ The event's own day, not the query's first — over a range they differ.
+            var (start, end) = WindowOf(ev, DateOnly.FromDateTime(ev.StartDate));
 
-            // An event with times must actually overlap the proposed window; an all-day one covers it.
-            if (!ev.IsAllDayEvent && ev.StartTime.HasValue && ev.EndTime.HasValue
-                && (start >= q.WindowEnd || end <= q.WindowStart))
+            // An event with times must actually overlap the asked-about window; an all-day one covers it.
+            if (!ev.IsAllDayEvent && ev.StartTime.HasValue && ev.EndTime.HasValue && !q.Overlaps(start, end))
                 continue;
 
             var accepted = p.InvitationStatus == InvitationStatus.Accepted;
@@ -325,8 +333,8 @@ public sealed class TrainingCommitmentSource : IPanelistCommitmentSource
     {
         if (q.EmployeeIds.Count == 0) return Array.Empty<PanelistCommitment>();
 
-        var dayStart = q.Date.ToDateTime(TimeOnly.MinValue);
-        var dayEnd = q.Date.ToDateTime(TimeOnly.MaxValue);
+        var dayStart = q.DayStart;
+        var dayEnd = q.DayEnd;
 
         var rows = await _unitOfWork.Repository<TrainingNomination>().GetQueryable()
             .Include(n => n.Schedule).ThenInclude(sch => sch.Program)
@@ -353,25 +361,30 @@ public sealed class TrainingCommitmentSource : IPanelistCommitmentSource
         var commitments = new List<PanelistCommitment>();
         foreach (var n in rows)
         {
+            // ⚠ Over a range there may be several sessions; the first one in the window is the one
+            // to report, and its own date is what the times hang off.
             var session = sessions.FirstOrDefault(x => x.ScheduleId == n.ScheduleId);
+            var sessionDay = session?.Date.Date ?? dayStart;
             var name = n.Schedule!.Program?.ProgramName ?? "Training";
 
             DateTime start, end;
             bool dayGranular;
             if (session?.StartTime is { } ss && session.EndTime is { } se)
             {
-                (start, end, dayGranular) = (dayStart + ss, dayStart + se, false);
+                (start, end, dayGranular) = (sessionDay + ss, sessionDay + se, false);
             }
             else if (n.Schedule.StartTime is { } cs && n.Schedule.EndTime is { } ce)
             {
-                (start, end, dayGranular) = (dayStart + cs, dayStart + ce, false);
+                // The course's daily hours, on the first day of the asked-about window that it covers.
+                var courseDay = n.Schedule.StartDate.Date > dayStart ? n.Schedule.StartDate.Date : dayStart;
+                (start, end, dayGranular) = (courseDay + cs, courseDay + ce, false);
             }
             else
             {
                 (start, end, dayGranular) = (dayStart, dayEnd, true);
             }
 
-            if (!dayGranular && (start >= q.WindowEnd || end <= q.WindowStart)) continue;
+            if (!dayGranular && !q.Overlaps(start, end)) continue;
 
             commitments.Add(new PanelistCommitment(
                 n.EmployeeId, false, CommitmentKind.Training, CommitmentHardness.Soft,
@@ -410,8 +423,8 @@ public sealed class ClosureCommitmentSource : IPanelistCommitmentSource
             .ToList();
         if (everyone.Count == 0) return Array.Empty<PanelistCommitment>();
 
-        var dayStart = q.Date.ToDateTime(TimeOnly.MinValue);
-        var dayEnd = q.Date.ToDateTime(TimeOnly.MaxValue);
+        var dayStart = q.DayStart;
+        var dayEnd = q.DayEnd;
         var commitments = new List<PanelistCommitment>();
 
         var closures = await _unitOfWork.Repository<BusinessClosure>().GetQueryable()
@@ -419,23 +432,32 @@ public sealed class ClosureCommitmentSource : IPanelistCommitmentSource
                      && c.StartDate <= dayEnd && c.EndDate >= dayStart)
             .ToListAsync(ct);
 
+        // ⚠ Clipped to the asked-about window. A two-week shutdown reported as spanning the whole
+        // fortnight is right; reported as spanning the query is wrong the moment the query is one day.
         foreach (var c in closures)
             foreach (var (id, external) in everyone)
                 commitments.Add(new PanelistCommitment(
                     id, external, CommitmentKind.Closure, CommitmentHardness.Soft,
-                    $"Business closure: {c.Title}", dayStart, dayEnd, IsDayGranular: true));
+                    $"Business closure: {c.Title}",
+                    c.StartDate > dayStart ? c.StartDate : dayStart,
+                    c.EndDate < dayEnd ? c.EndDate : dayEnd,
+                    IsDayGranular: true));
 
-        var date = q.Date;
+        var from = q.FromDate;
+        var to = q.ToDate;
         var holidays = await _unitOfWork.Repository<PublicHoliday>().GetQueryable()
             .Where(h => h.TenantId == q.TenantId && !h.IsDeleted
-                     && h.DateFrom <= date && h.DateTo >= date)
+                     && h.DateFrom <= to && h.DateTo >= from)
             .ToListAsync(ct);
 
         foreach (var h in holidays)
             foreach (var (id, external) in everyone)
                 commitments.Add(new PanelistCommitment(
                     id, external, CommitmentKind.Holiday, CommitmentHardness.Soft,
-                    $"Public holiday: {h.HolidayName}", dayStart, dayEnd, IsDayGranular: true));
+                    $"Public holiday: {h.HolidayName}",
+                    h.DateFrom.ToDateTime(TimeOnly.MinValue),
+                    h.DateTo.ToDateTime(TimeOnly.MaxValue),
+                    IsDayGranular: true));
 
         return commitments;
     }

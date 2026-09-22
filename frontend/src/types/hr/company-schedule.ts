@@ -195,7 +195,19 @@ export interface CompanyEvent extends AuditFields {
   cancellationReason?: string | null;
 
   isRescheduled: boolean;
+  /** ⚠ WHEN it was moved, not what it was moved from — see `originalStartDate`. */
   rescheduledDate?: string | null;
+  /**
+   * What the event was originally scheduled for, kept from the FIRST move (round 4, D7; C-2).
+   *
+   * ⚠ Null on an event that never moved, and on every event rescheduled BEFORE that lane — the
+   * original was overwritten then and is not recoverable. Render null as "not recorded", never as
+   * "same as now".
+   */
+  originalStartDate?: string | null;
+  originalStartTime?: string | null;
+  originalEndDate?: string | null;
+  originalEndTime?: string | null;
   rescheduleReason?: string | null;
 
   additionalNotes?: string | null;
@@ -756,4 +768,63 @@ export interface UpdateFiscalPeriod {
 
 export interface CloseFiscalPeriod {
   periodId: string;
+}
+
+
+// ── The personal diary (round 4, D5) ─────────────────────────────────────────
+
+// CommitmentKind — HREnums.cs. One member per registered IPanelistCommitmentSource.
+export const SCHEDULE_ENTRY_KINDS = [
+  'Interview',
+  'Leave',
+  'Travel',
+  'Event',
+  'RoomBooking',
+  'Training',
+  'Closure',
+  'Holiday',
+] as const;
+export type ScheduleEntryKind = (typeof SCHEDULE_ENTRY_KINDS)[number];
+
+/**
+ * One thing an employee is committed to, from any module that tracks commitments.
+ *
+ * ⚠ Assembled by fanning out over the SAME commitment sources the interview clash check uses, so a
+ * new kind of commitment appears here and there together — or in neither.
+ */
+export interface PersonalScheduleEntry {
+  subjectId: string;
+  kind: ScheduleEntryKind;
+  kindName: string;
+  /**
+   * ⚠ On the interview clash check `Hard` REFUSES a booking. In a diary nothing is refused and this
+   * is only a hint about how movable the entry is.
+   */
+  hardness: 'Soft' | 'Hard';
+  hardnessName: string;
+  label: string;
+  start: string;
+  end: string;
+  /**
+   * ⚠ True when the source records whole DAYS — leave, travel, a closure, an all-day event. `start`
+   * and `end` are the day's bounds, not a window; never render them as hours.
+   */
+  isDayGranular: boolean;
+  reference?: string | null;
+}
+
+export interface PersonalSchedule {
+  employeeId: string;
+  employeeName: string;
+  from: string;
+  to: string;
+  entries: PersonalScheduleEntry[];
+}
+
+/** A unit and everything beneath it — what a head needs before scheduling for their team. */
+export interface TeamSchedule {
+  organizationUnitId: string;
+  from: string;
+  to: string;
+  members: PersonalSchedule[];
 }

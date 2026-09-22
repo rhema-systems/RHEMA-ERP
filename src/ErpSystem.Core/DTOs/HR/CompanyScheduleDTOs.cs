@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
@@ -108,7 +108,23 @@ public class CompanyEventDto : BaseDto
     
     // Reschedule
     public bool IsRescheduled { get; set; }
+
+    /// <summary>⚠ WHEN it was moved, not what it was moved from — see the entity. C-2.</summary>
     public DateTime? RescheduledDate { get; set; }
+
+    /// <summary>
+    /// What the event was originally scheduled for, kept from the first move (round 4, D7; C-2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Null on an event that has never moved, and on every event rescheduled BEFORE this lane —
+    /// the original was overwritten and is not recoverable. A screen must render null as "not
+    /// recorded", never as "same as now".
+    /// </remarks>
+    public DateTime? OriginalStartDate { get; set; }
+    public TimeSpan? OriginalStartTime { get; set; }
+    public DateTime? OriginalEndDate { get; set; }
+    public TimeSpan? OriginalEndTime { get; set; }
+
     public string? RescheduleReason { get; set; }
     
     public string? AdditionalNotes { get; set; }
@@ -1251,3 +1267,62 @@ public class CloseFiscalPeriodDto
 
 #endregion
 
+
+// ── The personal diary (round 4, D5) ───────────────────────────────────────────────────────────
+
+/// <summary>One thing an employee is committed to, from any module that tracks commitments.</summary>
+/// <remarks>
+/// ⚠ Assembled by fanning out over the SAME <c>IPanelistCommitmentSource</c> implementations the
+/// interview clash check uses. A diary written separately would have started identical and drifted,
+/// and only one of them would learn about an eighth kind of commitment.
+/// </remarks>
+public class PersonalScheduleEntryDto
+{
+    /// <summary>Whose entry this is — the diary owner, or a team member on a unit read.</summary>
+    public Guid SubjectId { get; set; }
+
+    public CommitmentKind Kind { get; set; }
+    public string KindName => Kind.ToString();
+
+    /// <summary>
+    /// How firm it is. ⚠ On the interview clash check <c>Hard</c> REFUSES a booking; in a diary
+    /// nothing is refused and this is only a hint about how movable the entry is.
+    /// </summary>
+    public CommitmentHardness Hardness { get; set; }
+    public string HardnessName => Hardness.ToString();
+
+    public string Label { get; set; } = string.Empty;
+    public DateTime Start { get; set; }
+    public DateTime End { get; set; }
+
+    /// <summary>
+    /// ⚠ True when the source records whole DAYS — leave, travel, a closure, an all-day event. The
+    /// times are the day's bounds, not a window, and a screen must not render them as hours.
+    /// </summary>
+    public bool IsDayGranular { get; set; }
+
+    public string? Reference { get; set; }
+}
+
+/// <summary>Everything one employee is committed to between two dates.</summary>
+public class PersonalScheduleDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public DateOnly From { get; set; }
+    public DateOnly To { get; set; }
+    public List<PersonalScheduleEntryDto> Entries { get; set; } = new();
+}
+
+/// <summary>The same for a whole organisation unit and everything beneath it.</summary>
+/// <remarks>
+/// ⚠ The SUBTREE. A head scheduling for their directorate means everybody under them; a unit-only
+/// read would quietly leave out the sections reporting into it.
+/// </remarks>
+public class TeamScheduleDto
+{
+    public Guid OrganizationUnitId { get; set; }
+    public DateOnly From { get; set; }
+    public DateOnly To { get; set; }
+    public List<PersonalScheduleDto> Members { get; set; } = new();
+}

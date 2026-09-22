@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -27,6 +27,25 @@ public interface ICompanyEventService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Participant operations
+    /// <summary>
+    /// Emails everybody who has not yet answered their invitation (round 4, D6).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Only the UNANSWERED. Somebody who has already accepted or declined has done what was
+    /// asked, and chasing them reads as the system not listening.</para>
+    ///
+    /// <para>⚠ An endpoint, not a sweep. Every one of HR's fourteen scheduled sweeps logs intent
+    /// into a dispatch table and delivers nothing — making this the fifteenth would add to that pile
+    /// rather than to the product. Lane K owns turning the sweeps into things that actually send;
+    /// when it lands, this is the method it calls, and until then the organiser can chase from the
+    /// event screen, which is where they already are when they notice.</para>
+    /// </remarks>
+    Task<int> SendRsvpRemindersAsync(Guid eventId, CancellationToken cancellationToken = default);
+
+    /// <summary>Emails every participant that the event is coming up (round 4, D6).</summary>
+    /// <inheritdoc cref="SendRsvpRemindersAsync" path="/remarks/para[2]"/>
+    Task<int> SendEventRemindersAsync(Guid eventId, CancellationToken cancellationToken = default);
+
     Task<EventParticipantDto> AddParticipantAsync(CreateEventParticipantDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<EventParticipantDto>> GetParticipantsAsync(Guid eventId, CancellationToken cancellationToken = default);
     Task<bool> RespondToInvitationAsync(RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default);

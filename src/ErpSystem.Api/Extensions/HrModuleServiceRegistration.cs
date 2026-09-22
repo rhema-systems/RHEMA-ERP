@@ -556,7 +556,17 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ILongServiceMilestoneService, LongServiceMilestoneService>();
         services.AddScoped<ILongServiceSweepService, LongServiceSweepService>();
         services.AddScoped<IAwardTypeTargetService, AwardTypeTargetService>();
+        // Round 4, D5 — one person's diary, assembled from the same commitment sources the
+        // interview clash check fans out over.
+        services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService,
+            ErpSystem.Core.Services.HR.CompanySchedule.PersonalScheduleService>();
         services.AddScoped<ICompanyEventService, CompanyEventService>();
+        // ⚠ Round 4, D6. NOT optional: without the catalogue registration TemplatedEmailService has
+        // no fallback for the CompanySchedule module, and every invitation, reschedule notice and
+        // cancellation throws instead of rendering its shipped default. The same trap lane F
+        // recorded for the interview paper.
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
+            ErpSystem.Core.Services.HR.CompanySchedule.CompanyScheduleEmailEventCatalog>();
         services.AddScoped<IMeetingRoomService, MeetingRoomService>();
         services.AddScoped<IRoomBookingService, RoomBookingService>();
         services.AddScoped<ICompanyMilestoneService, CompanyMilestoneService>();

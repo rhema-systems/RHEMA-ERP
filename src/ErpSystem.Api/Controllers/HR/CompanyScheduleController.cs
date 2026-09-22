@@ -1,4 +1,4 @@
-using ErpSystem.Api.Filters;
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
@@ -40,6 +40,7 @@ namespace ErpSystem.Api.Controllers.HR;
 public class CompanyScheduleController : HrControllerBase
 {
     private readonly ICompanyEventService _eventService;
+    private readonly ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService _personalSchedule;
     private readonly IMeetingRoomService _roomService;
     private readonly IRoomBookingService _bookingService;
     private readonly ICompanyMilestoneService _milestoneService;
@@ -53,6 +54,7 @@ public class CompanyScheduleController : HrControllerBase
         ICompanyMilestoneService milestoneService,
         IBusinessClosureService closureService,
         IFiscalYearService fiscalYearService,
+        ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService personalSchedule,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -62,6 +64,7 @@ public class CompanyScheduleController : HrControllerBase
         _milestoneService = milestoneService;
         _closureService = closureService;
         _fiscalYearService = fiscalYearService;
+        _personalSchedule = personalSchedule;
     }
 
     #region Company Events
@@ -212,6 +215,59 @@ public class CompanyScheduleController : HrControllerBase
         await _eventService.RespondToInvitationAsync(dto);
         return Ok(new { message = "Invitation response recorded" });
     }
+
+    // =========================================================================
+    // THE DIARY  (round 4, D5)
+    // =========================================================================
+
+    /// <summary>
+    /// Everything the signed-in employee is committed to between two dates — their events, room
+    /// bookings, interview panels, training, leave and travel, in one place.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Self-service, and self only.</b> The employee id comes from the token, never from the
+    /// caller: a query parameter here would let any signed-in user read a colleague's leave and
+    /// travel, which is the exposure the panel-availability endpoint is HR-gated to prevent.
+    /// Reading somebody else's diary is <c>team</c> below, which is gated on the unit.
+    /// </remarks>
+    [HttpGet("my-schedule")]
+    public async Task<ActionResult<PersonalScheduleDto>> GetMySchedule(
+        [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken ct)
+    {
+        // ⚠ `CurrentUser` from HrControllerBase — this controller has no `_currentUser` field of its
+        // own, it hands the service to the base.
+        var employeeId = CurrentUser.EmployeeId;
+        if (employeeId is null)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _personalSchedule.GetForEmployeeAsync(employeeId.Value, from, to, ct));
+    }
+
+    /// <summary>
+    /// Everything an organisation unit and its subtree are committed to — what a head needs before
+    /// scheduling something for their team.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Gated on the company-schedule WRITE policy rather than Read: this exposes other people's
+    /// leave and travel, which is desk information, not general reading.
+    /// </remarks>
+    [HttpGet("team-schedule/{organizationUnitId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<TeamScheduleDto>> GetTeamSchedule(
+        Guid organizationUnitId, [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken ct)
+        => Ok(await _personalSchedule.GetForUnitAsync(organizationUnitId, from, to, ct));
+
+    /// <summary>Chases everybody who has not answered their invitation (round 4, D6).</summary>
+    [HttpPost("events/{eventId:guid}/rsvp-reminders")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> SendRsvpReminders(Guid eventId, CancellationToken ct)
+        => Ok(new { sent = await _eventService.SendRsvpRemindersAsync(eventId, ct) });
+
+    /// <summary>Reminds every participant who has not declined that the event is coming (D6).</summary>
+    [HttpPost("events/{eventId:guid}/reminders")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> SendEventReminders(Guid eventId, CancellationToken ct)
+        => Ok(new { sent = await _eventService.SendEventRemindersAsync(eventId, ct) });
 
     [HttpDelete("participants/{participantId:guid}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]

@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.CompanySchedule;
+﻿using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -16,6 +16,18 @@ public interface ICompanyEventRepository : IGenericRepository<CompanyEvent>
     Task<IEnumerable<CompanyEvent>> GetUpcomingEventsAsync(int daysAhead = 30);
     Task<IEnumerable<CompanyEvent>> GetActiveEventsAsync(DateTime? asOfDate = null);
     Task<bool> HasConflictingEventAsync(Guid organizerId, DateTime startDate, DateTime endDate, Guid? excludeEventId = null);
+
+    /// <summary>
+    /// The next event number, from the shared sequence and probed against the table before it is
+    /// used (round 4, D7 — company-schedule defect C-6).
+    /// </summary>
+    /// <remarks>
+    /// &#9888; This was <c>COUNT(*) + 1</c> over live rows. Soft-deleted rows are excluded from that
+    /// count, so deleting an event FREED its number and the next create took it — and the index was
+    /// not unique, so nothing complained and two events quietly shared a reference. Every other HR
+    /// generator was hardened against exactly this; these three were missed.
+    /// </remarks>
+    Task<string> GetNextEventNumberAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }
 
 #endregion Company Event Repository
@@ -76,6 +88,9 @@ public interface IMeetingRoomRepository : IGenericRepository<MeetingRoom>
     Task<IEnumerable<MeetingRoom>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null);
     Task<IEnumerable<MeetingRoom>> GetActiveRoomsAsync();
     Task<IEnumerable<MeetingRoom>> GetBookableRoomsAsync();
+
+    /// <inheritdoc cref="ICompanyEventRepository.GetNextEventNumberAsync"/>
+    Task<string> GetNextRoomCodeAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }
 
 #endregion Meeting Room Repository
@@ -91,6 +106,9 @@ public interface IRoomBookingRepository : IGenericRepository<RoomBooking>
     Task<IEnumerable<RoomBooking>> GetByStatusAsync(BookingStatus status);
     Task<bool> HasConflictingBookingAsync(Guid roomId, DateTime startDateTime, DateTime endDateTime, Guid? excludeBookingId = null);
     Task<IEnumerable<RoomBooking>> GetPendingApprovalsAsync();
+
+    /// <inheritdoc cref="ICompanyEventRepository.GetNextEventNumberAsync"/>
+    Task<string> GetNextBookingNumberAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }
 
 #endregion Room Booking Repository

@@ -52,8 +52,42 @@ public sealed record PanelistCommitmentQuery(
     Guid? ExcludeInterviewId,
     Guid TenantId)
 {
-    /// <summary>The date the window falls on, for the day-granular sources.</summary>
+    /// <summary>
+    /// The first day the window touches. ⚠ Use <see cref="FromDate"/>/<see cref="ToDate"/> rather
+    /// than this where a source filters by date: a window may span days.
+    /// </summary>
     public DateOnly Date => DateOnly.FromDateTime(WindowStart);
+
+    /// <summary>The first and last day the window touches, inclusive.</summary>
+    /// <remarks>
+    /// <para>⚠ Round 4, D5. The clash check asks about ONE window on ONE day, and the sources were
+    /// written to that: they filtered on <see cref="Date"/> and would have answered about the first
+    /// day only. The personal diary asks the same question — "what is this person committed to?" —
+    /// over a fortnight, and reusing the sources for it is the whole reason there is an interface
+    /// rather than a method.</para>
+    ///
+    /// <para>The clash check passes a same-day range, so its answers are unchanged; that is what
+    /// <c>run-round4-d</c> proves.</para>
+    /// </remarks>
+    public DateOnly FromDate => DateOnly.FromDateTime(WindowStart);
+
+    /// <inheritdoc cref="FromDate"/>
+    public DateOnly ToDate => DateOnly.FromDateTime(WindowEnd.AddTicks(-1) < WindowStart ? WindowStart : WindowEnd.AddTicks(-1));
+
+    /// <summary>The whole span the window covers, as day boundaries — for the day-granular sources.</summary>
+    public DateTime DayStart => FromDate.ToDateTime(TimeOnly.MinValue);
+
+    /// <inheritdoc cref="DayStart"/>
+    public DateTime DayEnd => ToDate.ToDateTime(TimeOnly.MaxValue);
+
+    /// <summary>
+    /// Whether a timed commitment overlaps the asked-about window.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ For a single-day clash check this is the real test. For a multi-day diary the window spans
+    /// whole days, so everything inside it overlaps — which is the intended answer there.
+    /// </remarks>
+    public bool Overlaps(DateTime start, DateTime end) => start < WindowEnd && end > WindowStart;
 
     /// <summary>
     /// Whether a day-granular commitment spanning these dates touches the window's day.

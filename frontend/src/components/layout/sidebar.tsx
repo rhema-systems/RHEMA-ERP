@@ -1292,6 +1292,23 @@ export const navigationItems: NavItem[] = [
                 icon: CalendarCheck,
                 permissions: ['HR.Company.Read'],
               },
+              {
+                // Round 4, D5. The diary: everything the signed-in person is down for, assembled
+                // from the same commitment sources the interview clash check fans out over.
+                // ⚠ NO permission — the server takes the employee from the token, so this is
+                // self-service and gating it would lock people out of their own schedule.
+                title: 'My Schedule',
+                href: '/hr/company-schedule/my-schedule',
+                icon: CalendarClock,
+              },
+              {
+                // ⚠ Company WRITE, not Read: the team view exposes other people's leave and
+                // travel, which is desk information rather than general reading.
+                title: 'Team Schedule',
+                href: '/hr/company-schedule/team',
+                icon: Users,
+                permissions: ['HR.Company.Write'],
+              },
             ],
           },
           {

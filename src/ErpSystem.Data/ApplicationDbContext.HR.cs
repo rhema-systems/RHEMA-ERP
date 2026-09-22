@@ -5785,7 +5785,12 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<CompanyEvent>(entity =>
         {
-            entity.HasIndex(x => x.EventNumber);
+            // ⚠ Round 4, D7 (C-6). UNIQUE per tenant. These three were plain indexes, so the
+            // count-based generators that used to issue the numbers could hand the same reference to
+            // two rows and nothing objected. The generators are fixed; this is the guard that makes
+            // a future regression fail loudly instead of silently duplicating.
+            entity.HasIndex(x => new { x.TenantId, x.EventNumber }).IsUnique()
+                .HasDatabaseName("IX_CompanyEvent_Tenant_EventNumber");
             entity.HasIndex(x => x.EventName);
             entity.HasIndex(x => x.Category);
             entity.HasIndex(x => x.Status);
@@ -5922,7 +5927,9 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<MeetingRoom>(entity =>
         {
-            entity.HasIndex(x => x.RoomCode);
+            // Same rule as CompanyEvent above: a room code is a reference, and two rooms must not share one.
+            entity.HasIndex(x => new { x.TenantId, x.RoomCode }).IsUnique()
+                .HasDatabaseName("IX_MeetingRoom_Tenant_RoomCode");
             entity.HasIndex(x => x.RoomName);
             entity.HasIndex(x => x.LocationId);
             entity.HasIndex(x => x.IsActive);
@@ -5942,7 +5949,8 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<RoomBooking>(entity =>
         {
-            entity.HasIndex(x => x.BookingNumber);
+            entity.HasIndex(x => new { x.TenantId, x.BookingNumber }).IsUnique()
+                .HasDatabaseName("IX_RoomBooking_Tenant_BookingNumber");
             entity.HasIndex(x => x.RoomId);
             entity.HasIndex(x => x.EventId);
             entity.HasIndex(x => x.BookedById);

@@ -1,10 +1,12 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.CompanySchedule;
 using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -24,6 +26,16 @@ public class CompanyEventService : ICompanyEventService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CompanyEventService> _logger;
 
+    /// <summary>
+    /// Round 4, D6 — the module could invite, reschedule and cancel, and told nobody.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>EventParticipant.InvitationSentDate</c> was written by the participant-create and meant
+    /// nothing: no invitation was ever sent. An event with an RSVP deadline and no invitation is a
+    /// deadline the invitee has never heard of.
+    /// </remarks>
+    private readonly ITemplatedEmailService _templatedEmail;
+
     public CompanyEventService(
         ICompanyEventRepository eventRepository,
         IEventParticipantRepository participantRepository,
@@ -32,6 +44,7 @@ public class CompanyEventService : ICompanyEventService
         IEventTaskRepository taskRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        ITemplatedEmailService templatedEmail,
         ILogger<CompanyEventService> logger)
     {
         _eventRepository = eventRepository;
@@ -41,7 +54,121 @@ public class CompanyEventService : ICompanyEventService
         _taskRepository = taskRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _templatedEmail = templatedEmail;
         _logger = logger;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  D6 — telling people (round 4)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The when-and-where tokens every company-schedule email shares.</summary>
+    /// <remarks>
+    /// ⚠ <c>EventTime</c> is left NULL for an all-day event rather than filled with 00:00–00:00.
+    /// The template hides the line when the token is absent, so an all-day event reads "When:
+    /// Tuesday, 14 October" — printing a time there would invent a precision the record does not
+    /// carry, the same distinction the clash check draws between precise and day-granular.
+    /// </remarks>
+    private static Dictionary<string, string?> EventTokens(CompanyEvent ev, string participantName)
+    {
+        string? time = null;
+        if (!ev.IsAllDayEvent && ev.StartTime.HasValue && ev.EndTime.HasValue)
+            // ⚠ Verbatim: a TimeSpan format needs `hh\:mm`, and `\:` is not a legal escape
+            // in an ordinary interpolated string.
+            time = $@"{ev.StartTime.Value:hh\:mm} – {ev.EndTime.Value:hh\:mm}";
+
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ParticipantName"]   = participantName,
+            ["EventName"]         = ev.EventName,
+            ["EventNumber"]       = ev.EventNumber,
+            ["EventDate"]         = ev.StartDate.ToString("dddd, d MMMM yyyy"),
+            ["EventTime"]         = time,
+            ["VenueName"]         = ev.VenueName,
+            ["OnlineMeetingLink"] = ev.OnlineMeetingLink,
+            ["OrganizerName"]     = ev.Organizer is null
+                ? null
+                : $"{ev.Organizer.FirstName} {ev.Organizer.LastName}".Trim(),
+            ["Description"]       = ev.Description,
+            ["RsvpDeadline"]      = ev.RsvpDeadline?.ToString("dddd, d MMMM yyyy"),
+        };
+    }
+
+    /// <summary>
+    /// Sends one company-schedule email without ever failing the operation that prompted it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Best-effort, and raced against a timeout, exactly as the recruitment sends are. The event
+    /// is already committed by the time these run: a participant whose invitation cannot be
+    /// delivered is still a participant, and an unreachable SMTP server must not roll back a
+    /// meeting. Latency — not an exception — is the failure mode that matters, because
+    /// TemplatedEmailService already swallows delivery failures and returns false.
+    /// </remarks>
+    private async Task SendEventEmailAsync(
+        string eventKey, string? toEmail, Dictionary<string, string?> tokens, string description)
+    {
+        if (string.IsNullOrWhiteSpace(toEmail)) return;
+
+        try
+        {
+            var send = _templatedEmail.SendAsync(
+                CompanyScheduleEmailCatalog.Module, eventKey, toEmail, tokens);
+
+            if (await Task.WhenAny(send, Task.Delay(TimeSpan.FromSeconds(10))) == send)
+                await send;
+            else
+                _logger.LogWarning(
+                    "{Description} email timed out after 10 s for {Email} — the operation itself succeeded.",
+                    description, toEmail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to send the {Description} email to {Email} — the operation itself succeeded.",
+                description, toEmail);
+        }
+    }
+
+    /// <summary>
+    /// Tells every participant of an event something — a reschedule, a cancellation, a reminder.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Reads the participants fresh rather than through the event's navigation, which callers may
+    /// not have loaded. A notification loop over an empty unloaded collection tells nobody and looks
+    /// like success.
+    /// </remarks>
+    private async Task<int> NotifyParticipantsAsync(
+        CompanyEvent ev, string eventKey, Func<Dictionary<string, string?>, Dictionary<string, string?>>? enrich,
+        string description, Func<EventParticipant, bool>? filter = null, CancellationToken cancellationToken = default)
+    {
+        var tenantId = ev.TenantId;
+        var participants = (await _participantRepository.GetQueryable()
+                .Include(p => p.Employee)
+                .Where(p => p.EventId == ev.Id && p.TenantId == tenantId && !p.IsDeleted)
+                .ToListAsync(cancellationToken))
+            .Where(p => filter is null || filter(p))
+            .ToList();
+
+        var sent = 0;
+        foreach (var p in participants)
+        {
+            var name = p.Employee is not null
+                ? $"{p.Employee.FirstName} {p.Employee.LastName}".Trim()
+                : p.ExternalParticipantName ?? "Colleague";
+            var email = p.Employee?.EmailAddress ?? p.ExternalParticipantEmail;
+            if (string.IsNullOrWhiteSpace(email)) continue;
+
+            var tokens = EventTokens(ev, name);
+            if (enrich is not null) tokens = enrich(tokens);
+
+            await SendEventEmailAsync(eventKey, email, tokens, description);
+            sent++;
+        }
+
+        _logger.LogInformation(
+            "Company schedule: {Description} sent to {Count} participant(s) of {EventNumber}.",
+            description, sent, ev.EventNumber);
+        return sent;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -199,7 +326,7 @@ public class CompanyEventService : ICompanyEventService
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
         entity.OrganizerId = organizerId;
-        entity.EventNumber = await GenerateEventNumberAsync(tenantId, cancellationToken);
+        entity.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
         entity.Status = EventStatus.Scheduled;
 
         await _eventRepository.AddAsync(entity);
@@ -266,12 +393,34 @@ public class CompanyEventService : ICompanyEventService
 
         _logger.LogInformation("Company event cancelled: {EventNumber}", entity.EventNumber);
 
+        await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled,
+            tokens =>
+            {
+                tokens["CancellationReason"] = entity.CancellationReason;
+                return tokens;
+            },
+            "event cancelled", cancellationToken: cancellationToken);
+
         return true;
     }
 
     public async Task<bool> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(rescheduleDto.EventId, cancellationToken);
+
+        // ⚠ Round 4, D7 (C-2). The original date was LOST. This wrote `RescheduledDate =
+        // DateTime.UtcNow` — which records when somebody pressed the button, not what the event was
+        // moved from — and then overwrote StartDate/EndDate, so nothing anywhere remembered the
+        // original. Meanwhile the dialog tells the user the original is kept. The interview path got
+        // this right in lane C with `OriginalDate`; this is the same repair.
+        //
+        // ⚠ `??=` on the first move only. Rescheduling twice must keep the FIRST original: the
+        // question "when was this originally going to be?" has one answer, and overwriting it on
+        // each move would make a twice-moved event claim it was always meant for last Tuesday.
+        entity.OriginalStartDate ??= entity.StartDate;
+        entity.OriginalStartTime ??= entity.StartTime;
+        entity.OriginalEndDate   ??= entity.EndDate;
+        entity.OriginalEndTime   ??= entity.EndTime;
 
         entity.IsRescheduled = true;
         entity.RescheduledDate = DateTime.UtcNow;
@@ -285,6 +434,25 @@ public class CompanyEventService : ICompanyEventService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Company event rescheduled: {EventNumber}", entity.EventNumber);
+
+        // ⚠ Round 4, D6. Everybody invited is told, and told what it moved FROM — which is only
+        // possible because C-2 above now keeps the original window. Before this lane the event moved
+        // and the participants found out by looking.
+        var original = entity.OriginalStartDate is { } os
+            ? os.ToString("dddd, d MMMM yyyy")
+              + (entity.OriginalStartTime is { } ost && entity.OriginalEndTime is { } oet
+                  ? $@", {ost:hh\:mm} – {oet:hh\:mm}"
+                  : string.Empty)
+            : null;
+
+        await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventRescheduled,
+            tokens =>
+            {
+                tokens["OriginalWhen"] = original;
+                tokens["RescheduleReason"] = entity.RescheduleReason;
+                return tokens;
+            },
+            "event rescheduled", cancellationToken: cancellationToken);
 
         return true;
     }
@@ -321,6 +489,46 @@ public class CompanyEventService : ICompanyEventService
 
     #region Participant Operations
 
+    /// <inheritdoc />
+    public async Task<int> SendRsvpRemindersAsync(Guid eventId, CancellationToken cancellationToken = default)
+    {
+        var ev = await GetOwnedEventAsync(eventId, cancellationToken);
+        if (ev.IsCancelled || ev.Status == EventStatus.Cancelled)
+            throw new InvalidOperationException(
+                $"{ev.EventName} has been cancelled, so there is nothing left to RSVP to.");
+
+        return await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventRsvpReminder,
+            enrich: null, "RSVP reminder",
+            // ⚠ NotSent as well as Sent. A participant added before the invitation send existed
+            // carries NotSent and has genuinely never been asked — chasing them is the first time
+            // anybody has told them, which is exactly who this is for.
+            filter: p => p.InvitationStatus is InvitationStatus.Sent or InvitationStatus.NotSent,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SendEventRemindersAsync(Guid eventId, CancellationToken cancellationToken = default)
+    {
+        var ev = await GetOwnedEventAsync(eventId, cancellationToken);
+        if (ev.IsCancelled || ev.Status == EventStatus.Cancelled)
+            throw new InvalidOperationException(
+                $"{ev.EventName} has been cancelled, so a reminder would be telling people to attend "
+              + "something that is not happening.");
+
+        // ⚠ Declined participants are NOT reminded. They have said they are not coming; a reminder
+        // is the system ignoring the answer it asked for.
+        var daysUntil = (ev.StartDate.Date - DateTime.UtcNow.Date).TotalDays;
+        return await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder,
+            tokens =>
+            {
+                tokens["DaysUntil"] = daysUntil >= 1 ? ((int)daysUntil).ToString() : null;
+                return tokens;
+            },
+            "event reminder",
+            filter: p => p.InvitationStatus != InvitationStatus.Declined,
+            cancellationToken);
+    }
+
     public async Task<EventParticipantDto> AddParticipantAsync(CreateEventParticipantDto createDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -346,6 +554,27 @@ public class CompanyEventService : ICompanyEventService
             .FirstOrDefaultAsync(p => p.Id == entity.Id && p.TenantId == tenantId, cancellationToken);
 
         _logger.LogInformation("Participant added to event: {EventId}", createDto.EventId);
+
+        // ⚠ Round 4, D6. InvitationSentDate was stamped above long before anything was sent. Now it
+        // is true. Best-effort: the participant row is already committed, and an unreachable mail
+        // server must not undo somebody's place on the invitation list.
+        var invitedTo = await _eventRepository.GetQueryable()
+            .Include(e => e.Organizer)
+            .FirstOrDefaultAsync(e => e.Id == createDto.EventId && e.TenantId == tenantId, cancellationToken);
+        if (invitedTo is not null)
+        {
+            var name = entity!.Employee is not null
+                ? $"{entity.Employee.FirstName} {entity.Employee.LastName}".Trim()
+                : entity.ExternalParticipantName ?? "Colleague";
+            var tokens = EventTokens(invitedTo, name);
+            tokens["IsRequired"] = entity.IsRequired ? "true" : null;
+            tokens["SpecialRequirements"] = entity.SpecialRequirements;
+
+            await SendEventEmailAsync(
+                CompanyScheduleEmailCatalog.Events.EventInvitation,
+                entity.Employee?.EmailAddress ?? entity.ExternalParticipantEmail,
+                tokens, "event invitation");
+        }
 
         return entity!.ToDto();
     }
@@ -609,14 +838,12 @@ public class CompanyEventService : ICompanyEventService
 
     #region Helper Methods
 
-    private async Task<string> GenerateEventNumberAsync(Guid tenantId, CancellationToken cancellationToken)
-    {
-        var year = DateTime.UtcNow.Year;
-        var count = await _eventRepository.GetQueryable()
-            .CountAsync(e => e.TenantId == tenantId && e.CreatedAt.Year == year, cancellationToken);
-
-        return $"EVT-{year}-{(count + 1):D5}";
-    }
+    // ⚠ Round 4, D7 (C-6). The count-based generator that used to live here issued
+    // `EVT-{year}-{COUNT(*) + 1}` over LIVE rows. Soft-deleted rows are excluded from that count, so
+    // deleting an event freed its number and the next create took it — and the index was not unique,
+    // so nothing complained and two events quietly shared a reference. Number issuing now goes
+    // through the shared sequence in the repository, which probes with IgnoreQueryFilters so a
+    // deleted row still holds its number. See ICompanyEventRepository.GetNextEventNumberAsync.
 
     #endregion
 }
@@ -750,7 +977,7 @@ public class MeetingRoomService : IMeetingRoomService
 
         if (string.IsNullOrEmpty(entity.RoomCode))
         {
-            entity.RoomCode = await GenerateRoomCodeAsync(tenantId, cancellationToken);
+            entity.RoomCode = await _roomRepository.GetNextRoomCodeAsync(tenantId, cancellationToken);
         }
         else
         {
@@ -816,12 +1043,7 @@ public class MeetingRoomService : IMeetingRoomService
                 $"Site '{locationId}' is not a location in this organisation, so a room cannot be filed against it.");
     }
 
-    private async Task<string> GenerateRoomCodeAsync(Guid tenantId, CancellationToken cancellationToken)
-    {
-        var count = await _roomRepository.GetQueryable()
-            .CountAsync(r => r.TenantId == tenantId, cancellationToken);
-        return $"RM-{(count + 1):D4}";
-    }
+    // ⚠ Round 4, D7 (C-6) — see the note where GenerateEventNumberAsync used to be.
 }
 
 #endregion Meeting Room Service
@@ -993,6 +1215,8 @@ public class RoomBookingService : IRoomBookingService
         if (!room.IsBookable)
             throw new InvalidOperationException("This room is not available for booking");
 
+        EnforceRoomRules(room, createDto.StartDateTime, createDto.EndDateTime, createDto.ExpectedAttendees);
+
         var hasConflict = await HasConflictingBookingAsync(
             tenantId, createDto.RoomId, createDto.StartDateTime, createDto.EndDateTime, cancellationToken: cancellationToken);
 
@@ -1003,7 +1227,7 @@ public class RoomBookingService : IRoomBookingService
         entity.TenantId = tenantId;
         entity.BookedById = bookedById;
         entity.BookingDate = DateTime.UtcNow;
-        entity.BookingNumber = await GenerateBookingNumberAsync(tenantId, cancellationToken);
+        entity.BookingNumber = await _bookingRepository.GetNextBookingNumberAsync(tenantId, cancellationToken);
         entity.Status = room.RequiresApproval ? BookingStatus.Tentative : BookingStatus.Confirmed;
 
         await _bookingRepository.AddAsync(entity);
@@ -1026,6 +1250,12 @@ public class RoomBookingService : IRoomBookingService
 
         if (entity == null)
             throw new ArgumentException($"Room booking with ID '{updateDto.Id}' not found.");
+
+        // ⚠ The EDIT enforces them too. A rule checked only on create is a rule anyone can get
+        // round by booking something legal and then changing it.
+        var roomForRules = entity.Room ?? await _roomRepository.GetByIdAsync(entity.RoomId);
+        if (roomForRules is not null)
+            EnforceRoomRules(roomForRules, updateDto.StartDateTime, updateDto.EndDateTime, updateDto.ExpectedAttendees);
 
         var hasConflict = await HasConflictingBookingAsync(
             tenantId, entity.RoomId, updateDto.StartDateTime, updateDto.EndDateTime, updateDto.Id, cancellationToken);
@@ -1088,13 +1318,47 @@ public class RoomBookingService : IRoomBookingService
         return true;
     }
 
-    private async Task<string> GenerateBookingNumberAsync(Guid tenantId, CancellationToken cancellationToken)
-    {
-        var year = DateTime.UtcNow.Year;
-        var count = await _bookingRepository.GetQueryable()
-            .CountAsync(b => b.TenantId == tenantId && b.BookingDate.Year == year, cancellationToken);
 
-        return $"BK-{year}-{(count + 1):D5}";
+    /// <summary>
+    /// The rules a room records and, until round 4 D7 (C-4), never enforced.
+    /// </summary>
+    /// <remarks>
+    /// <para>&#9888; <c>MaxBookingDurationHours</c>, <c>AdvanceBookingDays</c> and <c>Capacity</c>
+    /// were all settable on the room's admin screen and read by nothing. A room could be configured
+    /// "2 hours maximum, 14 days ahead, seats 8" and then booked for a day, a year out, for forty
+    /// people, with no complaint — which is worse than not having the fields, because somebody set
+    /// them believing they meant something.</para>
+    ///
+    /// <para>Each rule is skipped when the room leaves it unset: null means "no limit", not zero.</para>
+    /// </remarks>
+    private static void EnforceRoomRules(MeetingRoom room, DateTime start, DateTime end, int expectedAttendees)
+    {
+        if (end <= start)
+            throw new InvalidOperationException("A booking must end after it starts.");
+
+        if (room.MaxBookingDurationHours is { } maxHours && maxHours > 0)
+        {
+            var hours = (end - start).TotalHours;
+            if (hours > maxHours)
+                throw new InvalidOperationException(
+                    $"{room.RoomName} may be booked for at most {maxHours} hour(s) at a time; this booking is "
+                  + $"{hours:0.#}. Shorten it, or book a room without that limit.");
+        }
+
+        if (room.AdvanceBookingDays is { } maxAhead && maxAhead > 0)
+        {
+            var daysAhead = (start.Date - DateTime.UtcNow.Date).TotalDays;
+            if (daysAhead > maxAhead)
+                throw new InvalidOperationException(
+                    $"{room.RoomName} can only be booked up to {maxAhead} day(s) ahead; this booking is "
+                  + $"{daysAhead:0} day(s) out.");
+        }
+
+        // ⚠ Capacity is a refusal, not a warning. A room that seats 8 cannot hold 40, and a booking
+        // that says it will is a meeting that arrives and finds nowhere to sit.
+        if (room.Capacity > 0 && expectedAttendees > room.Capacity)
+            throw new InvalidOperationException(
+                $"{room.RoomName} seats {room.Capacity}; this booking expects {expectedAttendees}.");
     }
 }
 

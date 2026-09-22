@@ -71,6 +71,12 @@ public static class CompanyScheduleMappingExtensions
             CancellationReason = entity.CancellationReason,
             IsRescheduled = entity.IsRescheduled,
             RescheduledDate = entity.RescheduledDate,
+            // Round 4, D7 (C-2). Null on an event that never moved, and on any moved before this
+            // lane — the original was overwritten then and cannot be recovered.
+            OriginalStartDate = entity.OriginalStartDate,
+            OriginalStartTime = entity.OriginalStartTime,
+            OriginalEndDate = entity.OriginalEndDate,
+            OriginalEndTime = entity.OriginalEndTime,
             RescheduleReason = entity.RescheduleReason,
             AdditionalNotes = entity.AdditionalNotes,
             CreatedAt = entity.CreatedAt,

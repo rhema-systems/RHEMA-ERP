@@ -11,14 +11,14 @@
 > | **H** | **DONE** — 36 ×2, `run-round4-h.mjs` |
 > | **B** | **DONE** — 96 ×2, `run-round4-b.mjs`; **no migration**; all 16 neighbouring suites at baseline |
 > | **D-1** | **DONE** — 58 ×2, `run-round4-d.mjs`; migration `AddInterviewPanelClashOverrideAndRoomBooking` applied to UAT. D1–D4 + D8, the recruitment half |
-> | **D-2** | **NEXT** — D5–D7: the organizer screens, event notifications, the four Company Schedule defects |
+> | **D-2** | **DONE** — 39 ×2, `hr-company-schedule/run-round4-d.mjs`; migration `AddCompanyEventOriginalWindowAndUniqueNumbers` applied to UAT. D5–D7 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> After D-2: E, I, L, J, M, K, N, O.
+> Lane D is complete. Next: **E**, then I, L, J, M, K, N, O.
 >
 > ⚠ **Lane B moved the scoring engine.** `ScoringCandidateView` and `EvaluateCriterion` were private
 > members of `JobApplicationService`; they are now `ShortlistingEvaluator` in
@@ -1265,6 +1265,115 @@ resolved"* for it.
 
 **Not walked in a browser:** the rewritten availability panel and the "when is everyone free?"
 suggestions.
+
+---
+
+### Lane D-2 — the organizer, the notifications, the four defects · DONE 2026-09-22 · 39 assertions ×2
+
+Harness: `dev-harness/hr-company-schedule/run-round4-d.mjs`. Migration:
+`20260922132728_AddCompanyEventOriginalWindowAndUniqueNumbers` (guarded SQL; applied to
+`ErpSystemDB_UAT`). Covers **D5, D6 and D7**, completing lane D.
+
+**D7 — the four defects this lane made load-bearing.**
+
+| | What was wrong | What it is now |
+|---|---|---|
+| **C-6** | Three generators issued `COUNT(*) + 1` over **live** rows. Soft-deleted rows are excluded from that count, so deleting an event FREED its number and the next create took it — and the indexes were not unique, so nothing complained and two rows quietly shared a reference. | Issuing moved into the repositories on the shared sequence, which probes with `IgnoreQueryFilters` so a deleted row still holds its number. The three indexes are UNIQUE per tenant. |
+| **C-2** | `RescheduleEventAsync` set `RescheduledDate = DateTime.UtcNow` — *when somebody pressed the button*, not what the event moved from — then overwrote `StartDate`/`EndDate`. Nothing remembered the original, while the dialog told the user it was kept. | Four nullable columns hold it, set on the **first** move only. |
+| **C-4** | `MaxBookingDurationHours`, `AdvanceBookingDays` and `Capacity` were settable on the room's admin screen and read by **nothing**. A room configured "2 hours maximum, seats 8" could be booked for a day, for forty people. | Enforced on create **and** edit. |
+| **C-1** | Every Delete is gated on `HR.Company.Admin`; the HR role holds Read, Write and Approve and **not** Admin — verified against UAT. The button was rendered, in destructive red, for the people it refuses. | The **button is hidden**; the endpoint is unchanged. |
+
+⚠ **C-1 was fixed by hiding the button, not by loosening the policy.** Whether HR may delete a
+company event is a permission decision for TDC to make in role setup; the defect is that the screen
+offered what it could not do. The harness asserts the 403 is *still* there, which is the assertion
+that records the choice.
+
+**⚠ How C-6 is tested, because the obvious test proves nothing.** A repeating number generator is
+invisible until it repeats. Asserting that two fresh creates differ passes under the old code too.
+The suite has to MAKE it repeat: create, **delete**, create again, and assert the third did not take
+the dead row's number. The deletes go through `admin`, because the HR actor cannot delete — which is
+C-1, asserted three sections later.
+
+**D6 — the module told nobody.** It could invite, take an RSVP, reschedule and cancel, and sent
+nothing: `EventParticipant.InvitationSentDate` was stamped by the participant-create and meant
+nothing, so an event with an RSVP deadline was a deadline the invitee had never heard of. A
+`CompanySchedule` catalogue with five templates now backs real sends on invite, reschedule and
+cancel. The reschedule notice carries **what it moved from**, which is only possible because C-2
+keeps the original.
+
+⚠ **The RSVP chase and the reminder are ENDPOINTS, not sweeps**, and that is a deliberate scoping
+call. All fourteen existing HR scheduled sweeps log intent into a dispatch table and deliver
+nothing; making these the fifteenth would have added to that pile rather than to the product. **Lane
+K owns** turning sweeps into things that actually send, and when it lands these are the methods it
+calls. Until then the organiser chases from the event screen, which is where they already are when
+they notice. The harness asserts the filters that make them worth having: a chase stops once
+somebody answers, and a reminder never reaches somebody who declined — *ignoring the answer it asked
+for* is the failure mode a naive loop produces.
+
+**D5 — the diary, and why D1's interface earned its keep.**
+
+"What is this person committed to?" is the same question the clash check asks, over a fortnight
+instead of an hour. So `/my-schedule` and `/team-schedule` fan out over the **same seven registered
+commitment sources** rather than re-reading six modules. A diary written separately would have
+started identical and drifted, and the day somebody adds an eighth kind of commitment only one of
+them would learn about it.
+
+That required the sources to honour a date **range** — they filtered on a single day, so a
+fortnight's diary would have shown the first day's entries. Six of the seven changed. The clash check
+passes a same-day range and is unaffected: `run-round4-d` at **58/58** is what proves it, and that
+assertion is the whole reason the recruitment suite is in the neighbour list for a company-schedule
+lane.
+
+⚠ `my-schedule` takes the employee **from the token**, never a query parameter. One there would let
+any signed-in user read a colleague's leave and travel — exactly what the panel-availability
+endpoint is HR-gated to prevent. Reading somebody else's goes through `team-schedule`, which is
+gated on Company **Write** rather than Read for the same reason, and the harness asserts an ordinary
+employee gets their own diary and a 403 on the team's.
+
+**Two defects of my own, both caught by the harness:**
+
+1. **`UnitSubtreeAsync` returns UNIT ids, not employee ids** — its own remarks say so, because the
+   staff directory wanted the walk as a SQL predicate rather than a resolved employee set. I read
+   them as employee ids, so nothing matched and the team read answered **"0 members" for a populated
+   directorate**. Silently: no error, an empty list. Fixed to match on `OrganizationUnitId`, and
+   filtered to active employees to match the resolver's own population — a leaver should not appear
+   in next week's team diary.
+2. **The `hh\:mm` escape, for the second time in one lane.** A `TimeSpan` format needs `hh\:mm`, and
+   `\:` only parses inside a **verbatim** interpolated string. `DateTime` needs no escape at all,
+   which is why identical-looking code elsewhere compiles. Recorded here because repeating it inside
+   one lane means reading the D-1 note was not enough.
+
+**⚠ A harness defect that had broken the whole area, silently.** `hr-company-schedule/setup.mjs`
+still sent `employeeNumber`, which the register has refused since 2026-09-10 (*"Staff numbers for
+permanent staff are issued by the system"*). It is the **shared** setup, so all four company-schedule
+slices had been failing at their first fixture since then — the same repair `hr-recruitment`,
+`hr-employee-docs` and `hr-payroll-membership` each had to make. Removing it revived them:
+
+| Suite | Result |
+|---|---|
+| `run-round4-d` (new) | **39/39 ×2** |
+| `run-slice0` · `-1` · `-2` · `-3` | **24 · 32 · 62 · 44**, all zero failures — first green since 2026-09-10 |
+
+**Neighbouring suites — recruitment, all at baseline** (the range refactor touched the shared
+sources, so the whole recruitment set is a neighbour here):
+
+| Suite | Result | Baseline | |
+|---|---|---|---|
+| `run-round4-d` | **58/58** | 58 | ✅ the range refactor did not move the clash check |
+| `run-round4-a` · `-b` · `-c` · `-f` · `-g` · `-h` | 45 · 96 · 46 · 103 · 41 · 36 | same | ✅ |
+| `run-k` · `run-v` · `run-a` · `run-c1` · `run-c2` · `run-candidate-country` | 81 · 72 · 44 · 96 · 89 · 43 | same | ✅ |
+| `slice-b` · `slice-c` · `slice-e` · `slice-f` | 174/176 · 188/190 · 101/105 · 69/69 | same | ✅ |
+| `run-lane5b` | 32/34 | 32/34 | ✅ recorded stale admin-gate |
+
+**On the migration, and a question worth recording.** The first draft **renumbered** duplicate
+references automatically so the unique index could be built. It was idempotent and it was the wrong
+trade: these references are printed on agendas and quoted in emails, and forty lines of untested SQL
+whose failure mode is *corrupting* them is a poor risk for a case that does not currently exist —
+UAT has zero duplicates, measured. It now **refuses** with the table, the column and the shared
+values, and says the decision is the operator's. Compare the two failures: SQL Server's own names the
+index and not the cause.
+
+**Not walked in a browser:** `my-schedule`, `team`, and the hidden Delete buttons.
 
 ---
 
