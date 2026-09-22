@@ -1553,6 +1553,9 @@ export const navigationItems: NavItem[] = [
               { title: 'Talent Pool', href: '/hr/recruitment/talent-pool', icon: Star, permissions: ['HR.Recruitment.Read'] },
               { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText, permissions: ['HR.Recruitment.Read'] },
               { title: 'Interviews', href: '/hr/recruitment/interviews', icon: CalendarClock, permissions: ['HR.Recruitment.Read'] },
+              // Round 4, lane E. Between interviews and offers because that is where it falls in the
+              // hire: a test is sat before a decision, and its marking queue is a daily job.
+              { title: 'Assessments', href: '/hr/recruitment/assessments', icon: ClipboardCheck, permissions: ['HR.Recruitment.Read'] },
               // The only recruitment screen a non-HR employee can use: a panelist's own sessions. The
               // interview schedule above answers 403 for them, so without this they have no way in.
               { title: 'Offers', href: '/hr/recruitment/offers', icon: HandCoins, permissions: ['HR.Recruitment.Read'] },

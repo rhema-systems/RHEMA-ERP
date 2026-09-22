@@ -293,6 +293,19 @@ public partial class ApplicationDbContext
     public DbSet<JobApplication> JobApplications { get; set; } = null!;
     public DbSet<JobApplicationStageHistory> JobApplicationStageHistories { get; set; } = null!;
     public DbSet<JobApplicantTestResult> JobApplicantTestResults { get; set; } = null!;
+
+    // ── Round 4, lane E — the recruitment test engine ──────────────────────────
+    //
+    // ⚠ JobApplicantTestResults above is KEPT. It is the ledger an offline test lands in — a
+    // practical, a typing test at a desk — and finalising a sitting writes a row into it. The
+    // engine becomes one way of producing a result, not the only one.
+    public DbSet<RecruitmentTest> RecruitmentTests { get; set; } = null!;
+    public DbSet<RecruitmentTestSection> RecruitmentTestSections { get; set; } = null!;
+    public DbSet<RecruitmentTestQuestion> RecruitmentTestQuestions { get; set; } = null!;
+    public DbSet<RecruitmentTestQuestionOption> RecruitmentTestQuestionOptions { get; set; } = null!;
+    public DbSet<RecruitmentTestAssignment> RecruitmentTestAssignments { get; set; } = null!;
+    public DbSet<RecruitmentTestSitting> RecruitmentTestSittings { get; set; } = null!;
+    public DbSet<RecruitmentTestAnswer> RecruitmentTestAnswers { get; set; } = null!;
     public DbSet<JobApplicantCommunication> JobApplicantCommunications { get; set; } = null!;
     public DbSet<ShortlistDecisionLog> ShortlistDecisionLogs { get; set; } = null!;
     public DbSet<ShortlistReview> ShortlistReviews { get; set; } = null!;
@@ -5889,6 +5902,142 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.MarkedBy)
                 .WithMany()
                 .HasForeignKey(x => x.MarkedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── Round 4, lane E — the recruitment test engine ──────────────────────
+        //
+        // ⚠ Every number is UNIQUE PER TENANT from the start. Lane D-2 had to retrofit that onto
+        // three company-schedule generators that had been quietly issuing duplicates; there is no
+        // reason to repeat the lesson here.
+        builder.Entity<RecruitmentTest>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TestCode }).IsUnique()
+                .HasDatabaseName("IX_RecruitmentTest_Tenant_Code");
+            entity.HasIndex(x => x.IsActive).HasDatabaseName("IX_RecruitmentTest_IsActive");
+            entity.Property(x => x.TestType).HasConversion<int>();
+            entity.Property(x => x.PassMarkPercent).HasPrecision(5, 2);
+        });
+
+        builder.Entity<RecruitmentTestSection>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestId).HasDatabaseName("IX_RecruitmentTestSection_Test");
+
+            // ⚠ Cascade, and only here. A section belongs to its paper and has no meaning without
+            // it. The SITTING side is Restrict throughout: deleting a test must not silently delete
+            // somebody's marked answers.
+            entity.HasOne(x => x.Test)
+                .WithMany(x => x.Sections)
+                .HasForeignKey(x => x.RecruitmentTestId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<RecruitmentTestQuestion>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestId).HasDatabaseName("IX_RecruitmentTestQuestion_Test");
+            entity.HasIndex(x => x.RecruitmentTestSectionId).HasDatabaseName("IX_RecruitmentTestQuestion_Section");
+            entity.Property(x => x.QuestionType).HasConversion<int>();
+            entity.Property(x => x.Points).HasPrecision(6, 2);
+
+            entity.HasOne(x => x.Test)
+                .WithMany(x => x.Questions)
+                .HasForeignKey(x => x.RecruitmentTestId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ NOT cascade. Deleting a section must not take its questions with it — a section is a
+            // heading, and regrouping a paper should not destroy it.
+            entity.HasOne(x => x.Section)
+                .WithMany(x => x.Questions)
+                .HasForeignKey(x => x.RecruitmentTestSectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecruitmentTestQuestionOption>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestQuestionId).HasDatabaseName("IX_RecruitmentTestOption_Question");
+
+            entity.HasOne(x => x.Question)
+                .WithMany(x => x.Options)
+                .HasForeignKey(x => x.RecruitmentTestQuestionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<RecruitmentTestAssignment>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestId).HasDatabaseName("IX_RecruitmentTestAssignment_Test");
+            entity.HasIndex(x => x.JobVacancyId).HasDatabaseName("IX_RecruitmentTestAssignment_Vacancy");
+            entity.HasIndex(x => x.JobApplicationId).HasDatabaseName("IX_RecruitmentTestAssignment_Application");
+
+            entity.HasOne(x => x.Test)
+                .WithMany()
+                .HasForeignKey(x => x.RecruitmentTestId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.JobVacancy)
+                .WithMany()
+                .HasForeignKey(x => x.JobVacancyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.JobApplication)
+                .WithMany()
+                .HasForeignKey(x => x.JobApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecruitmentTestSitting>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestAssignmentId).HasDatabaseName("IX_RecruitmentTestSitting_Assignment");
+            entity.HasIndex(x => x.JobApplicationId).HasDatabaseName("IX_RecruitmentTestSitting_Application");
+            entity.HasIndex(x => x.Status).HasDatabaseName("IX_RecruitmentTestSitting_Status");
+
+            // ⚠ One row per attempt, and the pair is unique. Without this a double-submit could mint
+            // two attempt 1s and the attempt limit would count wrong.
+            entity.HasIndex(x => new { x.RecruitmentTestAssignmentId, x.JobApplicationId, x.AttemptNumber })
+                .IsUnique()
+                .HasDatabaseName("IX_RecruitmentTestSitting_Assignment_Application_Attempt");
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.AutoScore).HasPrecision(8, 2);
+            entity.Property(x => x.ManualScore).HasPrecision(8, 2);
+            entity.Property(x => x.FinalScore).HasPrecision(8, 2);
+            entity.Property(x => x.TotalPoints).HasPrecision(8, 2);
+            entity.Property(x => x.ScorePercent).HasPrecision(5, 2);
+
+            entity.HasOne(x => x.Assignment)
+                .WithMany(x => x.Sittings)
+                .HasForeignKey(x => x.RecruitmentTestAssignmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.JobApplication)
+                .WithMany()
+                .HasForeignKey(x => x.JobApplicationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.TestResult)
+                .WithMany()
+                .HasForeignKey(x => x.JobApplicantTestResultId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RecruitmentTestAnswer>(entity =>
+        {
+            entity.HasIndex(x => x.RecruitmentTestSittingId).HasDatabaseName("IX_RecruitmentTestAnswer_Sitting");
+            entity.HasIndex(x => x.RecruitmentTestQuestionId).HasDatabaseName("IX_RecruitmentTestAnswer_Question");
+            entity.Property(x => x.PointsAwarded).HasPrecision(6, 2);
+
+            entity.HasOne(x => x.Sitting)
+                .WithMany(x => x.Answers)
+                .HasForeignKey(x => x.RecruitmentTestSittingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Question)
+                .WithMany()
+                .HasForeignKey(x => x.RecruitmentTestQuestionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.SelectedOption)
+                .WithMany()
+                .HasForeignKey(x => x.SelectedOptionId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

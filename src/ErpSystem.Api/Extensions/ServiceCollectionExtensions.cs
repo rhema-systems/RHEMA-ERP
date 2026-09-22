@@ -168,7 +168,7 @@ namespace ErpSystem.Api.Extensions
 
             // Bind the external-portal URL options. Without this, IOptions<CandidatePortalOptions>.Value
             // .PortalUrl is empty and the candidate/consultant portal auth services build relative
-            // verification / password-reset links (e.g. "/careers/portal/verify-email?...") that recipients
+            // verification / password-reset links (e.g. "/careers/verify-email?...") that recipients
             // cannot follow. ValidateOnStart makes a missing/empty PortalUrl fail fast at boot rather than
             // shipping broken emails.
             services.AddOptions<ErpSystem.Core.Models.CandidatePortalOptions>()

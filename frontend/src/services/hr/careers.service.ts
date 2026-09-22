@@ -30,6 +30,12 @@ import type {
   PublicVacancy,
   SaveCandidateProfilePayload,
 } from '@/types/hr/careers';
+import type {
+  CandidateAssessmentSummary,
+  CandidateSitting,
+  CandidateSittingResult,
+  SubmitSittingPayload,
+} from '@/types/hr/recruitment-tests';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -297,6 +303,45 @@ class CandidateService {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/applications/${applicationId}/offer/respond`,
       { response, notes: notes ?? null, declineReason: declineReason ?? null },
+    );
+  }
+
+  // ── assessments (round 4, lane E) ────────────────────────────────────────
+  //
+  // ⚠ CandidateSitting carries no isCorrect and no expectedAnswer, because the SERVER does not
+  // send them — the candidate projection is a different type on both sides. A component that
+  // renders a paper must take CandidateTestQuestion, never the authoring shape.
+
+  getAssessments(): Promise<CandidateAssessmentSummary[]> {
+    return apiService.get<CandidateAssessmentSummary[]>(`${this.baseUrl}/assessments`);
+  }
+
+  /**
+   * Opens an attempt, or returns the one already running (which does not consume another).
+   *
+   * ⚠ The clock starts on the SERVER here and does not restart when the page is reloaded. Keep the
+   * returned `accessToken` — every save and the submit must present it.
+   */
+  startAssessment(assignmentId: string): Promise<CandidateSitting> {
+    return apiService.post<CandidateSitting>(`${this.baseUrl}/assessments/${assignmentId}/start`, {});
+  }
+
+  /** Resumes an attempt. Re-issues the access token, which invalidates any other open window. */
+  getSitting(sittingId: string): Promise<CandidateSitting> {
+    return apiService.get<CandidateSitting>(`${this.baseUrl}/assessments/sittings/${sittingId}`);
+  }
+
+  saveAssessmentProgress(payload: SubmitSittingPayload): Promise<CandidateSitting> {
+    return apiService.put<CandidateSitting>(
+      `${this.baseUrl}/assessments/sittings/${payload.sittingId}/progress`,
+      payload,
+    );
+  }
+
+  submitAssessment(payload: SubmitSittingPayload): Promise<CandidateSittingResult> {
+    return apiService.post<CandidateSittingResult>(
+      `${this.baseUrl}/assessments/sittings/${payload.sittingId}/submit`,
+      payload,
     );
   }
 }

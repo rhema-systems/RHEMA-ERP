@@ -231,6 +231,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IInterviewQuestionPresetRepository, InterviewQuestionPresetRepository>();
         services.AddScoped<IInterviewQuestionPresetItemRepository, InterviewQuestionPresetItemRepository>();
         services.AddScoped<IJobInterviewRepository, JobInterviewRepository>();
+        // Round 4, lane E: one repository for the whole test engine — the reference-number
+        // generator needs the Data layer; everything else goes through IUnitOfWork.Repository<T>().
+        services.AddScoped<IRecruitmentTestRepository, RecruitmentTestRepository>();
         services.AddScoped<IJobInterviewPanelistRepository, JobInterviewPanelistRepository>();
         services.AddScoped<IJobInterviewExternalPanelistRepository, JobInterviewExternalPanelistRepository>();
         services.AddScoped<IJobIntervieweeRepository, JobIntervieweeRepository>();
@@ -661,6 +664,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ICandidateEngagementEventService, CandidateEngagementEventService>();
         // Round 4, lane B: screening the pool by a vacancy's criteria, then acting on the result.
         services.AddScoped<ITalentPoolScreeningService, TalentPoolScreeningService>();
+        // Round 4, lane E: the recruitment test engine — authoring, sitting, marking, and the
+        // ledger row that finally gives JobVacancy.TestScoreWeight something to blend.
+        services.AddScoped<IRecruitmentTestService, RecruitmentTestService>();
         services.AddScoped<IJobApplicationService, JobApplicationService>();
         services.AddSingleton<IApplicationSnapshotService, ApplicationSnapshotService>();
         services.AddScoped<IApplicationPipelineService, ApplicationPipelineService>();

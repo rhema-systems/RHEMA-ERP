@@ -2137,6 +2137,64 @@ public enum JobApplicantTestType
     Practical = 2
 }
 
+/// <summary>
+/// What a recruitment test question asks for (round 4, lane E).
+/// </summary>
+/// <remarks>
+/// ⚠ Mirrors <c>OrientationQuestionType</c> deliberately (decision D-2), because the marking follows
+/// the same rules — including the one it had to learn: the denominator is every GRADABLE question on
+/// the paper, and <see cref="FreeText"/> is the only member that is not one.
+/// </remarks>
+public enum RecruitmentQuestionType
+{
+    [Description("Single choice")]
+    SingleChoice = 1,
+
+    /// <summary>⚠ Marked on EXACT SET EQUALITY — every correct option and no incorrect one.</summary>
+    [Description("Multiple choice")]
+    MultiSelect = 2,
+
+    [Description("True or false")]
+    TrueFalse = 3,
+
+    /// <summary>The one type the machine cannot mark. Stored, and awaits a human.</summary>
+    [Description("Free text")]
+    FreeText = 4,
+
+    [Description("Numeric")]
+    Numeric = 5,
+}
+
+/// <summary>Where one candidate's attempt at a paper has got to (round 4, lane E).</summary>
+public enum RecruitmentSittingStatus
+{
+    [Description("Not started")]
+    NotStarted = 1,
+
+    [Description("In progress")]
+    InProgress = 2,
+
+    /// <summary>Submitted, and the closed questions are marked. A paper with free text is not done.</summary>
+    [Description("Awaiting marking")]
+    AwaitingMarking = 3,
+
+    [Description("Marked")]
+    Marked = 4,
+
+    /// <summary>
+    /// The window closed with the paper unsubmitted.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Distinct from a zero. A candidate who ran out of time has a mark; one who never started has
+    /// nothing, and recording that as 0% would blend a non-event into their shortlisting score.
+    /// </remarks>
+    [Description("Expired")]
+    Expired = 5,
+
+    [Description("Cancelled")]
+    Cancelled = 6,
+}
+
 public enum JobInterviewType
 {
     /// <summary>Initial short conversation to verify basics. Format is set via InterviewMode.</summary>

@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
@@ -1605,7 +1605,14 @@ public class JobOfferService : IJobOfferService
             // no token was issued.
             ["RespondUrl"]    = candidateToken.HasValue
                 ? $"{_portalBaseUrl}/careers/portal/offer-response?token={candidateToken.Value}"
-                : $"{_portalBaseUrl}/careers/portal/login?returnUrl=/careers/portal/offer/{offer.JobApplicationId}",
+                // ⚠ Corrected 2026-09-22. This read
+                //   /careers/portal/login?returnUrl=/careers/portal/offer/{id}
+                // which was wrong three times over: the login page is at /login, its parameter is
+                // `redirect` (not returnUrl), and /careers/portal/offer/{id} has never existed. A
+                // candidate who reached this branch — any offer issued without a candidate token
+                // — got a 404 instead of their offer. The offer opens from the application list,
+                // which is where this now lands them after signing in.
+                : $"{_portalBaseUrl}/login?redirect={Uri.EscapeDataString("/external-portal/careers")}",
         };
 
         // Best-effort: the offer is already committed when this runs, so a mail failure must not turn a

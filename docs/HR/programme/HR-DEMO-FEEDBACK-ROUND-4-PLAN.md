@@ -12,13 +12,20 @@
 > | **B** | **DONE** — 96 ×2, `run-round4-b.mjs`; **no migration**; all 16 neighbouring suites at baseline |
 > | **D-1** | **DONE** — 58 ×2, `run-round4-d.mjs`; migration `AddInterviewPanelClashOverrideAndRoomBooking` applied to UAT. D1–D4 + D8, the recruitment half |
 > | **D-2** | **DONE** — 39 ×2, `hr-company-schedule/run-round4-d.mjs`; migration `AddCompanyEventOriginalWindowAndUniqueNumbers` applied to UAT. D5–D7 |
+> | **E-a** | **DONE** — 141 ×2, `run-round4-e.mjs`; migration `AddRecruitmentTestEngine` applied to UAT; all 18 neighbouring suites at baseline. E1–E5. **The harness found two defects in the lane's own code** — § 8 |
+> | *(E-b)* | **NOT STARTED** — E6 printable paper + offline entry, E7 demo seed + coverage manifest |
+> | *email links* | **DONE** — every candidate-facing CTA in the recruitment catalogue pointed at a non-existent page since 2026-08-31; six repointed, **two confirmation pages built**. § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> Lane D is complete. Next: **E**, then I, L, J, M, K, N, O.
+> E-a is verified. Next: **E-b** (E6 printable paper + offline entry, E7 demo seed), then I, L,
+> J, M, K, N, O, with P alongside.
+>
+> ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
+> all three are still outstanding.
 >
 > ⚠ **Lane B moved the scoring engine.** `ScoringCandidateView` and `EvaluateCriterion` were private
 > members of `JobApplicationService`; they are now `ShortlistingEvaluator` in
@@ -1376,6 +1383,145 @@ index and not the cause.
 **Not walked in a browser:** `my-schedule`, `team`, and the hidden Delete buttons.
 
 ---
+
+---
+
+### Lane E-a — the recruitment test engine · DONE 2026-09-22 · 141 assertions ×2
+
+Harness: `dev-harness/hr-recruitment/run-round4-e.mjs`, blocks A–O. **Not** a new `hr-tests/` as
+this plan first said: a sitting hangs off an application, which hangs off a candidate and a
+published vacancy — slice-F's whole fixture. A fresh directory would have rebuilt that plumbing to
+test a feature whose own endpoints are `api/hr/recruitment/tests`.
+
+**Neighbouring suites, all at baseline:** `run-round4-a` 45 · `-b` 96 · `-c` 46 · `-d` 58 · `-f`
+103 · `-g` 41 · `-h` 36 · `run-a` 44 · `run-c1` 96 · `run-c2` 89 · `run-k` 81 · `run-v` 72 ·
+`run-candidate-country` 43 · `slice-b` 174/176 · `slice-c` 188/190 · `slice-e` 101/105 · `slice-f`
+69 · `run-lane5b` 32/34 (§ 9.2's stale admin-gate) · `hr-company-schedule/run-round4-d` 39.
+
+Migration `20260922152618_AddRecruitmentTestEngine` (guarded SQL; applied to `ErpSystemDB_UAT`,
+all 7 tables and 23 indexes verified present). No frontend route has been browser-walked; **E4's
+walk is already listed in § 5** as one of the three things a harness cannot prove.
+
+**What was built (E1–E5).** Seven entities; `RecruitmentTestService` + `IRecruitmentTestService`;
+`RecruitmentTestController` (`api/hr/recruitment/tests`, `InternalOnly` + `HR.Recruitment.*`) and
+five candidate actions on `CandidateController`; authoring, assignment, delivery, auto-marking,
+manual marking and finalisation; six screens.
+
+**Three decisions taken inside the lane, each reversible and each worth a second opinion.**
+
+| | Decision | Why, and what the alternative cost |
+|---|---|---|
+| 1 | A paper the machine can settle outright **finalises itself at submit** — ledger row written, application re-scored, result released. A paper with written answers waits for a human and shows the candidate nothing. | This is what finally gives `TestScoreWeight` an input (§ 3 defect 8) without a second click. The alternative leaves every aptitude test in a queue waiting for a human to press a button that has nothing to decide. |
+| 2 | Past the deadline the **late payload is ignored** and the sitting is marked on what was *saved* before it, status `Expired`, with a 2-minute grace for clock skew. It does not refuse. | Refusing loses work the candidate did in time; accepting late answers makes the clock decorative. Requires server-side autosave, which is why progress is stored rather than kept in the tab. |
+| 3 | The sitting's access token **binds one live window per attempt** — reopening re-issues it and the stale tab's autosave is refused. | Without it a second tab's twenty-minute-old answers silently overwrite the fresh ones. It also gives `AccessTokenHash`/`Last4`/`ExpiresAt` a job; the alternative was three columns nothing populated, which is the defect shape this round keeps finding. |
+
+**⚠ Deviation from the plan, for the record.** The plan said to reuse `AssessmentPending` for the
+invitation. A new `TestInvitation` template was added instead: `AssessmentPending` is the *pipeline
+stage* notice — it carries no test name, duration, deadline or attempt count and points at the
+dashboard, so a candidate would open a timed paper on a phone with ten minutes to spare. Both are
+kept.
+
+**§ 9.4's token recommendation is now half taken.** The sitting token is SHA-256 hashed at rest
+with only the last four characters in clear, following procurement's design as § 9.4 asked.
+**The offer-response and interview-confirmation tokens still store in clear** — unchanged, still
+owed.
+
+#### What verifying it found — two defects in the lane's own code
+
+| | Defect | How it was found | Fix |
+|---|---|---|---|
+| 1 | **A re-sit was AVERAGED with the attempt it replaced.** The ledger row was keyed off the *sitting*, so attempt 2 minted a second `JobApplicantTestResult` — and the shortlisting blend averages every scored row. The commonest reason to grant a re-sit (Q4) is that the first went wrong; averaging penalised the candidate for the power cut HR granted the re-sit over. | **Designing** block K, before it ever ran | One ledger row per test per candidate, owned by the latest finalised attempt, `TestDate` moving with it. Attempt history lives in the sittings. K5 asserts one row carrying 15/15, not an average of 6 and 15 |
+| 2 | **The countdown was wrong by the viewer's UTC offset after a refresh.** `datetime2` carries no offset, so EF reads every value back as `Kind=Unspecified` and JSON drops the `Z`: `MustSubmitBy` left the API as `…Z` on the start and without it on the next read. A browser parses the second as **local** time. Invisible at UTC+0; an hour east, the timer reads an hour long and the server cuts the candidate off while their clock still shows time. | Block E3, comparing the deadline across two responses | `AsUtc` on every instant the service serves — 15 sites |
+
+⚠ **Defect 2 is not lane E's alone.** Every HR DTO that serialises a `DateTime` read back from a
+`datetime2` column has the same property; lane E fixed its own because a countdown is the one field
+where an offset-sized error changes the outcome. Recorded here, not swept.
+
+**Block O exists because nothing else runs the sweep.** No harness in the repo exercised the
+recruitment lifecycle sweep before this one, so `ExpireOverdueSittingsAsync` had never executed —
+this repo has twice found HR sweeps that never ran in production. O asserts an abandoned sitting is
+expired and marked on the **2 marks it saved of the paper's 15**, with the denominator still the
+whole paper.
+
+**Three things the harness taught about itself, for whoever runs it next:**
+
+- **`start` and `submit` carry `SensitivePolicy`, 5 a minute.** It partitions by `CallerKey`, which
+  prefers the authenticated **user id** — so an exam hall behind one NAT does not lock itself out
+  (block N asserts it). A real candidate makes two of these calls; the suite makes a dozen, so it
+  spreads them across four candidates and waits out the window once before the re-sit.
+- **`[Required]` on a string trims before deciding**, so a whitespace-only reason is a **400** from
+  model validation — the service's own 422 guard is unreachable over HTTP.
+- ⚠ **`appsettings.json` points at `ErpSystemDB`, but `slice-f/setup.mjs` defaults to
+  `ErpSystemDB_UAT`** and claims that default "matches the API's own default". It no longer does.
+  Run the API with `ConnectionStrings__DefaultConnection` overridden to UAT, or every fixture fails
+  on *"the statement matched NO rows in ErpSystemDB_UAT"*. And the host machine ran out of RAM
+  mid-verification (1.1 GB free of 23.4; SQL trimmed to a 385 MB working set; every query at its
+  35 s timeout) — two runs died in unrelated places before that was diagnosed.
+
+#### What lane E still owes
+
+| | Item | State |
+|---|---|---|
+| **E-b** | E6 — printable paper + marking key + offline results entry | not started |
+| | E7 — demo aptitude test seed + coverage-manifest rows | not started |
+| **Walk** | E4 end to end in the careers portal, including refresh mid-test (§ 5, item 2) | not done |
+
+---
+
+### Candidate-facing email links — a sweep, DONE 2026-09-22
+
+Found while wiring lane E's invitation. **Every call-to-action button in the recruitment email
+catalogue pointed at a page that did not exist**, and had done since the standalone candidate portal
+was retired on 2026-08-31 — three weeks of live email.
+
+**Why it was cheap to fix, and the check that established it.** These are `DefaultHtmlBody` values,
+used only when no row exists in `EmailTemplates` for that module+event. Both databases held 11
+stored templates, **none of them Recruitment and none carrying the old path**, so the C# default
+*was* the live text and no data migration was needed. Run that query first, always:
+`SELECT COUNT(*), SUM(CASE WHEN HtmlBody LIKE '%<path>%' THEN 1 ELSE 0 END) FROM EmailTemplates`.
+
+| | Was | Now |
+|---|---|---|
+| 6 buttons — ApplicationReceived, ApplicationUnderReview, ApplicationShortlisted, AssessmentPending, OfferAccepted, TalentPoolInvitation | `/careers/portal/dashboard` — no such page | `/external-portal/careers` |
+| InterviewInvitation + InterviewRescheduled (shared `interviewDetailsTable`) | `/careers/portal/confirm-interview/{token}` — **page never built** | page built at `/careers/confirm-interview/[token]`; template repointed |
+| InterviewPanelistAssignment | `/interviews/confirm-panelist/{token}` — **page never built** | page built at that exact route; template unchanged |
+| `JobOfferHireService` non-token `RespondUrl` fallback | `/careers/portal/login?returnUrl=/careers/portal/offer/{id}` — wrong path, wrong parameter name, non-existent target | `/login?redirect=%2Fexternal-portal%2Fcareers` |
+| `RespondUrl` sample value, and a stale example in a `ServiceCollectionExtensions` comment | advertised routes that never existed | corrected |
+
+**Verified mechanically, not by eye.** Every link the HR email layer emits was extracted and checked
+against a real page; all eight resolve. `/careers/portal/offer-response` is the only survivor of the
+retired namespace and genuinely exists.
+
+**⚠ Two confirmation pages, not one.** The panelist link was found while checking the candidate one
+and was equally dead, with an equally live API half. Placement is load-bearing in both cases: the
+candidate page sits under `/careers` (that layout carries no AuthGuard); the panelist page is
+top-level with no shell, because a panelist may be an **external associate with no account at all**
+— `/external-portal/*` would lock them out and the careers header would greet a director with
+"Create an account".
+
+**⚠ Both confirm endpoints are a GET that CONFIRMS AND SPENDS the token.** Two consequences, handled
+in the pages and recorded here rather than designed away:
+
+- React StrictMode double-invokes effects, so a naive fetch reports *"invalid or expired"* over a
+  confirmation that had just succeeded. Both pages use React Query with `retry: false` and every
+  refetch disabled.
+- **A mail scanner that pre-fetches links spends the token before the human clicks.** The attendance
+  is still recorded correctly — the scanner's GET is what records it — but the person then sees the
+  expired message. That is a property of the token design, not of these pages, which is why
+  *"already confirmed"* is presented as a **success**. Changing it means making the confirm a POST
+  behind a landing page, or not spending the token on read. **Deliberately not done here** — it is
+  a behaviour change to a live flow, and it belongs with § 9.4's token rework.
+
+#### Recorded, not fixed
+
+**`JobApplicationService.AddTestResultAsync` stamps an employee id into a user column.** Its
+parameter is named `createdByUserId`, its only caller (`JobApplicationController:293`) passes
+`employeeId.Value`, and `ToEntity` writes it to `CreatedBy`. So every offline test result records
+its author as an employee id where every other row records a user id. Harmless to behaviour, wrong
+in the audit column, and the same shape this repo has recorded before — *a column named
+`...UserId` holding an employee id*. Lane E's own ledger writer does not go through that door and
+stamps both correctly (`CreatedById` = user, `MarkedById` = employee). Not fixed: it is another
+lane's door, and changing it touches the controller, the parameter name and existing rows.
 
 ---
 

@@ -58,6 +58,19 @@ public static class RecruitmentEmailCatalog
         /// HR owns rather than a string in a service.
         /// </remarks>
         public const string TalentPoolInvitation = "TalentPoolInvitation";
+
+        /// <summary>
+        /// Asks a candidate to sit a test online - round 4, lane E.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ NOT <see cref="AssessmentPending"/>, and the difference is not cosmetic. That one says
+        /// "you have reached the assessment stage, check your portal" and links to the dashboard; it
+        /// carries no paper, no duration, no deadline and no attempt count. A candidate who has to
+        /// find a timed test on their own, with no idea how long it runs or when it shuts, is a
+        /// candidate who opens it on a phone with ten minutes to spare. Both are kept: the stage
+        /// notice is still the stage notice.
+        /// </remarks>
+        public const string TestInvitation = "TestInvitation";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -166,7 +179,7 @@ public static class RecruitmentEmailCatalog
     </div>
   </div>
   <p>You can track your application status at any time using your application reference number.</p>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "Track my application") + @"
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "Track my application") + @"
   <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>
     Our team will review your application and be in touch if your profile matches our requirements.
   </p>"),
@@ -217,7 +230,7 @@ public static class RecruitmentEmailCatalog
                 @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
   <p>Good news — your application for <strong>{{JobTitle}}</strong> (ref: <strong>{{ApplicationNumber}}</strong>) is now being actively reviewed by our recruitment team.</p>
   <p>We will be in touch with an update once our review is complete. No action is required from you at this stage.</p>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "Track my application") + @"
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "Track my application") + @"
   <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>Thank you for your patience.</p>"),
             Tokens = new()
             {
@@ -245,7 +258,7 @@ public static class RecruitmentEmailCatalog
     <p style='color:#166534;margin:0;font-weight:600'>What happens next?</p>
     <p style='color:#166534;margin:0.5rem 0 0'>You may be invited for an interview or an assessment. Keep an eye on your inbox and phone for communications from our team.</p>
   </div>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "View my application status")),
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "View my application status")),
             Tokens = new()
             {
                 T("CandidateName", "Candidate's full name.", "Ada Boahen"),
@@ -299,7 +312,7 @@ public static class RecruitmentEmailCatalog
     <p style='color:#92400e;margin:0;font-weight:600'>&#9888; Action required</p>
     <p style='color:#92400e;margin:0.5rem 0 0'>Please check your portal for assessment instructions and any deadlines that may apply.</p>
   </div>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "View assessment details")),
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "View assessment details")),
             Tokens = new()
             {
                 T("CandidateName", "Candidate's full name.", "Ada Boahen"),
@@ -311,6 +324,18 @@ public static class RecruitmentEmailCatalog
         });
 
         // ── 7 & 8. Interview invitation / rescheduled (shared details table) ────
+        //
+        // ⚠ /careers/confirm-interview/{token}, NOT /careers/portal/... . Until 2026-09-22 this
+        // button pointed into the retired portal namespace at a page that had never been built, so
+        // "Confirm attendance" was a 404 in every invitation and every reschedule the system had
+        // ever sent — while the API half (GET api/job-interviews/confirm-attendance/{token},
+        // anonymous, rate-limited on PublicPortalPolicy) sat live the whole time. The page now
+        // exists and is ANONYMOUS by design: it lives under /careers, whose layout carries no
+        // AuthGuard, because somebody reading an invitation on their phone will not sign in first.
+        //
+        // ⚠ The endpoint CONFIRMS AND SPENDS the token on a GET. Anything that follows the link
+        // consumes it — including a mail scanner that pre-fetches, which is why the page treats
+        // "already confirmed" as a success rather than an error.
         const string interviewDetailsTable = @"
   <table style='width:100%;border-collapse:collapse;margin:1rem 0'>
     <tr><td style='padding:0.5rem;background:#fff;border:1px solid #e5e7eb;font-weight:600;width:40%'>Date</td><td style='padding:0.5rem;background:#fff;border:1px solid #e5e7eb'>{{Date}}</td></tr>
@@ -320,14 +345,14 @@ public static class RecruitmentEmailCatalog
     <tr><td style='padding:0.5rem;background:#f9fafb;border:1px solid #e5e7eb;font-weight:600'>Location / Link</td><td style='padding:0.5rem;background:#f9fafb;border:1px solid #e5e7eb'>{{Location}}</td></tr>
   </table>
   <p style='margin-top:1.5rem'>
-    <a href='{{PortalUrl}}/careers/portal/confirm-interview/{{ConfirmToken}}'
+    <a href='{{PortalUrl}}/careers/confirm-interview/{{ConfirmToken}}'
        style='background:#1a56db;color:#fff;padding:0.75rem 1.5rem;border-radius:6px;text-decoration:none;font-weight:600'>
       Confirm attendance
     </a>
   </p>
   <p style='color:#6b7280;font-size:0.85rem;margin-top:0.5rem'>
     If the button does not work, copy this link into your browser:<br/>
-    <a href='{{PortalUrl}}/careers/portal/confirm-interview/{{ConfirmToken}}' style='color:#1a56db;word-break:break-all'>{{PortalUrl}}/careers/portal/confirm-interview/{{ConfirmToken}}</a>
+    <a href='{{PortalUrl}}/careers/confirm-interview/{{ConfirmToken}}' style='color:#1a56db;word-break:break-all'>{{PortalUrl}}/careers/confirm-interview/{{ConfirmToken}}</a>
   </p>
   <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>If you have any questions, please contact our recruitment team.</p>";
 
@@ -461,7 +486,8 @@ public static class RecruitmentEmailCatalog
                 T("SalaryLine", "Formatted salary line; row hidden when empty.", "GHS 90,000.00 per annum"),
                 T("StartDate", "Proposed start date; row hidden when empty.", "Monday, 3 August 2026"),
                 T("ExpiryDate", "Offer expiry date; row hidden when empty.", "Friday, 25 July 2026"),
-                T("RespondUrl", "Deep link that signs the candidate in to view the offer.", "https://careers.example.com/careers/portal/login"),
+                T("RespondUrl", "Link the candidate follows to read and answer the offer.",
+                  "https://careers.example.com/careers/portal/offer-response?token=…"),
                 PortalUrlToken,
             }
         });
@@ -483,7 +509,7 @@ public static class RecruitmentEmailCatalog
     <p style='color:#166534;margin:0.5rem 0 0'>{{#if StartDate}}Your proposed start date is <strong>{{StartDate}}</strong>. Our HR team will be in touch with onboarding details.{{else}}Our HR team will be in touch shortly with onboarding details and your confirmed start date.{{/if}}</p>
   </div>
   <p>If you have any questions in the meantime, please don't hesitate to reach out to our HR team.</p>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "Go to my portal")),
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "Go to my portal")),
             Tokens = new()
             {
                 T("CandidateName", "Candidate's full name.", "Ada Boahen"),
@@ -600,7 +626,7 @@ public static class RecruitmentEmailCatalog
     We have opened an application for you so nothing is lost - please review it, attach anything you
     would like us to see, and confirm you want to be considered.
   </p>" +
-                PrimaryButton("{{PortalUrl}}/careers/portal/dashboard", "Review my application") + @"
+                PrimaryButton("{{PortalUrl}}/external-portal/careers", "Review my application") + @"
   <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>
     You are receiving this because you asked to be kept on our talent register. If you would rather
     not hear about openings, reply to this message and we will take you off it.
@@ -615,6 +641,71 @@ public static class RecruitmentEmailCatalog
                 T("ClosingDate", "The application deadline; the whole line is hidden when the vacancy has none.", "Friday, 10 October 2026"),
                 T("InvitationNote", "What the recruiter typed when inviting; hidden when they typed nothing.",
                   "Your work at Ghana Ports looked directly relevant to this one."),
+                PortalUrlToken,
+            }
+        });
+
+        // ── 14. Test invitation ────────────────────────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.TestInvitation,
+            Name = "Test Invitation",
+            Category = "Assessment",
+            Description =
+                "Sent when HR assigns a recruitment test and invites the candidates who must sit it. "
+                + "Carries the four things a candidate needs before they open a timed paper: what it "
+                + "is, how long it runs, when the window shuts and how many attempts they have.",
+            DefaultSubject = "Assessment to complete: {{TestName}} ({{ApplicationNumber}})",
+            DefaultHtmlBody = Shell(BlueGradient, "An assessment to complete",
+                @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
+  <p>
+    As part of your application for <strong>{{JobTitle}}</strong> (ref:
+    <strong>{{ApplicationNumber}}</strong>), we would like you to complete an assessment.
+  </p>
+  <div style='background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:1rem 0'>
+    <div style='font-size:1.125rem;font-weight:700;color:#111827'>{{TestName}}</div>
+    <div style='color:#6b7280;font-size:0.875rem;margin-top:0.5rem'>
+      {{QuestionCount}} question(s) &middot; {{DurationText}} &middot; {{AttemptsAllowed}} attempt(s)
+    </div>
+    {{#if OpensAt}}<div style='margin-top:0.75rem;font-size:0.875rem'>
+      <strong>Opens:</strong> {{OpensAt}}
+    </div>{{/if}}
+    {{#if ClosesAt}}<div style='margin-top:0.25rem;font-size:0.875rem'>
+      <strong>Closes:</strong> {{ClosesAt}}
+    </div>{{/if}}
+  </div>
+  {{#if TestInstructions}}<p style='white-space:pre-wrap'>{{TestInstructions}}</p>{{/if}}
+  <div style='background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:1rem;margin:1rem 0'>
+    <p style='color:#92400e;margin:0;font-weight:600'>&#9888; Before you start</p>
+    <p style='color:#92400e;margin:0.5rem 0 0'>
+      The clock starts the moment you open the paper and keeps running if you close the page, so
+      begin only when you have the time free and a connection you trust. Your answers are saved as
+      you go.
+    </p>
+  </div>" +
+                // ⚠ /external-portal/careers/..., NOT /careers/portal/... . The candidate area
+                // moved into the shared external-portal shell when the standalone portal was retired
+                // (2026-08-31), and six buttons in this file went on pointing at the old path for
+                // three weeks — every one of them a 404. They were corrected on 2026-09-22; the
+                // only survivor is the confirm-attendance link above, which is a missing PAGE
+                // rather than a moved one.
+                PrimaryButton("{{PortalUrl}}/external-portal/careers/assessments", "Open my assessments")),
+            Tokens = new()
+            {
+                T("CandidateName", "Candidate's full name.", "Ada Boahen"),
+                T("JobTitle", "The role applied for.", "Senior Accountant"),
+                T("ApplicationNumber", "Reference number of this application.", "APP-000456"),
+                T("TestName", "The name of the paper.", "Numerical Reasoning"),
+                T("TestInstructions", "The paper's own instructions; the paragraph is hidden when it has none.",
+                  "Answer every question. Calculators are permitted."),
+                T("DurationText", "How long it runs, in words.", "45 minutes"),
+                T("QuestionCount", "How many questions are on the paper.", "20"),
+                T("OpensAt", "When the window opens; the line is hidden when it is already open.",
+                  "Monday, 28 September 2026 at 09:00"),
+                T("ClosesAt", "When the window shuts; the line is hidden when there is no closing date.",
+                  "Friday, 2 October 2026 at 17:00"),
+                T("AttemptsAllowed", "How many times the candidate may sit it.", "1"),
                 PortalUrlToken,
             }
         });
