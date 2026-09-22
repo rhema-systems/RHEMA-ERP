@@ -125,8 +125,8 @@ describe('accounting book settings', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'View details' }));
         await waitFor(() => expect(financeDataService.getAccountingBook).toHaveBeenCalledWith('book-primary'));
-        expect(await screen.findByText('Accounting use')).toBeInTheDocument();
-        expect(screen.getByText('Yes — structure locked')).toBeInTheDocument();
+        expect(await screen.findByText('Journal/posting activity')).toBeInTheDocument();
+        expect(screen.getByText('Activity exists — structure locked')).toBeInTheDocument();
     });
 
     it('offers a governed same-day reversal on the current primary designation', async () => {

@@ -1705,9 +1705,9 @@ export default function AccountingBooksSettingsPage() {
                   </p>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Accounting use</span>
+                  <span className="text-muted-foreground">Journal/posting activity</span>
                   <p>
-                    {detail.hasAccountingUse ? 'Yes — structure locked' : 'No'}
+                    {detail.hasAccountingUse ? 'Activity exists — structure locked' : 'None yet'}
                   </p>
                 </div>
                 <div>
