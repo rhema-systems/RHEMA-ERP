@@ -226,8 +226,42 @@ describe('accounting book settings', () => {
         expect(screen.getByText('Structural identity locked')).toBeInTheDocument();
         expect(screen.getByLabelText('Stable code')).toBeDisabled();
         expect(screen.getByLabelText('Book type')).toHaveAttribute('data-disabled');
+        expect(screen.getByLabelText('Book type')).toHaveTextContent('Primary / base');
         expect(screen.getByLabelText('Accounting purpose / principle')).toBeDisabled();
         expect(screen.getByLabelText('Name')).not.toBeDisabled();
+    });
+
+    it('keeps the accounting-book editor within the viewport with a scrollable body and visible actions', async () => {
+        permissions.add('Finance.AccountingBooks.Manage');
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+        const dialog = screen.getByRole('dialog');
+        expect(dialog).toHaveClass('max-h-[calc(100dvh-2rem)]', 'overflow-hidden');
+        expect(dialog.querySelector('.overflow-y-auto')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Save book' }).parentElement)
+            .toHaveClass('shrink-0', 'border-t');
+    });
+
+    it('explains that a Delta inherits Primary activity as a live view rather than copying it', async () => {
+        permissions.add('Finance.AccountingBooks.Manage');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            code: 'IFRS_ADJUSTMENTS',
+            name: 'IFRS Adjustments',
+            bookType: 'Delta',
+            baseAccountingBookId: primaryBook.id,
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+        expect(screen.getByText('Primary activity remains available as a live inherited view'))
+            .toBeInTheDocument();
+        expect(screen.getByText(/Delta stores only explicit adjustment journals/))
+            .toBeInTheDocument();
+        expect(screen.queryByText('Earlier Primary activity will not be copied'))
+            .not.toBeInTheDocument();
     });
 
     it.each(['Initializing', 'Active', 'Suspended'] as const)(

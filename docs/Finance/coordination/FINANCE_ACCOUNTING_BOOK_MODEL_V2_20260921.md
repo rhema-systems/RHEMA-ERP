@@ -59,6 +59,8 @@ Migrations `20260921154920_AccountingBookModelV2` and `20260921174134_Accounting
 - Implemented governed Parallel opening conversion with immutable rate id/value/date/type/source per account, supporting single-approved-rate and classification-driven methods plus protected CTA balancing.
 - Implemented idempotent historical replay during governed activation. Every eligible Primary journal is translated at its accounting-date approved rate, linked to its source journal, and projected into exact-book balances; missing rates or mappings roll back activation.
 - Reversal replicas reuse the original immutable Parallel rate even when later rates exist.
+- Corrected the accounting-book editor so the protected Primary type renders explicitly, the create/edit dialog remains viewport-bounded with a scrollable body and persistent action footer, and Delta displays its own live-inheritance explanation while Parallel opening notices remain treatment-specific.
+- Canonicalized baseline initialization fingerprint ordering in memory and added a fail-closed repair path restricted to untouched `FIN-BASELINE-2.0` zero-opening packages with no journals or transactions.
 
 ## Verification evidence
 
@@ -81,6 +83,8 @@ Migrations `20260921154920_AccountingBookModelV2` and `20260921174134_Accounting
 - A fresh Next.js production build completed with `NEXT_PUBLIC_API_URL=http://127.0.0.1:5013/api` and started independently on `http://127.0.0.1:3003`. Root, accounting books, currencies, dimensions, and dimension-readiness routes returned HTTP 200; warm responses were 50–80 ms after an 18.5-second first cold render. CORS preflight from port 3003 to the login API returned HTTP 204 with the expected origin, and generated assets contained 421 cutover-API references with zero references to the prior port 5012. The existing frontend remained untouched.
 - Created disposable transactional-test clone `RHEMAERP_BOOKV2_UAT_20260922` from a copy-only checksummed backup of the pristine cutover candidate. `RESTORE VERIFYONLY`, restore, and `DBCC CHECKDB ... PHYSICAL_ONLY` passed; the retained backup SHA-256 is `64F2D6B74F15C58F167F339BB140D7656B70B427AB19E6378324167D29AD4284`. Cross-database reconciliation found zero table row-count differences, matching seven-migration histories, three books, and zero Finance journals/transactions. API port 5013 was then repointed to the UAT clone; SQL session evidence and HTTP 200 liveness confirmed the target while the cutover candidate remained pristine.
 - Targeted `AccountingBookPeriodInitializationC4Tests`: 20 passed; 3 legacy assertions fail because they require removed behavior (per-book close readiness, Primary lifecycle transitions, and inactive derived mappings). These tests must be replaced with V2 assertions.
+- Accounting-book editor regression tests passed: 3 focused tests cover Primary type presentation, viewport-safe dialog actions, and Delta live-inheritance guidance; scoped ESLint passed with zero errors.
+- `ErpSystem.Data` compiled with the baseline fingerprint repair: 0 errors (109 existing repository warnings). The disposable UAT clone repair reconciled BASE and IFRS at 45/45 lines and USD Parallel at 47/47 lines, with zero journals and zero transactions; the preserved cutover candidate was not modified.
 - No migration was applied to the retained `RhemaERP` database and no database was reset or dropped.
 
 ## Open implementation slices

@@ -60,25 +60,41 @@ public sealed class FinanceBaselineProvisioningSeeder
     private async Task ProvisionUntouchedBookAsync(Guid tenantId, string currency, AccountingBook book, FiscalPeriod cutoff,
         DateTime firstPostingDate, DateTime now, CancellationToken ct)
     {
-        var existingInitialization = await _db.AccountingBookInitializations.AnyAsync(item =>
-            item.TenantId == tenantId && item.AccountingBookId == book.Id && !item.IsDeleted, ct);
+        var existingInitializations = await _db.AccountingBookInitializations
+            .Include(item => item.Lines)
+            .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
+            .ToListAsync(ct);
         var hasActivity = await _db.AccountTransactions.AnyAsync(item =>
             item.TenantId == tenantId && item.AccountingBookId == book.Id && !item.IsDeleted, ct)
             || await _db.JournalEntries.AnyAsync(item =>
                 item.TenantId == tenantId && item.AccountingBookId == book.Id && !item.IsDeleted, ct);
 
-        var expectedLifecycle = book.BookType == AccountingBookType.PrimaryFull
+        var expectedProvisioningLifecycle = book.BookType == AccountingBookType.PrimaryFull
             ? book.LifecycleStatus == AccountingBookLifecycleStatus.Active && book.IsActive && book.AllowsPosting
             : book.LifecycleStatus == AccountingBookLifecycleStatus.Configuring && !book.IsActive && !book.AllowsPosting;
-        if (existingInitialization || hasActivity || !expectedLifecycle || book.UpdatedBy != null
-            || !string.Equals(book.CreatedBy, $"System ({FinanceClassificationManifestSeeder.ManifestVersion})", StringComparison.Ordinal))
+        var expectedRepairLifecycle = book.LifecycleStatus == AccountingBookLifecycleStatus.Active
+            && book.IsActive && book.AllowsPosting;
+        var systemOwnedBook = book.UpdatedBy == null
+            && string.Equals(book.CreatedBy, $"System ({FinanceClassificationManifestSeeder.ManifestVersion})", StringComparison.Ordinal);
+        var repairableInitialization = existingInitializations.Count == 1
+            ? existingInitializations[0]
+            : null;
+        var repairSystemEvidence = repairableInitialization != null
+            && expectedRepairLifecycle
+            && repairableInitialization.InitializationStatus == AccountingBookInitializationStatus.Approved
+            && string.Equals(repairableInitialization.IdempotencyKey, $"{ProvisioningVersion}-{book.Code}", StringComparison.Ordinal)
+            && string.Equals(repairableInitialization.CreatedBy, $"System ({ProvisioningVersion})", StringComparison.Ordinal);
+        if (hasActivity || !systemOwnedBook
+            || (existingInitializations.Count == 0 && !expectedProvisioningLifecycle)
+            || (existingInitializations.Count > 0 && !repairSystemEvidence))
             return;
 
         var mappings = await _db.AccountAccountingBooks.Include(item => item.Account).Include(item => item.AccountClassification)
             .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
-            .OrderBy(item => item.AccountId).ToListAsync(ct);
+            .ToListAsync(ct);
         mappings = mappings.Where(item => item.Account != null && !item.Account.IsDeleted
-            && (item.Account.EffectiveDate == null || item.Account.EffectiveDate.Value.Date <= cutoff.EndDate.Date)).ToList();
+            && (item.Account.EffectiveDate == null || item.Account.EffectiveDate.Value.Date <= cutoff.EndDate.Date))
+            .OrderBy(item => item.AccountId).ToList();
         if (mappings.Count == 0 || mappings.Any(item => item.AccountClassification == null
             || item.AccountClassification.IsDeleted || item.AccountClassification.Status != AccountClassificationStatus.Active
             || !item.AccountClassification.IsPostingClassification
@@ -96,6 +112,32 @@ public sealed class FinanceBaselineProvisioningSeeder
             null, null, null, null, null, idempotencyKey, InitializationReason, lineEvidence);
         var authority = string.Join('|', mappings.Select(item => $"{item.AccountId:N}:{item.Account.AccountNumber}:{item.Account.AccountType}:{item.Id:N}:{item.AccountClassificationId:N}:{item.AccountClassification!.Code}:{item.AccountClassification.Status}:{item.AccountClassification.IsPostingClassification}"));
         var reconciliation = AccountingBookInitializationFingerprint.Reconciliation(evidence, authority, string.Empty, string.Empty, 0, 0);
+        if (repairSystemEvidence)
+        {
+            var retainedInitialization = repairableInitialization!;
+            var expectedAccounts = mappings.Select(item => item.AccountId).ToHashSet();
+            var retainedAccounts = retainedInitialization.Lines.Select(item => item.AccountId).ToHashSet();
+            if (!expectedAccounts.SetEquals(retainedAccounts)
+                || retainedInitialization.Lines.Any(item => item.OpeningDebit != 0 || item.OpeningCredit != 0
+                    || item.BaseBookSignedBalance != 0 || item.OpeningAdjustment != 0
+                    || !string.Equals(item.CurrencyCode, currency, StringComparison.Ordinal)))
+                throw new InvalidOperationException($"FINANCE_BASELINE_EVIDENCE_REPAIR_REFUSED: {book.Code} is not untouched zero-opening system evidence.");
+
+            if (retainedInitialization.RequiredAccountCount == mappings.Count
+                && retainedInitialization.CoveredAccountCount == mappings.Count
+                && string.Equals(retainedInitialization.EvidenceFingerprint, evidence, StringComparison.Ordinal)
+                && string.Equals(retainedInitialization.ReconciliationFingerprint, reconciliation, StringComparison.Ordinal))
+                return;
+
+            retainedInitialization.RequiredAccountCount = mappings.Count;
+            retainedInitialization.CoveredAccountCount = mappings.Count;
+            retainedInitialization.EvidenceFingerprint = evidence;
+            retainedInitialization.ReconciliationFingerprint = reconciliation;
+            retainedInitialization.UpdatedAt = now;
+            retainedInitialization.UpdatedBy = $"System ({ProvisioningVersion})";
+            return;
+        }
+
         var initialization = new AccountingBookInitialization
         {
             TenantId = tenantId, AccountingBookId = book.Id, Version = 1,

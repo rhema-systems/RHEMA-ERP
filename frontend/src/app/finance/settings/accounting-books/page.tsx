@@ -62,6 +62,11 @@ import { SearchableOptionPicker } from '@/components/finance/accounting-books/se
 import type { Currency } from '@/types/finance';
 
 const bookTypes: AccountingBookType[] = ['ParallelFull', 'Delta'];
+const bookTypeLabels: Record<AccountingBookType, string> = {
+  PrimaryFull: 'Primary / base',
+  ParallelFull: 'Parallel / foreign currency',
+  Delta: 'Delta / adjustment',
+};
 const lifecycleStates: AccountingBookLifecycleStatus[] = [
   'Draft',
   'Configuring',
@@ -1317,8 +1322,8 @@ export default function AccountingBooksSettingsPage() {
           if (!open) setEditing(undefined);
         }}
       >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 px-6 pb-4 pt-6">
             <DialogTitle>
               {editing ? `Edit ${editing.code}` : 'Create accounting book'}
             </DialogTitle>
@@ -1328,8 +1333,9 @@ export default function AccountingBooksSettingsPage() {
               explicit replication cutoff.
             </DialogDescription>
           </DialogHeader>
-          {structuralLocked && (
-            <Alert>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-2">
+            {structuralLocked && (
+              <Alert>
               <ShieldAlert className="h-4 w-4" />
               <AlertTitle>Structural identity locked</AlertTitle>
               <AlertDescription>
@@ -1337,9 +1343,9 @@ export default function AccountingBooksSettingsPage() {
                   ? 'No changes can be saved while this book has a pending lifecycle transition.'
                   : 'This lifecycle or its initialization/accounting evidence locks structural fields. Only display name, description and display order can be amended.'}
               </AlertDescription>
-            </Alert>
-          )}
-          <div className="grid gap-4 sm:grid-cols-2">
+              </Alert>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label htmlFor="book-code">Stable code</Label>
               <Input
@@ -1379,9 +1385,12 @@ export default function AccountingBooksSettingsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {bookTypes.map((type) => (
+                  {(form.bookType === 'PrimaryFull'
+                    ? (['PrimaryFull'] as AccountingBookType[])
+                    : bookTypes
+                  ).map((type) => (
                     <SelectItem key={type} value={type}>
-                      {type}
+                      {bookTypeLabels[type]}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1474,6 +1483,17 @@ export default function AccountingBooksSettingsPage() {
             </div>
             {form.bookType === 'Delta' && (
               <>
+                <Alert className="sm:col-span-2">
+                  <AlertTitle>
+                    Primary activity remains available as a live inherited view
+                  </AlertTitle>
+                  <AlertDescription>
+                    Primary journals are not copied into this Delta ledger. The
+                    Delta stores only explicit adjustment journals, while
+                    reporting combines the live Primary balance with selected
+                    Delta adjustments without duplicating the base activity.
+                  </AlertDescription>
+                </Alert>
                 <div>
                   <Label htmlFor="book-from">Posting allowed from (optional)</Label>
                   <Input
@@ -1597,8 +1617,9 @@ export default function AccountingBooksSettingsPage() {
                 }
               />
             </div>
+            </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t bg-background px-6 py-4">
             <Button variant="outline" onClick={() => setEditing(undefined)}>
               Cancel
             </Button>
