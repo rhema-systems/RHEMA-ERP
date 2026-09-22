@@ -37,6 +37,12 @@
       normally after that baseline.
     -->
     <Compile Remove="LegacyMigrationsArchive\**\*.cs" />
+    <!--
+      These 27 migrations were merged after the disposable baseline cutover but
+      carry older timestamps. Their schema is already present in the baseline,
+      so compiling them would place duplicate operations before the baseline.
+    -->
+    <Compile Remove="SupersededMigrationsArchive\**\*.cs" />
   </ItemGroup>
 
 </Project>

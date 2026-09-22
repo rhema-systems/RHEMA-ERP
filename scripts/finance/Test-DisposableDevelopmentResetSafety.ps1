@@ -144,7 +144,7 @@ try {
     Write-Host 'PASS: actual pre-dispatch backup reservation helper is available and refuses collisions'
 
     $migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
-    foreach ($functionName in @('ConvertTo-SanitizedEvidenceLine','Get-SqlEvidenceTokens',
+    foreach ($functionName in @('Replace-OrdinalIgnoreCase','ConvertTo-SanitizedEvidenceLine','Get-SqlEvidenceTokens',
         'Assert-UniqueOrderedSqlEvidenceTokens','Invoke-Native','Assert-SqlcmdOutputWidth','Invoke-Sql',
         'Invoke-SqlWithSanitizedEvidence','Get-DisposableBackupFileName','Join-DisposableBackupPath',
         'Write-AtomicTextFile','Write-MigrationHistoryEvidence','Read-MigrationHistoryEvidence',
@@ -536,10 +536,7 @@ exit 0
         'requires an exact, unique, ordered compiled migration set before DROP',
         '$script:authoritativeMigrationCount = $repositoryMigrations.Count',
         '$script:authoritativeLatestMigration = $repositoryLatest',
-        '--disable-build-servers',
-        '/maxcpucount:1',
-        '/nodeReuse:false',
-        '/p:UseSharedCompilation=false',
+        'Get-BoundedApiBuildArguments',
         'RHEMAERP_DISPOSABLE_DEVELOPMENT_RESET',
         "Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'",
         'Get-DisposableTargetMigrationState $evidenceDirectory $repositoryMigrations',
@@ -549,6 +546,11 @@ exit 0
         'Get-SanitizedExceptionMessage'
     )) {
         if (-not $reset.Contains($required)) { throw "Disposable reset contract is missing: $required" }
+    }
+    foreach ($boundedBuildToken in @('--disable-build-servers','/maxcpucount:1','/nodeReuse:false','/p:UseSharedCompilation=false')) {
+        if (-not $text.Contains($boundedBuildToken)) {
+            throw "Bounded build helper contract is missing: $boundedBuildToken"
+        }
     }
     if ([regex]::Matches($reset, 'DROP DATABASE \[RhemaERP\]').Count -ne 1 -or
         $reset -match '(?i)retry\s*\(' -or $reset -match 'Remove-Item[^\r\n]+backup') {
