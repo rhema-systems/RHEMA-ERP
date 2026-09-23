@@ -642,6 +642,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IOrientationNoticeEmailDispatcher, ErpSystem.Core.Services.HR.Orientation.OrientationNoticeEmailDispatcher>();
         // Round 4, lane N: every HR email, listed from the registered catalogues, reworded per tenant.
         services.AddScoped<IHrLetterTemplateService, ErpSystem.Core.Services.HR.Templates.HrLetterTemplateService>();
+        // Round 4 lane N-b: an HR letter as a PDF, for the offer letter attached to the Offer Issued email.
+        services.AddScoped<ErpSystem.Core.Interfaces.Common.IHtmlToPdfRenderer, ErpSystem.Api.Services.DocumentManagement.HtmlToPdfRenderer>();
         services.AddScoped<IOnboardingTemplateApplicabilityService, OnboardingTemplateApplicabilityService>();
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();

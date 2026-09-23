@@ -39,6 +39,8 @@ public class JobOfferService : IJobOfferService
     private readonly string _portalBaseUrl;
     private readonly ICompanyHrPolicySettingsService _policySettings;
     private readonly HrCurrencyBridge _currencies;
+    private readonly IOfferLetterService _offerLetters;
+    private readonly IHtmlToPdfRenderer _pdfRenderer;
 
     public JobOfferService(
         IJobOfferRepository offerRepository,
@@ -56,7 +58,9 @@ public class JobOfferService : IJobOfferService
         ITemplatedEmailService templatedEmail,
         IConfiguration configuration,
         ICompanyHrPolicySettingsService policySettings,
-        HrCurrencyBridge currencies)
+        HrCurrencyBridge currencies,
+        IOfferLetterService offerLetters,
+        IHtmlToPdfRenderer pdfRenderer)
     {
         _offerRepository         = offerRepository;
         _benefitRepository       = benefitRepository;
@@ -73,6 +77,8 @@ public class JobOfferService : IJobOfferService
         _templatedEmail          = templatedEmail;
         _policySettings          = policySettings;
         _currencies              = currencies;
+        _offerLetters            = offerLetters;
+        _pdfRenderer             = pdfRenderer;
         // No localhost fallback: this URL goes into offer emails sent to real candidates. A missing
         // config value must fail at startup, not silently mail every candidate a link to localhost.
         _portalBaseUrl           = configuration["CandidatePortal:PortalUrl"]
@@ -1497,7 +1503,8 @@ public class JobOfferService : IJobOfferService
             // ⚠ Deliberately NOT `offer.OfferLetterPath`. That is a server filesystem path, and this
             // payload goes to an unauthenticated caller holding only an emailed token — it told them
             // where the file lives on disk and was useless to them as a link anyway. The letter
-            // reaches the candidate as an email attachment; a download route for them would need its
+            // reaches the candidate as a PDF attached to the Offer Issued email (round 4, lane N-b —
+            // this comment said so before it was true); a download route for them would need its
             // own token check, which is candidate-portal work rather than something to bolt on here.
             OfferLetterUrl  = null,
         };
@@ -1543,7 +1550,20 @@ public class JobOfferService : IJobOfferService
             "Candidate responded to offer {OfferNumber} via token: {Response}",
             entity.OfferNumber, dto.Response);
 
+        if (dto.Response == JobOfferStatus.Accepted)
+            await SendAcceptanceConfirmationAsync(entity.Id);
+
         return true;
+    }
+
+    /// <summary>The Offer Accepted email for an acceptance the candidate made themselves.</summary>
+    private async Task SendAcceptanceConfirmationAsync(Guid offerId)
+    {
+        var fullOffer = await _offerRepository.GetWithFullDetailsAsync(offerId);
+        if (fullOffer is null) return;
+        var candidateEmail = fullOffer.Application?.JobCandidate?.Email;
+        var candidateName  = fullOffer.Application?.JobCandidate?.FullName ?? "Candidate";
+        await SendOfferAcceptedEmailAsync(candidateEmail ?? string.Empty, candidateName, fullOffer);
     }
 
     public async Task<bool> RecordPortalCandidateResponseAsync(Guid applicationId, CandidatePortalOfferResponseDto dto, CancellationToken cancellationToken = default)
@@ -1584,6 +1604,9 @@ public class JobOfferService : IJobOfferService
             "Candidate responded to offer {OfferNumber} via portal: {Response}",
             entity.OfferNumber, dto.Response);
 
+        if (dto.Response == JobOfferStatus.Accepted)
+            await SendAcceptanceConfirmationAsync(entity.Id);
+
         return true;
     }
 
@@ -1615,12 +1638,49 @@ public class JobOfferService : IJobOfferService
                 : $"{_portalBaseUrl}/login?redirect={Uri.EscapeDataString("/external-portal/careers")}",
         };
 
+        // The offer letter, as a PDF the candidate can keep (round 4, lane N-b — the user's call). Its
+        // sentence in the email is switched on only when the attachment really exists: a letter that
+        // cannot be rendered or converted costs the candidate the attachment, never the offer email,
+        // and the email never promises a file it does not carry. The letter itself stays readable on
+        // the portal either way.
+        IReadOnlyList<EmailAttachmentDto>? attachments = null;
+        try
+        {
+            var letter = await _offerLetters.GenerateAsync(offer.Id);
+            var pdf = await _pdfRenderer.RenderAsync(letter.HtmlBody, $"Offer letter {offer.OfferNumber}");
+            if (pdf is { Length: > 0 })
+            {
+                attachments = new[]
+                {
+                    new EmailAttachmentDto
+                    {
+                        FileName    = $"Offer letter {offer.OfferNumber}.pdf",
+                        ContentType = "application/pdf",
+                        Content     = pdf,
+                    },
+                };
+                tokens["LetterAttached"] = "yes";
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "The offer letter for {OfferNumber} could not be made a PDF; the offer email goes without it.",
+                    offer.OfferNumber);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "The offer letter for {OfferNumber} could not be rendered; the offer email goes without it.",
+                offer.OfferNumber);
+        }
+
         // Best-effort: the offer is already committed when this runs, so a mail failure must not turn a
         // successful issue into an error response.
         try
         {
             await _templatedEmail.SendAsync(
-                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferIssued, toEmail, tokens);
+                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferIssued, toEmail, tokens, attachments);
         }
         catch (Exception ex)
         {
@@ -1630,6 +1690,12 @@ public class JobOfferService : IJobOfferService
         }
     }
 
+    /// <remarks>
+    /// Sent however the acceptance arrives — HR recording it, the candidate's emailed link, the careers
+    /// portal (round 4, lane N-b: only HR's recording sent it, although this comment already claimed the
+    /// link did). ⚠ By the OFFER'S tenant: the link is anonymous, so there is no signed-in user to say
+    /// whose wording and whose company name the email carries.
+    /// </remarks>
     private async Task SendOfferAcceptedEmailAsync(string toEmail, string candidateName, JobOffer offer)
     {
         if (string.IsNullOrWhiteSpace(toEmail)) return;
@@ -1647,8 +1713,8 @@ public class JobOfferService : IJobOfferService
         // unresponsive SMTP server would otherwise hold their response open.
         try
         {
-            var emailTask = _templatedEmail.SendAsync(
-                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferAccepted, toEmail, tokens);
+            var emailTask = _templatedEmail.SendForTenantAsync(
+                offer.TenantId, RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.OfferAccepted, toEmail, tokens);
 
             if (await Task.WhenAny(emailTask, Task.Delay(TimeSpan.FromSeconds(10))) == emailTask)
                 await emailTask;

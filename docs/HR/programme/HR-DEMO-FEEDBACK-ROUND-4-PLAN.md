@@ -1,7 +1,7 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–N done (with I-b; K as K-a, K-b1, K-b2). Next is N-b, the four senders
-> lane N's survey found; then O.**
+> **Status 2026-09-23 — A–N done (with I-b; K as K-a, K-b1, K-b2), and N-b1. Next is N-b2, the
+> company-schedule reminders, which has a migration. Then O.**
 >
 > | Lane | State |
 > |---|---|
@@ -25,13 +25,14 @@
 > | **K-b1** | **DONE** — 84 ×2, `hr-orientation/run-round4-kb.mjs`; migration `AddOrientationNoticeEmailOutbox` applied to UAT. **The events tell people now**: enrolled (HR, bulk, a rule; a renewal too, wired but not exercised — § 8), a session placed / moved (saying where from) / postponed / cancelled — participants and employee facilitators — completed, certificate issued; each notice written in the same save as its event, its email queued on it and sent within a minute by a dispatcher. **Certificates are issued at completion** for a programme that issues them (nothing issued one before — the user's call), plus an HR **Issue / Reissue certificate** button. The programme's **"Send reminders"** switch made real — it was read by nothing, K-a included. A **Notices** tab: who was told what, and what each email did — § 8 |
 > | **K-b2** | **DONE** — 54 ×2, `hr-orientation/run-round4-kb2.mjs`; **no migration**. Onboarding tells people: a plan made **welcomes the new hire** and tells its coordinator and buddy (on hire too — lane I 184 ×2, H6d); a plan changing hands tells only the new holders; a task given tells its assignee; marking a task done that needs signing off tells the coordinator at once. And the page they lead to — the user's call — **"My onboarding"** in the portal: the new hire's plan and who owes each task, the tasks given to the reader with **Mark done**, the new colleagues they are buddy to. K-a's reminders for a task given to somebody now open it, not HR's queues — § 8 |
 > | **N** | **DONE** — 115 ×2, a new suite `hr-templates/run-lane-n.mjs`; **no migration**. **Letter & Email Templates** under HR Settings covers all 44 templates in the eight catalogues (32 emails, 12 printed documents). It has a token palette, a live preview that lists every problem a save would be refused for, save, reset and a test send to the officer's own address. The list comes from the catalogues and a row is stored only when a tenant edits; N2's startup seeding was rejected because a seeded row would freeze its day's wording. **The sender used any tenant's stored wording**, and would still have taken an untouched seeded copy for an edit; both are fixed. Background emails now carry the tenant's legal name, where they printed "Our Company"; so does the careers activation email, where it read "Default Tenant". Candidates are greeted by name, where "Application Received" used their email address. The register § 2.7 lists all 44, checked against the screen both ways. The survey found **four sender behaviours outside the lane**, which become **N-b** — § 8 |
+> | **N-b1** | **DONE** — 32 ×2, `hr-templates/run-lane-nb1.mjs`; **no migration**. **The offer letter goes with the Offer Issued email as a PDF** (the user's call), rendered by the Syncfusion engine the document module already uses; the email says it is attached only when it is. **Under Review** is sent once, on the first move a person makes into a review stage, from either door; the older door had sent it after every move. **Application Withdrawn** is sent from all three live withdrawals; it was unreachable. **Offer Accepted** is sent however the acceptance arrives, and an acceptance by the anonymous link carries the offer tenant's wording. The portal's withdrawal now closes the application's pipeline stage, as HR's always did. ⚠ The first PDF had **empty tables**, because the importer does not read `rem`. It was found by opening the file, then fixed, and the suite now checks the tables' words — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). Next is **N-b**, the four sender fixes in § 4 that lane N's survey found. Then O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b1**, the recruitment half of the sender fixes, is done. Next is **N-b2**, the company-schedule reminders, which has a migration. Then O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names four walks a harness cannot replace;
 > all four are still outstanding.
@@ -702,8 +703,15 @@ a candidate or a participant reads. The user asked for them to be fixed, so this
   - The manual buttons stamp the same markers, so nobody is told twice.
   - Background sends name the event's tenant, which is lane N's lesson.
 
-**Harness:** `dev-harness/hr-templates/run-lane-nb.mjs`, through the local SMTP sink. Every email is
-asserted to **arrive**, and to arrive **once**.
+- **Nb5 — The offer letter, attached to Offer Issued (the user's call, 2026-09-23).** The survey
+  found the letter was never emailed, although two comments said it was. Asked whether to correct
+  the comments or attach the letter, the user chose to attach it as a PDF.
+
+**Split, like lane K: N-b1** (Nb1, Nb2, Nb3, Nb5, the recruitment senders, no migration) and **N-b2**
+(Nb4, the company schedule, with the migration).
+
+**Harness:** `dev-harness/hr-templates/run-lane-nb1.mjs` and `run-lane-nb2.mjs`, through the local
+SMTP sink. Every email is asserted to **arrive**, and to arrive **once**.
 
 ### Lane O — The technician-role flag, and the Maintenance door it feeds
 
@@ -2314,6 +2322,80 @@ match, because this log writes `[17:31:58 ERR]`. Grep for ` ERR]`.
 
 **Frontend:** scoped type-check (`tsconfig.round4-lane-n.json`) clean, with a negative control in the
 new page; eslint clean. **Not browser-walked.** The template editor is walk 3 in § 5.
+
+### Lane N-b1 — the recruitment senders, and the offer letter attached · DONE 2026-09-23 · 32 assertions ×2
+
+Harness: `dev-harness/hr-templates/run-lane-nb1.mjs`, through the local SMTP sink. **No migration.**
+
+**What was built.**
+
+| | |
+|---|---|
+| **Nb5: the offer letter, attached** (the user's call) | The Offer Issued email carries the letter as `Offer letter <number>.pdf`. `IHtmlToPdfRenderer`, implemented in the API project as `HtmlToPdfRenderer`, imports the HTML into a Syncfusion Word document and renders that to PDF, using the engine the document-management renditions already use. The email's new `{{#if LetterAttached}}` sentence appears only when the attachment really went. A letter that cannot be rendered or converted costs the attachment, never the email. |
+| **Nb2: Under Review, once** | It moved into the pipeline service, which both stage-move doors go through. It is sent on the **first move a person makes into a review stage**. The older door sent it after every move: into an interview, into an offer, beside Assessment Pending. The board's door never sent it. |
+| **Nb1: Application Withdrawn, reachable** | It is sent from HR's withdrawal on a candidate's behalf, which the employee applicant's own door also goes through, and from the careers portal's. Its only sender had been a token-link withdrawal that nothing called. The portal's withdrawal also **closes the application's open pipeline stage**, as HR's always did. The portal's left the application sitting in its stage. |
+| **Nb3: Offer Accepted, however it arrives** | It is sent for HR's record, the candidate's emailed link and the portal; before, only HR's record sent it. The link is anonymous, so the send names the offer's tenant (lane N's `SendForTenantAsync`). Otherwise the tenant's wording would be skipped and the company name would fall back to configuration. |
+
+**Decisions.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **"First move into review" is marked by the stage history's mover, not by the application leaving Submitted** | A submission is placed in the pipeline's first stage at once, and that is usually a review stage, so the application is "under review" before anyone has looked at it. The placement row records no mover; a person's move always does. So the rule needs no new column. |
+| 2 | **The letter is attached as a PDF, not as HTML** | An `.html` attachment is what phishing uses, and mail filters treat it so. PDF is what a candidate expects to keep and print. |
+| 3 | **The email never promises an attachment it does not carry** | The sentence is a token switched on by the attachment itself, so a failed conversion degrades to the pre-N-b1 email, not to a false claim. |
+| 4 | **HR's withdrawal on a candidate's behalf tells the candidate too** | It is still their application, and the shipped wording ("has been withdrawn") reads correctly whoever withdrew it. |
+
+**⚠ The first PDF looked right to the suite and wrong to a reader.** The first build passed 30/30: a
+real PDF, the right size, the email saying so. Opened by hand, it showed the letter with **both its
+tables empty**: the position-and-terms table, and the salary table. The rows' height survived, the
+columns collapsed to nothing, and the text went with them. The cause was found **without a rebuild**,
+through lane N's own screen. Eight variants of the letter were saved as the tenant's wording, an offer
+was issued against each, and each attached PDF was read. Converting `rem` to `px` alone restored the
+tables: Syncfusion's HTML import does not know the unit, and every table in HR's letters is styled in
+it. The renderer now converts it. The suite now looks inside the PDF for the employment type and the
+salary; the cells print in a standard font, so their words are literal in the page streams [E4b–E4c].
+**Negative control:** against the build without the fix, exactly those two assertions failed. A
+harness can prove a file is a PDF, but not that a person can read it, so the suite saves the last
+PDF as `offer-letter-from-last-run.pdf` for a person to open.
+
+**How it is proved.**
+
+- **Under Review:** exactly one per application, through each door. None for an application moved
+  straight into an interview, and none beside Assessment Pending [B, C].
+- **Application Withdrawn:** exactly one per withdrawal, through all three doors. The portal
+  application's stage is closed as Withdrawn [D].
+- **Offer Issued:** the PDF is real (header, page, end marker, a letter's size, both tables' words),
+  and the email says so. HR's own letter wording, badly nested, costs the attachment but not the
+  email, and that email then promises nothing [E].
+- **Offer Accepted:** exactly one per acceptance, however it arrives. By the link, it carries the
+  tenant's own wording. A decline sends none [F].
+
+**Found on the way, not a product defect:** publishing a vacancy through `POST …/transition` with a
+partial payload **cleared its pipeline** as well as its advert title. This is the recorded "null means
+clear it" behaviour of that DTO; the UI sends the full edit form, so its screens keep both. The
+suite's first run died on it, and the suite now publishes with `change-status`.
+
+**Neighbouring suites.** Every suite that moves, withdraws, offers or applies was run, along with
+lane N's, which checks the new `LetterAttached` token against the register. All are at baseline:
+
+| Suite | Result |
+|---|---|
+| `hr-templates/run-lane-n` | 115/115 |
+| `slice-b` | 174/176 |
+| `slice-c` | 188/190 |
+| `slice-e` | 101/105 |
+| `slice-f` | 69/69 |
+| lanes A, B, C, D | 45, 96, 46, 58 |
+| lanes E, E6, G, H | 141, 86, 41, 36 |
+| `run-a`, `run-c1`, `run-c2` | 44, 96, 89 |
+| `run-k`, `run-v` | 81, 72 |
+| candidate country | 43 |
+| `run-lane5b` | 32/34 |
+
+Every failure among them is one already named in § 9.2. The API log holds only the known noise:
+- the notification processor with no mail server;
+- one payroll-profile failure (defect #23) per employee the suites made;
+- one timed-out clean-up of expired notifications, which belongs to that processor.
 
 ---
 

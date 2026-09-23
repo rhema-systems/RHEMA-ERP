@@ -466,6 +466,7 @@ public static class RecruitmentEmailCatalog
             DefaultHtmlBody = Shell(BlueGradient, "&#127881; You have received a job offer!",
                 @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
   <p>Congratulations! We are delighted to extend to you an offer of employment for the position of <strong>{{PositionTitle}}</strong> (ref: <strong>{{OfferNumber}}</strong>).</p>
+  {{#if LetterAttached}}<p>Your offer letter is attached to this email as a PDF for you to keep.</p>{{/if}}
   <p>Please log in to the candidate portal to review the full offer details and submit your response before the expiry date.</p>
   <table style='width:100%;border-collapse:collapse;margin:1rem 0'>
     <tr><td style='padding:0.5rem;background:#fff;border:1px solid #e5e7eb;font-weight:600'>Position</td><td style='padding:0.5rem;background:#fff;border:1px solid #e5e7eb'>{{PositionTitle}}</td></tr>
@@ -491,6 +492,9 @@ public static class RecruitmentEmailCatalog
                 T("ExpiryDate", "Offer expiry date; row hidden when empty.", "Friday, 25 July 2026"),
                 T("RespondUrl", "Link the candidate follows to read and answer the offer.",
                   "https://careers.example.com/careers/portal/offer-response?token=…"),
+                // Round 4 lane N-b: set only when the letter really went with the email — the sentence
+                // must never promise an attachment the conversion could not make.
+                T("LetterAttached", "Set when the offer letter is attached as a PDF; leave its sentence inside {{#if LetterAttached}}.", "yes"),
                 PortalUrlToken,
             }
         });
@@ -524,10 +528,12 @@ public static class RecruitmentEmailCatalog
         });
 
         // ── 12. Offer letter (formal document) ─────────────────────────────────
-        // A full, HR-editable offer-of-employment letter. Rendered on demand (portal view,
-        // print-to-PDF, and as the email body) by OfferLetterService, which supplies the rich
-        // token set below — including pre-built HTML fragments ({{{SalaryBreakdownTable}}},
-        // {{{BenefitsList}}}, {{{DutiesList}}}, {{{ConditionsList}}}) it assembles itself.
+        // A full, HR-editable offer-of-employment letter. Rendered on demand by OfferLetterService —
+        // HR's preview, the candidate's portal view — and, since round 4 lane N-b, as a PDF attached to
+        // the Offer Issued email. It supplies the rich token set below, including pre-built HTML
+        // fragments ({{{SalaryBreakdownTable}}}, {{{BenefitsList}}}, {{{DutiesList}}},
+        // {{{PreEmploymentChecklist}}}, and {{{ConditionsList}}} for a tenant that places it) it
+        // assembles itself.
         list.Add(new EmailEventDescriptor
         {
             Module = Module,

@@ -492,6 +492,17 @@ public class JobApplicationService : IJobApplicationService
         await _pipelineService.CloseCurrentStageForExitAsync(
             entity.Id, JobApplicationStageExitReason.Withdrawn, updatedByUserId, cancellationToken);
 
+        // The candidate is told, whoever withdrew it — HR on their behalf, or an employee applicant
+        // through their own door, which comes through here (round 4, lane N-b). The confirmation's only
+        // sender was a token-link withdrawal nothing ever called, so no withdrawal confirmed itself.
+        var candidate = await _candidateRepository.GetByIdAsync(entity.JobCandidateId);
+        var vacancy = await GetOwnedVacancyAsync(entity.JobVacancyId);
+        await SendWithdrawalConfirmationEmailAsync(
+            candidate?.Email ?? string.Empty,
+            candidate?.FullName ?? "Candidate",
+            entity.ApplicationNumber,
+            string.IsNullOrWhiteSpace(vacancy.JobTitle) ? "the position" : vacancy.JobTitle);
+
         return true;
     }
 
@@ -530,15 +541,10 @@ public class JobApplicationService : IJobApplicationService
 
         _logger.LogInformation("Application {ApplicationNumber} moved to stage {StageId}", entity.ApplicationNumber, dto.PipelineStageId);
 
-        // Email #6 — Under Review
-        var candUr = await _candidateRepository.GetByIdAsync(entity.JobCandidateId);
-        var vacUr  = await GetOwnedVacancyAsync(entity.JobVacancyId);
-        await SendUnderReviewEmailAsync(
-            candUr?.Email ?? string.Empty,
-            candUr?.FullName ?? "Candidate",
-            entity.ApplicationNumber,
-            vacUr?.JobTitle ?? "the position");
-
+        // ⚠ No email of its own any more (round 4, lane N-b). This door sent "Under Review" after EVERY
+        // move — into an interview, an offer, beside Assessment Pending — while the board's door never
+        // sent it. The pipeline service, which both doors go through, now sends it once, on the first
+        // move into a review stage, so the two doors send the same emails.
         return true;
     }
 
@@ -3039,22 +3045,6 @@ public class JobApplicationService : IJobApplicationService
 
         await SendBestEffortAsync(
             RecruitmentEmailCatalog.Events.ApplicationWithdrawn, toEmail, tokens, "withdrawal confirmation");
-    }
-
-    private async Task SendUnderReviewEmailAsync(
-        string toEmail, string candidateName, string applicationNumber, string jobTitle)
-    {
-        if (string.IsNullOrWhiteSpace(toEmail)) return;
-
-        var tokens = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["CandidateName"]     = candidateName,
-            ["JobTitle"]          = jobTitle,
-            ["ApplicationNumber"] = applicationNumber,
-        };
-
-        await SendBestEffortAsync(
-            RecruitmentEmailCatalog.Events.ApplicationUnderReview, toEmail, tokens, "application under review");
     }
 
     private async Task SendShortlistedEmailAsync(

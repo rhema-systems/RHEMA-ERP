@@ -722,6 +722,20 @@ public sealed class CandidatePortalService : ICandidatePortalService
         // submission — the withdrawal is already durable.
         await AdjustVacancyApplicationCountAsync(
             application.JobVacancyId, -1, tenantId, ct);
+
+        // Round 4 lane N-b: the pipeline is told, as HR's withdrawal tells it — the open stage row is
+        // closed as Withdrawn (this door left it open, so the application went on sitting in its stage)
+        // — and the candidate gets the confirmation every withdrawal now sends. The closer only logs
+        // its actor, and a candidate is not an employee.
+        await _pipelineService.CloseCurrentStageForExitAsync(
+            application.Id, JobApplicationStageExitReason.Withdrawn, Guid.Empty, ct);
+
+        var vacancy = await _vacancyRepo.GetByIdAsync(application.JobVacancyId);
+        await SendApplicationWithdrawnEmailAsync(
+            ownCandidate.Email,
+            string.IsNullOrWhiteSpace(ownCandidate.FullName) ? "Candidate" : ownCandidate.FullName,
+            application.ApplicationNumber,
+            string.IsNullOrWhiteSpace(vacancy?.JobTitle) ? "the position" : vacancy.JobTitle);
     }
 
     // ── Get Applications ───────────────────────────────────────────────────────
@@ -1261,6 +1275,36 @@ public sealed class CandidatePortalService : ICandidatePortalService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to send application received email to {Email}", toEmail);
+        }
+    }
+
+    private async Task SendApplicationWithdrawnEmailAsync(
+        string? toEmail, string candidateName, string applicationNumber, string jobTitle)
+    {
+        if (string.IsNullOrWhiteSpace(toEmail)) return;
+
+        var tokens = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CandidateName"]     = candidateName,
+            ["JobTitle"]          = jobTitle,
+            ["ApplicationNumber"] = applicationNumber,
+        };
+
+        // The same race as the received email: the withdrawal is durable before this runs.
+        try
+        {
+            var emailTask = _templatedEmail.SendAsync(
+                RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.ApplicationWithdrawn, toEmail, tokens);
+            if (await Task.WhenAny(emailTask, Task.Delay(TimeSpan.FromSeconds(10))) == emailTask)
+                await emailTask;
+            else
+                _logger.LogWarning(
+                    "Application withdrawn email timed out after 10 s for {Email} — the withdrawal was recorded.",
+                    toEmail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send application withdrawn email to {Email}", toEmail);
         }
     }
 }
