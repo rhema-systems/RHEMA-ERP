@@ -921,12 +921,25 @@ function Invoke-Preflight {
     Write-Output 'GUARD_COVERAGE|20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue'
     # Inspection-plan governance binds future plans to existing shared workflow owners.
     Write-Output 'GUARD_COVERAGE|20260822003700_GovernCivilInspectionPlanWorkflow'
-    $guards = @(Get-MigrationGuardResults)
+    $currentBaselineId = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
+    $baselineApplied = @($history | Where-Object {
+        [string]$_.MigrationId -eq $currentBaselineId
+    }).Count -eq 1
+    if ($baselineApplied) {
+        # The baseline is the complete zero-to-current schema. Its archived predecessor
+        # migrations are neither compiled nor pending, so their destructive-data guards
+        # must not evaluate newly seeded current-model rows as legacy blockers.
+        Write-Output "MIGRATION_GUARDS|SKIPPED|$currentBaselineId"
+        $guards = @()
+    }
+    else {
+        $guards = @(Get-MigrationGuardResults)
+    }
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
     }
     Assert-True ($guards.Count -eq 0) `
-        'One or more guarded HR migrations would halt. Resolve and archive the reported data before deployment.'
+        'One or more guarded pre-baseline migrations would halt. Resolve and archive the reported data before deployment.'
 
     $summary = @(Get-DatabaseControlSummary)[0]
     Write-Output "MIGRATION_COUNT|$($summary.MigrationCount)"
