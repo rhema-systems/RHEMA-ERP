@@ -1059,6 +1059,10 @@ public class EmployeeOrientationSummaryDto
     public Guid? AudienceRuleId { get; set; }
     public OrientationEnrollmentTrigger? TriggerEvent { get; set; }
     public DateOnly? TriggerDate { get; set; }
+
+    // Round 4, lane K-b — so the list can offer "Issue certificate" or "Reissue".
+    public bool CertificateIssued { get; set; }
+    public string? CertificateSerialNumber { get; set; }
 }
 
 public class CreateEmployeeOrientationDto : CreateDtoBase
@@ -1450,7 +1454,12 @@ public class IssueOrientationCertificateDto
     public string? CertificateNumber { get; set; }   // auto-generated if not supplied
 
     public DateTime? ExpiresAt { get; set; }
+
+    /// <summary>Ignored — the issuer is the signed-in HR officer (round 4, lane K-b). Kept so older callers still bind.</summary>
     public Guid? IssuedByEmployeeId { get; set; }
+
+    /// <summary>Replace the enrolment's live certificate (marked Reissued). Without it, a second live one is refused.</summary>
+    public bool Reissue { get; set; }
 }
 
 public class RevokeOrientationCertificateDto

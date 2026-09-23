@@ -636,6 +636,10 @@ public static class HrModuleServiceRegistration
         // Round 4, lane K: the orientation & onboarding reminder engine — the first HR sweep that
         // delivers (an in-app notification and an email), not only logs.
         services.AddScoped<IOnboardingOrientationReminderService, OnboardingOrientationReminderService>();
+        // Round 4, lane K-b: the lifecycle notices (staged with the event they report) and the
+        // dispatcher that sends their queued emails.
+        services.AddScoped<IOnboardingOrientationNotices, ErpSystem.Core.Services.HR.Orientation.OnboardingOrientationNoticeService>();
+        services.AddScoped<IOrientationNoticeEmailDispatcher, ErpSystem.Core.Services.HR.Orientation.OrientationNoticeEmailDispatcher>();
         services.AddScoped<IOnboardingTemplateApplicabilityService, OnboardingTemplateApplicabilityService>();
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();

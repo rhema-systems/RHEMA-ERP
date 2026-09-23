@@ -10132,7 +10132,22 @@ public enum OrientationNotificationType
     Overdue = 4,
     Completion = 5,
     CertificateIssued = 6,
-    Cancellation = 7
+    Cancellation = 7,
+
+    /// <summary>A participant placed on a session, or a facilitator told of theirs (round 4, lane K-b).</summary>
+    SessionScheduled = 8,
+
+    /// <summary>A live session's date, time, place or link changed.</summary>
+    SessionRescheduled = 9,
+
+    /// <summary>A live session put off, with no new date yet.</summary>
+    SessionPostponed = 10,
+
+    /// <summary>An onboarding plan made: to the new hire, their coordinator and their buddy.</summary>
+    OnboardingPlanAssigned = 11,
+
+    /// <summary>An onboarding task given to a person.</summary>
+    OnboardingTaskAssigned = 12
 }
 
 /// <summary>

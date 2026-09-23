@@ -214,6 +214,15 @@ public interface IOrientationNotificationService
     /// </summary>
     Task<bool> MarkAsReadAsync(Guid notificationId, Guid recipientEmployeeId, CancellationToken cancellationToken = default);
     Task<int> MarkAllAsReadAsync(Guid recipientEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every notice the tenant sent in the last <paramref name="days"/> days — who was told what, and
+    /// what its email did (round 4, lane K-b). Newest first, at most 1,000.
+    /// </summary>
+    /// <param name="kind">A catalogue event key, to show one kind of notice.</param>
+    /// <param name="emailStatus">An email status, or <c>None</c> for notices never meant to be emailed.</param>
+    Task<IEnumerable<OrientationNoticeLogEntryDto>> GetRecentAsync(
+        int days = 14, string? kind = null, string? emailStatus = null, CancellationToken cancellationToken = default);
 }
 
 #endregion

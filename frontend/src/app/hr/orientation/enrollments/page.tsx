@@ -13,6 +13,7 @@ import {
   X,
   AlertTriangle,
   RotateCcw,
+  Award,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -120,12 +121,20 @@ export default function OrientationEnrollmentsPage() {
     kind: 'reenrol' | 'nextCycle';
   } | null>(null);
 
+  // Round 4, lane K-b: a certificated programme now issues its certificate at completion; HR issues
+  // one here for somebody who completed before that, and reissues. There was no button at all.
+  const [certifyTarget, setCertifyTarget] = useState<EmployeeOrientationSummary | null>(null);
+
   const { data: programs = [] } = useQuery({
     queryKey: ['hr', 'orientation-programs'],
     queryFn: () => orientationProgramService.getAll(),
   });
   const recurringProgramIds = useMemo(
     () => new Set(programs.filter((p) => p.isRecurring && p.recurrenceFrequency).map((p) => p.id)),
+    [programs],
+  );
+  const certificatedProgramIds = useMemo(
+    () => new Set(programs.filter((p) => p.isCertificateIssued).map((p) => p.id)),
     [programs],
   );
 
@@ -328,6 +337,33 @@ export default function OrientationEnrollmentsPage() {
       toast({
         title: 'Could not enrol',
         description: error?.message || 'Failed to enrol.',
+        variant: 'destructive',
+      });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runCertify = async () => {
+    if (!certifyTarget) return false;
+    setBusy(true);
+    try {
+      const issued = await employeeOrientationService.issueCertificate(certifyTarget.id, {
+        employeeOrientationId: certifyTarget.id,
+        reissue: !!certifyTarget.certificateIssued,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-enrollments'] });
+      toast({
+        title: certifyTarget.certificateIssued ? 'Certificate reissued' : 'Certificate issued',
+        description: `${issued.certificateNumber} — ${certifyTarget.employeeName ?? 'the participant'} has been told.`,
+      });
+      setCertifyTarget(null);
+      return true;
+    } catch (error: any) {
+      toast({
+        title: 'Could not issue the certificate',
+        description: error?.message || 'Failed to issue.',
         variant: 'destructive',
       });
       return false;
@@ -568,6 +604,13 @@ export default function OrientationEnrollmentsPage() {
                                   Open the next cycle now
                                 </DropdownMenuItem>
                               )}
+                            {e.completionStatus === 'Completed' &&
+                              certificatedProgramIds.has(e.programId) && (
+                                <DropdownMenuItem onClick={() => setCertifyTarget(e)}>
+                                  <Award className="mr-2 h-4 w-4" />
+                                  {e.certificateIssued ? 'Reissue certificate' : 'Issue certificate'}
+                                </DropdownMenuItem>
+                              )}
                             {e.enrollmentStatus !== 'Withdrawn' &&
                               e.enrollmentStatus !== 'Cancelled' && (
                                 <DropdownMenuItem
@@ -762,6 +805,24 @@ export default function OrientationEnrollmentsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={certifyTarget !== null}
+        onOpenChange={(o) => !o && setCertifyTarget(null)}
+        title={
+          certifyTarget?.certificateIssued
+            ? `Reissue ${certifyTarget.employeeName ?? 'this person'}'s certificate?`
+            : `Issue ${certifyTarget?.employeeName ?? 'this person'} a certificate?`
+        }
+        description={
+          certifyTarget?.certificateIssued
+            ? `A new certificate for ${certifyTarget.programTitle ?? 'the programme'} replaces ${certifyTarget.certificateSerialNumber ?? 'the current one'}, which is marked reissued. They are told, in-app and by email.`
+            : `A certificate for ${certifyTarget?.programTitle ?? 'the programme'}, with the next serial and the programme's validity. They are told, in-app and by email.`
+        }
+        confirmText={certifyTarget?.certificateIssued ? 'Reissue' : 'Issue certificate'}
+        isLoading={busy}
+        onConfirm={runCertify}
+      />
 
       <ConfirmationDialog
         open={againTarget !== null}

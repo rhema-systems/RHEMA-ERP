@@ -347,7 +347,13 @@ export type OrientationNotificationType =
   | 'Overdue'
   | 'Completion'
   | 'CertificateIssued'
-  | 'Cancellation';
+  | 'Cancellation'
+  // Round 4, lane K-b
+  | 'SessionScheduled'
+  | 'SessionRescheduled'
+  | 'SessionPostponed'
+  | 'OnboardingPlanAssigned'
+  | 'OnboardingTaskAssigned';
 
 export type OrientationRecurrenceFrequency =
   | 'Monthly'
@@ -1146,7 +1152,10 @@ export interface IssueOrientationCertificateRequest {
   /** Omit to have the server generate OCERT-{year}-NNNNN. */
   certificateNumber?: string | null;
   expiresAt?: string | null;
+  /** Ignored since round 4 lane K-b — the issuer is the signed-in HR officer. */
   issuedByEmployeeId?: string | null;
+  /** Replace the enrolment's live certificate. Without it the server refuses a second live one. */
+  reissue?: boolean;
 }
 
 export interface RevokeOrientationCertificateRequest {
@@ -1177,6 +1186,9 @@ export interface EmployeeOrientationSummary {
   audienceRuleId?: string | null;
   triggerEvent?: OrientationEnrollmentTrigger | null;
   triggerDate?: string | null;
+  /** Round 4, lane K-b — whether it holds a live certificate, for "Issue" or "Reissue". */
+  certificateIssued?: boolean;
+  certificateSerialNumber?: string | null;
 }
 
 export interface EmployeeOrientation extends AuditFields {
@@ -1375,4 +1387,60 @@ export interface OrientationReminderLogEntry {
   notificationId?: string | null;
   emailOutcome: OrientationReminderEmailOutcome | string;
   dispatchedAt: string;
+}
+
+// ── Lifecycle notices (round 4, lane K-b) ────────────────────────────────────
+
+/** What a notice's email did. Null: never meant to be emailed (a manual notice, or one from before K-b). */
+export type OrientationNoticeEmailStatus =
+  | 'Queued'
+  | 'Sent'
+  | 'Failed'
+  | 'TimedOut'
+  | 'NoAddress'
+  | 'NoMailServer'
+  | 'Stale';
+
+/** The catalogue events a notice can be. */
+export type OrientationNoticeKind =
+  | 'OrientationEnrolled'
+  | 'OrientationSessionScheduled'
+  | 'OrientationSessionRescheduled'
+  | 'OrientationSessionPostponed'
+  | 'OrientationSessionCancelled'
+  | 'OrientationCompleted'
+  | 'OrientationCertificateIssued'
+  | 'OrientationReminderDigest';
+
+export interface OrientationNoticeLogEntry {
+  id: string;
+  sentAt: string;
+  type: OrientationNotificationType | string;
+  /** Null for a manual notice. */
+  kind?: OrientationNoticeKind | string | null;
+  recipientEmployeeId: string;
+  recipientName?: string | null;
+  programId?: string | null;
+  programTitle?: string | null;
+  employeeOrientationId?: string | null;
+  subject: string;
+  message?: string | null;
+  isRead: boolean;
+  emailStatus?: OrientationNoticeEmailStatus | string | null;
+  emailAttempts: number;
+  emailLastAttemptAt?: string | null;
+}
+
+export interface OrientationNoticeDispatchResult {
+  /** Another pass held the lock; this one sent nothing. */
+  busy: boolean;
+  mailServerConfigured: boolean;
+  picked: number;
+  sent: number;
+  failed: number;
+  retrying: number;
+  noAddress: number;
+  noMailServer: number;
+  stale: number;
+  stillQueued: number;
 }

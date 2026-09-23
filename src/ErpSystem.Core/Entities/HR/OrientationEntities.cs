@@ -859,6 +859,15 @@ public class OrientationCertificate : TenantEntity
 /// A lifecycle notification sent for an orientation (enrollment, reminder, overdue,
 /// completion, certificate). Instance record — not a template.
 /// </summary>
+/// <remarks>
+/// <para><b>Also the email outbox (round 4, lane K-b).</b> The row IS the in-app delivery, written in
+/// the same save as the event it reports. Its email is sent afterwards by a dispatcher, never inside
+/// the request: publishing a programme can enrol hundreds of people in one save, and sending their
+/// emails there would hold the request for minutes. <see cref="EmailStatus"/> says what happened —
+/// null for a row that was never meant to be emailed (a manual notice, anything written before this),
+/// <c>Queued</c> until the dispatcher settles it, then <c>Sent</c>, <c>Failed</c>, <c>TimedOut</c>,
+/// <c>NoAddress</c>, <c>NoMailServer</c> or <c>Stale</c>.</para>
+/// </remarks>
 public class OrientationNotification : TenantEntity
 {
     public Guid? ProgramId { get; set; }
@@ -882,6 +891,23 @@ public class OrientationNotification : TenantEntity
     public DateTime? ReadAt { get; set; }
 
     public DateTime SentAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>The Orientation &amp; Onboarding catalogue event the email renders. Also says which
+    /// lifecycle event the row reports, more finely than <see cref="Type"/>.</summary>
+    [MaxLength(100)]
+    public string? EmailEventKey { get; set; }
+
+    /// <summary>The email's tokens as they stood at the event, as JSON — a reschedule notice must say
+    /// where the session moved FROM, which the session no longer knows by the time the email goes.</summary>
+    public string? EmailTokens { get; set; }
+
+    /// <summary>What the email did; see the remarks.</summary>
+    [MaxLength(20)]
+    public string? EmailStatus { get; set; }
+
+    public int EmailAttempts { get; set; }
+
+    public DateTime? EmailLastAttemptAt { get; set; }
 
     // Navigation
     [ForeignKey(nameof(ProgramId))]

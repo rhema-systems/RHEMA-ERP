@@ -13116,6 +13116,12 @@ private void ConfigureOrientationEntities(ModelBuilder builder)
             entity.HasIndex(x => x.RecipientEmployeeId);
             entity.HasIndex(x => x.IsRead);
 
+            // Round 4, lane K-b: HR's "what did we tell whom" read, and the email outbox — filtered
+            // to the rows the dispatcher still has to send, which is the only question it asks.
+            entity.HasIndex(x => new { x.TenantId, x.SentAt });
+            entity.HasIndex(x => new { x.TenantId, x.SentAt }, "IX_OrientationNotifications_EmailQueue")
+                .HasFilter("[EmailStatus] = N'Queued'");
+
             entity.Property(x => x.Type).HasConversion<int>();
 
             entity.HasOne(x => x.Program)

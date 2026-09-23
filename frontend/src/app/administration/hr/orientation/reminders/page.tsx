@@ -3,13 +3,21 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BellRing, Eye, Loader2, MailWarning, Play } from 'lucide-react';
+import { BellRing, Eye, Loader2, MailWarning, Megaphone, Play, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -30,6 +38,8 @@ import type {
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
+type BadgeVariant = 'default' | 'secondary' | 'outline' | 'destructive';
+
 /** What each rule means, in the words someone reading the log would use. */
 const KIND_LABELS: Record<string, string> = {
   OnboardingTaskDueSoon: 'Onboarding task due soon',
@@ -43,7 +53,7 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 /** What happened to an item's email — said plainly, because "false" from a mail call says nothing. */
-const EMAIL_OUTCOMES: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
+const EMAIL_OUTCOMES: Record<string, { label: string; variant: BadgeVariant }> = {
   Sent: { label: 'Emailed', variant: 'default' },
   NoMailServer: { label: 'No mail server', variant: 'secondary' },
   NoAddress: { label: 'No email address', variant: 'secondary' },
@@ -53,12 +63,35 @@ const EMAIL_OUTCOMES: Record<string, { label: string; variant: 'default' | 'seco
   Pending: { label: 'Sending…', variant: 'outline' },
 };
 
+/** The lifecycle notices (round 4, lane K-b), plus the sweep's digest, by catalogue event. */
+const NOTICE_KINDS: Record<string, string> = {
+  OrientationEnrolled: 'Enrolled',
+  OrientationSessionScheduled: 'Session scheduled',
+  OrientationSessionRescheduled: 'Session moved',
+  OrientationSessionPostponed: 'Session postponed',
+  OrientationSessionCancelled: 'Session cancelled',
+  OrientationCompleted: 'Completed',
+  OrientationCertificateIssued: 'Certificate issued',
+  OrientationReminderDigest: 'Reminder (daily sweep)',
+};
+
+/** A notice's email. Null is a notice that was never meant to be emailed. */
+const NOTICE_EMAIL: Record<string, { label: string; variant: BadgeVariant }> = {
+  Queued: { label: 'Queued', variant: 'outline' },
+  Sent: { label: 'Emailed', variant: 'default' },
+  Failed: { label: 'Email failed', variant: 'destructive' },
+  TimedOut: { label: 'Email timed out', variant: 'destructive' },
+  NoAddress: { label: 'No email address', variant: 'secondary' },
+  NoMailServer: { label: 'No mail server', variant: 'secondary' },
+  Stale: { label: 'Too old to email', variant: 'secondary' },
+};
+
 const when = (days: number) =>
   days === 0 ? 'today' : days > 0 ? `${days} day${days === 1 ? '' : 's'} left` : `${-days} day${days === -1 ? '' : 's'} past`;
 
 /**
  * Operates the orientation & onboarding reminder sweep (round 4, lane K) and shows what reached
- * people.
+ * people — the sweep's reminders, and (lane K-b) every lifecycle notice.
  *
  * ⚠ The first HR sweep that delivers. Each person gets ONE in-app notification per run listing their
  * items — onboarding tasks go to the task's assignee, else the plan's coordinator; orientations,
@@ -67,6 +100,37 @@ const when = (days: number) =>
  * success. Repeating a run is safe: every item is sent once per due date and escalation rung.
  */
 export default function OrientationRemindersPage() {
+  return (
+    <div className="space-y-6 p-6">
+      <PageHeader
+        title="Orientation & onboarding reminders and notices"
+        description="The daily reminder sweep, and every notice the system sends — enrolments, session changes, completions, certificates — with what each email did."
+        backHref="/administration/hr/orientation"
+      />
+
+      <Tabs defaultValue="reminders">
+        <TabsList>
+          <TabsTrigger value="reminders">
+            <BellRing className="mr-2 h-4 w-4" />
+            Reminder sweep
+          </TabsTrigger>
+          <TabsTrigger value="notices">
+            <Megaphone className="mr-2 h-4 w-4" />
+            Notices
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="reminders" className="space-y-6 pt-4">
+          <ReminderSweepPanel />
+        </TabsContent>
+        <TabsContent value="notices" className="space-y-6 pt-4">
+          <NoticesPanel />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function ReminderSweepPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [lastRun, setLastRun] = useState<OrientationReminderRunResult | null>(null);
@@ -95,6 +159,7 @@ export default function OrientationRemindersPage() {
             : `${result.remindersQueued} item(s) sent to ${result.notificationsDelivered} person(s).`,
       });
       queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-reminders'] });
+      queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-notices'] });
     },
     onError: (error: any) =>
       toast({ title: 'Sweep failed', description: error?.message, variant: 'destructive' }),
@@ -111,22 +176,23 @@ export default function OrientationRemindersPage() {
   const latest = runs[0];
 
   return (
-    <div className="space-y-6 p-6">
-      <PageHeader
-        title="Orientation & onboarding reminders"
-        description="The daily sweep: onboarding tasks due soon, overdue or awaiting sign-off; orientations due, overdue or waiting on the participant; certificates expiring. Each person gets one notification listing theirs, and the same by email."
-        backHref="/administration/hr/orientation"
-        actions={
-          <Button onClick={() => run.mutate()} disabled={run.isPending}>
-            {run.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="mr-2 h-4 w-4" />
-            )}
-            Run now
-          </Button>
-        }
-      />
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-muted-foreground max-w-3xl text-sm">
+          The daily sweep: onboarding tasks due soon, overdue or awaiting sign-off; orientations due,
+          overdue or waiting on the participant; certificates expiring. Each person gets one
+          notification listing theirs, and the same by email. A programme whose “Send reminders” is
+          off is left out.
+        </p>
+        <Button onClick={() => run.mutate()} disabled={run.isPending}>
+          {run.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Play className="mr-2 h-4 w-4" />
+          )}
+          Run now
+        </Button>
+      </div>
 
       {latest && !latest.mailServerConfigured && (
         <Alert>
@@ -376,6 +442,206 @@ export default function OrientationRemindersPage() {
         </Link>
         .
       </p>
-    </div>
+    </>
+  );
+}
+
+/**
+ * Every notice the system sent (round 4, lane K-b): the lifecycle notices — enrolled, a session
+ * placed, moved, postponed or cancelled, completed, certificate issued — and the sweep's digests.
+ * Each is in the person's My Notifications from the moment the event saved; its email follows within
+ * a minute, and what the email did is shown here.
+ */
+function NoticesPanel() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [days, setDays] = useState('14');
+  const [kind, setKind] = useState('all');
+  const [emailStatus, setEmailStatus] = useState('all');
+
+  const { data: notices = [], isLoading } = useQuery({
+    queryKey: ['hr', 'orientation-notices', days, kind, emailStatus],
+    queryFn: () =>
+      orientationReminderService.getRecentNotices(
+        Number(days),
+        kind === 'all' ? undefined : kind,
+        emailStatus === 'all' ? undefined : emailStatus,
+      ),
+  });
+
+  const sendQueued = useMutation({
+    mutationFn: () => orientationReminderService.sendQueuedNotices(),
+    onSuccess: (result) => {
+      toast({
+        title: result.busy ? 'Already sending' : 'Queued emails sent',
+        description: result.busy
+          ? 'The dispatcher is sending right now; try again in a minute.'
+          : !result.mailServerConfigured && result.picked > 0
+            ? `No mail server is configured: ${result.noMailServer} notice(s) stay in-app only.`
+            : `${result.sent} emailed, ${result.failed} failed, ${result.retrying} to retry, ${result.noAddress} without an address. ${result.stillQueued} still queued.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-notices'] });
+    },
+    onError: (error: any) =>
+      toast({ title: 'Could not send', description: error?.message, variant: 'destructive' }),
+  });
+
+  const counts = notices.reduce<Record<string, number>>((acc, n) => {
+    const key = n.emailStatus ?? 'None';
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label>Sent in the last</Label>
+          <Select value={days} onValueChange={setDays}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">7 days</SelectItem>
+              <SelectItem value="14">14 days</SelectItem>
+              <SelectItem value="30">30 days</SelectItem>
+              <SelectItem value="90">90 days</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>What</Label>
+          <Select value={kind} onValueChange={setKind}>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Everything</SelectItem>
+              {Object.entries(NOTICE_KINDS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Email</Label>
+          <Select value={emailStatus} onValueChange={setEmailStatus}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any</SelectItem>
+              {Object.entries(NOTICE_EMAIL).map(([value, { label }]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+              <SelectItem value="None">In-app only</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          variant="outline"
+          className="ml-auto"
+          onClick={() => sendQueued.mutate()}
+          disabled={sendQueued.isPending}
+        >
+          {sendQueued.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="mr-2 h-4 w-4" />
+          )}
+          Send queued emails now
+        </Button>
+      </div>
+
+      {notices.length > 0 && (
+        <div className="flex flex-wrap gap-2 text-sm">
+          <Badge variant="outline">{notices.length} notice(s)</Badge>
+          {Object.entries(counts).map(([status, count]) => (
+            <Badge key={status} variant={NOTICE_EMAIL[status]?.variant ?? 'secondary'}>
+              {count} {status === 'None' ? 'in-app only' : (NOTICE_EMAIL[status]?.label ?? status).toLowerCase()}
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="flex items-center justify-center p-10">
+              <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
+            </div>
+          ) : notices.length === 0 ? (
+            <EmptyState
+              title="No notices"
+              description="Nothing matching was sent in that period. Notices go out when somebody is enrolled, a session is placed, moved or called off, an orientation is completed, or a certificate is issued."
+            />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Sent</TableHead>
+                  <TableHead>What</TableHead>
+                  <TableHead>To</TableHead>
+                  <TableHead>Notice</TableHead>
+                  <TableHead>Email</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {notices.map((n) => {
+                  const email = n.emailStatus ? NOTICE_EMAIL[n.emailStatus] : null;
+                  return (
+                    <TableRow key={n.id}>
+                      <TableCell className="whitespace-nowrap">{fmtDateTime(n.sentAt)}</TableCell>
+                      <TableCell>
+                        <div>{(n.kind && NOTICE_KINDS[n.kind]) ?? 'Manual notice'}</div>
+                        {n.programTitle && (
+                          <div className="text-muted-foreground text-xs">{n.programTitle}</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {n.recipientName ?? '—'}
+                        <div className="text-muted-foreground text-xs">{n.isRead ? 'read' : 'unread'}</div>
+                      </TableCell>
+                      <TableCell className="max-w-[420px]">
+                        <div className="font-medium">{n.subject}</div>
+                        {n.message && (
+                          <div className="text-muted-foreground line-clamp-2 whitespace-pre-line text-xs">
+                            {n.message}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {email ? (
+                          <Badge variant={email.variant}>{email.label}</Badge>
+                        ) : n.emailStatus ? (
+                          <Badge variant="outline">{n.emailStatus}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">In-app only</span>
+                        )}
+                        {n.emailStatus === 'Queued' && n.emailAttempts > 0 && (
+                          <div className="text-muted-foreground text-xs">attempt {n.emailAttempts} of 3 failed</div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <p className="text-muted-foreground text-xs">
+        A notice is in the person’s My Notifications from the moment the event is saved. Its email is
+        sent within a minute by the dispatcher — a failed one is retried twice, five minutes apart.
+        With no mail server configured, or no address on the employee’s record, the in-app notice is
+        the delivery. Enrolment notices follow a programme’s “Send reminders” switch; session changes,
+        completions and certificates are always sent.
+      </p>
+    </>
   );
 }

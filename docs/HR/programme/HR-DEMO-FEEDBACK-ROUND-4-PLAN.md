@@ -1,6 +1,6 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–I (with I-b), J, K-a, L and M done; K-b next.**
+> **Status 2026-09-23 — A–I (with I-b), J, K-a, K-b1, L and M done; K-b2 next.**
 >
 > | Lane | State |
 > |---|---|
@@ -21,13 +21,14 @@
 > | **J** | **DONE** — 94 ×2, `hr-orientation/run-round4-j.mjs`; **no migration**. Copy an onboarding template (never the default, **not** its audience), a programme (everything it is made of, as a Draft) and a session (*Run again* on a new date); a Copy / Run again button on each list **and each record's page** — a finished session is on no list. **The harness found two defects older than the lane, both closed:** editing a quiz question's options had never once saved, and a task due before the start date was refused though the screen offered it — § 8 |
 > | **M** | **DONE** — 54 ×2, `hr-orientation/run-round4-m.mjs`; migration `AddOrientationFacilitatorRegisterPick` applied to UAT. An external facilitator can be picked from the **training vendor register** (a vendor, and its trainer once named): the name, email and organisation are a snapshot taken when the pick is made or changed; a blacklisted/inactive vendor or inactive trainer cannot be picked, and one that becomes so later is flagged on the session instead of blocking its edits; a vendor or trainer booked for a session that has not happened cannot be deleted (M3); *Run again* keeps the picks (M4). Demo: GIMPA on both induction days — § 8 |
 > | **K-a** | **DONE** — 53 ×2, `hr-orientation/run-round4-k.mjs`; migration `AddOnboardingOrientationReminders` applied to UAT. **The first HR sweep that delivers**: eight rules (onboarding tasks due / overdue / awaiting sign-off; orientations due / overdue / assessment unattempted / acknowledgement unsigned; certificates expiring), **one digest per person per run**, in-app in the same save as the claims and emailed after — each email's outcome recorded; four lead-day settings, each enforced in both positions; run-now / preview / runs / log + a Reminders screen; the host registered with it and its scheduled run seen. Proved by a local SMTP sink: the email **arrives**. ⚠ 768 test-fixture onboarding plans cancelled first (the user's call) — § 8. ⚠ **The scheduled run found a lane I4 gap:** a plan created on hire had no coordinator, so its reminders reached nobody — the confirming officer now coordinates it (lane I 183 ×2, H6b/H6c) |
+> | **K-b1** | **DONE** — 84 ×2, `hr-orientation/run-round4-kb.mjs`; migration `AddOrientationNoticeEmailOutbox` applied to UAT. **The events tell people now**: enrolled (HR, bulk, a rule; a renewal too, wired but not exercised — § 8), a session placed / moved (saying where from) / postponed / cancelled — participants and employee facilitators — completed, certificate issued; each notice written in the same save as its event, its email queued on it and sent within a minute by a dispatcher. **Certificates are issued at completion** for a programme that issues them (nothing issued one before — the user's call), plus an HR **Issue / Reissue certificate** button. The programme's **"Send reminders"** switch made real — it was read by nothing, K-a included. A **Notices** tab: who was told what, and what each email did — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J and M are complete; K is split like D and E, and K-a is done.** Next: K-b (the lifecycle notifications, K3), then N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J and M are complete; K is split like D and E — K-a and K-b1 are done.** Next: K-b2 (the onboarding notices, and the portal's "My onboarding" and "Tasks assigned to me"), then N, O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
 > all three are still outstanding.
@@ -581,6 +582,20 @@ notification, not merely a 200 from the trigger endpoint.
 > **Split, like D and E** (sequencing, not narrowing): **K-a** = K1, K2, K4, K5 — the sweep that
 > delivers, its settings, its admin surface and its host — **done 2026-09-23**, see § 8. **K-b** =
 > K3, the lifecycle notifications, on K-a's delivery code.
+>
+> **K-b's survey changed its shape — two decisions, the user's, 2026-09-23.** (1) **No screen could
+> issue an orientation certificate** — the programme's "Issues a certificate" switch promised one
+> "when HR certifies a passed enrolment", and HR had no button; the only certificate on UAT is the
+> seeder's. Decided: issued **automatically at completion** for a programme set to issue one, **and**
+> an HR **Issue certificate** button for completions from before and for reissues. (2) **New hires,
+> buddies and non-HR task assignees can open no onboarding page** (the plan controller defers their
+> views to the portal). Decided: K-b **builds them** — "My onboarding" and "Tasks assigned to me" with
+> Mark done — so every notice leads somewhere. Also found: the programme's **"Send reminders"**
+> switch ("enrolment, deadline and overdue notices") is read by nothing, so K-a reminds on a
+> programme where it is off; K-b makes it govern exactly what it says. Sequenced as **K-b1**
+> (orientation notices, an email outbox — a publish can enrol hundreds in one save, so emails cannot
+> go inside the request — certificates, the switch) and **K-b2** (onboarding notices + the portal
+> views).
 
 ### Lane L — The sessions dropdown
 
@@ -2036,6 +2051,73 @@ leave for the dates it books — the recorded leave-harness litter trap), not on
 
 **Frontend:** scoped type-check (`tsconfig.round4-lane-k.json`, now including the settings screens)
 clean with a negative control; eslint clean. **Not browser-walked.**
+
+### Lane K-b1 — the events tell people, and certificates are issued · DONE 2026-09-23 · 84 assertions ×2
+
+Harness: `dev-harness/hr-orientation/run-round4-kb.mjs`. Migration
+`20260923140503_AddOrientationNoticeEmailOutbox` — scaffolded, rewritten as guarded SQL, proved on a
+scratch database built from UAT's own notification and dispatch-log rows (Up twice, the second
+changing nothing; the 20 K-a digests backfilled with the outcome their dispatch log held — 12
+`NoMailServer`, 8 `Sent` — and nothing else touched; a queued row written through the filtered index;
+Down twice; Up again), then applied to UAT.
+
+**The survey changed the lane** — two decisions, the user's, recorded under lane K above: no screen
+could issue an orientation certificate, and non-HR onboarding recipients have no page to be sent to
+(K-b2 builds them). It also found the programme's "Send reminders" switch read by nothing.
+
+**What was built.**
+
+| | |
+|---|---|
+| **Notices** | `OnboardingOrientationNoticeService` **stages** each notice on the caller's unit of work; the caller's own save commits it with the event, so a notice exists exactly when the thing it reports does (A12: a refused enrolment told nobody). It never throws — a notice that cannot be composed is logged and skipped. The events: enrolled (HR single and bulk, onto a session or its waiting list; an audience rule; a renewal); placed on or moved into a session; an employee facilitating a session told when it goes live, or when added to a live one; a live session moved (**saying where from** — the snapshot is taken before the edit), postponed, cancelled; the first completion; a certificate issued by HR. |
+| **The outbox** | Five columns on `OrientationNotification` — the catalogue event, its tokens as they stood at the event, what the email did, attempts, the last attempt — and `OrientationNoticeEmailDispatcher` with a host every minute. Emails never go inside the request. `Sent`; `NoMailServer` and `NoAddress` final at once; `Failed` / `TimedOut` retried twice, five minutes apart; `Stale` for anything still queued three days on. Saved row by row; a timeout ends the pass. The host and HR's "Send queued emails now" share one lock. K-a's digests now record their own outcome too. |
+| **Certificates** | A programme that issues certificates issues one **at the first completion** — the serial off the shared number sequence (the old highest-plus-one raced, and completions bunch at a deadline), the expiry from its validity, issued by nobody but the completion. HR's **Issue / Reissue certificate** on the enrolment list: refused for an unfinished enrolment and for a programme that issues none (neither was asked before), a second live certificate refused, a reissue marking the first `Reissued`; the issuer is the signed-in officer, and the request's `IssuedByEmployeeId` is ignored (D6). |
+| **The switch** | `EnableReminders` now governs enrolment notices and all five orientation reminder kinds in K-a's sweep — exactly what its description says. Session changes, completions and certificates go either way. Register § 2.6. |
+| **Screens** | A **Notices** tab on the Reminders screen (who was told what, the programme, the email's outcome; filters; the send button); **Issue certificate** / **Reissue certificate** on the enrolment list; the programme form's two switches say what they now do. |
+
+**Decisions — each one this entry's to defend.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **An outbox, not sends inside the request** | D-2 sends in the request — right for a meeting's handful of invitees. Here one publish can enrol a population in a single save (lane I's seeded rule reached 1,135 people); that many sends inline would hold the request for minutes. |
+| 2 | **The notice row is the outbox** | One notice is one message to one person, so its email's outcome belongs on it. A separate outbox table would be a second record of the same fact. |
+| 3 | **`NoMailServer`, `NoAddress` and `Stale` are final** | The in-app notice was the delivery. Nobody wants last month's enrolment emailed the day a mail server is configured. |
+| 4 | **A completion's certificate travels with the completion notice** | Issued at the same moment, one message says both. A certificate HR issues later has its own. |
+| 5 | **A facilitator's notice carries no link** | The session page is HR's, and a facilitator often is not HR — a link that 403s is the company-schedule finding again. |
+| 6 | **"Send reminders" governs what it says and no more** | "Enrolment, deadline and overdue notices". A session called off is not a reminder; suppressing it would leave somebody at a closed door. |
+
+**How it is proved.** Each notice is read straight from the table — recipient, tenant, kind, words,
+link, email state — and once as the person sees it in My Notifications (A7). Every one of the five
+people on a session heard exactly what happened to them, in order (B23), and an edit that moves
+nothing, or a draft session, tells nobody (B15, B16). Completion is driven by the participant's own
+content tracking, and a second pass issues nothing (C8). The outbox block drains the tenant's queue to
+`NoMailServer` before opening the local SMTP sink; the email **arrives**, in the notice's words, with a
+link to that very enrolment (E6–E9); a bouncing address is tried three times and never reaches the
+sink (E12, E13 — and the API log shows exactly three SMTP attempts per run).
+
+**⚠ The suite's own reader lied first.** Run 1 was 75/84 — nine failures, every one a "—" or "–" read
+back as "-". The table held the right characters (`CHARINDEX(NCHAR(8211), Message)` = 34): `sqlcmd`
+writes to a console code page and best-fits what it cannot show. Loosening the expectations would
+have stopped them proving the words, so the reader now returns text as the hex of its UTF-16 bytes.
+**Any harness that compares non-ASCII text through `sqlcmd` has this blind spot.**
+
+**Not exercised: renewal notices.** They go through the same `EnrolledAsync` with a different reason,
+but only the tenant-wide sweep renews, and this suite stays out of it (lane I's lesson); lane I's
+recurring fixtures keep "Send reminders" off. Nothing else here is claimed without a run.
+
+**Neighbouring suites:** `run-round4-k` 55/55 twice — 53 plus two new (the digest records its own
+outcome, C16 and D10b); its sink check now picks the digest by subject, because the dispatcher can put
+an enrolment email in the same mailbox during its block D. `run-round4-i` 183/183; `run-round4-j`
+94/94; `run-round4-m` 54/54; `hr-orientation/run.mjs` 107/107; `run-lane6-feedback` 20/20.
+`hr-portal/run-slice11` (the unified feed) did not reach its assertions: its fixture supplied a staff
+number the system now issues (fixed in `hr-portal/setup.mjs`), then approves a staff movement it
+requested itself, which the movements separation-of-duties rule now refuses — stale since before this
+lane, recorded rather than chased; A7 proves the feed carries the new notices. The API log: the 45
+payroll-profile inserts (defect #23, one per employee created), the bounce's nine SMTP refusals, and
+nothing from the new code.
+
+**Frontend:** scoped type-check (`tsconfig.round4-lane-kb.json`, which already includes `src/app/me`
+for K-b2) clean with a negative control; eslint clean. **Not browser-walked.**
 
 ---
 

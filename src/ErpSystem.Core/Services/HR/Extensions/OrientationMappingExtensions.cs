@@ -769,6 +769,8 @@ public static class OrientationMappingExtensions
             AudienceRuleId = entity.AudienceRuleId,
             TriggerEvent = entity.TriggerEvent,
             TriggerDate = entity.TriggerDate,
+            CertificateIssued = entity.CertificateIssued,
+            CertificateSerialNumber = entity.CertificateSerialNumber,
         };
     }
 

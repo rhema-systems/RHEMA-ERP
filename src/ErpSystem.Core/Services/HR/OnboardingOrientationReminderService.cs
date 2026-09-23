@@ -212,11 +212,21 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
         // that has already happened in-app. What happened is written back per item.
         foreach (var digest in digests)
         {
+            var sending = mailServer && !string.IsNullOrWhiteSpace(digest.Email);
             var outcome = !mailServer ? "NoMailServer"
                 : string.IsNullOrWhiteSpace(digest.Email) ? "NoAddress"
                 : await SendAsync(digest);
             if (outcome == "Sent") run.EmailsSent++; else run.EmailsNotSent++;
             foreach (var item in digest.Items) logs[item.DedupeKey].EmailOutcome = outcome;
+
+            // Lane K-b: the notice says what its own email did, as every orientation notice now does.
+            // Settled here, never Queued — the notice dispatcher leaves digests alone.
+            digest.Notification.EmailStatus = outcome;
+            if (sending)
+            {
+                digest.Notification.EmailAttempts = 1;
+                digest.Notification.EmailLastAttemptAt = DateTime.UtcNow;
+            }
         }
         run.CompletedAt = DateTime.UtcNow;
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -368,7 +378,9 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
                         && ((e.NextDueDate != null && e.NextDueDate >= horizonStart && e.NextDueDate < orientationLeadEnd)
                             || e.CompletionStatus == OrientationCompletionStatus.PendingAssessment
                             || e.CompletionStatus == OrientationCompletionStatus.PendingAcknowledgement))
-            .Join(_unitOfWork.Repository<OrientationProgram>().GetQueryable().Where(p => !p.IsDeleted),
+            // ⚠ Lane K-b: the programme's "Send reminders" switch ("enrolment, deadline and overdue
+            //   notices") was read by nothing — K-a shipped reminding on programmes where it is off.
+            .Join(_unitOfWork.Repository<OrientationProgram>().GetQueryable().Where(p => !p.IsDeleted && p.EnableReminders),
                 e => e.ProgramId, p => p.Id, (e, p) => new
                 {
                     e.Id,
@@ -429,7 +441,7 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
                         && c.ExpiresAt != null && c.ExpiresAt >= todayAt && c.ExpiresAt < certificateLeadEnd)
             .Join(_unitOfWork.Repository<EmployeeOrientation>().GetQueryable().Where(e => !e.IsDeleted),
                 c => c.EmployeeOrientationId, e => e.Id, (c, e) => new { c.Id, c.CertificateNumber, c.ExpiresAt, e.EmployeeId, e.ProgramId, EnrolmentId = e.Id })
-            .Join(_unitOfWork.Repository<OrientationProgram>().GetQueryable(),
+            .Join(_unitOfWork.Repository<OrientationProgram>().GetQueryable().Where(p => p.EnableReminders),
                 x => x.ProgramId, p => p.Id, (x, p) => new { x.Id, x.CertificateNumber, x.ExpiresAt, x.EmployeeId, x.EnrolmentId, p.Title })
             .ToListAsync(cancellationToken);
 
@@ -531,6 +543,7 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
             EmployeeOrientationId = single?.EmployeeOrientationId,
             IsRead = false,
             SentAt = now,
+            EmailEventKey = OnboardingOrientationEmailCatalog.Events.ReminderDigest,
         };
 
         var baseUrl = (_configuration["FrontendUrl"] ?? "http://localhost:3000").TrimEnd('/');

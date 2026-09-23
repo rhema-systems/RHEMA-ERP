@@ -195,6 +195,7 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
     private readonly IHrAudienceResolver _audienceResolver;
     private readonly IOnboardingTemplateApplicabilityService _onboardingApplicability;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IOnboardingOrientationNotices _notices;
     private readonly ILogger<OrientationEnrollmentTriggerService> _logger;
 
     public OrientationEnrollmentTriggerService(
@@ -202,12 +203,14 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
         IHrAudienceResolver audienceResolver,
         IOnboardingTemplateApplicabilityService onboardingApplicability,
         ICurrentUserProvider currentUserProvider,
+        IOnboardingOrientationNotices notices,
         ILogger<OrientationEnrollmentTriggerService> logger)
     {
         _unitOfWork = unitOfWork;
         _audienceResolver = audienceResolver;
         _onboardingApplicability = onboardingApplicability;
         _currentUserProvider = currentUserProvider;
+        _notices = notices;
         _logger = logger;
     }
 
@@ -1041,7 +1044,13 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                 if (programme.Program.CompletionDeadlineDays is > 0)
                     entity.NextDueDate = entity.EnrolledAt.AddDays(programme.Program.CompletionDeadlineDays.Value);
 
-                if (!run.Preview) await repository.AddAsync(entity);
+                if (!run.Preview)
+                {
+                    await repository.AddAsync(entity);
+                    // Lane K-b: staged with the enrolment, committed by the same save.
+                    await _notices.EnrolledAsync(entity, programme.Program.Notice, null,
+                        $"Enrolled by the audience rule \"{rule.RuleName}\".", cancellationToken);
+                }
                 run.StagedThisRun.Add((programme.Program.Id, employeeId));
 
                 result.Enrolled++;
@@ -1167,7 +1176,13 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                 if (programme.Program.CompletionDeadlineDays is > 0)
                     entity.NextDueDate = entity.EnrolledAt.AddDays(programme.Program.CompletionDeadlineDays.Value);
 
-                if (!run.Preview) await repository.AddAsync(entity);
+                if (!run.Preview)
+                {
+                    await repository.AddAsync(entity);
+                    await _notices.EnrolledAsync(entity, programme.Program.Notice, null,
+                        $"{programme.Program.Title} recurs {OrientationTriggerWindows.Describe(frequency)}: this is your next cycle.",
+                        cancellationToken);
+                }
 
                 result.Enrolled++;
                 result.Renewed++;
@@ -1336,7 +1351,7 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                          && (programId == null || p.Id == programId)
                          && (!activeOnly || p.Status == OrientationProgramStatus.Active))
                 .Select(p => new ProgrammeInfo(p.Id, p.ProgramCode, p.Title, p.Status, p.CompletionDeadlineDays,
-                    p.IsRecurring, p.RecurrenceFrequency, p.EffectiveFrom, p.EffectiveTo))
+                    p.IsRecurring, p.RecurrenceFrequency, p.EffectiveFrom, p.EffectiveTo, p.EnableReminders))
                 .ToListAsync(cancellationToken))
             .Where(p => !activeOnly || p.IsInEffect(today))
             .ToList();
@@ -1425,8 +1440,11 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
     private sealed record ProgrammeInfo(
         Guid Id, string Code, string Title, OrientationProgramStatus Status, int? CompletionDeadlineDays,
         bool IsRecurring, OrientationRecurrenceFrequency? RecurrenceFrequency,
-        DateTime? EffectiveFrom, DateTime? EffectiveTo)
+        DateTime? EffectiveFrom, DateTime? EffectiveTo, bool EnableReminders)
     {
+        /// <summary>What an enrolment notice needs of the programme (lane K-b).</summary>
+        public OrientationNoticeProgramme Notice => new(Id, Title, EnableReminders);
+
         public bool IsInEffect(DateOnly today) => OrientationTriggerWindows.IsInEffect(EffectiveFrom, EffectiveTo, today);
 
         /// <summary>Recurring with a frequency — a flag without a frequency renews nothing.</summary>

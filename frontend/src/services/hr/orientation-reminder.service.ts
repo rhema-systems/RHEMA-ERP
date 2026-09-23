@@ -4,6 +4,8 @@ import type {
   OrientationReminderPreviewItem,
   OrientationReminderRun,
   OrientationReminderLogEntry,
+  OrientationNoticeLogEntry,
+  OrientationNoticeDispatchResult,
 } from '@/types/hr/orientation';
 
 /**
@@ -32,6 +34,21 @@ class OrientationReminderService {
 
   getLog(days = 14): Promise<OrientationReminderLogEntry[]> {
     return apiService.get<OrientationReminderLogEntry[]>(`${this.baseUrl}/log`, { days });
+  }
+
+  // ── Lifecycle notices (round 4, lane K-b) — api/orientation-notifications ──
+
+  /** Every notice sent lately — who was told what, and what its email did. HR.Orientation.Read. */
+  getRecentNotices(days = 14, kind?: string, emailStatus?: string): Promise<OrientationNoticeLogEntry[]> {
+    const params: Record<string, string | number> = { days };
+    if (kind) params.kind = kind;
+    if (emailStatus) params.emailStatus = emailStatus;
+    return apiService.get<OrientationNoticeLogEntry[]>('/orientation-notifications/recent', params);
+  }
+
+  /** Sends the queued notice emails now instead of on the dispatcher's next minute. HR.Orientation.Write. */
+  sendQueuedNotices(): Promise<OrientationNoticeDispatchResult> {
+    return apiService.post<OrientationNoticeDispatchResult>('/orientation-notifications/send-queued', {});
   }
 }
 

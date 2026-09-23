@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -125,5 +126,49 @@ public class OrientationNotificationService : IOrientationNotificationService
         if (count > 0)
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         return count;
+    }
+
+    public async Task<IEnumerable<OrientationNoticeLogEntryDto>> GetRecentAsync(
+        int days = 14, string? kind = null, string? emailStatus = null, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        if (days is < 1 or > 365) days = 14;
+        var since = DateTime.UtcNow.AddDays(-days);
+
+        var query = _unitOfWork.Repository<OrientationNotification>().GetQueryable().AsNoTracking()
+            .Where(n => n.TenantId == tenantId && !n.IsDeleted && n.SentAt >= since);
+        if (!string.IsNullOrWhiteSpace(kind))
+            query = query.Where(n => n.EmailEventKey == kind);
+        if (!string.IsNullOrWhiteSpace(emailStatus))
+            query = emailStatus == "None"
+                ? query.Where(n => n.EmailStatus == null)
+                : query.Where(n => n.EmailStatus == emailStatus);
+
+        var rows = await query
+            .OrderByDescending(n => n.SentAt)
+            .Take(1000)
+            .Select(n => new OrientationNoticeLogEntryDto
+            {
+                Id = n.Id,
+                SentAt = n.SentAt,
+                Type = n.Type.ToString(),
+                Kind = n.EmailEventKey,
+                RecipientEmployeeId = n.RecipientEmployeeId,
+                ProgramId = n.ProgramId,
+                ProgramTitle = n.Program != null ? n.Program.Title : null,
+                EmployeeOrientationId = n.EmployeeOrientationId,
+                Subject = n.Subject,
+                Message = n.Message,
+                IsRead = n.IsRead,
+                EmailStatus = n.EmailStatus,
+                EmailAttempts = n.EmailAttempts,
+                EmailLastAttemptAt = n.EmailLastAttemptAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        var names = await _unitOfWork.ResolveEmployeesAsync(tenantId, rows.Select(r => (Guid?)r.RecipientEmployeeId));
+        foreach (var row in rows)
+            if (names.TryGetValue(row.RecipientEmployeeId, out var n)) row.RecipientName = n.Name;
+        return rows;
     }
 }

@@ -39,9 +39,9 @@ export default function OrientationAdministrationPage() {
             icon: FileStack,
           },
           {
-            title: 'Reminders',
+            title: 'Reminders & notices',
             description:
-              'The daily sweep that tells people what is due — onboarding tasks, orientations, certificates — in-app and by email.',
+              'The daily sweep that tells people what is due, and every notice sent — enrolments, session changes, completions, certificates — with what its email did.',
             href: '/administration/hr/orientation/reminders',
             icon: BellRing,
           },

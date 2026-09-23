@@ -1,10 +1,11 @@
 # HR — Configuration Register
 
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
-2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5).
+2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5; lane K-b1 — § 2.6).
 
 **Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2), and
-all four of leave's CHILD tables (38).** Three ghosts found, all in the first — **and one setting that is none of the
+all four of leave's CHILD tables (38)** — plus, not as a full survey, the three `OrientationProgram` notice and
+certificate switches lane K-b1 made real (§ 2.6: two were ghosts). Three ghosts found, all in the first — **and one setting that is none of the
 four statuses**, which is why there are now five. The per-module settings for attendance, travel,
 appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
 expected to cost.
@@ -215,6 +216,21 @@ enforced. Migration `AddOnboardingOrientationReminders` adds them `NOT NULL` wit
 **Not a setting, deliberately:** the 90-day backlog horizon for overdue items, for the reason given
 under § 2 — measured here as well: the demo database held 6,583 open onboarding tasks more than 90
 days overdue on the day the engine was built.
+
+---
+
+## 2.6 Orientation — per programme: notices and certificates `OrientationProgram` — added 2026-09-23
+
+Round 4, lane K-b1. Two switches on the programme form that said what they did and did nothing —
+**both ghosts until this lane**, found by its survey before anything was built. The first is also a
+defect in lane K-a: the daily sweep shipped reminding people on programmes where "Send reminders"
+was off.
+
+| Setting (the form's label) | Default | Status | Proof — `hr-orientation/run-round4-kb.mjs`, both positions |
+|---|---|---|---|
+| `EnableReminders` ("Send reminders") | on for a new programme | **Enforced** — was a ghost | [A13/A15] the same audience rule on two programmes enrols both pairs, tells them only where it is on; [F1] an HR enrolment: told on one, not the other; [F2] the daily sweep: due-soon reminded on one, silent on the other. Governs what its description says — enrolment notices and the sweep's reminders; session changes, completions and certificates are sent either way |
+| `IsCertificateIssued` ("Issues a certificate") | off | **Enforced** — was a ghost | [C1–C3] a certificated programme issues its certificate at the moment of completion; [C9] an uncertificated one issues none; [D3] and HR's Issue certificate is refused for it. Before this nothing issued one, and HR's endpoint (which no screen called) never asked |
+| `CertificateValidityMonths` | none — never expires | **Enforced** | [C3] 12 months, and [D8] 24 months, become the certificate's expiry. HR's issue path already read it; the completion path does too |
 
 ---
 

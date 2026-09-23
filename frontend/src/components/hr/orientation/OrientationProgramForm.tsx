@@ -324,7 +324,7 @@ export function OrientationProgramForm({
             form={form}
             name="isCertificateIssued"
             label="Issues a certificate"
-            description="A serial is generated when HR certifies a passed enrollment."
+            description="Issued automatically, with a serial, when an enrolment completes. HR can also issue or reissue one from the enrolment list — for anyone who completed before this was turned on."
           />
           {isCertificateIssued && (
             <NumberField
@@ -361,7 +361,7 @@ export function OrientationProgramForm({
             form={form}
             name="enableReminders"
             label="Send reminders"
-            description="Enrollment, deadline and overdue notices for this programme."
+            description="Enrolment notices, and the daily reminders — deadline, overdue, waiting on an assessment or a signature, certificate expiring — for this programme. Session changes, completions and certificates are sent either way."
           />
           <FieldRow>
             <DateField form={form} name="effectiveFrom" label="Effective from" />

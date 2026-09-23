@@ -27,6 +27,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ICurrentUserService _currentUser;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IOnboardingOrientationNotices _notices;
     private readonly ILogger<EmployeeOrientationService> _logger;
 
     public EmployeeOrientationService(
@@ -44,6 +45,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         ICurrentUserProvider currentUserProvider,
         ICurrentUserService currentUser,
         IUnitOfWork unitOfWork,
+        IOnboardingOrientationNotices notices,
         ILogger<EmployeeOrientationService> logger)
     {
         _enrollmentRepository = enrollmentRepository;
@@ -60,6 +62,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         _currentUserProvider = currentUserProvider;
         _currentUser = currentUser;
         _unitOfWork = unitOfWork;
+        _notices = notices;
         _logger = logger;
     }
 
@@ -289,10 +292,12 @@ public class EmployeeOrientationService : IEmployeeOrientationService
             throw new InvalidOperationException(reason);
 
         var entity = createDto.ToEntity(tenantId, enrolledByUserId);
-        await ApplySessionCapacityAsync(entity, createDto.SessionId, tenantId, cancellationToken);
+        var session = await ApplySessionCapacityAsync(entity, createDto.SessionId, tenantId, cancellationToken);
         ApplyDueDate(entity, program);
 
         await _enrollmentRepository.AddAsync(entity);
+        // Lane K-b: the person is told in the same save that enrols them.
+        await _notices.EnrolledAsync(entity, OrientationNoticeProgramme.From(program), session, null, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Employee {EmployeeId} enrolled in program {ProgramId}", createDto.EmployeeId, createDto.ProgramId);
 
@@ -327,10 +332,11 @@ public class EmployeeOrientationService : IEmployeeOrientationService
                 CompletionStatus = OrientationCompletionStatus.NotStarted,
                 CreatedBy = enrolledByUserId.ToString(),
             };
-            await ApplySessionCapacityAsync(entity, bulkDto.SessionId, tenantId, cancellationToken);
+            var session = await ApplySessionCapacityAsync(entity, bulkDto.SessionId, tenantId, cancellationToken);
             ApplyDueDate(entity, program);
 
             await _enrollmentRepository.AddAsync(entity);
+            await _notices.EnrolledAsync(entity, OrientationNoticeProgramme.From(program), session, null, cancellationToken);
             created.Add(entity);
         }
 
@@ -352,11 +358,15 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         // Round 4, lane L: moving somebody INTO a session is enrolling them onto it, so it takes the
         // same test — that programme's, and open. Only a change is checked: editing an enrolment whose
         // session has since closed must not start failing.
+        OrientationSession? placedOn = null;
         if (updateDto.SessionId is { } newSessionId && newSessionId != entity.SessionId)
-            await RequireSessionTakesEnrolmentAsync(entity.ProgramId, newSessionId, entity.TenantId);
+            placedOn = await RequireSessionTakesEnrolmentAsync(entity.ProgramId, newSessionId, entity.TenantId);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _enrollmentRepository.UpdateAsync(entity);
+        // Lane K-b: a session is where and when somebody has to be — they are told which.
+        if (placedOn is not null)
+            await _notices.PlacedOnSessionAsync(entity, placedOn, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return await ReadEnrollmentAsync(entity.Id);
@@ -827,26 +837,58 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     // CERTIFICATES
     // ====================================================================
 
+    /// <remarks>
+    /// Round 4, lane K-b: HR's button — for a completion from before certificates were issued
+    /// automatically, and for a reissue. It now asks what the programme switch always said it would:
+    /// a <b>completed</b> enrolment, on a programme that <b>issues certificates</b>. Neither was checked,
+    /// so a certificate could be issued to somebody half way through, for a programme that awards none.
+    /// A reissue replaces the live certificate (marked Reissued); without asking for one, a second live
+    /// certificate is refused. The issuer is the signed-in HR officer — the request's own
+    /// <c>IssuedByEmployeeId</c> is ignored, as a caller could have named anybody.
+    /// </remarks>
     public async Task<OrientationCertificateDto> IssueCertificateAsync(IssueOrientationCertificateDto issueDto, Guid tenantId, Guid issuedByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var enrollment = await GetOwnedEnrollmentAsync(issueDto.EmployeeOrientationId);
 
         var program = await _programRepository.GetByIdAsync(enrollment.ProgramId);
-        if (program != null && program.TenantId != tenantId)
-            program = null;
+        if (program == null || program.TenantId != tenantId)
+            throw new ArgumentException($"Orientation program with ID '{enrollment.ProgramId}' not found.");
+
+        if (!program.IsCertificateIssued)
+            throw new InvalidOperationException(
+                $"\"{program.Title}\" does not issue certificates. Turn on \"Issues a certificate\" on the programme first.");
+        if (enrollment.CompletionStatus != OrientationCompletionStatus.Completed)
+            throw new InvalidOperationException(
+                $"Only a completed enrolment can be certified; this one is {Words(enrollment.CompletionStatus)}.");
+
+        var live = (await _certificateRepository.GetByEnrollmentIdAsync(enrollment.Id))
+            .Where(c => c.TenantId == tenantId && c.Status == OrientationCertificateStatus.Active)
+            .ToList();
+        if (live.Count > 0 && !issueDto.Reissue)
+            throw new InvalidOperationException(
+                $"This enrolment already holds certificate {live[0].CertificateNumber}. Reissue it to replace that one.");
 
         var entity = issueDto.ToEntity(tenantId, issuedByUserId);
+        entity.IssuedByEmployeeId = _currentUser.EmployeeId;
         entity.CertificateNumber = string.IsNullOrWhiteSpace(issueDto.CertificateNumber)
-            ? await GenerateCertificateNumberAsync(tenantId, cancellationToken)
+            ? await _certificateRepository.NextCertificateNumberAsync(tenantId, cancellationToken)
             : issueDto.CertificateNumber.Trim();
 
         var numberExists = await _certificateRepository.CertificateNumberExistsAsync(tenantId, entity.CertificateNumber);
         if (numberExists)
             throw new InvalidOperationException($"Certificate number '{entity.CertificateNumber}' is already in use.");
 
-        if (entity.ExpiresAt == null && program?.CertificateValidityMonths is > 0)
+        if (entity.ExpiresAt == null && program.CertificateValidityMonths is > 0)
             entity.ExpiresAt = entity.IssuedAt.AddMonths(program.CertificateValidityMonths.Value);
+
+        foreach (var old in live)
+        {
+            old.Status = OrientationCertificateStatus.Reissued;
+            old.UpdatedAt = DateTime.UtcNow;
+            old.UpdatedBy = issuedByUserId.ToString();
+            await _certificateRepository.UpdateAsync(old);
+        }
 
         await _certificateRepository.AddAsync(entity);
 
@@ -855,6 +897,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         enrollment.CertificateExpiresAt = entity.ExpiresAt;
         await _enrollmentRepository.UpdateAsync(enrollment);
 
+        await _notices.CertificateIssuedAsync(enrollment, program, entity, reissue: live.Count > 0, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Orientation certificate issued: {Number}", entity.CertificateNumber);
 
@@ -993,6 +1036,15 @@ public class EmployeeOrientationService : IEmployeeOrientationService
             : "This person is already on this programme and has not completed it. Withdraw that enrolment first if they are to start again.";
     }
 
+    private static string Words(OrientationCompletionStatus status) => status switch
+    {
+        OrientationCompletionStatus.NotStarted => "not started",
+        OrientationCompletionStatus.InProgress => "in progress",
+        OrientationCompletionStatus.PendingAssessment => "waiting on its assessment",
+        OrientationCompletionStatus.PendingAcknowledgement => "waiting on its acknowledgement",
+        _ => status.ToString().ToLowerInvariant(),
+    };
+
     /// <summary>An enrolment HR ended without it being completed: withdrawn, cancelled or a no-show.</summary>
     internal static bool IsEndedByHr(OrientationEnrollmentStatus status) =>
         status is OrientationEnrollmentStatus.Withdrawn
@@ -1033,9 +1085,10 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         return session;
     }
 
-    private async Task ApplySessionCapacityAsync(EmployeeOrientation entity, Guid? sessionId, Guid tenantId, CancellationToken cancellationToken)
+    /// <summary>Validates the session an enrolment names and places it, waitlisted when full. Returns the session.</summary>
+    private async Task<OrientationSession?> ApplySessionCapacityAsync(EmployeeOrientation entity, Guid? sessionId, Guid tenantId, CancellationToken cancellationToken)
     {
-        if (sessionId == null) return;
+        if (sessionId == null) return null;
 
         var session = await RequireSessionTakesEnrolmentAsync(entity.ProgramId, sessionId.Value, tenantId);
 
@@ -1053,6 +1106,8 @@ public class EmployeeOrientationService : IEmployeeOrientationService
                 entity.WaitlistPosition = waitlisted.Count() + 1;
             }
         }
+
+        return session;
     }
 
     private static void ApplyDueDate(EmployeeOrientation entity, OrientationProgram program)
@@ -1133,9 +1188,21 @@ public class EmployeeOrientationService : IEmployeeOrientationService
 
         if (contentDone && assessmentDone && acknowledgementDone)
         {
+            // Lane K-b: the FIRST completion issues the certificate and tells the person. CompletedAt is
+            // kept through a later slide back to InProgress (new content), so completing again is not
+            // news — and a certificate HR has since revoked is not quietly put back.
+            var firstCompletion = enrollment.CompletedAt is null;
             enrollment.CompletionStatus = OrientationCompletionStatus.Completed;
             enrollment.CompletedAt ??= now;
             enrollment.EnrollmentStatus = OrientationEnrollmentStatus.Completed;
+
+            if (firstCompletion)
+            {
+                var certificate = program.IsCertificateIssued
+                    ? await IssueOnCompletionAsync(enrollment, program, cancellationToken)
+                    : null;
+                await _notices.CompletedAsync(enrollment, program, certificate, cancellationToken);
+            }
             return;
         }
 
@@ -1159,27 +1226,55 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     }
 
     /// <summary>
-    /// Numbers off the highest serial ever issued, soft-deleted rows included.
-    /// (TenantId, CertificateNumber) is UNIQUE and a soft delete does not release the value, so the
-    /// previous count-of-live-rows approach handed back a number the database still held: deleting one
-    /// certificate made the very next issue die on a duplicate key. A serial on an audit record is an
-    /// identifier, not a slot — once issued it is spent.
+    /// Issues a programme's certificate at the moment an enrolment completes (round 4, lane K-b).
     /// </summary>
-    private async Task<string> GenerateCertificateNumberAsync(Guid tenantId, CancellationToken cancellationToken)
+    /// <remarks>
+    /// <para>Before this nothing issued one. The programme switch "Issues a certificate" promised a
+    /// serial "when HR certifies a passed enrollment", and the only way to certify was an endpoint no
+    /// screen called — the one certificate on UAT was the seeder's. A completion the programme says
+    /// earns a certificate now gets one; HR's button remains for completions from before, and reissues.</para>
+    ///
+    /// <para>⚠ The serial comes off the shared number sequence, which saves the context it is handed:
+    /// the completion is committed a moment before the certificate is. If the certificate then failed,
+    /// the person stays completed without one, and HR's button issues it — a completion is never
+    /// refused because a certificate could not be numbered.</para>
+    /// </remarks>
+    private async Task<OrientationCertificate?> IssueOnCompletionAsync(
+        EmployeeOrientation enrollment, OrientationProgram program, CancellationToken cancellationToken)
     {
-        var prefix = $"OCERT-{DateTime.UtcNow.Year}-";
-        var issued = await _certificateRepository
-            .GetQueryableIncludingDeleted(c => c.TenantId == tenantId && c.CertificateNumber.StartsWith(prefix))
-            .Select(c => c.CertificateNumber)
-            .ToListAsync(cancellationToken);
-
-        var max = 0;
-        foreach (var number in issued)
+        try
         {
-            if (int.TryParse(number[prefix.Length..], out var n) && n > max) max = n;
-        }
+            // One live certificate per enrolment: HR may already have issued it by hand.
+            var holdsOne = await _certificateRepository.GetQueryable().AnyAsync(c =>
+                c.EmployeeOrientationId == enrollment.Id && !c.IsDeleted && c.Status == OrientationCertificateStatus.Active,
+                cancellationToken);
+            if (holdsOne) return null;
 
-        return $"{prefix}{(max + 1):D5}";
+            var now = DateTime.UtcNow;
+            var certificate = new OrientationCertificate
+            {
+                TenantId = enrollment.TenantId,
+                EmployeeOrientationId = enrollment.Id,
+                CertificateNumber = await _certificateRepository.NextCertificateNumberAsync(enrollment.TenantId, cancellationToken),
+                IssuedAt = now,
+                ExpiresAt = program.CertificateValidityMonths is > 0 ? now.AddMonths(program.CertificateValidityMonths.Value) : null,
+                IssuedByEmployeeId = null,
+                Status = OrientationCertificateStatus.Active,
+                CreatedBy = "system:orientation-completion",
+            };
+            await _certificateRepository.AddAsync(certificate);
+
+            enrollment.CertificateIssued = true;
+            enrollment.CertificateSerialNumber = certificate.CertificateNumber;
+            enrollment.CertificateExpiresAt = certificate.ExpiresAt;
+            _logger.LogInformation("Orientation certificate {Number} issued on completion of {EnrolmentId}", certificate.CertificateNumber, enrollment.Id);
+            return certificate;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "No certificate could be issued on completion of {EnrolmentId}; HR can issue it from the enrolment.", enrollment.Id);
+            return null;
+        }
     }
 
     private static string ComputeSignatureHash(Guid enrollmentId, string text, DateTime signedAt)

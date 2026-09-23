@@ -5,6 +5,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.Services.HR.Orientation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -19,6 +20,7 @@ public class OrientationSessionService : IOrientationSessionService
     private readonly IEmployeeOrientationRepository _enrollmentRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IOnboardingOrientationNotices _notices;
     private readonly ILogger<OrientationSessionService> _logger;
 
     public OrientationSessionService(
@@ -29,6 +31,7 @@ public class OrientationSessionService : IOrientationSessionService
         IEmployeeOrientationRepository enrollmentRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IOnboardingOrientationNotices notices,
         ILogger<OrientationSessionService> logger)
     {
         _sessionRepository = sessionRepository;
@@ -38,6 +41,7 @@ public class OrientationSessionService : IOrientationSessionService
         _enrollmentRepository = enrollmentRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _notices = notices;
         _logger = logger;
     }
 
@@ -294,8 +298,11 @@ public class OrientationSessionService : IOrientationSessionService
     {
         var entity = await GetOwnedSessionAsync(updateDto.Id);
 
+        // Lane K-b: an edit that moves a live session tells everyone on it, with where it moved from.
+        var before = OrientationSessionSnapshot.Of(entity);
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _sessionRepository.UpdateAsync(entity);
+        await _notices.SessionRescheduledAsync(entity, before, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return (await _sessionRepository.GetWithDetailsAsync(entity.Id))!.ToDto();
@@ -305,6 +312,7 @@ public class OrientationSessionService : IOrientationSessionService
     {
         var entity = await GetOwnedSessionAsync(changeDto.SessionId);
 
+        var from = entity.Status;
         entity.Status = changeDto.NewStatus;
         if (changeDto.NewStatus == OrientationSessionStatus.InProgress && entity.ActualStartAt == null)
             entity.ActualStartAt = DateTime.UtcNow;
@@ -315,6 +323,18 @@ public class OrientationSessionService : IOrientationSessionService
         entity.UpdatedBy = updatedByUserId.ToString();
 
         await _sessionRepository.UpdateAsync(entity);
+
+        // Lane K-b. A live session called off tells everyone on it; a draft going live tells its
+        // employee facilitators — nobody else is on a draft (lane L refuses enrolment onto one).
+        if (from != changeDto.NewStatus)
+        {
+            if (OrientationSessionLife.IsLive(from)
+                && changeDto.NewStatus is OrientationSessionStatus.Cancelled or OrientationSessionStatus.Postponed)
+                await _notices.SessionCalledOffAsync(entity, changeDto.NewStatus, cancellationToken);
+            else if (from == OrientationSessionStatus.Draft && OrientationSessionLife.IsLive(changeDto.NewStatus))
+                await _notices.FacilitatorsScheduledAsync(entity, await InternalFacilitatorIdsAsync(entity, cancellationToken), cancellationToken);
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Orientation session {Code} status changed to {Status}", entity.SessionCode, changeDto.NewStatus);
         return true;
@@ -349,9 +369,27 @@ public class OrientationSessionService : IOrientationSessionService
             createDto.ExternalFacilitatorTrainerProfileId, previous: null, tenantId, cancellationToken);
 
         await _facilitatorRepository.AddAsync(entity);
+
+        // Lane K-b: an employee added to a session that is already live is told of it (a draft's are
+        // told when it goes live).
+        if (entity.EmployeeId is { } facilitatorId)
+        {
+            var session = await GetOwnedSessionAsync(createDto.SessionId);
+            if (OrientationSessionLife.IsLive(session.Status))
+                await _notices.FacilitatorsScheduledAsync(session, new[] { facilitatorId }, cancellationToken);
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await HydrateFacilitatorAsync(entity.ToDto(), tenantId, cancellationToken);
     }
+
+    /// <summary>The employees facilitating a session — an external facilitator has no inbox here.</summary>
+    private async Task<List<Guid>> InternalFacilitatorIdsAsync(OrientationSession session, CancellationToken cancellationToken)
+        => await _facilitatorRepository.GetQueryable().AsNoTracking()
+            .Where(f => f.TenantId == session.TenantId && f.SessionId == session.Id && !f.IsDeleted && f.EmployeeId != null)
+            .Select(f => f.EmployeeId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
 
     /// <summary>What a facilitator was before an edit — who it named, and the snapshot a register pick wrote.</summary>
     private sealed record FacilitatorPick(Guid? EmployeeId, Guid? VendorId, Guid? TrainerId, string? Name, string? Email, string? Organization);
@@ -543,6 +581,15 @@ public class OrientationSessionService : IOrientationSessionService
             updateDto.ExternalFacilitatorTrainerProfileId, previous, entity.TenantId, cancellationToken);
 
         await _facilitatorRepository.UpdateAsync(entity);
+
+        // Lane K-b: the facilitator handed to another employee on a live session — the new one is told.
+        if (entity.EmployeeId is { } facilitatorId && facilitatorId != previous.EmployeeId)
+        {
+            var session = await GetOwnedSessionAsync(entity.SessionId);
+            if (OrientationSessionLife.IsLive(session.Status))
+                await _notices.FacilitatorsScheduledAsync(session, new[] { facilitatorId }, cancellationToken);
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await HydrateFacilitatorAsync(entity.ToDto(), entity.TenantId, cancellationToken);
     }

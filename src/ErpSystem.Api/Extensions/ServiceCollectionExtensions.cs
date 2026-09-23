@@ -2642,6 +2642,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // ⚠ Registered in the same change as the service (lane K5) — two HR sweeps here were not.
             services.AddHostedService<ErpSystem.Api.Services.HR.OnboardingOrientationReminderBackgroundService>();
 
+            // Orientation & onboarding notice emails (round 4, lane K-b): every minute, sends what the
+            // lifecycle notices queued — enrolled, a session placed, moved or called off, completed,
+            // certificate issued. The notice itself is written with the event; the email follows.
+            // Logic is scoped (IOrientationNoticeEmailDispatcher), shared with
+            // POST api/orientation-notifications/send-queued. ⚠ Registered with its class.
+            services.AddHostedService<ErpSystem.Api.Services.HR.OrientationNoticeEmailBackgroundService>();
+
             // Team reminder engine (round 2, lane F2): daily sweep — a task due within the tenant's
             // lead time, a task already overdue, an objective past its date, a meeting tomorrow, and
             // terms of reference lapsing within thirty days. Sweep logic is scoped

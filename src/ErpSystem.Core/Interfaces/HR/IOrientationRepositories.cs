@@ -380,6 +380,13 @@ public interface IOrientationCertificateRepository : IGenericRepository<Orientat
     /// </summary>
     Task<bool> CertificateNumberExistsAsync(Guid tenantId, string certificateNumber);
 
+    /// <summary>
+    /// The next unused serial (OCERT-{year}-00001), off the shared number sequence — safe when two
+    /// people complete at the same moment, and never a number a soft-deleted certificate still holds.
+    /// ⚠ The sequence saves the context it shares, committing whatever the caller has pending.
+    /// </summary>
+    Task<string> NextCertificateNumberAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
     /// <summary>Returns all certificates for an enrollment.</summary>
     Task<IEnumerable<OrientationCertificate>> GetByEnrollmentIdAsync(Guid employeeOrientationId);
 
