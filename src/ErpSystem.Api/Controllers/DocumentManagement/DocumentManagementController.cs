@@ -22,9 +22,8 @@ using ErpSystem.Api.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using QuestPDF.Fluent;
-using QuestPDF.Helpers;
-using QuestPDF.Infrastructure;
+using Syncfusion.DocIO.DLS;
+using Syncfusion.DocIORenderer;
 using CentralDocumentMetadataTemplateEntity = ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate;
 using BusinessPartner = ErpSystem.Core.Entities.Procurement.BusinessPartner;
 
@@ -4791,12 +4790,12 @@ public sealed class DocumentManagementController : ControllerBase
             }
         }
 
-        var pdfBytes = BuildSimplePdf(title, content);
+        var wordBytes = BuildSimpleWord(title, content);
         return new GeneratedTemplateFile(
-            pdfBytes,
-            $"{SafeFileName(template.TemplateCode)}-{DateTime.UtcNow:yyyyMMddHHmmss}.pdf",
-            "application/pdf",
-            true);
+            wordBytes,
+            $"{SafeFileName(template.TemplateCode)}-{DateTime.UtcNow:yyyyMMddHHmmss}.docx",
+            WordDocumentContentType,
+            false);
     }
 
     private static void MergeWordPlaceholders(
@@ -4862,49 +4861,35 @@ public sealed class DocumentManagementController : ControllerBase
         }
     }
 
-    private static byte[] BuildSimplePdf(string title, string content)
+    private static byte[] BuildSimpleWord(string title, string content)
     {
-        QuestPDF.Settings.License = LicenseType.Community;
+        using var wordDocument = new WordDocument();
+        var section = wordDocument.AddSection();
+        section.PageSetup.Margins.All = 50;
 
-        // DMS generation: paginate tenant-editable templates and keep Unicode text intact in the PDF rendition.
-        return QuestPDF.Fluent.Document.Create(container =>
+        var titleParagraph = section.AddParagraph();
+        titleParagraph.ParagraphFormat.AfterSpacing = 12;
+        var titleText = titleParagraph.AppendText(title);
+        titleText.CharacterFormat.Bold = true;
+        titleText.CharacterFormat.FontName = "Times New Roman";
+        titleText.CharacterFormat.FontSize = 14;
+
+        foreach (var paragraph in SplitPdfParagraphs(content))
         {
-            container.Page(page =>
+            var wordParagraph = section.AddParagraph();
+            wordParagraph.ParagraphFormat.AfterSpacing = string.IsNullOrWhiteSpace(paragraph) ? 6 : 8;
+
+            if (!string.IsNullOrWhiteSpace(paragraph))
             {
-                page.Size(PageSizes.A4);
-                page.Margin(50);
-                page.DefaultTextStyle(text => text
-                    .FontFamily("Times New Roman")
-                    .FontSize(10)
-                    .FontColor(Colors.Black));
+                var text = wordParagraph.AppendText(paragraph);
+                text.CharacterFormat.FontName = "Times New Roman";
+                text.CharacterFormat.FontSize = 10;
+            }
+        }
 
-                page.Content().Column(column =>
-                {
-                    column.Spacing(8);
-                    column.Item().Text(title).FontSize(14).Bold();
-
-                    foreach (var paragraph in SplitPdfParagraphs(content))
-                    {
-                        if (string.IsNullOrWhiteSpace(paragraph))
-                        {
-                            column.Item().Height(6);
-                            continue;
-                        }
-
-                        column.Item().Text(paragraph);
-                    }
-                });
-
-                page.Footer()
-                    .AlignCenter()
-                    .Text(text =>
-                    {
-                        text.CurrentPageNumber();
-                        text.Span(" / ");
-                        text.TotalPages();
-                    });
-            });
-        }).GeneratePdf();
+        using var output = new MemoryStream();
+        wordDocument.Save(output, Syncfusion.DocIO.FormatType.Docx);
+        return output.ToArray();
     }
 
     private static IEnumerable<string> SplitPdfParagraphs(string value)

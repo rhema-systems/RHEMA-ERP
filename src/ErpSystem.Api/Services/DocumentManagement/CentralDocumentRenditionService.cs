@@ -1,16 +1,15 @@
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Models;
-using iText.Kernel.Pdf.Canvas.Parser;
 using Syncfusion.DocIO;
 using Syncfusion.DocIO.DLS;
 using Syncfusion.DocIORenderer;
 using Syncfusion.Pdf;
+using Syncfusion.Pdf.Parsing;
+using Syncfusion.PdfToImageConverter;
 using Syncfusion.Presentation;
 using Syncfusion.PresentationRenderer;
 using Syncfusion.XlsIO;
 using Syncfusion.XlsIORenderer;
-using ITextPdfDocument = iText.Kernel.Pdf.PdfDocument;
-using ITextPdfReader = iText.Kernel.Pdf.PdfReader;
 
 namespace ErpSystem.Api.Services.DocumentManagement;
 
@@ -183,65 +182,34 @@ public sealed class CentralDocumentRenditionService : ICentralDocumentRenditionS
                 request.PdfStream.Position = 0;
             }
 
-            var extractedPages = new List<string>();
-            using (var reader = new ITextPdfReader(request.PdfStream))
-            using (var pdfDocument = new ITextPdfDocument(reader))
-            {
-                for (var pageNumber = 1; pageNumber <= pdfDocument.GetNumberOfPages(); pageNumber++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var text = PdfTextExtractor.GetTextFromPage(pdfDocument.GetPage(pageNumber));
-                    extractedPages.Add(NormalizeExtractedPdfText(text));
-                }
-            }
+            using var pdfDocument = new PdfLoadedDocument(request.PdfStream);
+            var imageConverter = new PdfToImageConverter();
+            request.PdfStream.Position = 0;
+            imageConverter.Load(request.PdfStream);
 
             using var wordDocument = new WordDocument();
-            var section = wordDocument.AddSection();
-            section.PageSetup.Margins.All = 48;
-
-            var title = section.AddParagraph();
-            title.ApplyStyle(BuiltinStyle.Heading1);
-            title.AppendText(string.IsNullOrWhiteSpace(request.DocumentTitle)
-                ? Path.GetFileNameWithoutExtension(request.FileName)
-                : request.DocumentTitle.Trim());
-
-            var reference = section.AddParagraph();
-            reference.ApplyStyle(BuiltinStyle.BodyText);
-            reference.AppendText($"DMS Reference: {request.DocumentReference}");
-
-            var hasText = extractedPages.Any(page => !string.IsNullOrWhiteSpace(page));
-            if (!hasText)
+            for (var pageIndex = 0; pageIndex < imageConverter.PageCount; pageIndex++)
             {
-                var emptyNotice = section.AddParagraph();
-                emptyNotice.AppendText("No selectable text could be extracted from the PDF. Use this editable copy to make manual changes, then upload it as a new DMS version.");
-            }
-            else
-            {
-                for (var index = 0; index < extractedPages.Count; index++)
-                {
-                    var pageText = extractedPages[index];
-                    if (string.IsNullOrWhiteSpace(pageText))
-                    {
-                        continue;
-                    }
+                cancellationToken.ThrowIfCancellationRequested();
+                var pageSize = pdfDocument.Pages[pageIndex].Size;
+                var section = wordDocument.AddSection();
+                section.PageSetup.PageSize = pageSize;
+                section.PageSetup.Margins.All = 12;
 
-                    if (index > 0)
-                    {
-                        section.AddParagraph().AppendBreak(BreakType.PageBreak);
-                    }
-
-                    foreach (var paragraphText in pageText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    {
-                        section.AddParagraph().AppendText(paragraphText);
-                    }
-                }
+                using var imageStream = imageConverter.Convert(pageIndex, false, false);
+                var picture = section.AddParagraph().AppendPicture(imageStream);
+                var availableWidth = pageSize.Width - 24;
+                var availableHeight = pageSize.Height - 24;
+                var scale = Math.Min(availableWidth / picture.Width, availableHeight / picture.Height);
+                picture.Width *= scale;
+                picture.Height *= scale;
             }
 
             var output = new MemoryStream();
             wordDocument.Save(output, Syncfusion.DocIO.FormatType.Docx);
             output.Position = 0;
 
-            var fileName = $"{Path.GetFileNameWithoutExtension(request.FileName)}-editable.docx";
+            var fileName = $"{Path.GetFileNameWithoutExtension(request.FileName)}-word-copy.docx";
             return Task.FromResult(new CentralDocumentWordCopyResult(true, fileName, output, null));
         }
         catch (OperationCanceledException)
@@ -339,19 +307,4 @@ public sealed class CentralDocumentRenditionService : ICentralDocumentRenditionS
         }
     }
 
-    private static string NormalizeExtractedPdfText(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var lines = value
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Split('\n', StringSplitOptions.TrimEntries)
-            .Where(line => !string.IsNullOrWhiteSpace(line));
-
-        return string.Join('\n', lines);
-    }
 }

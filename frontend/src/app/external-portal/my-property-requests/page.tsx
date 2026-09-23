@@ -34,6 +34,7 @@ import {
 } from '@/services/external-estate-services.service';
 
 const PROPERTY_LISTING_SOURCE = 'External Portal - Estate Listings';
+const SALES_PROPERTY_HANDOFF_SOURCE = 'Sales - Estate Enquiry';
 const REQUESTS_PER_PAGE = 10;
 
 function formatDate(value: string) {
@@ -102,15 +103,30 @@ function isApprovedStatus(value: string) {
   return normalized === 'approved' || normalized.startsWith('approved ');
 }
 
+function isLegalAgreementReleased(request: ExternalEstateServiceRequest) {
+  const status = fieldValue(request, 'legalAgreementReviewStatus').toLowerCase();
+  return status.includes('head of legal') && status.includes('signed');
+}
+
+function isPropertyListingRequest(request: ExternalEstateServiceRequest) {
+  return (
+    request.sourceDepartment === PROPERTY_LISTING_SOURCE ||
+    request.sourceDepartment === SALES_PROPERTY_HANDOFF_SOURCE
+  );
+}
+
 function isApprovedForCustomerAction(request: ExternalEstateServiceRequest) {
+  const acceptanceStatus = fieldValue(
+    request,
+    'customerAcceptanceStatus'
+  ).toLowerCase();
   return (
     !isListingUnavailable(request) &&
     isApprovedStatus(fieldValue(request, 'decisionStatus')) &&
+    isLegalAgreementReleased(request) &&
     Boolean(fieldValue(request, 'generatedAgreementReference')) &&
     (!isRentalRequest(request) || Boolean(fieldValue(request, 'moveInDate'))) &&
-    ['pending', ''].includes(
-      fieldValue(request, 'customerAcceptanceStatus').toLowerCase()
-    )
+    ['pending', '', 'accepted in sales'].includes(acceptanceStatus)
   );
 }
 
@@ -118,6 +134,7 @@ function canUploadSignedAgreement(request: ExternalEstateServiceRequest) {
   return (
     !isListingUnavailable(request) &&
     isApprovedStatus(fieldValue(request, 'decisionStatus')) &&
+    isLegalAgreementReleased(request) &&
     fieldValue(request, 'customerAcceptanceStatus').toLowerCase() ===
       'accepted' &&
     Boolean(fieldValue(request, 'generatedAgreementReference')) &&
@@ -130,6 +147,7 @@ function canDownloadGeneratedAgreement(request: ExternalEstateServiceRequest) {
   return (
     !isListingUnavailable(request) &&
     isApprovedStatus(fieldValue(request, 'decisionStatus')) &&
+    isLegalAgreementReleased(request) &&
     Boolean(fieldValue(request, 'generatedAgreementReference'))
   );
 }
@@ -377,11 +395,7 @@ export function PropertyRequestsView({
         file
       );
       const submitted = await externalEstateServicesService.getMyRequests();
-      setRequests(
-        submitted.filter(
-          (item) => item.sourceDepartment === PROPERTY_LISTING_SOURCE
-        )
-      );
+      setRequests(submitted.filter(isPropertyListingRequest));
       setIntakeFiles((current) => ({ ...current, [document.id]: null }));
       toast({
         title: 'Document uploaded',
@@ -406,11 +420,7 @@ export function PropertyRequestsView({
       try {
         const submitted = await externalEstateServicesService.getMyRequests();
         if (mounted) {
-          setRequests(
-            submitted.filter(
-              (request) => request.sourceDepartment === PROPERTY_LISTING_SOURCE
-            )
-          );
+          setRequests(submitted.filter(isPropertyListingRequest));
         }
       } catch {
         if (mounted) {

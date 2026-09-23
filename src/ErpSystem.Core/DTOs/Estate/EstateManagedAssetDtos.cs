@@ -75,6 +75,8 @@ public class EstateManagedAssetDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public DateTime? RentBillingActivatedAt { get; set; }
     public DateTime? NextRentBillingDate { get; set; }
     public Guid? LastRentInvoiceId { get; set; }
@@ -148,6 +150,8 @@ public class UpdateEstateManagedAssetListingDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -244,6 +248,8 @@ public class EstateLandDemarcationDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -285,6 +291,8 @@ public class UpdateEstateLandDemarcationDispositionDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }

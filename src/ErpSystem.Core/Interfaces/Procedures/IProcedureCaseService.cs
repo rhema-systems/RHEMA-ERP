@@ -20,6 +20,7 @@ public interface IProcedureCaseService
     Task<ProcedureCaseDetailDto?> UploadCustomerIntakeDocumentAsync(Guid id, Guid documentId, Stream fileStream, string fileName, string contentType, long fileSize, string? notes);
     Task<ProcedureCaseDocumentContentDto?> GetDocumentContentAsync(Guid id, Guid documentId);
     Task<ProcedureCaseDetailDto?> SignLegalTransferExecutedDocumentAsync(Guid id, Guid documentId, SignProcedureCaseDocumentRequest request);
+    Task<ProcedureCaseDetailDto?> SignPropertyAgreementAsync(Guid id, Guid documentId, SignProcedureCaseDocumentRequest request);
     Task<ProcedureCaseDetailDto?> SyncLegalTransferFeePaymentStatusAsync(Guid id);
     Task<ProcedureCaseDetailDto?> CompleteCurrentStageAsync(Guid id, CompleteProcedureCaseStageRequest request);
     Task<ProcedureCaseDetailDto?> ApplyReviewActionAsync(Guid id, ReviewProcedureCaseRequest request);

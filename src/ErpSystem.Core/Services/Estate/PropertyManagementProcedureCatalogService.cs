@@ -43,7 +43,7 @@ public sealed class PropertyManagementProcedureCatalogService : IPropertyManagem
                 "Finance invoice, payment, or rent billing readiness is recorded"
             ]),
         new("Legal conveyance or lease follow-up", "Legal / Estate",
-            "Sale cases complete Legal conveyance and registration; rental cases confirm lease execution and move-in readiness.",
+            "Sale and lease cases complete Legal conveyance and registration; rent cases confirm agreement execution and move-in readiness.",
             [
                 "Sale conveyance and registration is completed where applicable",
                 "Rental move-in and billing readiness is confirmed where applicable"
@@ -69,12 +69,13 @@ public sealed class PropertyManagementProcedureCatalogService : IPropertyManagem
         new("listingReference", "Listing reference", "text"),
         new("listingType", "Published listing type", "text"),
         new("requestType", "Request type", "text"),
-        new("listingPrice", "Published price / rent", "text"),
+        new("listingPrice", "Agreed sale / full lease amount / monthly rent", "text"),
         new("offerAmount", "Purchase offer amount", "text"),
         new("currency", "Currency", "text"),
         new("salesAmountPaid", "Amount paid in Sales", "text"),
         new("salesPaymentReference", "Sales payment reference", "text"),
         new("estateRemainingAmount", "Balance for Estate processing", "text"),
+        new("groundRentRequired", "Annual ground rent required", "select", ["No", "Yes"]),
         new("premiumChargeRequired", "Premium charge required", "select", ["No", "Yes"]),
         new("premiumChargeAmount", "Premium charge amount", "text"),
         new("premiumChargeInvoiceId", "Premium charge invoice ID", "text"),

@@ -139,6 +139,8 @@ public class EstateManagedAsset : TenantEntity
     public decimal? ExternalSalePrice { get; set; }
 
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
 
     public DateTime? RentBillingActivatedAt { get; set; }
     public DateTime? NextRentBillingDate { get; set; }
@@ -212,6 +214,8 @@ public class EstateLandDemarcation : TenantEntity
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     [MaxLength(10)] public string ExternalListingCurrency { get; set; } = "GHS";
     [MaxLength(2000)] public string? ExternalListingNotes { get; set; }

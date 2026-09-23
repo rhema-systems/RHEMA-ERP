@@ -271,6 +271,8 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 ExternalListingPrice = item.ExternalListingPrice,
                 ExternalSalePrice = item.ExternalSalePrice,
                 ExternalMonthlyRent = item.ExternalMonthlyRent,
+                ExternalGroundRentRequired = item.ExternalGroundRentRequired,
+                ExternalPremiumChargeRequired = item.ExternalPremiumChargeRequired,
                 ExternalLeaseTermMonths = item.ExternalLeaseTermMonths,
                 ExternalListingCurrency = item.ExternalListingCurrency,
                 ExternalListingNotes = item.ExternalListingNotes,

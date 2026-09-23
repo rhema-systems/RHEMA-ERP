@@ -189,6 +189,15 @@ public sealed class ProcedureCasesController : ControllerBase
         return await ExecuteUpdate(() => _procedureCaseService.SignLegalTransferExecutedDocumentAsync(id, documentId, request));
     }
 
+    [HttpPost("{id:guid}/documents/{documentId:guid}/property-agreement-signature")]
+    public async Task<IActionResult> SignPropertyAgreement(
+        Guid id,
+        Guid documentId,
+        [FromBody] SignProcedureCaseDocumentRequest request)
+    {
+        return await ExecuteUpdate(() => _procedureCaseService.SignPropertyAgreementAsync(id, documentId, request));
+    }
+
     [HttpPost("{id:guid}/complete-stage")]
     public async Task<IActionResult> CompleteCurrentStage(Guid id, [FromBody] CompleteProcedureCaseStageRequest request)
     {

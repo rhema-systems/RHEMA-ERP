@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, BarChart3, FileText, Loader2, Settings } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -114,9 +113,6 @@ export default function LegalProcedureWorkspacePage() {
         </Button>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
-            <Badge variant="outline" className="w-fit">
-              {procedure.entityType}
-            </Badge>
             <div>
               <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
                 {procedure.title}
@@ -124,7 +120,6 @@ export default function LegalProcedureWorkspacePage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Badge variant="secondary">{procedure.source}</Badge>
             <Button asChild variant="outline" size="sm">
               <Link href={`/administration/workflow?entityType=${encodeURIComponent(procedure.entityType)}`}>
                 <Settings className="mr-2 h-4 w-4" />

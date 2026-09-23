@@ -195,6 +195,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalListingPrice = null;
         asset.ExternalSalePrice = null;
         asset.ExternalMonthlyRent = null;
+        asset.ExternalGroundRentRequired = null;
+        asset.ExternalPremiumChargeRequired = null;
         asset.ExternalLeaseTermMonths = null;
         asset.ExternalListingNotes = null;
         asset.ExternalPublishedAt = null;
@@ -879,44 +881,43 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             ? request.ExternalSalePrice ?? request.ExternalListingPrice
             : null;
         salePrice ??= includesSale ? demarcation.TargetSalePrice : null;
-        var recurringCharge = includesRecurringCharge
+        var recurringCharge = includesRecurringCharge && !isLeaseListing
             ? request.ExternalMonthlyRent ?? (!includesSale ? request.ExternalListingPrice : null)
+            : null;
+        var leaseAmount = isLeaseListing
+            ? request.ExternalListingPrice ?? request.ExternalMonthlyRent ?? demarcation.TargetSalePrice
             : null;
         if (publishToCustomerPortal && includesSale && salePrice is not > 0m)
         {
             throw new InvalidOperationException("Enter the sale price before listing this demarcation.");
         }
-        if (includesSale && salePrice.HasValue && demarcation.TargetSalePrice is > 0m
-            && salePrice.Value < demarcation.TargetSalePrice.Value)
+        if (publishToCustomerPortal && isLeaseListing && leaseAmount is not > 0m)
         {
-            throw new InvalidOperationException(
-                $"The portal sale price cannot be below the minimum sale price of {listingCurrency} {demarcation.TargetSalePrice.Value:N2}.");
+            throw new InvalidOperationException("Enter the full-term lease amount before listing this demarcation.");
         }
-        if (publishToCustomerPortal && includesRecurringCharge && recurringCharge is not > 0m)
+        if (publishToCustomerPortal && includesRecurringCharge && !isLeaseListing && recurringCharge is not > 0m)
         {
-            throw new InvalidOperationException(isLeaseListing
-                ? "Enter the yearly lease amount before listing this demarcation."
-                : "Enter the monthly rent before listing this demarcation.");
+            throw new InvalidOperationException("Enter the monthly rent before listing this demarcation.");
+        }
+        if (publishToCustomerPortal && includesRecurringCharge && request.ExternalPremiumChargeRequired is null)
+        {
+            throw new InvalidOperationException("Select whether a premium charge is required before publishing this listing.");
         }
         if (publishToCustomerPortal
             && includesRecurringCharge
-            && isLeaseListing
             && asset.AssetType == EstateManagedAssetType.Land
+            && request.ExternalGroundRentRequired is null)
+        {
+            throw new InvalidOperationException("Select whether annual ground rent is required before publishing this land listing.");
+        }
+        if (publishToCustomerPortal
+            && includesRecurringCharge
+            && asset.AssetType == EstateManagedAssetType.Land
+            && request.ExternalGroundRentRequired == true
             && demarcation.GroundRentPayable is not > 0m)
         {
             throw new InvalidOperationException(
-                "Assess and approve the annual ground rent for this demarcated land portion before publishing a land lease listing.");
-        }
-        if (publishToCustomerPortal
-            && includesRecurringCharge
-            && isLeaseListing
-            && asset.AssetType == EstateManagedAssetType.Land
-            && demarcation.GroundRentPayable is > 0m
-            && recurringCharge.HasValue
-            && recurringCharge.Value < demarcation.GroundRentPayable.Value)
-        {
-            throw new InvalidOperationException(
-                $"The yearly lease amount cannot be below the approved ground rent of {listingCurrency} {demarcation.GroundRentPayable.Value:N2}.");
+                "Assess and approve annual ground rent for this demarcated land portion before publishing.");
         }
         demarcation.IsReadyForProjectManagement = request.IsReadyForProjectManagement;
         demarcation.IsPublishedToExternalPortal = request.IsPublishedToExternalPortal;
@@ -924,10 +925,12 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         demarcation.ExternalListingStatus = listingStatus;
         demarcation.ExternalSalePrice = salePrice;
         demarcation.ExternalMonthlyRent = recurringCharge;
+        demarcation.ExternalGroundRentRequired = includesRecurringCharge ? request.ExternalGroundRentRequired : null;
+        demarcation.ExternalPremiumChargeRequired = includesRecurringCharge ? request.ExternalPremiumChargeRequired : null;
         demarcation.ExternalLeaseTermMonths = includesRecurringCharge && request.ExternalLeaseTermMonths > 0
             ? request.ExternalLeaseTermMonths
             : null;
-        demarcation.ExternalListingPrice = includesSale ? salePrice : recurringCharge;
+        demarcation.ExternalListingPrice = includesSale ? salePrice : isLeaseListing ? leaseAmount : recurringCharge;
         demarcation.ExternalListingCurrency = listingCurrency;
         demarcation.ExternalListingNotes = TrimOrNull(request.ExternalListingNotes);
         demarcation.ParentLandAssetReference = asset.AssetCode;
@@ -1468,17 +1471,18 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             && (asset.AssetType == EstateManagedAssetType.Property
                 || asset.AssetType == EstateManagedAssetType.Facility))
         {
-            if (asset.SourceType != EstateManagedAssetSourceType.ProjectUnit
-                || !asset.IsPublishedFromProject)
+            if (asset.SourceType != EstateManagedAssetSourceType.Imported
+                && (asset.SourceType != EstateManagedAssetSourceType.ProjectUnit
+                    || !asset.IsPublishedFromProject))
             {
                 throw new InvalidOperationException(
-                    "Only property handed off from Project Management can be sent to Portal Listings.");
+                    "Only imported or project-handoff property can be sent to Portal Listings.");
             }
 
             if (asset.Status != EstateManagedAssetStatus.Available)
             {
                 throw new InvalidOperationException(
-                    "Only an available project-handoff property can be listed on the external portal.");
+                    "Only an available property can be listed on the external portal.");
             }
         }
 
@@ -1487,8 +1491,12 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var isLeaseListing = ListingIsLease(listingType);
         var requestedSalePrice = request.ExternalSalePrice
             ?? (includesSale ? request.ExternalListingPrice : null);
-        var requestedRecurringCharge = request.ExternalMonthlyRent
-            ?? (includesRecurringCharge && !includesSale ? request.ExternalListingPrice : null);
+        var requestedRecurringCharge = !isLeaseListing
+            ? request.ExternalMonthlyRent ?? (includesRecurringCharge && !includesSale ? request.ExternalListingPrice : null)
+            : null;
+        var leaseAmount = isLeaseListing
+            ? request.ExternalListingPrice ?? request.ExternalMonthlyRent
+            : null;
         var salePrice = includesSale && requestedSalePrice > 0
             ? requestedSalePrice
             : null;
@@ -1497,30 +1505,20 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             : null;
         if (request.IsPublishedToExternalPortal && includesRecurringCharge)
         {
-            if (!recurringCharge.HasValue)
+            if (request.ExternalPremiumChargeRequired is null)
+                throw new InvalidOperationException("Select whether a premium charge is required before publishing this listing.");
+            if (isLeaseListing && leaseAmount is not > 0m)
             {
-                throw new InvalidOperationException(isLeaseListing
-                    ? "Enter the yearly lease amount before publishing a lease listing."
-                    : "Enter the monthly rent before publishing a rental listing.");
+                throw new InvalidOperationException("Enter the full-term lease amount before publishing a lease listing.");
             }
-
-            if (asset.AssetType == EstateManagedAssetType.Land
-                && isLeaseListing
-                && asset.GroundRentPayable is not > 0m)
+            if (!isLeaseListing && !recurringCharge.HasValue)
             {
-                throw new InvalidOperationException(
-                    "Assess and approve the annual ground rent before publishing a land lease listing.");
+                throw new InvalidOperationException("Enter the monthly rent before publishing a rental listing.");
             }
-
-            if (asset.AssetType == EstateManagedAssetType.Land
-                && isLeaseListing
-                && asset.GroundRentPayable is > 0m
-                && recurringCharge.Value < asset.GroundRentPayable.Value)
-            {
-                throw new InvalidOperationException(
-                    $"The yearly lease amount cannot be below the approved ground rent of {asset.Currency ?? "GHS"} {asset.GroundRentPayable.Value:N2}.");
-            }
-
+            if (asset.AssetType == EstateManagedAssetType.Land && request.ExternalGroundRentRequired is null)
+                throw new InvalidOperationException("Select whether annual ground rent is required before publishing this land listing.");
+            if (asset.AssetType == EstateManagedAssetType.Land && request.ExternalGroundRentRequired == true && asset.GroundRentPayable is not > 0m)
+                throw new InvalidOperationException("Assess and approve annual ground rent before publishing this land listing.");
         }
 
         if (request.IsPublishedToExternalPortal && includesSale && !salePrice.HasValue)
@@ -1533,12 +1531,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalListingStatus = request.IsPublishedToExternalPortal ? NormalizeListingStatus(request.ExternalListingStatus) : "Draft";
         asset.ExternalSalePrice = salePrice;
         asset.ExternalMonthlyRent = recurringCharge;
+        asset.ExternalGroundRentRequired = includesRecurringCharge ? request.ExternalGroundRentRequired : null;
+        asset.ExternalPremiumChargeRequired = includesRecurringCharge ? request.ExternalPremiumChargeRequired : null;
         asset.ExternalLeaseTermMonths = includesRecurringCharge && request.ExternalLeaseTermMonths > 0
             ? request.ExternalLeaseTermMonths
             : null;
-        // Keep the legacy price populated for older integrations while the portal uses
-        // the explicit sale and recurring-charge values.
-        asset.ExternalListingPrice = includesSale ? salePrice : recurringCharge;
+        // Keep the generic listing price populated for older integrations.
+        asset.ExternalListingPrice = includesSale ? salePrice : isLeaseListing ? leaseAmount : recurringCharge;
         asset.ExternalListingCurrency = string.IsNullOrWhiteSpace(request.ExternalListingCurrency)
             ? "GHS"
             : request.ExternalListingCurrency.Trim().ToUpperInvariant();
@@ -2516,6 +2515,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ExternalListingPrice = demarcation.ExternalListingPrice,
         ExternalSalePrice = demarcation.ExternalSalePrice,
         ExternalMonthlyRent = demarcation.ExternalMonthlyRent,
+        ExternalGroundRentRequired = demarcation.ExternalGroundRentRequired,
+        ExternalPremiumChargeRequired = demarcation.ExternalPremiumChargeRequired,
         ExternalLeaseTermMonths = demarcation.ExternalLeaseTermMonths,
         ExternalListingCurrency = demarcation.ExternalListingCurrency,
         ExternalListingNotes = demarcation.ExternalListingNotes,
@@ -2597,6 +2598,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ExternalListingPrice = asset.ExternalListingPrice,
         ExternalSalePrice = asset.ExternalSalePrice,
         ExternalMonthlyRent = asset.ExternalMonthlyRent,
+        ExternalGroundRentRequired = asset.ExternalGroundRentRequired,
+        ExternalPremiumChargeRequired = asset.ExternalPremiumChargeRequired,
         RentBillingActivatedAt = asset.RentBillingActivatedAt,
         NextRentBillingDate = asset.NextRentBillingDate,
         LastRentInvoiceId = asset.LastRentInvoiceId,

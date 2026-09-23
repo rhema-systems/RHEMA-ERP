@@ -53,6 +53,9 @@
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\WorkflowEvidenceControllerTests.cs" />
     <Compile Include="Controllers\DocumentManagement\PaymentDocumentScopeTests.cs" />
+    <Compile Include="Services\DocumentManagement\CentralDocumentWordConversionTests.cs" />
+    <Compile Include="Controllers\Estate\EstateManagedAssetImportTests.cs" />
+    <Compile Include="Controllers\Estate\LegalPropertyCaseContextTests.cs" />
     <Compile Include="Controllers\WorkflowApprovalResponseTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementLegacyRoleAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />

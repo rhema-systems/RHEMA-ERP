@@ -16,6 +16,7 @@
     <PackageReference Include="iText7" Version="8.0.2" />
     <PackageReference Include="itext7.bouncy-castle-adapter" Version="8.0.2" />
     <PackageReference Include="Syncfusion.DocIORenderer.Net.Core" Version="34.1.30" />
+    <PackageReference Include="Syncfusion.PdfToImageConverter.Net.Core" Version="34.1.30" />
     <PackageReference Include="Syncfusion.PresentationRenderer.Net.Core" Version="34.1.30" />
     <PackageReference Include="Syncfusion.XlsIORenderer.Net.Core" Version="34.1.30" />
     <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />

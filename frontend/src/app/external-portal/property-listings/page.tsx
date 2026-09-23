@@ -62,13 +62,13 @@ function listingPriceSummary(listing: ExternalEstateListing) {
     return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
   }
   if (listing.externalListingType === 'Lease') {
-    return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / year`;
+    return `${formatMoney(listing.externalListingPrice ?? listing.externalMonthlyRent, listing.externalListingCurrency)} full term`;
   }
   if (listing.externalListingType === 'SaleAndRent') {
     return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Rent ${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
   }
   if (listing.externalListingType === 'SaleAndLease') {
-    return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Lease ${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / year`;
+    return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Lease ${formatMoney(listing.externalListingPrice ?? listing.externalMonthlyRent, listing.externalListingCurrency)} full term`;
   }
   return formatMoney(
     listing.externalSalePrice ?? listing.externalListingPrice,
@@ -541,7 +541,7 @@ export default function ExternalPropertyListingsPage() {
                       {selected.externalListingType === 'Sale'
                         ? 'Sale price'
                         : isLeaseListingType(selected.externalListingType)
-                          ? 'Lease amount per year'
+                          ? 'Full-term lease amount'
                           : 'Rent per month'}
                     </div>
                     <div className="mt-1 text-xl font-semibold text-slate-900">
@@ -549,8 +549,9 @@ export default function ExternalPropertyListingsPage() {
                         selected.externalListingType === 'Sale'
                           ? (selected.externalSalePrice ??
                               selected.externalListingPrice)
-                          : (selected.externalMonthlyRent ??
-                            selected.externalListingPrice),
+                          : isLeaseListingType(selected.externalListingType)
+                            ? (selected.externalListingPrice ?? selected.externalMonthlyRent)
+                            : (selected.externalMonthlyRent ?? selected.externalListingPrice),
                         selected.externalListingCurrency
                       )}
                     </div>
@@ -559,6 +560,16 @@ export default function ExternalPropertyListingsPage() {
                         ? 'Sales will continue the enquiry'
                         : listingTypeLabel(selected.externalListingType)}
                     </div>
+                    {selected.externalGroundRentRequired && selected.groundRentPayable != null ? (
+                      <div className="mt-2 border-t border-slate-200 pt-2 text-sm text-slate-600">
+                        Annual ground rent: {formatMoney(selected.groundRentPayable, selected.externalListingCurrency)} separately
+                      </div>
+                    ) : null}
+                    {selected.externalPremiumChargeRequired ? (
+                      <div className="mt-1 text-sm text-slate-600">
+                        Premium charge applies; Sales will confirm the amount.
+                      </div>
+                    ) : null}
                   </div>
 
                   {selected.externalListingNotes ? (

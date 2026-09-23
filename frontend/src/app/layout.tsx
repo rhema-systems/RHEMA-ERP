@@ -11,6 +11,7 @@ import '@syncfusion/ej2-dropdowns/styles/material.css';
 import '@syncfusion/ej2-splitbuttons/styles/material.css';
 import '@syncfusion/ej2-notifications/styles/material.css';
 import '@syncfusion/ej2-react-pdfviewer/styles/material.css';
+import './syncfusion-pdfviewer-overrides.css';
 import 'leaflet/dist/leaflet.css';
 import { ReactQueryProvider } from '../lib/react-query';
 import { TenantProvider } from '../contexts/TenantContext';

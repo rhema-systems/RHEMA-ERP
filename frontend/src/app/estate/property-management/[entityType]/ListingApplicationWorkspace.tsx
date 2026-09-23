@@ -72,6 +72,14 @@ const REQUESTS_PER_PAGE = 10;
 const SALE_CLOSEOUT_COMPLETED_QUEUE_KEY =
   'property-management.sale-closeout-completed-case-ids';
 
+const SYSTEM_MANAGED_AGREEMENT_FIELD_KEYS = new Set([
+  'signedAgreementReference',
+  'agreementExecutionStatus',
+  'internalApprovalStatus',
+  'internalSignatureStatus',
+  'finalSignedAgreementReference',
+]);
+
 const ProcedurePdfViewer = dynamic(
   () => import('@/components/procedures/ProcedurePdfViewer'),
   {
@@ -325,6 +333,12 @@ const isRentalApplication = (procedureCase: ProcedureCaseDetail) => {
   );
 };
 
+const isLeaseApplication = (procedureCase: ProcedureCaseDetail) => {
+  const requestType = caseFieldValue(procedureCase, 'requestType').toLowerCase();
+  const listingType = caseFieldValue(procedureCase, 'listingType').toLowerCase();
+  return requestType.includes('lease') || (!requestType && listingType.includes('lease'));
+};
+
 const isDecisionStage = (procedureCase: ProcedureCaseDetail) => {
   const stageName = procedureCase.currentStageName.toLowerCase();
   return (
@@ -335,7 +349,11 @@ const isDecisionStage = (procedureCase: ProcedureCaseDetail) => {
 };
 
 const editableFieldKeys = (procedureCase: ProcedureCaseDetail) => {
-  const keys = new Set(procedureCase.currentStageFieldKeys);
+  const keys = new Set(
+    procedureCase.currentStageFieldKeys.filter(
+      (key) => !SYSTEM_MANAGED_AGREEMENT_FIELD_KEYS.has(key)
+    )
+  );
   if (isDecisionStage(procedureCase)) {
     keys.add('decisionStatus');
     if (isRentalApplication(procedureCase)) {
@@ -369,13 +387,9 @@ const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
     case 3:
       return ['legalAgreementReviewStatus'];
     case 4:
-      return [
-        'signedAgreementReference',
-        'agreementExecutionStatus',
-        'internalApprovalStatus',
-        'internalSignatureStatus',
-        'finalSignedAgreementReference',
-      ];
+      // These values are populated by the customer portal and DMS workflow.
+      // Stage completion still verifies them below with action-specific guidance.
+      return [];
     case 5:
       return rental
         ? ['billingStartDate', 'billingStartStatus']
@@ -1527,6 +1541,9 @@ export function ListingApplicationWorkspace() {
   const rentalApplication = selectedCase
     ? isRentalApplication(selectedCase)
     : false;
+  const leaseApplication = selectedCase
+    ? isLeaseApplication(selectedCase)
+    : false;
   const missingApprovedMoveInDate = Boolean(
     selectedCase &&
       approvedDecision &&
@@ -1604,11 +1621,16 @@ export function ListingApplicationWorkspace() {
   );
   const legalAgreementReviewSubmitting =
     pendingLegalMatterType === 'agreementReview';
-  const legalAgreementReviewApproved = legalAgreementReviewStatus
-    .toLowerCase()
-    .includes('approved');
+  const legalAgreementSignedByHeadOfLegal =
+    legalAgreementReviewStatus.toLowerCase().includes('head of legal') &&
+    legalAgreementReviewStatus.toLowerCase().includes('signed');
+  const customerAgreementAccepted = Boolean(
+    selectedCase &&
+      caseFieldValue(selectedCase, 'customerAcceptanceStatus').toLowerCase() ===
+        'accepted'
+  );
   const missingLegalAgreementReview = Boolean(
-    selectedCase && approvedDecision && !legalAgreementReviewApproved
+    selectedCase && approvedDecision && !legalAgreementSignedByHeadOfLegal
   );
   const fullyExecuted = Boolean(
     selectedCase &&
@@ -2341,8 +2363,8 @@ export function ListingApplicationWorkspace() {
                       Agreement generation
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      Set the approval details, then generate the agreement
-                      before routing the approved request to the customer.
+                      Set the approval details, generate the agreement, and
+                      route it through Legal before customer execution.
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -2446,7 +2468,7 @@ export function ListingApplicationWorkspace() {
                         <div>
                           <div className="flex items-center gap-2 font-medium">
                             <Gavel className="h-4 w-4" />
-                            Legal agreement review
+                            Legal review and Head of Legal signature
                           </div>
                           <p className="mt-1 text-sm text-muted-foreground">
                             {legalAgreementReviewSubmitting
@@ -2458,14 +2480,14 @@ export function ListingApplicationWorkspace() {
                         <Button
                           type="button"
                           variant={
-                            legalAgreementReviewApproved ? 'outline' : 'default'
+                            legalAgreementSignedByHeadOfLegal ? 'outline' : 'default'
                           }
                           className="gap-2"
                           disabled={
                             isSaving ||
                             legalAgreementReviewSubmitting ||
                             legalAgreementReviewStarted ||
-                            legalAgreementReviewApproved
+                            legalAgreementSignedByHeadOfLegal
                           }
                           onClick={() =>
                             void lodgeLegalMatter('agreementReview')
@@ -2473,21 +2495,107 @@ export function ListingApplicationWorkspace() {
                         >
                           {legalAgreementReviewSubmitting ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : legalAgreementReviewApproved ? (
+                          ) : legalAgreementSignedByHeadOfLegal ? (
                             <CheckCircle2 className="h-4 w-4" />
                           ) : (
                             <Send className="h-4 w-4" />
                           )}
                           {legalAgreementReviewSubmitting
                             ? 'Submitting to Legal...'
-                            : legalAgreementReviewApproved
-                              ? 'Approved by Legal'
+                            : legalAgreementSignedByHeadOfLegal
+                              ? 'Signed by Head of Legal'
                               : legalAgreementReviewStarted
                                 ? 'Under Legal review'
                                 : 'Submit draft to Legal'}
                         </Button>
                       </div>
                     ) : null}
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {agreementAlreadyGenerated && legalAgreementSignedByHeadOfLegal ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <FileSignature className="h-4 w-4" />
+                      Customer agreement execution
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      {rentalApplication ? 'Rent and lease' : 'Sale'} agreements
+                      follow the same signed Legal, customer, internal execution,
+                      and conveyance process.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="divide-y rounded-md border">
+                      <div className="flex items-start gap-3 p-3">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">
+                            Head of Legal signature
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            The agreement is signed and sent to the customer portal.
+                          </p>
+                        </div>
+                        <Badge variant="outline">Complete</Badge>
+                      </div>
+                      <div className="flex items-start gap-3 p-3">
+                        {hasActiveCustomerSignedAgreement ? (
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                        ) : (
+                          <Send className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">
+                            Customer signature
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {hasActiveCustomerSignedAgreement
+                              ? 'The signed customer agreement has been received.'
+                              : customerAgreementAccepted
+                                ? 'Customer accepted the agreement; waiting for the signed upload.'
+                                : 'Customer has been notified; waiting for review, acceptance, and signed upload.'}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={
+                            hasActiveCustomerSignedAgreement
+                              ? 'outline'
+                              : 'secondary'
+                          }
+                        >
+                          {hasActiveCustomerSignedAgreement
+                            ? 'Received'
+                            : 'Waiting'}
+                        </Badge>
+                      </div>
+                      <div className="flex items-start gap-3 p-3">
+                        {fullyExecuted ? (
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                        ) : (
+                          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">
+                            Internal approval and digital signature
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {fullyExecuted
+                              ? 'The final agreement is internally approved and digitally signed.'
+                              : hasActiveCustomerSignedAgreement
+                                ? 'Continue below with DMS approval and the authorised digital signature.'
+                                : 'This begins after the customer returns the signed agreement.'}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={fullyExecuted ? 'outline' : 'secondary'}
+                        >
+                          {fullyExecuted ? 'Complete' : 'Pending'}
+                        </Badge>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               ) : null}
@@ -2500,8 +2608,9 @@ export function ListingApplicationWorkspace() {
                       Agreement approval and signature
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      The approved move-in date remains inactive until the
-                      customer copy is internally approved and digitally signed.
+                      {rentalApplication
+                        ? 'The approved move-in date remains inactive until the customer copy is internally approved and digitally signed.'
+                        : 'The sale agreement must be internally approved and digitally signed before conveyance continues.'}
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -2641,7 +2750,9 @@ export function ListingApplicationWorkspace() {
                         <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
                           <CheckCircle2 className="h-4 w-4" />
                           {rentalApplication
-                            ? 'Final agreement signed; move-in is now effective'
+                            ? leaseApplication
+                              ? 'Final agreement signed; lease conveyance is next'
+                              : 'Final agreement signed; move-in is now effective'
                             : 'Final agreement signed; conveyance and registration has started'}
                         </div>
                       ) : null}
@@ -2650,16 +2761,18 @@ export function ListingApplicationWorkspace() {
                 </Card>
               ) : null}
 
-              {fullyExecuted ? (
+              {agreementAlreadyGenerated && legalAgreementSignedByHeadOfLegal && (!rentalApplication || leaseApplication) ? (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base">
                       <Gavel className="h-4 w-4" />
-                      Legal follow-up
+                      Legal transfer and conveyance
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      {rentalApplication
-                        ? 'Lodge later legal events from this property record. Legal receives and completes the matter in the Legal workspace.'
+                      {!fullyExecuted
+                        ? 'This next Legal matter opens after the customer-signed agreement is internally approved and digitally signed.'
+                        : leaseApplication
+                        ? 'Lease conveyance and registration now proceed in the Legal workspace. Ground rent remains a separate Estate and Finance account; it is not the lease amount.'
                         : saleFullyPaidInSales
                           ? 'Sales has collected the full purchase amount, so Estate only completes Legal conveyance and ownership transfer.'
                           : 'Complete the Estate balance invoice, customer payment, and Legal conveyance before ownership transfer is marked complete.'}
@@ -2714,6 +2827,7 @@ export function ListingApplicationWorkspace() {
                               className="gap-2"
                               disabled={
                                 isSaving ||
+                                !fullyExecuted ||
                                 Boolean(saleInvoiceId) ||
                                 saleFullyPaidInSales
                               }
@@ -2742,13 +2856,13 @@ export function ListingApplicationWorkspace() {
                                 selectedCase,
                                 'legalConveyanceStatus'
                               ) ||
-                                'Required before Estate transfers ownership and marks the property sold.'}
+                                'Required after internal agreement execution before Estate completes the transaction.'}
                             </p>
                           </div>
                           <Button
                             type="button"
                             className="gap-2"
-                            disabled={isSaving || legalConveyanceStarted}
+                            disabled={isSaving || !fullyExecuted || legalConveyanceStarted}
                             onClick={() =>
                               void lodgeLegalMatter('conveyanceRegistration')
                             }
@@ -2803,58 +2917,56 @@ export function ListingApplicationWorkspace() {
                       </div>
                     ) : null}
                     {rentalApplication ? (
-                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                        <Select
-                          value={selectedLegalMatterType}
-                          onValueChange={setSelectedLegalMatterType}
-                          disabled={isSaving}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="termination">
-                              Termination / recognition
-                            </SelectItem>
-                            <SelectItem value="leaseRenewal">
-                              Lease renewal
-                            </SelectItem>
-                            <SelectItem value="leaseVariation">
-                              Deed of variation
-                            </SelectItem>
-                            <SelectItem value="sublease">Sublease</SelectItem>
-                            <SelectItem value="assignment">
-                              Assignment / vesting
-                            </SelectItem>
-                            <SelectItem value="mortgage">
-                              Consent to mortgage
-                            </SelectItem>
-                            <SelectItem value="mortgageInPrinciple">
-                              Mortgage in principle
-                            </SelectItem>
-                            <SelectItem value="disputeAdvisory">
-                              Property dispute / advisory
-                            </SelectItem>
-                            <SelectItem value="courtProcess">
-                              Court process
-                            </SelectItem>
-                            <SelectItem value="otherCourtProcess">
-                              Other court process
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="gap-2"
-                          disabled={isSaving}
-                          onClick={() =>
-                            void lodgeLegalMatter(selectedLegalMatterType)
-                          }
-                        >
-                          <Gavel className="h-4 w-4" />
-                          Lodge with Legal
-                        </Button>
+                      <div className="space-y-3">
+                        <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="font-medium">Lease conveyance and registration</p>
+                            <p className="text-sm text-muted-foreground">
+                              {caseFieldValue(selectedCase, 'legalConveyanceStatus') ||
+                                'Required after internal agreement execution before lease closeout.'}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            className="gap-2"
+                            disabled={isSaving || !fullyExecuted || legalConveyanceStarted}
+                            onClick={() => void lodgeLegalMatter('conveyanceRegistration')}
+                          >
+                            <Send className="h-4 w-4" />
+                            {legalConveyanceStarted ? 'With Legal' : 'Start conveyance'}
+                          </Button>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                          <Select
+                            value={selectedLegalMatterType}
+                            onValueChange={setSelectedLegalMatterType}
+                            disabled={isSaving || !fullyExecuted}
+                          >
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="termination">Termination / recognition</SelectItem>
+                              <SelectItem value="leaseRenewal">Lease renewal</SelectItem>
+                              <SelectItem value="leaseVariation">Deed of variation</SelectItem>
+                              <SelectItem value="sublease">Sublease</SelectItem>
+                              <SelectItem value="assignment">Assignment / vesting</SelectItem>
+                              <SelectItem value="mortgage">Consent to mortgage</SelectItem>
+                              <SelectItem value="mortgageInPrinciple">Mortgage in principle</SelectItem>
+                              <SelectItem value="disputeAdvisory">Property dispute / advisory</SelectItem>
+                              <SelectItem value="courtProcess">Court process</SelectItem>
+                              <SelectItem value="otherCourtProcess">Other court process</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-2"
+                            disabled={isSaving || !fullyExecuted}
+                            onClick={() => void lodgeLegalMatter(selectedLegalMatterType)}
+                          >
+                            <Gavel className="h-4 w-4" />
+                            Lodge other Legal matter
+                          </Button>
+                        </div>
                       </div>
                     ) : null}
                   </CardContent>
@@ -3013,8 +3125,8 @@ export function ListingApplicationWorkspace() {
                   ) : null}
                   {missingLegalAgreementReview && !missingApprovedAgreement ? (
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Submit the generated agreement to Legal and wait for Legal
-                      approval before routing this stage forward.
+                      Submit the generated agreement to Legal and wait for the
+                      Head of Legal signature before routing this stage forward.
                     </p>
                   ) : null}
                   {missingApprovedRentTerm ? (
