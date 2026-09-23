@@ -692,11 +692,19 @@ public class FinanceDataSeeder
             }
             account.IsSegmented = true;
             account.AccountNumber = $"{companyValue.SegmentValue}-{naturalValue}";
-            account.SegmentValues =
-            [
+            var segmentValues = new List<AccountSegmentValue>
+            {
                 NewValue(company, companyValue.SegmentValue, companyValue.Description, companyValue.Id),
                 NewValue(natural, naturalValue, account.AccountName, null)
-            ];
+            };
+            account.SegmentValues = segmentValues;
+            if (!isNew)
+            {
+                // These values are discovered through an already tracked account. Their GUID keys
+                // are assigned client-side, so relationship discovery can otherwise classify them
+                // as existing rows and issue UPDATEs that affect zero rows on SQL Server.
+                _context.AccountSegmentValues.AddRange(segmentValues);
+            }
             if (!isNew) upgradedAccounts++;
         }
 
