@@ -17,6 +17,15 @@ foreach ($token in @(
     }
 }
 foreach ($token in @(
+        "'ci', '--include=dev', '--no-audit', '--no-fund'",
+        'Frontend locked-dependency restore failed',
+        'ReuseApiOutputFromCommit',
+        'API source or build inputs changed; refusing to reuse')) {
+    if (-not $deploy.Contains($token)) {
+        throw "Release dependency/retry protection is missing: $token"
+    }
+}
+foreach ($token in @(
         'RHEMA_BROWSER_PATH',
         'Google\\Chrome\\Application\\chrome.exe',
         'Microsoft\\Edge\\Application\\msedge.exe',
