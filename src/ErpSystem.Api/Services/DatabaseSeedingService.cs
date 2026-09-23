@@ -1250,11 +1250,12 @@ namespace ErpSystem.Web.Services
                 {
                     var tenantId = tenant.Id;
                     await RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(tenantId);
+                    await RetireAccountingBookApplicabilityWorkflowDefinitionsAsync(tenantId);
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
                         var approvalStages = spec.EntityCode is
                             "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
-                                or "AccountingBookApplicabilityPolicy" or "DeltaAdjustmentJournal"
+                                or "DeltaAdjustmentJournal"
                             ? AccountingBookApprovalStages
                             : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
                                 ? FinancePaymentApprovalStages
@@ -1325,6 +1326,36 @@ namespace ErpSystem.Web.Services
                 "Retired {WorkflowDefinitionCount} active SupplierReturn workflow definition(s) for tenant {TenantId}; FIN-INT-012/013 remain quarantined.",
                 retiredCount,
                 tenantId);
+        }
+
+        private async Task RetireAccountingBookApplicabilityWorkflowDefinitionsAsync(Guid tenantId)
+        {
+            var definitions = await _context.WorkflowDefinitions
+                .Include(item => item.EntityType)
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+                .ToListAsync();
+            var retiredAt = DateTime.UtcNow;
+            var retiredCount = 0;
+            foreach (var definition in definitions.Where(item =>
+                         item.EntityType != null &&
+                         (WorkflowEntityTypeKeyMatches(item.EntityType.Code, "AccountingBookApplicabilityPolicy") ||
+                          WorkflowEntityTypeKeyMatches(item.EntityType.Name, "AccountingBookApplicabilityPolicy"))))
+            {
+                definition.IsActive = false;
+                definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                definition.RetiredAt = retiredAt;
+                definition.RetiredById = null;
+                definition.UpdatedAt = retiredAt;
+                definition.UpdatedBy = "System";
+                definition.LastModifiedById = null;
+                retiredCount++;
+            }
+
+            if (retiredCount == 0) return;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation(
+                "Retired {WorkflowDefinitionCount} accounting-book applicability workflow definition(s) for tenant {TenantId}; ordinary selection is automatic.",
+                retiredCount, tenantId);
         }
 
         private static int RetireQuarantinedSupplierReturnWorkflowDefinitions(
@@ -1650,10 +1681,6 @@ namespace ErpSystem.Web.Services
                     "Accounting Book Period Lifecycle Approval", "Independent approval of exact-book period opening and close transitions."),
                 new("AccountingBookLifecycle", "Accounting Book Lifecycle", typeof(AccountingBook).FullName,
                     "Accounting Book Lifecycle Approval", "Independent approval of governed accounting-book state transitions."),
-                new("AccountingBookApplicabilityPolicy", "Accounting Book Applicability Policy", typeof(AccountingBookApplicabilityPolicy).FullName,
-                    "Accounting Book Applicability Policy Approval",
-                    "Independent Financial Controller approval of effective-dated transaction-to-book selection rules and policy retirement."),
-
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
                     "AP purchase order approval before supplier commitment, receiving, invoicing, or closure."),

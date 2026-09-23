@@ -14,7 +14,6 @@ namespace ErpSystem.Data.Seeders;
 public sealed class FinanceBaselineProvisioningSeeder
 {
     public const string ProvisioningVersion = "FIN-BASELINE-2.0";
-    public const string BaselinePolicyCode = "SYSTEM_DEFAULT_ROUTING";
     public static readonly Guid ProvisioningMakerId = Guid.Parse("00000000-0000-0000-0000-00000000F101");
     public static readonly Guid ProvisioningAuthorityId = Guid.Parse("00000000-0000-0000-0000-00000000F102");
     private static readonly string[] StandardBookCodes = ["BASE", "IFRS_ADJUSTMENTS", "USD_PARALLEL"];
@@ -49,7 +48,6 @@ public sealed class FinanceBaselineProvisioningSeeder
                 book, cutoffPeriod, firstPostingDate, provisionedAtUtc, cancellationToken);
 
         await _db.SaveChangesAsync(cancellationToken);
-        await SeedUncoveredApplicabilityAsync(tenantId, books, firstPostingDate, provisionedAtUtc, cancellationToken);
         _logger.LogInformation("Applied Finance executable baseline {Version} for tenant {TenantId}", ProvisioningVersion, tenantId);
     }
 
@@ -166,71 +164,6 @@ public sealed class FinanceBaselineProvisioningSeeder
         book.LifecycleStatus = AccountingBookLifecycleStatus.Active;
         book.IsActive = true;
         book.AllowsPosting = true;
-    }
-
-    private async Task SeedUncoveredApplicabilityAsync(Guid tenantId, IReadOnlyCollection<AccountingBook> books,
-        DateTime effectiveFrom, DateTime now, CancellationToken ct)
-    {
-        var activeBooks = books.Where(item => item.LifecycleStatus == AccountingBookLifecycleStatus.Active
-            && item.IsActive && item.AllowsPosting && item.BookType == AccountingBookType.PrimaryFull)
-            .OrderBy(item => item.SortOrder).ThenBy(item => item.Code).ToList();
-        if (activeBooks.Count != 1) return;
-        if (await _db.AccountingBookApplicabilityPolicies.AnyAsync(item =>
-            item.TenantId == tenantId && item.PolicyCode == BaselinePolicyCode && !item.IsDeleted, ct)) return;
-
-        var governed = await _db.AccountingBookApplicabilityRules.AsNoTracking().Include(item => item.Policy)
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && !item.Policy.IsDeleted
-                && item.Policy.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Approved)
-            .Select(item => new { item.OriginatingModuleCode, item.SourceDocumentType, item.PostingAction })
-            .ToListAsync(ct);
-        var definitions = FinancePostingIdentityCatalog.Definitions.Where(definition => !governed.Any(item =>
-            item.OriginatingModuleCode == definition.OriginatingModuleCode
-            && item.SourceDocumentType == definition.SourceDocumentType
-            && item.PostingAction == definition.PostingAction)).ToList();
-        if (definitions.Count == 0) return;
-
-        var policy = new AccountingBookApplicabilityPolicy
-        {
-            TenantId = tenantId, PolicyCode = BaselinePolicyCode, Version = 1,
-            Name = "System default full-book routing",
-            Description = "Explicit baseline routing for canonical Finance posting producers across the provisioned full books.",
-            EffectiveFrom = effectiveFrom, PolicyStatus = AccountingBookApplicabilityPolicyStatus.Draft,
-            Reason = $"Provisioned by {ProvisioningVersion}.", CreatedByUserId = ProvisioningMakerId,
-            PreparedByUserId = ProvisioningMakerId, PreparedAtUtc = now,
-            CreatedAt = now, CreatedBy = $"System ({ProvisioningVersion})"
-        };
-        var order = 0;
-        foreach (var definition in definitions)
-        {
-            order += 10;
-            policy.Rules.Add(new AccountingBookApplicabilityRule
-            {
-                TenantId = tenantId, RuleCode = $"ROUTE_{order:D4}", Priority = 0,
-                OriginatingModuleCode = definition.OriginatingModuleCode,
-                SourceDocumentType = definition.SourceDocumentType, PostingAction = definition.PostingAction,
-                SortOrder = order, CreatedAt = now, CreatedBy = $"System ({ProvisioningVersion})",
-                SelectedBooks = activeBooks.Select((book, index) => new AccountingBookApplicabilityRuleBook
-                {
-                    TenantId = tenantId, AccountingBookId = book.Id, AccountingBookCodeSnapshot = book.Code,
-                    SelectionOrder = index, CreatedAt = now, CreatedBy = $"System ({ProvisioningVersion})"
-                }).ToList()
-            });
-        }
-        _db.AccountingBookApplicabilityPolicies.Add(policy);
-        await _db.SaveChangesAsync(ct);
-
-        // Cross the same relational authority boundaries as an interactive maker-checker
-        // request. SQL Server's C5 triggers intentionally reject a policy born Approved.
-        policy.PolicyStatus = AccountingBookApplicabilityPolicyStatus.PendingApproval;
-        await _db.SaveChangesAsync(ct);
-
-        policy.PolicyStatus = AccountingBookApplicabilityPolicyStatus.Approved;
-        policy.ApprovedByUserId = ProvisioningAuthorityId;
-        policy.ApprovedAtUtc = now;
-        policy.DecidedByUserId = ProvisioningAuthorityId;
-        policy.DecidedAtUtc = now;
-        policy.DecisionReason = "System-provisioned baseline; user-authored policies remain authoritative.";
-        await _db.SaveChangesAsync(ct);
     }
 
     private async Task<FiscalPeriod> FindBaselineCutoffAsync(Guid tenantId, CancellationToken ct)

@@ -4,7 +4,6 @@ using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
-using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -138,15 +137,15 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
             item.TenantId == tenantId && accounts.Select(account => account.Id).Contains(item.AccountId)))
             .Should().Be(9);
         var baselineBooks = await verify.AccountingBooks.AsNoTracking()
-            .Where(item => item.TenantId == tenantId && new[] { "IFRS", "LOCAL_STATUTORY", "MANAGEMENT" }.Contains(item.Code))
+            .Where(item => item.TenantId == tenantId && new[] { "BASE", "IFRS_ADJUSTMENTS", "USD_PARALLEL" }.Contains(item.Code))
             .ToListAsync();
         baselineBooks.Should().HaveCount(3);
         baselineBooks.Should().OnlyContain(item => item.IsActive && item.AllowsPosting
             && item.LifecycleStatus == AccountingBookLifecycleStatus.Active,
             "standard books must be immediately usable in a newly provisioned tenant");
-        (await verify.AccountingBooks.AnyAsync(item => item.TenantId == tenantId
-            && item.BookType == AccountingBookType.Delta && !item.IsDeleted)).Should().BeFalse(
-            "Delta books require an explicit adjustment purpose and base-book authority and are not generic baseline destinations");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.PrimaryFull && item.Code == "BASE");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.Delta && item.Code == "IFRS_ADJUSTMENTS");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.ParallelFull && item.Code == "USD_PARALLEL");
         (await verify.AccountAccountingBooks.Where(item => item.TenantId == tenantId)
             .AllAsync(item => item.IsEnabled)).Should().BeTrue(
             "the executable baseline enables only mappings whose classification authority was validated");
@@ -167,14 +166,9 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
             validation.IsValid.Should().BeTrue(validation.Blocker);
         }
 
-        var baselinePolicy = await verify.AccountingBookApplicabilityPolicies.AsNoTracking()
-            .Include(item => item.Rules).ThenInclude(item => item.SelectedBooks)
-            .SingleAsync(item => item.TenantId == tenantId
-                && item.PolicyCode == FinanceBaselineProvisioningSeeder.BaselinePolicyCode && !item.IsDeleted);
-        baselinePolicy.PolicyStatus.Should().Be(AccountingBookApplicabilityPolicyStatus.Approved);
-        baselinePolicy.Rules.Should().HaveCount(FinancePostingIdentityCatalog.Definitions.Count);
-        baselinePolicy.Rules.Should().OnlyContain(rule => rule.Priority == 0 && rule.SelectedBooks.Count == 3,
-            "the fallback policy covers every registered producer while remaining overridable by governed user rules");
+        (await verify.AccountingBookApplicabilityPolicies.AsNoTracking()
+            .CountAsync(item => item.TenantId == tenantId && !item.IsDeleted)).Should().Be(0,
+            "ordinary posting now resolves Primary automatically and no routing policy is provisioned");
     }
 
     private static async Task AddSupplierPrerequisitesAsync(ApplicationDbContext db, Guid tenantId)

@@ -220,7 +220,7 @@ public sealed class FinanceApprovalQueueProjectionTests
 
     [Fact]
     [Trait("Batch", "FinanceApprovalActiveQueue")]
-    public async Task Applicability_policy_queue_should_route_only_the_independent_checker_to_the_domain_page()
+    public async Task Retired_applicability_policy_workflows_should_not_appear_in_the_active_queue()
     {
         await using var db = CreateContext();
         var tenantId = Guid.NewGuid();
@@ -255,11 +255,7 @@ public sealed class FinanceApprovalQueueProjectionTests
         var checkerRows = ((OkObjectResult)checkerResponse.Result!).Value
             .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
             .Which;
-        checkerRows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(row =>
-            row.EntityType == "AccountingBookApplicabilityPolicy" &&
-            row.Reference == "TEST/V1" && row.DecisionOnDetailPage &&
-            row.DetailHref == "/finance/settings/accounting-books/applicability" &&
-            !row.CanApprove && !row.CanReject);
+        checkerRows.Should().BeEmpty();
 
         var maker = CreateQueueController(db, tenantId, makerId);
         var makerResponse = await maker.GetPending(CancellationToken.None);

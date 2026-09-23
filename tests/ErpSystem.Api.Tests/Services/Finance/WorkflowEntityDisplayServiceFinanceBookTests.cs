@@ -40,7 +40,7 @@ public sealed class WorkflowEntityDisplayServiceFinanceBookTests
     }
 
     [Fact]
-    public async Task AccountingBookApplicabilityPolicy_ShouldResolvePolicyPage()
+    public async Task HistoricalAccountingBookApplicabilityPolicy_ShouldResolveBookRegister()
     {
         var policy = new AccountingBookApplicabilityPolicy
         {
@@ -58,7 +58,7 @@ public sealed class WorkflowEntityDisplayServiceFinanceBookTests
 
         result.EntityNumber.Should().Be("FIN_DEFAULT/V2");
         result.EntityName.Should().Be("Finance defaults");
-        result.ActionUrl.Should().Be("/finance/settings/accounting-books/applicability");
+        result.ActionUrl.Should().Be("/finance/settings/accounting-books");
     }
 
     private static WorkflowEntityDisplayService CreateService(IUnitOfWork unitOfWork) => new(

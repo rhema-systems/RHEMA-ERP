@@ -171,8 +171,6 @@ public class FinanceApprovalsController : ControllerBase
             .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookPeriods)).Succeeded;
         var canApproveBookInitialization = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookInitialization)).Succeeded;
-        var canApproveBookApplicability = (await _authorizationService
-            .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookApplicabilityPolicy)).Succeeded;
 
         var currentRoles = roleSet.ToArray();
         var pageRows = await QueryPendingApprovals(tenantId)
@@ -395,62 +393,6 @@ public class FinanceApprovalsController : ControllerBase
                     {
                         ["Book"] = initialization.AccountingBook.Code,
                         ["Version"] = initialization.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                    }
-                });
-                continue;
-            }
-
-            if (IsAccountingBookApplicabilityPolicy(entityType))
-            {
-                // Applicability decisions must go through the domain service so effective-date,
-                // overlap, concurrency and maker-checker controls are revalidated atomically.
-                if (!canApproveBookApplicability || instance.InitiatedById == currentUserId.Value)
-                    continue;
-
-                var policy = await _db.AccountingBookApplicabilityPolicies.AsNoTracking()
-                    .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted &&
-                        item.Id == instance.EntityId &&
-                        ((item.WorkflowInstanceId == instance.Id &&
-                          item.PolicyStatus == AccountingBookApplicabilityPolicyStatus.PendingApproval &&
-                          item.PreparedByUserId != currentUserId.Value) ||
-                         (item.RetirementWorkflowInstanceId == instance.Id &&
-                          item.RetirementDecisionStatus == "Pending" &&
-                          item.RetirementRequestedByUserId.HasValue &&
-                          item.RetirementRequestedByUserId != currentUserId.Value)),
-                        cancellationToken);
-                if (policy == null || !await _workflowService.CanUserApproveAsync(
-                        "AccountingBookApplicabilityPolicy", policy.Id, currentUserId.Value))
-                    continue;
-
-                var retirement = policy.RetirementWorkflowInstanceId == instance.Id;
-                results.Add(new FinanceApprovalQueueItemDto
-                {
-                    ApprovalId = approval.Id,
-                    EntityId = policy.Id,
-                    EntityType = "AccountingBookApplicabilityPolicy",
-                    Reference = $"{policy.PolicyCode}/V{policy.Version}",
-                    Title = retirement
-                        ? $"{policy.Name}: retirement request"
-                        : $"{policy.Name}: applicability policy approval",
-                    DetailHref = "/finance/settings/accounting-books/applicability",
-                    DocumentType = "Accounting Book Applicability Policy",
-                    Module = "Finance Settings",
-                    CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
-                    StatusLabel = retirement ? "Pending policy retirement" : "Pending policy approval",
-                    SubmittedAt = retirement
-                        ? policy.RetirementRequestedAtUtc
-                        : instance.StartedDate ?? instance.CreatedDate,
-                    SubmittedBy = instance.InitiatedBy == null ? null : string.Join(" ",
-                        new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }
-                            .Where(value => !string.IsNullOrWhiteSpace(value))),
-                    ApproverRole = approval.ApproverRole,
-                    WorkflowName = instance.WorkflowDefinition?.Name,
-                    DecisionOnDetailPage = true,
-                    Metadata = new Dictionary<string, string>
-                    {
-                        ["Policy"] = policy.PolicyCode,
-                        ["Version"] = policy.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        ["Effective from"] = policy.EffectiveFrom.ToString("yyyy-MM-dd")
                     }
                 });
                 continue;
@@ -2900,8 +2842,7 @@ public class FinanceApprovalsController : ControllerBase
 
     internal static bool IsFinanceQueueEntity(string? entityType)
         => IsFinanceEntity(entityType) || IsAccountingBookLifecycle(entityType) ||
-           IsAccountingBookPeriodLifecycle(entityType) || IsAccountingBookInitialization(entityType) ||
-           IsAccountingBookApplicabilityPolicy(entityType);
+           IsAccountingBookPeriodLifecycle(entityType) || IsAccountingBookInitialization(entityType);
 
     private static bool IsAccountingBookLifecycle(string? entityType)
         => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
@@ -2911,9 +2852,6 @@ public class FinanceApprovalsController : ControllerBase
 
     private static bool IsAccountingBookInitialization(string? entityType)
         => Normalize(entityType) == "ACCOUNTINGBOOKINITIALIZATION";
-
-    private static bool IsAccountingBookApplicabilityPolicy(string? entityType)
-        => Normalize(entityType) == "ACCOUNTINGBOOKAPPLICABILITYPOLICY";
 
     internal static string ResolveDetailHref(string? entityType, Guid entityId, string? displayUrl)
     {

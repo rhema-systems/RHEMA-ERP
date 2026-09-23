@@ -196,76 +196,47 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
 
     public async Task<AccountingBookSelectionDto> ResolveAsync(ResolveAccountingBookApplicabilityDto request, CancellationToken cancellationToken = default)
     {
-        // Producer modules supply stable evidence only. Finance remains the sole book-enumeration authority.
+        // Producer modules supply stable evidence only. Ordinary accounting events always target
+        // the Primary book. Parallel replication and Delta adjustments are separate governed flows.
         var input = NormalizeRegistered(request);
         var date = request.EffectiveDate.Date;
-        // An approved successor replaces its policy lineage from its inclusive EffectiveFrom date without
-        // rewriting predecessor rows or frozen selections. This keeps before/at/after resolution gap-free.
-        var startedPolicies = await _db.AccountingBookApplicabilityPolicies.AsNoTracking()
-            .Where(item => item.TenantId == TenantId && !item.IsDeleted
-                && (item.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Approved || item.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Retired)
-                && item.EffectiveFrom <= date)
-            .OrderBy(item => item.PolicyCode).ThenByDescending(item => item.Version).ToListAsync(cancellationToken);
-        foreach (var policy in startedPolicies)
-            await ValidateExactVersionLineageAsync(policy, cancellationToken);
-        var effectivePolicyIds = startedPolicies.GroupBy(item => item.PolicyCode, StringComparer.Ordinal)
-            .Select(group => group.First()).Where(item => item.EffectiveTo == null || item.EffectiveTo >= date).Select(item => item.Id).ToList();
-        var candidates = await _db.AccountingBookApplicabilityRules.AsNoTracking()
-            .Include(item => item.Policy).Include(item => item.SelectedBooks).ThenInclude(item => item.AccountingBook)
-            .Where(item => item.TenantId == TenantId && !item.IsDeleted && effectivePolicyIds.Contains(item.AccountingBookApplicabilityPolicyId)
-                && item.OriginatingModuleCode == input.Module && item.SourceDocumentType == input.Document && item.PostingAction == input.Action)
-            .OrderByDescending(item => item.Priority).ThenBy(item => item.Policy.PolicyCode).ThenByDescending(item => item.Policy.Version).ThenBy(item => item.RuleCode)
-            .ToListAsync(cancellationToken);
-        AccountingBookApplicabilityRule? rule = null;
-        if (candidates.Count > 0)
-        {
-            var top = candidates[0].Priority;
-            var winners = candidates.Where(item => item.Priority == top).ToList();
-            if (winners.Count != 1) throw new InvalidOperationException("AMBIGUOUS_ACCOUNTING_BOOK_APPLICABILITY: multiple effective rules have equal highest priority.");
-            rule = winners[0];
-        }
-
-        IReadOnlyList<AccountingBookSelectionBookDto> selected;
-        var fallback = rule == null;
-        if (fallback)
-        {
-            // Replacement evidence makes fallback effective-dated. Frozen selections remain immutable,
-            // and late postings for an earlier date still resolve to the primary then in force.
-            var designation = await _db.AccountingBookPrimaryDesignations.AsNoTracking()
-                .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.ReversedAtUtc == null && item.EffectiveFrom <= date)
-                .OrderByDescending(item => item.EffectiveFrom).ThenByDescending(item => item.ApprovedAtUtc).FirstOrDefaultAsync(cancellationToken);
-            Guid? primaryId = designation?.NewPrimaryBookId;
-            if (!primaryId.HasValue)
-                primaryId = await _db.AccountingBookPrimaryDesignations.AsNoTracking()
-                    .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.ReversedAtUtc == null && item.EffectiveFrom > date)
-                    .OrderBy(item => item.EffectiveFrom).ThenBy(item => item.ApprovedAtUtc).Select(item => (Guid?)item.PreviousPrimaryBookId).FirstOrDefaultAsync(cancellationToken);
-            var primary = primaryId.HasValue
-                ? await _db.AccountingBooks.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted && item.Id == primaryId).ToListAsync(cancellationToken)
-                : await _db.AccountingBooks.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsDefault && item.BookType == AccountingBookType.PrimaryFull).ToListAsync(cancellationToken);
-            if (primary.Count != 1) throw new InvalidOperationException("PRIMARY_ACCOUNTING_BOOK_REQUIRED: exactly one effective primary/default full book is required.");
-            selected = [new AccountingBookSelectionBookDto { AccountingBookId = primary[0].Id, AccountingBookCode = primary[0].Code, SelectionOrder = 0 }];
-        }
-        else
-        {
-            // Ordinary applicability resolves only the perpetual Primary. Parallel books are
-            // atomic currency replicas and Delta books accept explicit adjustment journals.
-            selected = rule!.SelectedBooks.OrderBy(item => item.SelectionOrder).Select(item => new AccountingBookSelectionBookDto
-            { AccountingBookId = item.AccountingBookId, AccountingBookCode = item.AccountingBookCodeSnapshot, SelectionOrder = item.SelectionOrder }).ToList();
-            // Corrupt/imported explicit authority must never become a successful empty selection or fallback.
-            if (selected.Count == 0) throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_EMPTY_SELECTION: an explicit rule must select at least one governed full book.");
-        }
+        // Replacement evidence makes Primary resolution effective-dated. Frozen selections remain
+        // immutable, and late postings resolve to the Primary that governed their accounting date.
+        var designation = await _db.AccountingBookPrimaryDesignations.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.ReversedAtUtc == null && item.EffectiveFrom <= date)
+            .OrderByDescending(item => item.EffectiveFrom).ThenByDescending(item => item.ApprovedAtUtc).FirstOrDefaultAsync(cancellationToken);
+        Guid? primaryId = designation?.NewPrimaryBookId;
+        if (!primaryId.HasValue)
+            primaryId = await _db.AccountingBookPrimaryDesignations.AsNoTracking()
+                .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.ReversedAtUtc == null && item.EffectiveFrom > date)
+                .OrderBy(item => item.EffectiveFrom).ThenBy(item => item.ApprovedAtUtc)
+                .Select(item => (Guid?)item.PreviousPrimaryBookId).FirstOrDefaultAsync(cancellationToken);
+        var primary = primaryId.HasValue
+            ? await _db.AccountingBooks.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted && item.Id == primaryId).ToListAsync(cancellationToken)
+            : await _db.AccountingBooks.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsDefault && item.BookType == AccountingBookType.PrimaryFull).ToListAsync(cancellationToken);
+        if (primary.Count != 1)
+            throw new InvalidOperationException("PRIMARY_ACCOUNTING_BOOK_REQUIRED: exactly one effective primary/default full book is required.");
+        IReadOnlyList<AccountingBookSelectionBookDto> selected =
+        [
+            new AccountingBookSelectionBookDto
+            {
+                AccountingBookId = primary[0].Id,
+                AccountingBookCode = primary[0].Code,
+                SelectionOrder = 0
+            }
+        ];
 
         var validation = await ValidateSelectedBooksAsync(selected, date, input.Module, cancellationToken);
         var blockers = validation.Blockers;
-        var inputHash = Hash($"BOOK-APPLICABILITY-INPUT-V1|{TenantId:D}|{date:yyyy-MM-dd}|{input.Module}|{input.Document}|{input.Action}");
-        var fingerprint = Hash($"BOOK-APPLICABILITY-SELECTION-V1|{inputHash}|{rule?.Policy.Id:D}|{rule?.Id:D}|{rule?.Policy.Version}|{string.Join("|", selected.OrderBy(item => item.SelectionOrder).Select(item => $"{item.SelectionOrder}:{item.AccountingBookId:D}:{item.AccountingBookCode}:{item.AuthorityFingerprint}"))}");
+        var inputHash = Hash($"PRIMARY-BOOK-INPUT-V1|{TenantId:D}|{date:yyyy-MM-dd}|{input.Module}|{input.Document}|{input.Action}");
+        var fingerprint = Hash($"PRIMARY-BOOK-SELECTION-V1|{inputHash}|{string.Join("|", selected.OrderBy(item => item.SelectionOrder).Select(item => $"{item.SelectionOrder}:{item.AccountingBookId:D}:{item.AccountingBookCode}:{item.AuthorityFingerprint}"))}");
         if (!string.IsNullOrWhiteSpace(request.ExpectedCalculationInputHash) && !string.Equals(request.ExpectedCalculationInputHash, inputHash, StringComparison.Ordinal))
             throw new InvalidOperationException("ACCOUNTING_BOOK_SELECTION_INPUT_CONFLICT: normalized selection inputs changed.");
         if (!string.IsNullOrWhiteSpace(request.ExpectedSelectionFingerprint) && !string.Equals(request.ExpectedSelectionFingerprint, fingerprint, StringComparison.Ordinal))
-            throw new InvalidOperationException("ACCOUNTING_BOOK_SELECTION_EVIDENCE_CONFLICT: policy, rule, or selected-book evidence changed.");
-        return new AccountingBookSelectionDto { PolicyId = rule?.Policy.Id, RuleId = rule?.Id, PolicyVersion = rule?.Policy.Version,
+            throw new InvalidOperationException("ACCOUNTING_BOOK_SELECTION_EVIDENCE_CONFLICT: Primary book selection evidence changed.");
+        return new AccountingBookSelectionDto { PolicyId = null, RuleId = null, PolicyVersion = null,
             EffectiveDate = date, OriginatingModuleCode = input.Module, SourceDocumentType = input.Document, PostingAction = input.Action,
-            UsedPrimaryOnlyFallback = fallback, Books = selected, Blockers = blockers, CalculationInputHash = inputHash, SelectionFingerprint = fingerprint };
+            UsedPrimaryOnlyFallback = true, Books = selected, Blockers = blockers, CalculationInputHash = inputHash, SelectionFingerprint = fingerprint };
     }
 
     public Task<AccountingBookSelectionDto> FreezeAsync(FreezeAccountingBookSelectionDto request, CancellationToken cancellationToken = default) => AtomicAsync(async () =>
@@ -318,7 +289,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
               evidence.CalculationInputHash, evidence.SelectionFingerprint,
               Books = evidence.Books.OrderBy(item => item.SelectionOrder).Select(item => new
               { item.AccountingBookId, item.AccountingBookCodeSnapshot, item.SelectionOrder, item.AuthorityFingerprint }) },
-            Reason = "Approved applicability selection evidence frozen." }, cancellationToken);
+            Reason = "Automatic Primary book selection evidence frozen." }, cancellationToken);
         return resolved;
     }, cancellationToken);
 

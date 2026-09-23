@@ -22,8 +22,7 @@ public sealed class FinancePermissionAuthorizationHandlerTests
         {
             FinancePermissions.ApproveAccountingBookTransitions,
             FinancePermissions.ApproveAccountingBookPeriods,
-            FinancePermissions.ApproveAccountingBookInitialization,
-            FinancePermissions.ApproveAccountingBookApplicabilityPolicy
+            FinancePermissions.ApproveAccountingBookInitialization
         });
 
         FinancePermissions.FinancialControllerNames.Should().NotContain(

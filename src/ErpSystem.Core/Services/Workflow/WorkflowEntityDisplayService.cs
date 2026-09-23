@@ -663,6 +663,8 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            // Historical policy workflows remain readable after policy authoring is retired,
+            // but they route to the accounting-book register rather than a configuration page.
             if (key == Normalize("AccountingBookApplicabilityPolicy"))
             {
                 var policy = await _unitOfWork.Repository<AccountingBookApplicabilityPolicy>()
@@ -670,7 +672,7 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 info.EntityType = "AccountingBookApplicabilityPolicy";
                 info.EntityNumber = policy == null ? null : $"{policy.PolicyCode}/V{policy.Version}";
                 info.EntityName = policy?.Name;
-                info.ActionUrl = "/finance/settings/accounting-books/applicability";
+                info.ActionUrl = "/finance/settings/accounting-books";
                 return info;
             }
 

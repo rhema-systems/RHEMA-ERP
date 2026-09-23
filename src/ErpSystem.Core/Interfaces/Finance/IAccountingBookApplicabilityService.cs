@@ -4,6 +4,8 @@ namespace ErpSystem.Core.Interfaces.Finance;
 
 public interface IAccountingBookApplicabilityService
 {
+    // Legacy policy administration members remain for historical evidence compatibility.
+    // They are not exposed by the API; ordinary runtime selection is automatic.
     Task<IReadOnlyList<AccountingBookApplicabilityPolicyDto>> GetPoliciesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AccountingBookApplicabilityEligibleBookDto>> GetEligibleBooksAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AccountingBookPostingIdentityDto>> GetPostingIdentitiesAsync(CancellationToken cancellationToken = default);

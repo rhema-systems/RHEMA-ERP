@@ -197,10 +197,7 @@ public static class FinancePermissions
         new(ApproveAccountingBookPeriods, "Approve Accounting Book Periods", "Independently approve exact-book period transitions.", CategoryPeriodClose),
         new(ManageAccountingBookInitialization, "Manage Accounting Book Initialization", "Prepare and submit governed exact-book opening evidence.", CategoryMigration),
         new(ApproveAccountingBookInitialization, "Approve Accounting Book Initialization", "Independently approve governed accounting-book opening evidence.", CategoryMigration),
-        new(ViewAccountingBookApplicabilityPolicy, "View Accounting Book Applicability Policy", "View Finance-owned book-selection policy configuration.", CategoryGeneralLedger),
-        new(ManageAccountingBookApplicabilityPolicy, "Manage Accounting Book Applicability Policy", "Create and submit effective-dated book-selection policy versions.", CategoryGeneralLedger),
-        new(ApproveAccountingBookApplicabilityPolicy, "Approve Accounting Book Applicability Policy", "Independently approve, reject, or retire book-selection policies.", CategoryGeneralLedger),
-        new(ResolveAccountingBookApplicability, "Resolve Accounting Book Applicability", "Resolve and freeze governed book-selection evidence without posting.", CategoryGeneralLedger),
+        new(ResolveAccountingBookApplicability, "Resolve Primary Book Selection", "Resolve and freeze automatic Primary-book selection evidence without posting.", CategoryGeneralLedger),
         new(ViewAccountingEvents, "View Accounting Events", "View canonical event groups and exact-book posting evidence.", CategoryGeneralLedger),
         new(PrepareAccountingEvents, "Prepare Accounting Events", "Prepare an immutable accounting event for independent release.", CategoryGeneralLedger),
         new(OrchestrateAccountingEvents, "Orchestrate Accounting Events", "Create an atomic set of governed accounting-book representations.", CategoryGeneralLedger),
@@ -350,8 +347,7 @@ public static class FinancePermissions
         ManageAccountingBooks,
         RequestAccountingBookTransitions,
         ManageAccountingBookPeriods,
-        ManageAccountingBookInitialization,
-        ManageAccountingBookApplicabilityPolicy
+        ManageAccountingBookInitialization
     };
 
     public static readonly string[] FinancialControllerNames = AllNames

@@ -956,11 +956,6 @@ export default function AccountingBooksSettingsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline">
-            <Link href="/finance/settings/accounting-books/applicability">
-              Applicability policy
-            </Link>
-          </Button>
           {access.canManage && (
             <Button onClick={() => openEditor()}>
               <Plus className="mr-2 h-4 w-4" />
@@ -974,10 +969,10 @@ export default function AccountingBooksSettingsPage() {
         <ShieldAlert className="h-4 w-4" />
         <AlertTitle>About book activation</AlertTitle>
         <AlertDescription>
-          Each approved request moves a book to its next lifecycle state. Before
-          requesting Active, approve the book&apos;s initialization and open its
-          required book period. Activating a book does not automatically post
-          transactions to multiple books.
+          Ordinary accounting events always post to the tenant Primary book.
+          Active Parallel books receive governed foreign-currency replicas from
+          their replication start date, while Delta books accept explicit
+          adjustment journals only.
         </AlertDescription>
       </Alert>
 
