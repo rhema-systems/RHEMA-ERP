@@ -71,7 +71,9 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
       { label: 'My Journal', hint: 'Your private work notes', href: '/me/performance/journal', icon: BookOpen },
       { label: 'My Training', hint: 'Courses, requests and certificates', href: '/me/training', icon: GraduationCap },
       { label: 'My Learning Paths', hint: 'Guided development journeys', href: '/me/learning', icon: Compass },
-      { label: 'My Orientations', hint: 'Onboarding checklists', href: '/me/orientation', icon: ClipboardList },
+      { label: 'My Orientations', hint: 'Programmes you are enrolled on', href: '/me/orientation', icon: ClipboardList },
+      // Round 4, lane K-b2 — the hint above said "Onboarding checklists" while the page held none.
+      { label: 'My Onboarding', hint: 'Your onboarding, and tasks given to you', href: '/me/onboarding', icon: Rocket },
       { label: 'Peer Reviews', hint: 'Feedback you owe colleagues', href: '/me/performance/peer-reviews', icon: Users },
     ],
   },

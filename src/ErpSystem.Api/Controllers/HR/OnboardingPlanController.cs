@@ -16,7 +16,8 @@ namespace ErpSystem.Api.Controllers.HR;
 /// ⚠ A new hire's own "my onboarding" view, and the task queues for the IT/facilities staff a task is
 /// assigned to, both need a self-scoped read this controller deliberately does not offer. They belong
 /// to the employee self-service portal (area 25); building a half-check here would only have to be
-/// unpicked. Until then those users reach their tasks through HR.
+/// unpicked. **They now exist there** — <c>MyOnboardingController</c> (round 4, lane K-b2), with Mark
+/// done for the person a task was given to.
 /// </summary>
 [ApiController]
 [OrientationBusinessRules]

@@ -1410,6 +1410,11 @@ export type OrientationNoticeKind =
   | 'OrientationSessionCancelled'
   | 'OrientationCompleted'
   | 'OrientationCertificateIssued'
+  | 'OnboardingWelcome'
+  | 'OnboardingCoordinatorAssigned'
+  | 'OnboardingBuddyAssigned'
+  | 'OnboardingTaskAssigned'
+  | 'OnboardingTaskDone'
   | 'OrientationReminderDigest';
 
 export interface OrientationNoticeLogEntry {

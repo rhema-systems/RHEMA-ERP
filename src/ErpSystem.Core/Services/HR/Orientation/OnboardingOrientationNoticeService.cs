@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Orientation;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -353,6 +355,213 @@ public sealed class OnboardingOrientationNoticeService : IOnboardingOrientationN
         ? $"Your certificate is {certificate.CertificateNumber}, valid until {Day(expires)}."
         : $"Your certificate is {certificate.CertificateNumber}; it does not expire.";
 
+    // ── Onboarding (lane K-b2) ────────────────────────────────────────────────
+    //
+    // The new hire, their buddy and anybody given a task are sent to "My onboarding" in the portal —
+    // built in this lane so that every one of these notices has somewhere to go. The coordinator is
+    // sent to the plan on HR's screen, where coordinating happens.
+
+    private const string MyOnboardingPath = "/me/onboarding";
+
+    private static readonly OnboardingStatus[] ClosedPlanStatuses = { OnboardingStatus.Completed, OnboardingStatus.Cancelled };
+
+    public async Task PlanAssignedAsync(
+        OnboardingPlan plan, IReadOnlyCollection<OnboardingTask> tasks, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var names = await NamesAsync(plan.TenantId, new[] { plan.EmployeeId, plan.OnboardingCoordinatorId, plan.AssignedBuddyId }, cancellationToken);
+            var hire = NameOf(names, plan.EmployeeId) ?? "a new hire";
+            var coordinator = NameOf(names, plan.OnboardingCoordinatorId);
+            var buddy = NameOf(names, plan.AssignedBuddyId);
+            var begins = plan.StartDate >= DateOnly.FromDateTime(DateTime.UtcNow) ? "starts" : "began";
+            var start = Day(plan.StartDate);
+
+            var welcome = new List<string> { coordinator is null ? "HR is coordinating it." : $"{coordinator} is coordinating it." };
+            if (buddy is not null) welcome.Add($"{buddy} is your onboarding buddy — somebody to ask anything.");
+            if (tasks.Count > 0) welcome.Add($"{tasks.Count} tasks are planned. See them, and anything that is yours to do, under My onboarding.");
+            await StageAsync(plan.TenantId, plan.EmployeeId, OrientationNotificationType.OnboardingPlanAssigned,
+                OnboardingOrientationEmailCatalog.Events.OnboardingWelcome, null, null,
+                $"Welcome — your onboarding {begins} on {start}", welcome, MyOnboardingPath, "Open my onboarding",
+                new()
+                {
+                    ["NewHireName"] = hire, ["StartDate"] = start, ["CoordinatorName"] = coordinator,
+                    ["BuddyName"] = buddy, ["TaskCount"] = tasks.Count.ToString(En),
+                });
+
+            if (plan.OnboardingCoordinatorId is { } coordinatorId && coordinatorId != plan.EmployeeId)
+                await CoordinatorAsync(plan, coordinatorId, hire, buddy, tasks.Count, tasks.Select(t => (DateOnly?)t.DueDate).Min(), takingOver: false);
+
+            if (plan.AssignedBuddyId is { } buddyId && buddyId != plan.EmployeeId)
+                await BuddyAsync(plan, buddyId, hire, coordinator);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Onboarding notices for plan {PlanId} could not be composed; the plan stands.", plan.Id);
+        }
+    }
+
+    public async Task PlanRolesChangedAsync(
+        OnboardingPlan plan, Guid? previousCoordinatorId, Guid? previousBuddyId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (ClosedPlanStatuses.Contains(plan.Status)) return;
+            var coordinatorChanged = plan.OnboardingCoordinatorId is { } c && c != previousCoordinatorId && c != plan.EmployeeId;
+            var buddyChanged = plan.AssignedBuddyId is { } b && b != previousBuddyId && b != plan.EmployeeId;
+            if (!coordinatorChanged && !buddyChanged) return;
+
+            var names = await NamesAsync(plan.TenantId, new[] { plan.EmployeeId, plan.OnboardingCoordinatorId, plan.AssignedBuddyId }, cancellationToken);
+            var hire = NameOf(names, plan.EmployeeId) ?? "a new hire";
+            var open = await _unitOfWork.Repository<OnboardingTask>().GetQueryable().AsNoTracking()
+                .Where(t => t.OnboardingPlanId == plan.Id && !t.IsDeleted
+                            && t.Status != OnboardingTaskStatus.Completed && t.Status != OnboardingTaskStatus.Waived)
+                .Select(t => t.DueDate)
+                .ToListAsync(cancellationToken);
+
+            if (coordinatorChanged)
+                await CoordinatorAsync(plan, plan.OnboardingCoordinatorId!.Value, hire, NameOf(names, plan.AssignedBuddyId),
+                    open.Count, open.Count == 0 ? (DateOnly?)null : open.Min(), takingOver: true);
+            if (buddyChanged)
+                await BuddyAsync(plan, plan.AssignedBuddyId!.Value, hire, NameOf(names, plan.OnboardingCoordinatorId));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Onboarding role notices for plan {PlanId} could not be composed; the change stands.", plan.Id);
+        }
+    }
+
+    private async Task CoordinatorAsync(
+        OnboardingPlan plan, Guid coordinatorId, string hire, string? buddy, int taskCount, DateOnly? firstDue, bool takingOver)
+    {
+        var lines = new List<string>
+        {
+            $"It {(plan.StartDate >= DateOnly.FromDateTime(DateTime.UtcNow) ? "starts" : "began")} on {Day(plan.StartDate)}.",
+            taskCount == 0
+                ? "It has no open tasks yet."
+                : $"{taskCount} {(takingOver ? "open " : "")}task{(taskCount == 1 ? "" : "s")}; the first due on {Day(firstDue!.Value)}.",
+        };
+        if (buddy is not null) lines.Add($"{buddy} is their onboarding buddy.");
+
+        await StageAsync(plan.TenantId, coordinatorId, OrientationNotificationType.OnboardingPlanAssigned,
+            OnboardingOrientationEmailCatalog.Events.OnboardingCoordinatorAssigned, null, null,
+            takingOver ? $"You are now coordinating {hire}'s onboarding" : $"You are coordinating {hire}'s onboarding",
+            lines, $"/hr/orientation/onboarding/{plan.Id}", "Open the plan",
+            new()
+            {
+                ["NewHireName"] = hire, ["StartDate"] = Day(plan.StartDate),
+                ["TaskCount"] = taskCount.ToString(En), ["FirstDue"] = firstDue is { } d ? Day(d) : null,
+            });
+    }
+
+    private async Task BuddyAsync(OnboardingPlan plan, Guid buddyId, string hire, string? coordinator)
+    {
+        var lines = new List<string>
+        {
+            $"{hire} {(plan.StartDate >= DateOnly.FromDateTime(DateTime.UtcNow) ? "starts" : "started")} on {Day(plan.StartDate)}.",
+        };
+        if (coordinator is not null) lines.Add($"{coordinator} is coordinating their onboarding.");
+        lines.Add("Be somebody they can ask anything.");
+
+        await StageAsync(plan.TenantId, buddyId, OrientationNotificationType.OnboardingPlanAssigned,
+            OnboardingOrientationEmailCatalog.Events.OnboardingBuddyAssigned, null, null,
+            $"You are {hire}'s onboarding buddy", lines, MyOnboardingPath, "Open my onboarding",
+            new() { ["NewHireName"] = hire, ["StartDate"] = Day(plan.StartDate), ["CoordinatorName"] = coordinator });
+    }
+
+    public async Task TaskAssignedAsync(OnboardingTask task, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (task.AssignedToId is not { } assigneeId) return;
+            if (task.Status is OnboardingTaskStatus.Completed or OnboardingTaskStatus.Waived or OnboardingTaskStatus.PendingVerification) return;
+
+            var plan = await _unitOfWork.Repository<OnboardingPlan>().GetQueryable().AsNoTracking()
+                .Where(p => p.Id == task.OnboardingPlanId)
+                .Select(p => new { p.EmployeeId, p.OnboardingCoordinatorId, p.StartDate, p.Status })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (plan is null || ClosedPlanStatuses.Contains(plan.Status)) return;
+
+            var names = await NamesAsync(task.TenantId, new[] { plan.EmployeeId, plan.OnboardingCoordinatorId }, cancellationToken);
+            var hire = NameOf(names, plan.EmployeeId) ?? "a new hire";
+            var coordinator = NameOf(names, plan.OnboardingCoordinatorId);
+            var theirOwn = assigneeId == plan.EmployeeId;
+
+            var lines = new List<string> { $"Due {Day(task.DueDate)}." };
+            if (!string.IsNullOrWhiteSpace(task.Description)) lines.Add(task.Description.Trim());
+            if (!theirOwn)
+                lines.Add(coordinator is null
+                    ? $"{hire} {(plan.StartDate >= DateOnly.FromDateTime(DateTime.UtcNow) ? "starts" : "started")} on {Day(plan.StartDate)}."
+                    : $"{hire} {(plan.StartDate >= DateOnly.FromDateTime(DateTime.UtcNow) ? "starts" : "started")} on {Day(plan.StartDate)}; {coordinator} is coordinating.");
+            lines.Add(task.RequiresVerification
+                ? $"Mark it done under My onboarding when it is; {coordinator ?? "HR"} then signs it off."
+                : "Mark it done under My onboarding when it is.");
+
+            await StageAsync(task.TenantId, assigneeId, OrientationNotificationType.OnboardingTaskAssigned,
+                OnboardingOrientationEmailCatalog.Events.OnboardingTaskAssigned, null, null,
+                theirOwn ? $"Your onboarding task: {task.TaskName}" : $"Onboarding task for {hire}: {task.TaskName}",
+                lines, MyOnboardingPath, "Open my onboarding tasks",
+                new()
+                {
+                    ["TaskName"] = task.TaskName, ["NewHireName"] = hire, ["DueDate"] = Day(task.DueDate),
+                    ["Description"] = task.Description, ["CoordinatorName"] = coordinator,
+                });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Task notice for onboarding task {TaskId} could not be composed; the task stands.", task.Id);
+        }
+    }
+
+    public async Task TaskAwaitingSignOffAsync(
+        OnboardingTask task, Guid doneByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (task.Status != OnboardingTaskStatus.PendingVerification) return;
+
+            var plan = await _unitOfWork.Repository<OnboardingPlan>().GetQueryable().AsNoTracking()
+                .Where(p => p.Id == task.OnboardingPlanId)
+                .Select(p => new { p.Id, p.EmployeeId, p.OnboardingCoordinatorId })
+                .FirstOrDefaultAsync(cancellationToken);
+            // Nobody to tell, or the coordinator did it themselves — and cannot sign off their own work.
+            if (plan is null || plan.OnboardingCoordinatorId is not { } coordinatorId || coordinatorId == doneByEmployeeId) return;
+
+            var names = await NamesAsync(task.TenantId, new Guid?[] { plan.EmployeeId, doneByEmployeeId }, cancellationToken);
+            var hire = NameOf(names, plan.EmployeeId) ?? "a new hire";
+            var doneBy = NameOf(names, doneByEmployeeId) ?? "the person it was given to";
+
+            var lines = new List<string> { $"{doneBy} marked it done on {Day(DateTime.UtcNow)}." };
+            if (!string.IsNullOrWhiteSpace(task.CompletionNotes)) lines.Add($"Their note: {task.CompletionNotes.Trim()}");
+
+            await StageAsync(task.TenantId, coordinatorId, OrientationNotificationType.Completion,
+                OnboardingOrientationEmailCatalog.Events.OnboardingTaskDone, null, null,
+                $"{task.TaskName} for {hire} is done — waiting for your sign-off",
+                lines, $"/hr/orientation/onboarding/{plan.Id}", "Open the plan",
+                new()
+                {
+                    ["TaskName"] = task.TaskName, ["NewHireName"] = hire, ["DoneByName"] = doneBy,
+                    ["CompletionNotes"] = task.CompletionNotes,
+                });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Sign-off notice for onboarding task {TaskId} could not be composed; the task stands.", task.Id);
+        }
+    }
+
+    private async Task<Dictionary<Guid, string>> NamesAsync(Guid tenantId, IEnumerable<Guid?> ids, CancellationToken cancellationToken)
+    {
+        var wanted = ids.Where(i => i.HasValue).Select(i => i!.Value).Distinct().ToList();
+        if (wanted.Count == 0) return new Dictionary<Guid, string>();
+        return await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+            .Where(e => e.TenantId == tenantId && wanted.Contains(e.Id))
+            .ToDictionaryAsync(e => e.Id, e => (e.FirstName + " " + e.LastName).Trim(), cancellationToken);
+    }
+
+    private static string? NameOf(IReadOnlyDictionary<Guid, string> names, Guid? id)
+        => id is { } value && names.TryGetValue(value, out var name) ? name : null;
+
     // ── Staging ───────────────────────────────────────────────────────────────
 
     private async Task StageAsync(
@@ -409,6 +618,8 @@ public sealed class OnboardingOrientationNoticeService : IOnboardingOrientationN
     // ── Words ─────────────────────────────────────────────────────────────────
 
     private static string Day(DateTime value) => value.ToString("dddd, d MMMM yyyy", En);
+
+    private static string Day(DateOnly value) => Day(value.ToDateTime(TimeOnly.MinValue));
 
     private static string DayOrTbc(DateTime? value) => value is { } v ? Day(v) : "date to be confirmed";
 

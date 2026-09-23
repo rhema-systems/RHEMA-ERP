@@ -277,6 +277,7 @@ public class OnboardingPlanService : IOnboardingPlanService
     private readonly IOnboardingPlanTemplateRepository _templateRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IOnboardingOrientationNotices _notices;
     private readonly ILogger<OnboardingPlanService> _logger;
 
     public OnboardingPlanService(
@@ -287,6 +288,7 @@ public class OnboardingPlanService : IOnboardingPlanService
         IOnboardingPlanTemplateRepository templateRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IOnboardingOrientationNotices notices,
         ILogger<OnboardingPlanService> logger)
     {
         _planRepository = planRepository;
@@ -296,6 +298,7 @@ public class OnboardingPlanService : IOnboardingPlanService
         _templateRepository = templateRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _notices = notices;
         _logger = logger;
     }
 
@@ -369,7 +372,7 @@ public class OnboardingPlanService : IOnboardingPlanService
     /// is the only reason that column exists. OwnerPositionId is carried across so an unassigned task
     /// still records the role that owes it, which is what the entity's own remarks promise.
     /// </summary>
-    private async Task InstantiateTemplateTasksAsync(
+    private async Task<List<OnboardingTask>> InstantiateTemplateTasksAsync(
         OnboardingPlan plan, OnboardingPlanTemplate template, Guid createdByUserId, CancellationToken cancellationToken)
     {
         var taskTemplates = template.TaskTemplates
@@ -379,7 +382,7 @@ public class OnboardingPlanService : IOnboardingPlanService
             .ToList();
 
         if (taskTemplates.Count == 0)
-            return;
+            return new List<OnboardingTask>();
 
         var tasks = taskTemplates.Select((t, index) => new OnboardingTask
         {
@@ -401,6 +404,7 @@ public class OnboardingPlanService : IOnboardingPlanService
         _logger.LogInformation(
             "Instantiated {Count} task(s) from template {TemplateId} onto onboarding plan {PlanId}",
             tasks.Count, template.Id, plan.Id);
+        return tasks;
     }
 
     public async Task<OnboardingPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -445,9 +449,13 @@ public class OnboardingPlanService : IOnboardingPlanService
 
         await _planRepository.AddAsync(entity);
 
-        if (template != null)
-            await InstantiateTemplateTasksAsync(entity, template, createdByUserId, cancellationToken);
+        var tasks = template != null
+            ? await InstantiateTemplateTasksAsync(entity, template, createdByUserId, cancellationToken)
+            : new List<OnboardingTask>();
 
+        // Round 4, lane K-b2: the new hire is welcomed, and the coordinator and buddy told, in the
+        // same save that makes the plan — whether HR made it or the start was confirmed.
+        await _notices.PlanAssignedAsync(entity, tasks, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Onboarding plan created for employee {EmployeeId}", createDto.EmployeeId);
@@ -464,8 +472,12 @@ public class OnboardingPlanService : IOnboardingPlanService
         if (entity.Status == OnboardingStatus.Completed)
             throw new InvalidOperationException("A completed onboarding plan cannot be edited.");
 
+        var previousCoordinator = entity.OnboardingCoordinatorId;
+        var previousBuddy = entity.AssignedBuddyId;
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _planRepository.UpdateAsync(entity);
+        // Lane K-b2: a new coordinator or buddy is told the plan is now theirs.
+        await _notices.PlanRolesChangedAsync(entity, previousCoordinator, previousBuddy, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
     }
@@ -516,6 +528,8 @@ public class OnboardingPlanService : IOnboardingPlanService
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _taskRepository.AddAsync(entity);
+        // Lane K-b2: a task added for somebody tells them, in the same save.
+        await _notices.TaskAssignedAsync(entity, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Re-read for the assignee / owning-unit names the DTO promises; the entity we just built has
@@ -527,8 +541,12 @@ public class OnboardingPlanService : IOnboardingPlanService
     {
         var entity = await GetOwnedTaskAsync(updateDto.Id);
 
+        var previousAssignee = entity.AssignedToId;
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _taskRepository.UpdateAsync(entity);
+        // Lane K-b2: passed to somebody new — they are told. The same person keeping it is not news.
+        if (entity.AssignedToId is { } assignee && assignee != previousAssignee)
+            await _notices.TaskAssignedAsync(entity, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
     }
@@ -671,5 +689,199 @@ public class OnboardingPlanService : IOnboardingPlanService
 
         var entities = await _assetItemRepository.GetByStatusAsync(status, planId);
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+    }
+
+    // ── Self-service (round 4, lane K-b2) ─────────────────────────────────────
+    //
+    // The views this controller's HR twin deliberately did not offer ("they belong to the portal"),
+    // built so that every onboarding notice has a page behind it. The employee id is always the
+    // caller's own, from the token — never a parameter.
+
+    private static readonly OnboardingStatus[] OpenPlanStatuses =
+        { OnboardingStatus.NotStarted, OnboardingStatus.InProgress, OnboardingStatus.Overdue };
+
+    private static readonly OnboardingTaskStatus[] FinishedTaskStatuses =
+        { OnboardingTaskStatus.Completed, OnboardingTaskStatus.Waived };
+
+    /// <remarks>
+    /// Narrower than HR's plan read on purpose: no comments, no evidence, and nobody's completion
+    /// notes but the caller's own — those are HR's working record, and a task's notes can be about
+    /// the new hire. A task done more than 30 days ago drops off the caller's list; the plan keeps it.
+    /// </remarks>
+    public async Task<MyOnboardingDto> GetMyOnboardingAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var plans = _planRepository.GetQueryable().AsNoTracking()
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.Status != OnboardingStatus.Cancelled);
+        var allTasks = _taskRepository.GetQueryable().AsNoTracking()
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted);
+
+        // Their own plan — the latest that was not called off.
+        var myPlan = await plans.Where(p => p.EmployeeId == employeeId)
+            .OrderByDescending(p => p.StartDate).ThenByDescending(p => p.CreatedAt)
+            .Select(p => new { p.Id, p.Status, p.StartDate, p.TargetCompletionDate, p.OnboardingCoordinatorId, p.AssignedBuddyId })
+            .FirstOrDefaultAsync(cancellationToken);
+        var planTasks = myPlan is null
+            ? new List<OnboardingTask>()
+            : await allTasks.Where(t => t.OnboardingPlanId == myPlan.Id)
+                .OrderBy(t => t.DueDate).ThenBy(t => t.DisplayOrder)
+                .ToListAsync(cancellationToken);
+
+        // The tasks given to them, on anybody's plan: open, or finished in the last 30 days.
+        var since = today.AddDays(-30);
+        var mine = await allTasks
+            .Where(t => t.AssignedToId == employeeId
+                        && (!FinishedTaskStatuses.Contains(t.Status) || (t.CompletedDate != null && t.CompletedDate >= since)))
+            .Join(plans, t => t.OnboardingPlanId, p => p.Id,
+                (t, p) => new { Task = t, HireId = p.EmployeeId, p.StartDate, p.OnboardingCoordinatorId, PlanStatus = p.Status })
+            .OrderBy(x => x.Task.DueDate).ThenBy(x => x.Task.DisplayOrder)
+            .ToListAsync(cancellationToken);
+
+        // Whom they are buddy to, while that onboarding is under way.
+        var buddyFor = await plans.Where(p => p.AssignedBuddyId == employeeId && OpenPlanStatuses.Contains(p.Status))
+            .OrderBy(p => p.StartDate)
+            .Select(p => new { p.Id, p.EmployeeId, p.StartDate, p.Status, p.OnboardingCoordinatorId })
+            .ToListAsync(cancellationToken);
+
+        var people = new List<Guid?> { myPlan?.OnboardingCoordinatorId, myPlan?.AssignedBuddyId };
+        people.AddRange(planTasks.Select(t => t.AssignedToId));
+        people.AddRange(mine.Select(m => (Guid?)m.HireId));
+        people.AddRange(mine.Select(m => m.OnboardingCoordinatorId));
+        people.AddRange(buddyFor.Select(b => (Guid?)b.EmployeeId));
+        people.AddRange(buddyFor.Select(b => b.OnboardingCoordinatorId));
+        var names = await _unitOfWork.ResolveEmployeesAsync(tenantId, people);
+        string? NameOf(Guid? id) => id is { } v && names.TryGetValue(v, out var n) ? n.Name : null;
+
+        var positionIds = planTasks.Where(t => t.AssignedToId == null && t.OwnerPositionId != null)
+            .Select(t => t.OwnerPositionId!.Value).Distinct().ToList();
+        var posts = positionIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeePosition>().GetQueryable().AsNoTracking()
+                .Where(p => positionIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id, p => p.Title, cancellationToken);
+
+        var result = new MyOnboardingDto();
+        if (myPlan is not null)
+        {
+            result.MyPlan = new MyOnboardingPlanDto
+            {
+                PlanId = myPlan.Id,
+                Status = myPlan.Status,
+                StartDate = myPlan.StartDate,
+                TargetCompletionDate = myPlan.TargetCompletionDate,
+                CoordinatorName = NameOf(myPlan.OnboardingCoordinatorId),
+                BuddyName = NameOf(myPlan.AssignedBuddyId),
+                TasksTotal = planTasks.Count,
+                TasksDone = planTasks.Count(t => FinishedTaskStatuses.Contains(t.Status)),
+                Tasks = planTasks.Select(t => new MyOnboardingPlanTaskDto
+                {
+                    TaskId = t.Id,
+                    TaskName = t.TaskName,
+                    Category = t.Category,
+                    Status = t.Status,
+                    DueDate = t.DueDate,
+                    IsMandatory = t.IsMandatory,
+                    Who = NameOf(t.AssignedToId)
+                          ?? (t.OwnerPositionId is { } post && posts.TryGetValue(post, out var title) ? title : null)
+                          ?? NameOf(myPlan.OnboardingCoordinatorId),
+                    IsMine = t.AssignedToId == employeeId,
+                }).ToList(),
+            };
+        }
+
+        result.TasksAssignedToMe = mine.Select(m => ToMine(m.Task, m.HireId == employeeId, NameOf(m.HireId), m.StartDate,
+            NameOf(m.OnboardingCoordinatorId), m.PlanStatus, today)).ToList();
+
+        result.BuddyFor = buddyFor.Select(b => new MyOnboardingBuddyDto
+        {
+            PlanId = b.Id,
+            NewHireName = NameOf(b.EmployeeId),
+            StartDate = b.StartDate,
+            Status = b.Status,
+            CoordinatorName = NameOf(b.OnboardingCoordinatorId),
+        }).ToList();
+
+        return result;
+    }
+
+    private static MyOnboardingTaskDto ToMine(
+        OnboardingTask t, bool ownOnboarding, string? hire, DateOnly start, string? coordinator, OnboardingStatus planStatus, DateOnly today)
+    {
+        var finished = FinishedTaskStatuses.Contains(t.Status) || t.Status == OnboardingTaskStatus.PendingVerification;
+        var why = planStatus == OnboardingStatus.Completed ? "This onboarding is closed."
+            : t.Status == OnboardingTaskStatus.Completed ? "Done."
+            : t.Status == OnboardingTaskStatus.Waived ? "HR waived it."
+            : t.Status == OnboardingTaskStatus.PendingVerification ? $"Done — waiting for {coordinator ?? "HR"} to sign it off."
+            : null;
+
+        return new MyOnboardingTaskDto
+        {
+            TaskId = t.Id,
+            PlanId = t.OnboardingPlanId,
+            TaskName = t.TaskName,
+            Description = t.Description,
+            Category = t.Category,
+            Status = t.Status,
+            DueDate = t.DueDate,
+            IsMandatory = t.IsMandatory,
+            RequiresVerification = t.RequiresVerification,
+            IsOverdue = !finished && t.DueDate < today,
+            ForMyOwnOnboarding = ownOnboarding,
+            NewHireName = hire,
+            NewHireStartDate = start,
+            CoordinatorName = coordinator,
+            CompletedDate = t.CompletedDate,
+            CompletionNotes = t.CompletionNotes,
+            CanMarkDone = why is null,
+            CannotMarkDoneBecause = why,
+        };
+    }
+
+    /// <remarks>
+    /// The same outcome as HR's complete — a task needing sign-off waits for it — with the rules a
+    /// self-service door needs and HR's does not: only the person it was given to, only while the plan
+    /// is open, only once. Evidence files are not taken here; they go through HR's upload gate.
+    /// </remarks>
+    public async Task<MyOnboardingTaskDto> CompleteMyTaskAsync(
+        Guid taskId, Guid employeeId, CompleteMyOnboardingTaskDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _taskRepository.GetByIdAsync(taskId);
+        // Somebody else's task, another tenant's, or none at all: the same answer, so the endpoint
+        // does not confirm that a colleague's task exists.
+        if (entity == null || entity.TenantId != tenantId || entity.IsDeleted || entity.AssignedToId != employeeId)
+            throw new ArgumentException($"Onboarding task with ID '{taskId}' not found.");
+
+        var plan = await _planRepository.GetQueryable().AsNoTracking()
+            .Where(p => p.Id == entity.OnboardingPlanId)
+            .Select(p => new { p.Status, p.IsDeleted, p.EmployeeId, p.StartDate, p.OnboardingCoordinatorId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (plan is null || plan.IsDeleted || plan.Status is OnboardingStatus.Cancelled or OnboardingStatus.Completed)
+            throw new InvalidOperationException("This onboarding is closed, so its tasks can no longer be marked done.");
+        if (entity.Status is OnboardingTaskStatus.Completed or OnboardingTaskStatus.Waived)
+            throw new InvalidOperationException("This task is already done.");
+        if (entity.Status == OnboardingTaskStatus.PendingVerification)
+            throw new InvalidOperationException("This task is already marked done, and is waiting to be signed off.");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        entity.Status = entity.RequiresVerification ? OnboardingTaskStatus.PendingVerification : OnboardingTaskStatus.Completed;
+        entity.CompletedDate = today;
+        entity.CompletedById = employeeId;
+        entity.CompletionNotes = string.IsNullOrWhiteSpace(dto.CompletionNotes) ? null : dto.CompletionNotes.Trim();
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = employeeId.ToString();
+        await _taskRepository.UpdateAsync(entity);
+
+        // Waiting on a sign-off: the coordinator is told now, not three days on by the sweep's chase.
+        if (entity.Status == OnboardingTaskStatus.PendingVerification)
+            await _notices.TaskAwaitingSignOffAsync(entity, employeeId, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var names = await _unitOfWork.ResolveEmployeesAsync(tenantId, new Guid?[] { plan.EmployeeId, plan.OnboardingCoordinatorId });
+        return ToMine(entity, plan.EmployeeId == employeeId,
+            names.TryGetValue(plan.EmployeeId, out var hire) ? hire.Name : null, plan.StartDate,
+            plan.OnboardingCoordinatorId is { } c && names.TryGetValue(c, out var coordinator) ? coordinator.Name : null,
+            plan.Status, today);
     }
 }

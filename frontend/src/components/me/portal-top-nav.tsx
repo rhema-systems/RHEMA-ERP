@@ -112,6 +112,8 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'My Mentoring', href: '/me/mentoring' },
       // Slice 7: orientation lives in the portal.
       { label: 'My Orientations', href: '/me/orientation' },
+      // Round 4, lane K-b2: onboarding too — the new hire's plan, and tasks given to anybody.
+      { label: 'My Onboarding', href: '/me/onboarding' },
     ],
   },
   {

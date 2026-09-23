@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.HR.Orientation;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -56,6 +57,26 @@ public interface IOnboardingOrientationNotices
     Task CertificateIssuedAsync(
         EmployeeOrientation enrolment, OrientationProgram programme, OrientationCertificate certificate, bool reissue,
         CancellationToken cancellationToken = default);
+
+    // ── Onboarding (lane K-b2) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// A plan was made: the new hire is welcomed, and its coordinator and buddy are told. Pass the
+    /// tasks it was made with, which are not saved yet.
+    /// </summary>
+    Task PlanAssignedAsync(
+        OnboardingPlan plan, IReadOnlyCollection<OnboardingTask> tasks, CancellationToken cancellationToken = default);
+
+    /// <summary>A plan's coordinator or buddy changed hands: the new one is told.</summary>
+    Task PlanRolesChangedAsync(
+        OnboardingPlan plan, Guid? previousCoordinatorId, Guid? previousBuddyId, CancellationToken cancellationToken = default);
+
+    /// <summary>A task was given to somebody — added for them, or passed to them.</summary>
+    Task TaskAssignedAsync(OnboardingTask task, CancellationToken cancellationToken = default);
+
+    /// <summary>Somebody marked their task done and it needs signing off: the plan's coordinator is told.</summary>
+    Task TaskAwaitingSignOffAsync(
+        OnboardingTask task, Guid doneByEmployeeId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

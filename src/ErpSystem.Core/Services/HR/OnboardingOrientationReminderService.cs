@@ -60,6 +60,9 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
     /// <summary>Most items a digest lists before "and N more".</summary>
     private const int DigestListLimit = 25;
 
+    private const string QueuesPath = "/hr/orientation/onboarding/queues";
+    private const string MyOnboardingPath = "/me/onboarding";
+
     /// <summary>Overdue escalation: chase, then chase harder, then stop climbing.</summary>
     private static readonly (int MinDaysOverdue, int Tier)[] OverdueTiers =
     {
@@ -304,7 +307,10 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
             var hire = names.TryGetValue(t.EmployeeId, out var h) ? h : "a new hire";
             var routedTo = t.AssignedToId ?? t.OnboardingCoordinatorId;
             var routedName = routedTo is { } rid && names.TryGetValue(rid, out var rn) ? rn : null;
-            const string url = "/hr/orientation/onboarding/queues";
+            // Lane K-b2: the person a task was GIVEN to opens it in their own portal ("My onboarding" —
+            // HR's queues refuse anybody without HR.Orientation.Read); the coordinator, and every
+            // sign-off chase, keeps HR's queues.
+            var url = t.AssignedToId is null ? QueuesPath : MyOnboardingPath;
 
             if (t.Status == OnboardingTaskStatus.PendingVerification)
             {
@@ -322,7 +328,7 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
                     RoutedToEmployeeId = t.OnboardingCoordinatorId,
                     RoutedToName = t.OnboardingCoordinatorId is { } c && names.TryGetValue(c, out var cn) ? cn : null,
                     DedupeKey = Key("OnboardingTaskAwaitingSignOff", t.Id, done, 0),
-                    NavigationUrl = url,
+                    NavigationUrl = QueuesPath,
                 });
                 continue;
             }
@@ -518,12 +524,14 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
         if (items.Count > DigestListLimit) lines.Add($"…and {items.Count - DigestListLimit} more.");
         var list = string.Join("\n", lines);
 
-        // One place to go: the single enrolment, the participant's list, or HR's onboarding queues.
+        // One place to go: the single enrolment, the participant's list, their own onboarding tasks
+        // (lane K-b2: when every task listed was given to them), or HR's onboarding queues.
+        var ownTasksOnly = tasks > 0 && items.Where(i => i.ItemType == "Onboarding task").All(i => i.NavigationUrl == MyOnboardingPath);
         var path = single?.NavigationUrl
-                   ?? (tasks == 0 ? "/me/orientation" : "/hr/orientation/onboarding/queues");
+                   ?? (tasks == 0 ? "/me/orientation" : ownTasksOnly ? MyOnboardingPath : QueuesPath);
         var actionLabel = tasks == 0
             ? (single is not null ? "Open the orientation" : "Open my orientations")
-            : "Open the onboarding queues";
+            : path == MyOnboardingPath ? "Open my onboarding tasks" : "Open the onboarding queues";
 
         var type = items.Any(i => i.DaysRemaining < 0 && i.EscalationTier > 0) ? OrientationNotificationType.Overdue
             : items.Any(i => i.Kind.EndsWith("DueSoon", StringComparison.Ordinal) || i.Kind == "OrientationCertificateExpiring")

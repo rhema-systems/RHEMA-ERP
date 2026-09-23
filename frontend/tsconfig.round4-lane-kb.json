@@ -9,6 +9,7 @@
     "src/app/hr/orientation/**/*.tsx",
     "src/app/administration/hr/orientation/**/*.tsx",
     "src/app/administration/hr/settings/**/*.tsx",
-    "src/app/me/**/*.tsx"
+    "src/app/me/**/*.tsx",
+    "src/components/me/**/*.tsx"
   ]
 }

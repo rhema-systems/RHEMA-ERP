@@ -72,6 +72,11 @@ const NOTICE_KINDS: Record<string, string> = {
   OrientationSessionCancelled: 'Session cancelled',
   OrientationCompleted: 'Completed',
   OrientationCertificateIssued: 'Certificate issued',
+  OnboardingWelcome: 'Onboarding — welcome',
+  OnboardingCoordinatorAssigned: 'Onboarding — coordinator',
+  OnboardingBuddyAssigned: 'Onboarding — buddy',
+  OnboardingTaskAssigned: 'Onboarding — task given',
+  OnboardingTaskDone: 'Onboarding — awaiting sign-off',
   OrientationReminderDigest: 'Reminder (daily sweep)',
 };
 

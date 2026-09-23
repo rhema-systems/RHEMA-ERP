@@ -1,6 +1,6 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–I (with I-b), J, K-a, K-b1, L and M done; K-b2 next.**
+> **Status 2026-09-23 — A–M done (with I-b; K as K-a, K-b1, K-b2); N next.**
 >
 > | Lane | State |
 > |---|---|
@@ -22,16 +22,17 @@
 > | **M** | **DONE** — 54 ×2, `hr-orientation/run-round4-m.mjs`; migration `AddOrientationFacilitatorRegisterPick` applied to UAT. An external facilitator can be picked from the **training vendor register** (a vendor, and its trainer once named): the name, email and organisation are a snapshot taken when the pick is made or changed; a blacklisted/inactive vendor or inactive trainer cannot be picked, and one that becomes so later is flagged on the session instead of blocking its edits; a vendor or trainer booked for a session that has not happened cannot be deleted (M3); *Run again* keeps the picks (M4). Demo: GIMPA on both induction days — § 8 |
 > | **K-a** | **DONE** — 53 ×2, `hr-orientation/run-round4-k.mjs`; migration `AddOnboardingOrientationReminders` applied to UAT. **The first HR sweep that delivers**: eight rules (onboarding tasks due / overdue / awaiting sign-off; orientations due / overdue / assessment unattempted / acknowledgement unsigned; certificates expiring), **one digest per person per run**, in-app in the same save as the claims and emailed after — each email's outcome recorded; four lead-day settings, each enforced in both positions; run-now / preview / runs / log + a Reminders screen; the host registered with it and its scheduled run seen. Proved by a local SMTP sink: the email **arrives**. ⚠ 768 test-fixture onboarding plans cancelled first (the user's call) — § 8. ⚠ **The scheduled run found a lane I4 gap:** a plan created on hire had no coordinator, so its reminders reached nobody — the confirming officer now coordinates it (lane I 183 ×2, H6b/H6c) |
 > | **K-b1** | **DONE** — 84 ×2, `hr-orientation/run-round4-kb.mjs`; migration `AddOrientationNoticeEmailOutbox` applied to UAT. **The events tell people now**: enrolled (HR, bulk, a rule; a renewal too, wired but not exercised — § 8), a session placed / moved (saying where from) / postponed / cancelled — participants and employee facilitators — completed, certificate issued; each notice written in the same save as its event, its email queued on it and sent within a minute by a dispatcher. **Certificates are issued at completion** for a programme that issues them (nothing issued one before — the user's call), plus an HR **Issue / Reissue certificate** button. The programme's **"Send reminders"** switch made real — it was read by nothing, K-a included. A **Notices** tab: who was told what, and what each email did — § 8 |
+> | **K-b2** | **DONE** — 54 ×2, `hr-orientation/run-round4-kb2.mjs`; **no migration**. Onboarding tells people: a plan made **welcomes the new hire** and tells its coordinator and buddy (on hire too — lane I 184 ×2, H6d); a plan changing hands tells only the new holders; a task given tells its assignee; marking a task done that needs signing off tells the coordinator at once. And the page they lead to — the user's call — **"My onboarding"** in the portal: the new hire's plan and who owes each task, the tasks given to the reader with **Mark done**, the new colleagues they are buddy to. K-a's reminders for a task given to somebody now open it, not HR's queues — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J and M are complete; K is split like D and E — K-a and K-b1 are done.** Next: K-b2 (the onboarding notices, and the portal's "My onboarding" and "Tasks assigned to me"), then N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J and M are complete, and so is K** (K-a, K-b1, K-b2). Next: N, then O, with P alongside.
 >
-> ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
-> all three are still outstanding.
+> ⚠ **Nothing in round 4 has been browser-walked.** § 5 names four walks a harness cannot replace;
+> all four are still outstanding.
 >
 > ⚠ **Lane B moved the scoring engine.** `ScoringCandidateView` and `EvaluateCriterion` were private
 > members of `JobApplicationService`; they are now `ShortlistingEvaluator` in
@@ -764,11 +765,15 @@ assertions.
 **Per lane:** its harness green twice, plus the neighbouring suites re-run on count — *fewer
 assertions with zero failures is a regression signal, not a pass.*
 
-**Three things a harness cannot prove, so they are walked in the browser:**
+**Things a harness cannot prove, so they are walked in the browser** (three planned; the fourth added
+by lane K-b2):
 
 1. The apportionment panel and the timetable it draws (lane C).
 2. The candidate sitting a test end to end in the careers portal, including refresh mid-test (E4).
 3. The template editor's token palette, preview and reset (N3).
+4. **My onboarding**, signed in as three people — the new hire (their plan, who owes what), an IT
+   assignee (Mark done, then waiting on the sign-off) and a buddy — each seeing only their own; and a
+   notice's link landing each of them on it (K-b2).
 
 **Live probes before building, not after:**
 
@@ -2118,6 +2123,54 @@ nothing from the new code.
 
 **Frontend:** scoped type-check (`tsconfig.round4-lane-kb.json`, which already includes `src/app/me`
 for K-b2) clean with a negative control; eslint clean. **Not browser-walked.**
+
+### Lane K-b2 — onboarding tells people, and the page they are sent to · DONE 2026-09-23 · 54 assertions ×2
+
+Harness: `dev-harness/hr-orientation/run-round4-kb2.mjs`. **No migration** — K-b1's outbox columns
+carry these notices too. Lane K is complete.
+
+**What was built.**
+
+| | |
+|---|---|
+| **Notices** | On K-b1's staging and outbox. A plan made — by HR, or by the hire hook — **welcomes the new hire** (who coordinates, their buddy, how many tasks) and tells the **coordinator** (the plan on HR's screen: when it starts, its tasks, the first due) and the **buddy**. A plan changing hands tells only the NEW coordinator or buddy. A task added for somebody, or passed to somebody new, tells them — as their own when it is the new hire's. A task marked done that needs signing off tells the **coordinator at once**. Five new catalogue events, one per reader: `OnboardingWelcome`, `OnboardingCoordinatorAssigned`, `OnboardingBuddyAssigned`, `OnboardingTaskAssigned`, `OnboardingTaskDone`. |
+| **My onboarding** (the user's call) | `MyOnboardingController` at `api/employee-portal/onboarding`: one read and **Mark done**, the employee always the caller from the token. The new hire sees their plan — coordinator, buddy, progress, and **who owes each task** (a person, else the post, else the coordinator); anyone sees the tasks given to them on anybody's plan (open, or done within 30 days) with Mark done — done, or waiting on the sign-off, with a note; a buddy sees whom they are helping. Narrower than HR's read: no comments, no evidence, nobody's notes but the reader's own. A portal page, a nav link and a home tile; the "My Orientations" tile's hint had promised "Onboarding checklists" it never held. |
+| **The sweep's links** | K-a's reminder about a task given to somebody opens **My onboarding** — HR's queues refuse anybody without `HR.Orientation.Read`, so every assignee who is not HR had been sent to a 403. The coordinator's reminders, and every sign-off chase, keep the queues. |
+
+**Decisions — each one this entry's to defend.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **Somebody else's task is "not found"** | The door never confirms a colleague's task exists — the house rule every self-service door follows. |
+| 2 | **Mark done keeps HR's outcome** | A task needing sign-off waits for it (`PendingVerification`), exactly as HR's own complete does; only the rules a self-service door needs are added — the person it was given to, an open plan, once. |
+| 3 | **The coordinator is told the moment a sign-off is waiting** | Otherwise the first they hear is K-a's chase, three days on — and the new hire's laptop sits unsigned-for. |
+| 4 | **No evidence upload on Mark done** | Evidence files go through HR's upload gate; a note is what the portal takes. |
+| 5 | **A task nobody was given shows the coordinator as its owner** | On the new hire's page, "nobody" reads as "nothing is happening"; the coordinator is who is answerable. |
+
+**How it is proved.** Every notice is read from the table — recipient, kind, words, link — and every
+reader's page as that reader: the assignee sees their task and nothing of anybody else's, the new hire
+their plan with who owes what, the new buddy the new hire and the old buddy nobody. Mark done is driven
+through the portal door as the assignee; the table then says done by them, today, with their note, and
+the coordinator's notice says who and what they wrote. A colleague gets "not found", a second Mark done
+and a cancelled plan's task are refused, and HR's own sign-off still works — by somebody else. Each of
+the five new kinds is emailed through the local sink and **arrives**, the welcome opening the new
+hire's own page.
+
+**⚠ The suite's first run: 51/54 — its own window, again.** "This block's notices" were picked by a
+two-second lookback, and the whole suite runs in eleven seconds, so the window caught the previous
+block's notices (already settled with no mail server) and the arrival check compared the wrong
+subjects. They are picked by exact ids now — a before-and-after set. A time window is not a fixture.
+
+**Neighbouring suites:** `run-round4-kb` 84/84; `run-round4-k` 55/55; `run-round4-i` 184/184 twice
+(183 plus H6d — a plan made on hire welcomes the new hire and tells the confirming officer, keyed to
+that plan's own link because the officer is the same fixture on every run); `run-round4-j` 94/94;
+`run-round4-m` 54/54; `hr-orientation/run.mjs` 107/107; `run-lane6-feedback` 20/20. The API log: the
+27 payroll-profile inserts (defect #23, one per employee created) and nothing from the new code.
+
+**Frontend:** scoped type-check (`tsconfig.round4-lane-kb.json`, now including `src/components/me`)
+clean with a negative control in the new page's folder; eslint clean. **Not browser-walked** — and
+this lane adds a portal page to the walk list: a new hire, an IT assignee and a buddy, each signing in
+to see their own.
 
 ---
 

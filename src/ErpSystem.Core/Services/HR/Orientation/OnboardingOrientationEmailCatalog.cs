@@ -37,6 +37,13 @@ public static class OnboardingOrientationEmailCatalog
         public const string SessionCancelled = "OrientationSessionCancelled";
         public const string Completed = "OrientationCompleted";
         public const string CertificateIssued = "OrientationCertificateIssued";
+
+        // Onboarding (lane K-b2): one key per reader, because each is told something different.
+        public const string OnboardingWelcome = "OnboardingWelcome";
+        public const string OnboardingCoordinatorAssigned = "OnboardingCoordinatorAssigned";
+        public const string OnboardingBuddyAssigned = "OnboardingBuddyAssigned";
+        public const string OnboardingTaskAssigned = "OnboardingTaskAssigned";
+        public const string OnboardingTaskDone = "OnboardingTaskDone";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -139,6 +146,42 @@ public static class OnboardingOrientationEmailCatalog
             new("CertificateNumber", "The certificate's serial", "OCERT-2026-00012"),
             new("CertificateIssuedOn", "The day it was issued", "Wednesday, 1 October 2026"),
             new("CertificateExpires", "When it expires, if it does", "Friday, 1 October 2027")),
+
+        Notice(Events.OnboardingWelcome, "Onboarding Welcome",
+            "Sent to a new hire when their onboarding plan is made — by HR, or when their start is confirmed.",
+            new("NewHireName", "The new hire", "Kofi Mensah"),
+            new("StartDate", "The day onboarding starts", "Monday, 5 October 2026"),
+            new("CoordinatorName", "Who is coordinating it, if anybody", "Akpene Amoah"),
+            new("BuddyName", "Their onboarding buddy, if they have one", "Yaw Boateng"),
+            new("TaskCount", "How many tasks the plan holds", "12")),
+
+        Notice(Events.OnboardingCoordinatorAssigned, "Onboarding Coordinator Assigned",
+            "Sent to the person who will coordinate a new hire's onboarding — when the plan is made, or when they take it over.",
+            new("NewHireName", "The new hire", "Kofi Mensah"),
+            new("StartDate", "The day onboarding starts", "Monday, 5 October 2026"),
+            new("TaskCount", "How many tasks the plan holds", "12"),
+            new("FirstDue", "When the first task falls due, if any", "Monday, 5 October 2026")),
+
+        Notice(Events.OnboardingBuddyAssigned, "Onboarding Buddy Assigned",
+            "Sent to a colleague named as a new hire's onboarding buddy.",
+            new("NewHireName", "The new hire", "Kofi Mensah"),
+            new("StartDate", "The day onboarding starts", "Monday, 5 October 2026"),
+            new("CoordinatorName", "Who is coordinating it, if anybody", "Akpene Amoah")),
+
+        Notice(Events.OnboardingTaskAssigned, "Onboarding Task Assigned",
+            "Sent to the person an onboarding task is given to, when it is added for them or passed to them.",
+            new("TaskName", "The task", "Laptop and accounts"),
+            new("NewHireName", "Whose onboarding it is part of", "Kofi Mensah"),
+            new("DueDate", "When it is due", "Wednesday, 7 October 2026"),
+            new("Description", "What it involves, if described", "Issue a laptop and create the new hire's accounts."),
+            new("CoordinatorName", "Who is coordinating the onboarding", "Akpene Amoah")),
+
+        Notice(Events.OnboardingTaskDone, "Onboarding Task Waiting for Sign-off",
+            "Sent to the coordinator when somebody marks an onboarding task done that needs signing off.",
+            new("TaskName", "The task", "Laptop and accounts"),
+            new("NewHireName", "Whose onboarding it is part of", "Kofi Mensah"),
+            new("DoneByName", "Who marked it done", "Yaw Boateng"),
+            new("CompletionNotes", "What they wrote, if anything", "Laptop issued; accounts created.")),
     };
 
     private const string NoticeBody =

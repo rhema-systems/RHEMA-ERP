@@ -83,4 +83,16 @@ public interface IOnboardingPlanService
     Task<IEnumerable<OnboardingTaskDto>> GetOverdueTasksAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<OnboardingTaskDto>> GetTasksByAssigneeAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OnboardingAssetDto>> GetAssetsByStatusAsync(OnboardingAssetProvisionStatus status, Guid? planId = null, CancellationToken cancellationToken = default);
+
+    // Self-service (round 4, lane K-b2) — the employee id is ALWAYS the caller's own, from the token.
+
+    /// <summary>The signed-in employee's onboarding: their own plan, the tasks given to them, whom they are buddy to.</summary>
+    Task<MyOnboardingDto> GetMyOnboardingAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Marks a task given to the signed-in employee done. Somebody else's task is "not found" — the
+    /// endpoint does not confirm it exists. A task needing sign-off waits for it, and its coordinator is told.
+    /// </summary>
+    Task<MyOnboardingTaskDto> CompleteMyTaskAsync(
+        Guid taskId, Guid employeeId, CompleteMyOnboardingTaskDto dto, CancellationToken cancellationToken = default);
 }
