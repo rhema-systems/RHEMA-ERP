@@ -253,7 +253,12 @@ For the current test VPS:
 StartupInitialization__SeedDevelopmentData=true
 StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment=true
 CorsSettings__AllowedOrigins__0=https://63.141.230.56
+ALLOWED_ORIGINS=https://63.141.230.56
 ```
+
+`ALLOWED_ORIGINS` currently takes precedence in the API. Keep it identical to
+`CorsSettings__AllowedOrigins__0`; the deployment helper reconciles both before
+restarting the API.
 
 Syncfusion licensing is held in the protected API service configuration, not
 in a deployed `appsettings.json` or `.env` file. The service XML must contain a

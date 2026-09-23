@@ -239,6 +239,9 @@ function Set-TestServerConfiguration {
         Remove-ApiServiceEnvironmentValues $existingCorsNames
     }
     Set-ApiServiceEnvironmentValues @{
+        # The API gives this legacy variable precedence over CorsSettings.
+        # Keep both representations identical until the legacy setting is retired.
+        'ALLOWED_ORIGINS' = $ExpectedPublicOrigin
         'CorsSettings__AllowedOrigins__0' = $ExpectedPublicOrigin
         'StartupInitialization__SeedDevelopmentData' = 'true'
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
@@ -749,6 +752,7 @@ function Invoke-Preflight {
             "Test VPS configuration is invalid for $($entry.Key)."
     }
     foreach ($name in @(
+            'ALLOWED_ORIGINS',
             'CorsSettings__AllowedOrigins__0',
             'CandidatePortal__PortalUrl',
             'FrontendUrl')) {

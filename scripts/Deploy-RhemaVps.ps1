@@ -836,9 +836,15 @@ function Invoke-PublicSmoke {
     $allowedOriginPattern = '(?im)^access-control-allow-origin:\s*' +
         [regex]::Escape($base) + '\s*$'
     if ($allowedHeaders -notmatch $allowedOriginPattern) {
+        $actualOriginMatch = [regex]::Match(
+            $allowedHeaders, '(?im)^access-control-allow-origin:\s*([^\r\n]+)')
+        $actualOrigin = if ($actualOriginMatch.Success) {
+            $actualOriginMatch.Groups[1].Value.Trim()
+        }
+        else { '<missing>' }
         Assert-True $AllowConfigurationDrift `
-            'Allowed-origin CORS preflight did not return the exact HTTPS origin.'
-        Write-Output "CONFIG_DRIFT|CORS|EXPECTED=$base"
+            "Allowed-origin CORS preflight expected $base but received $actualOrigin."
+        Write-Output "CONFIG_DRIFT|CORS|EXPECTED=$base|ACTUAL=$actualOrigin"
     }
     $deniedHeaders = (& curl.exe -k -sS --max-time 30 -D - -o NUL `
         -X OPTIONS -H 'Origin: https://invalid.example' `
