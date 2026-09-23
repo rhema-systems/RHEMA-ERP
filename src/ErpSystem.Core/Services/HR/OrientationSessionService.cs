@@ -166,8 +166,15 @@ public class OrientationSessionService : IOrientationSessionService
     {
         tenantId = RequireCurrentTenant(tenantId);
 
-        if (!await _programRepository.ExistsAsync(p => p.Id == createDto.ProgramId && p.TenantId == tenantId && !p.IsDeleted))
+        var program = await _programRepository.GetByIdAsync(createDto.ProgramId);
+        if (program == null || program.TenantId != tenantId || program.IsDeleted)
             throw new ArgumentException($"Orientation program with ID '{createDto.ProgramId}' not found.");
+
+        // Round 4, lane L: the sessions screen offers only active programmes and its code said "the
+        // server would refuse it anyway" — it did not. It does now, so the claim is true for any caller.
+        if (program.Status != OrientationProgramStatus.Active)
+            throw new InvalidOperationException(
+                $"Sessions can only be scheduled for an active programme; \"{program.Title}\" is {program.Status}. Publish it first.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 

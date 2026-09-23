@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Plus, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -70,7 +70,11 @@ export default function OrientationSessionsPage() {
   const { toast } = useToast();
   const [scope, setScope] = useState<Scope>('upcoming');
   const [search, setSearch] = useState('');
-  const [createOpen, setCreateOpen] = useState(false);
+  // Round 4, lane L: the enrolment dialog's "Schedule one" link lands here with ?schedule=<programme>,
+  // and the form opens with that programme already chosen.
+  const searchParams = useSearchParams();
+  const scheduleFor = searchParams?.get('schedule') ?? '';
+  const [createOpen, setCreateOpen] = useState(!!scheduleFor);
   const [creating, setCreating] = useState(false);
 
   const { data: sessions = [], isLoading } = useQuery({
@@ -254,7 +258,9 @@ export default function OrientationSessionsPage() {
           <OrientationSessionForm
             compact
             programs={programs}
-            defaultValues={emptyOrientationSession}
+            defaultValues={
+              scheduleFor ? { ...emptyOrientationSession, programId: scheduleFor } : emptyOrientationSession
+            }
             onSubmit={handleCreate}
             submitting={creating}
             submitLabel="Create session"

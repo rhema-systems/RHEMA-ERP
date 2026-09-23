@@ -749,6 +749,9 @@ export interface OrientationProgramSummary {
   /** Round 4, lane I-b — a list needs it to offer "open the next cycle" on a completion. */
   isRecurring?: boolean;
   recurrenceFrequency?: OrientationRecurrenceFrequency | null;
+  /** Round 4, lane L — Active and in its effective dates: what an enrolment picker may offer. */
+  acceptsEnrolment?: boolean;
+  closedBecause?: string | null;
   moduleCount: number;
   enrollmentCount: number;
   completedCount: number;
@@ -875,7 +878,19 @@ export interface OrientationSessionSummary {
   scheduledStartAt?: string | null;
   maxParticipants?: number | null;
   enrolledCount: number;
+  /** Round 4, lane L — whether it can take an enrolment now, by the server's one definition. */
+  enrollmentDeadlineAt?: string | null;
+  acceptsEnrolment?: boolean;
+  /** "it was cancelled" — when it cannot. */
+  closedBecause?: string | null;
 }
+
+/** Delivery modes with no sessions to attend — the participant works through them alone. */
+export const SELF_PACED_DELIVERY_MODES: OrientationDeliveryMode[] = [
+  'SelfPacedOnline',
+  'VideoOnDemand',
+  'PrintedMaterial',
+];
 
 export interface OrientationSession extends AuditFields {
   tenantId: string;

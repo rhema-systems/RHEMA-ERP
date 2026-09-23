@@ -157,6 +157,12 @@ public class OrientationProgramSummaryDto
     public bool IsRecurring { get; set; }
     public OrientationRecurrenceFrequency? RecurrenceFrequency { get; set; }
 
+    /// <summary>Round 4, lane L: Active and in its effective dates — what an enrolment picker may offer.</summary>
+    public bool AcceptsEnrolment { get; set; }
+
+    /// <summary>Why not ("it has been retired"), when <see cref="AcceptsEnrolment"/> is false.</summary>
+    public string? ClosedBecause { get; set; }
+
     public int ModuleCount { get; set; }
     public int EnrollmentCount { get; set; }
     public int CompletedCount { get; set; }
@@ -626,6 +632,15 @@ public class OrientationSessionSummaryDto
     public DateTime? ScheduledStartAt { get; set; }
     public int? MaxParticipants { get; set; }
     public int EnrolledCount { get; set; }
+
+    // Round 4, lane L — so a picker can mark what it cannot take rather than offer it.
+    public DateTime? EnrollmentDeadlineAt { get; set; }
+
+    /// <summary>Open for enrolment now — the same definition the enrol check applies.</summary>
+    public bool AcceptsEnrolment { get; set; }
+
+    /// <summary>Why not, in words ("it was cancelled"), when <see cref="AcceptsEnrolment"/> is false.</summary>
+    public string? ClosedBecause { get; set; }
 }
 
 public class CreateOrientationSessionDto : CreateDtoBase

@@ -412,9 +412,8 @@ public class OrientationSessionRepository : GenericRepository<OrientationSession
     {
         var now = DateTime.UtcNow;
         return await WithSummaryNavigations()
-            .Where(s => !s.IsDeleted
-                        && s.Status == OrientationSessionStatus.EnrollmentOpen
-                        && (s.EnrollmentDeadlineAt == null || s.EnrollmentDeadlineAt >= now))
+            .Where(s => !s.IsDeleted)
+            .Where(OrientationSessionEnrolment.IsOpen(now))   // the one definition — the enrol check reads it too
             .OrderBy(s => s.ScheduledStartAt)
             .ToListAsync();
     }

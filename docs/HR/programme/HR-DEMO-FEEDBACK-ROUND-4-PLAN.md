@@ -1,6 +1,6 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-22 — A, C, F, G, H, B done.**
+> **Status 2026-09-23 — A–I (with I-b) and L done; J next.**
 >
 > | Lane | State |
 > |---|---|
@@ -17,13 +17,14 @@
 > | *email links* | **DONE** — every candidate-facing CTA in the recruitment catalogue pointed at a non-existent page since 2026-08-31; six repointed, **two confirmation pages built**. § 8 |
 > | **I** | **DONE** — 100 ×2, `hr-orientation/run-round4-i.mjs`; migration `AddOrientationTriggers` applied to UAT. I1–I5: audience rules on the shared HR axis + populations, typed picker + reach, triggers that fire (hire, movement, publish, nightly), onboarding template applicability + a plan on hire, the "why" diagnostic. **Two demo-data incidents of my own, both reversed** — § 8 |
 > | **I-b** | **DONE** — 152 ×2 (lane I's 100 + 52), same harness; **no migration**. Recurring programmes renew one period after completion, opened early by the deadline so it falls on the anniversary; the effective dates now bind (a lane I gap); **HR may re-enrol after a withdrawal and open a next cycle early by hand** (the user's call); a renewal can no longer open over a completed-then-withdrawn cycle; ORI-CMP-001 recurs annually on UAT and in the seeder — § 8 |
+> | **L** | **DONE** — block S, 29 assertions, in the same harness: 181 ×2; **no migration**. L1 reproduced first: the endpoint was right — onboarding (blended) had never had a session scheduled, compliance is self-paced, and the dialog drew a 403 like "none". The dialog now says which; only programmes that take enrolments are offered; closed sessions are marked; **the enrol path refuses a retired/draft programme and a closed or other programme's session** (it checked neither); two induction days seeded. ⚠ A third demo-data incident, reversed — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b.** Next: L, J, M, K, N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lane L is complete.** Next: J, M, K, N, O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
 > all three are still outstanding.
@@ -1758,6 +1759,62 @@ of "already enrolled".
 **Neighbouring suites:** `hr-orientation/run.mjs` 107/107 and `run-lane6-feedback` 20/20 — the ones
 that create and update programmes and enrol people, which is where the new rules could bite. The demo
 scenario that touches programmes (140) only reads them.
+
+### Lane L — the sessions dropdown · DONE 2026-09-23 · 29 assertions (block S) · 181 ×2 with lane I
+
+Harness: block **S** of `dev-harness/hr-orientation/run-round4-i.mjs`, as the plan asked. **No
+migration.**
+
+**L1 — reproduced before anything was built**, against `ErpSystemDB_UAT`, as `hr.head`:
+
+| Programme | Delivery | `GET orientation-sessions/program/{id}` | Verdict |
+|---|---|---|---|
+| ORI-ONB-001 New Employee Onboarding | **Blended** | 200, `[]` | a data gap — it has a classroom day and nobody had scheduled one |
+| ORI-CMP-001 Anti-Harassment & Code of Conduct | **Self-paced online** | 200, `[]` | legitimately empty |
+| ORI-PRD-001 Q3 Product Launch | Virtual | 200, one session, open | fine |
+| *(any of them, as `staff`)* | | **403** | drawn by the dialog exactly like "no sessions" |
+
+So the endpoint was right, and "the dropdown is empty" was two different truths plus a lie the
+screen told about a third. The probe also showed the dialog offering **all 111 programmes, 87
+retired and 12 drafts.**
+
+**What was built.**
+
+| | |
+|---|---|
+| **L2** | Under the session dropdown, one line tells five states apart: loading; no permission (403); failed; self-paced ("people work through it on their own"); nothing scheduled — with a **Schedule one** link that opens the sessions screen's form with the programme chosen (`?schedule=`). A 403 is not retried. |
+| **L3** | The dialog offers only programmes that take enrolments — Active and in their effective dates — and says how many it hides and why. The programme summary carries `AcceptsEnrolment` / `ClosedBecause` for it. |
+| **L4** | Sessions are listed open-first; a closed one stays visible but cannot be chosen, and says why ("not open: it was cancelled"). The session summary carries `AcceptsEnrolment` / `ClosedBecause` / `EnrollmentDeadlineAt`. |
+| **L5** | Two **Corporate Induction Days** for ORI-ONB-001, open for enrolment, a fortnight and six weeks out (scenario 140; it keeps two upcoming, whatever month it runs). **Deliberately none for compliance** — a deviation from the plan, which said "seed sessions for the onboarding and compliance programmes": compliance is self-paced online, so the fix there is the dialog saying so, not a session nobody would attend. |
+
+**Defects found and closed — the server had checked none of this.**
+
+| | Was | Now |
+|---|---|---|
+| 1 | HR could enrol people onto a **retired or draft** programme — while the programme page said a retired one "enrols nobody new" | refused, with the reason; one definition (`OrientationProgramEnrolment`) — Active and in its effective dates, the same the triggers use |
+| 2 | The enrol path **never looked at the session**: a cancelled one, a finished one, one past its enrolment deadline, **another programme's** | refused, with the reason; one definition (`OrientationSessionEnrolment`) shared with the "open for enrolment" list and the dropdown's flag (S8 asserts the list and the flags agree) |
+| 3 | Moving an enrolment into a session (the edit door) had the same gap | the same check, on a change of session only — editing an enrolment whose session has since closed does not start failing |
+| 4 | The sessions screen's code said "the server would refuse" scheduling against a draft or retired programme — it did not | it does now (S1) |
+
+**⚠ A third demo-data incident this round — mine, reversed with the user's agreement.** Running
+scenario 140 to seed the induction days also ran its benefits half, whose "already done?" guard
+reads `GET /hr/employee-benefit-enrollments` — **an endpoint that does not exist (405)** — through
+`.catch(() => [])`. The failure read as "no enrolments yet", so the guard had **never** held and every
+run re-created the same 45 benefit enrolments. I had predicted the run safe from the table count (48)
+without checking what the guard itself read; two runs added **90 duplicates**. Removed (one
+transaction, count-checked, nothing referenced them; every employee–policy pair back to its one
+original row), and the guard now counts in the database, as the orientation half of the same
+scenario always has. Two further runs added nothing. Before that, the scenario was also made safe
+the way scenario 145 was on 2026-09-22: it takes the six starters by the demo seeder's stamp (not
+every probationer — ~800 of them are harness fixtures now), and finds the programme by its code
+rather than page one of 111, whose fallback was usually a retired fixture.
+
+**Neighbouring suites:** `hr-orientation/run.mjs` 107/107; `run-lane6-feedback` 20/20 — after its
+fixture was repaired: it enrolled onto a programme it never published, i.e. a **draft**, which the new
+rule refuses as the product's own status text says it should ("not yet available"). It now publishes
+first and retires before deleting. `verify-tables --area orientation`: 23 of 23.
+
+**Not browser-walked** — the dropdown's five states are the next thing a screen walk should look at.
 
 ---
 

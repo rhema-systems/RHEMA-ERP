@@ -283,6 +283,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     {
         tenantId = RequireCurrentTenant(tenantId);
         var program = await GetOwnedProgramAsync(createDto.ProgramId);
+        RequireProgrammeTakesEnrolments(program);
 
         if (await WhyCannotEnrolAsync(tenantId, createDto.EmployeeId, program, cancellationToken) is { } reason)
             throw new InvalidOperationException(reason);
@@ -302,6 +303,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     {
         tenantId = RequireCurrentTenant(tenantId);
         var program = await GetOwnedProgramAsync(bulkDto.ProgramId);
+        RequireProgrammeTakesEnrolments(program);
 
         var created = new List<EmployeeOrientation>();
 
@@ -346,6 +348,12 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     public async Task<EmployeeOrientationDto> UpdateAsync(UpdateEmployeeOrientationDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEnrollmentAsync(updateDto.Id);
+
+        // Round 4, lane L: moving somebody INTO a session is enrolling them onto it, so it takes the
+        // same test — that programme's, and open. Only a change is checked: editing an enrolment whose
+        // session has since closed must not start failing.
+        if (updateDto.SessionId is { } newSessionId && newSessionId != entity.SessionId)
+            await RequireSessionTakesEnrolmentAsync(entity.ProgramId, newSessionId, entity.TenantId);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _enrollmentRepository.UpdateAsync(entity);
@@ -991,13 +999,45 @@ public class EmployeeOrientationService : IEmployeeOrientationService
             or OrientationEnrollmentStatus.Cancelled
             or OrientationEnrollmentStatus.NoShow;
 
+    /// <summary>
+    /// Round 4, lane L: a programme takes enrolments only while it is Active and in its effective
+    /// dates — the programme page has always said a retired one "enrols nobody new", and nothing
+    /// enforced it. One definition: <see cref="OrientationProgramEnrolment"/>.
+    /// </summary>
+    private static void RequireProgrammeTakesEnrolments(OrientationProgram program)
+    {
+        if (OrientationProgramEnrolment.WhyNotTaking(program.Status, program.EffectiveFrom, program.EffectiveTo,
+                DateOnly.FromDateTime(DateTime.UtcNow)) is { } why)
+            throw new InvalidOperationException($"Nobody can be enrolled on \"{program.Title}\": {why}.");
+    }
+
+    /// <summary>
+    /// Round 4, lane L: a session takes an enrolment only if it belongs to the programme being enrolled
+    /// onto and is open for enrolment (<see cref="OrientationSessionEnrolment"/>). The capacity check
+    /// below never asked either — an enrolment could sit on a cancelled session, or on another
+    /// programme's.
+    /// </summary>
+    private async Task<OrientationSession> RequireSessionTakesEnrolmentAsync(Guid programId, Guid sessionId, Guid tenantId)
+    {
+        var session = await _sessionRepository.GetByIdAsync(sessionId);
+        if (session == null || session.TenantId != tenantId)
+            throw new ArgumentException($"Orientation session with ID '{sessionId}' not found.");
+
+        if (session.ProgramId != programId)
+            throw new InvalidOperationException(
+                $"Session {session.SessionCode} belongs to a different programme. Choose one of this programme's sessions.");
+
+        if (OrientationSessionEnrolment.WhyNotOpen(session.Status, session.EnrollmentDeadlineAt, DateTime.UtcNow) is { } why)
+            throw new InvalidOperationException($"Session {session.SessionCode} cannot take enrolments: {why}.");
+
+        return session;
+    }
+
     private async Task ApplySessionCapacityAsync(EmployeeOrientation entity, Guid? sessionId, Guid tenantId, CancellationToken cancellationToken)
     {
         if (sessionId == null) return;
 
-        var session = await _sessionRepository.GetByIdAsync(sessionId.Value);
-        if (session == null || session.TenantId != tenantId)
-            throw new ArgumentException($"Orientation session with ID '{sessionId}' not found.");
+        var session = await RequireSessionTakesEnrolmentAsync(entity.ProgramId, sessionId.Value, tenantId);
 
         if (session.MaxParticipants.HasValue)
         {

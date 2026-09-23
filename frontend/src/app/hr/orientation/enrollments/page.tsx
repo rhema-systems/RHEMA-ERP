@@ -64,6 +64,7 @@ import { orientationSessionService } from '@/services/hr/orientation-session.ser
 import {
   ORIENTATION_COMPLETION_STATUS_OPTIONS,
   ORIENTATION_ENROLLMENT_SOURCE_OPTIONS,
+  SELF_PACED_DELIVERY_MODES,
   OCCUPYING_ENROLLMENT_STATUSES,
 } from '@/types/hr/orientation';
 import type {
@@ -129,12 +130,41 @@ export default function OrientationEnrollmentsPage() {
   );
 
   // Sessions for the programme being enrolled onto. A session is optional — a self-paced programme
-  // has none — so this stays empty rather than blocking the dialog.
-  const { data: sessions = [] } = useQuery({
+  // has none — so an empty list never blocks the dialog.
+  // ⚠ Round 4, lane L: the loading / error / permission state is KEPT. `const { data: sessions = [] }`
+  //   alone drew a refused request (403) exactly like "no sessions" — the demo's "empty dropdown".
+  const {
+    data: sessions = [],
+    isLoading: sessionsLoading,
+    isError: sessionsFailed,
+    error: sessionsError,
+  } = useQuery({
     queryKey: ['hr', 'orientation-sessions', 'program', enrolProgramId],
     queryFn: () => orientationSessionService.getByProgram(enrolProgramId),
     enabled: !!enrolProgramId,
+    retry: false,
   });
+
+  // Round 4, lane L — only programmes that take enrolments are offered (Active and in their dates,
+  // the server's own definition), matching the sessions screen; and what the session dropdown says.
+  const enrollablePrograms = useMemo(
+    () => programs.filter((p) => p.acceptsEnrolment !== false),
+    [programs],
+  );
+  const hiddenProgramCount = programs.length - enrollablePrograms.length;
+  const enrolProgram = programs.find((p) => p.id === enrolProgramId);
+  const enrolSelfPaced =
+    !!enrolProgram && SELF_PACED_DELIVERY_MODES.includes(enrolProgram.defaultDeliveryMode);
+  const sortedSessions = useMemo(
+    () =>
+      [...sessions].sort(
+        (a, b) =>
+          Number(b.acceptsEnrolment !== false) - Number(a.acceptsEnrolment !== false) ||
+          String(a.scheduledStartAt ?? '').localeCompare(String(b.scheduledStartAt ?? '')),
+      ),
+    [sessions],
+  );
+  const openSessionCount = sessions.filter((x) => x.acceptsEnrolment !== false).length;
 
   const listKey = ['hr', 'orientation-enrollments', scope, programId, completionStatus];
   const ENDED_BY_HR: string[] = ['Withdrawn', 'Cancelled', 'NoShow'];
@@ -592,13 +622,21 @@ export default function OrientationEnrollmentsPage() {
                   <SelectValue placeholder="Choose a programme…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {programs.map((p) => (
+                  {enrollablePrograms.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.programCode} — {p.title}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {hiddenProgramCount > 0 && (
+                <p className="text-muted-foreground text-xs">
+                  {hiddenProgramCount} programme{hiddenProgramCount === 1 ? '' : 's'} that{' '}
+                  {hiddenProgramCount === 1 ? 'is' : 'are'} a draft, retired or outside{' '}
+                  {hiddenProgramCount === 1 ? 'its' : 'their'} effective dates{' '}
+                  {hiddenProgramCount === 1 ? 'is' : 'are'} not offered — they take no enrolments.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -612,17 +650,57 @@ export default function OrientationEnrollmentsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ALL}>No session — self-paced</SelectItem>
-                  {sessions.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.title}
-                      {s.maxParticipants
-                        ? ` (${Math.max(0, s.maxParticipants - s.enrolledCount)} seats left)`
-                        : ' (uncapped)'}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value={ALL}>
+                    {enrolSelfPaced ? 'Self-paced — no session' : 'No session (enrol without one)'}
+                  </SelectItem>
+                  {sortedSessions.map((s) => {
+                    const open = s.acceptsEnrolment !== false;
+                    return (
+                      <SelectItem key={s.id} value={s.id} disabled={!open}>
+                        {s.title}
+                        {s.scheduledStartAt
+                          ? ` · ${new Date(s.scheduledStartAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
+                          : ''}
+                        {open
+                          ? s.maxParticipants
+                            ? ` (${Math.max(0, s.maxParticipants - s.enrolledCount)} seats left)`
+                            : ' (uncapped)'
+                          : ` — not open: ${s.closedBecause ?? s.status}`}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
+              {enrolProgramId && (
+                <p className="text-muted-foreground text-xs">
+                  {sessionsLoading ? (
+                    'Loading this programme’s sessions…'
+                  ) : sessionsFailed ? (
+                    (sessionsError as { status?: number } | null)?.status === 403 ? (
+                      'You do not have permission to see this programme’s sessions. People can still be enrolled without one.'
+                    ) : (
+                      `Its sessions could not be loaded (${(sessionsError as Error | null)?.message ?? 'an error'}). People can still be enrolled without one.`
+                    )
+                  ) : sessions.length === 0 ? (
+                    enrolSelfPaced ? (
+                      'This programme is self-paced, so it has no sessions — people work through it on their own.'
+                    ) : (
+                      <>
+                        No sessions are scheduled for this programme yet.{' '}
+                        <Link
+                          href={`/hr/orientation/sessions?schedule=${enrolProgramId}`}
+                          className="underline underline-offset-2"
+                        >
+                          Schedule one
+                        </Link>
+                        , or enrol without a session.
+                      </>
+                    )
+                  ) : openSessionCount === 0 ? (
+                    'None of its sessions is open for enrolment — the closed ones are listed for reference. Enrol without a session, or open one from the sessions screen.'
+                  ) : null}
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">

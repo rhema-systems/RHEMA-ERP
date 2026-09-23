@@ -130,6 +130,8 @@ public static class OrientationMappingExtensions
 
     public static OrientationProgramSummaryDto ToSummaryDto(this OrientationProgram entity)
     {
+        var closedBecause = OrientationProgramEnrolment.WhyNotTaking(
+            entity.Status, entity.EffectiveFrom, entity.EffectiveTo, DateOnly.FromDateTime(DateTime.UtcNow));
         return new OrientationProgramSummaryDto
         {
             Id = entity.Id,
@@ -145,6 +147,8 @@ public static class OrientationMappingExtensions
             RequiresAssessment = entity.RequiresAssessment,
             IsRecurring = entity.IsRecurring,
             RecurrenceFrequency = entity.RecurrenceFrequency,
+            AcceptsEnrolment = closedBecause is null,
+            ClosedBecause = closedBecause,
             ModuleCount = entity.Modules.Count,
             EnrollmentCount = entity.Enrollments.Count,
             CompletedCount = entity.Enrollments.Count(e => e.CompletionStatus == OrientationCompletionStatus.Completed),
@@ -502,6 +506,7 @@ public static class OrientationMappingExtensions
 
     public static OrientationSessionSummaryDto ToSummaryDto(this OrientationSession entity)
     {
+        var closedBecause = OrientationSessionEnrolment.WhyNotOpen(entity.Status, entity.EnrollmentDeadlineAt, DateTime.UtcNow);
         return new OrientationSessionSummaryDto
         {
             Id = entity.Id,
@@ -513,6 +518,9 @@ public static class OrientationMappingExtensions
             Status = entity.Status,
             ScheduledStartAt = entity.ScheduledStartAt,
             MaxParticipants = entity.MaxParticipants,
+            EnrollmentDeadlineAt = entity.EnrollmentDeadlineAt,
+            AcceptsEnrolment = closedBecause is null,
+            ClosedBecause = closedBecause,
             // Filled from a batched count in the service — list reads do not include Enrollments.
             EnrolledCount = entity.Enrollments.Count(e => OrientationEnrollmentStatuses.Occupying.Contains(e.EnrollmentStatus)),
         };

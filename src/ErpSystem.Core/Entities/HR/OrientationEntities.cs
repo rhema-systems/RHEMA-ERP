@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Linq.Expressions;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR.Orientation;
@@ -17,6 +18,73 @@ public static class OrientationEnrollmentStatuses
         OrientationEnrollmentStatus.Confirmed,
         OrientationEnrollmentStatus.Active,
         OrientationEnrollmentStatus.Completed,
+    };
+}
+
+/// <summary>
+/// The one definition of "this programme takes enrolments" (round 4, lane L): Active, and inside its
+/// effective dates — the same two conditions the automatic triggers have required since lane I-b.
+/// </summary>
+/// <remarks>
+/// Manual enrolment checked neither, while the programme page told HR that a retired programme
+/// "enrols nobody new" — and the enrolment dialog offered all 111 programmes on UAT, 87 of them
+/// retired and 12 drafts.
+/// </remarks>
+public static class OrientationProgramEnrolment
+{
+    /// <summary>Why the programme cannot take an enrolment today, in words — or null when it can.</summary>
+    public static string? WhyNotTaking(
+        OrientationProgramStatus status, DateTime? effectiveFrom, DateTime? effectiveTo, DateOnly today)
+    {
+        if (status != OrientationProgramStatus.Active)
+            return status switch
+            {
+                OrientationProgramStatus.Draft => "it is still a draft",
+                OrientationProgramStatus.PendingApproval => "it is awaiting approval",
+                OrientationProgramStatus.Suspended => "it is suspended",
+                OrientationProgramStatus.Retired => "it has been retired",
+                OrientationProgramStatus.Archived => "it is archived",
+                _ => $"it is {status}",
+            };
+        if (effectiveFrom is { } starts && DateOnly.FromDateTime(starts) > today)
+            return $"it is not in effect until {DateOnly.FromDateTime(starts):d MMM yyyy}";
+        if (effectiveTo is { } ends && DateOnly.FromDateTime(ends) < today)
+            return $"its effective period ended on {DateOnly.FromDateTime(ends):d MMM yyyy}";
+        return null;
+    }
+}
+
+/// <summary>
+/// The one definition of "this session can take an enrolment now" (round 4, lane L): its status is
+/// EnrollmentOpen and its enrolment deadline, if it has one, has not passed.
+/// </summary>
+/// <remarks>
+/// The "open for enrolment" list has always applied this — but the enrol path did not, so HR could
+/// enrol somebody onto a cancelled session, a completed one, or a session of ANOTHER programme, and
+/// the dialog's dropdown listed every session with nothing to say which were closed. The list query,
+/// the enrol check and the dropdown's flag now all read this class.
+/// </remarks>
+public static class OrientationSessionEnrolment
+{
+    /// <summary>For queries.</summary>
+    public static Expression<Func<OrientationSession, bool>> IsOpen(DateTime now) =>
+        s => s.Status == OrientationSessionStatus.EnrollmentOpen
+             && (s.EnrollmentDeadlineAt == null || s.EnrollmentDeadlineAt >= now);
+
+    /// <summary>Why a session cannot take an enrolment now, in words — or null when it can.</summary>
+    public static string? WhyNotOpen(OrientationSessionStatus status, DateTime? enrollmentDeadlineAt, DateTime now) => status switch
+    {
+        OrientationSessionStatus.EnrollmentOpen when enrollmentDeadlineAt is { } deadline && deadline < now
+            => $"its enrolment closed on {deadline:d MMM yyyy}",
+        OrientationSessionStatus.EnrollmentOpen => null,
+        OrientationSessionStatus.Draft => "it is still a draft",
+        OrientationSessionStatus.Published => "it is published but its enrolment has not opened",
+        OrientationSessionStatus.EnrollmentClosed => "its enrolment is closed",
+        OrientationSessionStatus.InProgress => "it is already under way",
+        OrientationSessionStatus.Completed => "it has finished",
+        OrientationSessionStatus.Cancelled => "it was cancelled",
+        OrientationSessionStatus.Postponed => "it has been postponed",
+        _ => $"it is {status}",
     };
 }
 
