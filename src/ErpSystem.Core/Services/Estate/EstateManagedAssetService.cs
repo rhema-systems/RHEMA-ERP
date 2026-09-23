@@ -885,7 +885,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             ? request.ExternalMonthlyRent ?? (!includesSale ? request.ExternalListingPrice : null)
             : null;
         var leaseAmount = isLeaseListing
-            ? request.ExternalListingPrice ?? request.ExternalMonthlyRent ?? demarcation.TargetSalePrice
+            ? request.ExternalListingPrice ?? demarcation.TargetSalePrice
             : null;
         if (publishToCustomerPortal && includesSale && salePrice is not > 0m)
         {
@@ -1495,7 +1495,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             ? request.ExternalMonthlyRent ?? (includesRecurringCharge && !includesSale ? request.ExternalListingPrice : null)
             : null;
         var leaseAmount = isLeaseListing
-            ? request.ExternalListingPrice ?? request.ExternalMonthlyRent
+            ? request.ExternalListingPrice
             : null;
         var salePrice = includesSale && requestedSalePrice > 0
             ? requestedSalePrice

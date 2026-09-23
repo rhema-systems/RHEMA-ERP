@@ -210,7 +210,7 @@ const isPremiumChargeSettled = (procedureCase: ProcedureCaseDetail) => {
   const status = caseFieldValue(procedureCase, 'premiumChargePaymentStatus')
     .trim()
     .toLowerCase();
-  return status === 'paid' || status === 'waived' || status === 'not required';
+  return status === 'paid';
 };
 
 const PREMIUM_FIELD_KEYS = new Set([
@@ -318,6 +318,8 @@ const isRentalApplication = (procedureCase: ProcedureCaseDetail) => {
     procedureCase,
     'requestType'
   ).toLowerCase();
+  if (requestType.includes('lease') || requestType.includes('rent')) return true;
+  if (requestType.includes('purchase') || requestType.includes('sale')) return false;
   const listingType = caseFieldValue(
     procedureCase,
     'listingType'
@@ -372,14 +374,7 @@ const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
     case 0:
       return ['customerValidationStatus', 'listingValidationStatus'];
     case 1:
-      return rental
-        ? [
-            'availabilityCheck',
-            'commercialReviewStatus',
-            'reservationStatus',
-            'premiumChargeRequired',
-          ]
-        : ['availabilityCheck', 'commercialReviewStatus', 'reservationStatus'];
+      return ['availabilityCheck', 'commercialReviewStatus', 'reservationStatus', 'premiumChargeRequired'];
     case 2:
       return rental && approved
         ? ['decisionStatus', 'requestedLeaseTerm', 'moveInDate']
@@ -391,12 +386,14 @@ const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
       // Stage completion still verifies them below with action-specific guidance.
       return [];
     case 5:
-      return rental
+      return rental && !isLeaseApplication(procedureCase)
         ? ['billingStartDate', 'billingStartStatus']
         : ['salePaymentStatus', 'salePaymentCheckStatus'];
     case 6:
       return rental
-        ? ['moveInEffectiveStatus']
+        ? isLeaseApplication(procedureCase)
+          ? ['legalConveyanceStatus', 'moveInEffectiveStatus']
+          : ['moveInEffectiveStatus']
         : ['legalConveyanceStatus', 'ownershipTransferStatus'];
     case 7:
     default:
@@ -424,6 +421,8 @@ const buildAgreementMergeValues = (
   rentalApplication: boolean,
   moveInDate: string
 ) => {
+  const leaseApplication = isLeaseApplication(procedureCase);
+  const monthlyRental = rentalApplication && !leaseApplication;
   const fields = Object.fromEntries(
     procedureCase.fields.map((field) => [field.key, field.value ?? null])
   );
@@ -454,6 +453,12 @@ const buildAgreementMergeValues = (
   const generatedAgreementReference = firstNonBlank(
     fields.generatedAgreementReference
   );
+  const premiumCharge = fields.premiumChargeRequired === 'Yes'
+    ? firstNonBlank(fields.premiumChargeAmount, 'To be confirmed')
+    : 'Not applicable';
+  const annualGroundRent = fields.groundRentRequired === 'Yes'
+    ? firstNonBlank(fields.groundRentPayable, fields.groundRentComputed, 'To be confirmed')
+    : 'Not applicable';
 
   return {
     ...fields,
@@ -463,6 +468,10 @@ const buildAgreementMergeValues = (
     CaseReference: caseReference,
     PropertyNumber: propertyNumber,
     PropertyReference: propertyReference,
+    PropertyLocation: fields.listingLocation || '',
+    PropertyArea: [fields.listingArea, fields.listingAreaUnit]
+      .filter(Boolean)
+      .join(' '),
     SourceReference: firstNonBlank(
       fields.sourceReference,
       fields.listingReference,
@@ -474,10 +483,21 @@ const buildAgreementMergeValues = (
     GranteeName: customerName,
     CustomerReference: customerReference,
     RequestType: fields.requestType || '',
-    RentAmount: paymentAmount,
+    RentAmount: monthlyRental ? paymentAmount : '',
+    PurchasePrice: rentalApplication ? '' : paymentAmount,
+    FullTermLeaseAmount: leaseApplication ? paymentAmount : '',
+    MonthlyRent: monthlyRental ? paymentAmount : '',
     PaymentAmount: paymentAmount,
-    PaymentType: rentalApplication ? 'Monthly rent' : 'Purchase price',
-    PaymentSchedule: rentalApplication ? 'Monthly' : 'As agreed',
+    PaymentType: leaseApplication
+      ? 'Full term lease amount'
+      : monthlyRental
+        ? 'Monthly rent'
+        : 'Purchase price',
+    PaymentSchedule: monthlyRental ? 'Monthly' : 'As agreed',
+    PremiumCharge: premiumCharge,
+    PremiumChargeRequired: fields.premiumChargeRequired || 'No',
+    AnnualGroundRent: annualGroundRent,
+    AnnualGroundRentRequired: fields.groundRentRequired || 'No',
     Currency: fields.currency || '',
     LeaseTerm: fields.requestedLeaseTerm || '',
     MoveInDate: moveInDate,
@@ -699,23 +719,32 @@ export function ListingApplicationWorkspace() {
           await documentManagementService.getGenerationTemplates('Estate');
         if (!mounted) return;
         const rental = isRentalApplication(selectedCase);
+        const lease = isLeaseApplication(selectedCase);
         const applicableTemplates = templates.filter((template) => {
           const value =
             `${template.templateCode} ${template.title} ${template.documentType}`.toLowerCase();
           if (!value.includes('agreement')) return false;
-          return rental
-            ? value.includes('lease') ||
-                value.includes('tenancy') ||
-                value.includes('rent')
-            : value.includes('sale') || value.includes('purchase');
+          return lease
+            ? value.includes('lease')
+            : rental
+              ? (value.includes('tenancy') || value.includes('rent')) &&
+                !value.includes('lease')
+              : value.includes('sale') || value.includes('purchase');
         });
         setGenerationTemplates(applicableTemplates);
+        const preferredCode = lease
+          ? 'EST-LEASE-AGREEMENT'
+          : rental
+            ? 'EST-RENT-AGREEMENT'
+            : 'EST-SALE-AGREEMENT';
         setSelectedTemplateCode((current) =>
           applicableTemplates.some(
             (template) => template.templateCode === current
           )
             ? current
-            : applicableTemplates[0]?.templateCode || ''
+            : applicableTemplates.find(
+                (template) => template.templateCode === preferredCode
+              )?.templateCode || applicableTemplates[0]?.templateCode || ''
         );
       } catch {
         setGenerationTemplates([]);
@@ -864,7 +893,6 @@ export function ListingApplicationWorkspace() {
     }
 
     if (
-      isRentalApplication(selectedCase) &&
       isPremiumChargeRequired(selectedCase) &&
       selectedCase.currentStageIndex >= 1 &&
       !(caseMoneyValue(selectedCase, 'premiumChargeAmount') > 0)
@@ -874,13 +902,12 @@ export function ListingApplicationWorkspace() {
     }
 
     if (
-      isRentalApplication(selectedCase) &&
       isPremiumChargeRequired(selectedCase) &&
       selectedCase.currentStageIndex >= 2 &&
       !isPremiumChargeSettled(selectedCase)
     ) {
       setError(
-        'Premium charge payment is pending. Wait for Finance payment confirmation or record an approved waiver before routing this request forward.'
+        'Premium charge payment is pending. Wait for Finance payment confirmation before routing this request forward.'
       );
       return;
     }
@@ -891,11 +918,10 @@ export function ListingApplicationWorkspace() {
     const stageName = selectedCase.currentStageName.trim().toLowerCase();
     if (
       stageName === 'commercial and availability review' &&
-      isRentalApplication(selectedCase) &&
       isPremiumChargeRequired(selectedCase) &&
       !(caseMoneyValue(selectedCase, 'premiumChargeAmount') > 0)
     ) {
-      setError('Enter the rental premium charge amount before continuing.');
+      setError('Enter the premium charge amount before continuing.');
       return;
     }
     if (
@@ -921,12 +947,11 @@ export function ListingApplicationWorkspace() {
     if (
       stageName === 'estate decision and agreement' &&
       approved &&
-      isRentalApplication(selectedCase) &&
       isPremiumChargeRequired(selectedCase) &&
       !isPremiumChargeSettled(selectedCase)
     ) {
       setError(
-        'The rental premium charge must be paid or waived before agreement generation can continue.'
+        'The premium charge must be paid in Finance before agreement generation can continue.'
       );
       return;
     }
@@ -975,7 +1000,7 @@ export function ListingApplicationWorkspace() {
       return;
     }
     if (stageName === 'payment, billing and finance check') {
-      if (isRentalApplication(selectedCase)) {
+      if (isRentalApplication(selectedCase) && !isLeaseApplication(selectedCase)) {
         if (
           !caseFieldValue(selectedCase, 'billingStartDate') ||
           !containsAny(caseFieldValue(selectedCase, 'billingStartStatus'), [
@@ -989,7 +1014,7 @@ export function ListingApplicationWorkspace() {
         }
       } else if (!isSalePaymentSatisfied(selectedCase)) {
         setError(
-          'Complete the Estate sale balance payment check before moving to Legal conveyance.'
+          'Complete the Estate sale or lease balance payment check before moving to Legal conveyance.'
         );
         return;
       }
@@ -1117,12 +1142,11 @@ export function ListingApplicationWorkspace() {
       return;
     }
     if (
-      rentalApplication &&
       isPremiumChargeRequired(selectedCase) &&
       !isPremiumChargeSettled(selectedCase)
     ) {
       setError(
-        'The rental premium charge must be paid or waived before generating the rental agreement.'
+        'The premium charge must be paid in Finance before generating the agreement.'
       );
       return;
     }
@@ -1510,7 +1534,7 @@ export function ListingApplicationWorkspace() {
           editableFieldKeys(selectedCase).has(field.key) &&
           (field.key !== 'moveInDate' || isRentalApplication(selectedCase)) &&
           (!PREMIUM_FIELD_KEYS.has(field.key) ||
-            isRentalApplication(selectedCase))
+            selectedCase.currentStageIndex >= 1)
       )
     : [];
   const stageItems =
@@ -1557,7 +1581,7 @@ export function ListingApplicationWorkspace() {
       !caseFieldValue(selectedCase, 'requestedLeaseTerm')
   );
   const premiumChargeRequired = Boolean(
-    selectedCase && rentalApplication && isPremiumChargeRequired(selectedCase)
+    selectedCase && isPremiumChargeRequired(selectedCase)
   );
   const premiumChargeSettled = Boolean(
     selectedCase && isPremiumChargeSettled(selectedCase)
@@ -1583,14 +1607,12 @@ export function ListingApplicationWorkspace() {
     : 'GHS';
   const missingPremiumChargePayment = Boolean(
     selectedCase &&
-      rentalApplication &&
       premiumChargeRequired &&
       selectedCase.currentStageIndex >= 2 &&
       !premiumChargeSettled
   );
   const missingPremiumChargeAmount = Boolean(
     selectedCase &&
-      rentalApplication &&
       premiumChargeRequired &&
       selectedCase.currentStageIndex >= 1 &&
       !(premiumChargeAmount > 0)
@@ -1659,7 +1681,7 @@ export function ListingApplicationWorkspace() {
     : Number.NaN;
   const saleFullyPaidInSales = Boolean(
     selectedCase &&
-      !rentalApplication &&
+      (!rentalApplication || leaseApplication) &&
       salePaymentStatus === 'paid in full' &&
       Number.isFinite(estateRemainingAmount) &&
       estateRemainingAmount <= 0
@@ -2424,13 +2446,13 @@ export function ListingApplicationWorkspace() {
                     {missingApprovedRentTerm ? (
                       <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                         Enter the approved rental term on the current stage
-                        before generating the rental agreement.
+                        before generating the agreement.
                       </p>
                     ) : null}
                     {missingPremiumChargePayment ? (
                       <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                         Initiate the premium charge invoice and wait for Finance
-                        payment confirmation before generating the rental or
+                        payment confirmation before generating the
                         lease agreement.
                       </p>
                     ) : null}
@@ -2772,19 +2794,19 @@ export function ListingApplicationWorkspace() {
                       {!fullyExecuted
                         ? 'This next Legal matter opens after the customer-signed agreement is internally approved and digitally signed.'
                         : leaseApplication
-                        ? 'Lease conveyance and registration now proceed in the Legal workspace. Ground rent remains a separate Estate and Finance account; it is not the lease amount.'
+                        ? 'Confirm the full lease payment after signing, then start Legal conveyance. Ground rent remains separate from the full-term lease amount.'
                         : saleFullyPaidInSales
                           ? 'Sales has collected the full purchase amount, so Estate only completes Legal conveyance and ownership transfer.'
                           : 'Complete the Estate balance invoice, customer payment, and Legal conveyance before ownership transfer is marked complete.'}
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {!rentalApplication ? (
+                    {(!rentalApplication || leaseApplication) ? (
                       <div className="space-y-3">
                         <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <p className="font-medium">
-                              Purchase invoice and payment
+                              {leaseApplication ? 'Lease balance invoice and payment' : 'Purchase invoice and payment'}
                             </p>
                             <p className="text-sm text-muted-foreground">
                               {saleFullyPaidInSales
@@ -2794,7 +2816,7 @@ export function ListingApplicationWorkspace() {
                                       'saleInvoiceReference'
                                     )
                                   ? `${caseFieldValue(selectedCase, 'saleInvoiceReference')} · ${caseFieldValue(selectedCase, 'salePaymentStatus') || caseFieldValue(selectedCase, 'saleInvoiceStatus')}`
-                                  : 'Create the Finance AR invoice for the remaining Estate balance.'}
+                                  : 'Create the Finance AR invoice for the remaining Estate balance after the agreement is fully signed.'}
                             </p>
                             {caseFieldValue(
                               selectedCase,
@@ -2862,7 +2884,7 @@ export function ListingApplicationWorkspace() {
                           <Button
                             type="button"
                             className="gap-2"
-                            disabled={isSaving || !fullyExecuted || legalConveyanceStarted}
+                            disabled={isSaving || !fullyExecuted || !saleInvoicePaid || legalConveyanceStarted}
                             onClick={() =>
                               void lodgeLegalMatter('conveyanceRegistration')
                             }
@@ -2873,6 +2895,7 @@ export function ListingApplicationWorkspace() {
                               : 'Start conveyance'}
                           </Button>
                         </div>
+                        {!leaseApplication ? (
                         <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <p className="font-medium">
@@ -2914,28 +2937,11 @@ export function ListingApplicationWorkspace() {
                                   : 'Complete ownership transfer'}
                           </Button>
                         </div>
+                        ) : null}
                       </div>
                     ) : null}
-                    {rentalApplication ? (
+                    {leaseApplication ? (
                       <div className="space-y-3">
-                        <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="font-medium">Lease conveyance and registration</p>
-                            <p className="text-sm text-muted-foreground">
-                              {caseFieldValue(selectedCase, 'legalConveyanceStatus') ||
-                                'Required after internal agreement execution before lease closeout.'}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            className="gap-2"
-                            disabled={isSaving || !fullyExecuted || legalConveyanceStarted}
-                            onClick={() => void lodgeLegalMatter('conveyanceRegistration')}
-                          >
-                            <Send className="h-4 w-4" />
-                            {legalConveyanceStarted ? 'With Legal' : 'Start conveyance'}
-                          </Button>
-                        </div>
                         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                           <Select
                             value={selectedLegalMatterType}
@@ -3144,8 +3150,7 @@ export function ListingApplicationWorkspace() {
                   {missingPremiumChargePayment ? (
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                       Premium charge payment is still pending. Refresh the
-                      Finance payment status after Finance receives payment, or
-                      waive the charge when management approves the waiver.
+                      Finance payment status after Finance receives payment.
                     </p>
                   ) : null}
                   {!caseIsCompleted && selectedCase.canEditCurrentStage ? (

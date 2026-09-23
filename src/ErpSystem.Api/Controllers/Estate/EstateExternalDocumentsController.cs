@@ -496,7 +496,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 asset.ProjectUnitCode,
                 asset.Name,
                 asset.Status,
-                TransactionType = asset.Status == EstateManagedAssetStatus.Sold ? "Purchased" : "Rental",
+                TransactionType = asset.Status == EstateManagedAssetStatus.Sold
+                    ? "Purchased"
+                    : asset.ExternalListingType != null && asset.ExternalListingType.Contains("Lease")
+                        ? "Lease"
+                        : "Rental",
                 asset.Location,
                 asset.Town,
                 asset.District,
@@ -504,7 +508,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 AgreementDate = asset.DateOfTenancy,
                 ActualPossessionDate = asset.RightOfEntryDate,
                 asset.LeaseTermYears,
-                MonthlyRent = asset.ExternalMonthlyRent ?? asset.ExternalListingPrice,
+                MonthlyRent = asset.ExternalListingType != null && asset.ExternalListingType.Contains("Lease")
+                    ? null
+                    : asset.ExternalMonthlyRent ?? asset.ExternalListingPrice,
+                FullTermLeaseAmount = asset.ExternalListingType != null && asset.ExternalListingType.Contains("Lease")
+                    ? asset.ExternalListingPrice
+                    : null,
                 CurrencyCode = string.IsNullOrWhiteSpace(asset.ExternalListingCurrency)
                     ? asset.Currency
                     : asset.ExternalListingCurrency,
@@ -678,6 +687,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     asset.ActualPossessionDate,
                     asset.LeaseTermYears,
                     asset.MonthlyRent,
+                    asset.FullTermLeaseAmount,
                     asset.CurrencyCode,
                     asset.NextRentBillingDate,
                     asset.RentGracePeriodDays,
@@ -2068,7 +2078,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
         var listingCurrency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
         var listingSalePrice = demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice;
-        var listingPrice = demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
+        var listingPrice = demarcationListing is null
+            ? asset.ExternalListingPrice
+            : ResolveDemarcationLeaseAmount(demarcationListing);
         var listingMonthlyRent = demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent;
         var listingLeaseTermMonths = demarcationListing?.ExternalLeaseTermMonths ?? asset.ExternalLeaseTermMonths;
 
@@ -2173,10 +2185,24 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["customerName"] = customer.PartnerName,
             ["propertyUnit"] = listingReference,
             ["listingReference"] = listingReference,
+            ["listingId"] = listingId.ToString(),
+            ["listingRecordType"] = demarcationListing is null ? "EstateManagedAsset" : "EstateLandDemarcation",
+            ["listingName"] = listingName,
+            ["listingLocation"] = asset.Location,
+            ["listingArea"] = demarcationListing is null
+                ? asset.AreaValue?.ToString(CultureInfo.InvariantCulture)
+                : demarcationListing.AreaSquareFeet.ToString(CultureInfo.InvariantCulture),
+            ["listingAreaUnit"] = demarcationListing is null ? asset.AreaUnit : "sq ft",
             ["listingType"] = publishedListingType,
             ["requestType"] = requestLabel,
             ["listingPrice"] = publishedAmount?.ToString("0.##"),
             ["offerAmount"] = requestType == "Purchase" ? request.OfferAmount?.ToString("0.##") : null,
+            ["groundRentRequired"] = (demarcationListing?.ExternalGroundRentRequired ?? asset.ExternalGroundRentRequired) == true ? "Yes" : "No",
+            ["premiumChargeRequired"] = (demarcationListing?.ExternalPremiumChargeRequired ?? asset.ExternalPremiumChargeRequired) == true ? "Yes" : "No",
+            ["salesAmountPaid"] = "0.00",
+            ["estateRemainingAmount"] = (requestType == "Purchase" ? request.OfferAmount : publishedAmount)?.ToString("0.00", CultureInfo.InvariantCulture),
+            ["salePaymentStatus"] = requestType is "Purchase" or "Lease" ? "Pending Estate payment" : null,
+            ["salePaymentCheckStatus"] = requestType is "Purchase" or "Lease" ? "No Sales payment recorded; Finance balance invoice required after agreement execution." : null,
             ["currency"] = listingCurrency,
             ["requestedLeaseTerm"] = requestType == "Purchase" || !listingLeaseTermMonths.HasValue
                 ? null
@@ -2196,7 +2222,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["signedAgreementReference"] = null,
             ["moveInDate"] = null,
             ["billingStartDate"] = null,
-            ["billingStartStatus"] = requestType == "Purchase"
+            ["billingStartStatus"] = requestType is "Purchase" or "Lease"
                 ? "Not applicable"
                 : "Blocked - agreement pending",
             ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
@@ -2338,7 +2364,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var price = type == "Rent"
                 ? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent
                 : type == "Lease"
-                    ? demarcationListing?.ExternalListingPrice ?? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalListingPrice ?? asset.ExternalMonthlyRent
+                    ? (demarcationListing is null ? asset.ExternalListingPrice : ResolveDemarcationLeaseAmount(demarcationListing))
                     : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
             var category = await _db.EhcTicketCategories.AsNoTracking().FirstOrDefaultAsync(c =>
                 c.TenantId == tenantId && !c.IsDeleted && c.Code == "PROPERTY-LISTING", cancellationToken);
@@ -2492,7 +2518,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var price = type == "Rent"
                 ? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent
                 : type == "Lease"
-                    ? demarcationListing?.ExternalListingPrice ?? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalListingPrice ?? asset.ExternalMonthlyRent
+                    ? (demarcationListing is null ? asset.ExternalListingPrice : ResolveDemarcationLeaseAmount(demarcationListing))
                     : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
             var contactName = request.ContactName.Trim();
             var contactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim();
@@ -2972,6 +2998,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         };
     }
 
+    private static decimal? ResolveDemarcationLeaseAmount(EstateLandDemarcation demarcation)
+        => string.Equals(demarcation.ExternalListingType, "Lease", StringComparison.OrdinalIgnoreCase)
+            && demarcation.ExternalMonthlyRent.HasValue
+            && demarcation.ExternalListingPrice == demarcation.ExternalMonthlyRent
+            && demarcation.TargetSalePrice is > 0m
+                ? demarcation.TargetSalePrice
+                : demarcation.ExternalListingPrice ?? (string.Equals(demarcation.ExternalListingType, "Lease", StringComparison.OrdinalIgnoreCase)
+                    ? demarcation.TargetSalePrice
+                    : null);
+
     private static object ToExternalListingDto(EstateLandDemarcation demarcation, bool usePublicImageRoute = false)
     {
         var asset = demarcation.EstateManagedAsset;
@@ -3003,7 +3039,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             AreaValue = demarcation.AreaSquareFeet,
             AreaUnit = "square feet",
             demarcation.ExternalListingType,
-            demarcation.ExternalListingPrice,
+            ExternalListingPrice = ResolveDemarcationLeaseAmount(demarcation),
             demarcation.ExternalSalePrice,
             demarcation.ExternalMonthlyRent,
             demarcation.ExternalGroundRentRequired,

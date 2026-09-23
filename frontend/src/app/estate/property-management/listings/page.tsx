@@ -45,6 +45,7 @@ import {
   type EstateManagedAssetDocument,
 } from '@/services/estate-land-management.service';
 import { getStatusBadgeClassName } from '@/lib/status-badge';
+import { getListingPriceDefaults } from '@/lib/estate-listing-pricing';
 
 const LISTINGS_PER_PAGE = 10;
 
@@ -252,6 +253,7 @@ export default function EstatePropertyListingsPage() {
       selected.externalListingType && selected.externalListingType !== 'None'
         ? selected.externalListingType
         : null;
+    const listingPrices = getListingPriceDefaults(selected);
     setForm({
       isPublishedToExternalPortal: selected.isPublishedToExternalPortal,
       externalListingType:
@@ -261,17 +263,9 @@ export default function EstatePropertyListingsPage() {
       externalListingStatus:
         selected.externalListingStatus ||
         (selected.listingScope === 'demarcation' ? 'Draft' : 'Published'),
-      externalSalePrice:
-        selected.externalSalePrice == null &&
-        selected.externalListingType !== 'Rent'
-          ? selected.externalListingPrice == null
-            ? selected.targetSalePrice == null
-              ? ''
-              : String(selected.targetSalePrice)
-            : String(selected.externalListingPrice)
-          : selected.externalSalePrice == null
-            ? ''
-            : String(selected.externalSalePrice),
+      externalSalePrice: listingPrices.salePrice == null
+        ? ''
+        : String(listingPrices.salePrice),
       externalMonthlyRent:
         selected.externalMonthlyRent == null &&
         includesRecurringCharge(savedListingType ?? selected.externalListingType)
@@ -281,14 +275,9 @@ export default function EstatePropertyListingsPage() {
           : selected.externalMonthlyRent == null
             ? ''
             : String(selected.externalMonthlyRent),
-      externalLeaseAmount:
-        selected.externalListingType === 'Lease' && selected.externalListingPrice != null
-          ? String(selected.externalListingPrice)
-          : selected.externalMonthlyRent != null && selected.externalListingType === 'Lease'
-            ? String(selected.externalMonthlyRent)
-            : selected.targetSalePrice != null && selected.targetSalePrice > 0
-              ? String(selected.targetSalePrice)
-              : '',
+      externalLeaseAmount: listingPrices.leasePrice == null
+        ? ''
+        : String(listingPrices.leasePrice),
       externalGroundRentRequired:
         selected.externalGroundRentRequired == null
           ? selected.isPublishedToExternalPortal && selected.groundRentPayable != null && selected.groundRentPayable > 0
@@ -374,12 +363,8 @@ export default function EstatePropertyListingsPage() {
   const leaseAmount = listingIsLease && form.externalLeaseAmount
     ? Number(form.externalLeaseAmount)
     : null;
-  const landBankSalePrice =
-    selected?.listingScope === 'demarcation' &&
-    selected.targetSalePrice != null &&
-    selected.targetSalePrice > 0
-      ? selected.targetSalePrice
-      : null;
+  const listingPriceDefaults = selected ? getListingPriceDefaults(selected) : null;
+  const landBankSalePrice = listingPriceDefaults?.landBankPrice ?? null;
 
   const saveListing = async () => {
     if (!selected) return;
@@ -925,6 +910,11 @@ export default function EstatePropertyListingsPage() {
                         {listingIsLease && landBankSalePrice != null ? (
                           <p className="text-xs text-muted-foreground">
                             Land Bank amount: {formatMoney(landBankSalePrice, form.externalListingCurrency || selected.currency)}. This is the default and may be changed for the listing.
+                          </p>
+                        ) : null}
+                        {listingIsLease && listingPriceDefaults?.legacyRecurringLeasePrice && selected.isPublishedToExternalPortal ? (
+                          <p className="text-xs text-amber-700">
+                            Current published amount: {formatMoney(selected.externalListingPrice, form.externalListingCurrency || selected.currency)}. Save this listing to apply the Land Bank full-term amount.
                           </p>
                         ) : null}
                         <p className="text-xs text-muted-foreground">
