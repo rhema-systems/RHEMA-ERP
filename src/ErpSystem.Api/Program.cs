@@ -76,6 +76,27 @@ if (args.Length > 0 && args[0] == "seed")
     return;
 }
 
+// Reconcile reusable Procurement, Inventory, Finance and connected QS UAT actors
+// and master data. Existing passwords and tenant-owned master records are preserved.
+if (args.Length > 0 && args[0] == "seed-operational-uat")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+
+    var tempApp = tempBuilder.Build();
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.OperationalUatBaselineSeeder>()
+            .SeedAsync();
+    }
+
+    Console.WriteLine("Operational UAT baseline seeding completed successfully.");
+    return;
+}
+
 // Create the narrowly scoped, role-separated fixture used by the disposable Civil
 // Engineering browser acceptance harness. The seeder itself refuses non-test DB names.
 if (args.Length > 0 && args[0] == "seed-civil-e2e")
