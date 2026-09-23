@@ -29,6 +29,7 @@ import {
 import { ProcedureCaseWorkspace } from '@/components/procedures/ProcedureCaseWorkspace';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
 import {
@@ -1019,6 +1020,8 @@ export default function FacilitiesProcedureWorkspacePage() {
   const [dutyRosterItems, setDutyRosterItems] = React.useState<
     EstateFacilityDutyRosterItem[]
   >([]);
+  const [dutyRosterDate, setDutyRosterDate] = React.useState(todayInputValue);
+  const [editingDutyId, setEditingDutyId] = React.useState<string | null>(null);
   const [dutyRosterForm, setDutyRosterForm] =
     React.useState<UpsertEstateFacilityDutyRosterRequest>(
       defaultDutyRosterForm()
@@ -1043,7 +1046,7 @@ export default function FacilitiesProcedureWorkspacePage() {
     setDutyRosterError(null);
     try {
       setIsLoadingDutyRoster(true);
-      const items = await estateFacilitiesService.getDutyRoster();
+      const items = await estateFacilitiesService.getDutyRoster(dutyRosterDate);
       setDutyRosterItems(items);
     } catch {
       setDutyRosterError('Unable to load Facilities duty roster.');
@@ -1072,7 +1075,7 @@ export default function FacilitiesProcedureWorkspacePage() {
 
     try {
       setIsSavingDutyRoster(true);
-      const item = await estateFacilitiesService.createDutyRosterItem({
+      const request = {
         ...dutyRosterForm,
         employeeNumber: dutyRosterForm.employeeNumber?.trim() || null,
         propertyReference: dutyRosterForm.propertyReference?.trim() || null,
@@ -1090,36 +1093,74 @@ export default function FacilitiesProcedureWorkspacePage() {
         linkedProcedureCaseReference:
           dutyRosterForm.linkedProcedureCaseReference?.trim() || null,
         notes: dutyRosterForm.notes?.trim() || null,
-      });
-      setDutyRosterItems((current) => [item, ...current]);
+      };
+      if (editingDutyId) {
+        await estateFacilitiesService.updateDutyRosterItem(editingDutyId, request);
+      } else {
+        await estateFacilitiesService.createDutyRosterItem(request);
+      }
+      await loadDutyRoster();
       setDutyRosterForm(defaultDutyRosterForm());
-    } catch {
-      setDutyRosterError('Unable to save Facilities duty roster assignment.');
+      setEditingDutyId(null);
+    } catch (error) {
+      setDutyRosterError(error instanceof Error ? error.message : 'Unable to save Facilities duty roster assignment.');
     } finally {
       setIsSavingDutyRoster(false);
     }
   };
 
-  const markDutyCompleted = async (item: EstateFacilityDutyRosterItem) => {
+  const editDutyRosterItem = (item: EstateFacilityDutyRosterItem) => {
+    setEditingDutyId(item.id);
+    setDutyRosterForm({
+      employeeProfileId: item.employeeProfileId,
+      employeeNumber: item.employeeNumber,
+      staffName: item.staffName,
+      staffType: item.staffType,
+      dutyType: item.dutyType,
+      propertyReference: item.propertyReference,
+      propertyUnit: item.propertyUnit,
+      serviceAreaType: item.serviceAreaType,
+      serviceAreaName: item.serviceAreaName,
+      frequency: item.frequency,
+      dayPattern: item.dayPattern,
+      startDate: item.startDate.slice(0, 10),
+      endDate: item.endDate?.slice(0, 10) || '',
+      shiftStart: item.shiftStart,
+      shiftEnd: item.shiftEnd,
+      supervisorName: item.supervisorName,
+      toolsIssued: item.toolsIssued,
+      suppliesIssued: item.suppliesIssued,
+      checklist: item.checklist,
+      attendanceStatus: item.attendanceStatus,
+      completionStatus: item.completionStatus,
+      qualityStatus: item.qualityStatus,
+      linkedMaintenanceReference: item.linkedMaintenanceReference,
+      linkedComplaintReference: item.linkedComplaintReference,
+      linkedProcedureCaseReference: item.linkedProcedureCaseReference,
+      notes: item.notes,
+    });
+    document.getElementById('duty-staff-name')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const recordDutyAttendance = async (item: EstateFacilityDutyRosterItem, present: boolean) => {
     setDutyRosterError(null);
     try {
       const updated = await estateFacilitiesService.updateDutyAttendance(
         item.id,
         {
-          attendanceStatus: 'Present',
-          completionStatus: 'Completed',
-          qualityStatus: item.qualityStatus || 'Pending inspection',
+          attendanceStatus: present ? 'Present' : 'Absent',
+          completionStatus: present ? 'Completed' : 'Missed',
+          qualityStatus: present ? 'Pending inspection' : 'Not inspected',
           linkedMaintenanceReference: item.linkedMaintenanceReference || null,
           linkedComplaintReference: item.linkedComplaintReference || null,
-          notes:
-            'Marked completed from Facilities Staff & Cleaner Duties workspace.',
+          notes: present ? 'Duty completed.' : 'Staff absent; replacement coverage required.',
         }
       );
       setDutyRosterItems((current) =>
         current.map((row) => (row.id === updated.id ? updated : row))
       );
-    } catch {
-      setDutyRosterError('Unable to update duty attendance.');
+    } catch (error) {
+      setDutyRosterError(error instanceof Error ? error.message : 'Unable to update duty attendance.');
     }
   };
 
@@ -1337,7 +1378,7 @@ export default function FacilitiesProcedureWorkspacePage() {
     }
 
     void loadDutyRoster();
-  }, [entityType]);
+  }, [entityType, dutyRosterDate]);
 
   if (isLoading) {
     return (
@@ -1828,14 +1869,14 @@ export default function FacilitiesProcedureWorkspacePage() {
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="duty-frequency">Frequency</Label>
-                  <Input
-                    id="duty-frequency"
-                    value={dutyRosterForm.frequency}
-                    onChange={(event) =>
-                      updateDutyRosterForm('frequency', event.target.value)
-                    }
-                    placeholder="Daily, weekly, one-off"
-                  />
+                  <Select value={dutyRosterForm.frequency} onValueChange={(value) => updateDutyRosterForm('frequency', value)}>
+                    <SelectTrigger id="duty-frequency"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Daily">Daily</SelectItem>
+                      <SelectItem value="Weekly">Weekly</SelectItem>
+                      <SelectItem value="One-off">One-off</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="duty-day-pattern">Day pattern</Label>
@@ -1858,6 +1899,10 @@ export default function FacilitiesProcedureWorkspacePage() {
                       updateDutyRosterForm('startDate', event.target.value)
                     }
                   />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="duty-end-date">End date</Label>
+                  <Input id="duty-end-date" type="date" value={dutyRosterForm.endDate || ''} onChange={(event) => updateDutyRosterForm('endDate', event.target.value)} />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="duty-shift-start">Shift start</Label>
@@ -1944,8 +1989,9 @@ export default function FacilitiesProcedureWorkspacePage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2 md:col-span-2 xl:col-span-4">
                   <Button type="submit" disabled={isSavingDutyRoster}>
-                    {isSavingDutyRoster ? 'Saving duty...' : 'Add duty roster'}
+                    {isSavingDutyRoster ? 'Saving duty...' : editingDutyId ? 'Save duty' : 'Add duty roster'}
                   </Button>
+                  {editingDutyId ? <Button type="button" variant="outline" onClick={() => { setEditingDutyId(null); setDutyRosterForm(defaultDutyRosterForm()); }}>Cancel edit</Button> : null}
                   <Button
                     type="button"
                     variant="outline"
@@ -1964,12 +2010,16 @@ export default function FacilitiesProcedureWorkspacePage() {
             <div className="rounded-md border border-border bg-background p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <div className="font-medium">Active roster assignments</div>
+                  <div className="font-medium">Cleaner timetable</div>
                   <p className="text-sm text-muted-foreground">
                     {isLoadingDutyRoster
                       ? 'Loading roster...'
                       : `${dutyRosterItems.length} duty assignment(s)`}
                   </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="duty-roster-date">Date</Label>
+                  <Input id="duty-roster-date" type="date" className="w-40" value={dutyRosterDate} onChange={(event) => setDutyRosterDate(event.target.value)} />
                 </div>
               </div>
               {dutyRosterItems.length === 0 && !isLoadingDutyRoster ? (
@@ -2011,6 +2061,7 @@ export default function FacilitiesProcedureWorkspacePage() {
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => editDutyRosterItem(item)}>Edit schedule</Button>
                         {item.linkedMaintenanceReference ? (
                           <Badge variant="outline">
                             Maintenance: {item.linkedMaintenanceReference}
@@ -2025,10 +2076,19 @@ export default function FacilitiesProcedureWorkspacePage() {
                           type="button"
                           size="sm"
                           variant="outline"
-                          onClick={() => void markDutyCompleted(item)}
-                          disabled={item.completionStatus === 'Completed'}
+                          onClick={() => void recordDutyAttendance(item, true)}
+                          disabled={dutyRosterDate !== todayInputValue() || item.completionStatus === 'Completed'}
                         >
                           Mark present / completed
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void recordDutyAttendance(item, false)}
+                          disabled={dutyRosterDate !== todayInputValue() || item.attendanceStatus === 'Absent'}
+                        >
+                          Mark absent
                         </Button>
                       </div>
                     </div>

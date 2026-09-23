@@ -953,6 +953,8 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         updateOccupancy.Should().Contain("Occupancy released on");
         updateOccupancy.Should().Contain("asset.CustomerBusinessPartnerId = null;");
         updateOccupancy.Should().Contain("asset.PropertyFileReference = null;");
+        updateOccupancy.Should().Contain("groundRentAccount.Status = \"Closed\";");
+        updateOccupancy.Should().Contain("Closed after occupancy release on");
     }
 
     [Fact]
@@ -1048,7 +1050,11 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         completion.Should().Contain("invoice.Status, \"Paid\"");
         completion.Should().Contain("legalConveyanceStatus");
         completion.Should().Contain("\"Completed by Legal\"");
+        completion.Should().Contain("item.EntityType == \"LegalTransfer\"");
+        completion.Should().Contain("item.Status == \"Completed\"");
         completion.Should().Contain("asset.Status = EstateManagedAssetStatus.Sold;");
+        completion.Should().Contain("asset.OwnershipHistoryJson = JsonSerializer.Serialize(ownerHistory);");
+        completion.Should().Contain("This property is already sold to another customer.");
         completion.Should().Contain("asset.IsPublishedToExternalPortal = false;");
         completion.Should().Contain("estate.property.sale-completed");
 

@@ -2,14 +2,27 @@
 
 import Link from 'next/link';
 import React from 'react';
-import { ClipboardList, Eye, Loader2, Send, Wrench } from 'lucide-react';
+import { Eye, Loader2, Plus, Send } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   Select,
   SelectContent,
@@ -66,7 +79,11 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
   maintenance: [
     { key: 'issueType', label: 'Maintenance issue type' },
     { key: 'preferredVisitDate', label: 'Preferred visit date', type: 'date' },
-    { key: 'accessInstructions', label: 'Access instructions', type: 'textarea' },
+    {
+      key: 'accessInstructions',
+      label: 'Access instructions',
+      type: 'textarea',
+    },
   ],
   complaint: [
     { key: 'complaintCategory', label: 'Complaint category' },
@@ -88,7 +105,14 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
       key: 'documentToCertify',
       label: 'Document to certify',
       type: 'select',
-      options: ['Offer Letter', 'Right of Entry', 'Lease', 'Rent Card', 'Allocation Letter', 'Other'],
+      options: [
+        'Offer Letter',
+        'Right of Entry',
+        'Lease',
+        'Rent Card',
+        'Allocation Letter',
+        'Other',
+      ],
     },
     { key: 'originalDocumentReference', label: 'Original document reference' },
     { key: 'certificationFeeReceipt', label: 'Certification fee receipt' },
@@ -103,19 +127,50 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
       key: 'transferProcessType',
       label: 'Transfer process type',
       type: 'select',
-      options: ['Transfer of interest', 'Portion transfer', 'Assignment', 'Rental transfer', 'Rental-to-HOS conversion'],
+      options: [
+        'Transfer of interest',
+        'Portion transfer',
+        'Assignment',
+        'Rental transfer',
+        'Rental-to-HOS conversion',
+      ],
     },
     { key: 'housePlotShopNumber', label: 'House / plot / shop number' },
     { key: 'transferorName', label: 'Transferor' },
     { key: 'transfereeName', label: 'Transferee' },
-    { key: 'newLesseeAddress', label: 'New lessee / transferee address', type: 'textarea' },
-    { key: 'transferEffectiveDate', label: 'Transfer effective date', type: 'date' },
-    { key: 'transferDeclarationReference', label: 'Transfer Declaration form reference' },
-    { key: 'voluntaryVacationReference', label: 'Voluntary vacation evidence reference' },
-    { key: 'hosFormReference', label: 'HOS form reference, if rental changes to HOS' },
+    {
+      key: 'newLesseeAddress',
+      label: 'New lessee / transferee address',
+      type: 'textarea',
+    },
+    {
+      key: 'transferEffectiveDate',
+      label: 'Transfer effective date',
+      type: 'date',
+    },
+    {
+      key: 'transferDeclarationReference',
+      label: 'Transfer Declaration form reference',
+    },
+    {
+      key: 'voluntaryVacationReference',
+      label: 'Voluntary vacation evidence reference',
+    },
+    {
+      key: 'hosFormReference',
+      label: 'HOS form reference, if rental changes to HOS',
+    },
     { key: 'houseType', label: 'House type, if HOS applies' },
-    { key: 'purchaseAmount', label: 'Purchase amount / amount bought', type: 'number' },
-    { key: 'considerationAmount', label: 'Consideration amount', type: 'number' },
+    {
+      key: 'purchaseAmount',
+      label: 'Purchase amount / amount bought',
+      type: 'number',
+    },
+    {
+      key: 'considerationAmount',
+      label: 'Consideration amount',
+      type: 'number',
+    },
   ],
   assignment: [
     { key: 'transferorName', label: 'Assignor' },
@@ -137,23 +192,50 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
       key: 'developmentStatus',
       label: 'Development status',
       type: 'select',
-      options: ['Undeveloped', 'Partially developed', 'Substantially developed', 'Completed'],
+      options: [
+        'Undeveloped',
+        'Partially developed',
+        'Substantially developed',
+        'Completed',
+      ],
     },
     { key: 'buildingPermitReference', label: 'Building permit reference' },
     { key: 'dateOfTenancy', label: 'Date of tenancy', type: 'date' },
   ],
   additionalLand: [
     { key: 'adjoiningPlotNumber', label: 'Adjoining plot number' },
-    { key: 'additionalLandSizeAcres', label: 'Additional land size (acres)', type: 'number' },
-    { key: 'recommendation', label: 'Reason for additional land', type: 'textarea' },
+    {
+      key: 'additionalLandSizeAcres',
+      label: 'Additional land size (acres)',
+      type: 'number',
+    },
+    {
+      key: 'recommendation',
+      label: 'Reason for additional land',
+      type: 'textarea',
+    },
   ],
   changeOfUse: [
-    { key: 'existingUse', label: 'Existing use', type: 'select', options: landUseOptions },
-    { key: 'newUse', label: 'Proposed use', type: 'select', options: landUseOptions },
+    {
+      key: 'existingUse',
+      label: 'Existing use',
+      type: 'select',
+      options: landUseOptions,
+    },
+    {
+      key: 'newUse',
+      label: 'Proposed use',
+      type: 'select',
+      options: landUseOptions,
+    },
     { key: 'plotSizeAcres', label: 'Plot size (acres)', type: 'number' },
   ],
   leaseRenewal: [
-    { key: 'existingLeaseExpiryDate', label: 'Existing lease expiry date', type: 'date' },
+    {
+      key: 'existingLeaseExpiryDate',
+      label: 'Existing lease expiry date',
+      type: 'date',
+    },
     { key: 'yearsToExpiry', label: 'Years to expiry', type: 'number' },
     {
       key: 'surrenderOptionStatus',
@@ -164,16 +246,39 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
     { key: 'developmentStatus', label: 'Development proposal / status' },
   ],
   landApplication: [
-    { key: 'landUse', label: 'Intended land use', type: 'select', options: landUseOptions },
-    { key: 'plotSizeAcres', label: 'Preferred plot size (acres)', type: 'number' },
-    { key: 'approvedFeeScheduleReference', label: 'Known approved fee / appendix reference, if any' },
+    {
+      key: 'landUse',
+      label: 'Intended land use',
+      type: 'select',
+      options: landUseOptions,
+    },
+    {
+      key: 'plotSizeAcres',
+      label: 'Preferred plot size (acres)',
+      type: 'number',
+    },
+    {
+      key: 'approvedFeeScheduleReference',
+      label: 'Known approved fee / appendix reference, if any',
+    },
   ],
   traditionalLand: [
-    { key: 'landUse', label: 'Land use', type: 'select', options: landUseOptions },
+    {
+      key: 'landUse',
+      label: 'Land use',
+      type: 'select',
+      options: landUseOptions,
+    },
     { key: 'plotSizeAcres', label: 'Plot size (acres)', type: 'number' },
     { key: 'traditionalCouncil', label: 'Traditional Council / Stool' },
-    { key: 'allocationLetterReference', label: 'Traditional Council allocation letter reference' },
-    { key: 'sitePlanReference', label: 'Traditional Council site plan reference' },
+    {
+      key: 'allocationLetterReference',
+      label: 'Traditional Council allocation letter reference',
+    },
+    {
+      key: 'sitePlanReference',
+      label: 'Traditional Council site plan reference',
+    },
   ],
   tenancyRecognition: [
     { key: 'declarationReference', label: 'Statutory declaration reference' },
@@ -182,10 +287,18 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
   ],
   hosConversion: [
     { key: 'hosFormReference', label: 'House Ownership Scheme form reference' },
-    { key: 'tenantNamesChangingToHos', label: 'Tenant names changing to HOS', type: 'textarea' },
+    {
+      key: 'tenantNamesChangingToHos',
+      label: 'Tenant names changing to HOS',
+      type: 'textarea',
+    },
     { key: 'houseType', label: 'House type' },
     { key: 'sellingPrice', label: 'Selling price', type: 'number' },
-    { key: 'purchaseAmount', label: 'Purchase amount / amount bought', type: 'number' },
+    {
+      key: 'purchaseAmount',
+      label: 'Purchase amount / amount bought',
+      type: 'number',
+    },
     { key: 'purchaseDate', label: 'Date property was purchased', type: 'date' },
     { key: 'dateOfTenancy', label: 'Date of tenancy', type: 'date' },
     { key: 'rentCardNumber', label: 'Rent card number' },
@@ -199,14 +312,20 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
       options: ['Direct approach', 'Indirect approach'],
     },
     { key: 'plotSizeAcres', label: 'Plot size (acres)', type: 'number' },
-    { key: 'communityRegularised', label: 'Community / area being regularised' },
+    {
+      key: 'communityRegularised',
+      label: 'Community / area being regularised',
+    },
     { key: 'planLayoutStatus', label: 'Planning layout status' },
   ],
   rightOfEntry: [
     { key: 'allocationReference', label: 'Allocation reference' },
     { key: 'offerLetterReference', label: 'Offer Letter reference' },
     { key: 'acceptanceDate', label: 'Acceptance date', type: 'date' },
-    { key: 'paymentConfirmationReference', label: 'Payment confirmation reference' },
+    {
+      key: 'paymentConfirmationReference',
+      label: 'Payment confirmation reference',
+    },
   ],
 };
 
@@ -223,12 +342,14 @@ const initialForm = {
   additionalValues: {},
 } satisfies EstateServiceFormState;
 
-const REQUEST_PAGE_SIZE = 5;
+const REQUEST_PAGE_SIZE = 10;
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not recorded';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleDateString();
+  return Number.isNaN(date.getTime())
+    ? 'Not recorded'
+    : date.toLocaleDateString();
 }
 
 function propertyReference(
@@ -255,19 +376,22 @@ export default function ExternalEstateServicesPage() {
   const [requestTypes, setRequestTypes] = React.useState<
     ExternalEstateRequestType[]
   >([]);
-  const [requests, setRequests] = React.useState<ExternalEstateServiceRequest[]>(
-    []
-  );
+  const [requests, setRequests] = React.useState<
+    ExternalEstateServiceRequest[]
+  >([]);
   const [requestPage, setRequestPage] = React.useState(1);
   const [requestTotalCount, setRequestTotalCount] = React.useState(0);
   const [isRequestPageLoading, setIsRequestPageLoading] = React.useState(false);
   const [properties, setProperties] = React.useState<
     ExternalPropertyPortfolio['properties']
   >([]);
-  const [customers, setCustomers] = React.useState<ExternalCustomerProfile[]>([]);
+  const [customers, setCustomers] = React.useState<ExternalCustomerProfile[]>(
+    []
+  );
   const [form, setForm] = React.useState<EstateServiceFormState>(initialForm);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isCreateOpen, setIsCreateOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const selectedType = React.useMemo(
@@ -296,11 +420,12 @@ export default function ExternalEstateServicesPage() {
     async (pageNumber: number) => {
       setIsRequestPageLoading(true);
       try {
-        const pageResult = await externalEstateServicesService.getMyRequestsPage({
-          page: pageNumber,
-          pageSize: REQUEST_PAGE_SIZE,
-          source: 'estateServices',
-        });
+        const pageResult =
+          await externalEstateServicesService.getMyRequestsPage({
+            page: pageNumber,
+            pageSize: REQUEST_PAGE_SIZE,
+            source: 'estateServices',
+          });
         applyRequestsPage(pageResult);
       } finally {
         setIsRequestPageLoading(false);
@@ -327,7 +452,8 @@ export default function ExternalEstateServicesPage() {
     const selectedCustomer =
       (selectedProperty?.customerBusinessPartnerId
         ? customerProfiles.find(
-            (customer) => customer.id === selectedProperty.customerBusinessPartnerId
+            (customer) =>
+              customer.id === selectedProperty.customerBusinessPartnerId
           )
         : undefined) ??
       (customerProfiles.length === 1 ? customerProfiles[0] : undefined);
@@ -338,7 +464,8 @@ export default function ExternalEstateServicesPage() {
     setForm((current) => ({
       ...current,
       requestType: current.requestType || types[0]?.code || '',
-      applicantName: current.applicantName || selectedCustomer?.partnerName || '',
+      applicantName:
+        current.applicantName || selectedCustomer?.partnerName || '',
       contact: current.contact || customerContact(selectedCustomer),
       propertyReference:
         current.propertyReference ||
@@ -395,20 +522,22 @@ export default function ExternalEstateServicesPage() {
     const selectedProperty = properties.find(
       (property) => propertyReference(property) === value
     );
-    const selectedCustomer =
-      selectedProperty?.customerBusinessPartnerId
-        ? customers.find(
-            (customer) => customer.id === selectedProperty.customerBusinessPartnerId
-          )
-        : customers.length === 1
-          ? customers[0]
-          : undefined;
+    const selectedCustomer = selectedProperty?.customerBusinessPartnerId
+      ? customers.find(
+          (customer) =>
+            customer.id === selectedProperty.customerBusinessPartnerId
+        )
+      : customers.length === 1
+        ? customers[0]
+        : undefined;
     setForm((current) => ({
       ...current,
       applicantName: selectedCustomer?.partnerName || current.applicantName,
       contact: customerContact(selectedCustomer) || current.contact,
       propertyReference: value,
-      location: selectedProperty ? propertyLocation(selectedProperty) : current.location,
+      location: selectedProperty
+        ? propertyLocation(selectedProperty)
+        : current.location,
     }));
   };
 
@@ -477,7 +606,9 @@ export default function ExternalEstateServicesPage() {
           }
           step={field.type === 'number' ? '0.01' : undefined}
           value={value}
-          onChange={(event) => updateAdditionalValue(field.key, event.target.value)}
+          onChange={(event) =>
+            updateAdditionalValue(field.key, event.target.value)
+          }
         />
       </div>
     );
@@ -519,7 +650,9 @@ export default function ExternalEstateServicesPage() {
         description: form.description.trim(),
         additionalValues,
       });
-      toast.success(`Request ${created.referenceNumber || created.title} submitted.`);
+      toast.success(
+        `Request ${created.referenceNumber || created.title} submitted.`
+      );
       try {
         await loadRequestsPage(1);
       } catch {
@@ -535,6 +668,7 @@ export default function ExternalEstateServicesPage() {
         propertyReference: current.propertyReference,
         location: current.location,
       }));
+      setIsCreateOpen(false);
     } catch {
       toast.error('Could not submit the Estate service request.');
     } finally {
@@ -568,16 +702,26 @@ export default function ExternalEstateServicesPage() {
             Estate Services
           </h1>
         </div>
-        {isLoading ? (
+        <div className="flex items-center gap-3">
           <Badge variant="outline" className="w-fit">
-            <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-            Loading
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                Loading
+              </>
+            ) : (
+              `${requestTotalCount} request${requestTotalCount === 1 ? '' : 's'}`
+            )}
           </Badge>
-        ) : (
-          <Badge variant="outline" className="w-fit">
-            {requestTotalCount} request{requestTotalCount === 1 ? '' : 's'}
-          </Badge>
-        )}
+          <Button
+            type="button"
+            disabled={isLoading}
+            onClick={() => setIsCreateOpen(true)}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add New
+          </Button>
+        </div>
       </div>
 
       {error ? (
@@ -585,254 +729,269 @@ export default function ExternalEstateServicesPage() {
           {error}
         </div>
       ) : null}
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Wrench className="h-5 w-5 text-blue-600" />
-              New Request
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form className="space-y-4" onSubmit={submitRequest}>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Request type</Label>
-                  <Select
-                    value={form.requestType}
-                    onValueChange={updateRequestType}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select request type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {requestTypes.map((type) => (
-                        <SelectItem key={type.code} value={type.code}>
-                          {type.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Category</Label>
-                  <Input
-                    value={form.category}
-                    placeholder={selectedType?.category || 'Category'}
-                    onChange={(event) => updateForm('category', event.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Name</Label>
-                  <Input
-                    value={form.applicantName}
-                    readOnly
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Contact</Label>
-                  <Input
-                    value={form.contact}
-                    readOnly
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Property / unit / plot</Label>
-                  {properties.length > 0 ? (
-                    <Select
-                      value={form.propertyReference || undefined}
-                      onValueChange={updatePropertyReference}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select your property" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {properties.map((property) => {
-                          const reference = propertyReference(property);
-                          return (
-                            <SelectItem key={property.id} value={reference}>
-                              {reference} · {property.name}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      value={form.propertyReference}
-                      onChange={(event) =>
-                        updateForm('propertyReference', event.target.value)
-                      }
-                    />
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label>Location</Label>
-                  <Input
-                    value={form.location}
-                    readOnly
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Urgency</Label>
-                  <Select
-                    value={form.priority}
-                    onValueChange={(value) => updateForm('priority', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {['Low', 'Normal', 'High', 'Urgent'].map((priority) => (
-                        <SelectItem key={priority} value={priority}>
-                          {priority}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              {extraFields.length > 0 ? (
-                <div className="grid gap-4 md:grid-cols-2">
-                  {extraFields.map((field) => renderExtraField(field))}
-                </div>
-              ) : null}
+      <Dialog
+        open={isCreateOpen}
+        onOpenChange={(open) => !isSaving && setIsCreateOpen(open)}
+      >
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>New Estate Service Request</DialogTitle>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={submitRequest}>
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Service impact</Label>
+                <Label>Request type</Label>
                 <Select
-                  value={form.serviceImpact}
-                  onValueChange={(value) => updateForm('serviceImpact', value)}
+                  value={form.requestType}
+                  onValueChange={updateRequestType}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="Select request type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {[
-                      'No service impact',
-                      'Tenant affected',
-                      'Common area affected',
-                      'Safety risk',
-                      'Access restricted',
-                      'Utility outage',
-                      'Unit block required',
-                    ].map((impact) => (
-                      <SelectItem key={impact} value={impact}>
-                        {impact}
+                    {requestTypes.map((type) => (
+                      <SelectItem key={type.code} value={type.code}>
+                        {type.title}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  className="min-h-[140px]"
-                  value={form.description}
+                <Label>Category</Label>
+                <Input
+                  value={form.category}
+                  placeholder={selectedType?.category || 'Category'}
                   onChange={(event) =>
-                    updateForm('description', event.target.value)
+                    updateForm('category', event.target.value)
                   }
                 />
               </div>
-              <Button className="w-full gap-2" disabled={isSaving}>
-                {isSaving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+              <div className="space-y-2">
+                <Label>Name</Label>
+                <Input value={form.applicantName} readOnly />
+              </div>
+              <div className="space-y-2">
+                <Label>Contact</Label>
+                <Input value={form.contact} readOnly />
+              </div>
+              <div className="space-y-2">
+                <Label>Property / unit / plot</Label>
+                {properties.length > 0 ? (
+                  <Select
+                    value={form.propertyReference || undefined}
+                    onValueChange={updatePropertyReference}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select your property" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {properties.map((property) => {
+                        const reference = propertyReference(property);
+                        return (
+                          <SelectItem key={property.id} value={reference}>
+                            {reference} · {property.name}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
                 ) : (
-                  <Send className="h-4 w-4" />
+                  <Input
+                    value={form.propertyReference}
+                    onChange={(event) =>
+                      updateForm('propertyReference', event.target.value)
+                    }
+                  />
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Location</Label>
+                <Input value={form.location} readOnly />
+              </div>
+              <div className="space-y-2">
+                <Label>Urgency</Label>
+                <Select
+                  value={form.priority}
+                  onValueChange={(value) => updateForm('priority', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {['Low', 'Normal', 'High', 'Urgent'].map((priority) => (
+                      <SelectItem key={priority} value={priority}>
+                        {priority}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {extraFields.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {extraFields.map((field) => renderExtraField(field))}
+              </div>
+            ) : null}
+            <div className="space-y-2">
+              <Label>Service impact</Label>
+              <Select
+                value={form.serviceImpact}
+                onValueChange={(value) => updateForm('serviceImpact', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[
+                    'No service impact',
+                    'Tenant affected',
+                    'Common area affected',
+                    'Safety risk',
+                    'Access restricted',
+                    'Utility outage',
+                    'Unit block required',
+                  ].map((impact) => (
+                    <SelectItem key={impact} value={impact}>
+                      {impact}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                className="min-h-[140px]"
+                value={form.description}
+                onChange={(event) =>
+                  updateForm('description', event.target.value)
+                }
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSaving}
+                onClick={() => setIsCreateOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSaving}>
+                {isSaving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="mr-2 h-4 w-4" />
                 )}
                 Submit request
               </Button>
-            </form>
-          </CardContent>
-        </Card>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ClipboardList className="h-5 w-5 text-blue-600" />
-              My Requests
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {requests.length === 0 && !isLoading ? (
-              <div className="rounded-md border border-dashed p-6 text-center text-sm text-slate-500">
-                No Estate service requests submitted yet.
-              </div>
-            ) : null}
-            {isRequestPageLoading ? (
-              <div className="rounded-md border border-dashed p-4 text-center text-sm text-slate-500">
-                <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-                Loading requests
-              </div>
-            ) : null}
-            {requests.map((request) => (
-              <div
-                key={request.id}
-                className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm text-slate-100 shadow-sm"
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold text-slate-900">My Requests</h2>
+        <div className="overflow-x-auto rounded-md border">
+          <Table className="min-w-[840px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Reference</TableHead>
+                <TableHead>Service</TableHead>
+                <TableHead>Property / unit / plot</TableHead>
+                <TableHead>Current stage</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Submitted</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading || isRequestPageLoading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="py-10 text-center text-slate-500"
+                  >
+                    <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                    Loading requests
+                  </TableCell>
+                </TableRow>
+              ) : requests.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="py-10 text-center text-slate-500"
+                  >
+                    No Estate service requests submitted yet.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                requests.map((request) => (
+                  <TableRow key={request.id}>
+                    <TableCell className="font-medium">
+                      {request.referenceNumber || 'Pending'}
+                    </TableCell>
+                    <TableCell>{request.title}</TableCell>
+                    <TableCell>
+                      {request.fieldValues?.propertyReference || 'Not recorded'}
+                    </TableCell>
+                    <TableCell>
+                      <div>{request.currentStageName || 'Not started'}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {request.currentAssignedRole || 'Awaiting assignment'}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{request.status}</Badge>
+                    </TableCell>
+                    <TableCell>{formatDate(request.createdAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild type="button" size="sm" variant="outline">
+                        <Link
+                          href={`/external-portal/estate-services/${request.id}`}
+                        >
+                          <Eye className="mr-2 h-4 w-4" />
+                          Open
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        {requestTotalCount > REQUEST_PAGE_SIZE ? (
+          <div className="flex items-center justify-between text-xs text-slate-600">
+            <span>
+              Page {requestPage} of {totalRequestPages}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={requestPage <= 1 || isRequestPageLoading}
+                onClick={() => void changeRequestPage(requestPage - 1)}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="font-medium text-white">
-                      {request.referenceNumber || request.title}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-300">
-                      {request.title}
-                    </div>
-                  </div>
-                  <Badge variant="secondary">{request.status}</Badge>
-                </div>
-                <div className="mt-3 grid gap-2 text-xs text-slate-300">
-                  <div>{request.currentStageName}</div>
-                  <div>{request.currentAssignedRole || 'Awaiting assignment'}</div>
-                  <div>{formatDate(request.createdAt)}</div>
-                </div>
-                <div className="mt-4 flex justify-end border-t border-slate-800 pt-3">
-                  <Button
-                    asChild
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="border-slate-500 bg-slate-900 text-white hover:bg-slate-800 hover:text-white"
-                  >
-                    <Link href={`/external-portal/estate-services/${request.id}`}>
-                      <Eye className="mr-2 h-4 w-4" />
-                      Open
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {requestTotalCount > REQUEST_PAGE_SIZE ? (
-              <div className="flex items-center justify-between border-t pt-3 text-xs text-slate-600">
-                <span>
-                  Page {requestPage} of {totalRequestPages}
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={requestPage <= 1 || isRequestPageLoading}
-                    onClick={() => void changeRequestPage(requestPage - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={
-                      requestPage >= totalRequestPages || isRequestPageLoading
-                    }
-                    onClick={() => void changeRequestPage(requestPage + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-      </div>
+                Previous
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={
+                  requestPage >= totalRequestPages || isRequestPageLoading
+                }
+                onClick={() => void changeRequestPage(requestPage + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

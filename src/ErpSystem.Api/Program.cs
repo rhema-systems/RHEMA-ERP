@@ -604,6 +604,13 @@ if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true))
     builder.Services.RemoveAll<IHostedService>();
 }
 
+// Run Estate billing in the local launch profile without enabling every unrelated scheduler.
+if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true)
+    && builder.Configuration.GetValue("EstateRecurringBilling:Enabled", false))
+{
+    builder.Services.AddHostedService<ErpSystem.Api.Services.Estate.EstateRecurringBillingBackgroundService>();
+}
+
 // Add Award Letter Service for PDF award letter generation
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();
 

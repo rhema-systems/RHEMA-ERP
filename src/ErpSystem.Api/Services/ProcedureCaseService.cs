@@ -246,6 +246,22 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         {
             EnsureCanCreateProcedureCase(module);
         }
+        if (module == "Legal" && request.FieldValues is { } legalFields)
+        {
+            if (legalFields.TryGetValue("estateManagedAssetId", out var assetValue)
+                && !string.IsNullOrWhiteSpace(assetValue)
+                && (!Guid.TryParse(assetValue, out var assetId)
+                    || !await _db.EstateManagedAssets.AnyAsync(item => item.Id == assetId
+                        && item.TenantId == tenantId && !item.IsDeleted)))
+                throw new InvalidOperationException("Select an existing property for this Legal matter.");
+            if (legalFields.TryGetValue("customerBusinessPartnerId", out var customerValue)
+                && !string.IsNullOrWhiteSpace(customerValue)
+                && (!Guid.TryParse(customerValue, out var customerId)
+                    || !await _db.BusinessPartners.AnyAsync(item => item.Id == customerId
+                        && item.TenantId == tenantId && !item.IsDeleted && item.IsActive
+                        && (item.PartnerType == "Customer" || item.PartnerType == "Both"))))
+                throw new InvalidOperationException("Select an active customer for this Legal matter.");
+        }
         var workspace = await BuildWorkspaceSeedAsync(module, entityType);
         var firstStage = workspace.Stages.FirstOrDefault() ?? new StageSeed(0, "Open", null, null, null, []);
         var organizationScope = await ResolveProcedureOrganizationScopeAsync(
@@ -544,7 +560,27 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var sourceReference = FirstNonBlank(sourceCase.ReferenceNumber, FieldValue(sourceCase, "applicationReference"), sourceCase.Id.ToString())!;
         var propertyReference = FirstNonBlank(FieldValue(sourceCase, "propertyUnit"), FieldValue(sourceCase, "listingReference"));
+        var listingReference = FieldValue(sourceCase, "listingReference");
         var applicant = FirstNonBlank(FieldValue(sourceCase, "customerName"), sourceCase.ApplicantName);
+        Guid? linkedAssetId = null;
+        if (!string.IsNullOrWhiteSpace(listingReference) || !string.IsNullOrWhiteSpace(propertyReference))
+        {
+            linkedAssetId = await _db.EstateManagedAssets.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && ((listingReference != null && item.AssetCode == listingReference)
+                        || (propertyReference != null
+                            && (item.AssetCode == propertyReference || item.ProjectUnitCode == propertyReference))))
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync();
+        }
+        var linkedCustomerId = Guid.TryParse(FieldValue(sourceCase, "sourceReference"), out var sourceCustomerId)
+            ? await _db.BusinessPartners.AsNoTracking()
+                .Where(item => item.Id == sourceCustomerId && item.TenantId == tenantId
+                    && !item.IsDeleted && item.IsActive
+                    && (item.PartnerType == "Customer" || item.PartnerType == "Both"))
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync()
+            : null;
         var legalReference = $"LEG-{DateTime.UtcNow:yyyy}-{Guid.NewGuid():N}"[..17].ToUpperInvariant();
         var legalCase = await CreateCaseCoreAsync(new CreateProcedureCaseRequest(
             "Legal",
@@ -567,6 +603,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 ["sourceDepartment"] = "Property Management",
                 ["propertyFileReference"] = FirstNonBlank(FieldValue(sourceCase, "finalSignedAgreementReference"), FieldValue(sourceCase, "generatedAgreementReference"), sourceReference),
                 ["propertyNumber"] = propertyReference,
+                ["estateManagedAssetId"] = linkedAssetId?.ToString(),
+                ["customerBusinessPartnerId"] = linkedCustomerId?.ToString(),
                 ["applicantName"] = applicant,
                 ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 ["instrumentType"] = matter.Purpose == "ConveyanceRegistration" && IsLeaseListingApplication(sourceCase)

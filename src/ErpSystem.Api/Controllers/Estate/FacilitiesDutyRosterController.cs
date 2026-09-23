@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Estate;
+using System.Globalization;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
@@ -46,19 +47,22 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             query = query.Where(item => item.StartDate <= to.Value.Date);
         }
 
-        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(item => item.CompletionStatus == status || item.AttendanceStatus == status);
-        }
-
         var items = await query
             .OrderBy(item => item.StartDate)
             .ThenBy(item => item.ShiftStart)
             .ThenBy(item => item.ServiceAreaName)
-            .Select(item => ToDto(item))
             .ToListAsync(cancellationToken);
 
-        return Ok(new { success = true, data = items });
+        var date = from?.Date == to?.Date && from.HasValue ? from.Value.Date : (DateTime?)null;
+        var roster = items
+            .Where(item => !date.HasValue || IsScheduledOn(item, date.Value))
+            .Select(item => ToDto(item, date))
+            .Where(item => string.IsNullOrWhiteSpace(status) || string.Equals(status, "all", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.CompletionStatus, status, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.AttendanceStatus, status, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return Ok(new { success = true, data = roster });
     }
 
     [HttpPost]
@@ -146,6 +150,8 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
+        if (!IsScheduledOn(item, now.Date))
+            return BadRequest(new { success = false, message = "This staff duty is not scheduled for today." });
         item.AttendanceStatus = TrimOrDefault(request.AttendanceStatus, "Present");
         item.CompletionStatus = TrimOrDefault(request.CompletionStatus, "Completed");
         item.QualityStatus = TrimOrDefault(request.QualityStatus, "Pending inspection");
@@ -223,7 +229,7 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         }
     }
 
-    private static string? ValidateRequest(UpsertEstateFacilityDutyRosterDto request)
+    internal static string? ValidateRequest(UpsertEstateFacilityDutyRosterDto request)
     {
         if (string.IsNullOrWhiteSpace(request.StaffName))
         {
@@ -240,10 +246,52 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             return "End date cannot be before start date.";
         }
 
+        if (!new[] { "Daily", "Weekly", "One-off" }.Contains(request.Frequency, StringComparer.OrdinalIgnoreCase))
+            return "Frequency must be Daily, Weekly, or One-off.";
+        if (!TimeOnly.TryParseExact(request.ShiftStart, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start)
+            || !TimeOnly.TryParseExact(request.ShiftEnd, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var end)
+            || end <= start)
+            return "Enter a valid shift with an end time after the start time.";
+        if (request.Frequency.Equals("Weekly", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(request.DayPattern))
+            return "Select the scheduled day or days for a weekly duty.";
+        if (!string.IsNullOrWhiteSpace(request.DayPattern) && !TryParseDays(request.DayPattern, out _))
+            return "Use day names such as Mon-Fri or Mon, Wed, Fri.";
+
         return null;
     }
 
-    private static EstateFacilityDutyRosterDto ToDto(EstateFacilityDutyRoster item) =>
+    internal static bool IsScheduledOn(EstateFacilityDutyRoster item, DateTime date)
+    {
+        if (date.Date < item.StartDate.Date || item.EndDate is { } end && date.Date > end.Date)
+            return false;
+        if (item.Frequency.Equals("One-off", StringComparison.OrdinalIgnoreCase))
+            return date.Date == item.StartDate.Date;
+        if (string.IsNullOrWhiteSpace(item.DayPattern))
+            return !item.Frequency.Equals("Weekly", StringComparison.OrdinalIgnoreCase)
+                || date.DayOfWeek == item.StartDate.DayOfWeek;
+        return TryParseDays(item.DayPattern, out var days) && days.Contains(date.DayOfWeek);
+    }
+
+    private static bool TryParseDays(string pattern, out HashSet<DayOfWeek> days)
+    {
+        days = [];
+        var labels = new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+        foreach (var part in pattern.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var range = part.Split('-', StringSplitOptions.TrimEntries);
+            if (range.Length is < 1 or > 2) return false;
+            var first = Array.FindIndex(labels, label => label.Equals(range[0], StringComparison.OrdinalIgnoreCase));
+            var last = range.Length == 2
+                ? Array.FindIndex(labels, label => label.Equals(range[1], StringComparison.OrdinalIgnoreCase))
+                : first;
+            if (first < 0 || last < first) return false;
+            for (var day = first; day <= last; day++) days.Add((DayOfWeek)day);
+        }
+        return days.Count > 0;
+    }
+
+    private static EstateFacilityDutyRosterDto ToDto(EstateFacilityDutyRoster item, DateTime? date = null) =>
         new(
             item.Id,
             item.RosterReference,
@@ -266,9 +314,12 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             item.ToolsIssued,
             item.SuppliesIssued,
             item.Checklist,
-            item.AttendanceStatus,
-            item.CompletionStatus,
-            item.QualityStatus,
+            item.LastAttendanceAt?.Date == (date ?? DateTime.UtcNow.Date) || item.Frequency == "One-off"
+                ? item.AttendanceStatus : "Pending",
+            item.LastAttendanceAt?.Date == (date ?? DateTime.UtcNow.Date) || item.Frequency == "One-off"
+                ? item.CompletionStatus : "Scheduled",
+            item.LastAttendanceAt?.Date == (date ?? DateTime.UtcNow.Date) || item.Frequency == "One-off"
+                ? item.QualityStatus : "Not inspected",
             item.LinkedMaintenanceReference,
             item.LinkedComplaintReference,
             item.LinkedProcedureCaseReference,

@@ -10314,7 +10314,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<EstateGroundRentAccount>(entity =>
         {
             entity.ToTable("EstateGroundRentAccounts");
-            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId })
+                .IsUnique()
+                .HasFilter("[Status] <> 'Closed' AND [IsDeleted] = 0");
             entity.HasIndex(item => new { item.TenantId, item.CustomerBusinessPartnerId, item.Status });
             entity.HasIndex(item => new { item.TenantId, item.NextDueDate, item.Status });
             entity.HasIndex(item => new { item.TenantId, item.NextReviewDate, item.Status });
