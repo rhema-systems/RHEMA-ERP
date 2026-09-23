@@ -55,6 +55,15 @@ public class OrientationTriggerRunResultDto
     /// picks them up on the first night after they complete it.</summary>
     public int WaitingOnPrerequisite { get; set; }
 
+    /// <summary>Of <see cref="Enrolled"/>, how many were the next cycle of a recurring programme (lane I-b).</summary>
+    public int Renewed { get; set; }
+
+    /// <summary>
+    /// Completed a recurring programme and are due for the next cycle, but none of its rules reaches
+    /// them any longer — they moved on, or stopped being a new hire — so they are not renewed.
+    /// </summary>
+    public int LeftAudience { get; set; }
+
     /// <summary>Set when an event hook failed. The host's own work stood; the nightly sweep retries.</summary>
     public string? Error { get; set; }
 
@@ -70,10 +79,19 @@ public class OrientationTriggerEnrolmentDto
     public string? EmployeeNumber { get; set; }
     public Guid ProgramId { get; set; }
     public string ProgramTitle { get; set; } = string.Empty;
-    public Guid RuleId { get; set; }
+
+    /// <summary>The rule that enrolled them. Null for a renewal, which no rule creates.</summary>
+    public Guid? RuleId { get; set; }
     public string RuleName { get; set; } = string.Empty;
-    public OrientationEnrollmentTrigger TriggerEvent { get; set; }
+
+    /// <summary>What fired. Null for a renewal — see <see cref="IsRenewal"/>.</summary>
+    public OrientationEnrollmentTrigger? TriggerEvent { get; set; }
+
+    /// <summary>The date counted from: the hire or movement date, or — for a renewal — the
+    /// completion of the cycle it renews.</summary>
     public DateOnly? TriggerDate { get; set; }
+
+    public bool IsRenewal { get; set; }
 }
 
 /// <summary>
@@ -134,7 +152,9 @@ public class OrientationProgramDiagnosisDto
 
     /// <summary>
     /// One word for the outcome: WouldEnrolNow, Enrolled, Excluded, WaitingForDate, WindowLapsed,
-    /// WaitingOnPrerequisite, OnlyWhenHrEnrols, NoTriggeringEvent, NotInAudience, ProgramNotActive.
+    /// WaitingOnPrerequisite, OnlyWhenHrEnrols, NoTriggeringEvent, NotInAudience, ProgramNotActive —
+    /// and since lane I-b RenewalDue, RenewalScheduled and EndedByHr (withdrawn, cancelled or a
+    /// no-show: never undone by the system, re-enrollable by HR).
     /// </summary>
     public string Verdict { get; set; } = string.Empty;
 
@@ -148,6 +168,15 @@ public class OrientationProgramDiagnosisDto
 
     public List<string> MissingPrerequisites { get; set; } = new();
     public List<OrientationRuleDiagnosisDto> Rules { get; set; } = new();
+
+    // Round 4, lane I-b — a recurring programme after the latest cycle was completed.
+    public DateOnly? LastCompletedOn { get; set; }
+
+    /// <summary>The day the next cycle opens: the anniversary less the completion deadline.</summary>
+    public DateOnly? NextCycleOpensOn { get; set; }
+
+    /// <summary>The anniversary: one period after the last completion.</summary>
+    public DateOnly? NextCycleDueOn { get; set; }
 }
 
 public class OrientationRuleDiagnosisDto

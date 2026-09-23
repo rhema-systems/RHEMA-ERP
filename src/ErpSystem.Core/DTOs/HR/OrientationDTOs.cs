@@ -152,6 +152,11 @@ public class OrientationProgramSummaryDto
     public int? EstimatedDurationMinutes { get; set; }
     public bool IsCertificateIssued { get; set; }
     public bool RequiresAssessment { get; set; }
+
+    /// <summary>Round 4, lane I-b — lists need it to offer "open the next cycle" on a completion.</summary>
+    public bool IsRecurring { get; set; }
+    public OrientationRecurrenceFrequency? RecurrenceFrequency { get; set; }
+
     public int ModuleCount { get; set; }
     public int EnrollmentCount { get; set; }
     public int CompletedCount { get; set; }

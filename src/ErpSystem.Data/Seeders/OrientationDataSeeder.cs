@@ -76,7 +76,11 @@ public class OrientationDataSeeder
             estimatedMinutes: 60, requiresAssessment: true, passingScore: 80, requiresAck: true,
             isCertificate: true, certValidityMonths: 12, deadlineDays: 14,
             description: "Annual mandatory training on workplace conduct, anti-harassment policy and reporting channels.",
-            objectives: "Recognise unacceptable conduct, understand reporting channels, and acknowledge the code of conduct.");
+            objectives: "Recognise unacceptable conduct, understand reporting channels, and acknowledge the code of conduct.",
+            // Round 4, lane I-b: it says "annual", so it recurs annually — the nightly sweep opens each
+            // person's next cycle 351 days after they complete it (a year less the 14-day deadline),
+            // so the refresher falls due on the anniversary and the 12-month certificate never lapses.
+            recurs: OrientationRecurrenceFrequency.Annually);
 
         var productLaunch = await GetOrCreateProgramAsync(tenantId, "ORI-PRD-001", "Q3 Product Launch Briefing",
             productCat.Id, OrientationProgramType.ProductLaunch, OrientationDeliveryMode.VirtualInstructor,
@@ -140,7 +144,8 @@ public class OrientationDataSeeder
         OrientationAudienceScope scope, Guid? ownerUnitId, Guid ownerEmployeeId,
         int estimatedMinutes, bool requiresAssessment, decimal? passingScore, bool requiresAck,
         bool isCertificate, int? certValidityMonths, int deadlineDays,
-        string description, string objectives)
+        string description, string objectives,
+        OrientationRecurrenceFrequency? recurs = null)
     {
         var existing = await _context.OrientationPrograms
             .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.ProgramCode == code);
@@ -166,6 +171,8 @@ public class OrientationDataSeeder
             CompletionDeadlineDays = deadlineDays,
             IsCertificateIssued = isCertificate,
             CertificateValidityMonths = certValidityMonths,
+            IsRecurring = recurs is not null,
+            RecurrenceFrequency = recurs,
             EnableReminders = true,
             Version = "v1.0",
             EffectiveFrom = DateTime.UtcNow.AddMonths(-2),

@@ -41,7 +41,9 @@ public interface IOrientationEnrollmentTriggerService
 
     /// <summary>
     /// The nightly sweep for one tenant: the scheduled rules, plus the dated rules whose day has
-    /// come (a hire with a delay, a movement whose effective date has arrived, a hook that failed).
+    /// come (a hire with a delay, a movement whose effective date has arrived, a hook that failed),
+    /// the publish rules of a programme that has just come into effect, and — lane I-b — the next
+    /// cycle of every recurring programme for the people whose last cycle is due.
     /// </summary>
     Task<OrientationTriggerRunResultDto> RunSweepForTenantAsync(
         Guid tenantId, string trigger, Guid? triggeredByUserId, bool preview = false,

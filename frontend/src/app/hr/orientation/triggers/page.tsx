@@ -48,10 +48,13 @@ import { cn } from '@/lib/utils';
 const VERDICT: Record<OrientationTriggerVerdict, { label: string; tone: string }> = {
   Enrolled: { label: 'Enrolled', tone: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200' },
   WouldEnrolNow: { label: 'Enrols tonight', tone: 'bg-sky-100 text-sky-900 dark:bg-sky-950/50 dark:text-sky-200' },
+  RenewalDue: { label: 'Next cycle opens tonight', tone: 'bg-sky-100 text-sky-900 dark:bg-sky-950/50 dark:text-sky-200' },
+  RenewalScheduled: { label: 'Next cycle scheduled', tone: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200' },
   WaitingForDate: { label: 'Waiting for its date', tone: 'bg-sky-100 text-sky-900 dark:bg-sky-950/50 dark:text-sky-200' },
   WaitingOnPrerequisite: { label: 'Waiting on a prerequisite', tone: 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200' },
   OnlyWhenHrEnrols: { label: 'Only when HR enrols', tone: 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200' },
   Excluded: { label: 'Excluded', tone: 'bg-muted text-muted-foreground' },
+  EndedByHr: { label: 'Ended by HR', tone: 'bg-muted text-muted-foreground' },
   WindowLapsed: { label: 'Window lapsed', tone: 'bg-muted text-muted-foreground' },
   NoTriggeringEvent: { label: 'No triggering event', tone: 'bg-muted text-muted-foreground' },
   NotInAudience: { label: 'Not in the audience', tone: 'bg-muted text-muted-foreground' },
@@ -180,7 +183,9 @@ export default function OrientationTriggersPage() {
       const result = await orientationProgramService.runTriggers(false);
       toast({
         title: `Sweep ran: ${result.enrolled} enrolled`,
-        description: `${result.alreadyEnrolled} already enrolled, ${result.excluded} excluded, ${result.waitingOnPrerequisite} waiting on a prerequisite.`,
+        description:
+          (result.renewed > 0 ? `${result.renewed} renewed for their next cycle. ` : '') +
+          `${result.alreadyEnrolled} already enrolled, ${result.excluded} excluded, ${result.waitingOnPrerequisite} waiting on a prerequisite.`,
       });
       setSweepPreview(null);
       if (employeeId) await refetch();
@@ -359,6 +364,11 @@ export default function OrientationTriggersPage() {
         description={
           sweepPreview
             ? `${sweepPreview.rulesEvaluated} rule(s) across ${sweepPreview.programsEvaluated} programme(s). ` +
+              (sweepPreview.renewed > 0 || sweepPreview.leftAudience > 0
+                ? `${sweepPreview.renewed} of them the next cycle of a recurring programme` +
+                  (sweepPreview.leftAudience > 0 ? ` (${sweepPreview.leftAudience} more are due but no longer in its audience)` : '') +
+                  '. '
+                : '') +
               `${sweepPreview.alreadyEnrolled} already enrolled, ${sweepPreview.excluded} excluded, ` +
               `${sweepPreview.waitingOnPrerequisite} waiting on a prerequisite. Nothing has been written yet.`
             : ''

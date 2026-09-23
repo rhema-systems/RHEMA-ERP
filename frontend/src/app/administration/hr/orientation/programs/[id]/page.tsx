@@ -49,6 +49,7 @@ import {
   ORIENTATION_ENROLLMENT_TRIGGER_OPTIONS,
   ORIENTATION_AUDIENCE_POPULATION_OPTIONS,
   ORIENTATION_TRIGGER_HINTS,
+  ORIENTATION_RECURRENCE_FREQUENCY_OPTIONS,
   DATED_TRIGGERS,
 } from '@/types/hr/orientation';
 import type {
@@ -264,7 +265,16 @@ function AudienceRuleFields({ form }: { form: UseFormReturn<AudienceRuleForm> })
  * HR's "Enrol audience now": previews first (nothing written), then enrols on confirmation. Runs the
  * programme's rules that have no date to count from — manual, publish and scheduled.
  */
-function EnrolAudiencePanel({ programId, isActive }: { programId: string; isActive: boolean }) {
+function EnrolAudiencePanel({
+  programId,
+  isActive,
+  recursEvery,
+}: {
+  programId: string;
+  isActive: boolean;
+  /** The recurrence frequency's label when the programme recurs (lane I-b). */
+  recursEvery?: string | null;
+}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [preview, setPreview] = useState<OrientationTriggerRunResult | null>(null);
@@ -306,6 +316,12 @@ function EnrolAudiencePanel({ programId, isActive }: { programId: string; isActi
           <div className="text-muted-foreground">
             Hire, transfer and promotion rules fire on the event; scheduled rules every night. “Enrol
             audience now” runs the manual, publish and scheduled rules immediately.{' '}
+            {recursEvery && (
+              <>
+                Recurs {recursEvery.toLowerCase()}: the nightly sweep opens each person’s next cycle one
+                period after they complete it, while a rule here still reaches them.{' '}
+              </>
+            )}
             <Link href="/hr/orientation/triggers" className="underline underline-offset-2">
               Why did — or didn’t — a rule reach someone?
             </Link>
@@ -693,7 +709,16 @@ export default function OrientationProgramDetailPage() {
         </TabsContent>
 
         <TabsContent value="audience" className="pt-4">
-          <EnrolAudiencePanel programId={id} isActive={isActive} />
+          <EnrolAudiencePanel
+            programId={id}
+            isActive={isActive}
+            recursEvery={
+              program.isRecurring && program.recurrenceFrequency
+                ? (ORIENTATION_RECURRENCE_FREQUENCY_OPTIONS.find((o) => o.value === program.recurrenceFrequency)?.label ??
+                  program.recurrenceFrequency)
+                : null
+            }
+          />
           <ResourceCollectionTab<OrientationAudienceRule, AudienceRuleForm>
             parentId={id}
             title="audience rules"

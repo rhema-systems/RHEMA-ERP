@@ -78,6 +78,57 @@ public static class OrientationTriggerWindows
 
     public static bool IsDue(DateOnly triggerDate, int delayDays, DateOnly today) =>
         today >= FiresFrom(triggerDate, delayDays) && today <= FiresUntil(triggerDate, delayDays);
+
+    // ── Recurrence (round 4, lane I-b) ────────────────────────────────────────────────────────
+
+    public static int MonthsOf(OrientationRecurrenceFrequency frequency) => frequency switch
+    {
+        OrientationRecurrenceFrequency.Monthly => 1,
+        OrientationRecurrenceFrequency.Quarterly => 3,
+        OrientationRecurrenceFrequency.SemiAnnually => 6,
+        OrientationRecurrenceFrequency.Annually => 12,
+        OrientationRecurrenceFrequency.Biennially => 24,
+        _ => 12,
+    };
+
+    /// <summary>The day the next cycle is due to be COMPLETED: one period after the last completion.</summary>
+    public static DateOnly Anniversary(DateOnly completedOn, OrientationRecurrenceFrequency frequency) =>
+        completedOn.AddMonths(MonthsOf(frequency));
+
+    /// <summary>
+    /// The day the next cycle OPENS: the anniversary less the programme's completion deadline, so
+    /// that the ordinary due date (enrolment + deadline) falls on the anniversary itself. An annual
+    /// programme with a 14-day deadline reopens 351 days after completion and is due on day 365.
+    /// Never before the day after the completion it renews.
+    /// </summary>
+    public static DateOnly OpensOn(DateOnly completedOn, OrientationRecurrenceFrequency frequency, int? deadlineDays)
+    {
+        var opens = Anniversary(completedOn, frequency).AddDays(-Math.Max(0, deadlineDays ?? 0));
+        var earliest = completedOn.AddDays(1);
+        return opens < earliest ? earliest : opens;
+    }
+
+    public static string Describe(OrientationRecurrenceFrequency frequency) => frequency switch
+    {
+        OrientationRecurrenceFrequency.Monthly => "monthly",
+        OrientationRecurrenceFrequency.Quarterly => "quarterly",
+        OrientationRecurrenceFrequency.SemiAnnually => "every six months",
+        OrientationRecurrenceFrequency.Annually => "annually",
+        OrientationRecurrenceFrequency.Biennially => "every two years",
+        _ => frequency.ToString(),
+    };
+
+    // ── The effective window (round 4, lane I-b) ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether a programme is in effect on a day: its effective-from has come and its effective-to
+    /// has not passed (both inclusive, both optional). Lane I shipped without this — the dates were
+    /// stored and read by nothing, so a programme whose effective period had ended went on
+    /// enrolling people for as long as it stayed Active.
+    /// </summary>
+    public static bool IsInEffect(DateTime? effectiveFrom, DateTime? effectiveTo, DateOnly today) =>
+        (effectiveFrom is not { } starts || DateOnly.FromDateTime(starts) <= today)
+        && (effectiveTo is not { } ends || DateOnly.FromDateTime(ends) >= today);
 }
 
 /// <summary>
@@ -94,7 +145,7 @@ public static class OrientationTriggerWindows
 ///   nowhere near the day anybody joined.</item>
 ///   <item><b>OnTransfer / OnPromotion</b> — a movement is implemented (transfer, lateral move and
 ///   secondment are transfers). Counts from the movement's effective date.</item>
-///   <item><b>OnProgramPublish</b> — the programme becomes Active.</item>
+///   <item><b>OnProgramPublish</b> — the programme becomes Active (or, if published early, comes into effect).</item>
 ///   <item><b>Scheduled</b> — the nightly sweep: everyone the rule reaches who is not yet on it.</item>
 ///   <item><b>Manual</b> — only HR's "enrol the audience now" on the programme, which also re-runs
 ///   the publish and scheduled rules.</item>
@@ -124,9 +175,14 @@ public static class OrientationTriggerWindows
 ///   <item>the programme not being Active, or the person not being an active employee.</item>
 /// </list>
 ///
-/// <para>⚠ <b>Not handled: recurrence.</b> An annual programme re-enrols nobody — the "any earlier
-/// enrollment" rule sees last year's. Re-enrolment on <c>RecurrenceFrequency</c> is its own piece
-/// of work, recorded in the round-4 plan.</para>
+/// <para><b>Recurrence (lane I-b).</b> Rules never enrol anybody twice, so a recurring programme's
+/// next cycle is not a rule's to open: <see cref="RenewAsync"/> does it on the nightly sweep, one
+/// period after the last completion, for the people the programme is still for. See its remarks.</para>
+///
+/// <para><b>The effective window (lane I-b).</b> "Active" means Active AND in its effective dates:
+/// nothing enrols anybody into a programme outside them — not a trigger, not a renewal, not HR's
+/// "enrol audience now". A programme published ahead of its effective-from date runs its publish
+/// rules on the nightly sweep once it comes into effect.</para>
 /// </remarks>
 public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollmentTriggerService
 {
@@ -293,13 +349,22 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
 
         var programme = await _unitOfWork.Repository<OrientationProgram>().GetQueryable()
             .Where(p => p.Id == programId && p.TenantId == tenantId && !p.IsDeleted)
-            .Select(p => new { p.Status })
+            .Select(p => new { p.Status, p.EffectiveFrom, p.EffectiveTo })
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new ArgumentException($"Orientation program with ID '{programId}' not found.");
 
         if (programme.Status != OrientationProgramStatus.Active)
             throw new InvalidOperationException(
                 "Only an active programme enrols anyone. Publish it first — publishing runs its publish rules by itself.");
+
+        // Lane I-b: outside its effective dates a programme enrols nobody — by hand included.
+        var today = Today;
+        if (programme.EffectiveFrom is { } starts && DateOnly.FromDateTime(starts) > today)
+            throw new InvalidOperationException(
+                $"This programme is not in effect until {DateOnly.FromDateTime(starts):d MMM yyyy}. Its audience can be enrolled from then, or change the effective-from date.");
+        if (programme.EffectiveTo is { } ends && DateOnly.FromDateTime(ends) < today)
+            throw new InvalidOperationException(
+                $"This programme's effective period ended on {DateOnly.FromDateTime(ends):d MMM yyyy}, so it enrols nobody. Extend the effective-to date to enrol its audience.");
 
         var programmes = await LoadProgrammesAsync(tenantId, programId, activeOnly: true, includeInactiveRules: false, cancellationToken);
         var run = new RunState(tenantId, Today, preview, actingUserId);
@@ -381,6 +446,25 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                 r => r.Trigger == movementTrigger, candidates,
                 _ => movementTrigger, TriggerLabel(movementTrigger), cancellationToken));
         }
+
+        // 4 — publish rules of a programme published AHEAD of its effective date (lane I-b). The
+        //     publish hook fires nothing for a programme not yet in effect, so the rules run here on
+        //     the sweeps of its first CatchUpDays in effect. De-duplication makes the repeats
+        //     harmless; the cost is that somebody joining the audience during those days is caught
+        //     too, which a publish rule otherwise would not do.
+        var justInEffect = programmes
+            .Where(p => p.Program.EffectiveFrom is { } starts
+                     && DateOnly.FromDateTime(starts) <= today
+                     && DateOnly.FromDateTime(starts) >= today.AddDays(-OrientationTriggerWindows.CatchUpDays))
+            .ToList();
+        if (justInEffect.Any(p => p.Rules.Any(r => r.IsInclusive && r.Trigger == OrientationEnrollmentTrigger.OnProgramPublish)))
+            Merge(total, await EvaluateAsync(run, justInEffect,
+                r => r.Trigger == OrientationEnrollmentTrigger.OnProgramPublish, null,
+                _ => OrientationEnrollmentTrigger.OnProgramPublish, "Publish (came into effect)", cancellationToken));
+
+        // 5 — the next cycle of recurring programmes (lane I-b).
+        if (programmes.Any(p => p.Program.Recurs is not null))
+            Merge(total, await RenewAsync(run, programmes, cancellationToken));
 
         return await CommitAsync(run, total, cancellationToken);
     }
@@ -510,8 +594,12 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
         // Every programme with a rule, plus any the person is already on.
         var enrolments = await _unitOfWork.Repository<EmployeeOrientation>().GetQueryable()
             .Where(e => e.TenantId == tenantId && e.EmployeeId == employeeId && !e.IsDeleted)
-            .OrderByDescending(e => e.EnrolledAt)
-            .Select(e => new { e.Id, e.ProgramId, e.EnrollmentStatus, e.EnrollmentSource, e.AudienceRuleId, e.TriggerEvent })
+            .OrderByDescending(e => e.EnrolledAt).ThenByDescending(e => e.CreatedAt)
+            .Select(e => new
+            {
+                e.Id, e.ProgramId, e.EnrollmentStatus, e.EnrollmentSource, e.AudienceRuleId, e.TriggerEvent,
+                e.CompletionStatus, e.CompletedAt,
+            })
             .ToListAsync(cancellationToken);
         var enrolmentByProgramme = enrolments.GroupBy(e => e.ProgramId).ToDictionary(g => g.Key, g => g.First());
 
@@ -595,6 +683,9 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                     (rd.Timing, rd.Explanation) = rule.Trigger switch
                     {
                         OrientationEnrollmentTrigger.Scheduled => ("Nightly", "Fires on every nightly sweep for anyone it reaches who is not yet on the programme."),
+                        OrientationEnrollmentTrigger.OnProgramPublish when programme.Program.EffectiveFrom is { } starts
+                                                                          && DateOnly.FromDateTime(starts) > today
+                            => ("AtPublish", $"Fires when the programme comes into effect on {DateOnly.FromDateTime(starts):d MMM yyyy} — the nightly sweep runs it then."),
                         OrientationEnrollmentTrigger.OnProgramPublish => ("AtPublish", "Fired when the programme was published; after that only HR's \"Enrol audience now\" runs it again."),
                         _ => ("OnlyByHr", "Fires only when HR presses \"Enrol audience now\" on the programme."),
                     };
@@ -611,14 +702,15 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
             pd.MissingPrerequisites = programme.Prerequisites
                 .Where(p => !completed.Contains(p.Id)).Select(p => p.Title).ToList();
 
-            (Guid Id, OrientationEnrollmentStatus Status, OrientationEnrollmentSource Source, string? RuleName)? existing = null;
+            LatestEnrolment? existing = null;
             if (enrolmentByProgramme.TryGetValue(programme.Program.Id, out var en))
             {
                 string? byRule = en.AudienceRuleId is { } rid && allRuleNames.TryGetValue(rid, out var rn) ? rn : null;
-                existing = (en.Id, en.EnrollmentStatus, en.EnrollmentSource, byRule);
+                existing = new LatestEnrolment(en.Id, en.EnrollmentStatus, en.EnrollmentSource, byRule,
+                    en.CompletionStatus, en.CompletedAt);
             }
 
-            Decide(pd, programme, existing, employee.IsActive);
+            Decide(pd, programme, existing, employee.IsActive, today);
 
             diagnosis.Programs.Add(pd);
         }
@@ -644,27 +736,47 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
 
     /// <summary>The programme-level verdict, in the order a person would ask the questions.</summary>
     private static void Decide(
-        OrientationProgramDiagnosisDto pd, ProgrammeRules programme,
-        (Guid Id, OrientationEnrollmentStatus Status, OrientationEnrollmentSource Source, string? RuleName)? enrolment,
-        bool employeeActive)
+        OrientationProgramDiagnosisDto pd, ProgrammeRules programme, LatestEnrolment? enrolment,
+        bool employeeActive, DateOnly today)
     {
+        var notLive = programme.Program.NotLiveBecause(today);
+        var reaching = pd.Rules.Where(r => r.IsActive && r.IsInclusive && r.MatchesTarget && r.MatchesPopulation).ToList();
+        var exclusion = pd.Rules.FirstOrDefault(r => r.IsActive && !r.IsInclusive && r.MatchesTarget && r.MatchesPopulation);
+
         if (enrolment is { } en)
         {
             pd.EnrollmentId = en.Id;
             pd.EnrollmentStatus = en.Status.ToString();
             pd.EnrollmentSource = en.Source.ToString();
             pd.EnrolledByRuleName = en.RuleName;
+
+            // Lane I-b: an enrolment HR ended is HR's to undo — and only HR's.
+            if (EmployeeOrientationService.IsEndedByHr(en.Status))
+            {
+                pd.Verdict = "EndedByHr";
+                pd.Explanation = $"HR ended their enrolment ({en.Status}). No rule and no renewal ever puts them back — HR can re-enrol them by hand.";
+                return;
+            }
+
             pd.Verdict = "Enrolled";
-            pd.Explanation = en.Source == OrientationEnrollmentSource.AutoRule
-                ? $"Enrolled automatically{(en.RuleName is null ? "" : $" by \"{en.RuleName}\"")}; status {en.Status}. No rule enrols anyone twice."
-                : $"Already on the programme ({en.Source}, {en.Status}). No rule enrols anyone twice — not even after a withdrawal.";
+            pd.Explanation = en.Source switch
+            {
+                OrientationEnrollmentSource.AutoRule =>
+                    $"Enrolled automatically{(en.RuleName is null ? "" : $" by \"{en.RuleName}\"")}; status {en.Status}. No rule enrols anyone twice.",
+                OrientationEnrollmentSource.Recurrence =>
+                    $"On the next cycle of this recurring programme, opened automatically; status {en.Status}.",
+                _ => $"Already on the programme ({en.Source}, {en.Status}). No rule enrols anyone twice.",
+            };
+
+            if (programme.Program.Recurs is { } frequency)
+                ExplainRenewal(pd, programme, en, frequency, notLive, reaching, exclusion, employeeActive, today);
             return;
         }
 
-        if (programme.Program.Status != OrientationProgramStatus.Active)
+        if (notLive is not null)
         {
             pd.Verdict = "ProgramNotActive";
-            pd.Explanation = $"The programme is {programme.Program.Status}; only an active programme's rules fire.";
+            pd.Explanation = notLive;
             return;
         }
 
@@ -675,7 +787,6 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
             return;
         }
 
-        var reaching = pd.Rules.Where(r => r.IsActive && r.IsInclusive && r.MatchesTarget && r.MatchesPopulation).ToList();
         if (reaching.Count == 0)
         {
             pd.Verdict = "NotInAudience";
@@ -685,7 +796,6 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
             return;
         }
 
-        var exclusion = pd.Rules.FirstOrDefault(r => r.IsActive && !r.IsInclusive && r.MatchesTarget && r.MatchesPopulation);
         if (exclusion is not null)
         {
             pd.Verdict = "Excluded";
@@ -746,6 +856,86 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
         pd.Verdict = "NoTriggeringEvent";
         pd.Explanation = reaching[0].Explanation;
     }
+
+    /// <summary>
+    /// For a recurring programme, what happens after the person's latest enrolment — the same
+    /// questions <see cref="RenewAsync"/> asks, in the same order (lane I-b).
+    /// </summary>
+    private static void ExplainRenewal(
+        OrientationProgramDiagnosisDto pd, ProgrammeRules programme, LatestEnrolment en,
+        OrientationRecurrenceFrequency frequency, string? notLive,
+        List<OrientationRuleDiagnosisDto> reaching, OrientationRuleDiagnosisDto? exclusion,
+        bool employeeActive, DateOnly today)
+    {
+        var every = OrientationTriggerWindows.Describe(frequency);
+
+        if (EmployeeOrientationService.IsEndedByHr(en.Status))
+        {
+            pd.Explanation += $" The programme recurs {every}, but an enrolment HR ended ({en.Status}) is never renewed over by the system — HR can re-enrol them by hand.";
+            return;
+        }
+
+        if (en.Completion != OrientationCompletionStatus.Completed || en.CompletedAt is not { } completedAt)
+        {
+            pd.Explanation += $" The programme recurs {every}: the next cycle opens one period after this one is completed.";
+            return;
+        }
+
+        var completedOn = DateOnly.FromDateTime(completedAt);
+        var deadline = programme.Program.CompletionDeadlineDays;
+        var opens = OrientationTriggerWindows.OpensOn(completedOn, frequency, deadline);
+        var anniversary = OrientationTriggerWindows.Anniversary(completedOn, frequency);
+        pd.LastCompletedOn = completedOn;
+        pd.NextCycleOpensOn = opens;
+        pd.NextCycleDueOn = anniversary;
+        var when = deadline is > 0
+            ? $"opens on {opens:d MMM yyyy} and is due on {anniversary:d MMM yyyy} ({every} after completion; it opens {deadline} days early so the deadline falls on the anniversary)"
+            : $"opens on {opens:d MMM yyyy} ({every} after completion)";
+
+        if (notLive is not null)
+        {
+            pd.Explanation = $"Completed on {completedOn:d MMM yyyy}. {notLive} No next cycle opens while it is not.";
+            return;
+        }
+
+        if (today < opens)
+        {
+            pd.Verdict = "RenewalScheduled";
+            pd.Explanation = $"Completed on {completedOn:d MMM yyyy}. The programme recurs {every}: the next cycle {when}.";
+            return;
+        }
+
+        if (!employeeActive)
+        {
+            pd.Verdict = "NotInAudience";
+            pd.Explanation = $"Completed on {completedOn:d MMM yyyy} and the next cycle is due, but they are not an active employee, so it is not renewed.";
+            return;
+        }
+
+        // A programme with no active inclusive rule is managed by hand: everyone who completed it renews.
+        var hasRules = pd.Rules.Any(r => r.IsActive && r.IsInclusive);
+        if (hasRules && reaching.Count == 0)
+        {
+            pd.Verdict = "NotInAudience";
+            pd.Explanation = $"Completed on {completedOn:d MMM yyyy} and the next cycle {when} — but none of the programme's rules reaches them any longer, so it is not renewed.";
+            return;
+        }
+
+        if (exclusion is not null)
+        {
+            pd.Verdict = "Excluded";
+            pd.Explanation = $"Completed on {completedOn:d MMM yyyy} and the next cycle is due, but the exclusion \"{exclusion.RuleName}\" keeps them out of it.";
+            return;
+        }
+
+        pd.Verdict = "RenewalDue";
+        pd.Explanation = $"Completed on {completedOn:d MMM yyyy}. The next cycle {when} — tonight's sweep enrols them.";
+    }
+
+    /// <summary>A person's latest enrolment on one programme, as the diagnostic reads it.</summary>
+    private sealed record LatestEnrolment(
+        Guid Id, OrientationEnrollmentStatus Status, OrientationEnrollmentSource Source, string? RuleName,
+        OrientationCompletionStatus Completion, DateTime? CompletedAt);
 
     // ====================================================================
     // THE EVALUATOR
@@ -866,6 +1056,133 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                         RuleName = rule.RuleName,
                         TriggerEvent = trigger,
                         TriggerDate = triggerDate,
+                    });
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Opens the next cycle of every recurring programme for the people whose last cycle is due
+    /// (round 4, lane I-b). Stages only — <see cref="CommitAsync"/> saves.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Who is renewed.</b> A person whose LATEST enrolment on the programme is Completed,
+    /// and whose next cycle has opened (<see cref="OrientationTriggerWindows.OpensOn"/>). The latest
+    /// enrolment decides everything: an unfinished current cycle is still the current cycle; a
+    /// withdrawal or cancellation is HR's act and is never undone by the system; a Failed attempt is
+    /// not a completion.</para>
+    ///
+    /// <para><b>…and whom the programme is still for.</b> If the programme has active inclusive rules,
+    /// one of them — whatever its trigger — must still reach the person; a programme with none is
+    /// managed by hand, and everyone who completed it is renewed. Exclusions apply either way. So a
+    /// recurring site-safety refresher does not follow somebody who has moved to Finance, and a
+    /// programme "for new hires" never renews at all, because a year on they are not new hires.</para>
+    ///
+    /// <para><b>Not gated by prerequisites.</b> They were met for the first cycle.</para>
+    ///
+    /// <para><b>No catch-up window</b>, unlike the dated triggers: a renewal creates exactly one open
+    /// cycle, after which the person's latest enrolment is no longer Completed, so a completion from
+    /// years ago renews once, not once per missed period. Making a programme recurring therefore
+    /// renews, on the next sweep, everyone whose last completion is older than one period — which is
+    /// the point of making it recurring; the sweep preview shows the number first.</para>
+    /// </remarks>
+    private async Task<OrientationTriggerRunResultDto> RenewAsync(
+        RunState run, IReadOnlyList<ProgrammeRules> programmes, CancellationToken cancellationToken)
+    {
+        var result = Empty("Renewal");
+        result.IsPreview = run.Preview;
+        var repository = _unitOfWork.Repository<EmployeeOrientation>();
+
+        foreach (var programme in programmes)
+        {
+            if (programme.Program.Recurs is not { } frequency) continue;
+
+            var rows = await repository.GetQueryable()
+                .Where(e => e.TenantId == run.TenantId && e.ProgramId == programme.Program.Id && !e.IsDeleted)
+                .Select(e => new { e.EmployeeId, e.EnrolledAt, e.CreatedAt, e.EnrollmentStatus, e.CompletionStatus, e.CompletedAt })
+                .ToListAsync(cancellationToken);
+
+            var due = rows
+                .GroupBy(e => e.EmployeeId)
+                .Select(g => g.OrderByDescending(e => e.EnrolledAt).ThenByDescending(e => e.CreatedAt).First())
+                // ⚠ A completed enrolment HR then withdrew still reads Completed; the enrolment
+                //   status is what says HR ended it, and the system never renews over that.
+                .Where(e => !EmployeeOrientationService.IsEndedByHr(e.EnrollmentStatus))
+                .Where(e => e.CompletionStatus == OrientationCompletionStatus.Completed && e.CompletedAt is not null)
+                .Select(e => (e.EmployeeId, CompletedOn: DateOnly.FromDateTime(e.CompletedAt!.Value)))
+                .Where(e => run.Today >= OrientationTriggerWindows.OpensOn(e.CompletedOn, frequency, programme.Program.CompletionDeadlineDays))
+                .ToList();
+
+            result.ProgramsEvaluated++;
+            if (due.Count == 0) continue;
+
+            // Still the programme's audience: any active inclusive rule reaches them — or, with no
+            // rules at all, anyone active. Exclusions subtract either way.
+            var inclusive = programme.Rules.Where(r => r.IsInclusive).ToList();
+            HashSet<Guid> audience;
+            if (inclusive.Count == 0)
+            {
+                audience = await AxisAsync(run.TenantId, HrAudienceTargetType.AllEmployees, null, run.Cache, cancellationToken);
+            }
+            else
+            {
+                audience = [];
+                foreach (var rule in inclusive)
+                    audience.UnionWith(await MatchAsync(run.TenantId, rule.TargetType, rule.TargetEntityId, rule.Population, run.Today, run.Cache, cancellationToken));
+            }
+            result.RulesEvaluated += inclusive.Count;
+
+            var excluded = new HashSet<Guid>();
+            foreach (var rule in programme.Rules.Where(r => !r.IsInclusive))
+                excluded.UnionWith(await MatchAsync(run.TenantId, rule.TargetType, rule.TargetEntityId, rule.Population, run.Today, run.Cache, cancellationToken));
+
+            foreach (var (employeeId, completedOn) in due)
+            {
+                if (!audience.Contains(employeeId)) { result.LeftAudience++; continue; }
+                if (excluded.Contains(employeeId)) { result.Excluded++; continue; }
+                if (!run.StagedThisRun.Add((programme.Program.Id, employeeId))) { result.AlreadyEnrolled++; continue; }
+
+                var entity = new EmployeeOrientation
+                {
+                    TenantId = run.TenantId,
+                    ProgramId = programme.Program.Id,
+                    EmployeeId = employeeId,
+                    SessionId = null,
+                    EnrollmentStatus = OrientationEnrollmentStatus.Confirmed,
+                    EnrollmentSource = OrientationEnrollmentSource.Recurrence,
+                    EnrolledAt = DateTime.UtcNow,
+                    EnrolledByEmployeeId = null,
+                    CompletionStatus = OrientationCompletionStatus.NotStarted,
+                    AudienceRuleId = null,
+                    TriggerEvent = null,
+                    TriggerDate = completedOn,
+                    CreatedById = run.ActingUserId,
+                    CreatedBy = run.ActingUserId?.ToString() ?? SystemActor,
+                };
+                // The ordinary due date. Because the cycle opened `deadline` days before the
+                // anniversary, enrolment + deadline IS the anniversary when it opens on time — and
+                // never a date already past when it opens late.
+                if (programme.Program.CompletionDeadlineDays is > 0)
+                    entity.NextDueDate = entity.EnrolledAt.AddDays(programme.Program.CompletionDeadlineDays.Value);
+
+                if (!run.Preview) await repository.AddAsync(entity);
+
+                result.Enrolled++;
+                result.Renewed++;
+                if (result.Enrolments.Count < MaxListedEnrolments)
+                    result.Enrolments.Add(new OrientationTriggerEnrolmentDto
+                    {
+                        EnrollmentId = run.Preview ? null : entity.Id,
+                        EmployeeId = employeeId,
+                        ProgramId = programme.Program.Id,
+                        ProgramTitle = programme.Program.Title,
+                        RuleId = null,
+                        RuleName = $"Renewal — recurs {OrientationTriggerWindows.Describe(frequency)}",
+                        TriggerEvent = null,
+                        TriggerDate = completedOn,
+                        IsRenewal = true,
                     });
             }
         }
@@ -1005,15 +1322,24 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
     // LOADING
     // ====================================================================
 
+    /// <remarks>
+    /// <paramref name="activeOnly"/> means LIVE: Active and in its effective window today (lane I-b).
+    /// Every trigger, the renewals and HR's "enrol audience now" load through here, so a programme
+    /// outside its effective dates cannot enrol anybody by any route.
+    /// </remarks>
     private async Task<List<ProgrammeRules>> LoadProgrammesAsync(
         Guid tenantId, Guid? programId, bool activeOnly, bool includeInactiveRules, CancellationToken cancellationToken)
     {
-        var programmes = await _unitOfWork.Repository<OrientationProgram>().GetQueryable()
-            .Where(p => p.TenantId == tenantId && !p.IsDeleted
-                     && (programId == null || p.Id == programId)
-                     && (!activeOnly || p.Status == OrientationProgramStatus.Active))
-            .Select(p => new ProgrammeInfo(p.Id, p.ProgramCode, p.Title, p.Status, p.CompletionDeadlineDays))
-            .ToListAsync(cancellationToken);
+        var today = Today;
+        var programmes = (await _unitOfWork.Repository<OrientationProgram>().GetQueryable()
+                .Where(p => p.TenantId == tenantId && !p.IsDeleted
+                         && (programId == null || p.Id == programId)
+                         && (!activeOnly || p.Status == OrientationProgramStatus.Active))
+                .Select(p => new ProgrammeInfo(p.Id, p.ProgramCode, p.Title, p.Status, p.CompletionDeadlineDays,
+                    p.IsRecurring, p.RecurrenceFrequency, p.EffectiveFrom, p.EffectiveTo))
+                .ToListAsync(cancellationToken))
+            .Where(p => !activeOnly || p.IsInEffect(today))
+            .ToList();
         if (programmes.Count == 0) return [];
 
         var ids = programmes.Select(p => p.Id).ToList();
@@ -1061,6 +1387,8 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
         into.AlreadyEnrolled += from.AlreadyEnrolled;
         into.Excluded += from.Excluded;
         into.WaitingOnPrerequisite += from.WaitingOnPrerequisite;
+        into.Renewed += from.Renewed;
+        into.LeftAudience += from.LeftAudience;
         foreach (var e in from.Enrolments)
             if (into.Enrolments.Count < MaxListedEnrolments) into.Enrolments.Add(e);
     }
@@ -1094,7 +1422,28 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                 : $"{PopulationLabel(population)} — {where}";
     }
 
-    private sealed record ProgrammeInfo(Guid Id, string Code, string Title, OrientationProgramStatus Status, int? CompletionDeadlineDays);
+    private sealed record ProgrammeInfo(
+        Guid Id, string Code, string Title, OrientationProgramStatus Status, int? CompletionDeadlineDays,
+        bool IsRecurring, OrientationRecurrenceFrequency? RecurrenceFrequency,
+        DateTime? EffectiveFrom, DateTime? EffectiveTo)
+    {
+        public bool IsInEffect(DateOnly today) => OrientationTriggerWindows.IsInEffect(EffectiveFrom, EffectiveTo, today);
+
+        /// <summary>Recurring with a frequency — a flag without a frequency renews nothing.</summary>
+        public OrientationRecurrenceFrequency? Recurs => IsRecurring ? RecurrenceFrequency : null;
+
+        /// <summary>Why the programme is not live today, or null when it is.</summary>
+        public string? NotLiveBecause(DateOnly today)
+        {
+            if (Status != OrientationProgramStatus.Active)
+                return $"The programme is {Status}; only an active programme's rules fire.";
+            if (EffectiveFrom is { } starts && DateOnly.FromDateTime(starts) > today)
+                return $"The programme is not in effect until {DateOnly.FromDateTime(starts):d MMM yyyy}; its rules fire from then.";
+            if (EffectiveTo is { } ends && DateOnly.FromDateTime(ends) < today)
+                return $"The programme's effective period ended on {DateOnly.FromDateTime(ends):d MMM yyyy}; it enrols nobody after that.";
+            return null;
+        }
+    }
 
     private sealed record ProgrammeRules(
         ProgrammeInfo Program,

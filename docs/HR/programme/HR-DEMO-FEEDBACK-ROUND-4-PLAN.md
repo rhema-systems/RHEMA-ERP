@@ -16,14 +16,14 @@
 > | **E-b** | **DONE** — 86 ×2, `run-round4-e6.mjs`; migration `AddRecruitmentTestSittingMode` applied to UAT; E-a still 141 and all 18 neighbours at baseline; demo scenario `052-recruitment-tests` idempotent, `verify-tables` recruitment 74/74. E6 + E7 — § 8 |
 > | *email links* | **DONE** — every candidate-facing CTA in the recruitment catalogue pointed at a non-existent page since 2026-08-31; six repointed, **two confirmation pages built**. § 8 |
 > | **I** | **DONE** — 100 ×2, `hr-orientation/run-round4-i.mjs`; migration `AddOrientationTriggers` applied to UAT. I1–I5: audience rules on the shared HR axis + populations, typed picker + reach, triggers that fire (hire, movement, publish, nightly), onboarding template applicability + a plan on hire, the "why" diagnostic. **Two demo-data incidents of my own, both reversed** — § 8 |
-> | **I-b** | **NEXT** — re-enrolment for recurring programmes (the user's call, 2026-09-22: build after I is verified) |
+> | **I-b** | **DONE** — 152 ×2 (lane I's 100 + 52), same harness; **no migration**. Recurring programmes renew one period after completion, opened early by the deadline so it falls on the anniversary; the effective dates now bind (a lane I gap); **HR may re-enrol after a withdrawal and open a next cycle early by hand** (the user's call); a renewal can no longer open over a completed-then-withdrawn cycle; ORI-CMP-001 recurs annually on UAT and in the seeder — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete.** Next: I-b (recurrence), then L, J, M, K, N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b.** Next: L, J, M, K, N, O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
 > all three are still outstanding.
@@ -1673,10 +1673,91 @@ API log carries no trigger failure).
 
 | | Item | State |
 |---|---|---|
-| **I-b** | Re-enrolment of recurring programmes (`IsRecurring`/`RecurrenceFrequency`): today "any earlier enrollment" blocks last year's refresher | **next — the user's decision 2026-09-22** |
+| **I-b** | Re-enrolment of recurring programmes (`IsRecurring`/`RecurrenceFrequency`): today "any earlier enrollment" blocks last year's refresher | **done 2026-09-23 — see the I-b entry below** |
 | | Browser walk of the rule form (typed picker, reach line), the template audience panel and the diagnostic | not done — no browser automation |
 | | A concurrent hook and sweep could in principle both enrol one person (no unique index on programme + employee; existing data may hold duplicates) | recorded, not built |
 | | `EnrollAsync`/`BulkEnrollAsync` stamp a **user id** into `EnrolledByEmployeeId` | recorded — the "…Id holding the wrong kind of id" shape again; not this lane's door |
+
+### Lane I-b — recurring programmes renew; the effective dates bind; HR enrols again by hand · DONE 2026-09-23 · 152 assertions ×2
+
+Harness: `dev-harness/hr-orientation/run-round4-i.mjs`, new blocks **R** (recurrence), **W**
+(effective window) and **X** (HR enrols again by hand) — lane I's 100 unchanged, 52 added. **No
+migration**: the one new value is an enum member (`OrientationEnrollmentSource.Recurrence = 5`) in
+an existing int column. Built at the user's request after lane I was verified; block X at the
+user's request before I-b was committed.
+
+**Why it was needed.** `IsRecurring` and `RecurrenceFrequency` were stored, shown on the programme
+form ("Recurs — compliance refreshers people must retake on a cycle") and **read by nothing**; and
+lane I's own rule — any earlier enrolment blocks a rule — would have blocked every annual refresher
+after its first year.
+
+**What renews, and when — decisions taken inside the lane.**
+
+| | Rule | Why |
+|---|---|---|
+| 1 | The nightly sweep opens a person's next cycle when their **latest** enrolment is **Completed** and one period has passed | The latest enrolment decides: an open cycle is still the current one; a withdrawal or cancellation is HR's act and is never renewed over; a Failed attempt is not a completion. |
+| 2 | The cycle **opens early by the programme's completion deadline** — an annual programme with a 14-day deadline reopens 351 days after completion | So the ordinary due date (enrolment + deadline) falls **on the anniversary**, and a 12-month certificate never lapses. A cycle that opens late gets a full deadline from the day it opens — never a date already past (R14). No deadline set → it opens on the anniversary with no due date (R23). |
+| 3 | Only people the programme is **still for** renew: one of its active inclusive rules — whatever the trigger — must still reach them; a programme with no rules is managed by hand and renews everyone who completed it; exclusions apply either way | A site-safety refresher does not follow somebody who moved to Finance (R6, R19); a programme "for new hires" never renews, because a year on they are not new hires. |
+| 4 | No catch-up window, unlike the dated triggers | A renewal creates exactly one open cycle, after which the latest enrolment is no longer Completed — so a completion from years ago renews once, not once per missed period (R25). |
+| 5 | Not gated by prerequisites | They were met for the first cycle. |
+| 6 | Recorded as source **Recurrence**, no rule id, trigger date = the completion it renews | The diagnostic and the run summary can tell a renewal from a rule. |
+
+**The effective dates now bind — a gap in lane I, found while building this.** `EffectiveFrom` and
+`EffectiveTo` were stored and read by nothing, so lane I's triggers would have gone on enrolling
+people into a programme whose effective period had ended. "Active" now means Active **and** in its
+dates, for every route — the triggers, renewals, and "Enrol audience now", which refuses with the
+date (W1). A programme published **ahead** of its effective-from runs its publish rules on the
+nightly sweep once it comes into effect (W3, W6), and a hire the hook skipped is caught up the same
+night (W4, W8).
+
+**Two refusals the API lacked.** A recurring programme with no frequency (the form required one; the
+API accepted it and the flag then renewed nothing) and an effective-to before the effective-from
+are now 422s (R0, R0b).
+
+**ORI-CMP-001 recurs annually** — on UAT (two columns, one row, count-checked) and in
+`OrientationDataSeeder` for rebuilt databases — at the user's request. It renews nobody today: its
+one enrolment is overdue, not completed; its rule is the Manual "All employees annually", so every
+future completer stays in its audience.
+
+**Screens.** The *Recurs* switch and the effective dates say what they now do; the rules tab says
+when a programme recurs; the diagnostic gains **Next cycle scheduled** / **Next cycle opens tonight**
+with the completion, opening and due dates; the sweep preview counts renewals and anyone due but no
+longer in the audience. *Renewed* is deliberately **not** offered in the manual-enrolment source
+picker — HR enrolling somebody by hand is not a renewal.
+
+**HR enrols again by hand — decided with the user, 2026-09-23.** Manual enrolment (single and
+bulk) refused anybody with ANY enrolment on the programme, ever — so HR could neither open a
+recurring programme's next cycle early nor put back somebody it had withdrawn by mistake. It now
+reads the person's **latest** enrolment, as renewal does (`EmployeeOrientationService.WhyCannotEnrolAsync`):
+
+| Latest enrolment | Manual enrolment |
+|---|---|
+| none | allowed, as before |
+| **withdrawn, cancelled or a no-show** | **allowed** — HR's ending, HR's to undo (X1–X4, X13) |
+| **completed, programme recurs** | **allowed** — the next cycle, opened early (X9–X12) |
+| completed, programme does not recur | refused: *"…completed this programme, and it does not recur…"* (X7, X8) |
+| still open | refused: *"…already on the current cycle…"* (X5, X6) |
+
+Bulk applies the same rule and skips rather than refuses (X11, X12). Both doors stay HR-only
+(orientation Write, X16), so this is never a way for an employee to undo a withdrawal — and the
+**automation still never re-enrols anybody**: rules treat any earlier enrolment as final, renewals
+never open over an ending.
+
+⚠ **Found while doing it:** a completed cycle HR then **withdrew** still reads *Completed* — only
+the enrolment status says HR ended it — so the renewal would have opened a new cycle straight over
+the withdrawal. `RenewAsync` now checks the enrolment status as well (X14). The diagnostic gains an
+**Ended by HR** verdict instead of calling a withdrawn person "Enrolled", and tells HR it can
+re-enrol them (R7, X15).
+
+**Screens for it:** the enrolments list's row menu offers **Re-enrol** (withdrawn / cancelled /
+no-show) and **Open the next cycle now** (a completion on a recurring programme), each behind a
+confirmation and only on a person's latest row for that programme — the programme summary now
+carries `IsRecurring` for that. The enrol dialog and its "skipped" note give the real reason instead
+of "already enrolled".
+
+**Neighbouring suites:** `hr-orientation/run.mjs` 107/107 and `run-lane6-feedback` 20/20 — the ones
+that create and update programmes and enrol people, which is where the new rules could bite. The demo
+scenario that touches programmes (140) only reads them.
 
 ---
 

@@ -284,6 +284,7 @@ public class OrientationProgramService : IOrientationProgramService
     public async Task<OrientationProgramDto> CreateAsync(CreateOrientationProgramDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        ValidateLifecycle(createDto.IsRecurring, createDto.RecurrenceFrequency, createDto.EffectiveFrom, createDto.EffectiveTo);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         entity.ProgramCode = string.IsNullOrWhiteSpace(createDto.ProgramCode)
@@ -305,6 +306,7 @@ public class OrientationProgramService : IOrientationProgramService
     public async Task<OrientationProgramDto> UpdateAsync(UpdateOrientationProgramDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedProgramAsync(updateDto.Id);
+        ValidateLifecycle(updateDto.IsRecurring, updateDto.RecurrenceFrequency, updateDto.EffectiveFrom, updateDto.EffectiveTo);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _programRepository.UpdateAsync(entity);
@@ -313,6 +315,23 @@ public class OrientationProgramService : IOrientationProgramService
 
         return await HydrateDetailCountsAsync(
             (await _programRepository.GetWithFullDetailsAsync(entity.Id))!.ToDto(), entity.TenantId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Round 4, lane I-b: recurrence and the effective dates now DO something — the nightly sweep
+    /// renews on the frequency and nothing enrols outside the dates — so the two ways of saying
+    /// something the sweep cannot act on are refused here rather than silently ignored. The form has
+    /// always required a frequency; the API did not.
+    /// </summary>
+    private static void ValidateLifecycle(
+        bool isRecurring, OrientationRecurrenceFrequency? frequency, DateTime? effectiveFrom, DateTime? effectiveTo)
+    {
+        if (isRecurring && frequency is null)
+            throw new InvalidOperationException("A recurring programme needs a frequency — how often the next cycle opens.");
+        if (frequency is { } f && !Enum.IsDefined(f))
+            throw new InvalidOperationException($"'{(int)f}' is not a recurrence frequency.");
+        if (effectiveFrom is { } starts && effectiveTo is { } ends && ends.Date < starts.Date)
+            throw new InvalidOperationException("The effective-to date is before the effective-from date.");
     }
 
     public async Task<bool> ChangeStatusAsync(ChangeOrientationProgramStatusDto changeDto, Guid updatedByUserId, CancellationToken cancellationToken = default)

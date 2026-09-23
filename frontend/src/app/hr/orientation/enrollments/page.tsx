@@ -12,6 +12,7 @@ import {
   UserMinus,
   X,
   AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,6 +52,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/use-toast';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -110,10 +112,21 @@ export default function OrientationEnrollmentsPage() {
   const [withdrawReason, setWithdrawReason] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Round 4, lane I-b: HR may re-enrol somebody whose enrolment HR ended, and may open the next
+  // cycle of a recurring programme early. The automation still does neither by itself.
+  const [againTarget, setAgainTarget] = useState<{
+    row: EmployeeOrientationSummary;
+    kind: 'reenrol' | 'nextCycle';
+  } | null>(null);
+
   const { data: programs = [] } = useQuery({
     queryKey: ['hr', 'orientation-programs'],
     queryFn: () => orientationProgramService.getAll(),
   });
+  const recurringProgramIds = useMemo(
+    () => new Set(programs.filter((p) => p.isRecurring && p.recurrenceFrequency).map((p) => p.id)),
+    [programs],
+  );
 
   // Sessions for the programme being enrolled onto. A session is optional — a self-paced programme
   // has none — so this stays empty rather than blocking the dialog.
@@ -124,6 +137,7 @@ export default function OrientationEnrollmentsPage() {
   });
 
   const listKey = ['hr', 'orientation-enrollments', scope, programId, completionStatus];
+  const ENDED_BY_HR: string[] = ['Withdrawn', 'Cancelled', 'NoShow'];
   const { data: enrollments = [], isLoading } = useQuery({
     queryKey: listKey,
     queryFn: () => {
@@ -216,14 +230,16 @@ export default function OrientationEnrollmentsPage() {
         title: `${created.length} of ${picked.length} enrolled`,
         description:
           skipped > 0
-            ? `${skipped} were already enrolled on this programme and were skipped.`
+            ? `${skipped} were skipped — already on the programme's current cycle, or they have completed a programme that does not recur.`
             : 'Everyone selected was enrolled.',
       });
 
       if (skipped > 0 || waitlisted > 0) {
         setSkippedNote(
           [
-            skipped > 0 ? `${skipped} already enrolled and skipped.` : null,
+            skipped > 0
+              ? `${skipped} skipped — already on the current cycle, or completed a programme that does not recur.`
+              : null,
             waitlisted > 0
               ? `${waitlisted} placed on the waitlist — the session is full.`
               : null,
@@ -246,6 +262,47 @@ export default function OrientationEnrollmentsPage() {
       });
     } finally {
       setEnrolling(false);
+    }
+  };
+
+  // The server decides by each person's LATEST enrolment on a programme, so the actions are offered
+  // on that row only — an old withdrawn row beside a newer enrolment would only be refused.
+  const latestRowIds = useMemo(() => {
+    const latest = new Map<string, EmployeeOrientationSummary>();
+    for (const e of enrollments) {
+      const key = `${e.employeeId}|${e.programId}`;
+      const seen = latest.get(key);
+      if (!seen || String(e.enrolledAt) > String(seen.enrolledAt)) latest.set(key, e);
+    }
+    return new Set(Array.from(latest.values()).map((e) => e.id));
+  }, [enrollments]);
+
+  const runAgain = async () => {
+    if (!againTarget) return false;
+    setBusy(true);
+    try {
+      await employeeOrientationService.enroll({
+        programId: againTarget.row.programId,
+        employeeId: againTarget.row.employeeId,
+        sessionId: null,
+        enrollmentSource: 'HrAssigned',
+      });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-enrollments'] });
+      toast({
+        title: againTarget.kind === 'reenrol' ? 'Re-enrolled' : 'Next cycle opened',
+        description: 'The earlier enrolment stays on the record.',
+      });
+      setAgainTarget(null);
+      return true;
+    } catch (error: any) {
+      toast({
+        title: 'Could not enrol',
+        description: error?.message || 'Failed to enrol.',
+        variant: 'destructive',
+      });
+      return false;
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -462,6 +519,25 @@ export default function OrientationEnrollmentsPage() {
                             <DropdownMenuItem asChild>
                               <Link href={`/me/orientation/${e.id}`}>View progress</Link>
                             </DropdownMenuItem>
+                            {latestRowIds.has(e.id) && ENDED_BY_HR.includes(e.enrollmentStatus) && (
+                              <DropdownMenuItem
+                                onClick={() => setAgainTarget({ row: e, kind: 'reenrol' })}
+                              >
+                                <RotateCcw className="mr-2 h-4 w-4" />
+                                Re-enrol
+                              </DropdownMenuItem>
+                            )}
+                            {latestRowIds.has(e.id) &&
+                              e.completionStatus === 'Completed' &&
+                              !ENDED_BY_HR.includes(e.enrollmentStatus) &&
+                              recurringProgramIds.has(e.programId) && (
+                                <DropdownMenuItem
+                                  onClick={() => setAgainTarget({ row: e, kind: 'nextCycle' })}
+                                >
+                                  <RotateCcw className="mr-2 h-4 w-4" />
+                                  Open the next cycle now
+                                </DropdownMenuItem>
+                              )}
                             {e.enrollmentStatus !== 'Withdrawn' &&
                               e.enrollmentStatus !== 'Cancelled' && (
                                 <DropdownMenuItem
@@ -495,8 +571,10 @@ export default function OrientationEnrollmentsPage() {
           <DialogHeader>
             <DialogTitle>Enrol participants</DialogTitle>
             <DialogDescription>
-              Anyone already enrolled on the programme is skipped. If the chosen session is full and
-              allows a waitlist, they are queued rather than confirmed.
+              Anyone already on the programme and not finished is skipped, as is anyone who has
+              completed a programme that does not recur. Someone HR withdrew can be enrolled again,
+              and on a recurring programme a completed person starts their next cycle. If the chosen
+              session is full and allows a waitlist, they are queued rather than confirmed.
             </DialogDescription>
           </DialogHeader>
 
@@ -606,6 +684,24 @@ export default function OrientationEnrollmentsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={againTarget !== null}
+        onOpenChange={(o) => !o && setAgainTarget(null)}
+        title={
+          againTarget?.kind === 'nextCycle'
+            ? `Open the next cycle for ${againTarget.row.employeeName ?? 'this person'} now?`
+            : `Re-enrol ${againTarget?.row.employeeName ?? 'this person'}?`
+        }
+        description={
+          againTarget?.kind === 'nextCycle'
+            ? `A new cycle of ${againTarget.row.programTitle ?? 'the programme'} starts today instead of waiting for the nightly renewal. The completed cycle stays on the record.`
+            : `A new, self-paced enrolment on ${againTarget?.row.programTitle ?? 'the programme'}. The ${(againTarget?.row.enrollmentStatus ?? 'ended').toLowerCase()} enrolment stays on the record — and no rule would ever have done this by itself.`
+        }
+        confirmText={againTarget?.kind === 'nextCycle' ? 'Open the next cycle' : 'Re-enrol'}
+        isLoading={busy}
+        onConfirm={runAgain}
+      />
 
       <Dialog
         open={withdrawTarget !== null}

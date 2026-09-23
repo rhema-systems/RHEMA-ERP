@@ -284,10 +284,8 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         tenantId = RequireCurrentTenant(tenantId);
         var program = await GetOwnedProgramAsync(createDto.ProgramId);
 
-        var alreadyEnrolled = await _enrollmentRepository.GetQueryable()
-            .AnyAsync(e => e.TenantId == tenantId && e.EmployeeId == createDto.EmployeeId && e.ProgramId == createDto.ProgramId && !e.IsDeleted, cancellationToken);
-        if (alreadyEnrolled)
-            throw new InvalidOperationException("This employee is already enrolled in the program.");
+        if (await WhyCannotEnrolAsync(tenantId, createDto.EmployeeId, program, cancellationToken) is { } reason)
+            throw new InvalidOperationException(reason);
 
         var entity = createDto.ToEntity(tenantId, enrolledByUserId);
         await ApplySessionCapacityAsync(entity, createDto.SessionId, tenantId, cancellationToken);
@@ -309,9 +307,9 @@ public class EmployeeOrientationService : IEmployeeOrientationService
 
         foreach (var employeeId in bulkDto.EmployeeIds.Distinct())
         {
-            var alreadyEnrolled = await _enrollmentRepository.GetQueryable()
-                .AnyAsync(e => e.TenantId == tenantId && e.EmployeeId == employeeId && e.ProgramId == bulkDto.ProgramId && !e.IsDeleted, cancellationToken);
-            if (alreadyEnrolled)
+            // The same rule as a single enrolment; a bulk run skips rather than refuses, and the
+            // caller compares the returned count with what it sent.
+            if (await WhyCannotEnrolAsync(tenantId, employeeId, program, cancellationToken) is not null)
                 continue;
 
             var entity = new EmployeeOrientation
@@ -943,6 +941,55 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     // ====================================================================
     // HELPERS
     // ====================================================================
+
+    /// <summary>
+    /// Whether HR may enrol this person on this programme now — null when they may, otherwise the
+    /// reason, in words (round 4, lane I-b).
+    /// </summary>
+    /// <remarks>
+    /// <para>This used to refuse anyone with ANY enrolment on the programme, ever. That blocked two
+    /// things HR legitimately does, now allowed — decided with the user on 2026-09-23:</para>
+    /// <list type="bullet">
+    ///   <item><b>Opening the next cycle of a recurring programme early.</b> The nightly sweep opens
+    ///   it on its own one period after completion; HR may open it sooner. Once open it is the
+    ///   latest enrolment, so the sweep will not open a second.</item>
+    ///   <item><b>Re-enrolling somebody whose enrolment HR ended</b> — withdrawn, cancelled or marked
+    ///   a no-show. Those are HR's acts, so HR may undo them. The AUTOMATION still never does: a
+    ///   rule treats any earlier enrolment as final, and a renewal never opens over an ended one.</item>
+    /// </list>
+    /// <para>The LATEST enrolment decides, as it does for renewals. Earlier cycles stay on the record
+    /// as history. Still refused: somebody on a cycle they have not finished, and a second go at a
+    /// programme that does not recur.</para>
+    /// </remarks>
+    private async Task<string?> WhyCannotEnrolAsync(
+        Guid tenantId, Guid employeeId, OrientationProgram program, CancellationToken cancellationToken)
+    {
+        var latest = await _enrollmentRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.EmployeeId == employeeId && e.ProgramId == program.Id && !e.IsDeleted)
+            .OrderByDescending(e => e.EnrolledAt).ThenByDescending(e => e.CreatedAt)
+            .Select(e => new { e.EnrollmentStatus, e.CompletionStatus })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (latest is null) return null;
+
+        if (IsEndedByHr(latest.EnrollmentStatus)) return null;
+
+        var recurs = program.IsRecurring && program.RecurrenceFrequency is not null;
+        if (latest.CompletionStatus is OrientationCompletionStatus.Completed or OrientationCompletionStatus.Exempted)
+            return recurs
+                ? null
+                : "This person has already completed this programme, and it does not recur, so there is no further cycle to enrol them onto.";
+
+        return recurs
+            ? "This person is already on the current cycle of this programme and has not completed it. The next cycle can be opened once they have."
+            : "This person is already on this programme and has not completed it. Withdraw that enrolment first if they are to start again.";
+    }
+
+    /// <summary>An enrolment HR ended without it being completed: withdrawn, cancelled or a no-show.</summary>
+    internal static bool IsEndedByHr(OrientationEnrollmentStatus status) =>
+        status is OrientationEnrollmentStatus.Withdrawn
+            or OrientationEnrollmentStatus.Cancelled
+            or OrientationEnrollmentStatus.NoShow;
 
     private async Task ApplySessionCapacityAsync(EmployeeOrientation entity, Guid? sessionId, Guid tenantId, CancellationToken cancellationToken)
     {

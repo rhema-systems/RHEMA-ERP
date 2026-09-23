@@ -205,7 +205,11 @@ export type OrientationEnrollmentSource =
   | 'AutoRule'
   | 'SelfEnrollment'
   | 'HrAssigned'
-  | 'ManagerAssigned';
+  | 'ManagerAssigned'
+  // Round 4, lane I-b: the next cycle of a recurring programme, opened by the nightly sweep.
+  // ⚠ Deliberately NOT in the options below — they are the manual-enrolment picker, and a person
+  //   enrolling somebody by hand is not a renewal.
+  | 'Recurrence';
 
 export const ORIENTATION_ENROLLMENT_SOURCE_OPTIONS = opts<OrientationEnrollmentSource>([
   ['HrAssigned', 'HR Assigned'],
@@ -535,6 +539,10 @@ export interface OrientationTriggerRunResult {
   alreadyEnrolled: number;
   excluded: number;
   waitingOnPrerequisite: number;
+  /** Of `enrolled`, the next cycles of recurring programmes (lane I-b). */
+  renewed: number;
+  /** Due for a next cycle, but no rule of the programme reaches them any longer. */
+  leftAudience: number;
   error?: string | null;
   /** At most 500 rows; the counts above are complete. */
   enrolments: {
@@ -544,10 +552,13 @@ export interface OrientationTriggerRunResult {
     employeeNumber?: string | null;
     programId: string;
     programTitle: string;
-    ruleId: string;
+    /** Null for a renewal — no rule creates it. */
+    ruleId?: string | null;
     ruleName: string;
-    triggerEvent: OrientationEnrollmentTrigger;
+    triggerEvent?: OrientationEnrollmentTrigger | null;
+    /** The hire/movement date — or, for a renewal, the completion it renews. */
     triggerDate?: string | null;
+    isRenewal: boolean;
   }[];
 }
 
@@ -561,7 +572,12 @@ export type OrientationTriggerVerdict =
   | 'OnlyWhenHrEnrols'
   | 'NoTriggeringEvent'
   | 'NotInAudience'
-  | 'ProgramNotActive';
+  | 'ProgramNotActive'
+  // Round 4, lane I-b — a recurring programme after the last cycle was completed.
+  | 'RenewalDue'
+  | 'RenewalScheduled'
+  // Withdrawn, cancelled or a no-show — never undone by the system; HR can re-enrol by hand.
+  | 'EndedByHr';
 
 export interface OrientationRuleDiagnosis {
   ruleId: string;
@@ -595,6 +611,10 @@ export interface OrientationProgramDiagnosis {
   enrolledByRuleName?: string | null;
   missingPrerequisites: string[];
   rules: OrientationRuleDiagnosis[];
+  /** Lane I-b — a recurring programme after the latest cycle was completed. */
+  lastCompletedOn?: string | null;
+  nextCycleOpensOn?: string | null;
+  nextCycleDueOn?: string | null;
 }
 
 /** "Which rules would fire for this employee, and why" (lane I5). */
@@ -726,6 +746,9 @@ export interface OrientationProgramSummary {
   estimatedDurationMinutes?: number | null;
   isCertificateIssued: boolean;
   requiresAssessment: boolean;
+  /** Round 4, lane I-b — a list needs it to offer "open the next cycle" on a completion. */
+  isRecurring?: boolean;
+  recurrenceFrequency?: OrientationRecurrenceFrequency | null;
   moduleCount: number;
   enrollmentCount: number;
   completedCount: number;

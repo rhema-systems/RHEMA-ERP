@@ -143,6 +143,8 @@ public static class OrientationMappingExtensions
             EstimatedDurationMinutes = entity.EstimatedDurationMinutes,
             IsCertificateIssued = entity.IsCertificateIssued,
             RequiresAssessment = entity.RequiresAssessment,
+            IsRecurring = entity.IsRecurring,
+            RecurrenceFrequency = entity.RecurrenceFrequency,
             ModuleCount = entity.Modules.Count,
             EnrollmentCount = entity.Enrollments.Count,
             CompletedCount = entity.Enrollments.Count(e => e.CompletionStatus == OrientationCompletionStatus.Completed),

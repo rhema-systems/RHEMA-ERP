@@ -346,7 +346,7 @@ export function OrientationProgramForm({
             form={form}
             name="isRecurring"
             label="Recurs"
-            description="Compliance refreshers people must retake on a cycle."
+            description="Everyone who completes it is enrolled again one period after completing — opened early by the completion deadline, so the deadline falls on the anniversary — as long as the programme's rules still reach them."
           />
           {isRecurring && (
             <SelectField
@@ -367,6 +367,11 @@ export function OrientationProgramForm({
             <DateField form={form} name="effectiveFrom" label="Effective from" />
             <DateField form={form} name="effectiveTo" label="Effective to" />
           </FieldRow>
+          <p className="text-muted-foreground -mt-2 text-xs">
+            Outside these dates nothing enrols anyone — not the audience rules, not a renewal, not
+            “Enrol audience now”. A programme published before its start date runs its publish rules
+            when it comes into effect.
+          </p>
           <FieldRow>
             <TextField form={form} name="version" label="Version" placeholder="e.g. 2.1" />
             <TextField

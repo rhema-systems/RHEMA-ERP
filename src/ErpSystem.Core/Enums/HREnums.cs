@@ -10014,7 +10014,14 @@ public enum OrientationEnrollmentSource
     AutoRule = 1,
     SelfEnrollment = 2,
     HrAssigned = 3,
-    ManagerAssigned = 4
+    ManagerAssigned = 4,
+
+    /// <summary>
+    /// The next cycle of a recurring programme, opened by the nightly sweep one period after the
+    /// last completion (round 4, lane I-b). No rule creates it, so it carries no rule id; its
+    /// <c>TriggerDate</c> is the completion it renews.
+    /// </summary>
+    Recurrence = 5
 }
 
 /// <summary>
