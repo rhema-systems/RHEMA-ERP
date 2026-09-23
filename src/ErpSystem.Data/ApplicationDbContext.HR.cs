@@ -475,6 +475,8 @@ public partial class ApplicationDbContext
     public DbSet<ProbationConfirmingAuthority> ProbationConfirmingAuthorities { get; set; } = null!;
     public DbSet<ProbationReminderRun> ProbationReminderRuns { get; set; } = null!;
     public DbSet<ProbationReminderDispatchLog> ProbationReminderDispatchLogs { get; set; } = null!;
+    public DbSet<OnboardingOrientationReminderRun> OnboardingOrientationReminderRuns { get; set; } = null!;
+    public DbSet<OnboardingOrientationReminderDispatchLog> OnboardingOrientationReminderDispatchLogs { get; set; } = null!;
     public DbSet<SheIncidentType> SheIncidentTypes { get; set; } = null!;
     public DbSet<SheIncidentTypeCorrectiveAction> SheIncidentTypeCorrectiveActions { get; set; } = null!;
     public DbSet<SheInjuryType> SheInjuryTypes { get; set; } = null!;
@@ -4392,6 +4394,11 @@ private void ConfigureHREntities(ModelBuilder builder)
                 // setting existed — and every property must appear in this seed block or the
                 // DbContext will not build at design time.
                 LeaveYearStartMonth            = 1,
+                // Round 4, lane K: the orientation & onboarding reminder windows, at their defaults.
+                OnboardingTaskDueLeadDays      = 3,
+                OrientationDueLeadDays         = 7,
+                OrientationCertificateExpiryLeadDays = 30,
+                OrientationChaseAfterDays      = 3,
                 CreatedAt                      = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt                      = (DateTime?)null,
                 CreatedBy                      = "System",
@@ -10932,6 +10939,22 @@ private void ConfigureHREntities(ModelBuilder builder)
             e.HasIndex(x => new { x.TenantId, x.CreatedAt });
             e.HasIndex(x => x.RunId);
             e.HasIndex(x => x.ProbationPeriodId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Orientation & onboarding reminder engine (round 4, lane K) — the sweep that delivers ----
+        builder.Entity<OnboardingOrientationReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<OnboardingOrientationReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key in the same save that delivers.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+            e.HasIndex(x => x.RoutedToEmployeeId);
 
             e.HasOne(x => x.Run)
                 .WithMany(x => x.DispatchLogs)

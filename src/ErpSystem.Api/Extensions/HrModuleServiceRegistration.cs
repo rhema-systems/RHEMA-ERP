@@ -633,6 +633,9 @@ public static class HrModuleServiceRegistration
         // Round 4, lane I — the audience rules made to fire, and onboarding templates made to
         // choose themselves. The nightly host is registered in ServiceCollectionExtensions.
         services.AddScoped<IOrientationEnrollmentTriggerService, OrientationEnrollmentTriggerService>();
+        // Round 4, lane K: the orientation & onboarding reminder engine — the first HR sweep that
+        // delivers (an in-app notification and an email), not only logs.
+        services.AddScoped<IOnboardingOrientationReminderService, OnboardingOrientationReminderService>();
         services.AddScoped<IOnboardingTemplateApplicabilityService, OnboardingTemplateApplicabilityService>();
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();
@@ -942,6 +945,9 @@ public static class HrModuleServiceRegistration
         // for the same reason: the built-in default is what makes it render before anyone has
         // opened the template editor.
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Assets.AssetsEmailEventCatalog>();
+        // Orientation & onboarding (round 4, lane K): the reminder digest. Registered so the built-in
+        // default renders before anyone has opened the template editor — the sweep emails from day one.
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Orientation.OnboardingOrientationEmailEventCatalog>();
         services.AddScoped<ErpSystem.Core.Interfaces.Common.ITemplatedEmailService, ErpSystem.Core.Services.Common.TemplatedEmailService>();
         services.AddScoped<ErpSystem.Core.Interfaces.INumberSequenceService, ErpSystem.Data.Services.NumberSequenceService>();
         services.AddSingleton<ErpSystem.Core.Services.Common.IEmailTemplateRenderer, ErpSystem.Core.Services.Common.EmailTemplateRenderer>();

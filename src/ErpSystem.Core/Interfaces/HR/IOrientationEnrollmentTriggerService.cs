@@ -110,7 +110,9 @@ public interface IOnboardingTemplateApplicabilityService
     /// template, unless they already have one or no template applies. Best-effort — logs and
     /// returns null rather than throwing.
     /// </summary>
+    /// <param name="coordinatorEmployeeId">The plan's coordinator — the officer who confirmed the
+    /// start. Ignored, and the plan left uncoordinated, when it is not an employee of the tenant.</param>
     Task<Guid?> CreatePlanOnHireAsync(
-        Guid tenantId, Guid employeeId, DateOnly startDate, Guid actingUserId,
+        Guid tenantId, Guid employeeId, DateOnly startDate, Guid actingUserId, Guid? coordinatorEmployeeId,
         CancellationToken cancellationToken = default);
 }

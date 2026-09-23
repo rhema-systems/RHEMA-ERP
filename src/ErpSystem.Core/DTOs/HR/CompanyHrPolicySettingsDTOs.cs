@@ -122,6 +122,12 @@ public class CompanyHrPolicySettingsDto : BaseDto
 
     /// <summary>⚠ The month the LEAVE year begins. 1 = January. Change-once-at-setup (D-9).</summary>
     public int LeaveYearStartMonth { get; set; }
+
+    // Orientation & onboarding reminder windows (round 4, lane K).
+    public int OnboardingTaskDueLeadDays { get; set; }
+    public int OrientationDueLeadDays { get; set; }
+    public int OrientationCertificateExpiryLeadDays { get; set; }
+    public int OrientationChaseAfterDays { get; set; }
 }
 
 /// <summary>
@@ -238,4 +244,10 @@ public class UpdateCompanyHrPolicySettingsDto
 
     /// <summary>⚠ The month the LEAVE year begins. Refused once the tenant holds leave data (D-9).</summary>
     [Range(1, 12)] public int LeaveYearStartMonth { get; set; } = 1;
+
+    // Orientation & onboarding reminder windows (round 4, lane K).
+    [Range(0, 90)]  public int OnboardingTaskDueLeadDays { get; set; } = 3;
+    [Range(0, 90)]  public int OrientationDueLeadDays { get; set; } = 7;
+    [Range(0, 365)] public int OrientationCertificateExpiryLeadDays { get; set; } = 30;
+    [Range(1, 90)]  public int OrientationChaseAfterDays { get; set; } = 3;
 }

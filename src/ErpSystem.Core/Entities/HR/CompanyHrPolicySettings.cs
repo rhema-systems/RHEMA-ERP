@@ -515,4 +515,34 @@ public class CompanyHrPolicySettings : TenantEntity
     /// refused rather than half-corrected.</para>
     /// </remarks>
     public int LeaveYearStartMonth { get; set; } = 1;
+
+    // ── Orientation & onboarding reminder windows (round 4, lane K) ──────────────────────────
+    //
+    // Read by OnboardingOrientationReminderService, the first HR sweep that DELIVERS — an in-app
+    // notification and an email — rather than only logging what it would have said. ⚠ Every one is
+    // non-nullable with a real DEFAULT in the migration; at zero the windows would close and the
+    // sweep would quietly remind nobody.
+    //
+    // ⚠ NOT a setting: the 90-day backlog horizon for overdue items. Like the leave engine's, it
+    // stops the first run on an established database announcing years of history at once — it
+    // protects the system from itself and is not a policy anybody should be choosing.
+
+    /// <summary>Days before an onboarding task's due date that its owner is reminded.</summary>
+    [Range(0, 90)]
+    public int OnboardingTaskDueLeadDays { get; set; } = 3;
+
+    /// <summary>Days before an orientation's completion date that the participant is reminded.</summary>
+    [Range(0, 90)]
+    public int OrientationDueLeadDays { get; set; } = 7;
+
+    /// <summary>Days before an orientation certificate expires that its holder is warned.</summary>
+    [Range(0, 365)]
+    public int OrientationCertificateExpiryLeadDays { get; set; } = 30;
+
+    /// <summary>
+    /// Days something may wait on a person before they are chased: a completed onboarding task
+    /// awaiting sign-off, an assessment not yet attempted, an acknowledgement not yet signed.
+    /// </summary>
+    [Range(1, 90)]
+    public int OrientationChaseAfterDays { get; set; } = 3;
 }

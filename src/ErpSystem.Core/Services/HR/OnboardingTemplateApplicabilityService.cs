@@ -298,8 +298,17 @@ public sealed class OnboardingTemplateApplicabilityService : IOnboardingTemplate
     // THE HIRE HOOK
     // ====================================================================
 
+    /// <remarks>
+    /// ⚠ <b>The coordinator was not set until round 4 lane K-a's first scheduled run showed why it
+    /// must be.</b> An onboarding task nobody is assigned to is reminded to the plan's coordinator,
+    /// and template tasks name a position, not a person (on UAT not one task had an assignee) — so a
+    /// plan created here with no coordinator had reminders nobody received (the run logs them
+    /// <c>NotRouted</c>). The
+    /// officer who confirmed the start is HR, knows the person has arrived, and is the one name the
+    /// system has at this moment; HR can hand the plan to someone else from the plan screen.
+    /// </remarks>
     public async Task<Guid?> CreatePlanOnHireAsync(
-        Guid tenantId, Guid employeeId, DateOnly startDate, Guid actingUserId,
+        Guid tenantId, Guid employeeId, DateOnly startDate, Guid actingUserId, Guid? coordinatorEmployeeId,
         CancellationToken cancellationToken = default)
     {
         try
@@ -322,11 +331,22 @@ public sealed class OnboardingTemplateApplicabilityService : IOnboardingTemplate
                 return null;
             }
 
+            Guid? coordinatorId = null;
+            if (coordinatorEmployeeId is { } candidateId)
+            {
+                var isEmployee = await _unitOfWork.Repository<Employee>().GetQueryable()
+                    .AnyAsync(e => e.Id == candidateId && e.TenantId == tenantId && !e.IsDeleted, cancellationToken);
+                if (isEmployee) coordinatorId = candidateId;
+                else _logger.LogWarning("Onboarding plan for {EmployeeId} created with no coordinator: {CoordinatorId} is not an employee of the tenant.",
+                    employeeId, candidateId);
+            }
+
             var created = await _planService.CreateAsync(new CreateOnboardingPlanDto
             {
                 EmployeeId = employeeId,
                 TemplatePlanId = templateId,
                 StartDate = startDate,
+                OnboardingCoordinatorId = coordinatorId,
             }, tenantId, actingUserId, cancellationToken);
 
             // The reason is the system's, not a field a caller of the create endpoint may set, so it

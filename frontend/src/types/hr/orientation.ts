@@ -1305,3 +1305,74 @@ export interface OrientationDashboard {
   upcomingSessionList: OrientationSessionSummary[];
   expiringCertificateList: OrientationCertificate[];
 }
+
+// ── Reminders (round 4, lane K) — the sweep that delivers ─────────────────────
+
+/** Sent, Failed, TimedOut, NoAddress, NoMailServer, NotRouted — or Pending while a run is mid-send. */
+export type OrientationReminderEmailOutcome =
+  | 'Sent'
+  | 'Failed'
+  | 'TimedOut'
+  | 'NoAddress'
+  | 'NoMailServer'
+  | 'NotRouted'
+  | 'Pending';
+
+export interface OrientationReminderRunResult {
+  runId: string;
+  remindersQueued: number;
+  notificationsDelivered: number;
+  emailsSent: number;
+  emailsNotSent: number;
+  unrouted: number;
+  mailServerConfigured: boolean;
+  byKind: Record<string, number>;
+}
+
+export interface OrientationReminderPreviewItem {
+  kind: string;
+  itemType: string;
+  entityId: string;
+  onboardingPlanId?: string | null;
+  employeeOrientationId?: string | null;
+  reference: string;
+  dueDate?: string | null;
+  daysRemaining: number;
+  escalationTier: number;
+  routedToEmployeeId?: string | null;
+  routedToName?: string | null;
+  dedupeKey: string;
+  navigationUrl?: string | null;
+}
+
+export interface OrientationReminderRun {
+  id: string;
+  startedAt: string;
+  completedAt?: string | null;
+  trigger: string;
+  remindersQueued: number;
+  notificationsDelivered: number;
+  emailsSent: number;
+  emailsNotSent: number;
+  unrouted: number;
+  mailServerConfigured: boolean;
+}
+
+export interface OrientationReminderLogEntry {
+  id: string;
+  runId: string;
+  kind: string;
+  itemType: string;
+  entityId: string;
+  onboardingPlanId?: string | null;
+  employeeOrientationId?: string | null;
+  reference: string;
+  dueDate?: string | null;
+  daysRemaining: number;
+  escalationTier: number;
+  routedToEmployeeId?: string | null;
+  routedToName?: string | null;
+  notificationId?: string | null;
+  emailOutcome: OrientationReminderEmailOutcome | string;
+  dispatchedAt: string;
+}

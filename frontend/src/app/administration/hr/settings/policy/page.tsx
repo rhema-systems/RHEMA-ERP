@@ -100,6 +100,10 @@ const schema = z
     mandatoryLeaveChaseFromMonth: z.coerce.number().int().min(1).max(12),
     leaveCarryOverExpiryReminderDays: z.coerce.number().int().min(0).max(365),
     leaveYearStartMonth: z.string(),
+    onboardingTaskDueLeadDays: z.coerce.number().int().min(0).max(90),
+    orientationDueLeadDays: z.coerce.number().int().min(0).max(90),
+    orientationCertificateExpiryLeadDays: z.coerce.number().int().min(0).max(365),
+    orientationChaseAfterDays: z.coerce.number().int().min(1).max(90),
 
     budgetEnforcementMode: z.string(),
     establishmentEnforcementMode: z.string(),
@@ -216,6 +220,10 @@ export default function PolicySettingsPage() {
       mandatoryLeaveChaseFromMonth: data.mandatoryLeaveChaseFromMonth,
       leaveCarryOverExpiryReminderDays: data.leaveCarryOverExpiryReminderDays,
       leaveYearStartMonth: String(data.leaveYearStartMonth ?? 1),
+      onboardingTaskDueLeadDays: data.onboardingTaskDueLeadDays,
+      orientationDueLeadDays: data.orientationDueLeadDays,
+      orientationCertificateExpiryLeadDays: data.orientationCertificateExpiryLeadDays,
+      orientationChaseAfterDays: data.orientationChaseAfterDays,
     });
   }, [data, form]);
 
@@ -307,6 +315,10 @@ export default function PolicySettingsPage() {
         mandatoryLeaveChaseFromMonth: Number(v.mandatoryLeaveChaseFromMonth),
         leaveCarryOverExpiryReminderDays: Number(v.leaveCarryOverExpiryReminderDays),
         leaveYearStartMonth: Number(v.leaveYearStartMonth),
+        onboardingTaskDueLeadDays: Number(v.onboardingTaskDueLeadDays),
+        orientationDueLeadDays: Number(v.orientationDueLeadDays),
+        orientationCertificateExpiryLeadDays: Number(v.orientationCertificateExpiryLeadDays),
+        orientationChaseAfterDays: Number(v.orientationChaseAfterDays),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr', 'policy-settings'] });
@@ -824,6 +836,54 @@ export default function PolicySettingsPage() {
               Month 9 is September — late enough that the chase is not noise, early enough that
               there is still a quarter of the year in which to take the leave. Chasing from January
               says nothing; chasing in December is too late to act on.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Orientation &amp; onboarding — reminders</CardTitle>
+            <CardDescription>
+              The daily reminder sweep tells people what is due: onboarding tasks go to their
+              assignee, else the plan&apos;s coordinator; orientations, assessments, acknowledgements
+              and certificates to the participant. Each person gets one notification listing theirs,
+              and the same by email.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="onboardingTaskDueLeadDays"
+                label="Remind about an onboarding task this many days before it is due"
+                required
+              />
+              <NumberField
+                form={form}
+                name="orientationDueLeadDays"
+                label="Remind about an orientation this many days before it is due"
+                required
+              />
+            </FieldRow>
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="orientationCertificateExpiryLeadDays"
+                label="Warn this many days before an orientation certificate expires"
+                required
+              />
+              <NumberField
+                form={form}
+                name="orientationChaseAfterDays"
+                label="Chase something waiting on a person after this many days"
+                required
+              />
+            </FieldRow>
+            <p className="text-sm text-muted-foreground">
+              &quot;Waiting on a person&quot; is a completed task nobody has signed off, an assessment
+              not yet attempted, or an acknowledgement not yet signed. Overdue items are reminded when
+              they fall due, again after a week and after a fortnight; anything more than 90 days
+              overdue is treated as history.
             </p>
           </CardContent>
         </Card>

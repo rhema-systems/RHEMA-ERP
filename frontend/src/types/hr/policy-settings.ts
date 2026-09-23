@@ -115,6 +115,16 @@ export interface CompanyHrPolicySettings {
    */
   leaveYearStartMonth: number;
 
+  /**
+   * Round 4, lane K — the orientation & onboarding reminder windows, read by the sweep that
+   * delivers (an in-app notification and an email) rather than only logging.
+   */
+  onboardingTaskDueLeadDays: number;
+  orientationDueLeadDays: number;
+  orientationCertificateExpiryLeadDays: number;
+  /** Days a task awaiting sign-off, an unattempted assessment or an unsigned acknowledgement waits before it is chased. */
+  orientationChaseAfterDays: number;
+
   createdAt: string;
   createdBy: string | null;
   updatedAt: string | null;

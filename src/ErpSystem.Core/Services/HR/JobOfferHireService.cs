@@ -2290,11 +2290,13 @@ public class JobHireService : IJobHireService
             // OnboardingPlanTemplate when a HireRecord is confirmed" — until now it was not. Only for
             // an employee THIS hire created: the template is chosen by placement, and a linked
             // (internal) employee still carries their old placement at this point — choosing by it
-            // would hand them the onboarding plan for the job they are leaving.
+            // would hand them the onboarding plan for the job they are leaving. The officer who
+            // confirmed the start coordinates it: its unassigned tasks are reminded to them.
             if (!linkedEmployeeId.HasValue && entity.ActualStartDate is { } started)
                 await _onboardingTemplates.CreatePlanOnHireAsync(
                     entity.TenantId, hiredEmployeeId, started,
                     _currentUserProvider.UserId == Guid.Empty ? confirmedByUserId : _currentUserProvider.UserId,
+                    confirmedByUserId,
                     cancellationToken);
         }
 

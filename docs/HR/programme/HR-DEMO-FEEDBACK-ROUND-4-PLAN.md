@@ -1,6 +1,6 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–I (with I-b), J, L and M done; K next.**
+> **Status 2026-09-23 — A–I (with I-b), J, K-a, L and M done; K-b next.**
 >
 > | Lane | State |
 > |---|---|
@@ -20,13 +20,14 @@
 > | **L** | **DONE** — block S, 29 assertions, in the same harness: 181 ×2; **no migration**. L1 reproduced first: the endpoint was right — onboarding (blended) had never had a session scheduled, compliance is self-paced, and the dialog drew a 403 like "none". The dialog now says which; only programmes that take enrolments are offered; closed sessions are marked; **the enrol path refuses a retired/draft programme and a closed or other programme's session** (it checked neither); two induction days seeded. ⚠ A third demo-data incident, reversed — § 8 |
 > | **J** | **DONE** — 94 ×2, `hr-orientation/run-round4-j.mjs`; **no migration**. Copy an onboarding template (never the default, **not** its audience), a programme (everything it is made of, as a Draft) and a session (*Run again* on a new date); a Copy / Run again button on each list **and each record's page** — a finished session is on no list. **The harness found two defects older than the lane, both closed:** editing a quiz question's options had never once saved, and a task due before the start date was refused though the screen offered it — § 8 |
 > | **M** | **DONE** — 54 ×2, `hr-orientation/run-round4-m.mjs`; migration `AddOrientationFacilitatorRegisterPick` applied to UAT. An external facilitator can be picked from the **training vendor register** (a vendor, and its trainer once named): the name, email and organisation are a snapshot taken when the pick is made or changed; a blacklisted/inactive vendor or inactive trainer cannot be picked, and one that becomes so later is flagged on the session instead of blocking its edits; a vendor or trainer booked for a session that has not happened cannot be deleted (M3); *Run again* keeps the picks (M4). Demo: GIMPA on both induction days — § 8 |
+> | **K-a** | **DONE** — 53 ×2, `hr-orientation/run-round4-k.mjs`; migration `AddOnboardingOrientationReminders` applied to UAT. **The first HR sweep that delivers**: eight rules (onboarding tasks due / overdue / awaiting sign-off; orientations due / overdue / assessment unattempted / acknowledgement unsigned; certificates expiring), **one digest per person per run**, in-app in the same save as the claims and emailed after — each email's outcome recorded; four lead-day settings, each enforced in both positions; run-now / preview / runs / log + a Reminders screen; the host registered with it and its scheduled run seen. Proved by a local SMTP sink: the email **arrives**. ⚠ 768 test-fixture onboarding plans cancelled first (the user's call) — § 8. ⚠ **The scheduled run found a lane I4 gap:** a plan created on hire had no coordinator, so its reminders reached nobody — the confirming officer now coordinates it (lane I 183 ×2, H6b/H6c) |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J and M are complete.** Next: K, N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J and M are complete; K is split like D and E, and K-a is done.** Next: K-b (the lifecycle notifications, K3), then N, O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
 > all three are still outstanding.
@@ -576,6 +577,10 @@ the copy does not touch the original.
 
 **Harness:** `hr-orientation/run-round4-k.mjs` — assert rows in the run table **and** a delivered
 notification, not merely a 200 from the trigger endpoint.
+
+> **Split, like D and E** (sequencing, not narrowing): **K-a** = K1, K2, K4, K5 — the sweep that
+> delivers, its settings, its admin surface and its host — **done 2026-09-23**, see § 8. **K-b** =
+> K3, the lifecycle notifications, on K-a's delivery code.
 
 ### Lane L — The sessions dropdown
 
@@ -1619,7 +1624,7 @@ nothing, audience rules had no resolver, and an onboarding plan was created only
 | **I1** | Rules target the shared `HrAudienceTargetType` through `IHrAudienceResolver` (a unit includes the units beneath it), narrowed by a new `Population` — new hires (employed ≤ 90 days), management (heads a unit or manages someone), contractors (contract, fixed-term, consultant, freelance). "New hires in Operations" was not expressible before. `OrientationAudienceScope` survives only as the programme's descriptive label. |
 | **I2** | A typed target picker (the level→unit and level→location cascades, levels, positions, the employee search) replacing the free-text GUID box; targets validated server-side (a position's id under "unit" is now a 422); `TargetEntityName` filled at last (§ 3 defect 15); a live reach line on the form and a *Reach today* column, both proven against an independent SQL count. |
 | **I3** | `OrientationEnrollmentTriggerService`: **OnHire** from `EmployeeService.CreateEmployeeAsync` (the form and the import) and `ConfirmStartAsync`; **OnTransfer/OnPromotion** from `StaffMovementService.ImplementAsync`; **OnProgramPublish** from the status change; **Scheduled** plus a catch-up of every dated rule in a nightly `OrientationTriggerBackgroundService`, **registered in the same change**; **Manual** only from HR's new *Enrol audience now* (preview first). Each automatic enrollment records its rule, event and date (`AudienceRuleId`, `TriggerEvent`, `TriggerDate`). |
-| **I4** | `OnboardingPlanTemplateAudience` + `OnboardingTemplateApplicabilityService`: most specific wins (position 100 › own unit 90, one less per level up › level 40 › location 30 › everyone 10 › the default template 0), exclusions veto, ties flagged `IsAmbiguous`; `GET …/applicable`; and **a plan created automatically when a hire's start is confirmed**, with `TemplateSelectionReason` — making true what `RecruitmentEntities.cs` had always claimed. |
+| **I4** | `OnboardingPlanTemplateAudience` + `OnboardingTemplateApplicabilityService`: most specific wins (position 100 › own unit 90, one less per level up › level 40 › location 30 › everyone 10 › the default template 0), exclusions veto, ties flagged `IsAmbiguous`; `GET …/applicable`; and **a plan created automatically when a hire's start is confirmed**, with `TemplateSelectionReason` — making true what `RecruitmentEntities.cs` had always claimed. ⚠ *Corrected in lane K-a:* that plan had no coordinator, so its reminders reached nobody; the confirming officer now coordinates it (H6b, H6c). |
 | **I5** | *Orientation → Enrollment Triggers*: for one employee, per programme, the verdict (enrolled, enrols tonight, waiting for its date, waiting on a prerequisite, excluded, window lapsed, only when HR enrols, not in the audience…) with the reason, every rule's match and window, and which onboarding template their plan would come from. |
 
 **Rules the triggers run on — each a decision taken inside the lane.**
@@ -1948,6 +1953,89 @@ belongs to area 7; recorded, not done here.
 
 **Frontend:** scoped type-check (`tsconfig.round4-lane-m.json`) clean with a negative control; eslint
 clean. **Not browser-walked.**
+
+### Lane K-a — the reminder sweep that delivers · DONE 2026-09-23 · 53 assertions ×2
+
+Harness: `dev-harness/hr-orientation/run-round4-k.mjs`, **53 ×2**. Migration
+`20260923110909_AddOnboardingOrientationReminders` — scaffolded, rewritten as guarded SQL, proved on
+a scratch database (Up twice; the four windows filled on **both** tenants' settings rows, not only a
+seeded one; a duplicate claim refused by the unique index; deleting a run cascading to its log; Down
+twice; Up again), applied to UAT and checked there.
+
+**The survey said what the plan assumed, and it held.** All eleven HR reminder sweeps (asset,
+certification, discipline, identification, leave, probation, separation, SHE, movement, travel,
+team) have **no call** to any notification or email service, and nothing reads their dispatch logs
+but their own admin screens — no outbox. They count what they would have said. That debt is HR's
+own, so it is recorded as **lane 10 of `HR-FINISH-PLAN.md`**, not in the cross-module defects file
+this plan named (that file is for other teams' modules).
+
+**What was built.**
+
+| | |
+|---|---|
+| **K1** | `OnboardingOrientationReminderService` + its host, on the probation engine's pattern — run header, dispatch log, a dedupe key of kind, item, **due date** and tier (moving a date re-arms), a lock, per-tenant isolation, a staggered start (19 minutes; the other sweeps take 3–29). **Eight rules:** an onboarding task due soon, overdue (three rungs: at due, a week, a fortnight) or completed and awaiting sign-off; an orientation due soon or overdue; an assessment not attempted and an acknowledgement not signed after the chase window; a certificate expiring. Onboarding tasks route to their assignee, else the plan's coordinator; the rest to the participant. A **90-day backlog horizon** keeps history out. |
+| **K2** | **Delivery.** One `OrientationNotification` **per person per run** — their items listed — saved in the **same transaction** as the claims (a crash cannot claim a reminder nobody received); then one email per person through the templated email service and a new Orientation & Onboarding catalogue (`OrientationReminderDigest`), after the commit, raced against a 10-second timeout. The outcome is written back **per item**: `Sent`, `Failed`, `TimedOut`, `NoAddress`, `NoMailServer` (checked the way the sender checks), `NotRouted`. |
+| **K4** | `POST /api/orientation-reminders/run` (HR.Orientation.**Write** — the HR role holds no Admin, and a button HR cannot press is the company-schedule finding again), `GET preview?asOf=`, `GET runs`, `GET log?days=` (Read). A **Reminders** screen under Orientation setup: run now with what reached people, preview as at a date, recent sweeps with their delivery columns, and the log with who each item went to and what its email did. **Four settings** on `CompanyHrPolicySettings` — `OnboardingTaskDueLeadDays` 3, `OrientationDueLeadDays` 7, `OrientationCertificateExpiryLeadDays` 30, `OrientationChaseAfterDays` 3 — on the HR policy settings screen, and in the configuration register (§ 2.5) as **Enforced**, each proved in both positions. |
+| **K5** | Registered with `AddHostedService` in the same change; the host logged its start. **The first scheduled run fired at 11:41:21, 19 minutes after the start as designed**, and wrote its header: queued 2, people 0, **unrouted 2**, mail 0, completed. Both items were lane I's own hire-test tasks, from a plan the hire hook had created at 11:26 — and the reason nobody received them is a lane I4 gap, below. After the fix and a rebuild the host fired again on time (13:02:57): queued 0 — the suites' tenant-wide runs had already claimed what was due — and **unrouted 0**. |
+
+**Decisions this lane made — each one this entry's to defend.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **One digest per person per run, not one message per item** | Measured before building: every one of the 755 coordinated onboarding plans had the same coordinator. One notification per task would have handed her hundreds on the first night. Each item is still claimed and logged on its own. |
+| 2 | **Onboarding tasks route to the plan's coordinator when unassigned — not to the holders of the owning position** | On UAT **0 of 6,857** tasks had an assignee; 6,040 were owned by a position. A position can have many holders, and none of them can see an onboarding task anywhere in the portal — so the coordinator, whose queue it is, is told. |
+| 3 | **In-app through `OrientationNotification`**, not the platform notification table | It is already merged into the employee's **My Notifications** feed and unread count (area 25), and it is keyed by employee, so a person without a login still has a record. |
+| 4 | **The email outcome is recorded, never assumed** | The templated email service returns only true/false and never throws. On a database with no mail server the in-app notification is the delivery and the log says `NoMailServer` — which UAT's first real run shows. |
+
+**How it is proved.** The preview (which claims nothing) shows each rule, tier and recipient; each
+setting is flipped both ways and the item appears and disappears; a run with **no mail server** —
+UAT's true state — claims the fixtures, writes one notification per person, records `NoMailServer`,
+and the participant **sees it in their own My Notifications feed**, unread and counted. Then the suite
+starts a **local SMTP sink**, adds a mail-settings row pointing at it, re-arms one item per person by
+moving its date, and runs again: both emails **arrive**, to the right addresses, with the task or
+programme and "due tomorrow" / "due in 2 days" in the subject, the greeting, the link to the queues or
+that very enrolment, and the list kept as text. The row is deleted and UAT is back to no mail server.
+A re-run claims nothing; the overdue task climbs to the third rung five days on; the admin reads carry
+the delivery counts and names; an ordinary employee is refused both.
+
+**⚠ Demo data — the user's call, made before the first sweep.** UAT held **774** open onboarding
+plans: the 6 real starters' and **768 test fixtures** — 749 from the scenario 145 burst during lane I
+(its cleanup had removed 445 and missed these; nothing has created any since) and 19 from lane I's
+hire tests. All named the Head of HR as coordinator or no one. Asked, the user chose to **cancel** them:
+one transaction, count-checked at 768, marked `UpdatedBy = round4-laneK-fixture-tidy-2026-09-23`, with
+every plan's previous status saved to `dev-harness/hr-orientation/fixture-plans-cancelled-2026-09-23.csv`.
+**The first real run then sent the Head of HR one notification — "41 onboarding tasks need your
+attention"**, the six starters' overdue tasks (63–79 days late in the demo data), 25 listed and "…and
+16 more", linking to the onboarding queues — and one to a demo employee for her overdue orientation.
+
+**⚠ The scheduled run found a gap in lane I4: a plan created on hire had no coordinator.**
+`CreatePlanOnHireAsync` passed the employee, the template and the start date, and nothing else. Template
+tasks name a position, not a person — on UAT not one onboarding task has an assignee — so an
+unassigned task is reminded to the plan's coordinator (decision 2), and on a plan the hire created
+there was none: every one of its reminders would be logged `NotRouted`, for every real hire, from the
+first night. Lane I's suite could not see it; it asserted the plan existed, not that anyone owned it.
+**Fixed:** the officer who confirms the start becomes the coordinator — HR, the person who knows the
+hire has arrived, and the one name the system has at that moment. The id is checked as an employee
+of the tenant first (otherwise the plan is created uncoordinated and a warning logged — the hook
+stays best-effort), and HR can hand the plan to someone else on the plan screen. Lane I block H now
+asserts the coordinator (**H6b**) and, through the reminder preview — which lists before the claim
+filter, so it holds whenever it runs — that the plan's tasks are routed to that officer (**H6c**; the
+11:41 run is its negative: the same items, routed to nobody). Its tidy-up cancels the plan its hire
+created, so the nightly sweep does not remind a fixture officer about fixture tasks for 90 days. UAT held exactly **one** open plan created
+on hire — that same fixture — so nothing needed backfilling; it was cancelled like the 768 (same
+marker, row 769 of the CSV).
+
+**Neighbouring suites:** `run-round4-i` 181/181 before the coordinator fix and **183/183 twice** after
+it (H6b, H6c; the only suite that drives the hire hook — `hr-w3-permissions/run-slice9` only checks
+that an employee is refused `confirm-start`, and recruitment `slice-d` is parked on its own § 9.3 wall;
+`run-round4-k` 53/53 twice again on the rebuilt API); `run-round4-j` 94/94; `run-round4-m` 54/54;
+`hr-orientation/run.mjs` 107/107; `run-lane6-feedback` 20/20. The settings suites that save the
+policy all read-then-spread it, so the new windows round-trip; `hr-leave/run-slice6-settings` saved and
+restored the settings cleanly, then stopped on its own stale fixture (its fixed employee already has
+leave for the dates it books — the recorded leave-harness litter trap), not on this lane.
+
+**Frontend:** scoped type-check (`tsconfig.round4-lane-k.json`, now including the settings screens)
+clean with a negative control; eslint clean. **Not browser-walked.**
 
 ---
 

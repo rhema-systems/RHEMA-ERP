@@ -30,6 +30,7 @@ sweep closed; coverage queue 3 real endpoints from empty.
 | **7** | Org-authority model | ✅ built · 4 residues | — | — |
 | **8** | HR ↔ Finance GL posting sweep | 7 prerequisites + the adapters | 5+ slices | lane 2, Finance owner, Payroll owner |
 | **9** | Hand-offs — real, but not HR's to fix | 3 | file and acknowledge | other owners |
+| **10** | Reminders that reach people — eleven HR sweeps log and tell nobody | 11 sweeps | 2–3 slices | — (unblocked; the delivery path exists since round 4 lane K-a) |
 
 **Buildable by this team: roughly 9–10 slices.** Unblocked today: **3b, 3a-ii, lane 6** (and lane 4). Lanes 0, 1, 7, 2a, 3a, 3c, 5a, 5b and 3d’s schema-free rows are done.
 
@@ -1395,6 +1396,38 @@ supplied one — the register rule from lane 3b working as designed; fixtures mu
 **Recorded, not fixed:** `Employee.Salary` is read as *monthly* by `EmolumentService` and by this
 lane's payroll basis, but the salary-confirmation letter prints it as `AnnualSalary`. One of the two
 is wrong; the letter is the likelier. Decide with TDC which unit the flat figure holds.
+
+---
+
+## Lane 10 — Reminders that reach people · 2–3 slices · unblocked · added 2026-09-23
+
+**Found building round 4, lane K-a, and verified before it was written down:** eleven HR reminder
+sweeps — asset, certification expiry, discipline, identification expiry, leave, probation,
+separation, SHE, staff movement, staff travel, team — run nightly, claim their items in a dispatch
+log, and **tell nobody**. Each service was searched for any call to a notification or email service
+(none), and every reader of their dispatch logs was listed (only their own admin log screens — there
+is no outbox). The run tables say "N reminders queued"; no person ever received one.
+
+**What now exists to build on** (round 4, lane K-a — `OnboardingOrientationReminderService`):
+
+- one message **per person per run**, listing their items — the only shape that survives a
+  coordinator with hundreds of open items (measured on the demo database: one person coordinated
+  every onboarding plan);
+- the in-app row written in the **same save** as the claims, and the email sent after the commit
+  with its outcome recorded per item (`Sent`, `Failed`, `TimedOut`, `NoAddress`, `NoMailServer`,
+  `NotRouted`) — so "no mail server configured" reads as that, not as success;
+- a harness pattern that proves delivery end to end: a local SMTP sink, a temporary mail-settings
+  row, and the recipient's own notification feed.
+
+**What each sweep still needs:** a store the recipient sees. Orientation had its own
+(`OrientationNotification`, merged into My Notifications). The others would write the general
+platform notification (by USER — so an employee without a login gets email only), which the header
+bell and My Notifications both read. The recipient is already on most dispatch rows
+(`RoutedToEmployeeId` or equivalent); where it is not, routing is the first job, as it was for
+probation's confirming authority.
+
+⚠ **The plan that found this said to file it in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.** That
+document is for other teams' modules; these sweeps are HR's own, so the debt is recorded here.
 
 ---
 

@@ -78,6 +78,10 @@ public static class CompanyHrPolicyMappingExtensions
             MandatoryLeaveChaseFromMonth          = entity.MandatoryLeaveChaseFromMonth,
             LeaveCarryOverExpiryReminderDays      = entity.LeaveCarryOverExpiryReminderDays,
             LeaveYearStartMonth                   = entity.LeaveYearStartMonth,
+            OnboardingTaskDueLeadDays             = entity.OnboardingTaskDueLeadDays,
+            OrientationDueLeadDays                = entity.OrientationDueLeadDays,
+            OrientationCertificateExpiryLeadDays  = entity.OrientationCertificateExpiryLeadDays,
+            OrientationChaseAfterDays             = entity.OrientationChaseAfterDays,
         };
     }
 
@@ -146,5 +150,9 @@ public static class CompanyHrPolicyMappingExtensions
         entity.MandatoryLeaveChaseFromMonth       = dto.MandatoryLeaveChaseFromMonth;
         entity.LeaveCarryOverExpiryReminderDays   = dto.LeaveCarryOverExpiryReminderDays;
         entity.LeaveYearStartMonth                = dto.LeaveYearStartMonth;
+        entity.OnboardingTaskDueLeadDays          = dto.OnboardingTaskDueLeadDays;
+        entity.OrientationDueLeadDays             = dto.OrientationDueLeadDays;
+        entity.OrientationCertificateExpiryLeadDays = dto.OrientationCertificateExpiryLeadDays;
+        entity.OrientationChaseAfterDays          = dto.OrientationChaseAfterDays;
     }
 }

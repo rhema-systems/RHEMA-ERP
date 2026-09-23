@@ -1,9 +1,9 @@
 # HR — Configuration Register
 
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
-2026-09-18 (entitlement plan W1c).
+2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5).
 
-**Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18), all of `LeaveType` (26 + 2), and
+**Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2), and
 all four of leave's CHILD tables (38).** Three ghosts found, all in the first — **and one setting that is none of the
 four statuses**, which is why there are now five. The per-module settings for attendance, travel,
 appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
@@ -194,6 +194,27 @@ meaning with the calendar is worse than one that admits it cannot run today.
 **Not moved, deliberately:** the engine's 90-day backlog horizon stays a constant. It stops the first
 run on an established database queueing years of history at once (area 9 queued 275 items, 242 of
 them history). It protects the system from itself; it is not a policy anybody should be choosing.
+
+---
+
+## 2.5 Orientation & onboarding — reminder windows `CompanyHrPolicySettings` — added 2026-09-23
+
+Round 4, lane K-a. Read by `OnboardingOrientationReminderService` — **the first HR sweep that
+delivers** (one in-app notification per person per run, and the same by email) rather than only
+logging. Born as settings, not constants, and each proved in both positions before being marked
+enforced. Migration `AddOnboardingOrientationReminders` adds them `NOT NULL` with their real
+`DEFAULT`s, so every tenant's row — not only the seeded one — starts at the value below.
+
+| Setting | Default | Status | Proof — `hr-orientation/run-round4-k.mjs` block B, both positions |
+|---|---|---|---|
+| `OnboardingTaskDueLeadDays` | `3` | **Enforced** | [B1] a task due in 5 days: silent at 3, reminded at 10 |
+| `OrientationDueLeadDays` | `7` | **Enforced** | [B2] an orientation due in 3 days: silent at 2, reminded at 7 |
+| `OrientationCertificateExpiryLeadDays` | `30` | **Enforced** | [B3] a certificate expiring in 10 days: silent at 5, warned at 30 |
+| `OrientationChaseAfterDays` | `3` | **Enforced** | [B4] an assessment unattempted, and a task awaiting sign-off, both waiting 5 days: neither chased at 10, both chased at 3 |
+
+**Not a setting, deliberately:** the 90-day backlog horizon for overdue items, for the reason given
+under § 2 — measured here as well: the demo database held 6,583 open onboarding tasks more than 90
+days overdue on the day the engine was built.
 
 ---
 
