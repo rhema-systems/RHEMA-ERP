@@ -11,6 +11,7 @@ import type {
   OnboardingPlanTemplateSummary,
   OnboardingPlanTemplateCreateRequest,
   OnboardingPlanTemplateUpdateRequest,
+  CloneOnboardingPlanTemplateRequest,
   OnboardingTaskTemplate,
   OnboardingTaskTemplateCreateRequest,
   OnboardingTaskTemplateUpdateRequest,
@@ -67,6 +68,14 @@ class OnboardingPlanTemplateService {
 
   update(id: string, data: OnboardingPlanTemplateUpdateRequest): Promise<OnboardingPlanTemplate> {
     return apiService.put<OnboardingPlanTemplate>(`${this.baseUrl}/${id}`, data);
+  }
+
+  /**
+   * Round 4, lane J1: copy a template and its tasks under a new name. 422 when the name is taken.
+   * The copy is never the default and has no audience of its own yet.
+   */
+  clone(id: string, data: CloneOnboardingPlanTemplateRequest): Promise<OnboardingPlanTemplateDetail> {
+    return apiService.post<OnboardingPlanTemplateDetail>(`${this.baseUrl}/${id}/clone`, data);
   }
 
   /** Refused with 422 for the default template — assign a new default first. */

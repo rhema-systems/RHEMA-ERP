@@ -836,6 +836,12 @@ export interface ChangeOrientationProgramStatusRequest {
   newStatus: OrientationProgramStatus;
 }
 
+/** Round 4, lane J2. The copy is a Draft; `newCode` is generated when omitted. */
+export interface CloneOrientationProgramRequest {
+  newName: string;
+  newCode?: string | null;
+}
+
 // ── Session / facilitator / attendance ────────────────────────────────────────
 
 export interface OrientationSessionFacilitator extends AuditFields {
@@ -949,6 +955,16 @@ export interface OrientationSessionUpdateRequest
 export interface ChangeOrientationSessionStatusRequest {
   sessionId: string;
   newStatus: OrientationSessionStatus;
+}
+
+/**
+ * Round 4, lane J3: run a session again. Without an end the copy keeps the original's length; the
+ * enrolment deadline keeps its lead before the start.
+ */
+export interface CloneOrientationSessionRequest {
+  scheduledStartAt: string;
+  scheduledEndAt?: string | null;
+  title?: string | null;
 }
 
 export interface OrientationAttendanceRecord extends AuditFields {

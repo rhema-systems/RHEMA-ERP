@@ -9,6 +9,10 @@ namespace ErpSystem.Core.Interfaces.HR;
 
 public interface IOnboardingPlanTemplateService
 {
+    /// <summary>Round 4, lane J1: copy a template and its tasks under a new name.</summary>
+    Task<OnboardingPlanTemplateDetailDto> CloneAsync(
+        Guid sourceId, CloneOnboardingPlanTemplateDto dto, Guid createdByUserId, CancellationToken cancellationToken = default);
+
     Task<OnboardingPlanTemplateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<OnboardingPlanTemplateSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<OnboardingPlanTemplateDetailDto> GetWithTaskTemplatesAsync(Guid id, CancellationToken cancellationToken = default);

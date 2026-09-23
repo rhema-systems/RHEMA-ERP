@@ -285,6 +285,23 @@ public class UpdateOrientationProgramDto : UpdateDtoBase
     public Guid? OwnerOrganizationUnitId { get; set; }
 }
 
+/// <summary>
+/// Copy a programme (round 4, lane J2): its modules and their content, its assessment questions and
+/// their options, its prerequisites and its audience rules — as a Draft. Sessions and enrolments are
+/// deliveries of the original and stay with it.
+/// </summary>
+public class CloneOrientationProgramDto
+{
+    /// <summary>The copy's title.</summary>
+    [Required]
+    [MaxLength(300)]
+    public string NewName { get; set; } = string.Empty;
+
+    /// <summary>The copy's programme code; generated when omitted.</summary>
+    [MaxLength(50)]
+    public string? NewCode { get; set; }
+}
+
 /// <summary>Lifecycle transition for a program (publish, suspend, retire, archive …).</summary>
 public class ChangeOrientationProgramStatusDto
 {
@@ -715,6 +732,22 @@ public class UpdateOrientationSessionDto : UpdateDtoBase
 
     [MaxLength(4000)]
     public string? ParticipantInstructions { get; set; }
+}
+
+/// <summary>
+/// Run a session again on a new date (round 4, lane J3) — the common case for a recurring briefing.
+/// </summary>
+public class CloneOrientationSessionDto
+{
+    [Required]
+    public DateTime? ScheduledStartAt { get; set; }
+
+    /// <summary>When omitted, the copy keeps the original's length.</summary>
+    public DateTime? ScheduledEndAt { get; set; }
+
+    /// <summary>When omitted, the original's title — which often names the month, so the screen asks.</summary>
+    [MaxLength(300)]
+    public string? Title { get; set; }
 }
 
 public class ChangeOrientationSessionStatusDto

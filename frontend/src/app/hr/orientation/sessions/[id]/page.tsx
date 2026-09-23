@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { Loader2, Users, Trash2, Video, MapPin } from 'lucide-react';
+import { Loader2, Users, Trash2, Video, MapPin, Repeat } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -47,6 +47,7 @@ import {
   type OrientationSessionFormValues,
 } from '@/components/hr/orientation/OrientationSessionForm';
 import { OrientationAttendanceRegister } from '@/components/hr/orientation/OrientationAttendanceRegister';
+import { RunSessionAgainDialog } from '@/components/hr/orientation/CopyDialogs';
 import { orientationSessionService } from '@/services/hr/orientation-session.service';
 import { employeeOrientationService } from '@/services/hr/employee-orientation.service';
 import {
@@ -113,6 +114,7 @@ export default function OrientationSessionDetailPage() {
   const [savingOverview, setSavingOverview] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<OrientationSessionStatus | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [rerunOpen, setRerunOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const queryKey = ['hr', 'orientation-sessions', id];
@@ -250,6 +252,10 @@ export default function OrientationSessionDetailPage() {
                 )}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={() => setRerunOpen(true)}>
+              <Repeat className="mr-2 h-4 w-4" />
+              Run again
+            </Button>
             <Button
               variant="outline"
               size="icon"
@@ -556,6 +562,20 @@ export default function OrientationSessionDetailPage() {
         variant="destructive"
         isLoading={busy}
         onConfirm={remove}
+      />
+
+      <RunSessionAgainDialog
+        source={
+          rerunOpen
+            ? {
+                id: session.id,
+                title: session.title,
+                scheduledStartAt: session.scheduledStartAt,
+                scheduledEndAt: session.scheduledEndAt,
+              }
+            : null
+        }
+        onClose={() => setRerunOpen(false)}
       />
     </div>
   );

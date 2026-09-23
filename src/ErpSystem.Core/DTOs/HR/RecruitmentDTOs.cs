@@ -4466,6 +4466,17 @@ public class OnboardingPlanTemplateDetailDto : OnboardingPlanTemplateDto
     public List<OnboardingTaskTemplateDto> TaskTemplates { get; set; } = new();
 }
 
+/// <summary>
+/// Copy an onboarding plan template under a new name (round 4, lane J1). Its tasks come with it; its
+/// audience does not, and it is never the default — see <c>OnboardingPlanTemplateService.CloneAsync</c>.
+/// </summary>
+public class CloneOnboardingPlanTemplateDto
+{
+    [Required]
+    [MaxLength(200)]
+    public string NewName { get; set; } = string.Empty;
+}
+
 public class CreateOnboardingPlanTemplateDto : CreateDtoBase
 {
     [Required]
@@ -4528,7 +4539,12 @@ public class CreateOnboardingTaskTemplateDto : CreateDtoBase
     [Required]
     public OnboardingTaskCategory Category { get; set; }
 
-    [Range(0, 365)]
+    /// <summary>
+    /// Days from the start date; negative for a task due before it (the contract, the accounts). The
+    /// template screen always offered −90…365 — "Negative for before the start date" — while this
+    /// range was 0…365 from the port, so every pre-start task was refused (found by round 4, lane J).
+    /// </summary>
+    [Range(-90, 365)]
     public int DueDaysFromStartDate { get; set; }
 
     public bool IsMandatory { get; set; } = true;
@@ -4552,7 +4568,8 @@ public class UpdateOnboardingTaskTemplateDto : UpdateDtoBase
     [Required]
     public OnboardingTaskCategory Category { get; set; }
 
-    [Range(0, 365)]
+    /// <summary>Negative for a task due before the start date — see the create DTO.</summary>
+    [Range(-90, 365)]
     public int DueDaysFromStartDate { get; set; }
 
     public bool IsMandatory { get; set; }

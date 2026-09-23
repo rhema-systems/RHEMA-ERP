@@ -1,16 +1,19 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
-import { Loader2 } from 'lucide-react';
+import { Copy, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
 import { OnboardingTemplateAudiencePanel } from '@/components/hr/orientation/OnboardingTemplateAudiencePanel';
+import { CopyOnboardingTemplateDialog } from '@/components/hr/orientation/CopyDialogs';
 import {
   TextField,
   NumberField,
@@ -81,6 +84,7 @@ const dueLabel = (days: number) => {
 export default function OnboardingTemplateDetailPage() {
   const params = useParams();
   const id = (params?.id as string) ?? '';
+  const [copyOpen, setCopyOpen] = useState(false);
 
   const { data: template, isLoading, isError } = useQuery({
     queryKey: ['hr', 'onboarding-templates', id],
@@ -130,6 +134,10 @@ export default function OnboardingTemplateDetailPage() {
           <div className="flex items-center gap-2">
             {template.isDefault && <Badge variant="default">Default</Badge>}
             <StatusBadge active={template.isActive} />
+            <Button variant="outline" onClick={() => setCopyOpen(true)}>
+              <Copy className="mr-2 h-4 w-4" />
+              Copy
+            </Button>
           </div>
         }
       />
@@ -270,6 +278,11 @@ export default function OnboardingTemplateDetailPage() {
             </FieldRow>
           </>
         )}
+      />
+
+      <CopyOnboardingTemplateDialog
+        source={copyOpen ? { id: template.id, name: template.name } : null}
+        onClose={() => setCopyOpen(false)}
       />
     </div>
   );

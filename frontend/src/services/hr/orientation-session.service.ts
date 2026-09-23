@@ -6,6 +6,7 @@ import type {
   OrientationSessionUpdateRequest,
   OrientationSessionStatus,
   ChangeOrientationSessionStatusRequest,
+  CloneOrientationSessionRequest,
   OrientationSessionFacilitator,
   OrientationSessionFacilitatorCreateRequest,
   OrientationSessionFacilitatorUpdateRequest,
@@ -58,6 +59,14 @@ class OrientationSessionService {
 
   update(id: string, data: OrientationSessionUpdateRequest): Promise<OrientationSession> {
     return apiService.put<OrientationSession>(`${this.baseUrl}/${id}`, data);
+  }
+
+  /**
+   * Round 4, lane J3: run a session again on a new date, as a Draft with nobody enrolled.
+   * Facilitators come across unconfirmed. 422 when the programme is no longer active.
+   */
+  clone(id: string, data: CloneOrientationSessionRequest): Promise<OrientationSession> {
+    return apiService.post<OrientationSession>(`${this.baseUrl}/${id}/clone`, data);
   }
 
   /** Moving to InProgress/Completed stamps actualStartAt/actualEndAt server-side if unset. */

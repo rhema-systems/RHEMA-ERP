@@ -98,6 +98,75 @@ public class OnboardingPlanTemplateService : IOnboardingPlanTemplateService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// Copies a template and its tasks under a new name (round 4, lane J1). Mirrors
+    /// <c>JobPostingPipelineService.ClonePipelineAsync</c>: the root is added, then each child through
+    /// its own repository with its key set — never through the new parent's navigation, which EF
+    /// would take for an UPDATE of a row that was never inserted.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Never the default</b> — at most one per tenant, and a copy stealing the fallback
+    /// silently would change which checklist every unmatched hire gets.</para>
+    ///
+    /// <para><b>Its audience is NOT copied.</b> Since lane I4 a confirmed hire gets the most specific
+    /// template whose audience reaches them. A copy carrying the same audience would tie with the
+    /// original, and the tie is settled by NAME — the copy could start being handed to new hires by
+    /// accident of the alphabet. Uncopied, the copy is chosen by hand until it is given an audience
+    /// of its own, which is what a copy is usually made for.</para>
+    /// </remarks>
+    public async Task<OnboardingPlanTemplateDetailDto> CloneAsync(
+        Guid sourceId, CloneOnboardingPlanTemplateDto dto, Guid createdByUserId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var name = dto.NewName?.Trim() ?? string.Empty;
+        if (name.Length == 0)
+            throw new InvalidOperationException("The copy needs a name.");
+
+        var source = await _templateRepository.GetWithTaskTemplatesAsync(sourceId);
+        if (source == null || source.TenantId != tenantId || source.IsDeleted)
+            throw new ArgumentException($"Onboarding plan template with ID '{sourceId}' not found.");
+
+        if (await _templateRepository.GetQueryable().AnyAsync(
+                t => t.TenantId == tenantId && !t.IsDeleted && t.Name == name, cancellationToken))
+            throw new InvalidOperationException($"A template named \"{name}\" already exists. Choose another name for the copy.");
+
+        var clone = new OnboardingPlanTemplate
+        {
+            TenantId = tenantId,
+            Name = name,
+            Description = source.Description,
+            IsDefault = false,
+            IsActive = source.IsActive,
+            CreatedById = createdByUserId,
+            CreatedBy = createdByUserId.ToString(),
+        };
+        await _templateRepository.AddAsync(clone);
+
+        foreach (var task in source.TaskTemplates.Where(t => !t.IsDeleted).OrderBy(t => t.DisplayOrder))
+        {
+            await _taskTemplateRepository.AddAsync(new OnboardingTaskTemplate
+            {
+                TenantId = tenantId,
+                PlanTemplateId = clone.Id,
+                TaskName = task.TaskName,
+                Description = task.Description,
+                Category = task.Category,
+                DueDaysFromStartDate = task.DueDaysFromStartDate,
+                IsMandatory = task.IsMandatory,
+                DisplayOrder = task.DisplayOrder,
+                InstructionsUrl = task.InstructionsUrl,
+                OwnerPositionId = task.OwnerPositionId,
+                CreatedById = createdByUserId,
+                CreatedBy = createdByUserId.ToString(),
+            });
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Onboarding plan template copied: {Source} -> {Copy}", source.Name, clone.Name);
+
+        return await GetWithTaskTemplatesAsync(clone.Id, cancellationToken);
+    }
+
     public async Task<OnboardingPlanTemplateDetailDto> GetWithTaskTemplatesAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();

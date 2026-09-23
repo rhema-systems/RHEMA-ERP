@@ -179,6 +179,11 @@ export interface OnboardingPlanTemplateUpdateRequest extends OnboardingPlanTempl
   id: string;
 }
 
+/** Round 4, lane J1. The copy is never the default and does not inherit the original's audience. */
+export interface CloneOnboardingPlanTemplateRequest {
+  newName: string;
+}
+
 // ── Task comments ─────────────────────────────────────────────────────────────
 
 export interface OnboardingTaskComment extends AuditFields {

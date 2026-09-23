@@ -127,6 +127,23 @@ public class OnboardingPlanTemplateController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    /// <summary>
+    /// Round 4, lane J1: copy a template and its tasks under a new name. Never the default; its
+    /// audience is not copied, so the copy is chosen by hand until it is given one of its own.
+    /// </summary>
+    [HttpPost("{id:guid}/clone")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    public async Task<ActionResult<OnboardingPlanTemplateDetailDto>> Clone(
+        Guid id, [FromBody] CloneOnboardingPlanTemplateDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_currentUser.EmployeeId is not { } employeeId)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        var copy = await _service.CloneAsync(id, dto, employeeId);
+        return CreatedAtAction(nameof(GetById), new { id = copy.Id }, copy);
+    }
+
     [HttpPut("{id:guid}")]
     [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto>> Update(

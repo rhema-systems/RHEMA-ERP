@@ -1,6 +1,6 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–I (with I-b) and L done; J next.**
+> **Status 2026-09-23 — A–I (with I-b), J and L done; M next.**
 >
 > | Lane | State |
 > |---|---|
@@ -18,13 +18,14 @@
 > | **I** | **DONE** — 100 ×2, `hr-orientation/run-round4-i.mjs`; migration `AddOrientationTriggers` applied to UAT. I1–I5: audience rules on the shared HR axis + populations, typed picker + reach, triggers that fire (hire, movement, publish, nightly), onboarding template applicability + a plan on hire, the "why" diagnostic. **Two demo-data incidents of my own, both reversed** — § 8 |
 > | **I-b** | **DONE** — 152 ×2 (lane I's 100 + 52), same harness; **no migration**. Recurring programmes renew one period after completion, opened early by the deadline so it falls on the anniversary; the effective dates now bind (a lane I gap); **HR may re-enrol after a withdrawal and open a next cycle early by hand** (the user's call); a renewal can no longer open over a completed-then-withdrawn cycle; ORI-CMP-001 recurs annually on UAT and in the seeder — § 8 |
 > | **L** | **DONE** — block S, 29 assertions, in the same harness: 181 ×2; **no migration**. L1 reproduced first: the endpoint was right — onboarding (blended) had never had a session scheduled, compliance is self-paced, and the dialog drew a 403 like "none". The dialog now says which; only programmes that take enrolments are offered; closed sessions are marked; **the enrol path refuses a retired/draft programme and a closed or other programme's session** (it checked neither); two induction days seeded. ⚠ A third demo-data incident, reversed — § 8 |
+> | **J** | **DONE** — 94 ×2, `hr-orientation/run-round4-j.mjs`; **no migration**. Copy an onboarding template (never the default, **not** its audience), a programme (everything it is made of, as a Draft) and a session (*Run again* on a new date); a Copy / Run again button on each list **and each record's page** — a finished session is on no list. **The harness found two defects older than the lane, both closed:** editing a quiz question's options had never once saved, and a task due before the start date was refused though the screen offered it — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lane L is complete.** Next: J, M, K, N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L and J are complete.** Next: M, K, N, O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
 > all three are still outstanding.
@@ -603,6 +604,11 @@ notification, not merely a 200 from the trigger endpoint.
 - **M2** The facilitator dialog gets three modes: employee / vendor + trainer from the setup / free
   text, fed by `GET /api/training-vendors/active` and that vendor's `TrainerProfile` list.
 - **M3** Check `TrainingVendorService.DeleteAsync` does not orphan a facilitator.
+- **M4** *(added by lane J)* **Run again copies facilitators field by field** —
+  `OrientationSessionService.CloneAsync`. The two new columns must be copied there too, and added to
+  the `copied` list for `OrientationSessionFacilitators` in `run-round4-j.mjs`. That suite's block Z
+  **fails on any column nobody has decided about**, so M's migration turns it red until this is done
+  — on purpose.
 
 **Harness:** `hr-orientation/run-round4-m.mjs`.
 
@@ -1815,6 +1821,75 @@ rule refuses as the product's own status text says it should ("not yet available
 first and retires before deleting. `verify-tables --area orientation`: 23 of 23.
 
 **Not browser-walked** — the dropdown's five states are the next thing a screen walk should look at.
+
+### Lane J — copy a template, a programme, a session · DONE 2026-09-23 · 94 assertions ×2
+
+Harness: `dev-harness/hr-orientation/run-round4-j.mjs`, **94 ×2**. **No migration.**
+
+**What was built.**
+
+| | |
+|---|---|
+| **J1** | `POST /api/onboarding-plan-templates/{id}/clone { newName }` — the template and its tasks, every field (timing, mandatory, order, instructions, owning position). **Never the default** — a copy must not take over the fallback. A name already in use is a 422. |
+| **J2** | `POST /api/orientation-programs/{id}/clone { newName, newCode? }` — every setting, the modules and their content, the prerequisites, the quiz **with which option is right**, and the audience rules, as a **Draft**. The code is numbered for you or given; a code in use is a 422 — **including a deleted programme's**, which still holds it in the unique index (a duplicate-key 500 otherwise). Retired modules, items and questions come across still retired; deleted ones do not come at all. A content item's file or link is shared, not duplicated. Sessions and enrolments are deliveries of the original and stay with it. |
+| **J3** | `POST /api/orientation-sessions/{id}/clone { scheduledStartAt, scheduledEndAt?, title? }` — *Run again*. The new run keeps the original's **length** unless an end is given, and its enrolment deadline keeps the **same notice** before the start. A Draft with a new code and nobody enrolled; the same programme, venue, link, capacity, waitlist and approval rules; the facilitators come across **unconfirmed** — they agreed to the old date. The recording and the actual times are the old run's and are not copied. Scheduling rules apply as to any new session: the programme must be active. |
+| **J4** | **Copy** on the templates list and each template's page, **Copy** on the programmes list and each programme's page, **Run again** on the sessions list and each session's page. The dialog keeps the server's refusal in place so it can be corrected, and lands on the copy. |
+
+**Three decisions the plan did not make — each one this entry's to defend.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **A template's audience is not copied** | Audiences arrived with lane I4, after this plan was written. A hire gets the most specific template whose audience reaches them, and a tie is settled **by name** — a copy carrying the original's audience would tie with it, and could start being handed to real hires by accident of the alphabet. Uncopied, the copy is chosen by hand until it is given an audience of its own, which is what a copy is usually made for. The dialog says so. |
+| 2 | **A programme's audience rules ARE copied** | A Draft never fires, so they are inert until somebody publishes the copy — and then they enrol people just as the original's do. The dialog says that too, and says to retire the original at the same time if the copy replaces it, or both will enrol the same people. |
+| 3 | **The actions are on the record pages as well as the lists** (the plan said lists) | The sessions list shows upcoming, open and published runs — **a finished session is on none of them**, and it is the one most often run again. |
+
+**Built the pipeline clone's way, not the appraisal clone's.** The plan named
+`AppraisalTemplateService.CloneAsync`'s nested rebuild. Each child is instead added through its own
+repository with its key set (`JobPostingPipelineService.ClonePipelineAsync`'s way): a child reached
+through the navigation of a parent EF already tracks is taken for an UPDATE of a row never inserted.
+The source's children are read **untracked**, so no loaded entity can end up in the new graph.
+
+**How it is proved — by rows, SQL as the oracle.** Copied rows equal the source's, field for field,
+by `EXCEPT` both ways, with exact counts beside them so empty-on-both-sides can never pass. A
+**SHA-256 fingerprint of every source row** — deleted ones included, every column including the
+audit stamps — is taken before the copy and again after the copy has been edited in every child
+collection (tasks renamed and deleted, options replaced, a content item and a rule changed, a module
+and a prerequisite deleted, a session's venue and capacity, a facilitator's confirmation): unchanged
+in all three blocks, so no source row was written at all. Refusals: a name or code in use, a blank
+one, a missing source (404), an ordinary employee (403), an end before the start, no start (400), a
+retired programme. A copy of the tenant's default template is not the default, and the tenant still
+has exactly one.
+
+**Block Z accounts for every column** of the eleven tables a copy writes — each is copied, set by
+the copy on purpose, or audit. A column in none of those lists **fails the suite**, so a column added
+later has to be decided rather than silently left behind by every copy. Lane M adds two to the
+facilitators; its section now says so (M4). Negative-controlled: a column left out of the account is
+named, and so is one the account names that the database no longer has.
+
+**Two defects older than the lane — the harness's first run found both, and both are closed.**
+
+| | Was | Now |
+|---|---|---|
+| 1 | **Editing a quiz question's answer options had never once saved.** `UpdateQuestionAsync` soft-deleted the old options and then also removed them from the tracked question's `Options` collection — to keep fixup from putting them back into the response. But Question → Options is a required relationship with `DeleteBehavior.Restrict`, so removing a child **severs** it, and EF refused the whole save. Every edit of a question with options, from the programme screen's question panel, failed that way from the area 15 sweep (`21ed54cf`, 2026-08-13) until now: no harness had ever sent one. | The collection is left alone; the response's options come from an **untracked** read, which fixup cannot reach. P28 asserts the response carries the new options and not the replaced ones — the concern the removal existed for. |
+| 2 | **A task due before the start date could not be saved.** The template screen offers −90…365 days, with the hint *"Negative for before the start date"*; the server's range was 0…365, carried over unexamined in the original port. The contract and the system accounts — the tasks most often due before day one — were a 400. | Both DTOs take −90…365. Plan creation already computed `StartDate.AddDays(n)`. No negative offset existed on UAT: the server had never allowed one. |
+
+The first build ran **78/83 — precisely the five assertions of those two defects**; after the rebuild,
+83/83 twice; with block Z, **94/94 twice**.
+
+**Neighbouring suites:** `hr-orientation/run.mjs` 107/107; `run-lane6-feedback` 20/20;
+`run-round4-i` 181/181 — all at baseline. Not run, and why: `hr-w3-permissions/run-slice13` tests
+the gates on existing endpoints, and this lane's controller changes are additive only (the clone
+endpoints' 403 is asserted in the lane J suite); demo-smoke scenarios 140/145 are seeders, not tests,
+and set no negative offset.
+
+**Hygiene:** the suite deletes what it made — the template's audience first, the sessions after
+withdrawing the fixture enrolment, the programmes after retiring the active one. Checked in SQL after
+the final runs: no live `R4J` template, programme or session, no fixture enrolment left open, and one
+default template. What stays is what every suite leaves: two fixture people per run, hired in 2019
+so no new-hire rule reaches them.
+
+**Frontend:** a scoped type-check (`tsconfig.round4-lane-j.json`) clean, with a negative control (a
+planted error was caught); eslint clean. **Not browser-walked.**
 
 ---
 

@@ -102,6 +102,22 @@ public class OrientationProgramsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    /// <summary>
+    /// Round 4, lane J2: copy a programme — modules, content, prerequisites, quiz and audience
+    /// rules — as a new draft. Sessions and enrolments stay with the original.
+    /// </summary>
+    [HttpPost("{id:guid}/clone")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    public async Task<ActionResult<OrientationProgramDto>> Clone(Guid id, [FromBody] CloneOrientationProgramDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var ctx = ResolveContext(out var bad);
+        if (bad != null) return bad;
+
+        var copy = await _service.CloneAsync(id, dto, ctx.TenantId, ctx.UserId);
+        return CreatedAtAction(nameof(GetById), new { id = copy.Id }, copy);
+    }
+
     [HttpPut("{id:guid}")]
     [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationProgramDto>> Update(Guid id, [FromBody] UpdateOrientationProgramDto dto)

@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseFormReturn } from 'react-hook-form';
 import { z } from 'zod';
-import { Loader2, AlertTriangle, Trash2, Users, UserPlus } from 'lucide-react';
+import { Loader2, AlertTriangle, Copy, Trash2, Users, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +44,7 @@ import { ProgramQuestionsPanel } from '@/components/hr/orientation/ProgramQuesti
 import { orientationProgramService } from '@/services/hr/orientation-program.service';
 import { orientationCategoryService } from '@/services/hr/orientation-lookup.service';
 import { AudienceTargetPicker } from '@/components/hr/orientation/AudienceTargetPicker';
+import { CopyOrientationProgramDialog } from '@/components/hr/orientation/CopyDialogs';
 import {
   ORIENTATION_PROGRAM_STATUS_OPTIONS,
   ORIENTATION_ENROLLMENT_TRIGGER_OPTIONS,
@@ -380,6 +381,7 @@ export default function OrientationProgramDetailPage() {
   const [savingOverview, setSavingOverview] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<OrientationProgramStatus | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const queryKey = ['hr', 'orientation-programs', id];
@@ -524,6 +526,10 @@ export default function OrientationProgramDetailPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Button variant="outline" onClick={() => setCopyOpen(true)}>
+              <Copy className="mr-2 h-4 w-4" />
+              Copy
+            </Button>
             <Button
               variant="outline"
               size="icon"
@@ -851,6 +857,15 @@ export default function OrientationProgramDetailPage() {
         variant="destructive"
         isLoading={busy}
         onConfirm={remove}
+      />
+
+      <CopyOrientationProgramDialog
+        source={
+          copyOpen
+            ? { id: program.id, title: program.title, programCode: program.programCode }
+            : null
+        }
+        onClose={() => setCopyOpen(false)}
       />
     </div>
   );

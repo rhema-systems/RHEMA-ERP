@@ -193,6 +193,96 @@ public class OrientationSessionService : IOrientationSessionService
         return (await _sessionRepository.GetWithDetailsAsync(entity.Id))!.ToDto();
     }
 
+    /// <summary>
+    /// Runs a session again on a new date (round 4, lane J3) — the common case for a briefing that
+    /// repeats. A new code, a Draft (as every new session is), the same place, capacity, rules and
+    /// facilitators.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Moved with the date:</b> the end keeps the original's length unless one is given, and
+    /// the enrolment deadline keeps the same lead before the start.</para>
+    ///
+    /// <para><b>Not copied:</b> enrolments and attendance (people sign up for the new run), the actual
+    /// start and end, and the recording — it is of the old run. Facilitators come across marked
+    /// <b>not confirmed</b>: they agreed to the old date, not this one.</para>
+    ///
+    /// <para>Scheduling rules apply as they do to a new session: the programme must be active.</para>
+    /// </remarks>
+    public async Task<OrientationSessionDto> CloneAsync(
+        Guid sourceId, CloneOrientationSessionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        if (dto.ScheduledStartAt is not { } start)
+            throw new InvalidOperationException("The new run needs a start date and time.");
+
+        var source = await GetOwnedSessionAsync(sourceId);
+
+        var program = await _programRepository.GetByIdAsync(source.ProgramId);
+        if (program == null || program.TenantId != tenantId || program.IsDeleted)
+            throw new ArgumentException($"Orientation program with ID '{source.ProgramId}' not found.");
+        if (program.Status != OrientationProgramStatus.Active)
+            throw new InvalidOperationException(
+                $"Sessions can only be scheduled for an active programme; \"{program.Title}\" is {program.Status}.");
+
+        DateTime? end = dto.ScheduledEndAt
+            ?? (source.ScheduledStartAt is { } oldStart && source.ScheduledEndAt is { } oldEnd ? start + (oldEnd - oldStart) : null);
+        if (end is { } e && e <= start)
+            throw new InvalidOperationException("The new run must end after it starts.");
+
+        DateTime? deadline = source.EnrollmentDeadlineAt is { } oldDeadline && source.ScheduledStartAt is { } oldFrom
+            ? start - (oldFrom - oldDeadline)
+            : null;
+
+        var by = createdByUserId.ToString();
+        var clone = new OrientationSession
+        {
+            TenantId = tenantId,
+            ProgramId = source.ProgramId,
+            SessionCode = await GenerateSessionCodeAsync(tenantId, cancellationToken),
+            Title = string.IsNullOrWhiteSpace(dto.Title) ? source.Title : dto.Title.Trim(),
+            Description = source.Description,
+            DeliveryMode = source.DeliveryMode,
+            Status = OrientationSessionStatus.Draft,
+            ScheduledStartAt = start,
+            ScheduledEndAt = end,
+            VenueDescription = source.VenueDescription,
+            VirtualMeetingUrl = source.VirtualMeetingUrl,
+            MaxParticipants = source.MaxParticipants,
+            EnrollmentDeadlineAt = deadline,
+            AllowWaitlist = source.AllowWaitlist,
+            RequiresApproval = source.RequiresApproval,
+            RecordingUrl = null,
+            ParticipantInstructions = source.ParticipantInstructions,
+            CreatedBy = by,
+        };
+        await _sessionRepository.AddAsync(clone);
+
+        var facilitators = await _facilitatorRepository.GetQueryable().AsNoTracking()
+            .Where(f => f.TenantId == tenantId && f.SessionId == sourceId && !f.IsDeleted)
+            .ToListAsync(cancellationToken);
+        foreach (var facilitator in facilitators)
+        {
+            await _facilitatorRepository.AddAsync(new OrientationSessionFacilitator
+            {
+                TenantId = tenantId,
+                SessionId = clone.Id,
+                EmployeeId = facilitator.EmployeeId,
+                ExternalFacilitatorName = facilitator.ExternalFacilitatorName,
+                ExternalFacilitatorEmail = facilitator.ExternalFacilitatorEmail,
+                ExternalFacilitatorOrganization = facilitator.ExternalFacilitatorOrganization,
+                Role = facilitator.Role,
+                HasConfirmed = false,
+                Notes = facilitator.Notes,
+                CreatedBy = by,
+            });
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Orientation session run again: {Source} -> {Copy} on {Start:u}", source.SessionCode, clone.SessionCode, start);
+
+        return (await _sessionRepository.GetWithDetailsAsync(clone.Id))!.ToDto();
+    }
+
     public async Task<OrientationSessionDto> UpdateAsync(UpdateOrientationSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSessionAsync(updateDto.Id);

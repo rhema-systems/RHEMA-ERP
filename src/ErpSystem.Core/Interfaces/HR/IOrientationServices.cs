@@ -51,6 +51,9 @@ public interface IOrientationProgramService
 
     // Program CRUD + lifecycle
     Task<OrientationProgramDto> CreateAsync(CreateOrientationProgramDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Round 4, lane J2: copy a programme and everything it is made of, as a Draft.</summary>
+    Task<OrientationProgramDto> CloneAsync(Guid sourceId, CloneOrientationProgramDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<OrientationProgramDto> UpdateAsync(UpdateOrientationProgramDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> ChangeStatusAsync(ChangeOrientationProgramStatusDto changeDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
@@ -101,6 +104,9 @@ public interface IOrientationSessionService
 
     // CRUD + lifecycle
     Task<OrientationSessionDto> CreateAsync(CreateOrientationSessionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Round 4, lane J3: run a session again on a new date.</summary>
+    Task<OrientationSessionDto> CloneAsync(Guid sourceId, CloneOrientationSessionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<OrientationSessionDto> UpdateAsync(UpdateOrientationSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> ChangeStatusAsync(ChangeOrientationSessionStatusDto changeDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);

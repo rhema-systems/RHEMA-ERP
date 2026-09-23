@@ -7,6 +7,7 @@ import type {
   OrientationProgramStatus,
   OrientationProgramType,
   ChangeOrientationProgramStatusRequest,
+  CloneOrientationProgramRequest,
   OrientationModule,
   OrientationModuleCreateRequest,
   OrientationModuleUpdateRequest,
@@ -92,6 +93,14 @@ class OrientationProgramService {
 
   update(id: string, data: OrientationProgramUpdateRequest): Promise<OrientationProgram> {
     return apiService.put<OrientationProgram>(`${this.baseUrl}/${id}`, data);
+  }
+
+  /**
+   * Round 4, lane J2: copy a programme — modules, content, prerequisites, quiz and audience rules —
+   * as a Draft. Sessions and enrolments stay with the original. 422 when the code is taken.
+   */
+  clone(id: string, data: CloneOrientationProgramRequest): Promise<OrientationProgram> {
+    return apiService.post<OrientationProgram>(`${this.baseUrl}/${id}/clone`, data);
   }
 
   changeStatus(id: string, data: ChangeOrientationProgramStatusRequest): Promise<void> {
