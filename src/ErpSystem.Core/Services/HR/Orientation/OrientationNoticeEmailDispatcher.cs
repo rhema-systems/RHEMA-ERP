@@ -120,7 +120,7 @@ public sealed class OrientationNoticeEmailDispatcher : IOrientationNoticeEmailDi
                     var tokens = ReadTokens(row);
                     tokens["RecipientName"] = $"{person!.FirstName} {person.LastName}".Trim();
                     tokens["ActionUrl"] = row.NavigationUrl is null ? null : baseUrl + row.NavigationUrl;
-                    outcome = await SendAsync(row.EmailEventKey!, person.EmailAddress!, tokens);
+                    outcome = await SendAsync(tenantId, row.EmailEventKey!, person.EmailAddress!, tokens);
                     row.EmailAttempts++;
                     row.EmailLastAttemptAt = DateTime.UtcNow;
                 }
@@ -177,11 +177,13 @@ public sealed class OrientationNoticeEmailDispatcher : IOrientationNoticeEmailDi
         return tokens;
     }
 
-    private async Task<string> SendAsync(string eventKey, string email, Dictionary<string, string?> tokens)
+    private async Task<string> SendAsync(Guid tenantId, string eventKey, string email, Dictionary<string, string?> tokens)
     {
         try
         {
-            var send = _templatedEmail.SendAsync(OnboardingOrientationEmailCatalog.Module, eventKey, email, tokens);
+            // By tenant (lane N): this runs on a host with no signed-in user, and the tenant's own
+            // wording — edited on HR's letter-templates screen — must still be what goes out.
+            var send = _templatedEmail.SendForTenantAsync(tenantId, OnboardingOrientationEmailCatalog.Module, eventKey, email, tokens);
             if (await Task.WhenAny(send, Task.Delay(SendTimeout)) != send)
             {
                 _logger.LogWarning("Orientation notice email {EventKey} to {Email} timed out after {Seconds} s.", eventKey, email, SendTimeout.TotalSeconds);

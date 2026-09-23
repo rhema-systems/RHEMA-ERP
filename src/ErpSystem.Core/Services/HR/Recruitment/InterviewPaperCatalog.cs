@@ -77,6 +77,9 @@ public static class InterviewPaperCatalog
 
     private static EmailTokenDescriptor T(string token, string desc, string sample) => new(token, desc, sample);
 
+    /// <summary>A token the system fills with ready-made HTML — the only kind a template may place raw.</summary>
+    private static EmailTokenDescriptor H(string token, string desc, string sample) => new(token, desc, sample) { IsHtml = true };
+
     /// <summary>The session facts every variant shares.</summary>
     private static List<EmailTokenDescriptor> SessionTokens() => new()
     {
@@ -90,7 +93,7 @@ public static class InterviewPaperCatalog
         T("VacancyNumber", "Reference of the vacancy.", "VAC-000123"),
         T("Round", "Which round this is.", "1"),
         T("InterviewType", "Panel, one-to-one, technical…", "Panel"),
-        T("PanelTable", "⚠ Raw HTML — the whole panel, internal and external, with roles.", "<table>…</table>"),
+        H("PanelTable", "⚠ Raw HTML — the whole panel, internal and external, with roles.", "<table>…</table>"),
     };
 
     private static List<EmailEventDescriptor> Build()
@@ -147,10 +150,10 @@ public static class InterviewPaperCatalog
                   "Currently Accountant at Blue Ltd · 6 years' experience"),
                 T("PanelistName", "Whose sheet this is. A blank rule when printed unassigned.", "Kofi Mensah"),
                 T("PanelistRole", "Chair, member, subject expert…", "Chair"),
-                T("QuestionTable", "⚠ Raw HTML — the questions with weight, band, score box and remark lines.",
+                H("QuestionTable", "⚠ Raw HTML — the questions with weight, band, score box and remark lines.",
                   "<table>…</table>"),
-                T("RecommendationBoxes", "⚠ Raw HTML — the five tick boxes.", "<span>…</span>"),
-                T("CommentLines", "⚠ Raw HTML — the ruled lines for written comments.", "<div>…</div>"),
+                H("RecommendationBoxes", "⚠ Raw HTML — the five tick boxes.", "<span>…</span>"),
+                H("CommentLines", "⚠ Raw HTML — the ruled lines for written comments.", "<div>…</div>"),
             }).ToList(),
         });
 
@@ -177,7 +180,7 @@ public static class InterviewPaperCatalog
                 "</p>\n" + Foot,
             Tokens = SessionTokens().Concat(new[]
             {
-                T("QuestionTable", "⚠ Raw HTML — the questions with their weight and band, no score boxes.",
+                H("QuestionTable", "⚠ Raw HTML — the questions with their weight and band, no score boxes.",
                   "<table>…</table>"),
             }).ToList(),
         });
@@ -209,7 +212,7 @@ public static class InterviewPaperCatalog
             {
                 T("LocationOrLink", "Room or joining link.", "Boardroom, Head Office"),
                 T("Instructions", "Anything the panel was told when the session was scheduled.", ""),
-                T("TimetableTable", "⚠ Raw HTML — each candidate and their slot.", "<table>…</table>"),
+                H("TimetableTable", "⚠ Raw HTML — each candidate and their slot.", "<table>…</table>"),
             }).ToList(),
         });
 

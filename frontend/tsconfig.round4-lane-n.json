@@ -1,0 +1,11 @@
+{
+  "//": "Round 4, lane N — HR letter & email templates. Scoped because `npm run type-check` over the whole tree does not complete on this branch; see the hr-coverage README.",
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/**/*.ts",
+    "src/services/hr/**/*.ts",
+    "src/config/hr-setup-nav.ts",
+    "src/app/administration/hr/settings/**/*.tsx"
+  ]
+}

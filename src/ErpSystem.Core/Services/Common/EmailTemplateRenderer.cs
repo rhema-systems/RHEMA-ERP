@@ -33,6 +33,16 @@ public interface IEmailTemplateRenderer
     /// <c>{{#if x}}</c> forms). Useful for validation / authoring aids.
     /// </summary>
     IReadOnlyList<string> ExtractTokenNames(string template);
+
+    /// <summary>The token names a template emits RAW — <c>{{{x}}}</c>, unescaped.</summary>
+    IReadOnlyList<string> ExtractRawTokenNames(string template);
+
+    /// <summary>
+    /// What is wrong with a template's structure, in words; empty when nothing is (round 4, lane N).
+    /// The renderer itself is forgiving — an unclosed <c>{{#if}}</c> silently swallows everything
+    /// after it whenever the condition is false — which is right at send time and wrong at save time.
+    /// </summary>
+    IReadOnlyList<string> FindProblems(string template);
 }
 
 public sealed class EmailTemplateRenderer : IEmailTemplateRenderer
@@ -67,6 +77,77 @@ public sealed class EmailTemplateRenderer : IEmailTemplateRenderer
             }
         }
         return names;
+    }
+
+    public IReadOnlyList<string> ExtractRawTokenNames(string template)
+    {
+        var names = new List<string>();
+        if (string.IsNullOrEmpty(template)) return names;
+        foreach (var tok in Tokenize(template))
+            if (tok.Kind == TokKind.RawVar) Add(names, tok.Value);
+        return names;
+    }
+
+    public IReadOnlyList<string> FindProblems(string template)
+    {
+        var problems = new List<string>();
+        if (string.IsNullOrEmpty(template)) return problems;
+
+        // The tokenizer stops at an unterminated marker and keeps the rest as text, so find it first.
+        var opening = template.IndexOf("{{", StringComparison.Ordinal);
+        while (opening >= 0)
+        {
+            var raw = opening + 2 < template.Length && template[opening + 2] == '{';
+            var close = template.IndexOf(raw ? "}}}" : "}}", opening + (raw ? 3 : 2), StringComparison.Ordinal);
+            if (close < 0)
+            {
+                problems.Add($"\"{Snippet(template, opening)}\" opens with {(raw ? "{{{" : "{{")} and is never closed.");
+                break;
+            }
+            opening = template.IndexOf("{{", close + (raw ? 3 : 2), StringComparison.Ordinal);
+        }
+
+        var open = new Stack<(string Name, bool SawElse)>();
+        foreach (var tok in Tokenize(template))
+        {
+            switch (tok.Kind)
+            {
+                case TokKind.Var or TokKind.RawVar when string.IsNullOrWhiteSpace(tok.Value):
+                    problems.Add("An empty {{ }} names no token.");
+                    break;
+                case TokKind.If when string.IsNullOrWhiteSpace(tok.Value):
+                    problems.Add("An {{#if}} names no token to test.");
+                    open.Push((string.Empty, false));
+                    break;
+                case TokKind.If:
+                    open.Push((tok.Value, false));
+                    break;
+                case TokKind.Else when open.Count == 0:
+                    problems.Add("An {{else}} stands outside any {{#if}}.");
+                    break;
+                case TokKind.Else:
+                    var current = open.Pop();
+                    if (current.SawElse) problems.Add($"{{{{#if {current.Name}}}}} has more than one {{{{else}}}}.");
+                    open.Push((current.Name, true));
+                    break;
+                case TokKind.EndIf when open.Count == 0:
+                    problems.Add("A {{/if}} closes nothing.");
+                    break;
+                case TokKind.EndIf:
+                    open.Pop();
+                    break;
+            }
+        }
+        foreach (var unclosed in open)
+            problems.Add($"{{{{#if {unclosed.Name}}}}} is never closed with {{{{/if}}}} — everything after it would disappear whenever {unclosed.Name} is empty.");
+
+        return problems;
+    }
+
+    private static string Snippet(string template, int at)
+    {
+        var text = template.Substring(at, Math.Min(30, template.Length - at)).ReplaceLineEndings(" ");
+        return text.Length < template.Length - at ? text + "…" : text;
     }
 
     private static void Add(List<string> names, string name)

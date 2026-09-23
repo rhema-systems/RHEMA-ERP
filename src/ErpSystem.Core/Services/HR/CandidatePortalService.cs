@@ -628,7 +628,12 @@ public sealed class CandidatePortalService : ICandidatePortalService
             application.Id, vacancy.Id, vacancy.TenantId, ct);
 
         var summary = MapApplicationToSummary(application, vacancy);
-        await SendApplicationReceivedEmailAsync(account.Email, account.Email, summary);
+        // ⚠ The candidate's NAME: this passed account.Email for both arguments, so "Dear {{CandidateName}}"
+        // greeted every applicant by their email address (found by round 4 lane N's survey of the senders).
+        await SendApplicationReceivedEmailAsync(
+            account.Email,
+            string.IsNullOrWhiteSpace(ownCandidate.FullName) ? account.Email : ownCandidate.FullName,
+            summary);
         return summary;
     }
 

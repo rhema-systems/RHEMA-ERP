@@ -102,6 +102,9 @@ public static class RecruitmentEmailCatalog
 
     private static EmailTokenDescriptor T(string token, string desc, string sample) => new(token, desc, sample);
 
+    /// <summary>A token the system fills with ready-made HTML — the only kind a template may place raw.</summary>
+    private static EmailTokenDescriptor H(string token, string desc, string sample) => new(token, desc, sample) { IsHtml = true };
+
     private static readonly EmailTokenDescriptor PortalUrlToken =
         T("PortalUrl", "Base URL of the candidate careers portal.", "https://careers.example.com");
 
@@ -561,21 +564,21 @@ public static class RecruitmentEmailCatalog
                 T("IsBargainingUnit", "Truthy when the role is covered by a collective agreement (shows the union clause).", "true"),
                 T("UnionName", "Union / bargaining unit name; shown inside the union clause.", "Industrial & Commercial Workers' Union"),
                 T("JobSummary", "Role summary paragraph; block hidden when empty.", "Lead the financial reporting function…"),
-                T("DutiesList", "Pre-built HTML <ul> of key duties; block hidden when empty.", "<ul><li>Prepare monthly accounts</li></ul>"),
+                H("DutiesList", "Pre-built HTML <ul> of key duties; block hidden when empty.", "<ul><li>Prepare monthly accounts</li></ul>"),
                 T("EssentialFunctions", "Essential-functions note; block hidden when empty.", "Must be able to meet statutory reporting deadlines."),
-                T("SalaryBreakdownTable", "Pre-built HTML table itemising basic + allowances + gross.", "<table>…</table>"),
+                H("SalaryBreakdownTable", "Pre-built HTML table itemising basic + allowances + gross.", "<table>…</table>"),
                 T("BaseSalaryLine", "Formatted basic salary line.", "GHS 90,000.00 per annum"),
                 T("GrossSalaryLine", "Formatted gross (basic + allowances) line; hidden when empty.", "GHS 108,000.00 per annum"),
                 T("BonusTerms", "Bonus terms; block hidden when empty.", "Discretionary annual bonus up to 10% of basic."),
                 T("CommissionStructure", "Commission structure; block hidden when empty.", "2% of net sales."),
-                T("BenefitsList", "Pre-built HTML <ul> of benefits; block hidden when empty.", "<ul><li>Medical cover</li></ul>"),
+                H("BenefitsList", "Pre-built HTML <ul> of benefits; block hidden when empty.", "<ul><li>Medical cover</li></ul>"),
                 T("NdaRequired", "Truthy when a non-disclosure agreement is required (shows the NDA clause).", "true"),
                 T("IsConditional", "Truthy when the offer is conditional (shows conditions-precedent block).", "true"),
-                T("ConditionsList", "Pre-built HTML <ul> of pre-employment conditions; shown when conditional.", "<ul><li>Satisfactory references</li></ul>"),
+                H("ConditionsList", "Pre-built HTML <ul> of pre-employment conditions; shown when conditional.", "<ul><li>Satisfactory references</li></ul>"),
                 // Round 4, lane H3. The same list, offered to EVERY letter rather than only a
                 // conditional one — a permanent appointment still asks for references and a medical.
                 T("HasPreEmploymentChecks", "Truthy when the offer carries a pre-employment check set.", "true"),
-                T("PreEmploymentChecklist", "⚠ Raw HTML — the checks the candidate must produce, with instructions and expected turnaround.", "<ul><li>Police clearance</li></ul>"),
+                H("PreEmploymentChecklist", "⚠ Raw HTML — the checks the candidate must produce, with instructions and expected turnaround.", "<ul><li>Police clearance</li></ul>"),
                 T("AdditionalTerms", "Free-text additional terms; block hidden when empty.", "Relocation assistance provided."),
                 T("ExpiryDate", "Offer expiry date; acceptance clause hidden when empty.", "Friday, 25 July 2026"),
                 T("AcceptanceInstructions", "How to accept the offer.", "Sign and return one copy of this letter, or accept via the candidate portal."),

@@ -1,7 +1,8 @@
 # HR — Configuration Register
 
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
-2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5; lane K-b1 — § 2.6).
+2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5; lane K-b1 — § 2.6;
+lane N — § 2.7, the 44 letter and email templates).
 
 **Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2), and
 all four of leave's CHILD tables (38)** — plus, not as a full survey, the three `OrientationProgram` notice and
@@ -231,6 +232,103 @@ was off.
 | `EnableReminders` ("Send reminders") | on for a new programme | **Enforced** — was a ghost | [A13/A15] the same audience rule on two programmes enrols both pairs, tells them only where it is on; [F1] an HR enrolment: told on one, not the other; [F2] the daily sweep: due-soon reminded on one, silent on the other. Governs what its description says — enrolment notices and the sweep's reminders; session changes, completions and certificates are sent either way |
 | `IsCertificateIssued` ("Issues a certificate") | off | **Enforced** — was a ghost | [C1–C3] a certificated programme issues its certificate at the moment of completion; [C9] an uncertificated one issues none; [D3] and HR's Issue certificate is refused for it. Before this nothing issued one, and HR's endpoint (which no screen called) never asked |
 | `CertificateValidityMonths` | none — never expires | **Enforced** | [C3] 12 months, and [D8] 24 months, become the certificate's expiry. HR's issue path already read it; the completion path does too |
+
+---
+
+## 2.7 HR letters and emails — the wording of every template `EmailTemplate` — added 2026-09-23
+
+Round 4, lane N. Every email and printed document the HR modules produce is rendered from a
+template whose shipped wording is declared in one of **eight catalogues** (`IEmailEventCatalog`) —
+**44 templates**. Since this lane a tenant can reword any of them at **Administration → HR Settings →
+Letter & Email Templates** (`api/hr/letter-templates`: reading on HR Company Read, saving, resetting
+and a test send on Write, which the HR role holds). The shipped wording stays in code; a tenant's own
+is a row in `EmailTemplates`, written only when HR saves one and set aside by **Reset**.
+
+⚠ **This table is checked against the screen in both directions** by
+`hr-templates/run-lane-n.mjs` [A6–A8]. A template added to a catalogue and not entered here fails that
+suite, and so does a row here for a template that no longer exists.
+
+**Not on the screen, and not configurable:** the in-app notifications — the orientation notices'
+headline and message, every `NotificationTemplate` — are written in code. The screen says so.
+
+### Whose wording goes out — one resolver, three roads
+
+Every production render goes through `TemplatedEmailService`. The survey on 2026-09-23 found 21 call
+sites, and none bypasses it. The service uses **the sending tenant's own row** if that tenant has
+chosen one, and the shipped wording otherwise. The roads differ only in how the sender's tenant is
+known.
+
+| Road | The tenant comes from | Templates | Proof in both positions (`run-lane-n.mjs`) |
+|---|---|---|---|
+| **Signed in**: HR, an employee or a candidate, inside a request | the caller's own token | 17 emails and 12 documents | [E1–E4] a letter HR previews: shipped wording, then HR's, then shipped again after a reset. [K2–K3] a candidate's application email arrives in HR's wording |
+| **Background**: a job with nobody signed in | the sender names it (`SendForTenantAsync`) | the 13 orientation and onboarding emails, sent through the outbox and the daily digest | [F4] shipped. [H5–H7] HR's. [I3] shipped after a reset. [I6] HR's again after a revive |
+| **Anonymous**: a careers registration | the sender names it: the registration's tenant | `CandidateAccountActivation` | [J2–J3b] shipped. [J6–J7] HR's. [J8] shipped after a reset |
+
+⚠ **"Enforced" below is proved per road, not per template.** The resolver is one method, every call
+site reaches it, and the harness changes one template on each road and sees the other wording
+arrive. A caller that stopped using `ITemplatedEmailService` would silently stop being Enforced, so
+the 21-call-site count is the thing to re-survey.
+
+⚠ **Raw placement is a catalogue fact, not a save-time guess.** `{{{Token}}}` is not escaped, so a
+save accepts it only for tokens marked `IsHtml`: the ready-made HTML the system builds (tables and
+lists). Twelve tokens across six templates carry the mark; the table below names them. The first
+cut of the rule allowed raw placement only where the shipped default already had it. That refused
+HR the offer letter's `ConditionsList` and the score sheet's `PanelTable`, both supplied as HTML on
+every render, and the escaped form would have printed their markup as text.
+
+| Template | Name | Kind | Goes out, or is rendered, when | Road | Status |
+|---|---|---|---|---|---|
+| `Recruitment/CandidateAccountActivation` | Careers Account Activation | email | a candidate registers on the careers site, or asks for the link again | anonymous | **Enforced**. It now carries the tenant's legal name: the controller had overridden the name with the tenant record's label, so the email read "Activate your Default Tenant careers account" |
+| `Recruitment/ApplicationReceived` | Application Received | email | a candidate submits an application on the careers portal | signed in | **Enforced**. ⚠ Until lane N it greeted the candidate by their email address, because the portal passed the address as `CandidateName` [K3]. The older external-apply path that also sends it has no caller |
+| `Recruitment/ApplicationWithdrawn` | Application Withdrawn | email | **never**: its only sender, a token-link withdrawal, has no caller. The portal's withdrawal and HR's send nothing | none | **Unreachable**. Listed and editable, and read by nothing. ⚠ Either wire it to the portal's withdrawal or retire it; that decision belongs to the recruitment owner |
+| `Recruitment/ApplicationUnderReview` | Application Under Review | email | HR moves an application through the older stage-move door (`JobApplicationController`), after **every** move whatever the stage | signed in | **Enforced**. ⚠ A move into an assessment stage sends this **and** `AssessmentPending`. The pipeline board's door sends only the second |
+| `Recruitment/ApplicationShortlisted` | Application Shortlisted | email | HR sends the shortlist notifications | signed in | **Enforced** |
+| `Recruitment/ApplicationRejected` | Application Unsuccessful | email | HR sends the rejection notifications | signed in | **Enforced** |
+| `Recruitment/AssessmentPending` | Assessment Invitation | email | an application moves into an assessment stage | signed in | **Enforced** |
+| `Recruitment/InterviewInvitation` | Interview Invitation | email + calendar file | HR sends the interview invitations | signed in | **Enforced** |
+| `Recruitment/InterviewRescheduled` | Interview Rescheduled | email + calendar file | HR moves an interview | signed in | **Enforced** |
+| `Recruitment/InterviewPanelistAssignment` | Interview Panel Assignment | email + calendar file | HR notifies the panel | signed in | **Enforced** |
+| `Recruitment/OfferIssued` | Offer Issued | email | HR issues an offer | signed in | **Enforced** |
+| `Recruitment/OfferAccepted` | Offer Accepted | email | HR records a candidate's acceptance. ⚠ Only then: a candidate who accepts by the link or on the portal gets nothing, although a comment says the link reaches it | signed in | **Enforced** |
+| `Recruitment/OfferLetter` | Offer Letter (document) | document | HR previews the offer, or the candidate opens it on the portal. ⚠ It is never emailed, although two comments say it is | signed in | **Enforced**. Raw HTML: `BenefitsList`, `ConditionsList`, `DutiesList`, `PreEmploymentChecklist`, `SalaryBreakdownTable` |
+| `Recruitment/TalentPoolInvitation` | Talent Pool Invitation | email | HR invites a talent-pool candidate to apply | signed in | **Enforced** |
+| `Recruitment/TestInvitation` | Test Invitation | email | HR invites candidates to a recruitment test | signed in | **Enforced** |
+| `Probation/ProbationConfirmationLetter` | Probation Confirmation Letter | document | HR generates a confirmation letter | signed in | **Enforced** |
+| `Assets/AssetResponsibilityTerms` | Asset Responsibility and Terms | document, also emailed | HR or the holder opens the terms, or HR emails them. The emailed copy is rendered first, then queued | signed in | **Enforced** |
+| `OnboardingOrientation/OrientationReminderDigest` | Orientation & Onboarding Reminder | email | the daily reminder sweep (lane K-a), one digest per person | background | **Enforced** |
+| `OnboardingOrientation/OrientationEnrolled` | Orientation Enrolment | email | an enrolment made by HR, in bulk, by a rule or by a renewal, on a programme that sends reminders | background | **Enforced**: [F4], [H5–H7], [I3], [I6] |
+| `OnboardingOrientation/OrientationSessionScheduled` | Orientation Session Scheduled | email | a person is placed on a session, or a facilitator is on a session going live or added to a live one | background | **Enforced** |
+| `OnboardingOrientation/OrientationSessionRescheduled` | Orientation Session Moved | email | a live session moves | background | **Enforced** |
+| `OnboardingOrientation/OrientationSessionPostponed` | Orientation Session Postponed | email | a live session is postponed | background | **Enforced** |
+| `OnboardingOrientation/OrientationSessionCancelled` | Orientation Session Cancelled | email | a live session is cancelled | background | **Enforced** |
+| `OnboardingOrientation/OrientationCompleted` | Orientation Completed | email | a person first completes an orientation | background | **Enforced** |
+| `OnboardingOrientation/OrientationCertificateIssued` | Orientation Certificate Issued | email | a certificate is issued or reissued | background | **Enforced** |
+| `OnboardingOrientation/OnboardingWelcome` | Onboarding Welcome | email | an onboarding plan is made for a new hire | background | **Enforced** |
+| `OnboardingOrientation/OnboardingCoordinatorAssigned` | Onboarding Coordinator Assigned | email | a plan is made, or passes to a new coordinator | background | **Enforced** |
+| `OnboardingOrientation/OnboardingBuddyAssigned` | Onboarding Buddy Assigned | email | a plan is made, or passes to a new buddy | background | **Enforced** |
+| `OnboardingOrientation/OnboardingTaskAssigned` | Onboarding Task Assigned | email | a task is added for somebody, or passed to somebody new | background | **Enforced** |
+| `OnboardingOrientation/OnboardingTaskDone` | Onboarding Task Waiting for Sign-off | email | a task needing sign-off is marked done | background | **Enforced** |
+| `CompanySchedule/EventInvitation` | Event Invitation | email | HR adds a participant to an event | signed in | **Enforced** |
+| `CompanySchedule/EventRsvpReminder` | RSVP Reminder | email | HR presses Send RSVP reminders. ⚠ Only then: no sweep sends it, although its description implies timing | signed in | **Enforced** |
+| `CompanySchedule/EventReminder` | Event Reminder | email | HR presses Send reminders. ⚠ Only then, as above | signed in | **Enforced** |
+| `CompanySchedule/EventRescheduled` | Event Rescheduled | email | an event is moved | signed in | **Enforced** |
+| `CompanySchedule/EventCancelled` | Event Cancelled | email | an event is cancelled | signed in | **Enforced** |
+| `HrLetters/HrLetterEmploymentConfirmation` | Letter — employment confirmation | document | HR previews or issues an employee's letter request | signed in | **Enforced**: [E1–E4] |
+| `HrLetters/HrLetterIntroduction` | Letter — introduction | document | as above | signed in | **Enforced** |
+| `HrLetters/HrLetterServiceCertificate` | Letter — certificate of service | document | as above | signed in | **Enforced** |
+| `HrLetters/HrLetterSalaryConfirmation` | Letter — employment and salary confirmation | document | as above | signed in | **Enforced** |
+| `Interviews/InterviewScoreSheet` | Interview Scoring Sheet (printed) | document | HR prints an interview's paper | signed in | **Enforced**. Raw HTML: `CommentLines`, `PanelTable`, `QuestionTable`, `RecommendationBoxes` |
+| `Interviews/InterviewQuestionList` | Interview Question List (printed) | document | as above | signed in | **Enforced**. Raw HTML: `PanelTable`, `QuestionTable` |
+| `Interviews/InterviewPackCover` | Interview Pack Cover (printed) | document | as above | signed in | **Enforced**. Raw HTML: `PanelTable`, `TimetableTable` |
+| `RecruitmentTests/TestQuestionPaper` | Recruitment Test Paper (printed) | document | HR prints a test paper, blank or one per candidate | signed in | **Enforced**. Raw HTML: `QuestionBlock` |
+| `RecruitmentTests/TestMarkingKey` | Recruitment Test Marking Key (printed) | document | HR prints the marking key | signed in | **Enforced**. Raw HTML: `KeyBlock` |
+
+**Not a setting, deliberately:** the catalogue seeder (`EmailTemplateCatalogSeeder`). Lane N's plan
+proposed seeding a row per template on every tenant at startup, so that a fresh tenant would have
+rows to edit. The screen lists from the catalogues instead. A seeded row would freeze its day's
+wording, because the resolver prefers a stored row, and lane K-b alone rewrote twelve defaults in one
+day. The seeder stays deferred. The resolver also ignores an untouched seeded copy: `IsSystemDefault`
+with no `UpdatedBy` [G1–G3].
 
 ---
 

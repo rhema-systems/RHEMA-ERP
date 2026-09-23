@@ -1954,14 +1954,20 @@ namespace ErpSystem.Api.Controllers
             // tokens for free, and puts the text where HR can rewrite it — which matters more here
             // than anywhere else in recruitment, because this is the FIRST message the organisation
             // ever sends a candidate and the one that decides whether they can sign in at all.
-            var sent = await _templatedEmail.SendAsync(
+            // By tenant (round 4, lane N): registration is anonymous, so there is no signed-in user to
+            // say whose wording to use — and the tenant's own edit of this template must still apply.
+            var sent = await _templatedEmail.SendForTenantAsync(
+                tenant.Id,
                 ErpSystem.Core.Services.HR.Recruitment.RecruitmentEmailCatalog.Module,
                 ErpSystem.Core.Services.HR.Recruitment.RecruitmentEmailCatalog.Events.CandidateAccountActivation,
                 user.Email,
                 new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["CandidateName"]  = $"{user.FirstName} {user.LastName}".Trim(),
-                    ["CompanyName"]    = tenant.Name,
+                    // No CompanyName: the sender now fills it from THIS tenant's company profile — the
+                    // legal name the catalogue promises. Passing tenant.Name here overrode that with the
+                    // tenant record's label, and a candidate's first email read "Activate your Default
+                    // Tenant careers account" (round 4, lane N).
                     ["ActivationLink"] = link,
                     ["ExpiryHours"]    = "24",
                     // Left null rather than invented: the template's {{#if}} drops the whole
@@ -1969,7 +1975,7 @@ namespace ErpSystem.Api.Controllers
                     // printing a mailbox nobody reads.
                     ["SupportEmail"]   = _configuration["Recruitment:SupportEmail"],
                 },
-                cancellationToken: ct);
+                ct);
 
             if (!sent)
                 _logger.LogWarning("Activation email could not be sent to candidate {UserId}", user.Id);

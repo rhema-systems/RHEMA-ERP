@@ -60,6 +60,9 @@ public static class RecruitmentTestPaperCatalog
 
     private static EmailTokenDescriptor T(string token, string desc, string sample) => new(token, desc, sample);
 
+    /// <summary>A token the system fills with ready-made HTML — the only kind a template may place raw.</summary>
+    private static EmailTokenDescriptor H(string token, string desc, string sample) => new(token, desc, sample) { IsHtml = true };
+
     private static List<EmailTokenDescriptor> CommonTokens() => new()
     {
         T("CompanyName", "The employer's name, from the company profile.", "Tema Development Corporation"),
@@ -122,7 +125,7 @@ public static class RecruitmentTestPaperCatalog
                 T("CandidateName", "The candidate the paper is printed for; a blank line on a blank paper.", "Ada Boahen"),
                 T("ApplicationNumber", "Their application reference; a blank line on a blank paper.", "APP-000456"),
                 T("JobTitle", "The role they applied for; a blank line on a blank paper.", "Senior Accountant"),
-                T("QuestionBlock", "⚠ Raw HTML — every question with its tick boxes or answer lines. No answers.",
+                H("QuestionBlock", "⚠ Raw HTML — every question with its tick boxes or answer lines. No answers.",
                   "<div>…</div>"),
             }).ToList(),
         });
@@ -166,7 +169,7 @@ public static class RecruitmentTestPaperCatalog
                 T("AutoMarkablePoints", "Marks the key settles: every closed question.", "34"),
                 T("WrittenPoints", "Marks awarded by hand: the written answers.", "6"),
                 T("PassMarkText", "The pass mark, or 'none set'.", "50%"),
-                T("KeyBlock", "⚠ Raw HTML — each question with its correct answer and marking note.",
+                H("KeyBlock", "⚠ Raw HTML — each question with its correct answer and marking note.",
                   "<table>…</table>"),
             }).ToList(),
         });

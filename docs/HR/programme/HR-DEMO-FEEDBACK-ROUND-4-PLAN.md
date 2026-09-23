@@ -1,6 +1,7 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–M done (with I-b; K as K-a, K-b1, K-b2); N next.**
+> **Status 2026-09-23 — A–N done (with I-b; K as K-a, K-b1, K-b2). Next is N-b, the four senders
+> lane N's survey found; then O.**
 >
 > | Lane | State |
 > |---|---|
@@ -23,13 +24,14 @@
 > | **K-a** | **DONE** — 53 ×2, `hr-orientation/run-round4-k.mjs`; migration `AddOnboardingOrientationReminders` applied to UAT. **The first HR sweep that delivers**: eight rules (onboarding tasks due / overdue / awaiting sign-off; orientations due / overdue / assessment unattempted / acknowledgement unsigned; certificates expiring), **one digest per person per run**, in-app in the same save as the claims and emailed after — each email's outcome recorded; four lead-day settings, each enforced in both positions; run-now / preview / runs / log + a Reminders screen; the host registered with it and its scheduled run seen. Proved by a local SMTP sink: the email **arrives**. ⚠ 768 test-fixture onboarding plans cancelled first (the user's call) — § 8. ⚠ **The scheduled run found a lane I4 gap:** a plan created on hire had no coordinator, so its reminders reached nobody — the confirming officer now coordinates it (lane I 183 ×2, H6b/H6c) |
 > | **K-b1** | **DONE** — 84 ×2, `hr-orientation/run-round4-kb.mjs`; migration `AddOrientationNoticeEmailOutbox` applied to UAT. **The events tell people now**: enrolled (HR, bulk, a rule; a renewal too, wired but not exercised — § 8), a session placed / moved (saying where from) / postponed / cancelled — participants and employee facilitators — completed, certificate issued; each notice written in the same save as its event, its email queued on it and sent within a minute by a dispatcher. **Certificates are issued at completion** for a programme that issues them (nothing issued one before — the user's call), plus an HR **Issue / Reissue certificate** button. The programme's **"Send reminders"** switch made real — it was read by nothing, K-a included. A **Notices** tab: who was told what, and what each email did — § 8 |
 > | **K-b2** | **DONE** — 54 ×2, `hr-orientation/run-round4-kb2.mjs`; **no migration**. Onboarding tells people: a plan made **welcomes the new hire** and tells its coordinator and buddy (on hire too — lane I 184 ×2, H6d); a plan changing hands tells only the new holders; a task given tells its assignee; marking a task done that needs signing off tells the coordinator at once. And the page they lead to — the user's call — **"My onboarding"** in the portal: the new hire's plan and who owes each task, the tasks given to the reader with **Mark done**, the new colleagues they are buddy to. K-a's reminders for a task given to somebody now open it, not HR's queues — § 8 |
+> | **N** | **DONE** — 115 ×2, a new suite `hr-templates/run-lane-n.mjs`; **no migration**. **Letter & Email Templates** under HR Settings covers all 44 templates in the eight catalogues (32 emails, 12 printed documents). It has a token palette, a live preview that lists every problem a save would be refused for, save, reset and a test send to the officer's own address. The list comes from the catalogues and a row is stored only when a tenant edits; N2's startup seeding was rejected because a seeded row would freeze its day's wording. **The sender used any tenant's stored wording**, and would still have taken an untouched seeded copy for an edit; both are fixed. Background emails now carry the tenant's legal name, where they printed "Our Company"; so does the careers activation email, where it read "Default Tenant". Candidates are greeted by name, where "Application Received" used their email address. The register § 2.7 lists all 44, checked against the screen both ways. The survey found **four sender behaviours outside the lane**, which become **N-b** — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J and M are complete, and so is K** (K-a, K-b1, K-b2). Next: N, then O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). Next is **N-b**, the four sender fixes in § 4 that lane N's survey found. Then O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names four walks a harness cannot replace;
 > all four are still outstanding.
@@ -666,6 +668,43 @@ says so, so nobody edits here expecting an in-app notification to change.
 
 **Harness:** new `dev-harness/hr-templates/`.
 
+### Lane N-b — The senders: four emails that go wrong, or never go
+
+**Added 2026-09-23, after lane N.** Lane N's survey of every sender (register § 2.7) found four
+emails that the catalogue promises and the code does not deliver as described. Every one is an email
+a candidate or a participant reads. The user asked for them to be fixed, so this lane runs before O.
+
+- **Nb1 — Application Withdrawn, made reachable.** Its only sender, a token-link withdrawal, has no
+  caller. The live withdrawals send nothing: the candidate on the portal, an employee applicant
+  withdrawing their own, and HR withdrawing on a candidate's behalf. Send it from all three; the
+  tenant is the signed-in caller's.
+- **Nb2 — Under Review, once, on entering review, from either door.** The older stage-move door
+  (`JobApplicationController` → `MoveToStageAsync`) sends it after **every** move, whatever the stage.
+  A move into an assessment stage therefore sends it together with Assessment Pending, and a move to
+  an interview or an offer sends "Good news — your application is now being actively reviewed". The
+  pipeline board's door never sends it at all. Fix it with one rule in the one writer
+  (`ApplicationPipelineService`): send Under Review when an application first moves from Submitted
+  into a review stage (application review, screening or hiring-manager review), and never otherwise.
+  Remove the older door's own send, so that both doors send the same emails.
+- **Nb3 — Offer Accepted, when the candidate accepts it themselves.** Today only HR's recording of
+  an acceptance sends it. Send it from the token link and from the portal too. ⚠ The token link is
+  **anonymous**: it must name the offer's tenant (`SendForTenantAsync`, lane N), or the tenant's own
+  wording is skipped and the email carries the fallback company name.
+- **Nb4 — Company-schedule reminders that send themselves.** The event form's **Send reminders** and
+  **days before** fields are saved and read by nothing, and `ReminderSentDate` is never written, so
+  both are ghosts. The RSVP chase exists only as a button.
+  - A daily sweep sends each event's reminder that many days before the event, **once**, and stamps
+    `ReminderSentDate`.
+  - The same sweep chases unanswered invitations ahead of the RSVP deadline, **once**. This needs a
+    new per-event marker, so the lane has **a migration**.
+  - The chase's lead time is a tenant setting (default 2 days), proved in both positions and entered
+    in the register.
+  - The manual buttons stamp the same markers, so nobody is told twice.
+  - Background sends name the event's tenant, which is lane N's lesson.
+
+**Harness:** `dev-harness/hr-templates/run-lane-nb.mjs`, through the local SMTP sink. Every email is
+asserted to **arrive**, and to arrive **once**.
+
 ### Lane O — The technician-role flag, and the Maintenance door it feeds
 
 **The lane is not "add a flag and find it a reader". It is "give four disagreeing definitions one
@@ -770,7 +809,9 @@ by lane K-b2):
 
 1. The apportionment panel and the timetable it draws (lane C).
 2. The candidate sitting a test end to end in the careers portal, including refresh mid-test (E4).
-3. The template editor's token palette, preview and reset (N3).
+3. The template editor (N3): reword an email with the token palette (the insert lands at the
+   cursor, in the field last used), watch the preview and its problems follow the typing, save, send a
+   test to yourself, and reset. Also open one template directly with `?t=Module/EventKey`.
 4. **My onboarding**, signed in as three people — the new hire (their plan, who owes what), an IT
    assignee (Mark done, then waiting on the sign-off) and a buddy — each seeing only their own; and a
    notice's link landing each of them on it (K-b2).
@@ -807,10 +848,11 @@ C ──► D ──► E4 (the portal sitting reuses D's window/notification pl
 G ──► H
 I ──► L (L's fix depends on I's trigger work for the "self-paced" distinction)
 J, K, M, N, O — independent
+N ──► N-b (the senders N's survey found; added 2026-09-23)
 P — continuous
 ```
 
-Recommended order: **A, C, F, G, H, B, D, E, I, L, J, M, K, N, O**, with P alongside.
+Recommended order: **A, C, F, G, H, B, D, E, I, L, J, M, K, N, N-b, O**, with P alongside.
 
 - **A and C first** — the scoring audit and the slot apportioner are the two the demo audience will
   look at hardest, and A's geography change ripples into B.
@@ -2171,6 +2213,107 @@ that plan's own link because the officer is the same fixture on every run); `run
 clean with a negative control in the new page's folder; eslint clean. **Not browser-walked** — and
 this lane adds a portal page to the walk list: a new hire, an IT assignee and a buddy, each signing in
 to see their own.
+
+### Lane N — HR letter and email templates · DONE 2026-09-23 · 115 assertions ×2
+
+Harness: `dev-harness/hr-templates/run-lane-n.mjs`, a new suite with a README alongside. **No
+migration.**
+
+**What was built.**
+
+| | |
+|---|---|
+| **N1: the API** | `api/hr/letter-templates` serves the list at the collection root, which the plan called `/events`. It also serves one template with its tokens and shipped defaults, save, preview, test send and reset. Reading and previewing need HR Company **Read**; saving, resetting and a test send need **Write**, which the HR role holds (Admin would be a door HR cannot open). Its own business-rules filter makes an unknown template a 404 and a refused save a 422 that gives every reason. |
+| **N3: the screen** | **Administration → HR Settings → Letter & Email Templates** (`/administration/hr/settings/letter-templates`), beside Company Profile and Policy Settings and on the HR Settings landing page. The plan said `/administration/hr/letter-templates`, but the settings group is where HR's tenant-wide configuration lives. The screen has: a grouped list with search and an Edited badge; a token palette that inserts at the cursor, in whichever field was last used (`{{{…}}}` only for ready-made HTML); a live preview with sample values in a sandboxed frame, half a second behind the typing, listing every problem a save would be refused for; and **Save**, **Undo changes**, **Start from the shipped wording**, **Send a test to me** and **Reset to shipped** (confirmed). `?t=Module/EventKey` opens one template directly. The screen says that in-app notifications and the platform's email designer are not edited here. |
+| **N2: replaced** | See decision 1. |
+| **N4: nothing to add** | All eight catalogues already existed: 44 templates, 32 emails and 12 printed documents. |
+| **N5** | `HR-CONFIGURATION-REGISTER.md` § 2.7 lists all 44, each with what sends it, on which road, and its status. The harness checks it against the screen in both directions [A6–A8]. |
+
+**Decisions — each one this entry's to defend.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **The list comes from the catalogues, and a row is stored only when a tenant edits. N2's startup seeding was not built** | The sender prefers a stored row, so a seeded copy would freeze its day's wording; lane K-b alone rewrote twelve defaults in one day. Reset sets the tenant's row aside, and the shipped wording goes out again. |
+| 2 | **A save is checked; a send is not** | The renderer forgives everything at send time. An unknown token prints nothing, and an unclosed `{{#if}}` swallows the rest of the letter whenever its condition is empty. That is right when a candidate is waiting and wrong while an author is typing. A save is refused, with every reason, for a broken structure, a token the email does not supply, an empty or over-long subject, or `{{{…}}}` on anything but ready-made HTML. |
+| 3 | **Raw placement is a catalogue mark (`IsHtml`), not "wherever the default places it"** | The first rule refused HR the offer letter's `ConditionsList` and the score sheet's `PanelTable`. Both are HTML on every render, but no default places them. Twelve tokens across six templates now carry the mark, and the harness pins them template by template [B7]. |
+| 4 | **A test goes only to the officer's own address** | The address is the one on their employee record, or else their account's. The request cannot name a recipient [L6]. The result is an outcome, not a boolean: Sent, NoMailServer, NoAddress, Failed, or TimedOut after 10 s [D1, D4, L1, L7, L9]. |
+| 5 | **Reset soft-deletes, and an edit after it revives the same row** | `(TenantId, Name)` is unique whether or not a row is deleted [I4–I5]. |
+
+**Five defects found and fixed. The first two would have shipped with the screen.**
+
+| | Found | Fixed |
+|---|---|---|
+| 1 | **The sender used ANY tenant's wording.** `TemplatedEmailService` took the first active row for the module and event. Its comment claimed the tenant filter scoped it, but that filter is inert on this context. One tenant's edited letter would have gone out under every tenant's name the day a second tenant existed. | The sender now uses its own tenant: the signed-in user's, or the one a background or anonymous sender names through the new `SendForTenantAsync` (the dispatcher, the K-a digest, the careers activation). When no tenant is known it uses the shipped wording, never another tenant's [F1–F4, J3]. |
+| 2 | **An untouched seeded copy could never be recognised.** The first cut defined one as `IsSystemDefault && UpdatedAt == null`. But `SaveChanges` stamps `UpdatedAt` on every INSERT: on UAT's 11 stored rows it sits within a microsecond of `CreatedAt`. So every seeded row would have counted as the tenant's choice. This was found by reading the insert path before the harness ran. | "Edited" is now read from `UpdatedBy`, which only an edit writes [G1–G6]. The suite inserts its seeded row with `UpdatedAt = CreatedAt`, exactly as the insert does. |
+| 3 | **Every background email said "Our Company".** The company name came from the signed-in user's profile. A background send has no user, so the lookup threw, and UAT's configuration has neither fallback key. | `ICompanyProfileProvider.GetForTenantAsync` now gives the sender's tenant's legal name [H6]. |
+| 4 | **The careers activation email read "Activate your Default Tenant careers account".** The controller overrode the company name with the tenant record's label. | The override is removed, and the email uses the tenant's legal name [J3b]. |
+| 5 | **"Application Received" greeted candidates by their email address.** The portal passed the address as the name; the sender survey found it. | It now uses the candidate's name [K3]. |
+
+**How it is proved.** The suite covers every road an email takes, through a local SMTP sink, in both
+positions:
+
+- **Signed in:** HR's preview of an employee's letter shows the shipped wording, then HR's, then the
+  shipped wording again [E]; a candidate's own application [K].
+- **Background:** the orientation dispatcher [F–I].
+- **Anonymous:** a careers registration [J].
+
+It also proves that:
+
+- another tenant's edit of the same email never goes out [F, J3];
+- a seeded copy nobody touched is ignored, and an edit made in the platform designer is honoured [G];
+- reset and revive both work [I];
+- every shipped default passes every check, so HR can always save the shipped wording back [C1];
+- each fault is reported word for word [C];
+- the gates hold [D];
+- a test send reports all five of its outcomes [D, L].
+
+The suite refuses to start if the tenant already has wording of its own for any template it edits,
+and it deletes every row it wrote outright.
+
+**The sender survey: four behaviours outside this lane, recorded in register § 2.7 rather than
+fixed here.**
+
+- `ApplicationWithdrawn` is Unreachable.
+- The older stage-move door sends "Under Review" after every move.
+- A candidate who accepts an offer themselves gets no email.
+- Company-schedule reminders go out only when HR presses the button, and the event form's own "Send
+  reminders / days before" fields are read by nothing.
+
+The user asked for all four to be fixed, so they are **lane N-b** (§ 4), next.
+
+**Neighbouring suites, every one that sends or renders through the changed sender.**
+
+- **Orientation:** K-a 55/55; K-b1 84/84; K-b2 54/54; I 184/184; J 94/94; M 54/54.
+- **Recruitment:** B 96/96 (the talent-pool invitation); E 141/141 (the test invitation and paper);
+  F 103/103 (the interview paper); G 41/41; H 36/36 (the offer letter's raw checklist);
+  candidate country 43/43 and run-a 44/44 (registrations and portal applications).
+- **Other documents:** the portal's HR letters (`hr-portal/run-slice12b`) 80/80; the probation
+  confirmation letter (`hr-probation/run-d1`) 79 passed, none failed.
+- **`hr-assets/run-slice5`** (the asset terms document) **died before its first assertion.** Its
+  fixture still supplied a staff number, which the numbering register has refused since round 2b.
+  The fixture is fixed (harness-only). Now **46/49**, and the three failures are older than this lane:
+  - two expect the refusal to say "employee concerned" and get the global handler's generic 403 text,
+    which is master's 403 masking, already recorded;
+  - its own cleanup DELETEs are refused with 403.
+
+  Every assertion about the rendered document passes.
+
+**The API log, classified.** None of it comes from this lane's code:
+
+- 111 failed saves, every one the payroll-profile foreign key (defect #23), one per employee the
+  suites created.
+- About 6,200 "Error processing notification" lines. The unified notification processor tries to
+  email every pending notification, UAT has no mail server, and it logs one error per notification
+  per pass. It runs at the same rate in every earlier lane's log: 30,419 in K-b2's.
+- Four "responded 500" request-log lines, which are not 500s. They are the asset suite's 403 and 404
+  refusals. The global exception middleware answered them, and the request logger sits inside that
+  middleware, so it saw the exception pass and recorded 500.
+
+⚠ An error count of zero was first reported here from a grep for `[ERR]`. That pattern can never
+match, because this log writes `[17:31:58 ERR]`. Grep for ` ERR]`.
+
+**Frontend:** scoped type-check (`tsconfig.round4-lane-n.json`) clean, with a negative control in the
+new page; eslint clean. **Not browser-walked.** The template editor is walk 3 in § 5.
 
 ---
 

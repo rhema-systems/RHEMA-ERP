@@ -591,7 +591,10 @@ public class OnboardingOrientationReminderService : IOnboardingOrientationRemind
     {
         try
         {
-            var send = _templatedEmail.SendAsync(
+            // Lane N: by tenant — the nightly host has no signed-in user, and the tenant's own wording
+            // for the digest must still be the one sent.
+            var send = _templatedEmail.SendForTenantAsync(
+                digest.Notification.TenantId,
                 OnboardingOrientationEmailCatalog.Module, OnboardingOrientationEmailCatalog.Events.ReminderDigest,
                 digest.Email!, digest.Tokens);
             if (await Task.WhenAny(send, Task.Delay(TimeSpan.FromSeconds(10))) != send)

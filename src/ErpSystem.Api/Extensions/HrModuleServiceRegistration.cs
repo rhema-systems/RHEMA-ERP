@@ -640,6 +640,8 @@ public static class HrModuleServiceRegistration
         // dispatcher that sends their queued emails.
         services.AddScoped<IOnboardingOrientationNotices, ErpSystem.Core.Services.HR.Orientation.OnboardingOrientationNoticeService>();
         services.AddScoped<IOrientationNoticeEmailDispatcher, ErpSystem.Core.Services.HR.Orientation.OrientationNoticeEmailDispatcher>();
+        // Round 4, lane N: every HR email, listed from the registered catalogues, reworded per tenant.
+        services.AddScoped<IHrLetterTemplateService, ErpSystem.Core.Services.HR.Templates.HrLetterTemplateService>();
         services.AddScoped<IOnboardingTemplateApplicabilityService, OnboardingTemplateApplicabilityService>();
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();
