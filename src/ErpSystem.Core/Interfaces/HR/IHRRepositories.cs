@@ -31,9 +31,12 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
     Task<IEnumerable<Employee>> GetByEmploymentTypeAsync(EmploymentType employmentType);
     Task<IEnumerable<Employee>> SearchEmployeesAsync(string searchTerm);
     Task<Employee?> GetEmployeeWithPositionHistoryAsync(Guid employeeId);
+    // The technician door (round 4, lane O). One predicate — the stored CanBeAssignedToMaintenance —
+    // and one include set, which carries what the door reports and nothing it does not.
     Task<IEnumerable<Employee>> GetMaintenanceTechniciansAsync();
     Task<IEnumerable<Employee>> GetAvailableTechniciansAsync();
-    Task<IEnumerable<Employee>> GetEmployeesBySkillAsync(Guid skillId, SkillLevel? minLevel = null);
+    Task<Employee?> GetMaintenanceTechnicianByIdAsync(Guid employeeId);
+    Task<IEnumerable<Employee>> GetMaintenanceTechniciansWithSkillAsync(Guid skillId, SkillLevel? minLevel = null);
 
     // Common identifier lookups (UI validations, payroll/HR integrations)
     Task<Employee?> GetByBadgeNumberAsync(string badgeNumber);

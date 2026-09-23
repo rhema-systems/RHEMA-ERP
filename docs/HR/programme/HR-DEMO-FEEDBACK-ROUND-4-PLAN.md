@@ -1,7 +1,7 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–N done (with I-b; K as K-a, K-b1, K-b2), and N-b (N-b1, N-b2). Next is O,
-> with P alongside.**
+> **Status 2026-09-23 — A–O done (with I-b; K as K-a, K-b1, K-b2; N-b as N-b1, N-b2). What remains is
+> P: the guide rewrites (P2) and the six walks in § 5.**
 >
 > | Lane | State |
 > |---|---|
@@ -27,13 +27,14 @@
 > | **N** | **DONE** — 115 ×2, a new suite `hr-templates/run-lane-n.mjs`; **no migration**. **Letter & Email Templates** under HR Settings covers all 44 templates in the eight catalogues (32 emails, 12 printed documents). It has a token palette, a live preview that lists every problem a save would be refused for, save, reset and a test send to the officer's own address. The list comes from the catalogues and a row is stored only when a tenant edits; N2's startup seeding was rejected because a seeded row would freeze its day's wording. **The sender used any tenant's stored wording**, and would still have taken an untouched seeded copy for an edit; both are fixed. Background emails now carry the tenant's legal name, where they printed "Our Company"; so does the careers activation email, where it read "Default Tenant". Candidates are greeted by name, where "Application Received" used their email address. The register § 2.7 lists all 44, checked against the screen both ways. The survey found **four sender behaviours outside the lane**, which become **N-b** — § 8 |
 > | **N-b1** | **DONE** — 32 ×2, `hr-templates/run-lane-nb1.mjs`; **no migration**. **The offer letter goes with the Offer Issued email as a PDF** (the user's call), rendered by the Syncfusion engine the document module already uses; the email says it is attached only when it is. **Under Review** is sent once, on the first move a person makes into a review stage, from either door; the older door had sent it after every move. **Application Withdrawn** is sent from all three live withdrawals; it was unreachable. **Offer Accepted** is sent however the acceptance arrives, and an acceptance by the anonymous link carries the offer tenant's wording. The portal's withdrawal now closes the application's pipeline stage, as HR's always did. ⚠ The first PDF had **empty tables**, because the importer does not read `rem`. It was found by opening the file, then fixed, and the suite now checks the tables' words — § 8 |
 > | **N-b2** | **DONE** — 36 ×2, `hr-templates/run-lane-nb2.mjs`; migration `AddCompanyScheduleReminderSweep` applied to UAT. **Company-schedule reminders send themselves.** An hourly sweep sends each live event's reminder the days before its form asks for, and chases unanswered invitations ahead of the RSVP deadline. Each goes **once**, stamped on the event, in the tenant's wording and under its legal name. The form's **Send reminders / days before** had been ghosts. The RSVP-chase lead is a new tenant setting (2 days, on the policy page). A moved date is reminded again. The manual endpoints, which no screen called, are now buttons on a Reminders card and count as the send. Register § 2.8 — § 8 |
+> | **O** | **DONE** — 101 ×2, `hr-jobarch/run-round4-o.mjs`; migration `AddTechnicianRoleFlag` applied to UAT. **One answer to "is this person a technician?"**: the stored `CanBeAssignedToMaintenance`, which Maintenance's work-order, labour and schedule gates already read. It follows a position's new **Technician role** flag unless HR sets the person *Include* or *Exclude* by hand, and the DbContext re-establishes that on every save. ⚠ The column had **no writer at all**: 0 of UAT's 2,089 staff, an empty door, every assignment refused. The door carries what HR knows (skills with their certification dates, unit, location, trade) and **null, not 0**, for what it does not. Maintenance's dropdowns now read it, and the every-employee fallback and the root endpoint are gone. **Probationers count as available** (the user's call). The plan's defect 21 was wrong, and so was its O2 formula. Lane H's check-set picker never saved, and cleared the set on every edit; fixed. Hand-off: cross-module defect #29 — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). Next is **O**, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). What remains is **P**.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names four walks a harness cannot replace;
 > all four are still outstanding.
@@ -219,7 +220,7 @@ Each is fixed inside the lane named. The first eight answer bullet 2 directly.
 | 18 | The nested `UserTechnicianSkillDto` is filled with only `SkillName`/`Level`/`IsCertified`; `SkillId`, `ProficiencyLevel`, `CertificationDate` and `CertificationExpiry` go back as defaults, so a consumer cannot tell a lapsed certification from a current one. | O5 |
 | 19 | `Employee.CanBeAssignedToMaintenance` and the five technical fields have **zero frontend references** — HR cannot see or set any of them, which is why `TechnicianService` sets the flag for itself. | O4 |
 | 20 | `JobInterviewQuestionDetail` has no scoring guidance, so a paper sheet cannot tell a panelist what a good answer looks like. | F1c |
-| 21 | `Employee.CurrentWorkload` and `MaxWorkload` are **written and read by nothing** — Maintenance keeps its own copies on `Technician` and computes real utilisation from work orders. Two dead columns that look exactly like the fix for defect 17. | O5 |
+| 21 | `Employee.CurrentWorkload` and `MaxWorkload` are **written and read by nothing** — Maintenance keeps its own copies on `Technician` and computes real utilisation from work orders. Two dead columns that look exactly like the fix for defect 17. ⚠ **Wrong, measured in lane O:** `CurrentWorkload` is written by nothing but READ by Maintenance's `TechnicianService`, which therefore reports every technician free. `MaxWorkload` is Maintenance's, and its only writer is unreachable. The conclusion stands (do not fill the door from them); register § 2.9, defect #29. | O5 |
 | 22 | The application profile snapshot has **three** write sites; two call the shared `BuildSnapshot`, the third builds it inline. Any field added to the snapshot lands on two paths out of three unless the inline one is fixed too. | A1 |
 | 23 | **Rescheduling an interview moves the session window and leaves every candidate's slot behind — then emails them the stale time.** `RescheduleAsync` rewrites `ScheduledDate`/`StartTime`/`EndTime`, rotates each confirmation token, and sends the reschedule notice with `slotStart: ie.SlotStartTime` — the *original* slot. Move a 09:00–11:00 session to 14:00–16:00 and every candidate is told to arrive at 09:20 on the new date, with a fresh token confirming it. Demo-visible. | C4 |
 | 24 | **"Is this person a technician?" has four disagreeing answers**, two of them magic strings over two different org models (`Department.Code == "MAINT"` and `OrganizationUnit.Name.Contains("Maintenance")`). Unrecorded in the cross-module defects document. | O2 |
@@ -716,6 +717,13 @@ SMTP sink. Every email is asserted to **arrive**, and to arrive **once**.
 
 ### Lane O — The technician-role flag, and the Maintenance door it feeds
 
+> ⚠ **Executed differently in three places — read § 8's lane O entry before this section.**
+> 1. The one predicate is the **stored** `CanBeAssignedToMaintenance`, maintained at save time, not
+>    O2's computed OR: five Maintenance gates read the column.
+> 2. The exception works **both** ways (Include / Exclude). O2's OR could not exclude anyone.
+> 3. **Defect 21 was wrong.** Maintenance reads both workload columns, so they are recorded rather
+>    than surfaced (O4, O5).
+
 **The lane is not "add a flag and find it a reader". It is "give four disagreeing definitions one
 answer."** Maintenance already pulls technicians from HR constantly — but *"is this person a
 technician?"* is decided four different ways, none of them a role, two of them by magic string, and
@@ -827,6 +835,16 @@ by lane K-b2):
 5. **An event's Reminders card** (N-b2): what went and when, or when it will. Press **Send reminder
    now** and see the card say it went. Also the policy page's **Company schedule reminders** card, and
    the event form's explained **Send reminders** switch.
+6. **The technician role, end to end** (lane O).
+   1. Switch on **Technician role** for Artisan and see the positions list's badge and filter.
+   2. On an employee's edit form, the **Maintenance** section should say *"Available: … is a technician
+      role"*. Change the position on the form, before saving, and watch that sentence change.
+   3. Save *Include* for a Facilities Officer.
+   4. Open **Maintenance → Work orders** and see both people in the technician dropdown.
+   5. Assign one of them to a work order. The assignment gate reads the same column, but the harness
+      could not exercise it, because UAT has no work orders.
+   6. Re-open a post's edit page and save it without touching anything: its **Pre-employment checks**
+      choice must survive (the lane H residue).
 
 **Live probes before building, not after:**
 
@@ -2471,6 +2489,164 @@ sweep.
 **Frontend:** scoped type-check (`tsconfig.round4-lane-nb2.json`) clean, with a negative control in
 the event page; eslint clean. **Not browser-walked**: the Reminders card and the policy page's new
 card join the walk list.
+
+### Lane O — the technician-role flag, and the Maintenance door it feeds · DONE 2026-09-23 · 101 assertions ×2
+
+Harness: `dev-harness/hr-jobarch/run-round4-o.mjs`. Migration `20260923223409_AddTechnicianRoleFlag`,
+applied to UAT. It is guarded SQL: two `bit NOT NULL` columns with named `DEFAULT (0)`s, and a
+value-keyed backfill in its own batch. It was proved twice up and twice down on two scratch databases:
+- a migrated shape, with a fixture for each backfill rule;
+- a model-built shape, with the columns already present and a post already flagged.
+
+On UAT it was verified directly: the history row, both columns, both named defaults, and 0 flagged, 0
+set by hand, 0 drift.
+
+**What the survey found first — and why the plan's O2 formula could not stand.** The plan's single
+predicate was `position.IsTechnicianRole || employee.CanBeAssignedToMaintenance`, computed on read.
+The survey found **five Maintenance gates reading the stored column directly**:
+- `WorkOrderService` (assign a technician);
+- `WorkOrderLaborService` (log labour);
+- `MaintenanceStaffScheduleService`, create and update;
+- `QualityControlService` (inspection officers).
+
+A computed rule would have let HR's door offer an artisan whom the work-order assignment then
+refused as "not qualified for maintenance assignments". So the one predicate is **the stored
+column**, and HR keeps it: it follows the position's flag unless HR set it by hand. And the column
+had **no writer at all**. Measured on UAT before the lane:
+- 0 of 2,089 employees held it;
+- HR's door listed nobody;
+- Maintenance would have refused every assignment.
+
+The Maintenance module is empty on UAT (0 work orders, 0 schedules), which is why nothing had shown it.
+
+**What was built.**
+
+| | |
+|---|---|
+| **The rule — `EmployeePosition.IsTechnicianRole`** | "Technician role" on the position form, beside Requires License, with a line saying what it does. The positions list has a badge and a Technician-roles filter. The update DTO takes it as `bool?`, so an update that omits it leaves it alone: turning it off moves every holder out of the pool, which must never happen by omission, and scenario 006 omits it. |
+| **The exception — `Employee.MaintenanceAssignmentSetByHand`** | The employee form's new **Maintenance** section: *Follow the position* / *Include* / *Exclude*, then the trade, certification level and experience level. Under the choice it says what "follow the position" answers today, for the position chosen above, live: *"Available: Artisan is a technician role…"*. |
+| **One writer — at save time** | `ApplicationDbContext.HrTechnicianRole.cs`, called in both save paths before the audit pass. (1) A write of the column that did not come from the rule becomes a by-hand exception. (2) Every employee saved and not set by hand takes their post's flag. (3) Every position saved takes its holders not set by hand with it, in the same save, audit-stamped. It asks "does the row agree with its post?", never "what changed?" |
+| **The door** | One predicate, the column. `Department.Code == "MAINT"` is retired; the migration first made anyone it matched a by-hand inclusion, so it dropped nobody. One include set. **What HR knows**: first and last names, position and its flag, why the person is in the pool, organisation unit (the department), location (the gates match it to the asset), trade, both levels, status, and skills — id, skill id, proficiency, the row's real `IsCertified`, and certification date, expiry, number and body, where a linked credential's win. **What HR does not know** — work orders, workload, shift — is **null**, where it was a hardcoded 0 that read "free". |
+| **"Available" (the user's call, 2026-09-23)** | Active **or on probation**. It was Active only, and every hire starts on probation, so a new artisan read "unavailable: Probation" in the pool that listed them for three to six months, and Maintenance's resource allocation could not propose them. Suspended, inactive and terminated staff stay out. |
+| **O3 — the dropdown that ships** | `maintenanceDataService.getTechnicians()`, behind the work-order, emergency, scheduled and job-card screens, now calls HR's door. `maintenanceApiService.getTechnicians()`, the copy with the every-employee fallback, is removed; it had no caller. The root `GET api/Employees/maintenance-available` is **retired** (Q1b). |
+| **The HR employee list** | A *Maintenance technicians* filter, the first caller `EmployeeSearchDto.MaintenanceTechniciansOnly` ever had, and a *Technician* badge on each row. |
+| **Seeds and demo** | `TdcOrganogramSeeder` flags TDC's three maintenance trades: `DV-BMS` (Building Maintenance Supervisor), `DV-ART` (Artisan) and `MS-CT` (Computer Technician). `EmployeePositionDataSeeder` flags `POS-HVAC`. New scenario **`007-maintenance-technicians`** does the same on UAT: Grace Danquah follows her post, and Kwabena Owusu (Facilities Officer) is included by hand. |
+
+**Decisions.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **The one predicate is the stored column, maintained, not a computed rule** | Maintenance's five gates read it. |
+| 2 | **Enforced at save time in the DbContext, not in each service** | A person changes post through at least six paths: HR's create and edit, a hire from an offer, a movement and its reversal, the import, and the seeders. A rule each path had to remember to call is how the question came to have four answers. The inventory cost projection is the precedent. |
+| 3 | **The exception works both ways** | The plan's OR could only add people; Q1's own rationale names both cases, a secondee and a technician on long-term light duties. |
+| 4 | **A write from outside the rule counts as by hand** | Another module's decision then sticks, and HR sees it on the form. Undoing it on the next save would be a silent no-op for them. |
+| 5 | **The workload columns are neither surfaced nor filled** | Nothing writes `CurrentWorkload`. `MaxWorkload` is Maintenance's own, and its only writer is unreachable. |
+| 6 | **`ExperienceLevel` held to the four words the entity has always documented** | Maintenance's list filters and groups on the text. |
+| 7 | **`ShiftName` left null, although HR holds shift assignments** (40 on UAT) | The plan's scope. Offered as a follow-up, with leave-aware availability. |
+| 8 | **Nothing added to `EmployeePositionLookupDto`** | It is constructed by nothing. A field on it would be a field populated by nothing. |
+
+**What the plan got wrong, measured before building:**
+- **Defect 21 was wrong on both halves.** `CurrentWorkload` is never written, but Maintenance *reads*
+  it, and its technician screen therefore reports everyone free. `MaxWorkload` is Maintenance's.
+  Register § 2.9.
+- **O2 listed four predicate sites, and missed all five gates above.** Those gates read the stored
+  column, and that is the fact that decided the design. O2's fourth row, Maintenance writing HR's
+  column, is real code with **no controller**.
+- **O3's every-employee fallback lived in a method no screen calls.** The shipped dropdown had none.
+  The root endpoint it called is what returned full employee records.
+- **The harness spec's "a unit merely named Maintenance"** — HR's door never read a unit name; it read
+  a department *code*. Both are now asserted [F1–F5].
+
+**Found on the way, fixed:**
+- **Lane H's check-set picker never saved.** It was on the position form, and neither page sent it.
+  The update applies the field unconditionally, so **every save from the edit page cleared the post's
+  check set**. Eleven posts had one, all lane H fixtures. It was also a latent type error that the
+  crashing full type-check never reported.
+- **The door's list reads never loaded skills**, so `technicians` and `technicians/available` sent
+  every technician with an empty skills list.
+- **`IsCertified` was `CertificationDate.HasValue`**, not the row's flag.
+- **A removed skill row still qualified its holder** in the skill door. The query now also runs in
+  SQL, where it loaded every holder of the skill.
+- **The employee list's empty state** said "No employees yet" under any filter.
+
+**How it is proved** — `run-round4-o.mjs`, 101 ×2. Blocks:
+- **A** — the flag round-trips, and an update that omits it leaves it.
+- **B** — a holder is in the door untouched.
+- **C** — the post takes its people with it both ways, in the same save, audit-stamped.
+- **D** — moving in and out of a technician post.
+- **E** — Include and Exclude both stick, through moves and through the post switched off and on;
+  Follow the position hands the answer back.
+- **F** — a `MAINT` department and a "…Maintenance…" unit each admit nobody. Maintenance's own list
+  still admits by unit name; this is printed, not asserted.
+- **G** — the whole projection, including a lapsed certification, a dateless certified skill, a linked
+  credential's dates, and null for the three unknowns.
+- **H** — the list filter returns exactly the door's answer.
+- **I** — the root endpoint is gone.
+- **J** — Maintenance's resource allocation, reading the door in-process, agrees.
+- **K** — HR may write, an employee may not, and the door is open to Maintenance staff.
+- **M** — "available" in both positions: a probationer yes, a deactivated technician no, saying why.
+- **L** — afterwards: no employee anywhere in the tenant disagrees with their post; the suite leaves
+  none of its fixtures in the pool; the real pool is exactly as it was.
+
+The first run was 92/98, and all six failures were probationers read as unavailable. That became the
+user's call above. Fixtures are "ZZZ R4O" posts and "R4O Tech…" people. Each run switches its posts off,
+deactivates them so the organogram does not draw them, and deactivates its people.
+
+**Neighbouring suites** — chosen by code path: everything that saves a position, the hire and movement
+paths the save rule now runs on, and offers read from a position.
+
+| Suite | Result | Baseline |
+|---|---|---|
+| `hr-jobarch/run-c1` · `c2` · `c3` · `c3b` (position requirements, all four PUT positions) | 36 · 143 · 74 · 33 | same ✅ |
+| `hr-recruitment/run-round4-h` · `run-round4-g` (offers from a post) | 36 · 41 | same ✅ |
+| `hr-movements/run-h` (movement implement and temporary return) | **32/33** | 33 — see below |
+| `hr-orientation/run-round4-i` (a hire from an offer, an implemented movement — both through the save rule) | 184 | same ✅ |
+| `hr-employee-import/run-smoke` · `run-update` | **69/76 · 48/52** | stale — see below |
+
+⚠ **`run-h` 32/33 is not this lane's.** Its promotion's implement and its temporary assignment's
+return passed, and those are the two movement paths that write a position. The missing assertion is
+its last transfer's submit, refused by the establishment gate. The target is `positionList[0]`,
+**Accounts Officer**, established for 1 on 2026-01-01, holding **1,077** active employees, **441 of
+them added today** by the suites' own actors. It is § 9.1's lesson, now in `hr-movements/setup.mjs`,
+which needs the same "require headroom" fix. Recorded, not fixed.
+
+⚠ **The two import suites are stale, and have one cause.** They were written on 2026-09-03, before
+UAT's Permanent register took the `TDC/00001` format. Every fixture row's staff number (`EIMP…-001`)
+now draws the warning *"does not match the Permanent register's format … accepted as given"*.
+Read from the session row, that warning is R1's **only** finding on first upload. So rows expected
+Ready read Warning, commits read "with issues", and the counts shift by exactly those rows. Nothing
+in any finding touches positions or maintenance. Recorded, not fixed.
+
+**The demo, after the suites.** Scenario 007 marked the three posts, 3/3, and wrote both profiles.
+Its second run wrote nothing, so the guards hold. The tenant now has exactly **two** technicians:
+- Grace Danquah, by her post, *Building maintenance*, Level 3, Senior;
+- Kwabena Owusu, by hand, *Plumbing and general repairs*, Level 2, Intermediate.
+
+Drift is 0. The suite was then run a third time, green, with that real pool of two present, and its
+L3 check confirmed it left them untouched.
+
+**The API log** holds only the known noise: 2,650 notification-processor lines (no SMTP), and 46
+failed saves, every one an `INSERT INTO [PayrollEmployeeProfiles]` refused by the payment-method
+foreign key (defect #23), one per employee the suites' actors and hires created. This suite's own
+fixtures are off payroll. Nothing came from the technician rule.
+
+**The hand-off** — cross-module defect **#29**:
+- Maintenance's own technician list still decides by `OrganizationUnit.Name.Contains("Maintenance")`,
+  at nine sites.
+- Its availability reads the workload nothing writes.
+- Its sync reads an HR stub that returns nothing.
+- Its create/update-technician methods write HR's row, and nothing calls them.
+- It resolves past schedules' names through the technician door, which now answers only for current
+  technicians.
+
+It also records the two Maintenance frontend files HR changed for O3. Integration map rows 4 and 5
+are corrected: the sync is 🔴, not "unverified". Register § 2.9 holds the flag, the exception, the
+vocabulary, the "available" rule in both positions, and the two workload columns under the
+register's own rule.
+
+**Frontend:** the scoped type-check (`tsconfig.round4-lane-o.json`) is clean. Its negative control
+passed: three probes, in a types glob and a page glob, and all three were caught. Eslint is clean
+apart from one pre-existing warning. **Not browser-walked** — walk 6 in § 5.
 
 ---
 

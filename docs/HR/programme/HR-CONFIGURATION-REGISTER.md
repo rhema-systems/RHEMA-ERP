@@ -2,7 +2,8 @@
 
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
 2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5; lane K-b1 — § 2.6;
-lane N — § 2.7, the 44 letter and email templates; lane N-b2 — § 2.8, company-schedule reminders).
+lane N — § 2.7, the 44 letter and email templates; lane N-b2 — § 2.8, company-schedule reminders;
+lane O — § 2.9, the technician-role flag and the person's exception).
 
 **Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2), and
 all four of leave's CHILD tables (38)** — plus, not as a full survey, the three `OrientationProgram` notice and
@@ -361,6 +362,38 @@ and nothing read them.
 
 **Not a setting, deliberately:** the hourly cadence. A reminder is day-granular, and the stamp makes
 cadence a matter of latency, never of duplicates.
+
+## 2.9 Maintenance technicians — the technician-role flag and the person's exception `EmployeePosition` · `Employee` — added 2026-09-23
+
+Round 4, lane O. **One answer** to "may Maintenance assign this person work?": the stored
+`Employee.CanBeAssignedToMaintenance`. HR's technician door (`api/hr/employees/technicians*`) reads
+it. So do Maintenance's work-order, labour, staff-schedule and QC gates. It follows the position's
+flag unless HR set it by hand, and `ApplicationDbContext.HrTechnicianRole.cs` re-establishes that on
+every save touching an employee or a position. ⚠ Before this lane the column had **no writer at
+all**: 0 of UAT's 2,089 employees held it, the door listed nobody, and every assignment would have
+been refused.
+
+| Setting (the form's label) | Where | Default | Status | Proof — `hr-jobarch/run-round4-o.mjs`, both positions |
+|---|---|---|---|---|
+| `IsTechnicianRole` ("Technician role") | per position, the position form | off; migration `AddTechnicianRoleFlag` adds `NOT NULL DEFAULT (0)`. TDC's `DV-BMS`, `DV-ART`, `MS-CT` are flagged by `TdcOrganogramSeeder` and demo scenario 007 | **Enforced**. New | [B2–B9] on: a holder is available and in the door, never ticked. [C1–C3] off: out, and the stored column cleared, in the same save. [C5] on again: back. [A6] an update that omits it leaves it |
+| `MaintenanceAssignment` ("Available to Maintenance": Follow the position / Include / Exclude) | per employee, the employee form's **Maintenance** section; stored as `MaintenanceAssignmentSetByHand` + the column | Follow the position | **Enforced**. New | [E1–E5] Include in a plain post: in, and it survives moving through a technician post. [E7–E10] Exclude in a technician post: out, and it survives the post switched off and on. [E11–E12] Follow the position hands it back |
+| `ExperienceLevel` ("Experience level") | per employee | none | **Enforced vocabulary** — Junior, Intermediate, Senior, Expert, the words Maintenance filters on | [G3] "senior" stored as "Senior". [G4] "Snr" refused, saying why |
+
+**Not settings, and recorded because they look like them:**
+
+| Column | Status | Why |
+|---|---|---|
+| `Employee.CurrentWorkload` | **Ghost, and worse** | Written by NOTHING, so it is always 0. Yet Maintenance's `TechnicianService` reads it for `IsAvailable = CurrentWorkload < MaxWorkload` and its utilisation figures, so that screen reports every technician free. HR neither surfaces nor reads it. HR's door returns work orders and workload as **null — not supplied** [G30–G31, G35], where it hardcoded 0. Real utilisation is Maintenance's (`TechnicianSchedulingService`). Cross-module defect #29 |
+| `Employee.MaxWorkload` | **Maintenance's** | Written only by `TechnicianService.Create/UpdateTechnicianAsync`, which no controller calls. Not surfaced by HR. Defect #29 |
+| `Employee.Specialization`, `.CertificationLevel` | Data, HR-written since lane O | The employee form writes them; HR's door and Maintenance's technician list read them [G1–G2, G25–G26] |
+
+**The "available" rule — a rule, not a setting, proved both ways:**
+- **In:** a technician on probation is available [B8, G29, G35b]. Every hire starts on probation,
+  and it was Active only, so a new artisan read "unavailable: Probation" in the pool that listed
+  them. TDC's call, 2026-09-23.
+- **Out:** a technician who is not at work is not available, and says so [M1–M2].
+
+Suspended, inactive and terminated staff stay out.
 
 ---
 

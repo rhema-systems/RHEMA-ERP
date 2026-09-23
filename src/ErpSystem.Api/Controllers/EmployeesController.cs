@@ -320,26 +320,11 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
-        /// <summary>
-        /// Get employees available for maintenance assignments
-        /// </summary>
-        [HttpGet("maintenance-available")]
-        [ProducesResponseType(typeof(IEnumerable<EmployeeDto>), 200)]
-        public async Task<ActionResult<IEnumerable<EmployeeDto>>> GetMaintenanceEmployees()
-        {
-            try
-            {
-                var employees = await _employeeRepository.GetMaintenanceTechniciansAsync();
-                var employeeDtos = _mapper.Map<IEnumerable<EmployeeDto>>(employees);
-
-                return Ok(employeeDtos);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error retrieving maintenance employees");
-                return StatusCode(500, "An error occurred while retrieving maintenance employees");
-            }
-        }
+        // ⚠ `GET api/Employees/maintenance-available` was retired in round 4, lane O. It returned the
+        // FULL EmployeeDto for every technician — an over-broad read that existed only because the
+        // narrow door was never wired up — and it is what Maintenance's shipped dropdowns called. They
+        // now call HR's technician door, `GET api/hr/employees/technicians`, which answers with the
+        // same predicate Maintenance's work-order gates apply.
 
         /// <summary>
         /// Terminate an employee

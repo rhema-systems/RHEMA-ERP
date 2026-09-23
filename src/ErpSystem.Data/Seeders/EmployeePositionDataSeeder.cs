@@ -446,7 +446,8 @@ public sealed class EmployeePositionDataSeeder
                     new("Fire Safety", SkillLevel.Intermediate, true, 2),
                     new("First Aid", SkillLevel.Beginner, false, 1)
                 },
-                Benefits: new() { new("Transport Allowance", 250m, null), new("Medical Cover (Standard)", null, null) }
+                Benefits: new() { new("Transport Allowance", 250m, null), new("Medical Cover (Standard)", null, null) },
+                IsTechnicianRole: true
             ),
 
             new(
@@ -499,6 +500,7 @@ public sealed class EmployeePositionDataSeeder
                 RequiresCertification = spec.RequiresCertification,
                 RequiresGuarantor = spec.RequiresGuarantor,
                 RequiresLicense = spec.RequiresLicense,
+                IsTechnicianRole = spec.IsTechnicianRole,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = "Seeder"
@@ -613,7 +615,9 @@ public sealed class EmployeePositionDataSeeder
         bool RequiresLicense,
         List<SkillReqSpec> Skills,
         List<BenefitSpec> Benefits,
-        string? Description = null);
+        string? Description = null,
+        // Round 4, lane O: holders are Maintenance's technicians.
+        bool IsTechnicianRole = false);
 
     private sealed record SkillReqSpec(string SkillName, SkillLevel Level, bool IsRequired, int Priority);
 

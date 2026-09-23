@@ -10450,6 +10450,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     private async Task<int> SaveWithInventoryCostProjectionAsync(bool acceptAllChanges, CancellationToken cancellationToken)
     {
         await SynchronizeInventoryAverageCostsAsync(true, cancellationToken);
+        // HR, round 4 lane O: before the audit pass, so the holders it moves are stamped too.
+        await ApplyTechnicianRoleRuleAsync(true, cancellationToken);
         UpdateAuditableEntities();
         NormalizeProcurementAwardReadinessAuditEnvelopes();
         NormalizeProcurementBidderCommunicationAuditEnvelopes();
@@ -10475,6 +10477,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     private int SaveWithInventoryCostProjection(bool acceptAllChanges)
     {
         SynchronizeInventoryAverageCostsAsync(false, CancellationToken.None).GetAwaiter().GetResult();
+        // HR, round 4 lane O — see the async path.
+        ApplyTechnicianRoleRuleAsync(false, CancellationToken.None).GetAwaiter().GetResult();
         UpdateAuditableEntities();
         NormalizeProcurementAwardReadinessAuditEnvelopes();
         NormalizeProcurementBidderCommunicationAuditEnvelopes();

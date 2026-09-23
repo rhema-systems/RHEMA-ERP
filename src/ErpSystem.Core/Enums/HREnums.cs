@@ -10628,3 +10628,27 @@ public enum DisabilityCategory
     [Description("Other")]
     Other = 99
 }
+
+/// <summary>
+/// Whether an employee is available to Maintenance as a technician because of their position, or
+/// because HR said so for this person (round 4, lane O).
+/// </summary>
+/// <remarks>
+/// A view over two stored columns, <c>Employee.MaintenanceAssignmentSetByHand</c> and
+/// <c>Employee.CanBeAssignedToMaintenance</c>. The second is what every reader asks, HR's technician
+/// door and Maintenance's work-order gates alike.
+/// </remarks>
+public enum MaintenanceAssignmentMode
+{
+    /// <summary>The position decides: available exactly when it is a technician role.</summary>
+    [Description("Follow the position")]
+    FollowPosition = 0,
+
+    /// <summary>Available whatever the position says, e.g. someone seconded in from another post.</summary>
+    [Description("Include, set by hand")]
+    Include = 1,
+
+    /// <summary>Not available although the position is a technician role, e.g. long-term light duties.</summary>
+    [Description("Exclude, set by hand")]
+    Exclude = 2
+}

@@ -106,6 +106,24 @@ export const BLOOD_TYPE_OPTIONS: { value: BloodType; label: string }[] = [
   { value: 'Unknown', label: 'Unknown' },
 ];
 
+/**
+ * Whether Maintenance may assign this person work because of their position, or because HR said
+ * so for them (round 4, lane O). Mirrors MaintenanceAssignmentMode.
+ */
+export type MaintenanceAssignmentMode = 'FollowPosition' | 'Include' | 'Exclude';
+
+export const MAINTENANCE_ASSIGNMENT_OPTIONS: { value: MaintenanceAssignmentMode; label: string }[] = [
+  { value: 'FollowPosition', label: 'Follow the position' },
+  { value: 'Include', label: 'Include, although the position is not a technician role' },
+  { value: 'Exclude', label: 'Exclude, although the position is a technician role' },
+];
+
+/**
+ * The four words Maintenance filters a technician's experience on. The server refuses anything
+ * else, so this is a picker rather than a text box.
+ */
+export const EXPERIENCE_LEVEL_OPTIONS = ['Junior', 'Intermediate', 'Senior', 'Expert'] as const;
+
 // --- Lightweight lookup (pickers) — subset of EmployeeDto ---
 export interface EmployeeLookup {
   id: string;
@@ -128,6 +146,8 @@ export interface EmployeeSearchRequest {
   isActive?: boolean;
   /** true = on payroll only; false = off-payroll staff only. */
   isOnPayroll?: boolean;
+  /** true = only people Maintenance may assign work to (round 4, lane O). */
+  maintenanceTechniciansOnly?: boolean;
 }
 
 export type EmployeePagedResult = PagedResult<EmployeeLookup>;
@@ -163,6 +183,11 @@ export interface Employee {
   isOnPayroll: boolean;
   dateEmployed?: string | null;
   yearsOfService?: number | null;
+  /**
+   * Whether Maintenance may assign this person work (round 4, lane O) — the one answer HR's
+   * technician door and Maintenance's work-order gates both read.
+   */
+  canBeAssignedToMaintenance: boolean;
   picturePath?: string | null;
 }
 
@@ -247,6 +272,14 @@ export interface EmployeeDetail extends Employee {
   offPayrollNote?: string | null;
   badgeNumber?: string | null;
   notes?: string | null;
+  // ── Maintenance (round 4, lane O) ──
+  /** How `canBeAssignedToMaintenance` is decided: by the position, or by HR for this person. */
+  maintenanceAssignment: MaintenanceAssignmentMode;
+  /** The position's own flag — what "follow the position" answers today. */
+  positionIsTechnicianRole: boolean;
+  specialization?: string | null;
+  certificationLevel?: string | null;
+  experienceLevel?: string | null;
   terminationDate?: string | null;
   terminationReason?: string | null;
   terminationNotes?: string | null;
@@ -387,6 +420,17 @@ export interface CreateEmployeeRequest {
   badgeNumber?: string | null;
   notes?: string | null;
   isExpatriate: boolean;
+  // ── Maintenance (round 4, lane O) ──
+  /** Omit (or FollowPosition) to let the position decide. */
+  maintenanceAssignment?: MaintenanceAssignmentMode | null;
+  /**
+   * ⚠ Sent as it stands, not blank→null: on the update a null means "leave it", so an emptied field
+   * must travel as '' for the server to clear it.
+   */
+  specialization?: string | null;
+  certificationLevel?: string | null;
+  /** One of EXPERIENCE_LEVEL_OPTIONS, or '' to clear. */
+  experienceLevel?: string | null;
 }
 
 export type UpdateEmployeeRequest = Partial<CreateEmployeeRequest> & {

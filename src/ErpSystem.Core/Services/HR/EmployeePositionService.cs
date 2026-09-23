@@ -219,6 +219,7 @@ public class EmployeePositionService : IEmployeePositionService
             RequiredGuarantorAmount = createDto.RequiredGuarantorAmount,
             RequiredGuarantorCurrencyCode = createDto.RequiredGuarantorCurrencyCode,
             RequiresLicense = createDto.RequiresLicense,
+            IsTechnicianRole = createDto.IsTechnicianRole,
             PreEmploymentCheckTemplateId = createDto.PreEmploymentCheckTemplateId,
             StaffLevelId = createDto.StaffLevelId,
             ReportsToPositionId = createDto.ReportsToPositionId,
@@ -323,6 +324,10 @@ public class EmployeePositionService : IEmployeePositionService
         position.RequiredGuarantorAmount = updateDto.RequiredGuarantorAmount;
         position.RequiredGuarantorCurrencyCode = updateDto.RequiredGuarantorCurrencyCode;
         position.RequiresLicense = updateDto.RequiresLicense;
+        // Round 4, lane O. Applied only when supplied — see the DTO. The holders follow in the same
+        // save: ApplicationDbContext.HrTechnicianRole.cs moves every one not set by hand in or out of
+        // Maintenance's pool, so this service need not (and must not) do it a second way.
+        if (updateDto.IsTechnicianRole.HasValue) position.IsTechnicianRole = updateDto.IsTechnicianRole.Value;
         position.PreEmploymentCheckTemplateId = updateDto.PreEmploymentCheckTemplateId;
         position.ExpectedHeadcount = updateDto.ExpectedHeadcount;
         position.MinimumExperienceYears = updateDto.MinimumExperienceYears;
@@ -408,6 +413,7 @@ public class EmployeePositionService : IEmployeePositionService
             RequiredGuarantorAmount = position.RequiredGuarantorAmount,
             RequiredGuarantorCurrencyCode = position.RequiredGuarantorCurrencyCode,
             RequiresLicense = position.RequiresLicense,
+            IsTechnicianRole = position.IsTechnicianRole,
             PreEmploymentCheckTemplateId = position.PreEmploymentCheckTemplateId,
             PreEmploymentCheckTemplateName = position.PreEmploymentCheckTemplate?.Name,
             IsActive = position.IsActive,

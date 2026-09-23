@@ -100,6 +100,11 @@ export interface EmployeePosition {
   requiredGuarantorCurrencyCode?: string | null;
   requiresLicense: boolean;
   /**
+   * A technician role (round 4, lane O): every holder is available to Maintenance to be assigned
+   * work, unless HR set that person otherwise by hand on their employee record.
+   */
+  isTechnicianRole: boolean;
+  /**
    * The pre-employment check set an offer for this post starts from (round 4, lane H1).
    *
    * ⚠ Null does NOT mean "no checks". The offer falls back to the tenant’s **single** active
@@ -148,6 +153,11 @@ export interface CreateEmployeePositionRequest {
   requiredGuarantorAmount?: number | null;
   requiredGuarantorCurrencyCode?: string | null;
   requiresLicense: boolean;
+  /**
+   * A technician role (round 4, lane O). ⚠ On an UPDATE, leaving it out leaves the flag alone —
+   * turning it off moves every holder out of Maintenance's pool, so it is never done by omission.
+   */
+  isTechnicianRole?: boolean;
   /**
    * The pre-employment check set an offer for this post starts from (round 4, lane H1).
    *

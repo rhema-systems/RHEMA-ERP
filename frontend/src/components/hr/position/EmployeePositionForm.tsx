@@ -77,6 +77,7 @@ export const employeePositionSchema = z.object({
   requiredGuarantorAmount: z.string().optional().or(z.literal('')),
   requiredGuarantorCurrencyCode: z.string().optional().or(z.literal('')),
   requiresLicense: z.boolean(),
+  isTechnicianRole: z.boolean(),
   preEmploymentCheckTemplateId: z.string().nullable(),
   isActive: z.boolean(),
   skillRequirements: z.array(
@@ -221,6 +222,7 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
   requiredGuarantorAmount: '',
   requiredGuarantorCurrencyCode: '',
   requiresLicense: false,
+  isTechnicianRole: false,
   preEmploymentCheckTemplateId: null,
   isActive: true,
   skillRequirements: [],
@@ -341,6 +343,7 @@ export function EmployeePositionForm({
   });
 
   const requiresLicense = form.watch('requiresLicense');
+  const isTechnicianRole = form.watch('isTechnicianRole');
   const isActive = form.watch('isActive');
   const staffLevelValue = form.watch('staffLevelId') || NONE;
   const salaryGradeValue = form.watch('salaryGradeId') || NONE;
@@ -992,6 +995,23 @@ export function EmployeePositionForm({
                 checked={requiresLicense}
                 onCheckedChange={(v) => form.setValue('requiresLicense', v)}
               />
+            </div>
+            {/* Round 4, lane O. The rule for the post; a person is the exception, set on their own
+                record. Saving moves every holder not set by hand in or out of Maintenance's pool at
+                once — which is the point: nobody is ticked one by one. */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="isTechnicianRole">Technician role</Label>
+                <Switch
+                  id="isTechnicianRole"
+                  checked={isTechnicianRole}
+                  onCheckedChange={(v) => form.setValue('isTechnicianRole', v, { shouldDirty: true })}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Holders of this position can be assigned maintenance work orders. Anyone HR has
+                included or excluded by hand on their employee record keeps that setting.
+              </p>
             </div>
             {/* Round 4, lane H1. The check set an offer for this post starts from. ⚠ Leaving it
                 unset does not mean "no checks": the offer falls back to the tenant’s SINGLE active

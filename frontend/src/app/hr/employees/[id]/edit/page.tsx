@@ -75,6 +75,11 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     tinNumber: d.tinNumber ?? '',
     badgeNumber: d.badgeNumber ?? '',
     notes: d.notes ?? '',
+    // Round 4, lane O. Loaded back so a save sends what is stored, not a reset to the defaults.
+    maintenanceAssignment: d.maintenanceAssignment ?? 'FollowPosition',
+    specialization: d.specialization ?? '',
+    certificationLevel: d.certificationLevel ?? '',
+    experienceLevel: d.experienceLevel ?? '',
   };
 }
 

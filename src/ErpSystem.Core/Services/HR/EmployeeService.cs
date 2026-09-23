@@ -529,6 +529,7 @@ public class EmployeeService : IEmployeeService
                 + "this system, use the import door — tick that they already have a staff number.");
 
         await _disabilityTypes.EnsureUsableAsync(dto.DisabilityTypeId, dto.HasDisability, cancellationToken); // round 3, lane P2
+        dto.ExperienceLevel = CanonicalExperienceLevel(dto.ExperienceLevel); // round 4, lane O
         var employeeEntity = dto.ToEntity(employeeNumber, orgUnit.OrganizationLevelId, location.LocationLevelId);
         employeeEntity.EmailAddress = email;
         employeeEntity.TenantId = GetTenantId();
@@ -840,6 +841,7 @@ public class EmployeeService : IEmployeeService
         var previousProbationDays = employee.ProbationPeriodDays;
 
         await _disabilityTypes.EnsureUsableAsync(dto.DisabilityTypeId, dto.HasDisability, cancellationToken); // round 3, lane P2
+        dto.ExperienceLevel = CanonicalExperienceLevel(dto.ExperienceLevel); // round 4, lane O
         dto.Apply(employee, newOrgLevelId, newLocationLevelId);
 
         // ⚠ AFTER Apply, which has just written whatever probation length the caller sent. The
@@ -4048,7 +4050,14 @@ public class EmployeeService : IEmployeeService
     public async Task<IEnumerable<EmployeeDto>> GetByEmploymentTypeAsync(EmploymentType employmentType)
         => (await _employeeRepository.GetByEmploymentTypeAsync(employmentType)).Select(e => e.ToSummaryDto());
 
-    // Maintenance integration left as existing (no aggregate writes)
+    // ── The technician door (round 4, lane O) ─────────────────────────────────────────────────
+    //
+    // HR's answer to Maintenance's "who may I assign work to?", served at api/hr/employees/technicians*
+    // and read in-process by Maintenance's TechnicianSchedulingService and MaintenanceScheduleService.
+    // ⚠ ONE predicate, the stored CanBeAssignedToMaintenance: it is what Maintenance's work-order,
+    // labour and schedule gates read, so the door can never offer somebody those gates refuse. It
+    // follows the position's IsTechnicianRole unless set by hand — see ApplicationDbContext.HrTechnicianRole.cs.
+
     public async Task<IEnumerable<MaintenanceTechnicianDto>> GetMaintenanceTechniciansAsync()
     {
         var technicians = await _employeeRepository.GetMaintenanceTechniciansAsync();
@@ -4063,7 +4072,10 @@ public class EmployeeService : IEmployeeService
 
     public async Task<MaintenanceTechnicianDto?> GetTechnicianByIdAsync(Guid employeeId)
     {
-        var employee = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
+        // ⚠ The door's own read, not the employee detail read: that one never loaded the linked
+        // credentials a skill row's certification dates come from, and carried five collections the
+        // door does not report.
+        var employee = await _employeeRepository.GetMaintenanceTechnicianByIdAsync(employeeId);
         return employee == null || !employee.CanBeAssignedToMaintenance ? null : MapToMaintenanceTechnicianDto(employee);
     }
 
@@ -4072,22 +4084,26 @@ public class EmployeeService : IEmployeeService
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
         if (employee == null || !employee.CanBeAssignedToMaintenance) return null;
 
+        var working = IsWorkingTechnician(employee);
         return new TechnicianAvailabilityDto
         {
             EmployeeId = employee.Id,
             EmployeeName = employee.FullName,
-            IsAvailable = employee.IsActive && employee.StaffStatus == StaffStatus.Active,
-            AvailableFrom = employee.StaffStatus == StaffStatus.Active ? DateTime.UtcNow : null,
-            UnavailabilityReason = employee.StaffStatus != StaffStatus.Active ? employee.StaffStatus.ToString() : null,
-            CurrentWorkOrders = 0,
-            WorkloadPercentage = 0
+            IsAvailable = working,
+            AvailableFrom = working ? DateTime.UtcNow : null,
+            UnavailabilityReason = working ? null : (employee.IsActive ? employee.StaffStatus.ToString() : "Inactive"),
+            // ⚠ Not supplied (null) where it was a hardcoded 0 — see MaintenanceTechnicianDto.
+            CurrentWorkOrders = null,
+            WorkloadPercentage = null
         };
     }
 
     public async Task<IEnumerable<MaintenanceTechnicianDto>> GetTechniciansWithSkillAsync(Guid skillId, SkillLevel? minLevel = null)
     {
-        var employees = await _employeeRepository.GetEmployeesBySkillAsync(skillId, minLevel);
-        return employees.Where(e => e.CanBeAssignedToMaintenance).Select(MapToMaintenanceTechnicianDto);
+        // The predicate in SQL now, where it used to load every holder of the skill and filter them
+        // in memory.
+        var employees = await _employeeRepository.GetMaintenanceTechniciansWithSkillAsync(skillId, minLevel);
+        return employees.Select(MapToMaintenanceTechnicianDto);
     }
 
     public Task<bool> EmployeeNumberExistsAsync(string employeeNumber) => _employeeRepository.EmployeeNumberExistsAsync(employeeNumber);
@@ -4233,24 +4249,109 @@ public class EmployeeService : IEmployeeService
         {
             Id = employee.Id,
             EmployeeNumber = employee.EmployeeNumber,
+            FirstName = employee.FirstName,
+            LastName = employee.LastName,
             FullName = employee.FullName,
             DisplayName = employee.DisplayName,
             EmailAddress = employee.EmailAddress,
             MobileNumber = employee.MobileNumber,
+            PositionId = employee.PositionId,
             PositionTitle = employee.Position?.Title ?? string.Empty,
+            IsTechnicianRole = employee.Position?.IsTechnicianRole ?? false,
+            MaintenanceAssignment = employee.MaintenanceAssignment,
+            OrganizationUnitId = employee.OrganizationUnitId,
+            OrganizationUnitName = employee.OrganizationUnit?.Name,
+            LocationId = employee.LocationId,
+            LocationName = employee.Location?.Name,
+            Specialization = employee.Specialization,
+            CertificationLevel = employee.CertificationLevel,
+            ExperienceLevel = employee.ExperienceLevel,
+            StaffStatus = employee.StaffStatus,
             IsActive = employee.IsActive,
-            IsAvailable = employee.IsActive && employee.StaffStatus == StaffStatus.Active,
-            Skills = employee.Skills?.Select(es => new ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto
-            {
-                SkillName = es.Skill.Name,
-                Level = (int)es.SkillLevel,
-                IsCertified = es.CertificationDate.HasValue
-            }).ToList() ?? new List<ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto>(),
-            CurrentWorkOrders = 0,
-            WorkloadScore = 0,
+            IsAvailable = IsWorkingTechnician(employee),
+            Skills = (employee.Skills ?? new List<EmployeeSkill>())
+                .Where(es => !es.IsDeleted)
+                .OrderBy(es => es.Skill?.Name)
+                .Select(ToTechnicianSkill)
+                .ToList(),
+            // ⚠ Not supplied, deliberately (round 4, lane O). All three were a hardcoded 0 or null,
+            // and a 0 reads as "this technician is free". Employee.CurrentWorkload / MaxWorkload
+            // look like the fix and are not: nothing writes the first. Maintenance counts its own
+            // work orders (TechnicianSchedulingService).
+            CurrentWorkOrders = null,
+            WorkloadScore = null,
             BadgeNumber = employee.BadgeNumber,
             ShiftName = null
         };
+    }
+
+    /// <summary>
+    /// A skill row as Maintenance needs it: enough to tell a lapsed certification from a current one.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Before round 4, lane O this sent only the name, the level and <c>IsCertified</c> — and that
+    /// last was <c>CertificationDate.HasValue</c>, not the row's own flag, so a certified skill with no
+    /// date on file read as uncertified. The linked credential (round 2, lane C2) wins where there is
+    /// one, as on HR's own skills tab; the per-skill columns stand for rows recorded before the
+    /// catalogue.
+    /// </remarks>
+    private static ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto ToTechnicianSkill(EmployeeSkill es)
+    {
+        var credential = es.EmployeeCertification is { IsDeleted: false } linked ? linked : null;
+        return new ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto
+        {
+            Id = es.Id,
+            EmployeeId = es.EmployeeId,
+            SkillId = es.SkillId,
+            SkillName = es.Skill?.Name ?? string.Empty,
+            Level = (int)es.SkillLevel,
+            ProficiencyLevel = (int)es.SkillLevel,
+            IsCertified = credential != null ? !credential.IsRevoked : es.IsCertified,
+            CertificationDate = AsUtcDate(credential != null ? credential.IssuedOn : es.CertificationDate),
+            CertificationExpiry = AsUtcDate(credential != null ? credential.ExpiresOn : es.CertificationExpiryDate),
+            CertificationNumber = credential?.CertificateNumber ?? es.CertificationNumber,
+            CertifyingBody = es.CertifyingBodyRef?.Name ?? es.CertifyingBody,
+            CreatedAt = es.CreatedAt,
+            UpdatedAt = es.UpdatedAt
+        };
+    }
+
+    // A calendar date as UTC midnight, so the JSON carries the Z (round 4, lane E-a's lesson).
+    private static DateTime? AsUtcDate(DateOnly? date)
+        => date?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+
+    /// <summary>
+    /// Employed and at work — Active or on probation (round 4, lane O; TDC's call 2026-09-23). The
+    /// door's list, its <c>available</c> list and each row's <c>IsAvailable</c> all use this one rule.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was Active only, and every hire starts on probation, so a new artisan read "unavailable:
+    /// Probation" in the very pool that listed them. What HR does not know — schedules, work orders —
+    /// is Maintenance's to add.
+    /// </remarks>
+    private static bool IsWorkingTechnician(Employee employee)
+        => employee.IsActive && employee.StaffStatus is StaffStatus.Active or StaffStatus.Probation;
+
+    /// <summary>The words Maintenance filters an experience level on (round 4, lane O).</summary>
+    private static readonly string[] ExperienceLevels = { "Junior", "Intermediate", "Senior", "Expert" };
+
+    /// <summary>
+    /// Null stays null (not supplied), blank stays blank (clear), and anything else must be one of
+    /// <see cref="ExperienceLevels"/> — stored in its canonical casing.
+    /// </summary>
+    /// <remarks>
+    /// Maintenance's technician list filters on this text and its analytics group by it, so a free
+    /// "senior " and "Snr" would be three levels where TDC has one. The entity has always documented
+    /// the four words; this is the first write that holds anyone to them.
+    /// </remarks>
+    private static string? CanonicalExperienceLevel(string? value)
+    {
+        if (value == null) return null;
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var trimmed = value.Trim();
+        return ExperienceLevels.FirstOrDefault(l => string.Equals(l, trimmed, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException(
+                $"Experience level must be one of {string.Join(", ", ExperienceLevels)}; '{trimmed}' is not one of them.");
     }
 
     #endregion

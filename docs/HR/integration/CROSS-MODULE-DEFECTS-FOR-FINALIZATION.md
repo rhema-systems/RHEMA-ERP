@@ -1677,6 +1677,110 @@ produce exactly this. The empty body suggests the action is returning a result w
 never populated. The mapping endpoint it blocks,
 `POST /api/pre-employment-checks/providers`, is HR's and works.
 
+## 29. Maintenance — its technician list decides "technician" by a unit's NAME, and reads a workload nothing writes (2026-09-23)
+
+**Owner:** Maintenance. **Severity:** (a) the technicians screen disagrees with Maintenance's own
+assignment gates, listing people the gates refuse; (b) every technician reads "available, 0%
+loaded"; (c)–(g) dead or misleading code. **Status:** open — the hand-off from HR round 4, lane O.
+**HR's side is done:** HR now maintains `Employee.CanBeAssignedToMaintenance` — the column
+Maintenance's gates already read — from the position's **Technician role** flag, with a per-person
+exception, and serves it at `GET api/hr/employees/technicians*`.
+
+### What is broken
+
+(a) **Two predicates for one question.** `TechnicianRepository` decides who is a technician by
+`e.OrganizationUnit.Name.Contains("Maintenance")`. That covers `GetTechniciansAsync`,
+`GetActiveTechniciansAsync`, `GetByDepartmentAsync`, `GetBySpecializationAsync`,
+`GetByEmployeeIdAsync` and four more, nine sites in all. `TechnicianService` builds the
+`/maintenance/technicians` screen from them. Maintenance's own gates read the COLUMN instead:
+- `WorkOrderService` (assign);
+- `WorkOrderLaborService` (log labour);
+- `MaintenanceStaffScheduleService` (create and update);
+- `QualityControlService.GetQualifiedInspectionOfficersAsync`.
+
+So the screen lists people the gates refuse, and misses the technicians the gates accept: anyone in
+a technician post outside a unit with that name.
+
+(b) **Availability from a column nothing writes.** `TechnicianService.MapToDto(Employee)` computes
+`IsAvailable = IsActive && CurrentWorkload < MaxWorkload`, and reports both figures from `Employee`.
+`CurrentWorkload` is written by nothing, so it is always 0. Every technician therefore reads
+available and 0% utilised, on that screen and in its utilisation figures.
+`TechnicianSchedulingService` computes real utilisation from schedules, but the screen does not use it.
+
+(c) **A sync that does nothing and reports success.** `TechnicianRepository.GetFromHRModuleAsync` is
+`// TODO: Implement actual HR module integration`, returning an empty list. So
+`SyncTechniciansFromHRAsync`, `GetTechnicianFromHRAsync` and
+`POST api/maintenance/technical-skills/sync-from-hr` do nothing, and `GetAllTechniciansAsync` calls
+the no-op sync on every read. There is nothing to sync: HR's record is read live.
+
+(d) **Unreachable writes into HR's record.** `TechnicianService.CreateTechnicianAsync` and
+`UpdateTechnicianAsync` write HR's `Employee` columns, and no controller calls them. The columns are
+`CanBeAssignedToMaintenance`, `Specialization`, `CertificationLevel`, `ExperienceLevel`,
+`MaxWorkload`, `Notes` and the names. Create also gates on the unit-name rule. If they were wired up,
+HR would keep the column write as a **by-hand inclusion**: it sticks, and shows on HR's employee form
+as set by hand. HR does not undo it on the next save.
+
+(e) **Names for past records go through the wrong door.** `MaintenanceScheduleService` resolves an
+assigned technician's NAME through HR's technician door (`IEmployeeService.GetTechnicianByIdAsync`),
+which answers only for CURRENT technicians. Now that the answer follows the post, someone who moves
+out of a technician post will read "Unknown Technician" on their past schedules. UAT holds no
+schedules today.
+
+(f) **The name is split by hand.** `TechnicianSchedulingService` splits HR's `FullName` on the first
+space to get a first and last name. The door now carries `FirstName` and `LastName`.
+
+(g) **A table with no reader.** The `Technicians` table (entity `Maintenance/Technician`) is written
+by two seeders only and read by no service. `ITechnicianRepository` is `IGenericRepository<Employee>`.
+
+### What was proven
+
+Round 4 lane O's suite (`dev-harness/hr-jobarch/run-round4-o.mjs`, 101 ×2, UAT, 2026-09-23) set up
+an employee in a fixture post that is NOT a technician role, inside the "Building Maintenance" unit:
+- HR's door leaves them out, and the stored column stays false;
+- `GET api/maintenance/technicians` still lists them, by unit name. The suite prints this as an
+  observation and does not assert it, because it is Maintenance's to fix.
+
+Measured on UAT before the lane:
+
+| Measure | Count |
+|---|---|
+| employees with the column set | 0 of 2,089 |
+| employees in a `MAINT` department | 0 |
+| employees in a unit named like "Maintenance" | 1 |
+| work orders | 0 |
+| `Technicians` rows | 0 |
+| `LastSyncDate` written | 0 |
+
+### What it blocks
+
+The Maintenance technicians screen cannot show the pool HR maintains, and its availability and
+utilisation figures say "free".
+
+Maintenance's shipped dropdowns are **not** blocked. The work-order, emergency, scheduled and
+job-card screens call `maintenanceDataService.getTechnicians()`, which lane O repointed at HR's door.
+
+⚠ **HR touched two Maintenance frontend files, and says so here.** The plan's O3 changed them
+because, until they were moved, the flag changed nothing a user saw:
+- `maintenanceDataService.getTechnicians()` now calls `/hr/employees/technicians`. It used the root
+  `/employees/maintenance-available`, which is retired and returned each person's full record.
+- `maintenanceApiService.getTechnicians()` is removed. It had no caller, and it fell back to
+  `/employees?pageSize=1000`, offering every employee in the tenant as a technician.
+
+### What a fix needs
+
+- (a) Replace the unit-name predicate in `TechnicianRepository` with `CanBeAssignedToMaintenance`,
+  the gates' own, or read HR's door.
+- (b) Take availability and utilisation from `TechnicianSchedulingService`, and stop reading
+  `Employee.CurrentWorkload`.
+- (c) Delete the sync.
+- (d) Delete `Create/UpdateTechnicianAsync`, or have HR's employee form be the only writer of those
+  columns.
+- (e) Resolve historical names through `IEmployeeService.GetEmployeeSummaryByIdAsync`.
+- (f) Read the door's `FirstName` and `LastName`.
+- (g) Retire the `Technicians` table.
+
+None of these needs an HR change.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:
