@@ -59,6 +59,7 @@ namespace ErpSystem.Web.Services
         private readonly CivilEngineeringStatutoryReportSeeder? _civilEngineeringStatutoryReportSeeder;
         private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
+        private readonly string? _operationalUatSharedPassword;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
             new List<WorkflowApprovalStageSeed>
@@ -174,6 +175,7 @@ namespace ErpSystem.Web.Services
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
                 false) ?? false;
+            _operationalUatSharedPassword = configuration?["UatBootstrap:SharedPassword"];
         }
 
         public Task SeedAsync() => SeedCoreAsync(applyMigrations: true);
@@ -7537,6 +7539,13 @@ namespace ErpSystem.Web.Services
         {
             _logger.LogInformation("Seeding test users...");
 
+            // The explicit operational-UAT bootstrap supplies this value from a process-scoped
+            // secret. Normal development seeding keeps the established Finance123! default.
+            // Existing accounts are never reset by CreateTestUserAsync.
+            var financeSeedPassword = string.IsNullOrWhiteSpace(_operationalUatSharedPassword)
+                ? "Finance123!"
+                : _operationalUatSharedPassword;
+
             await SeedRolesAsync();
             await SeedRolePermissionAssignmentsAsync();
             await SeedDefaultTenantAsync();
@@ -7575,36 +7584,36 @@ namespace ErpSystem.Web.Services
             await SeedLandAcquisitionTestUsersAsync(defaultTenant);
             await EnsurePropertyManagementTestRoleAssignmentsAsync();
 
-            await CreateTestUserAsync("finance.clerk", "finance.clerk@default.com", "Finance123!",
+            await CreateTestUserAsync("finance.clerk", "finance.clerk@default.com", financeSeedPassword,
                 "Ama", "Mensah", defaultTenant.Id, "Finance Clerk", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("accounts.officer", "accounts.officer@default.com", "Finance123!",
+            await CreateTestUserAsync("accounts.officer", "accounts.officer@default.com", financeSeedPassword,
                 "Kofi", "Boateng", defaultTenant.Id, "Accounts Officer", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("ap.officer", "ap.officer@default.com", "Finance123!",
+            await CreateTestUserAsync("ap.officer", "ap.officer@default.com", financeSeedPassword,
                 "Akua", "Owusu", defaultTenant.Id, "Accounts Payable Officer", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("ar.officer", "ar.officer@default.com", "Finance123!",
+            await CreateTestUserAsync("ar.officer", "ar.officer@default.com", financeSeedPassword,
                 "Kwame", "Asante", defaultTenant.Id, "Accounts Receivable Officer", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("senior.accountant", "senior.accountant@default.com", "Finance123!",
+            await CreateTestUserAsync("senior.accountant", "senior.accountant@default.com", financeSeedPassword,
                 "Efua", "Addo", defaultTenant.Id, "Senior Accountant", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("finance.manager", "finance.manager@default.com", "Finance123!",
+            await CreateTestUserAsync("finance.manager", "finance.manager@default.com", financeSeedPassword,
                 "Yaw", "Osei", defaultTenant.Id, "Finance Manager", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("financial.controller", "financial.controller@default.com", "Finance123!",
+            await CreateTestUserAsync("financial.controller", "financial.controller@default.com", financeSeedPassword,
                 "Abena", "Dapaah", defaultTenant.Id, "Financial Controller", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("chief.accountant", "chief.accountant@default.com", "Finance123!",
+            await CreateTestUserAsync("chief.accountant", "chief.accountant@default.com", financeSeedPassword,
                 "Nana", "Adu", defaultTenant.Id, "Chief Accountant", AuthenticationProvider.Local);
 
             // The development account lets the conditional executive stage be exercised without
             // granting broad tenant-administrator privileges to an approval actor.
-            await CreateTestUserAsync("managing.director", "managing.director@default.com", "Finance123!",
+            await CreateTestUserAsync("managing.director", "managing.director@default.com", financeSeedPassword,
                 "TDC", "Managing Director", defaultTenant.Id, "Managing Director", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("budget.officer", "budget.officer@default.com", "Finance123!",
+            await CreateTestUserAsync("budget.officer", "budget.officer@default.com", financeSeedPassword,
                 "Kojo", "Nkrumah", defaultTenant.Id, "Budget Officer", AuthenticationProvider.Local);
 
             _logger.LogInformation("Test users seeding completed");
@@ -10451,6 +10460,8 @@ namespace ErpSystem.Web.Services
             services.AddScoped<QuantitySurveyConfigurationProfileSeeder>();
             services.AddScoped<QuantitySurveyStatutoryReportSeeder>();
             services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
+            services.AddScoped<FinanceDataSeeder>();
+            services.AddScoped<ErpSystem.Api.Services.OperationalUatBaselineSeeder>();
             return services;
         }
 
