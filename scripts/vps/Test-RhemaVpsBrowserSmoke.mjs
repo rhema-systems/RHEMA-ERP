@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const baseUrl = (process.argv[2] ?? process.env.RHEMA_VPS_BASE_URL
-  ?? 'https://149.102.145.190:8443').replace(/\/$/, '');
+  ?? 'https://63.141.230.56').replace(/\/$/, '');
 const chromePath = process.env.RHEMA_CHROME_PATH
   ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 

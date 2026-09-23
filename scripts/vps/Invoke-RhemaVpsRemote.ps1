@@ -12,6 +12,7 @@ param(
     [string]$FrontendPackageName,
     [string]$ApiSha256,
     [string]$FrontendSha256,
+    [string]$ExpectedPublicOrigin = 'https://63.141.230.56',
     [int]$ApiReadyTimeoutSeconds = 1800
 )
 
@@ -25,7 +26,6 @@ $PackagesRoot = Join-Path $RhemaRoot 'packages'
 $BackupsRoot = Join-Path $RhemaRoot 'backups'
 $LogsRoot = Join-Path $RhemaRoot 'logs'
 $ApiServiceXml = Join-Path $RhemaRoot 'services\api\RhemaERPAPI.xml'
-$ExpectedPublicOrigin = 'https://149.102.145.190:8443'
 $NssmParametersPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
 
 function Assert-True {
@@ -694,11 +694,11 @@ function Write-ServiceState {
 }
 
 function Get-ManagedServices {
-    $proxy = Get-Service RhemaERPHTTPSIPProxy -ErrorAction SilentlyContinue
-    if ($null -eq $proxy) {
-        throw 'Required service RhemaERPHTTPSIPProxy is missing. Run scripts\vps\Repair-RhemaVpsHttpsProxy.ps1 from the VPS checkout, then retry.'
+    $caddy = Get-Service RhemaERPCaddy -ErrorAction SilentlyContinue
+    if ($null -eq $caddy) {
+        throw 'Required HTTPS gateway service RhemaERPCaddy is missing.'
     }
-    return @(Get-Service RhemaERPAPI,RhemaERPFrontend) + @($proxy)
+    return @(Get-Service RhemaERPAPI,RhemaERPFrontend) + @($caddy)
 }
 
 function Invoke-Preflight {
@@ -724,17 +724,28 @@ function Invoke-Preflight {
     $environment = Get-ApiServiceEnvironment
     Assert-SyncfusionLicenseConfigured
     $requiredSettings = @{
-        'CorsSettings__AllowedOrigins__0' = $ExpectedPublicOrigin
         'StartupInitialization__SeedDevelopmentData' = 'true'
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
-        'CandidatePortal__PortalUrl' = $ExpectedPublicOrigin
-        'FrontendUrl' = $ExpectedPublicOrigin
     }
     foreach ($entry in $requiredSettings.GetEnumerator()) {
         $actual = [string]$environment[$entry.Key]
         Write-Output "CONFIG|$($entry.Key)|$actual"
         Assert-True ($actual -eq $entry.Value) `
             "Test VPS configuration is invalid for $($entry.Key)."
+    }
+    foreach ($name in @(
+            'CorsSettings__AllowedOrigins__0',
+            'CandidatePortal__PortalUrl',
+            'FrontendUrl')) {
+        $actual = [string]$environment[$name]
+        Write-Output "CONFIG|$name|$actual"
+        if ($actual -ne $ExpectedPublicOrigin) {
+            # Apply reconciles public-origin settings before the API restarts.
+            # Existing servers may legitimately carry the previous origin into
+            # preflight, so record this as repairable drift instead of blocking
+            # the release before its backed-up apply phase.
+            Write-Output "CONFIG_DRIFT|$name|EXPECTED=$ExpectedPublicOrigin|ACTUAL=$actual"
+        }
     }
     $corsNodes = @($environment.Keys | Where-Object {
         $_ -like 'CorsSettings__AllowedOrigins__*'
