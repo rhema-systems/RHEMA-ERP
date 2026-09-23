@@ -5,6 +5,8 @@ param(
 
     [switch]$DryRun,
     [switch]$ReuseVerifiedArtifacts,
+    [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
+    [string]$ReuseApiOutputFromCommit,
     [switch]$SkipBrowserSmoke,
     [switch]$LocalVps,
     [switch]$AllowDirtyWorktree,
@@ -484,13 +486,47 @@ function New-ReleaseArtifacts {
     Reset-GeneratedDirectory $apiOutput $ReleaseDirectory
     Reset-GeneratedDirectory $frontendOutput $ReleaseDirectory
 
-    Invoke-NativeChecked 'dotnet' @(
-        'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
-        '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
-        '-o', $apiOutput,
-        '/p:PublishSingleFile=false',
-        '-p:UseSharedCompilation=false', '-m:1'
-    ) 'API publish failed' | Out-Host
+    if (-not [string]::IsNullOrWhiteSpace($ReuseApiOutputFromCommit)) {
+        $resolvedSourceCommit = (@(& git rev-parse --verify `
+                    "$ReuseApiOutputFromCommit^{commit}" 2>$null) -join '').Trim()
+        Assert-True ($LASTEXITCODE -eq 0 -and
+            $resolvedSourceCommit -match '^[0-9a-f]{40}$') `
+            "The reusable API source commit is invalid: $ReuseApiOutputFromCommit"
+
+        $apiInputPaths = @('src')
+        foreach ($candidate in @(
+                'global.json', 'NuGet.config', 'Directory.Build.props',
+                'Directory.Build.targets', 'Directory.Packages.props')) {
+            if (Test-Path -LiteralPath (Join-Path $RepositoryRoot $candidate)) {
+                $apiInputPaths += $candidate
+            }
+        }
+        & git diff --quiet $resolvedSourceCommit $script:Commit -- @apiInputPaths
+        Assert-True ($LASTEXITCODE -eq 0) `
+            'API source or build inputs changed; refusing to reuse the earlier publish output.'
+
+        $sourceRelease = Join-Path $ReleaseRoot $resolvedSourceCommit.Substring(0, 8)
+        $sourceApiOutput = Join-Path $sourceRelease 'api'
+        Assert-SafeChildPath $sourceApiOutput $ReleaseRoot
+        Assert-True (Test-Path -LiteralPath `
+                (Join-Path $sourceApiOutput 'ErpSystem.Api.exe')) `
+            "Reusable API publish output is missing: $sourceApiOutput"
+        Invoke-RobocopyChecked @(
+            $sourceApiOutput, $apiOutput, '/E', '/R:2', '/W:2',
+            '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+        ) 'Reusing the verified API publish output failed'
+        Write-Host "Reused API publish output from $resolvedSourceCommit." `
+            -ForegroundColor Green
+    }
+    else {
+        Invoke-NativeChecked 'dotnet' @(
+            'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
+            '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
+            '-o', $apiOutput,
+            '/p:PublishSingleFile=false',
+            '-p:UseSharedCompilation=false', '-m:1'
+        ) 'API publish failed' | Out-Host
+    }
 
     foreach ($name in @(
             'appsettings.json', 'appsettings.Production.json',
@@ -536,6 +572,9 @@ function New-ReleaseArtifacts {
     try {
         Push-Location $frontendRoot
         try {
+            Invoke-NativeChecked 'npm.cmd' @(
+                'ci', '--include=dev', '--no-audit', '--no-fund'
+            ) 'Frontend locked-dependency restore failed' | Out-Host
             $syncfusionActivator = Join-Path $frontendRoot `
                 'node_modules\.bin\syncfusion-license.cmd'
             Assert-True (Test-Path -LiteralPath $syncfusionActivator) `
