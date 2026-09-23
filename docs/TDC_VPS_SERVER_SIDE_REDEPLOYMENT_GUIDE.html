@@ -118,7 +118,10 @@ Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy
 
 Invoke-WebRequest 'http://127.0.0.1:5000/health' -UseBasicParsing
 Invoke-WebRequest 'http://127.0.0.1:3001/login' -UseBasicParsing</pre>
-<p>Expected result: all three services are <code>Running</code>, the local API health endpoint is healthy, and local frontend login returns HTTP 200. The API may take several minutes while startup migrations complete; do not repeatedly restart it during that window.</p></section>
+<p>Expected result: all three services are <code>Running</code>, the local API health endpoint is healthy, and local frontend login returns HTTP 200. The API may take several minutes while startup migrations complete; do not repeatedly restart it during that window.</p>
+<div class="notice"><strong>If the HTTPS proxy is missing or stopped:</strong> run the following single command from this repository in an elevated Windows PowerShell window. It restores the proxy script, obtains the missing IP certificate through the configured ACME challenge, corrects the NSSM service and verifies port 8443.</div>
+<pre>powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps\Repair-RhemaVpsHttpsProxy.ps1</pre>
+<p>Continue only after the command reports <code>HTTPS_PROXY_REPAIR|PASS</code>. Then rerun the normal <code>-LocalVps -DryRun</code> check.</p></section>
 
 <section class="card"><h2>6. Verify the public deployment</h2>
 <pre>$base = 'https://149.102.145.190:8443'

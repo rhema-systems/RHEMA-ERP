@@ -597,6 +597,16 @@ Verification from that fix:
 - 22 login-loaded scripts were scanned and had zero localhost API URL matches.
 - `http://149.102.145.190:5000/health` was refused from outside.
 
+### Restore a missing HTTPS proxy
+
+If `RhemaERPHTTPSIPProxy` is absent or stopped because the proxy script or IP certificate is missing, run this once from an elevated Windows PowerShell prompt in the VPS checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps\Repair-RhemaVpsHttpsProxy.ps1
+```
+
+The repair installs the repository-owned proxy, configures ACME renewal, requests the missing IP certificate, corrects the NSSM service, enables the port 8443 firewall rule, and verifies the local HTTPS health and login routes. After it reports `HTTPS_PROXY_REPAIR|PASS`, rerun the normal `-LocalVps -DryRun` deployment check.
+
 ## 2026-07-28 Verified Test Deployment
 
 Release:

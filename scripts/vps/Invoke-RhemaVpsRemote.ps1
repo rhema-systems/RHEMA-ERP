@@ -691,18 +691,14 @@ function Write-ServiceState {
     Get-ManagedServices | ForEach-Object {
         Write-Output "SERVICE|$($_.Name)|$($_.Status)"
     }
-    if ($null -eq (Get-Service RhemaERPHTTPSIPProxy -ErrorAction SilentlyContinue)) {
-        Write-Output 'SERVICE|RhemaERPHTTPSIPProxy|NOT_INSTALLED'
-    }
 }
 
 function Get-ManagedServices {
-    $services = @(Get-Service RhemaERPAPI,RhemaERPFrontend)
     $proxy = Get-Service RhemaERPHTTPSIPProxy -ErrorAction SilentlyContinue
-    if ($null -ne $proxy) {
-        $services += $proxy
+    if ($null -eq $proxy) {
+        throw 'Required service RhemaERPHTTPSIPProxy is missing. Run scripts\vps\Repair-RhemaVpsHttpsProxy.ps1 from the VPS checkout, then retry.'
     }
-    return $services
+    return @(Get-Service RhemaERPAPI,RhemaERPFrontend) + @($proxy)
 }
 
 function Invoke-Preflight {
