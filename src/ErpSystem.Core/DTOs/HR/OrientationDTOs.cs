@@ -778,14 +778,30 @@ public class OrientationSessionFacilitatorDto : BaseDto
     public string? ExternalFacilitatorEmail { get; set; }
     public string? ExternalFacilitatorOrganization { get; set; }
 
+    /// <summary>The training vendor, when picked from the register (round 4, lane M).</summary>
+    public Guid? ExternalFacilitatorVendorId { get; set; }
+
+    /// <summary>The vendor's trainer, when picked from the register and the person is known.</summary>
+    public Guid? ExternalFacilitatorTrainerProfileId { get; set; }
+
+    /// <summary>
+    /// What the register says NOW about a vendor or trainer picked earlier, when it matters — "GIMPA
+    /// has since been blacklisted in the training vendor register". Null when all is well or nothing
+    /// was picked. The snapshot columns keep saying what was agreed; this says what changed since.
+    /// </summary>
+    public string? RegisterNote { get; set; }
+
     public OrientationFacilitatorRole Role { get; set; }
     public string RoleName => Role.ToString();
 
     public bool HasConfirmed { get; set; }
     public string? Notes { get; set; }
 
-    /// <summary>Resolved display name (internal employee or external facilitator).</summary>
-    public string DisplayName => EmployeeName ?? ExternalFacilitatorName ?? string.Empty;
+    /// <summary>
+    /// Resolved display name — the employee, the external person, or (a vendor yet to name its
+    /// trainer) the vendor.
+    /// </summary>
+    public string DisplayName => EmployeeName ?? ExternalFacilitatorName ?? ExternalFacilitatorOrganization ?? string.Empty;
 }
 
 public class CreateOrientationSessionFacilitatorDto : CreateDtoBase
@@ -804,6 +820,15 @@ public class CreateOrientationSessionFacilitatorDto : CreateDtoBase
 
     [MaxLength(200)]
     public string? ExternalFacilitatorOrganization { get; set; }
+
+    /// <summary>
+    /// Pick from the training vendor register (round 4, lane M). The name, email and organisation are
+    /// then taken from the register and any typed values are ignored. A trainer alone is enough — its
+    /// vendor is implied.
+    /// </summary>
+    public Guid? ExternalFacilitatorVendorId { get; set; }
+
+    public Guid? ExternalFacilitatorTrainerProfileId { get; set; }
 
     [Required]
     public OrientationFacilitatorRole Role { get; set; }
@@ -827,6 +852,14 @@ public class UpdateOrientationSessionFacilitatorDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? ExternalFacilitatorOrganization { get; set; }
+
+    /// <summary>
+    /// ⚠ The whole pick, every time — like every field here. Omitting these on an update means "not
+    /// from the register", and the facilitator becomes a typed one.
+    /// </summary>
+    public Guid? ExternalFacilitatorVendorId { get; set; }
+
+    public Guid? ExternalFacilitatorTrainerProfileId { get; set; }
 
     [Required]
     public OrientationFacilitatorRole Role { get; set; }

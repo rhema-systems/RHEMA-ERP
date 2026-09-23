@@ -852,6 +852,11 @@ export interface OrientationSessionFacilitator extends AuditFields {
   externalFacilitatorName?: string | null;
   externalFacilitatorEmail?: string | null;
   externalFacilitatorOrganization?: string | null;
+  /** Round 4, lane M: picked from the training vendor register. The three fields above are then its snapshot. */
+  externalFacilitatorVendorId?: string | null;
+  externalFacilitatorTrainerProfileId?: string | null;
+  /** What the register says now about that pick, when it matters ("…has since been blacklisted…"). */
+  registerNote?: string | null;
   role: OrientationFacilitatorRole;
   hasConfirmed: boolean;
   notes?: string | null;
@@ -863,6 +868,12 @@ export interface OrientationSessionFacilitatorCreateRequest {
   externalFacilitatorName?: string | null;
   externalFacilitatorEmail?: string | null;
   externalFacilitatorOrganization?: string | null;
+  /**
+   * A pick from the training vendor register: the server takes the name, email and organisation
+   * from it and ignores typed ones. ⚠ On an update, omitting these means "not from the register".
+   */
+  externalFacilitatorVendorId?: string | null;
+  externalFacilitatorTrainerProfileId?: string | null;
   role: OrientationFacilitatorRole;
   hasConfirmed: boolean;
   notes?: string | null;

@@ -450,6 +450,18 @@ public class OrientationSession : TenantEntity
 /// have multiple facilitators; internal facilitators reference an employee, external
 /// ones are captured by name/email.
 /// </summary>
+/// <remarks>
+/// <para><b>An external facilitator can come from the training vendor register</b> (round 4, lane M;
+/// decision D-8 — orientation and training buy from the same market). Then
+/// <see cref="ExternalFacilitatorVendorId"/> — and, when the person is known,
+/// <see cref="ExternalFacilitatorTrainerProfileId"/> — point into the register, and the three
+/// <c>ExternalFacilitator…</c> text columns are a <b>snapshot</b> taken from it when the pick is made
+/// or changed: renaming or blacklisting the vendor later does not rewrite what a session says. The
+/// same reference-plus-snapshot shape as <c>PreEmploymentCheckItem.ServiceProviderName</c>.</para>
+///
+/// <para>Without a register pick the text columns are typed, as they always were — for the one-off
+/// speaker nobody has put on file.</para>
+/// </remarks>
 public class OrientationSessionFacilitator : TenantEntity
 {
     public Guid SessionId { get; set; }
@@ -457,14 +469,29 @@ public class OrientationSessionFacilitator : TenantEntity
     /// <summary>Employee acting as facilitator. Null if external.</summary>
     public Guid? EmployeeId { get; set; }
 
+    /// <summary>The person — a snapshot of the trainer's name when one is picked from the register.</summary>
     [MaxLength(200)]
     public string? ExternalFacilitatorName { get; set; }
 
+    /// <summary>A snapshot when picked from the register: the trainer's own address, else the vendor's contact.</summary>
     [MaxLength(200)]
     public string? ExternalFacilitatorEmail { get; set; }
 
+    /// <summary>A snapshot of the vendor's name when picked from the register.</summary>
     [MaxLength(200)]
     public string? ExternalFacilitatorOrganization { get; set; }
+
+    /// <summary>The training vendor providing the facilitator, when picked from the register.</summary>
+    public Guid? ExternalFacilitatorVendorId { get; set; }
+
+    [ForeignKey(nameof(ExternalFacilitatorVendorId))]
+    public virtual ErpSystem.Core.Entities.HR.Training.TrainingVendor? ExternalFacilitatorVendor { get; set; }
+
+    /// <summary>The vendor's trainer, when the person is known — null while the vendor has yet to name one.</summary>
+    public Guid? ExternalFacilitatorTrainerProfileId { get; set; }
+
+    [ForeignKey(nameof(ExternalFacilitatorTrainerProfileId))]
+    public virtual ErpSystem.Core.Entities.HR.Training.TrainerProfile? ExternalFacilitatorTrainerProfile { get; set; }
 
     public OrientationFacilitatorRole Role { get; set; }
 

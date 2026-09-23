@@ -12897,6 +12897,22 @@ private void ConfigureOrientationEntities(ModelBuilder builder)
                 .WithMany(x => x.Facilitators)
                 .HasForeignKey(x => x.SessionId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 4, lane M: a facilitator picked from the training vendor register. No collection on
+            // the vendor or trainer side, so both are one-way — configured here, or EF would pair them
+            // by convention and could mint a shadow key.
+            entity.HasIndex(x => x.ExternalFacilitatorVendorId);
+            entity.HasIndex(x => x.ExternalFacilitatorTrainerProfileId);
+
+            entity.HasOne(x => x.ExternalFacilitatorVendor)
+                .WithMany()
+                .HasForeignKey(x => x.ExternalFacilitatorVendorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ExternalFacilitatorTrainerProfile)
+                .WithMany()
+                .HasForeignKey(x => x.ExternalFacilitatorTrainerProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // =====================================================

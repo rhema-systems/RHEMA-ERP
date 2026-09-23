@@ -1,6 +1,6 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–I (with I-b), J and L done; M next.**
+> **Status 2026-09-23 — A–I (with I-b), J, L and M done; K next.**
 >
 > | Lane | State |
 > |---|---|
@@ -19,13 +19,14 @@
 > | **I-b** | **DONE** — 152 ×2 (lane I's 100 + 52), same harness; **no migration**. Recurring programmes renew one period after completion, opened early by the deadline so it falls on the anniversary; the effective dates now bind (a lane I gap); **HR may re-enrol after a withdrawal and open a next cycle early by hand** (the user's call); a renewal can no longer open over a completed-then-withdrawn cycle; ORI-CMP-001 recurs annually on UAT and in the seeder — § 8 |
 > | **L** | **DONE** — block S, 29 assertions, in the same harness: 181 ×2; **no migration**. L1 reproduced first: the endpoint was right — onboarding (blended) had never had a session scheduled, compliance is self-paced, and the dialog drew a 403 like "none". The dialog now says which; only programmes that take enrolments are offered; closed sessions are marked; **the enrol path refuses a retired/draft programme and a closed or other programme's session** (it checked neither); two induction days seeded. ⚠ A third demo-data incident, reversed — § 8 |
 > | **J** | **DONE** — 94 ×2, `hr-orientation/run-round4-j.mjs`; **no migration**. Copy an onboarding template (never the default, **not** its audience), a programme (everything it is made of, as a Draft) and a session (*Run again* on a new date); a Copy / Run again button on each list **and each record's page** — a finished session is on no list. **The harness found two defects older than the lane, both closed:** editing a quiz question's options had never once saved, and a task due before the start date was refused though the screen offered it — § 8 |
+> | **M** | **DONE** — 54 ×2, `hr-orientation/run-round4-m.mjs`; migration `AddOrientationFacilitatorRegisterPick` applied to UAT. An external facilitator can be picked from the **training vendor register** (a vendor, and its trainer once named): the name, email and organisation are a snapshot taken when the pick is made or changed; a blacklisted/inactive vendor or inactive trainer cannot be picked, and one that becomes so later is flagged on the session instead of blocking its edits; a vendor or trainer booked for a session that has not happened cannot be deleted (M3); *Run again* keeps the picks (M4). Demo: GIMPA on both induction days — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L and J are complete.** Next: M, K, N, O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J and M are complete.** Next: K, N, O, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names three walks a harness cannot replace;
 > all three are still outstanding.
@@ -608,7 +609,7 @@ notification, not merely a 200 from the trigger endpoint.
   `OrientationSessionService.CloneAsync`. The two new columns must be copied there too, and added to
   the `copied` list for `OrientationSessionFacilitators` in `run-round4-j.mjs`. That suite's block Z
   **fails on any column nobody has decided about**, so M's migration turns it red until this is done
-  — on purpose.
+  — on purpose. **Done in lane M** — both columns copied, block Z 94/94 after the migration.
 
 **Harness:** `hr-orientation/run-round4-m.mjs`.
 
@@ -1890,6 +1891,63 @@ so no new-hire rule reaches them.
 
 **Frontend:** a scoped type-check (`tsconfig.round4-lane-j.json`) clean, with a negative control (a
 planted error was caught); eslint clean. **Not browser-walked.**
+
+### Lane M — external facilitators from the training vendor register · DONE 2026-09-23 · 54 assertions ×2
+
+Harness: `dev-harness/hr-orientation/run-round4-m.mjs`, **54 ×2**. Migration
+`20260923091928_AddOrientationFacilitatorRegisterPick` — scaffolded, rewritten as guarded SQL,
+proved on a scratch database (Up twice, the keys refusing unknown ids, Down twice, Up again), then
+applied to UAT and checked there (history row, both columns, both keys, both indexes, all 32 existing
+facilitators intact).
+
+**What was built.**
+
+| | |
+|---|---|
+| **M1** | `OrientationSessionFacilitator` gains `ExternalFacilitatorVendorId` → `TrainingVendors` and `ExternalFacilitatorTrainerProfileId` → `TrainerProfiles`, both nullable, indexed, keyed. The three text columns stay, as the **snapshot**: the vendor's name as the organisation, the trainer's name, and the trainer's own address when their contact is one — else the vendor's contact address. |
+| **M2** | The facilitator dialog asks **who it is** — one of our employees / from the training vendor register / someone else — and shows only that mode's fields. Register mode offers the active vendors (`GET /api/training-vendors/active`) and the vendor's active trainers, with *To be confirmed by the vendor* for a vendor that has not named anyone. A 403 on the register is said, not drawn as "no vendors" (lane L's lesson). The list shows *From the training register*, and *trainer to be confirmed* where it applies. |
+| **M3** | A vendor or trainer **booked for a session that has not happened yet** cannot be deleted from the register: a 422 naming the sessions, and suggesting *inactive* instead. A soft delete never trips the foreign key, so this is the only thing that keeps a booked vendor on file. One named only on a finished session goes, and that session keeps saying who delivered it. |
+| **M4** | *Run again* (lane J) copies the pick with its snapshot. Lane J's block Z accounts for both new columns and passes (94/94). |
+
+**Decisions this lane made — each one this entry's to defend.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **The snapshot is taken when the pick is made or CHANGED, never otherwise** | The precedent (`PreEmploymentCheckService.ResolveProviderNameAsync`) re-mirrors the supplier's name on every save. For a session that would rewrite history on the first confirmation or note after a rename — and "renaming a vendor later does not rewrite what an old session says" was the plan's own requirement. |
+| 2 | **Availability is checked at the same moment and only then** | A vendor blacklisted after it was booked must not make that booking uneditable (confirming it, adding "checking whether to keep them"). The same rule lane L applied to an enrolment's session. The register's current state is reported instead — `RegisterNote` on every read: *has since been blacklisted*, *no longer active*, *has since been removed*, *no longer listed with the vendor*. |
+| 3 | **A vendor alone is a valid pick; a trainer alone implies its vendor** | A vendor is often booked before it says who will come. The display falls back to the vendor. |
+| 4 | **Typed values beside a register pick are ignored** | The register decides the snapshot; otherwise the screen could send a name the register does not hold and the "reference" would mean nothing. |
+| 5 | **Refused picks:** a blacklisted vendor (with the register's reason), an inactive vendor or trainer, a trainer of another vendor, an internal trainer (*add them as an employee*), an employee **and** a vendor, an unknown id | Each is a 422 that says which. |
+
+**Two gaps closed on the way.** (1) The **edit** path of a facilitator had no check at all — the add
+path refused a facilitator with neither an employee nor a name; the edit path saved one. Both paths
+now run one resolver. (2) Reopening an **employee** facilitator's dialog showed an empty search box
+rather than the employee — the picker was never given the name.
+
+**Permissions checked before reusing the register's endpoints.** The vendor and trainer reads sit on
+`HR.Training.Read`, the dialog on `HR.Orientation.Write`. On UAT every role holding the second holds
+the first (HR, SuperAdmin, TenantAdmin), so no narrower door was built; the dialog handles a 403 for
+the day a role differs.
+
+**Demo (scenario 140).** Both Corporate Induction Days had **no facilitator at all**. Now the Head of
+HR leads both, and **GIMPA** co-facilitates from the register — named (Dr. Efua Mensah-Bonsu,
+confirmed) in October, *trainer to be confirmed* in November — so the demo shows both kinds of pick.
+Every guard in the scenario was proved against UAT first (starters 6/6 enrolled, the assessment
+already sat, 48 benefit enrolments, two upcoming days with matching titles, already open); the run
+added exactly four facilitators and changed nothing else, and a second run added none.
+`verify-tables --area orientation` 23 of 23.
+
+**Neighbouring suites:** `run-round4-j` 94/94 (block Z with the new columns); `run-round4-i`
+181/181; `run.mjs` 107/107; `run-lane6-feedback` 20/20.
+⚠ **`hr-training/run.mjs` has not run to completion since W3 (2026-08-25)** — nothing to do with this
+lane. Its fixture supplied a staff number, which the register now refuses (fixed in its `setup.mjs`;
+the suites compare against the number the response returns), and then it approves a training budget
+as plain HR, which needs `HR.Training.Admin` since W3. It reached 47 assertions, 0 failed — sections
+1–5, the vendor and trainer lists the facilitator dialog reads. The W3 two-actor treatment it needs
+belongs to area 7; recorded, not done here.
+
+**Frontend:** scoped type-check (`tsconfig.round4-lane-m.json`) clean with a negative control; eslint
+clean. **Not browser-walked.**
 
 ---
 

@@ -594,6 +594,8 @@ public static class OrientationMappingExtensions
             ExternalFacilitatorName = entity.ExternalFacilitatorName,
             ExternalFacilitatorEmail = entity.ExternalFacilitatorEmail,
             ExternalFacilitatorOrganization = entity.ExternalFacilitatorOrganization,
+            ExternalFacilitatorVendorId = entity.ExternalFacilitatorVendorId,
+            ExternalFacilitatorTrainerProfileId = entity.ExternalFacilitatorTrainerProfileId,
             Role = entity.Role,
             HasConfirmed = entity.HasConfirmed,
             Notes = entity.Notes,

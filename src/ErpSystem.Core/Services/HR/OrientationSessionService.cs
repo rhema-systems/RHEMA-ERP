@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Orientation;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -93,6 +94,7 @@ public class OrientationSessionService : IOrientationSessionService
         var dto = entity.ToDto();
         var map = await _unitOfWork.ResolveEmployeesAsync(GetTenantId(), dto.Facilitators.Select(f => f.EmployeeId));
         dto.Facilitators.FillNames(map);
+        await FillRegisterNotesAsync(dto.Facilitators, GetTenantId(), cancellationToken);
         return dto;
     }
 
@@ -123,6 +125,7 @@ public class OrientationSessionService : IOrientationSessionService
         var dto = entity.ToDto();
         var map = await _unitOfWork.ResolveEmployeesAsync(tenantId, dto.Facilitators.Select(f => f.EmployeeId));
         dto.Facilitators.FillNames(map);
+        await FillRegisterNotesAsync(dto.Facilitators, tenantId, cancellationToken);
         return dto;
     }
 
@@ -270,6 +273,10 @@ public class OrientationSessionService : IOrientationSessionService
                 ExternalFacilitatorName = facilitator.ExternalFacilitatorName,
                 ExternalFacilitatorEmail = facilitator.ExternalFacilitatorEmail,
                 ExternalFacilitatorOrganization = facilitator.ExternalFacilitatorOrganization,
+                // Lane M: the register pick comes with its snapshot. A vendor blacklisted since is not
+                // dropped silently — the new run's page says so (RegisterNote), and HR decides.
+                ExternalFacilitatorVendorId = facilitator.ExternalFacilitatorVendorId,
+                ExternalFacilitatorTrainerProfileId = facilitator.ExternalFacilitatorTrainerProfileId,
                 Role = facilitator.Role,
                 HasConfirmed = false,
                 Notes = facilitator.Notes,
@@ -337,26 +344,179 @@ public class OrientationSessionService : IOrientationSessionService
         if (!await _sessionRepository.ExistsAsync(s => s.Id == createDto.SessionId && s.TenantId == tenantId && !s.IsDeleted))
             throw new ArgumentException($"Orientation session with ID '{createDto.SessionId}' not found.");
 
-        if (createDto.EmployeeId == null && string.IsNullOrWhiteSpace(createDto.ExternalFacilitatorName))
-            throw new InvalidOperationException("A facilitator must reference an employee or supply an external facilitator name.");
-
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        await ResolveFacilitatorAsync(entity, createDto.EmployeeId, createDto.ExternalFacilitatorVendorId,
+            createDto.ExternalFacilitatorTrainerProfileId, previous: null, tenantId, cancellationToken);
+
         await _facilitatorRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return await HydrateFacilitatorAsync(entity.ToDto(), tenantId);
+        return await HydrateFacilitatorAsync(entity.ToDto(), tenantId, cancellationToken);
     }
+
+    /// <summary>What a facilitator was before an edit — who it named, and the snapshot a register pick wrote.</summary>
+    private sealed record FacilitatorPick(Guid? EmployeeId, Guid? VendorId, Guid? TrainerId, string? Name, string? Email, string? Organization);
+
+    /// <summary>
+    /// Who a facilitator is — one of three (round 4, lane M): one of the organisation's employees; a
+    /// vendor, and its trainer when known, from the training vendor register; or somebody from outside,
+    /// typed. Called on add and on edit, with the entity already carrying the typed values.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A register pick writes the snapshot</b> — the vendor's name as the organisation, the
+    /// trainer's name, and the trainer's own address when their contact is one, else the vendor's —
+    /// and typed values are ignored. It is written when the pick is <b>made or changed</b>, never
+    /// otherwise: confirming a facilitator or adding a note keeps what the session said, even if the
+    /// vendor has been renamed since. The pick's availability (active, not blacklisted) is checked at
+    /// the same moment and only then, so an old session's facilitator can still be edited after the
+    /// vendor has been blacklisted — the same rule lane L applied to an enrolment's session. The
+    /// register's current state is reported instead, as <c>RegisterNote</c> on every read.</para>
+    ///
+    /// <para><b>An edit without a register pick had no check at all</b> — the add path refused a
+    /// facilitator with neither an employee nor a name, the edit path let one be saved. Both run this
+    /// now.</para>
+    /// </remarks>
+    private async Task ResolveFacilitatorAsync(
+        OrientationSessionFacilitator entity, Guid? employeeId, Guid? vendorId, Guid? trainerId,
+        FacilitatorPick? previous, Guid tenantId, CancellationToken cancellationToken)
+    {
+        entity.EmployeeId = employeeId;
+        entity.ExternalFacilitatorVendorId = null;
+        entity.ExternalFacilitatorTrainerProfileId = null;
+        var fromRegister = vendorId is not null || trainerId is not null;
+
+        if (employeeId is { } employee)
+        {
+            if (fromRegister)
+                throw new InvalidOperationException(
+                    "A facilitator is either one of your employees or somebody from outside — pick one, not both.");
+            // Checked when the employee is named or changed, like a register pick — an edit of an old
+            // session's facilitator must not start failing because the employee record has gone since.
+            if (previous?.EmployeeId != employee
+                && !(await _unitOfWork.ResolveEmployeesAsync(tenantId, new Guid?[] { employee })).ContainsKey(employee))
+                throw new InvalidOperationException("That employee was not found in this organisation.");
+            return;
+        }
+
+        if (!fromRegister)
+        {
+            entity.ExternalFacilitatorName = Typed(entity.ExternalFacilitatorName);
+            entity.ExternalFacilitatorEmail = Typed(entity.ExternalFacilitatorEmail);
+            entity.ExternalFacilitatorOrganization = Typed(entity.ExternalFacilitatorOrganization);
+            if (entity.ExternalFacilitatorName is null)
+                throw new InvalidOperationException(
+                    "A facilitator must be one of your employees, a vendor or trainer from the training vendor register, or a named person from outside.");
+            return;
+        }
+
+        // The same pick as before — a trainer alone names the same pick when it is the same trainer.
+        var samePick = previous is { VendorId: not null } p
+                       && trainerId == p.TrainerId
+                       && (vendorId == p.VendorId || (vendorId is null && trainerId is not null));
+        if (samePick)
+        {
+            entity.ExternalFacilitatorVendorId = previous!.VendorId;
+            entity.ExternalFacilitatorTrainerProfileId = previous.TrainerId;
+            entity.ExternalFacilitatorName = previous.Name;
+            entity.ExternalFacilitatorEmail = previous.Email;
+            entity.ExternalFacilitatorOrganization = previous.Organization;
+            return;
+        }
+
+        TrainerProfile? trainer = null;
+        if (trainerId is { } tId)
+        {
+            trainer = await _unitOfWork.Repository<TrainerProfile>().GetQueryable().AsNoTracking()
+                .FirstOrDefaultAsync(t => t.Id == tId && t.TenantId == tenantId && !t.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("That trainer is not in the training vendor register.");
+            if (trainer.VendorId is not { } trainersVendor)
+                throw new InvalidOperationException(
+                    $"{trainer.Name} is one of your own trainers, not a vendor's — add them as an employee.");
+            if (vendorId is { } named && named != trainersVendor)
+                throw new InvalidOperationException($"{trainer.Name} is not one of that vendor's trainers.");
+            vendorId = trainersVendor;
+        }
+
+        var vendor = await _unitOfWork.Repository<TrainingVendor>().GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(v => v.Id == vendorId && v.TenantId == tenantId && !v.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("That vendor is not in the training vendor register.");
+        if (vendor.IsBlacklisted)
+            throw new InvalidOperationException(
+                $"{vendor.Name} is blacklisted in the training vendor register{(string.IsNullOrWhiteSpace(vendor.BlacklistReason) ? "" : $" — {vendor.BlacklistReason.Trim()}")}.");
+        if (!vendor.IsActive)
+            throw new InvalidOperationException($"{vendor.Name} is not active in the training vendor register.");
+        if (trainer is { IsActive: false })
+            throw new InvalidOperationException($"{trainer.Name} is not active in the training vendor register.");
+
+        entity.ExternalFacilitatorVendorId = vendor.Id;
+        entity.ExternalFacilitatorTrainerProfileId = trainer?.Id;
+        entity.ExternalFacilitatorOrganization = vendor.Name;
+        entity.ExternalFacilitatorName = trainer?.Name;
+        entity.ExternalFacilitatorEmail = EmailIn(trainer?.Contact) ?? Typed(vendor.PrimaryContactEmail);
+    }
+
+    private static string? Typed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>A trainer's contact is "cell / personal email" in one box — used only when it is an address.</summary>
+    private static string? EmailIn(string? contact) =>
+        Typed(contact) is { } c && new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(c) ? c : null;
 
     /// <summary>
     /// Facilitators reference employees by id with no navigation, so a write response has to go through
     /// the same name lookup the list read uses — otherwise adding a facilitator returns a blank name
     /// and the row only acquires one on the next refetch.
     /// </summary>
-    private async Task<OrientationSessionFacilitatorDto> HydrateFacilitatorAsync(OrientationSessionFacilitatorDto dto, Guid tenantId)
+    private async Task<OrientationSessionFacilitatorDto> HydrateFacilitatorAsync(OrientationSessionFacilitatorDto dto, Guid tenantId, CancellationToken cancellationToken = default)
     {
         var list = new List<OrientationSessionFacilitatorDto> { dto };
         var map = await _unitOfWork.ResolveEmployeesAsync(tenantId, list.Select(f => f.EmployeeId));
         list.FillNames(map);
+        await FillRegisterNotesAsync(list, tenantId, cancellationToken);
         return dto;
+    }
+
+    /// <summary>
+    /// What the register says now about each vendor and trainer picked earlier, when it matters. Reads
+    /// deleted rows on purpose: "removed from the register" is one of the answers.
+    /// </summary>
+    private async Task FillRegisterNotesAsync(IReadOnlyCollection<OrientationSessionFacilitatorDto> facilitators, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var vendorIds = facilitators.Where(f => f.ExternalFacilitatorVendorId.HasValue).Select(f => f.ExternalFacilitatorVendorId!.Value).Distinct().ToList();
+        if (vendorIds.Count == 0) return;
+        var trainerIds = facilitators.Where(f => f.ExternalFacilitatorTrainerProfileId.HasValue).Select(f => f.ExternalFacilitatorTrainerProfileId!.Value).Distinct().ToList();
+
+        var vendors = await _unitOfWork.Repository<TrainingVendor>()
+            .GetQueryableIncludingDeleted(v => v.TenantId == tenantId && vendorIds.Contains(v.Id)).AsNoTracking()
+            .ToDictionaryAsync(v => v.Id, cancellationToken);
+        var trainers = trainerIds.Count == 0
+            ? new Dictionary<Guid, TrainerProfile>()
+            : await _unitOfWork.Repository<TrainerProfile>()
+                .GetQueryableIncludingDeleted(t => t.TenantId == tenantId && trainerIds.Contains(t.Id)).AsNoTracking()
+                .ToDictionaryAsync(t => t.Id, cancellationToken);
+
+        foreach (var f in facilitators.Where(f => f.ExternalFacilitatorVendorId.HasValue))
+        {
+            var notes = new List<string>();
+            var vendorName = f.ExternalFacilitatorOrganization ?? "The vendor";
+            if (!vendors.TryGetValue(f.ExternalFacilitatorVendorId!.Value, out var vendor) || vendor.IsDeleted)
+                notes.Add($"{vendorName} has since been removed from the training vendor register");
+            else if (vendor.IsBlacklisted)
+                notes.Add($"{vendor.Name} has since been blacklisted in the training vendor register");
+            else if (!vendor.IsActive)
+                notes.Add($"{vendor.Name} is no longer active in the training vendor register");
+
+            if (f.ExternalFacilitatorTrainerProfileId is { } trainerId)
+            {
+                var trainerName = f.ExternalFacilitatorName ?? "The trainer";
+                if (!trainers.TryGetValue(trainerId, out var trainer) || trainer.IsDeleted)
+                    notes.Add($"{trainerName} has since been removed from the register");
+                else if (!trainer.IsActive)
+                    notes.Add($"{trainer.Name} is no longer active in the register");
+                else if (trainer.VendorId != f.ExternalFacilitatorVendorId)
+                    notes.Add($"{trainer.Name} is no longer listed with {vendorName}");
+            }
+
+            f.RegisterNote = notes.Count == 0 ? null : string.Join("; ", notes) + ".";
+        }
     }
 
     public async Task<IEnumerable<OrientationSessionFacilitatorDto>> GetFacilitatorsAsync(Guid sessionId, CancellationToken cancellationToken = default)
@@ -368,17 +528,23 @@ public class OrientationSessionService : IOrientationSessionService
             .ToList();
         var map = await _unitOfWork.ResolveEmployeesAsync(tenantId, list.Select(f => f.EmployeeId));
         list.FillNames(map);
+        await FillRegisterNotesAsync(list, tenantId, cancellationToken);
         return list;
     }
 
     public async Task<OrientationSessionFacilitatorDto> UpdateFacilitatorAsync(UpdateOrientationSessionFacilitatorDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedFacilitatorAsync(updateDto.Id);
+        var previous = new FacilitatorPick(entity.EmployeeId, entity.ExternalFacilitatorVendorId, entity.ExternalFacilitatorTrainerProfileId,
+            entity.ExternalFacilitatorName, entity.ExternalFacilitatorEmail, entity.ExternalFacilitatorOrganization);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        await ResolveFacilitatorAsync(entity, updateDto.EmployeeId, updateDto.ExternalFacilitatorVendorId,
+            updateDto.ExternalFacilitatorTrainerProfileId, previous, entity.TenantId, cancellationToken);
+
         await _facilitatorRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return await HydrateFacilitatorAsync(entity.ToDto(), entity.TenantId);
+        return await HydrateFacilitatorAsync(entity.ToDto(), entity.TenantId, cancellationToken);
     }
 
     public async Task<bool> RemoveFacilitatorAsync(Guid facilitatorId, CancellationToken cancellationToken = default)
