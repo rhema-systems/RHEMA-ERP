@@ -27,6 +27,8 @@ $BackupsRoot = Join-Path $RhemaRoot 'backups'
 $LogsRoot = Join-Path $RhemaRoot 'logs'
 $ApiServiceXml = Join-Path $RhemaRoot 'services\api\RhemaERPAPI.xml'
 $NssmParametersPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
+$FrontendNssmParametersPath = `
+    'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPFrontend\Parameters'
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -710,6 +712,19 @@ function Invoke-Preflight {
         Assert-True (Test-Path -LiteralPath $ApiServiceXml) `
             "Required VPS path is missing: $ApiServiceXml"
     }
+    Assert-True (Test-Path -LiteralPath $FrontendNssmParametersPath) `
+        "Frontend NSSM configuration is missing: $FrontendNssmParametersPath"
+    $frontendService = Get-ItemProperty -LiteralPath $FrontendNssmParametersPath
+    $frontendApplication = [string]$frontendService.Application
+    $frontendDirectory = [string]$frontendService.AppDirectory
+    $frontendParameters = [string]$frontendService.AppParameters
+    Write-Output "FRONTEND_RUNTIME|$frontendApplication|$frontendDirectory|$frontendParameters"
+    Assert-True ($frontendApplication -match '(?i)(^|\\)npm\.cmd$') `
+        'RhemaERPFrontend must run npm.cmd for the regular Next.js release package.'
+    Assert-True ($frontendDirectory.TrimEnd('\\') -eq $FrontendRoot.TrimEnd('\\')) `
+        "RhemaERPFrontend AppDirectory must be $FrontendRoot."
+    Assert-True ($frontendParameters -match '(?i)^\s*run\s+start\s+--\s+-p\s+3001\s*$') `
+        'RhemaERPFrontend must use: npm run start -- -p 3001.'
 
     $services = Get-ManagedServices
     $notRunning = @($services | Where-Object { $_.Status -ne 'Running' })
@@ -1233,8 +1248,10 @@ function Invoke-Apply {
     $stageFrontend = Join-Path $stage 'frontend'
     Assert-True (Test-Path -LiteralPath (Join-Path $stageApi 'ErpSystem.Api.exe')) `
         'Staged API executable is missing.'
-    Assert-True (Test-Path -LiteralPath (Join-Path $stageFrontend 'server.js')) `
-        'Staged frontend server.js is missing.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $stageFrontend 'package-lock.json')) `
+        'Staged frontend dependency lock is missing.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $stageFrontend 'next.config.js')) `
+        'Staged frontend Next.js configuration is missing.'
     Assert-True (Test-Path -LiteralPath `
             (Join-Path $stageFrontend 'node_modules\next\package.json')) `
         'Staged frontend Next.js runtime is missing.'
@@ -1311,18 +1328,20 @@ function Invoke-Apply {
             Move-Item (Join-Path $FrontendRoot 'node_modules') `
                 (Join-Path $retired 'node_modules')
         }
-        Copy-Item (Join-Path $FrontendRoot 'server.js') `
-            (Join-Path $retired 'server.js') -Force
-        Copy-Item (Join-Path $FrontendRoot 'package.json') `
-            (Join-Path $retired 'package.json') -Force
+        foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+            $liveFile = Join-Path $FrontendRoot $name
+            if (Test-Path $liveFile) {
+                Copy-Item $liveFile (Join-Path $retired $name) -Force
+            }
+        }
         Move-Item (Join-Path $stageFrontend '.next') (Join-Path $FrontendRoot '.next')
         Move-Item (Join-Path $stageFrontend 'public') (Join-Path $FrontendRoot 'public')
         Move-Item (Join-Path $stageFrontend 'node_modules') `
             (Join-Path $FrontendRoot 'node_modules')
-        Copy-Item (Join-Path $stageFrontend 'server.js') `
-            (Join-Path $FrontendRoot 'server.js') -Force
-        Copy-Item (Join-Path $stageFrontend 'package.json') `
-            (Join-Path $FrontendRoot 'package.json') -Force
+        Copy-Item (Join-Path $stageFrontend 'package.json'), `
+            (Join-Path $stageFrontend 'package-lock.json'), `
+            (Join-Path $stageFrontend 'next.config.js') `
+            -Destination $FrontendRoot -Force
         Start-Service RhemaERPFrontend
         Wait-FrontendReady
     }
@@ -1335,10 +1354,12 @@ function Invoke-Apply {
             $oldPath = Join-Path $retired $name
             if (Test-Path $oldPath) { Move-Item $oldPath $livePath }
         }
-        Copy-Item (Join-Path $retired 'server.js') `
-            (Join-Path $FrontendRoot 'server.js') -Force
-        Copy-Item (Join-Path $retired 'package.json') `
-            (Join-Path $FrontendRoot 'package.json') -Force
+        foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+            $liveFile = Join-Path $FrontendRoot $name
+            if (Test-Path $liveFile) { Remove-Item $liveFile -Force }
+            $oldFile = Join-Path $retired $name
+            if (Test-Path $oldFile) { Copy-Item $oldFile $liveFile -Force }
+        }
         Start-Service RhemaERPFrontend -ErrorAction SilentlyContinue
         throw "Frontend apply failed and was rolled back: $($_.Exception.Message)"
     }
@@ -1371,8 +1392,10 @@ function Invoke-ResumeFrontend {
     $failedFrontend = Join-Path $PackagesRoot "failed-$DeploymentId"
     $rollbackFrontend = Join-Path $PackagesRoot "resume-old-$DeploymentId"
     $retryFailed = Join-Path $PackagesRoot "resume-failed-$DeploymentId"
-    Assert-True (Test-Path (Join-Path $stageFrontend 'server.js')) `
-        'The staged frontend server is missing.'
+    Assert-True (Test-Path (Join-Path $stageFrontend 'package-lock.json')) `
+        'The staged frontend dependency lock is missing.'
+    Assert-True (Test-Path (Join-Path $stageFrontend 'next.config.js')) `
+        'The staged frontend Next.js configuration is missing.'
     Assert-True (Test-Path (Join-Path $failedFrontend '.next\BUILD_ID')) `
         'The failed frontend build is unavailable for retry.'
     Assert-True (Test-Path `
@@ -1403,15 +1426,19 @@ function Invoke-ResumeFrontend {
             Move-Item (Join-Path $FrontendRoot $name) `
                 (Join-Path $rollbackFrontend $name)
         }
-        Copy-Item (Join-Path $FrontendRoot 'server.js'), `
-            (Join-Path $FrontendRoot 'package.json') `
-            -Destination $rollbackFrontend -Force
+        foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+            $liveFile = Join-Path $FrontendRoot $name
+            if (Test-Path $liveFile) {
+                Copy-Item $liveFile (Join-Path $rollbackFrontend $name) -Force
+            }
+        }
         foreach ($name in @('.next', 'public', 'node_modules')) {
             Move-Item (Join-Path $failedFrontend $name) `
                 (Join-Path $FrontendRoot $name)
         }
-        Copy-Item (Join-Path $stageFrontend 'server.js'), `
-            (Join-Path $stageFrontend 'package.json') `
+        Copy-Item (Join-Path $stageFrontend 'package.json'), `
+            (Join-Path $stageFrontend 'package-lock.json'), `
+            (Join-Path $stageFrontend 'next.config.js') `
             -Destination $FrontendRoot -Force
         $swapped = $true
         Start-Service RhemaERPFrontend
@@ -1448,9 +1475,12 @@ function Invoke-ResumeFrontend {
                 $oldPath = Join-Path $rollbackFrontend $name
                 if (Test-Path $oldPath) { Move-Item $oldPath $livePath }
             }
-            Copy-Item (Join-Path $rollbackFrontend 'server.js'), `
-                (Join-Path $rollbackFrontend 'package.json') `
-                -Destination $FrontendRoot -Force
+            foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+                $liveFile = Join-Path $FrontendRoot $name
+                if (Test-Path $liveFile) { Remove-Item $liveFile -Force }
+                $oldFile = Join-Path $rollbackFrontend $name
+                if (Test-Path $oldFile) { Copy-Item $oldFile $liveFile -Force }
+            }
             Start-Service RhemaERPFrontend -ErrorAction SilentlyContinue
         }
         throw "Frontend retry failed and rollback was attempted: $failure"

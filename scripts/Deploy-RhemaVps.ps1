@@ -7,6 +7,8 @@ param(
     [switch]$ReuseVerifiedArtifacts,
     [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
     [string]$ReuseApiOutputFromCommit,
+    [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
+    [string]$ReuseFrontendBuildFromCommit,
     [switch]$SkipBrowserSmoke,
     [switch]$LocalVps,
     [switch]$AllowDirtyWorktree,
@@ -554,42 +556,61 @@ function New-ReleaseArtifacts {
         'A local Next.js process is using this frontend. Stop it before release build.'
 
     $nextOutput = Join-Path $frontendRoot '.next'
-    if (Test-Path -LiteralPath $nextOutput) {
-        Assert-True ([System.IO.Path]::GetFullPath($nextOutput) -eq `
-                [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'frontend\.next'))) `
-            'Unexpected frontend build-output path.'
-        Remove-Item -LiteralPath $nextOutput -Recurse -Force
-    }
-    $previousEnvironment = Set-TemporaryEnvironment @{
-        NODE_ENV = 'production'
-        NODE_OPTIONS = '--max-old-space-size=8192'
-        NEXT_PUBLIC_API_URL = "$PublicBaseUrl/api"
-        API_URL = "$PublicBaseUrl/api"
-        NEXTAUTH_URL = $PublicBaseUrl
-        NEXT_TELEMETRY_DISABLED = '1'
-        SYNCFUSION_LICENSE = $syncfusionLicenseKey
-    }
-    try {
-        Push-Location $frontendRoot
-        try {
-            Invoke-NativeChecked 'npm.cmd' @(
-                'ci', '--include=dev', '--no-audit', '--no-fund'
-            ) 'Frontend locked-dependency restore failed' | Out-Host
-            $syncfusionActivator = Join-Path $frontendRoot `
-                'node_modules\.bin\syncfusion-license.cmd'
-            Assert-True (Test-Path -LiteralPath $syncfusionActivator) `
-                'The installed Syncfusion frontend license activator is missing.'
-            Invoke-NativeChecked $syncfusionActivator @('activate') `
-                'Syncfusion frontend license activation failed' | Out-Host
-            Invoke-NativeChecked 'npm.cmd' @('run', 'build') `
-                'Frontend build failed' | Out-Host
+    if (-not [string]::IsNullOrWhiteSpace($ReuseFrontendBuildFromCommit)) {
+        $resolvedFrontendCommit = (@(& git rev-parse --verify `
+                    "$ReuseFrontendBuildFromCommit^{commit}" 2>$null) -join '').Trim()
+        Assert-True ($LASTEXITCODE -eq 0 -and
+            $resolvedFrontendCommit -match '^[0-9a-f]{40}$') `
+            "The reusable frontend source commit is invalid: $ReuseFrontendBuildFromCommit"
+
+        & git diff --quiet $resolvedFrontendCommit $script:Commit -- frontend
+        Assert-True ($LASTEXITCODE -eq 0) `
+            'Frontend source or build inputs changed; refusing to reuse the earlier build.'
+        foreach ($relativePath in @(
+                'BUILD_ID', 'required-server-files.json',
+                'server\middleware-manifest.json')) {
+            Assert-True (Test-Path -LiteralPath (Join-Path $nextOutput $relativePath)) `
+                "Reusable frontend build output is incomplete: $relativePath"
         }
-        finally { Pop-Location }
+        Write-Host "Reused frontend build output from $resolvedFrontendCommit." `
+            -ForegroundColor Green
     }
-    finally {
-        Restore-TemporaryEnvironment $previousEnvironment
-        $syncfusionLicenseKey = $null
+    else {
+        if (Test-Path -LiteralPath $nextOutput) {
+            Assert-True ([System.IO.Path]::GetFullPath($nextOutput) -eq `
+                    [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'frontend\.next'))) `
+                'Unexpected frontend build-output path.'
+            Remove-Item -LiteralPath $nextOutput -Recurse -Force
+        }
+        $previousEnvironment = Set-TemporaryEnvironment @{
+            NODE_ENV = 'production'
+            NODE_OPTIONS = '--max-old-space-size=8192'
+            NEXT_PUBLIC_API_URL = "$PublicBaseUrl/api"
+            API_URL = "$PublicBaseUrl/api"
+            NEXTAUTH_URL = $PublicBaseUrl
+            NEXT_TELEMETRY_DISABLED = '1'
+            SYNCFUSION_LICENSE = $syncfusionLicenseKey
+        }
+        try {
+            Push-Location $frontendRoot
+            try {
+                Invoke-NativeChecked 'npm.cmd' @(
+                    'ci', '--include=dev', '--no-audit', '--no-fund'
+                ) 'Frontend locked-dependency restore failed' | Out-Host
+                $syncfusionActivator = Join-Path $frontendRoot `
+                    'node_modules\.bin\syncfusion-license.cmd'
+                Assert-True (Test-Path -LiteralPath $syncfusionActivator) `
+                    'The installed Syncfusion frontend license activator is missing.'
+                Invoke-NativeChecked $syncfusionActivator @('activate') `
+                    'Syncfusion frontend license activation failed' | Out-Host
+                Invoke-NativeChecked 'npm.cmd' @('run', 'build') `
+                    'Frontend build failed' | Out-Host
+            }
+            finally { Pop-Location }
+        }
+        finally { Restore-TemporaryEnvironment $previousEnvironment }
     }
+    $syncfusionLicenseKey = $null
 
     $buildId = (Get-Content (Join-Path $nextOutput 'BUILD_ID') -Raw).Trim()
     Assert-True ($buildId -ne 'development') `
@@ -600,28 +621,32 @@ function New-ReleaseArtifacts {
     $middlewareBuildId = $middleware.middleware.'/'.env.__NEXT_BUILD_ID
     Assert-True ($buildId -eq $middlewareBuildId) `
         'Frontend BUILD_ID and middleware build ID differ.'
-    Assert-True (Test-Path (Join-Path $nextOutput 'standalone\server.js')) `
-        'Standalone frontend server.js is missing.'
+    Assert-True (Test-Path (Join-Path $nextOutput 'required-server-files.json')) `
+        'Regular Next.js server files are missing.'
 
     Invoke-RobocopyChecked @(
         $nextOutput, (Join-Path $frontendOutput '.next'), '/E', '/R:2', '/W:2',
         '/NFL', '/NDL', '/NJH', '/NJS', '/NP',
-        '/XD', (Join-Path $nextOutput 'cache'),
-        (Join-Path $nextOutput 'standalone\node_modules')
+        '/XD', (Join-Path $nextOutput 'cache')
     ) 'Frontend .next staging failed'
     Invoke-RobocopyChecked @(
         (Join-Path $frontendRoot 'public'), (Join-Path $frontendOutput 'public'),
         '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
     ) 'Frontend public staging failed'
-    Copy-Item (Join-Path $nextOutput 'standalone\server.js') `
-        (Join-Path $frontendOutput 'server.js') -Force
-    Invoke-RobocopyChecked @(
-        (Join-Path $nextOutput 'standalone\node_modules'),
-        (Join-Path $frontendOutput 'node_modules'),
-        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
-    ) 'Frontend runtime dependencies staging failed'
-    Copy-Item (Join-Path $frontendRoot 'package.json') `
-        (Join-Path $frontendOutput 'package.json') -Force
+    Copy-Item (Join-Path $frontendRoot 'package.json'), `
+        (Join-Path $frontendRoot 'package-lock.json'), `
+        (Join-Path $frontendRoot 'next.config.js') `
+        -Destination $frontendOutput -Force
+    Push-Location $frontendOutput
+    try {
+        Invoke-NativeChecked 'npm.cmd' @(
+            'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'
+        ) 'Frontend production dependency staging failed' | Out-Host
+    }
+    finally { Pop-Location }
+    Assert-True (Test-Path `
+            (Join-Path $frontendOutput 'node_modules\next\package.json')) `
+        'Frontend production Next.js runtime is missing.'
 
     # A diagnostic dirty-worktree release can share HEAD with an earlier VPS
     # package. Include the deployment stamp so browsers always receive a new
