@@ -207,10 +207,10 @@ The frontend package contains only:
 
 - `.next`, excluding `.next\cache`;
 - `public`;
-- root `server.js` copied from `.next\standalone\server.js`;
-- `package.json`.
+- `package.json`, `package-lock.json`, and `next.config.js`;
+- production `node_modules` restored from the lock file with lifecycle scripts disabled.
 
-Do not package `.next\standalone\node_modules`; this made earlier packages unnecessarily large.
+The VPS frontend service runs `npm start -- -p 3001`, so the release uses the regular Next.js build. It does not require a standalone `server.js`.
 
 ### 4. Hash and upload packages
 
@@ -304,7 +304,7 @@ Frontend:
 1. Validate the staged build ID and service-worker version.
 2. Stop `RhemaERPFrontend`.
 3. Replace live `.next` and `public` as complete directory sets.
-4. Replace root `server.js` and `package.json`.
+4. Replace `node_modules`, `package.json`, `package-lock.json`, and `next.config.js` from the same package.
 5. Start `RhemaERPFrontend`.
 6. Verify `http://127.0.0.1:3001/login` returns HTTP 200.
 
@@ -479,12 +479,12 @@ The deployed frontend package should contain:
 
 - `.next`
 - `public`
-- `server.js`
 - `package.json`
+- `package-lock.json`
+- `next.config.js`
+- production `node_modules`
 
-In this repo, `server.js` is generated under `.next\standalone\server.js`. Put that file at the package root if the deployment script expects `server.js` beside `.next`.
-
-Avoid packaging `.next\cache` and `.next\standalone\node_modules`; the VPS already has runtime dependencies and including them can turn a small deployment into a very large zip.
+The NSSM service runs `npm start -- -p 3001`. Package the regular `.next` output and the exact production dependencies restored from `package-lock.json`. Exclude `.next\cache`.
 
 Before packaging, verify the build and middleware IDs match and neither is `development`:
 
@@ -500,14 +500,14 @@ if ($buildId -eq 'development' -or $buildId -ne $middlewareBuildId) {
 Do not live-mirror `.next` over SMB while the frontend service is running. Use the package-and-apply flow instead:
 
 1. Build locally with the production API variables.
-2. Stage `.next`, `public`, root `server.js` from `.next\standalone\server.js`, and `package.json`.
+2. Stage `.next`, `public`, `package.json`, `package-lock.json`, `next.config.js`, and production `node_modules`.
 3. Copy the package to `C:\RhemaERP\packages`.
 4. Stop `RhemaERPFrontend`.
 5. Apply the package on the VPS or copy the staged tree as one consistent set.
 6. Start `RhemaERPFrontend`.
 7. Verify `http://127.0.0.1:3001/login` on the VPS, then verify the live HTML and every CSS file referenced by that HTML.
 
-If a browser reports a missing old CSS chunk after deployment, first verify the live `/login` HTML. If live HTML no longer references that old chunk, add a temporary compatibility copy only as a bridge for already-cached browser pages, then restart `RhemaERPFrontend` so the standalone server sees the copied file.
+If a browser reports a missing old CSS chunk after deployment, first verify the live `/login` HTML. If live HTML no longer references that old chunk, add a temporary compatibility copy only as a bridge for already-cached browser pages, then restart `RhemaERPFrontend` so Next.js sees the copied file.
 
 The deployed API package should be copied over `C:\RhemaERP\api` while preserving:
 
