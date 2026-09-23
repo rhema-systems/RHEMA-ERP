@@ -92,6 +92,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVp
 <p>Read the dry-run result first. It must pass structural, migration, service and public-route checks. A <code>CONFIG_DRIFT</code> line for the former public origin is expected on the first run after this Caddy alignment; the backed-up apply stage reconciles those URL settings before restarting the API. Then run the release:</p>
 <pre>powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -LocalVps</pre>
 <p>For a new commit, omit <code>-ReuseVerifiedArtifacts</code> so the VPS builds fresh packages. The normal remote-workstation mode still uses SSH; use <code>-LocalVps</code> only when you are signed in directly to this VPS.</p>
+<p>The browser smoke automatically uses installed Google Chrome or Microsoft Edge. Set <code>RHEMA_BROWSER_PATH</code> only when the browser is installed in a non-standard location.</p>
 <div class="notice"><strong>Frontend rule:</strong> the VPS must run a production build through <code>npm run build</code> and the <code>RhemaERPFrontend</code> service runs the production server. Never use <code>npm run dev</code> on the VPS. The build embeds the public API URL <code>https://63.141.230.56/api</code>; changing an environment file after the build does not change compiled browser code.</div>
 <p>If you need to verify the intended production frontend variables before building, they are:</p>
 <pre>$env:NODE_ENV = 'production'

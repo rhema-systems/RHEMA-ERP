@@ -437,20 +437,24 @@ function Test-ReleaseManifest {
     catch { return $null }
 }
 
-function Assert-FastMigrationDiscovery {
+function Assert-MigrationDiscovery {
     $migrationRoot = Join-Path $RepositoryRoot 'src\ErpSystem.Data\Migrations'
-    $metadata = Get-Content (Join-Path $migrationRoot 'FastBuildMigrationMetadata.cs') -Raw
     $missing = @()
     foreach ($id in (Get-LocalMigrationIds)) {
         $source = Get-Content (Join-Path $migrationRoot "$id.cs") -Raw
+        $designerPath = Join-Path $migrationRoot "$id.Designer.cs"
+        $designer = if (Test-Path -LiteralPath $designerPath) {
+            Get-Content -LiteralPath $designerPath -Raw
+        }
+        else { '' }
         $migrationAttribute = 'Migration("' + $id + '")'
-        if (-not $metadata.Contains($migrationAttribute) -and
-            -not $source.Contains($migrationAttribute)) {
+        if (-not $source.Contains($migrationAttribute) -and
+            -not $designer.Contains($migrationAttribute)) {
             $missing += $id
         }
     }
     Assert-True ($missing.Count -eq 0) `
-        "Fast EF build metadata is missing migration discovery for: $($missing -join ', ')"
+        "Active EF migrations are missing compiled discovery metadata for: $($missing -join ', ')"
 }
 
 function Set-TemporaryEnvironment {
@@ -473,7 +477,7 @@ function Restore-TemporaryEnvironment {
 function New-ReleaseArtifacts {
     param([string]$ReleaseDirectory)
 
-    Assert-FastMigrationDiscovery
+    Assert-MigrationDiscovery
     $syncfusionLicenseKey = Get-SyncfusionLicenseKey
     $apiOutput = Join-Path $ReleaseDirectory 'api'
     $frontendOutput = Join-Path $ReleaseDirectory 'frontend'
@@ -484,7 +488,7 @@ function New-ReleaseArtifacts {
         'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
         '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
         '-o', $apiOutput,
-        '/p:PublishSingleFile=false', '-p:TdcFastEfBuild=true',
+        '/p:PublishSingleFile=false',
         '-p:UseSharedCompilation=false', '-m:1'
     ) 'API publish failed' | Out-Host
 
