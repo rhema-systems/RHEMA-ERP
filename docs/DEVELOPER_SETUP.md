@@ -59,6 +59,14 @@ dotnet ef database update --project src/ErpSystem.Data --startup-project src/Erp
 dotnet run --project src/ErpSystem.Api --environment Development
 ```
 
+The development launch profile keeps hosted schedulers and demo-data seeding disabled by default so a normal API start only runs the web host plus required startup checks. Enable them explicitly only when you need to exercise scheduled jobs:
+
+```bash
+$env:BackgroundServices__Enabled="true"
+$env:StartupInitialization__SeedDevelopmentData="true"
+dotnet run --project src/ErpSystem.Api --environment Development
+```
+
 The application will be available at:
 - API: https://localhost:5001
 - Swagger: https://localhost:5001/swagger

@@ -89,11 +89,16 @@ export default function MyPropertiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTransfer, setSelectedTransfer] = useState<ExternalPropertyPortfolio['legalTransfers'][number] | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<ExternalPropertyPortfolio['invoices'][number] | null>(null);
   const [transferFiles, setTransferFiles] = useState<Record<string, File | null>>({});
   const [transferNotes, setTransferNotes] = useState<Record<string, string>>({});
   const [savingTransferId, setSavingTransferId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('properties');
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('tab') === 'bills') {
+      setActiveTab('bills');
+    }
     const load = async () => {
       try {
         setLoading(true);
@@ -142,6 +147,24 @@ export default function MyPropertiesPage() {
   const properties = portfolio?.properties || [];
   const invoices = portfolio?.invoices || [];
   const legalTransfers = portfolio?.legalTransfers || [];
+
+  const downloadInvoice = async (invoice: ExternalPropertyPortfolio['invoices'][number]) => {
+    try {
+      const blob = await externalEstateServicesService.downloadPropertyInvoice(invoice.id);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${invoice.invoiceNumber}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      toast({
+        title: 'Invoice download failed',
+        description: downloadError instanceof Error ? downloadError.message : 'Could not download this invoice.',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const downloadLegalTransferDraft = async (transfer: ExternalPropertyPortfolio['legalTransfers'][number]) => {
     const blob = await externalEstateServicesService.downloadLegalTransferDraft(transfer.id);
@@ -193,6 +216,18 @@ export default function MyPropertiesPage() {
   return (
     <div className="space-y-6">
       <CentralDocumentViewerDialog
+        open={Boolean(selectedInvoice)}
+        onOpenChange={(open) => { if (!open) setSelectedInvoice(null); }}
+        enableAnnotations={false}
+        file={selectedInvoice ? {
+          title: `Invoice ${selectedInvoice.invoiceNumber}`,
+          fileName: `${selectedInvoice.invoiceNumber}.pdf`,
+          renditionPath: `/api/estate/external/invoices/${encodeURIComponent(selectedInvoice.id)}/pdf`,
+          contentType: 'application/pdf',
+          sourceLabel: 'Customer property invoice',
+        } : null}
+      />
+      <CentralDocumentViewerDialog
         open={Boolean(selectedTransfer)}
         onOpenChange={(open) => { if (!open) setSelectedTransfer(null); }}
         enableAnnotations={false}
@@ -224,7 +259,7 @@ export default function MyPropertiesPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="properties" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="properties">Properties</TabsTrigger>
           <TabsTrigger value="bills">Bills &amp; Receipts</TabsTrigger>
@@ -262,7 +297,8 @@ export default function MyPropertiesPage() {
                   <div><dt className="text-slate-500">Agreement date</dt><dd className="mt-1 font-medium">{formatDate(property.agreementDate)}</dd></div>
                   <div><dt className="text-slate-500">Actual possession</dt><dd className="mt-1 font-medium">{formatDate(property.actualPossessionDate)}</dd></div>
                   {property.transactionType === 'Rental' ? <div><dt className="text-slate-500">Monthly rent</dt><dd className="mt-1 font-medium">{property.monthlyRent ? formatMoney(property.monthlyRent, property.currencyCode) : 'Not recorded'}</dd></div> : null}
-                  {property.transactionType === 'Rental' ? <div><dt className="text-slate-500">Lease term</dt><dd className="mt-1 font-medium">{property.leaseTermYears ? `${property.leaseTermYears} years` : 'Not recorded'}</dd></div> : null}
+                  {property.transactionType === 'Lease' ? <div><dt className="text-slate-500">Listed full-term amount</dt><dd className="mt-1 font-medium">{property.fullTermLeaseAmount ? formatMoney(property.fullTermLeaseAmount, property.currencyCode) : 'Not recorded'}</dd></div> : null}
+                  {property.transactionType === 'Rental' || property.transactionType === 'Lease' ? <div><dt className="text-slate-500">Lease term</dt><dd className="mt-1 font-medium">{property.leaseTermYears ? `${property.leaseTermYears} years` : 'Not recorded'}</dd></div> : null}
                   {property.transactionType === 'Rental' ? <div><dt className="text-slate-500">Next billing date</dt><dd className="mt-1 font-medium">{formatDate(property.nextRentBillingDate)}</dd></div> : null}
                 </dl>
                   <div className="mt-4 flex justify-end">
@@ -280,8 +316,8 @@ export default function MyPropertiesPage() {
 
         <TabsContent value="bills" className="space-y-5">
           <div className="overflow-x-auto border bg-white">
-            <Table className="min-w-[880px] table-fixed">
-              <TableHeader><TableRow><TableHead className="w-40 pl-4">Invoice</TableHead><TableHead>Description</TableHead><TableHead className="w-40">Due date</TableHead><TableHead className="w-36 text-right">Amount</TableHead><TableHead className="w-36 text-right">Balance</TableHead><TableHead className="w-36">Status</TableHead></TableRow></TableHeader>
+            <Table className="min-w-[960px] table-fixed">
+              <TableHeader><TableRow><TableHead className="w-40 pl-4">Invoice</TableHead><TableHead>Description</TableHead><TableHead className="w-40">Due date</TableHead><TableHead className="w-36 text-right">Amount</TableHead><TableHead className="w-36 text-right">Balance</TableHead><TableHead className="w-36">Status</TableHead><TableHead className="w-24 text-right">Document</TableHead></TableRow></TableHeader>
               <TableBody>
                 {invoices.map((invoice) => {
                   const dueTiming = dueDateLabel(invoice.dueDate, invoice.balanceAmount);
@@ -293,6 +329,12 @@ export default function MyPropertiesPage() {
                     <TableCell className="text-right">{formatMoney(invoice.totalAmount, invoice.currencyCode)}</TableCell>
                     <TableCell className="text-right font-medium">{formatMoney(invoice.balanceAmount, invoice.currencyCode)}</TableCell>
                     <TableCell><Badge variant={invoice.balanceAmount <= 0 ? 'secondary' : 'outline'}>{enumLabel(invoice.status, invoiceStatusLabels)}</Badge></TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button type="button" size="icon" variant="ghost" title="View invoice" aria-label={`View invoice ${invoice.invoiceNumber}`} onClick={() => setSelectedInvoice(invoice)}><Eye className="h-4 w-4" /></Button>
+                        <Button type="button" size="icon" variant="ghost" title="Download invoice" aria-label={`Download invoice ${invoice.invoiceNumber}`} onClick={() => void downloadInvoice(invoice)}><Download className="h-4 w-4" /></Button>
+                      </div>
+                    </TableCell>
                   </TableRow>
                   );
                 })}

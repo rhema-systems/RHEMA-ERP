@@ -10,6 +10,7 @@ import {
   MapPin,
   RefreshCw,
   Search,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -47,6 +48,7 @@ import {
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
 import { useManagedAssetsPage } from './use-managed-assets-page';
+import { EstateAssetImportDialog } from './EstateAssetImportDialog';
 
 const statusLabels: Record<EstateManagedAssetStatus, string> = {
   [EstateManagedAssetStatus.LandBank]: 'Land bank',
@@ -71,6 +73,7 @@ const sourceLabels: Record<EstateManagedAssetSourceType, string> = {
   [EstateManagedAssetSourceType.Manual]: 'Estate records',
   [EstateManagedAssetSourceType.LandAcquisition]: 'Land acquisition',
   [EstateManagedAssetSourceType.ProjectUnit]: 'Project unit',
+  [EstateManagedAssetSourceType.Imported]: 'Excel import',
 };
 
 function formatArea(asset: EstateManagedAsset) {
@@ -133,6 +136,11 @@ export function PropertyUnitRegister() {
   const [sendingListingId, setSendingListingId] = React.useState<string | null>(
     null
   );
+  const [importOpen, setImportOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('import') === 'land') setImportOpen(true);
+  }, []);
   const {
     assets,
     page,
@@ -247,7 +255,12 @@ export function PropertyUnitRegister() {
                 assignment and commercial terms are managed in Lease Management.
               </CardDescription>
             </div>
-            <Badge variant="outline">Estates Records</Badge>
+            <div className="flex items-center gap-2">
+              <Button type="button" onClick={() => setImportOpen(true)}>
+                <Upload className="mr-2 h-4 w-4" /> Import Excel
+              </Button>
+              <Badge variant="outline">Estates Records</Badge>
+            </div>
           </div>
 
           <form
@@ -355,9 +368,9 @@ export function PropertyUnitRegister() {
                     const isPortalListing =
                       asset.externalListingType !== 'None';
                     const canSendProjectProperty =
-                      asset.sourceType ===
-                        EstateManagedAssetSourceType.ProjectUnit &&
-                      asset.isPublishedFromProject &&
+                      (asset.sourceType === EstateManagedAssetSourceType.Imported ||
+                        (asset.sourceType === EstateManagedAssetSourceType.ProjectUnit &&
+                          asset.isPublishedFromProject)) &&
                       asset.status === EstateManagedAssetStatus.Available &&
                       (asset.assetType === EstateManagedAssetType.Property ||
                         asset.assetType === EstateManagedAssetType.Facility);
@@ -479,6 +492,7 @@ export function PropertyUnitRegister() {
           {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
         </CardContent>
       </Card>
+      <EstateAssetImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={() => void loadAssets()} />
     </div>
   );
 }

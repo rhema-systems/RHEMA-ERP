@@ -88,7 +88,7 @@ describe('Central DMS PDF byte loading', () => {
     await waitFor(() =>
       expect(load).toHaveBeenCalledWith('blob:authorized-pdf', '')
     );
-    expect(dataBind).toHaveBeenCalled();
+    expect(dataBind).not.toHaveBeenCalled();
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -115,7 +115,7 @@ describe('Central DMS PDF byte loading', () => {
     await waitFor(() =>
       expect(load).toHaveBeenCalledWith('blob:fetched-pdf', '')
     );
-    expect(dataBind).toHaveBeenCalled();
+    expect(dataBind).not.toHaveBeenCalled();
     expect(createObjectURL).toHaveBeenCalledWith(blob);
     expect(fetchMock).toHaveBeenCalledWith('/sample.pdf');
   });

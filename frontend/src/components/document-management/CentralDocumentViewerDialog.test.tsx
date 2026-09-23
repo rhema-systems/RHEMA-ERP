@@ -10,7 +10,7 @@ const { exportAnnotationState, exportAnnotatedPdfBlob } = vi.hoisted(() => ({
   exportAnnotationState: vi.fn(), exportAnnotatedPdfBlob: vi.fn(),
 }));
 vi.mock('next/dynamic', () => ({ default: () => React.forwardRef(function PdfMock(
-  props: { fileData?: Uint8Array; fileName?: string }, ref
+  props: { fileData?: Uint8Array; fileName?: string }, ref: React.Ref<unknown>
 ) {
   React.useImperativeHandle(ref, () => ({ exportAnnotationState, exportAnnotatedPdfBlob }));
   return <div data-testid="pdf-bytes">{props.fileName}:{Array.from(props.fileData || []).join(',')}</div>;
@@ -76,5 +76,33 @@ describe('central PDF preview byte source', () => {
     expect(savePdfCopy).toHaveBeenCalledWith(bytes, 'PO-1.pdf');
     expect(onSaveAnnotations).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Save annotations' })).not.toBeInTheDocument();
+  });
+  it('shows the saved version immediately without re-fetching the old preview', async () => {
+    vi.mocked(apiService.downloadBlob).mockResolvedValue(
+      { arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer } as Blob
+    );
+    exportAnnotationState.mockResolvedValue('{}');
+    exportAnnotatedPdfBlob.mockResolvedValue(
+      { arrayBuffer: async () => new Uint8Array([9, 8, 7]).buffer } as Blob
+    );
+    const onSaveAnnotations = vi.fn().mockImplementation(async (file: CentralDocumentViewerFile) => ({
+      ...file,
+      versionId: 'version-2',
+      version: '2',
+      repositoryPath: '/api/document-management/records/record-1/versions/version-2/content',
+    }));
+    render(
+      <CentralDocumentViewerDialog
+        open
+        file={{ documentRecordId: 'record-1', versionId: 'version-1', title: 'Agreement', fileName: 'Agreement.pdf', repositoryPath: '/api/document-management/records/record-1/versions/version-1/content' }}
+        onOpenChange={vi.fn()}
+        onSaveAnnotations={onSaveAnnotations}
+      />
+    );
+    expect(await screen.findByTestId('pdf-bytes')).toHaveTextContent('1,2,3');
+    fireEvent.click(screen.getByRole('button', { name: 'Save annotations' }));
+    await waitFor(() => expect(screen.getByTestId('pdf-bytes')).toHaveTextContent('9,8,7'));
+    expect(screen.getByText('Annotations saved as 2.')).toBeInTheDocument();
+    expect(apiService.downloadBlob).toHaveBeenCalledTimes(1);
   });
 });

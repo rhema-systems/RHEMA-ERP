@@ -53,6 +53,7 @@ import {
   documentManagementService,
   type CentralDocumentGenerationTemplate,
   type CentralDocumentVersionDownloadFormat,
+  type CentralDocumentRecordDetail,
   type GeneratedCentralDocumentResult,
 } from '@/services/document-management.service';
 import {
@@ -62,6 +63,7 @@ import {
   type ProcedureCaseSummary,
 } from '@/services/procedure-case.service';
 import { getProcedureWorkspaceTerminology } from '@/lib/procedure-workspace';
+import { LegalPropertyCaseContextDialog } from './LegalPropertyCaseContextDialog';
 
 const ProcedurePdfViewer = dynamic(
   () => import('@/components/procedures/ProcedurePdfViewer'),
@@ -113,6 +115,13 @@ const LINKED_LEGAL_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
     'closeoutNotes',
   ],
   'Head of Legal Release': [
+    'signatureStatus',
+    'sealStatus',
+    'dispatchStatus',
+    'estateReturnStatus',
+    'closeoutNotes',
+  ],
+  'Head of Legal Signature': [
     'signatureStatus',
     'sealStatus',
     'dispatchStatus',
@@ -513,7 +522,14 @@ export function ProcedureCaseWorkspace({
   const [dmsViewerDocumentId, setDmsViewerDocumentId] = React.useState<
     string | null
   >(null);
+  const [dmsViewerFileOverride, setDmsViewerFileOverride] = React.useState<CentralDocumentViewerFile | null>(null);
+  const [versionHistoryDocumentId, setVersionHistoryDocumentId] = React.useState<string | null>(null);
+  const [versionHistory, setVersionHistory] = React.useState<CentralDocumentRecordDetail | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = React.useState<string>('');
+  const [versionHistoryLoading, setVersionHistoryLoading] = React.useState(false);
+  const [versionHistoryError, setVersionHistoryError] = React.useState<string | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
+  const [isLegalContextOpen, setIsLegalContextOpen] = React.useState(false);
   const [departmentOptions, setDepartmentOptions] = React.useState<
     DepartmentOption[]
   >([]);
@@ -858,8 +874,58 @@ export function ProcedureCaseWorkspace({
 
     const refreshed = await procedureCaseService.getCase(selectedCase.id);
     setSelectedCase(refreshed);
-    await loadCases();
+    if (!detailOnly) {
+      await loadCases();
+    }
     return refreshed;
+  };
+
+  const loadVersionHistory = async (recordId: string, preferredVersionId?: string | null) => {
+    setVersionHistory(null);
+    setVersionHistoryError(null);
+    setVersionHistoryLoading(true);
+    try {
+      const detail = await documentManagementService.getRecord(recordId);
+      if (!detail) throw new Error('Version history is unavailable.');
+      setVersionHistory(detail);
+      setSelectedVersionId(preferredVersionId || detail.versions[0]?.id || '');
+    } catch (error) {
+      setVersionHistoryError(error instanceof Error ? error.message : 'Unable to load version history.');
+    } finally {
+      setVersionHistoryLoading(false);
+    }
+  };
+
+  const openVersionHistory = async (document: ProcedureCaseDocument) => {
+    if (!document.centralDocumentRecordId) return;
+    if (versionHistoryDocumentId === document.id) {
+      setVersionHistoryDocumentId(null);
+      return;
+    }
+    setVersionHistoryDocumentId(document.id);
+    await loadVersionHistory(document.centralDocumentRecordId, document.centralDocumentVersionId);
+  };
+
+  const viewSelectedVersion = (document: ProcedureCaseDocument) => {
+    const version = versionHistory?.versions.find((item) => item.id === selectedVersionId);
+    if (!version || !document.centralDocumentRecordId) return;
+    const annotationReview = versionHistory?.annotationReviews
+      .filter((review) => review.documentVersionId === version.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    setDmsViewerFileOverride({
+      documentRecordId: document.centralDocumentRecordId,
+      versionId: version.id,
+      fileUploadRecordId: version.fileUploadRecordId,
+      title: document.name,
+      fileName: version.fileName || document.name,
+      repositoryPath: version.repositoryPath,
+      renditionPath: version.renditionPath,
+      contentType: version.contentType,
+      sourceLabel: document.providedBy || document.requiredFrom || undefined,
+      version: version.versionNumber,
+      annotationStateJson: annotationReview?.annotationStateJson,
+    });
+    setDmsViewerDocumentId(document.id);
   };
 
   const loadCases = React.useCallback(async () => {
@@ -867,10 +933,7 @@ export function ProcedureCaseWorkspace({
     setError(null);
     try {
       if (detailOnly && requestedCaseId) {
-        const detail =
-          selectedCase?.id === requestedCaseId
-            ? selectedCase
-            : await procedureCaseService.getCase(requestedCaseId);
+        const detail = await procedureCaseService.getCase(requestedCaseId);
         setCases([]);
         setCaseTotalCount(0);
         setCaseTotalPages(1);
@@ -891,7 +954,7 @@ export function ProcedureCaseWorkspace({
       // Notifications and handoff links pass caseId so reviewers land on the exact Estate procedure case.
       const targetCaseId = requestedCaseId || (registerOnly ? null : data.items[0]?.id);
 
-      if (targetCaseId && selectedCase?.id !== targetCaseId) {
+      if (targetCaseId) {
         const detail = await procedureCaseService.getCase(targetCaseId);
         setSelectedCase(detail);
       } else if (!targetCaseId) {
@@ -912,8 +975,6 @@ export function ProcedureCaseWorkspace({
     module,
     registerOnly,
     requestedCaseId,
-    selectedCase,
-    selectedCase?.id,
   ]);
 
   React.useEffect(() => {
@@ -1310,7 +1371,7 @@ export function ProcedureCaseWorkspace({
     try {
       const selectedFile = documentFiles[document.id];
       if (selectedFile && document.centralDocumentRecordId) {
-        await documentManagementService.uploadVersionFile(
+        const version = await documentManagementService.uploadVersionFile(
           document.centralDocumentRecordId,
           {
             file: selectedFile,
@@ -1321,6 +1382,9 @@ export function ProcedureCaseWorkspace({
         );
         setDocumentFiles((current) => ({ ...current, [document.id]: null }));
         await refreshSelectedCase();
+        if (versionHistoryDocumentId === document.id) {
+          await loadVersionHistory(document.centralDocumentRecordId, version.id);
+        }
         toast({
           title: 'Document version uploaded',
           description: 'The edited copy is now the current DMS version.',
@@ -1449,6 +1513,9 @@ export function ProcedureCaseWorkspace({
       annotationStateJson: annotationStateJson || '{}',
     });
     await refreshSelectedCase();
+    if (versionHistoryDocumentId === dmsViewerDocumentId) {
+      await loadVersionHistory(file.documentRecordId, version.id);
+    }
 
     return {
       ...file,
@@ -1847,6 +1914,26 @@ export function ProcedureCaseWorkspace({
     }
   };
 
+  const signPropertyAgreement = async (document: ProcedureCaseDocument) => {
+    if (!selectedCase) return;
+    setSigningDocumentId(document.id);
+    setError(null);
+    try {
+      const updated = await procedureCaseService.signPropertyAgreement(selectedCase.id, document.id);
+      setSelectedCase(updated);
+      await loadCases();
+      toast({
+        title: 'Agreement signed',
+        description: 'The Head of Legal signature has been applied to the agreement PDF.',
+        variant: 'success',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to sign the agreement.');
+    } finally {
+      setSigningDocumentId(null);
+    }
+  };
+
   const renderField = (field: ProcedureCaseDetail['fields'][number]) => {
     const isCalculated = CALCULATED_PROCEDURE_FIELD_KEYS.has(field.key);
     const isLinkedLegalReadonly =
@@ -1854,7 +1941,8 @@ export function ProcedureCaseWorkspace({
     const isDisabled =
       !canEditProcedureField(field.key) ||
       isCalculated ||
-      isLinkedLegalReadonly;
+      isLinkedLegalReadonly ||
+      (entityType === 'LegalPropertyAgreementReview' && field.key === 'signatureStatus');
     const isRequiredForStage = legalTransferRequiredFieldKeys.has(field.key);
     const fieldType = field.fieldType.toLowerCase();
     const fieldId = `procedure-field-${field.id}`;
@@ -2215,6 +2303,12 @@ export function ProcedureCaseWorkspace({
                           ? 'Editable'
                           : 'Read only'}
                       </Badge>
+                      {module === 'Legal' && originatingPropertyCaseId ? (
+                        <Button size="sm" variant="outline" onClick={() => setIsLegalContextOpen(true)}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          View full case
+                        </Button>
+                      ) : null}
                       {module === 'Legal' && originatingPropertyCaseId ? (
                         <Button asChild size="sm" variant="outline">
                           <Link
@@ -2761,6 +2855,15 @@ export function ProcedureCaseWorkspace({
                         Boolean(signatureRole) &&
                         selectedCase.canEditCurrentStage &&
                         !legalTransferStageSignatureRecorded;
+                      const propertyAgreementSigned = entityType === 'LegalPropertyAgreementReview' &&
+                        selectedCase.documents.some((item) => item.name === 'Head of Legal signed agreement' && Boolean(item.fileUrl));
+                      const canSignPropertyAgreement =
+                        entityType === 'LegalPropertyAgreementReview' &&
+                        document.name === 'Generated draft agreement' &&
+                        Boolean(document.fileUrl) &&
+                        (selectedCase.currentStageName === 'Head of Legal Signature' || selectedCase.currentStageName === 'Head of Legal Release') &&
+                        selectedCase.canEditCurrentStage &&
+                        !propertyAgreementSigned;
                       return (
                         <div
                           key={document.id}
@@ -2795,9 +2898,10 @@ export function ProcedureCaseWorkspace({
                                       <button
                                         type="button"
                                         className="inline-flex items-center gap-1 text-primary hover:underline"
-                                        onClick={() =>
-                                          setDmsViewerDocumentId(document.id)
-                                        }
+                                        onClick={() => {
+                                          setDmsViewerFileOverride(null);
+                                          setDmsViewerDocumentId(document.id);
+                                        }}
                                       >
                                         <Eye className="h-3 w-3" />
                                         View / annotate
@@ -2814,6 +2918,16 @@ export function ProcedureCaseWorkspace({
                                         Open uploaded file
                                       </button>
                                     )}
+                                    {isDmsDocument ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        onClick={() => void openVersionHistory(document)}
+                                      >
+                                        <Eye className="h-3 w-3" />
+                                        View versions
+                                      </button>
+                                    ) : null}
                                     {!isDmsDocument && isPdfDocument(document) ? (
                                       <button
                                         type="button"
@@ -2845,11 +2959,49 @@ export function ProcedureCaseWorkspace({
                                         Sign document
                                       </button>
                                     ) : null}
+                                    {canSignPropertyAgreement ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline disabled:opacity-60"
+                                        disabled={Boolean(signingDocumentId)}
+                                        onClick={() => void signPropertyAgreement(document)}
+                                      >
+                                        {signingDocumentId === document.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FilePenLine className="h-3 w-3" />}
+                                        Sign agreement
+                                      </button>
+                                    ) : null}
                                     {legalTransferStageSignatureRecorded ? (
                                       <span className="inline-flex items-center gap-1 text-muted-foreground">
                                         <CheckCircle2 className="h-3 w-3" />
                                         Signed
                                       </span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {isDmsDocument && versionHistoryDocumentId === document.id ? (
+                                  <div className="mt-3 space-y-2 border-t border-border pt-3">
+                                    {versionHistoryLoading ? <p className="text-muted-foreground">Loading versions...</p> : null}
+                                    {versionHistoryError ? <p className="text-destructive">{versionHistoryError}</p> : null}
+                                    {versionHistory && versionHistory.versions.length === 0 ? <p className="text-muted-foreground">No versions available.</p> : null}
+                                    {versionHistory && versionHistory.versions.length > 0 ? (
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <Select value={selectedVersionId} onValueChange={setSelectedVersionId}>
+                                          <SelectTrigger className="w-full min-w-0 sm:w-64" aria-label="Document version">
+                                            <SelectValue placeholder="Choose version" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {versionHistory.versions.map((version) => (
+                                              <SelectItem key={version.id} value={version.id}>
+                                                {version.versionNumber}{version.status === 'Current' ? ' (Current)' : ''} - {version.fileName || 'PDF'}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                        <Button type="button" size="sm" variant="outline" disabled={!selectedVersionId} onClick={() => viewSelectedVersion(document)}>
+                                          <Eye className="mr-1 h-4 w-4" />
+                                          View version
+                                        </Button>
+                                      </div>
                                     ) : null}
                                   </div>
                                 ) : null}
@@ -3030,10 +3182,12 @@ export function ProcedureCaseWorkspace({
         onOpenChange={(open) => {
           if (!open) {
             setDmsViewerDocumentId(null);
+            setDmsViewerFileOverride(null);
           }
         }}
-        file={toDmsViewerFile(dmsViewerDocument)}
+        file={dmsViewerFileOverride || toDmsViewerFile(dmsViewerDocument)}
         enableAnnotations={Boolean(
+          !dmsViewerFileOverride &&
           dmsViewerDocument?.canUploadAtCurrentStage &&
             selectedCase?.canEditCurrentStage
         )}
@@ -3041,6 +3195,13 @@ export function ProcedureCaseWorkspace({
         onDownload={downloadDmsVersion}
         onSaveAnnotations={saveDmsAnnotations}
       />
+      {module === 'Legal' && selectedCase && originatingPropertyCaseId ? (
+        <LegalPropertyCaseContextDialog
+          legalCaseId={selectedCase.id}
+          open={isLegalContextOpen}
+          onOpenChange={setIsLegalContextOpen}
+        />
+      ) : null}
       <Dialog
         open={Boolean(previewDocument && previewDocumentUrl)}
         onOpenChange={(open) => {

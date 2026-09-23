@@ -5859,6 +5859,12 @@ namespace ErpSystem.Data.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<bool?>("ExternalGroundRentRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("ExternalPremiumChargeRequired")
+                        .HasColumnType("bit");
+
                     b.Property<DateTime?>("ExternalPublishedAt")
                         .HasColumnType("datetime2");
 
@@ -6047,6 +6053,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("ExternalMonthlyRent")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool?>("ExternalGroundRentRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("ExternalPremiumChargeRequired")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime?>("ExternalPublishedAt")
                         .HasColumnType("datetime2");

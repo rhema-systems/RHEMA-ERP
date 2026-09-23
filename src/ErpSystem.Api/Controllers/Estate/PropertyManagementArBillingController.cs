@@ -159,6 +159,11 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             throw new InvalidOperationException("Use Ground Rent Administration for land leases.");
         }
 
+        if (asset.ExternalListingType?.Contains("Lease", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            throw new InvalidOperationException("Full-term leases use the one-time Estate balance invoice, not recurring rent billing.");
+        }
+
         if (asset.Status is not EstateManagedAssetStatus.Leased
             and not EstateManagedAssetStatus.Occupied)
         {
@@ -431,10 +436,11 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         Guid procedureCaseId,
         CancellationToken cancellationToken)
     {
-        var sourceCase = await LoadSaleProcedureCaseAsync(procedureCaseId, cancellationToken);
+        var sourceCase = await LoadSaleProcedureCaseAsync(procedureCaseId, cancellationToken, allowLease: true);
         var fields = CaseFields(sourceCase);
+        var isLease = (FieldValue(fields, "requestType") ?? sourceCase.Title).Contains("lease", StringComparison.OrdinalIgnoreCase);
         if (!string.Equals(FieldValue(fields, "agreementExecutionStatus"), "Fully executed", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The sale agreement must be fully executed before the purchase invoice is created.");
+            throw new InvalidOperationException("The agreement must be fully executed before the balance invoice is created.");
 
         if (Guid.TryParse(FieldValue(fields, "saleInvoiceId"), out var existingInvoiceId))
         {
@@ -455,7 +461,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             throw new InvalidOperationException("The sale request is not linked to a Finance AR customer.");
         var salePayable = ResolveSalePayable(fields);
         if (salePayable.EstateBalance <= 0m)
-            throw new InvalidOperationException("Sales has already recorded the full sale amount. No Estate balance remains to invoice.");
+            throw new InvalidOperationException("Sales has already recorded the full agreed amount. No Estate balance remains to invoice.");
 
         var revenueAccount = await _db.Accounts
             .AsNoTracking()
@@ -476,17 +482,17 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             CustomerId = customerId,
             InvoiceDate = DateTime.UtcNow.Date,
             DueDate = DateTime.UtcNow.Date,
-            Reference = BuildSaleInvoiceReference(sourceCase.ReferenceNumber ?? sourceCase.Id.ToString()),
+            Reference = BuildSaleInvoiceReference(sourceCase.ReferenceNumber ?? sourceCase.Id.ToString(), isLease),
             CurrencyCode = FieldValue(fields, "currency") ?? "GHS",
             ExchangeRate = 1m,
-            Notes = EnsureSourceLabel($"Property purchase for {propertyUnit}; agreement {agreementReference}."),
+            Notes = EnsureSourceLabel($"Property {(isLease ? "lease" : "purchase")} for {propertyUnit}; agreement {agreementReference}."),
             LineItems =
             [
                 new InvoiceLineItemCreateDto
                 {
                     LineItemType = "GLAccount",
                     GLAccountId = revenueAccount.Id,
-                    Description = $"Property sale: {propertyUnit}",
+                    Description = $"Property {(isLease ? "lease" : "sale")}: {propertyUnit}",
                     Quantity = 1m,
                     UnitPrice = salePayable.EstateBalance,
                     DiscountPercentage = 0m
@@ -495,12 +501,12 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         }, cancellationToken);
 
         var now = DateTime.UtcNow;
-        UpsertCaseField(sourceCase, fields, "saleInvoiceId", "Sale invoice ID", invoice.Id.ToString(), now);
-        UpsertCaseField(sourceCase, fields, "saleInvoiceReference", "Sale invoice reference", invoice.InvoiceNumber, now);
-        UpsertCaseField(sourceCase, fields, "saleInvoiceStatus", "Sale invoice status", invoice.Status, now);
-        UpsertCaseField(sourceCase, fields, "saleInvoiceAmount", "Sale invoice amount", invoice.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Sale invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Sale invoice balance", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceId", "Balance invoice ID", invoice.Id.ToString(), now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceReference", "Balance invoice reference", invoice.InvoiceNumber, now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceStatus", "Balance invoice status", invoice.Status, now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceAmount", "Balance invoice amount", invoice.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Balance invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Balance invoice remaining", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "estateRemainingAmount", "Balance for Estate processing", salePayable.EstateBalance.ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", BuildSalePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice.PaidAmount, invoice.BalanceAmount), now);
         UpsertCaseField(sourceCase, fields, "salePaymentStatus", "Sale payment status", "Pending full payment", now);
@@ -509,7 +515,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         await _db.SaveChangesAsync(cancellationToken);
 
         await NotifyBillingResultAsync(
-            "Property sale invoice created",
+            "Property balance invoice created",
             $"Finance AR draft invoice {invoice.InvoiceNumber} was created for {propertyUnit}.",
             "estate.property-management.sale-invoice-created",
             "Invoice",
@@ -518,13 +524,23 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             BillingMetadata(invoice.InvoiceNumber, invoice.CustomerId, invoice.CustomerName, invoice.TotalAmount, invoice.CurrencyCode, sourceCase.ReferenceNumber, propertyUnit),
             cancellationToken);
 
+        await NotifyCustomerEstateInvoiceAsync(
+            sourceCase,
+            fields,
+            invoice.Id,
+            invoice.InvoiceNumber,
+            isLease ? "Lease balance invoice prepared" : "Purchase balance invoice prepared",
+            $"Finance is preparing balance invoice {invoice.InvoiceNumber} for {propertyUnit}. Once issued, it will appear with payments and receipts in My Property Requests.",
+            "estate.property-management.balance-invoice-customer",
+            cancellationToken);
+
         return Ok(new EstateSaleInvoiceResult(
             invoice.Id,
             invoice.InvoiceNumber,
             invoice.TotalAmount,
             invoice.CurrencyCode,
             invoice.Status,
-            $"Finance AR draft {invoice.InvoiceNumber} was created for the property sale."));
+            $"Finance AR draft {invoice.InvoiceNumber} was created for the property {(isLease ? "lease" : "sale")}."));
     }
 
     [HttpPost("sale/{procedureCaseId:guid}/complete-ownership")]
@@ -648,26 +664,12 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         Guid procedureCaseId,
         CancellationToken cancellationToken)
     {
-        var sourceCase = await LoadRentalProcedureCaseAsync(procedureCaseId, cancellationToken);
+        var sourceCase = await LoadListingProcedureCaseAsync(procedureCaseId, cancellationToken);
         var fields = CaseFields(sourceCase);
         if (!IsPremiumChargeRequired(fields))
             throw new InvalidOperationException("Premium charge is not required for this request.");
 
         var premiumAmount = ResolvePremiumChargeAmount(fields);
-        if (string.Equals(FieldValue(fields, "premiumChargePaymentStatus"), "Waived", StringComparison.OrdinalIgnoreCase))
-        {
-            return Ok(new EstatePremiumChargeInvoiceResult(
-                null,
-                FieldValue(fields, "premiumChargeInvoiceReference"),
-                "Waived",
-                premiumAmount,
-                0m,
-                0m,
-                FieldValue(fields, "currency") ?? "GHS",
-                "Waived",
-                "Premium charge has been waived; no Finance invoice is required."));
-        }
-
         if (Guid.TryParse(FieldValue(fields, "premiumChargeInvoiceId"), out var existingInvoiceId))
         {
             var existingInvoice = await _invoiceService.GetByIdAsync(existingInvoiceId, cancellationToken);
@@ -683,7 +685,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         }
 
         if (!Guid.TryParse(FieldValue(fields, "sourceReference"), out var customerId))
-            throw new InvalidOperationException("The rental or lease request is not linked to a Finance AR customer.");
+            throw new InvalidOperationException("The property request is not linked to a Finance AR customer.");
 
         var revenueAccountId = await FindPropertyManagementRevenueAccountIdAsync(cancellationToken);
         var propertyUnit = FieldValue(fields, "propertyUnit") ?? FieldValue(fields, "listingReference") ?? sourceCase.Title;
@@ -730,8 +732,8 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             sourceCase,
             fields,
             result,
-            "Premium charge invoice issued",
-            $"Premium charge invoice {invoice.InvoiceNumber} has been issued. Estate will continue the agreement after Finance confirms payment.",
+            "Premium charge invoice prepared",
+            $"Premium charge invoice {invoice.InvoiceNumber} is with Finance. It will appear under Bills & Receipts after Finance issues it; Estate will continue the agreement after payment is confirmed.",
             "estate.property-management.premium-invoice-customer",
             cancellationToken);
 
@@ -744,11 +746,17 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         Guid procedureCaseId,
         CancellationToken cancellationToken)
     {
-        var sourceCase = await LoadSaleProcedureCaseAsync(procedureCaseId, cancellationToken);
+        var sourceCase = await LoadSaleProcedureCaseAsync(procedureCaseId, cancellationToken, allowLease: true);
         var fields = CaseFields(sourceCase);
         var result = await SyncSalePaymentStatusAsync(sourceCase, fields, cancellationToken);
         await PersistSalePaymentStatusAsync(sourceCase, result, cancellationToken);
         await NotifySalePaymentReceivedAsync(sourceCase, fields, result, cancellationToken);
+        if (string.Equals(result.PaymentStatus, "Paid in full", StringComparison.OrdinalIgnoreCase)
+            && result.InvoiceId.HasValue)
+            await NotifyCustomerEstateInvoiceAsync(sourceCase, fields, result.InvoiceId, result.InvoiceNumber,
+                "Property balance payment confirmed",
+                $"Finance confirmed full payment of invoice {result.InvoiceNumber}. Estate can now continue conveyance.",
+                "estate.property-management.balance-payment-customer", cancellationToken);
 
         return Ok(result);
     }
@@ -759,7 +767,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         Guid procedureCaseId,
         CancellationToken cancellationToken)
     {
-        var sourceCase = await LoadRentalProcedureCaseAsync(procedureCaseId, cancellationToken);
+        var sourceCase = await LoadListingProcedureCaseAsync(procedureCaseId, cancellationToken);
         var fields = CaseFields(sourceCase);
         var result = await SyncPremiumChargePaymentStatusAsync(sourceCase, fields, cancellationToken);
         await PersistPremiumChargePaymentStatusAsync(sourceCase, result, cancellationToken);
@@ -1019,26 +1027,20 @@ public sealed class PropertyManagementArBillingController : ControllerBase
 
     private async Task<ProcedureCase> LoadSaleProcedureCaseAsync(
         Guid procedureCaseId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowLease = false)
     {
-        var sourceCase = await _db.ProcedureCases
-            .Include(item => item.Fields.Where(field => !field.IsDeleted))
-            .FirstOrDefaultAsync(item => item.TenantId == GetTenantId()
-                && item.Id == procedureCaseId
-                && !item.IsDeleted
-                && item.Module == "PropertyManagement"
-                && item.EntityType == "EstatePropertyManagementListingApplication",
-                cancellationToken)
-            ?? throw new KeyNotFoundException("The property sale request was not found.");
+        var sourceCase = await LoadListingProcedureCaseAsync(procedureCaseId, cancellationToken);
         var fields = CaseFields(sourceCase);
         var requestType = FieldValue(fields, "requestType") ?? sourceCase.Title;
         if (!requestType.Contains("sale", StringComparison.OrdinalIgnoreCase)
-            && !requestType.Contains("purchase", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("This operation applies only to property sale requests.");
+            && !requestType.Contains("purchase", StringComparison.OrdinalIgnoreCase)
+            && !(allowLease && requestType.Contains("lease", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("This operation applies only to property sale or lease requests.");
         return sourceCase;
     }
 
-    private async Task<ProcedureCase> LoadRentalProcedureCaseAsync(
+    private async Task<ProcedureCase> LoadListingProcedureCaseAsync(
         Guid procedureCaseId,
         CancellationToken cancellationToken)
     {
@@ -1050,13 +1052,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                 && item.Module == "PropertyManagement"
                 && item.EntityType == "EstatePropertyManagementListingApplication",
                 cancellationToken)
-            ?? throw new KeyNotFoundException("The property rent or lease request was not found.");
-        var fields = CaseFields(sourceCase);
-        var requestType = FieldValue(fields, "requestType") ?? sourceCase.Title;
-        if (!requestType.Contains("rent", StringComparison.OrdinalIgnoreCase)
-            && !requestType.Contains("lease", StringComparison.OrdinalIgnoreCase)
-            && !requestType.Contains("rental", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("This operation applies only to property rent or lease requests.");
+            ?? throw new KeyNotFoundException("The property listing request was not found.");
         return sourceCase;
     }
 
@@ -1191,20 +1187,6 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         }
 
         var premiumAmount = ResolvePremiumChargeAmount(fields);
-        if (string.Equals(FieldValue(fields, "premiumChargePaymentStatus"), "Waived", StringComparison.OrdinalIgnoreCase))
-        {
-            return new EstatePremiumChargeInvoiceResult(
-                null,
-                FieldValue(fields, "premiumChargeInvoiceReference"),
-                "Waived",
-                premiumAmount,
-                0m,
-                0m,
-                FieldValue(fields, "currency") ?? "GHS",
-                "Waived",
-                "Premium charge has been waived; no Finance payment is required.");
-        }
-
         if (!Guid.TryParse(FieldValue(fields, "premiumChargeInvoiceId"), out var invoiceId))
             throw new InvalidOperationException("Create the premium charge invoice before syncing payment status.");
 
@@ -1228,14 +1210,14 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         var currentUserId = GetUserId();
         var fieldValues = new[]
         {
-            new SalePaymentFieldUpdate("saleInvoiceReference", "Sale invoice reference", result.InvoiceNumber),
-            new SalePaymentFieldUpdate("saleInvoiceStatus", "Sale invoice status", result.InvoiceStatus),
-            new SalePaymentFieldUpdate("saleInvoiceAmount", "Sale invoice amount", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
-            new SalePaymentFieldUpdate("saleInvoicePaidAmount", "Sale invoice paid amount", result.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture)),
-            new SalePaymentFieldUpdate("saleInvoiceBalance", "Sale invoice balance", result.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture)),
+            new SalePaymentFieldUpdate("saleInvoiceReference", "Balance invoice reference", result.InvoiceNumber),
+            new SalePaymentFieldUpdate("saleInvoiceStatus", "Balance invoice status", result.InvoiceStatus),
+            new SalePaymentFieldUpdate("saleInvoiceAmount", "Balance invoice amount", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
+            new SalePaymentFieldUpdate("saleInvoicePaidAmount", "Balance invoice paid amount", result.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture)),
+            new SalePaymentFieldUpdate("saleInvoiceBalance", "Balance invoice remaining", result.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("estateRemainingAmount", "Balance for Estate processing", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
-            new SalePaymentFieldUpdate("salePaymentCheckStatus", "Sale payment check", result.Message),
-            new SalePaymentFieldUpdate("salePaymentStatus", "Sale payment status", result.PaymentStatus),
+            new SalePaymentFieldUpdate("salePaymentCheckStatus", "Sale or lease payment check", result.Message),
+            new SalePaymentFieldUpdate("salePaymentStatus", "Sale or lease payment status", result.PaymentStatus),
             new SalePaymentFieldUpdate("ownershipTransferStatus", "Ownership transfer status", result.OwnershipTransferStatus)
         };
 
@@ -1405,17 +1387,58 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         string type,
         CancellationToken cancellationToken)
     {
-        if (sourceCase.OpenedById == Guid.Empty)
-        {
-            return;
-        }
+        await NotifyCustomerEstateInvoiceAsync(sourceCase, fields, result.InvoiceId, result.InvoiceNumber,
+            title, message, type, cancellationToken);
+    }
 
+    private async Task NotifyCustomerEstateInvoiceAsync(
+        ProcedureCase sourceCase,
+        IDictionary<string, ProcedureCaseField> fields,
+        Guid? invoiceId,
+        string? invoiceNumber,
+        string title,
+        string message,
+        string type,
+        CancellationToken cancellationToken)
+    {
         try
         {
+            var recipients = new HashSet<Guid>();
+            if (sourceCase.OpenedById != Guid.Empty
+                && sourceCase.SourceDepartment?.StartsWith("External Portal", StringComparison.OrdinalIgnoreCase) == true)
+                recipients.Add(sourceCase.OpenedById);
+
+            if (Guid.TryParse(FieldValue(fields, "sourceReference"), out var customerId))
+            {
+                var primaryUserId = await _db.BusinessPartners.AsNoTracking()
+                    .Where(customer => customer.TenantId == GetTenantId() && customer.Id == customerId && !customer.IsDeleted)
+                    .Select(customer => customer.UserId)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (primaryUserId.HasValue)
+                    recipients.Add(primaryUserId.Value);
+                var linkedUserIds = await _db.BusinessPartnerUsers.AsNoTracking()
+                    .Where(link => link.TenantId == GetTenantId()
+                        && link.BusinessPartnerId == customerId && !link.IsDeleted && link.IsActive)
+                    .Select(link => link.UserId)
+                    .ToListAsync(cancellationToken);
+                recipients.UnionWith(linkedUserIds);
+            }
+
+            var notifiedRecipients = await _db.Notifications.AsNoTracking()
+                .Where(notification => notification.TenantId == GetTenantId()
+                    && !notification.IsDeleted
+                    && notification.NotificationType == type
+                    && notification.EntityType == "ProcedureCase"
+                    && notification.EntityId == sourceCase.Id)
+                .Select(notification => notification.RecipientId)
+                .ToListAsync(cancellationToken);
+            recipients.ExceptWith(notifiedRecipients);
+
+            foreach (var recipientId in recipients)
             await _notificationService.CreateNotificationAsync(
                 new CreateNotificationDto
                 {
-                    RecipientId = sourceCase.OpenedById,
+                    RecipientId = recipientId,
                     Type = type,
                     Title = title,
                     Message = message,
@@ -1429,16 +1452,11 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                         ["sourceModule"] = "Estate / Property Management",
                         ["sourceRecordReference"] = sourceCase.ReferenceNumber ?? sourceCase.Id.ToString(),
                         ["propertyUnit"] = FieldValue(fields, "propertyUnit") ?? FieldValue(fields, "listingReference") ?? string.Empty,
-                        ["invoiceId"] = result.InvoiceId,
-                        ["invoiceNumber"] = result.InvoiceNumber ?? string.Empty,
-                        ["invoiceStatus"] = result.InvoiceStatus,
-                        ["paymentStatus"] = result.PaymentStatus,
-                        ["amount"] = result.Amount,
-                        ["paidAmount"] = result.PaidAmount,
-                        ["balanceAmount"] = result.BalanceAmount
+                        ["invoiceId"] = invoiceId,
+                        ["invoiceNumber"] = invoiceNumber ?? string.Empty
                     }
                 },
-                GetUserId() ?? sourceCase.OpenedById,
+                GetUserId() ?? recipientId,
                 GetTenantId());
         }
         catch
@@ -1452,13 +1470,13 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         var amountText = FieldValue(fields, "offerAmount") ?? FieldValue(fields, "listingPrice");
         if (!decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var purchasePrice)
             || purchasePrice <= 0m)
-            throw new InvalidOperationException("Record an approved purchase price before creating or completing the sale invoice.");
+            throw new InvalidOperationException("Record an approved sale or lease amount before creating the balance invoice.");
 
         var salesAmountPaid = ParseOptionalMoney(FieldValue(fields, "salesAmountPaid"));
         if (salesAmountPaid < 0m)
             throw new InvalidOperationException("Amount paid in Sales cannot be negative.");
         if (salesAmountPaid > purchasePrice)
-            throw new InvalidOperationException("Amount paid in Sales cannot be greater than the approved purchase price.");
+            throw new InvalidOperationException("Amount paid in Sales cannot be greater than the approved sale or lease amount.");
 
         return new SalePayableSnapshot(
             purchasePrice,
@@ -1570,9 +1588,9 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         fields[key] = field;
     }
 
-    private static string BuildSaleInvoiceReference(string sourceReference)
+    private static string BuildSaleInvoiceReference(string sourceReference, bool isLease = false)
     {
-        var reference = $"PROPERTY-SALE-{sourceReference}";
+        var reference = $"PROPERTY-{(isLease ? "LEASE" : "SALE")}-{sourceReference}";
         return reference.Length <= 100 ? reference : reference[..100];
     }
 

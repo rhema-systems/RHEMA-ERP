@@ -978,6 +978,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "[HttpPost(\"invoices\")]");
 
         activation.Should().Contain("asset.RentBillingActivatedAt.HasValue");
+        activation.Should().Contain("Full-term leases use the one-time Estate balance invoice");
         activation.Should().Contain("asset.ExternalMonthlyRent ?? asset.ExternalListingPrice");
         activation.Should().Contain("asset.CustomerBusinessPartnerId.Value");
         activation.Should().Contain("BuildRentInvoiceReference(asset.AssetCode, billingStart)");
@@ -1055,7 +1056,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             controller,
             "public async Task<ActionResult<EstateSaleInvoiceResult>> CreateSaleInvoice",
             "private static string BuildSaleInvoiceReference");
-        billing.Should().Contain("Sales has already recorded the full sale amount. No Estate balance remains to invoice.");
+        billing.Should().Contain("Sales has already recorded the full agreed amount. No Estate balance remains to invoice.");
         billing.Should().Contain("UnitPrice = salePayable.EstateBalance");
 
         var frontend = ReadSource(
@@ -1122,6 +1123,117 @@ public sealed class EstateWorkflowIntegrationRegressionTests
                 .Should().BeLessThan(
                     wrapper.IndexOf("_unitOfWork.ClearTrackedChanges();", StringComparison.Ordinal));
         }
+    }
+
+    [Fact]
+    public void ListingAgreementAndConveyance_RequireFinanceConfirmedPayments()
+    {
+        var service = ReadSource("src", "ErpSystem.Api", "Services", "ProcedureCaseService.cs");
+        var handoff = Slice(service,
+            "public async Task<ProcedureCaseDetailDto> CreateLinkedLegalMatterAsync",
+            "var sourceReference = FirstNonBlank(sourceCase.ReferenceNumber");
+        handoff.Should().Contain("matter.Purpose == \"AgreementReview\"");
+        handoff.Should().Contain("await EnsurePremiumFinancePaymentAsync(sourceCase)");
+        handoff.Should().Contain("matter.Purpose == \"ConveyanceRegistration\"");
+        handoff.Should().Contain("await EnsureFullAmountFinancePaymentAsync(sourceCase)");
+
+        var premium = Slice(service,
+            "private async Task EnsurePremiumFinancePaymentAsync",
+            "private async Task EnsureFullAmountFinancePaymentAsync");
+        premium.Should().Contain("premiumChargeInvoiceId");
+        premium.Should().Contain("_invoiceService.GetByIdAsync(invoiceId)");
+        premium.Should().Contain("invoice.BalanceAmount > 0m");
+        premium.Should().Contain("invoice.Status, \"Paid\"");
+
+        var balance = Slice(service,
+            "private async Task EnsureFullAmountFinancePaymentAsync",
+            "private static void EnsurePropertyListingPremiumChargeGateReady");
+        balance.Should().Contain("agreementExecutionStatus");
+        balance.Should().Contain("saleInvoiceId");
+        balance.Should().Contain("_invoiceService.GetByIdAsync(invoiceId)");
+        balance.Should().Contain("invoice.BalanceAmount > 0m");
+        balance.Should().Contain("invoice.Status, \"Paid\"");
+        var classification = Slice(service,
+            "private static bool IsRentalListingApplication",
+            "private static bool IsLeaseListingApplication");
+        classification.IndexOf("requestType.Contains(\"lease\"", StringComparison.Ordinal)
+            .Should().BeLessThan(classification.IndexOf("var listingType", StringComparison.Ordinal));
+
+        var controller = ReadSource("src", "ErpSystem.Api", "Controllers", "Estate", "PropertyManagementArBillingController.cs");
+        var saleInvoice = Slice(controller,
+            "public async Task<ActionResult<EstateSaleInvoiceResult>> CreateSaleInvoice",
+            "public async Task<ActionResult<EstateSaleCompletionResult>> CompleteSaleOwnership");
+        saleInvoice.Should().Contain("allowLease: true");
+        var ownership = Slice(controller,
+            "public async Task<ActionResult<EstateSaleCompletionResult>> CompleteSaleOwnership",
+            "[HttpPost(\"premium/{procedureCaseId:guid}/invoice\")]");
+        ownership.Should().NotContain("allowLease: true");
+        var customerNotice = Slice(controller,
+            "private async Task NotifyCustomerEstateInvoiceAsync",
+            "private static SalePayableSnapshot ResolveSalePayable");
+        customerNotice.Should().Contain("_db.BusinessPartnerUsers");
+        customerNotice.Should().Contain("recipients.ExceptWith(notifiedRecipients)");
+        customerNotice.Should().Contain("/external-portal/my-property-requests/");
+    }
+
+    [Fact]
+    public void PortalPropertyBilling_ShowsIssuedFinanceInvoicesAndAllocatedReceipts()
+    {
+        var portal = ReadSource("src", "ErpSystem.Api", "Controllers", "Estate", "EstateExternalDocumentsController.cs");
+        var requests = Slice(portal,
+            "public async Task<IActionResult> GetMyRequests",
+            "public async Task<IActionResult> GetMyRequest");
+        requests.Should().Contain("item.SourceDepartment == \"Sales - Estate Enquiry\"");
+        requests.Should().Contain("portalCustomerReferences.Contains(field.Value)");
+        var portfolio = Slice(portal,
+            "public async Task<IActionResult> GetMyProperties",
+            "public async Task<IActionResult> DownloadLegalTransferDraft");
+        portfolio.Should().Contain("customerIds.Contains(invoice.BusinessPartnerId)");
+        portfolio.Should().Contain("invoice.Status == InvoiceStatus.Sent");
+        portfolio.Should().Contain("invoice.Status == InvoiceStatus.Paid");
+        portfolio.Should().Contain("invoice.Notes.Contains(\"Estate / Property Management\")");
+        portfolio.Should().Contain("_db.Set<PaymentAllocation>()");
+        portfolio.Should().Contain("Receipts = receipts ?? new List<ExternalInvoiceReceiptDto>()");
+        portfolio.Should().Contain("FullTermLeaseAmount");
+        var legacyLease = Slice(portal,
+            "private static decimal? ResolveDemarcationLeaseAmount",
+            "private static object ToExternalListingDto(EstateLandDemarcation");
+        legacyLease.Should().Contain("demarcation.ExternalListingPrice == demarcation.ExternalMonthlyRent");
+        legacyLease.Should().Contain("demarcation.TargetSalePrice");
+    }
+
+    [Fact]
+    public void EstateAgreementTemplates_SeparateSaleLeaseAndRentMetadataAndAmounts()
+    {
+        var dms = ReadSource("src", "ErpSystem.Api", "Controllers", "DocumentManagement", "DocumentManagementController.cs");
+        var defaults = Slice(dms,
+            "private static readonly GeneratedDocumentTemplateDefinition[] GeneratedDocumentTemplates",
+            "private static GeneratedDocumentTemplateDefinition Template(");
+        defaults.Should().Contain("\"EST-RENT-AGREEMENT\"");
+        defaults.Should().Contain("{{FullTermLeaseAmount}}");
+        defaults.Should().Contain("{{MonthlyRent}}");
+        defaults.Should().Contain("{{PurchasePrice}}");
+
+        var metadata = Slice(dms,
+            "private async Task EnsureEstateAgreementMetadataTemplatesAsync",
+            "private async Task<bool> DefaultGenerationTemplatesExistAsync");
+        metadata.Should().Contain("FullTermLeaseAmount");
+        metadata.Should().Contain("MonthlyRent");
+        metadata.Should().Contain("PurchasePrice");
+
+        var merge = Slice(dms,
+            "private async Task EnrichEstateAgreementMergeValuesAsync",
+            "private static void SetAuthoritativeMergeValue");
+        merge.Should().Contain("demarcation?.ExternalListingPrice");
+        merge.Should().Contain("\"FullTermLeaseAmount\"");
+        merge.Should().Contain("\"MonthlyRent\"");
+        merge.Should().Contain("\"AnnualGroundRent\"");
+        merge.Should().Contain("\"PremiumCharge\"");
+
+        var workspace = ReadSource("frontend", "src", "app", "estate", "property-management", "[entityType]", "ListingApplicationWorkspace.tsx");
+        workspace.Should().Contain("const lease = isLeaseApplication(selectedCase)");
+        workspace.Should().Contain("FullTermLeaseAmount: leaseApplication ? paymentAmount : ''");
+        workspace.Should().Contain("MonthlyRent: monthlyRental ? paymentAmount : ''");
     }
 
     private static string ReadSource(params string[] path)

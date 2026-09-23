@@ -71,7 +71,8 @@ public enum EstateManagedAssetSourceType
 {
     Manual = 0,
     LandAcquisition = 1,
-    ProjectUnit = 2
+    ProjectUnit = 2,
+    Imported = 3
 }
 
 public enum EstateManagedAssetStatus

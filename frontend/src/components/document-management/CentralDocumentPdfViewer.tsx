@@ -65,7 +65,6 @@ function toPdfBlob(bytes: Uint8Array) {
 }
 
 type TextSelectionCapableViewer = PdfViewerComponent & {
-  dataBind?: () => void;
   enableTextSelection?: boolean;
   extractTextOption?: ExtractTextOption;
   interactionMode?: 'TextSelection' | 'Pan';
@@ -160,11 +159,9 @@ function forceTextSelectionMode(viewer: PdfViewerComponent | null) {
   if (selectableViewer.viewerBase) {
     selectableViewer.viewerBase.isPanMode = false;
     selectableViewer.viewerBase.isTextSelectionDisabled = false;
-    selectableViewer.viewerBase.initiateTextSelectMode?.();
   }
   selectableViewer.textSelectionModule?.enableTextSelectionMode?.();
   selectableViewer.toolbarModule?.updateInteractionTools?.(true);
-  selectableViewer.dataBind?.();
 }
 
 function restoreTextLayerSelection(viewerId: string) {
@@ -178,7 +175,6 @@ function restoreTextLayerSelection(viewerId: string) {
         '.e-pv-page-container',
         '.e-pv-page-div',
         '.e-pv-text-layer',
-        '.e-pv-text',
         '.e-disable-text-selection',
       ].join(',')
     )
@@ -229,7 +225,6 @@ ref
   const lastImportedAnnotationKeyRef = React.useRef<string | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [resourcesReady, setResourcesReady] = React.useState(false);
-  const [isTextSelectionMode, setIsTextSelectionMode] = React.useState(true);
   const viewerId = React.useMemo(
     () => `central-dms-pdf-${Math.random().toString(36).slice(2)}`,
     []
@@ -253,7 +248,9 @@ ref
         window.clearTimeout(timerId);
       });
       selectionRestoreTimersRef.current = delays.map((delay) =>
-        window.setTimeout(restoreTextSelectionIfActive, delay)
+        window.setTimeout(() => {
+          window.requestAnimationFrame(restoreTextSelectionIfActive);
+        }, delay)
       );
     },
     [restoreTextSelectionIfActive]
@@ -261,14 +258,12 @@ ref
 
   const ensureTextSelectionMode = React.useCallback(() => {
     textSelectionModeRef.current = true;
-    setIsTextSelectionMode(true);
     restoreTextSelectionIfActive();
     scheduleTextSelectionRestore();
   }, [restoreTextSelectionIfActive, scheduleTextSelectionRestore]);
 
   const suspendTextSelectionMode = React.useCallback(() => {
     textSelectionModeRef.current = false;
-    setIsTextSelectionMode(false);
   }, []);
 
   const clearAnnotationImportTimers = React.useCallback(() => {
@@ -394,9 +389,8 @@ ref
         objectUrlRef.current = objectUrl;
         lastImportedAnnotationKeyRef.current = null;
 
-        ensureTextSelectionMode();
+        textSelectionModeRef.current = true;
         viewer.load(objectUrl, '');
-        scheduleAnnotationImport([250, 750, 1500, 2500]);
       }
     };
 
@@ -414,38 +408,22 @@ ref
       disposed = true;
     };
   }, [
-    annotationStateJson,
-    enableAnnotations,
-    ensureTextSelectionMode,
     fileUrl,
     fileData,
     resourcesReady,
-    scheduleAnnotationImport,
   ]);
+
+  React.useEffect(() => {
+    if (resourcesReady) {
+      scheduleAnnotationImport([250, 750, 1500, 2500]);
+    }
+  }, [resourcesReady, scheduleAnnotationImport]);
 
   React.useEffect(() => {
     if (!resourcesReady) return;
 
-    const viewerElement = document.getElementById(viewerId);
-    if (!viewerElement) return;
-
-    const observer = new MutationObserver(() => {
-      if (textSelectionModeRef.current) {
-        scheduleTextSelectionRestore([0, 50]);
-      }
-    });
-    observer.observe(viewerElement, {
-      attributes: true,
-      attributeFilter: ['class', 'style'],
-      childList: true,
-      subtree: true,
-    });
-    scheduleTextSelectionRestore([0, 250, 1000, 2000]);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [resourcesReady, scheduleTextSelectionRestore, viewerId]);
+    scheduleTextSelectionRestore([250, 750, 1500, 2500]);
+  }, [resourcesReady, scheduleTextSelectionRestore]);
 
   React.useEffect(
     () => () => {
@@ -503,7 +481,7 @@ ref
 
   return (
     <div
-      className={`central-dms-pdf-viewer flex h-full min-h-[560px] flex-col overflow-hidden rounded-md border border-border bg-background ${isTextSelectionMode ? 'text-selection-mode' : 'annotation-mode'}`}
+      className="central-dms-pdf-viewer flex h-full min-h-[560px] flex-col overflow-hidden rounded-md border border-border bg-background"
     >
       <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
         {fileName || 'Central DMS PDF'}

@@ -45,6 +45,7 @@ import {
   type EstateManagedAssetDocument,
 } from '@/services/estate-land-management.service';
 import { getStatusBadgeClassName } from '@/lib/status-badge';
+import { getListingPriceDefaults } from '@/lib/estate-listing-pricing';
 
 const LISTINGS_PER_PAGE = 10;
 
@@ -80,15 +81,13 @@ function commercialSummary(asset: EstateManagedAsset) {
     return `${formatMoney(asset.externalMonthlyRent, currency)} / month`;
   }
   if (asset.externalListingType === 'Lease') {
-    const annualCharge = asset.externalMonthlyRent;
-    return `${formatMoney(annualCharge, currency)} / year`;
+    return `${formatMoney(asset.externalListingPrice ?? asset.externalMonthlyRent, currency)} full term`;
   }
   if (asset.externalListingType === 'SaleAndRent') {
     return `${formatMoney(asset.externalSalePrice, currency)} sale · ${formatMoney(asset.externalMonthlyRent, currency)} / month`;
   }
   if (asset.externalListingType === 'SaleAndLease') {
-    const annualCharge = asset.externalMonthlyRent;
-    return `${formatMoney(asset.externalSalePrice, currency)} sale · ${formatMoney(annualCharge, currency)} / year`;
+    return `${formatMoney(asset.externalSalePrice, currency)} sale · ${formatMoney(asset.externalListingPrice ?? asset.externalMonthlyRent, currency)} lease`;
   }
   return formatMoney(
     asset.externalSalePrice ||
@@ -156,6 +155,9 @@ export default function EstatePropertyListingsPage() {
     externalListingStatus: 'Published',
     externalSalePrice: '',
     externalMonthlyRent: '',
+    externalLeaseAmount: '',
+    externalGroundRentRequired: '',
+    externalPremiumChargeRequired: '',
     externalListingCurrency: 'GHS',
     externalListingNotes: '',
   });
@@ -251,6 +253,7 @@ export default function EstatePropertyListingsPage() {
       selected.externalListingType && selected.externalListingType !== 'None'
         ? selected.externalListingType
         : null;
+    const listingPrices = getListingPriceDefaults(selected);
     setForm({
       isPublishedToExternalPortal: selected.isPublishedToExternalPortal,
       externalListingType:
@@ -260,15 +263,9 @@ export default function EstatePropertyListingsPage() {
       externalListingStatus:
         selected.externalListingStatus ||
         (selected.listingScope === 'demarcation' ? 'Draft' : 'Published'),
-      externalSalePrice:
-        selected.externalSalePrice == null &&
-        selected.externalListingType !== 'Rent'
-          ? selected.externalListingPrice == null
-            ? ''
-            : String(selected.externalListingPrice)
-          : selected.externalSalePrice == null
-            ? ''
-            : String(selected.externalSalePrice),
+      externalSalePrice: listingPrices.salePrice == null
+        ? ''
+        : String(listingPrices.salePrice),
       externalMonthlyRent:
         selected.externalMonthlyRent == null &&
         includesRecurringCharge(savedListingType ?? selected.externalListingType)
@@ -278,6 +275,19 @@ export default function EstatePropertyListingsPage() {
           : selected.externalMonthlyRent == null
             ? ''
             : String(selected.externalMonthlyRent),
+      externalLeaseAmount: listingPrices.leasePrice == null
+        ? ''
+        : String(listingPrices.leasePrice),
+      externalGroundRentRequired:
+        selected.externalGroundRentRequired == null
+          ? selected.isPublishedToExternalPortal && selected.groundRentPayable != null && selected.groundRentPayable > 0
+            ? 'Yes'
+            : ''
+          : selected.externalGroundRentRequired ? 'Yes' : 'No',
+      externalPremiumChargeRequired:
+        selected.externalPremiumChargeRequired == null
+          ? ''
+          : selected.externalPremiumChargeRequired ? 'Yes' : 'No',
       externalListingCurrency: selected.externalListingCurrency || 'GHS',
       externalListingNotes: selected.externalListingNotes || '',
     });
@@ -337,47 +347,27 @@ export default function EstatePropertyListingsPage() {
     selected &&
       form.isPublishedToExternalPortal &&
       listingIncludesCharge &&
-      listingIsLease &&
       selectedIsLand &&
+      form.externalGroundRentRequired === 'Yes' &&
       !(selected.groundRentPayable != null && selected.groundRentPayable > 0)
   );
-  const leaseAmountBelowGroundRent = Boolean(
-    selected &&
-      form.isPublishedToExternalPortal &&
-      listingIncludesCharge &&
-      listingIsLease &&
-      selectedIsLand &&
-      selected.groundRentPayable != null &&
-      selected.groundRentPayable > 0 &&
-      form.externalMonthlyRent &&
-      Number(form.externalMonthlyRent) < selected.groundRentPayable
+  const listingPublicationNeedsGroundRentChoice = Boolean(
+    form.isPublishedToExternalPortal && listingIncludesCharge && selectedIsLand && !form.externalGroundRentRequired
   );
-  const minimumSalePrice =
-    selected?.listingScope === 'demarcation' &&
-    selected.targetSalePrice != null &&
-    selected.targetSalePrice > 0
-      ? selected.targetSalePrice
-      : null;
+  const listingPublicationNeedsPremiumChoice = Boolean(
+    form.isPublishedToExternalPortal && listingIncludesCharge && !form.externalPremiumChargeRequired
+  );
+  const recurringAmount = !listingIsLease && form.externalMonthlyRent
+    ? Number(form.externalMonthlyRent)
+    : null;
+  const leaseAmount = listingIsLease && form.externalLeaseAmount
+    ? Number(form.externalLeaseAmount)
+    : null;
+  const listingPriceDefaults = selected ? getListingPriceDefaults(selected) : null;
+  const landBankSalePrice = listingPriceDefaults?.landBankPrice ?? null;
 
   const saveListing = async () => {
     if (!selected) return;
-    const salePriceValue =
-      listingIncludesSale && form.externalSalePrice
-        ? Number(form.externalSalePrice)
-        : null;
-    if (
-      minimumSalePrice != null &&
-      salePriceValue != null &&
-      salePriceValue < minimumSalePrice
-    ) {
-      toast.error(
-        `Sale price cannot be below the minimum sale price of ${formatMoney(
-          minimumSalePrice,
-          form.externalListingCurrency || selected.currency
-        )}.`
-      );
-      return;
-    }
     if (listingLockedByWorkflow) {
       toast.error(
         'This listing is reserved for an active Estate case and cannot be republished manually.'
@@ -387,18 +377,17 @@ export default function EstatePropertyListingsPage() {
     if (listingPublicationBlockedByGroundRent) {
       toast.error(
         selected.listingScope === 'demarcation'
-          ? 'Assess annual ground rent for this demarcated land portion before publishing the lease listing.'
-          : 'Assess annual ground rent before publishing this land lease listing.'
+          ? 'Assess annual ground rent for this demarcated land portion before publishing.'
+          : 'Assess annual ground rent before publishing this land listing.'
       );
       return;
     }
-    if (leaseAmountBelowGroundRent) {
-      toast.error(
-        `Lease amount per year cannot be below the approved ground rent of ${formatMoney(
-          selected.groundRentPayable,
-          form.externalListingCurrency || selected.currency
-        )}.`
-      );
+    if (listingPublicationNeedsGroundRentChoice) {
+      toast.error('Select whether annual ground rent is required.');
+      return;
+    }
+    if (listingPublicationNeedsPremiumChoice) {
+      toast.error('Select whether a premium charge is required.');
       return;
     }
 
@@ -407,28 +396,6 @@ export default function EstatePropertyListingsPage() {
       const resolvedListingType = form.externalListingType;
       const resolvedIncludesSale = includesSale(resolvedListingType);
       const resolvedIncludesCharge = includesRecurringCharge(resolvedListingType);
-      const resolvedIsLease = isLeaseListing(resolvedListingType);
-      const recurringAmount =
-        resolvedIncludesCharge && form.externalMonthlyRent
-            ? Number(form.externalMonthlyRent)
-            : null;
-      if (
-        resolvedIncludesCharge &&
-        resolvedIsLease &&
-        selected.assetType === EstateManagedAssetType.Land &&
-        selected.groundRentPayable != null &&
-        selected.groundRentPayable > 0 &&
-        recurringAmount != null &&
-        recurringAmount < selected.groundRentPayable
-      ) {
-        toast.error(
-          `Lease amount per year cannot be below the approved ground rent of ${formatMoney(
-            selected.groundRentPayable,
-            form.externalListingCurrency || selected.currency
-          )}.`
-        );
-        return;
-      }
       const payload = {
         isPublishedToExternalPortal: form.isPublishedToExternalPortal,
         externalListingType: resolvedListingType,
@@ -437,12 +404,18 @@ export default function EstatePropertyListingsPage() {
           ? form.externalSalePrice
             ? Number(form.externalSalePrice)
             : null
-          : recurringAmount,
+          : listingIsLease ? leaseAmount : recurringAmount,
         externalSalePrice:
           resolvedIncludesSale && form.externalSalePrice
             ? Number(form.externalSalePrice)
             : null,
         externalMonthlyRent: recurringAmount,
+        externalGroundRentRequired: selectedIsLand && resolvedIncludesCharge
+          ? form.externalGroundRentRequired === 'Yes'
+          : null,
+        externalPremiumChargeRequired: resolvedIncludesCharge
+          ? form.externalPremiumChargeRequired === 'Yes'
+          : null,
         externalLeaseTermMonths: null,
         externalListingCurrency: form.externalListingCurrency,
         externalListingNotes: form.externalListingNotes,
@@ -492,6 +465,8 @@ export default function EstatePropertyListingsPage() {
         externalListingPrice: null,
         externalSalePrice: null,
         externalMonthlyRent: null,
+        externalGroundRentRequired: null,
+        externalPremiumChargeRequired: null,
         externalLeaseTermMonths: null,
         externalListingCurrency: form.externalListingCurrency,
         externalListingNotes: null,
@@ -883,7 +858,7 @@ export default function EstatePropertyListingsPage() {
                         <Label>Sale price</Label>
                         <Input
                           type="number"
-                          min={minimumSalePrice ?? 0}
+                          min="0"
                           disabled={listingLockedByWorkflow}
                           value={form.externalSalePrice}
                           onChange={(event) =>
@@ -893,23 +868,23 @@ export default function EstatePropertyListingsPage() {
                             }))
                           }
                           placeholder={
-                            minimumSalePrice != null
-                              ? `Minimum ${formatMoney(
-                                  minimumSalePrice,
+                            landBankSalePrice != null
+                              ? `Land Bank ${formatMoney(
+                                  landBankSalePrice,
                                   form.externalListingCurrency ||
                                     selected.currency
                                 )}`
                               : 'Enter sale price'
                           }
                         />
-                        {minimumSalePrice != null ? (
+                        {landBankSalePrice != null ? (
                           <p className="text-xs text-muted-foreground">
-                            Minimum sale price:{' '}
+                            Land Bank price:{' '}
                             {formatMoney(
-                              minimumSalePrice,
+                              landBankSalePrice,
                               form.externalListingCurrency || selected.currency
                             )}
-                            . You can publish higher, but not lower.
+                            . This is the default; the portal listing price may be changed.
                           </p>
                         ) : null}
                       </div>
@@ -917,56 +892,73 @@ export default function EstatePropertyListingsPage() {
                     {listingIncludesCharge ? (
                       <div className="space-y-2">
                         <Label>
-                          {selectedIsLand && listingIsLease
-                            ? 'Lease amount per year'
-                            : listingIsLease
-                              ? 'Amount per year'
-                              : 'Amount per month'}
+                          {listingIsLease ? 'Full-term lease amount' : 'Rent per month'}
                         </Label>
                         <Input
                           type="number"
                           min="0"
                           disabled={listingLockedByWorkflow}
-                          value={form.externalMonthlyRent}
+                          value={listingIsLease ? form.externalLeaseAmount : form.externalMonthlyRent}
                           onChange={(event) =>
                             setForm((current) => ({
                               ...current,
-                              externalMonthlyRent: event.target.value,
+                              [listingIsLease ? 'externalLeaseAmount' : 'externalMonthlyRent']: event.target.value,
                             }))
                           }
-                          placeholder={
-                            selectedIsLand && listingIsLease
-                              ? 'Enter lease amount per year'
-                              : listingIsLease
-                                ? 'Enter yearly lease amount'
-                                : 'Enter monthly rent'
-                          }
+                          placeholder={listingIsLease ? 'Enter full lease amount' : 'Enter monthly rent'}
                         />
+                        {listingIsLease && landBankSalePrice != null ? (
+                          <p className="text-xs text-muted-foreground">
+                            Land Bank amount: {formatMoney(landBankSalePrice, form.externalListingCurrency || selected.currency)}. This is the default and may be changed for the listing.
+                          </p>
+                        ) : null}
+                        {listingIsLease && listingPriceDefaults?.legacyRecurringLeasePrice && selected.isPublishedToExternalPortal ? (
+                          <p className="text-xs text-amber-700">
+                            Current published amount: {formatMoney(selected.externalListingPrice, form.externalListingCurrency || selected.currency)}. Save this listing to apply the Land Bank full-term amount.
+                          </p>
+                        ) : null}
                         <p className="text-xs text-muted-foreground">
                           Sales will capture the agreed customer duration before
                           handing the case to Estate.
                         </p>
-                        {selectedIsLand &&
-                        listingIsLease &&
-                        selected.groundRentPayable != null &&
-                        selected.groundRentPayable > 0 ? (
-                          <p className="text-xs text-muted-foreground">
-                            Approved ground rent floor:{' '}
-                            {formatMoney(
-                              selected.groundRentPayable,
-                              form.externalListingCurrency || selected.currency
-                            )}
-                            . The yearly lease amount cannot be lower.
-                          </p>
-                        ) : null}
+                      </div>
+                    ) : null}
+                    {listingIncludesCharge ? (
+                      <div className="space-y-2">
+                        <Label>Premium charge required?</Label>
+                        <Select
+                          value={form.externalPremiumChargeRequired}
+                          onValueChange={(value) => setForm((current) => ({ ...current, externalPremiumChargeRequired: value }))}
+                          disabled={listingLockedByWorkflow}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Select Yes or No" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Yes">Yes</SelectItem>
+                            <SelectItem value="No">No</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     ) : null}
                   </div>
                 </div>
 
-                {listingIncludesCharge &&
-                listingIsLease &&
-                selectedIsLand ? (
+                {listingIncludesCharge && selectedIsLand ? (
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label>Annual ground rent required?</Label>
+                      <Select
+                        value={form.externalGroundRentRequired}
+                        onValueChange={(value) => setForm((current) => ({ ...current, externalGroundRentRequired: value }))}
+                        disabled={listingLockedByWorkflow}
+                      >
+                        <SelectTrigger><SelectValue placeholder="Select Yes or No" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {form.externalGroundRentRequired === 'Yes' ? (
                   <div
                     className={`rounded-md border p-4 ${
                       selected.groundRentPayable != null &&
@@ -979,11 +971,11 @@ export default function EstatePropertyListingsPage() {
                     <p className="mt-1 text-sm">
                       {selected.groundRentPayable != null &&
                       selected.groundRentPayable > 0
-                        ? `Annual ground rent floor assessed at ${formatMoney(
+                        ? `Annual ground rent assessed at ${formatMoney(
                             selected.groundRentPayable,
                             form.externalListingCurrency || selected.currency
-                          )}. The principal yearly lease amount must be equal to or above this floor. Billing will only start after customer acceptance, signed agreement, and move-in / agreement start date.`
-                        : 'Assess and approve annual ground rent through the applicable Estate SOP before publishing this land lease listing. Billing account setup happens later after customer acceptance, signed agreement, and move-in / agreement start date.'}
+                          )}. It is billed separately from ${listingIsLease ? 'the full-term lease amount' : 'monthly rent'}. Billing will only start after customer acceptance, signed agreement, and move-in / agreement start date.`
+                        : 'Assess and approve annual ground rent through the applicable Estate SOP before publishing. Billing account setup happens later after customer acceptance, signed agreement, and move-in / agreement start date.'}
                     </p>
                     {selected.groundRentPayable == null ||
                     selected.groundRentPayable <= 0 ? (
@@ -1004,6 +996,8 @@ export default function EstatePropertyListingsPage() {
                           </Link>
                         </Button>
                       </div>
+                    ) : null}
+                  </div>
                     ) : null}
                   </div>
                 ) : null}
@@ -1045,17 +1039,20 @@ export default function EstatePropertyListingsPage() {
                       isSaving ||
                       listingLockedByWorkflow ||
                       listingPublicationBlockedByGroundRent ||
-                      leaseAmountBelowGroundRent
+                      listingPublicationNeedsGroundRentChoice ||
+                      listingPublicationNeedsPremiumChoice
                     }
                     title={
                       listingLockedByWorkflow
                         ? 'Reserved listings cannot be republished manually.'
+                        : listingPublicationNeedsPremiumChoice
+                        ? 'Select whether a premium charge is required.'
+                        : listingPublicationNeedsGroundRentChoice
+                        ? 'Select whether annual ground rent is required.'
                         : listingPublicationBlockedByGroundRent
                         ? selected.listingScope === 'demarcation'
                           ? 'Assess annual ground rent for this demarcated land portion before publishing.'
-                          : 'Assess annual ground rent before publishing this land lease listing.'
-                        : leaseAmountBelowGroundRent
-                          ? 'Lease amount per year cannot be below the approved ground rent.'
+                          : 'Assess annual ground rent before publishing this land listing.'
                         : undefined
                     }
                   >

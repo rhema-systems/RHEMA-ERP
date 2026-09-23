@@ -31,9 +31,11 @@ import {
   externalEstateServicesService,
   type ExternalEstateRequestDocument,
   type ExternalEstateServiceRequest,
+  type ExternalPropertyPortfolio,
 } from '@/services/external-estate-services.service';
 
 const PROPERTY_LISTING_SOURCE = 'External Portal - Estate Listings';
+const SALES_PROPERTY_HANDOFF_SOURCE = 'Sales - Estate Enquiry';
 const REQUESTS_PER_PAGE = 10;
 
 function formatDate(value: string) {
@@ -58,10 +60,11 @@ function requestTypeLabel(request: ExternalEstateServiceRequest) {
     return 'Purchase bid';
   }
 
-  if (
-    request.title.toLowerCase().startsWith('lease request') ||
-    request.title.toLowerCase().startsWith('rental request')
-  ) {
+  if (request.title.toLowerCase().startsWith('lease request')) {
+    return 'Lease request';
+  }
+
+  if (request.title.toLowerCase().startsWith('rental request')) {
     return 'Rental request';
   }
 
@@ -76,6 +79,13 @@ function isRentalRequest(request: ExternalEstateServiceRequest) {
     request.title.toLowerCase().startsWith('lease request') ||
     request.title.toLowerCase().startsWith('rental request')
   );
+}
+
+function isSaleOrLeaseRequest(request: ExternalEstateServiceRequest) {
+  const requestType = fieldValue(request, 'requestType').toLowerCase();
+  return requestType.includes('purchase') || requestType.includes('sale') || requestType.includes('lease') ||
+    request.title.toLowerCase().startsWith('purchase bid') ||
+    request.title.toLowerCase().startsWith('lease request');
 }
 
 function hasPremiumCharge(request: ExternalEstateServiceRequest) {
@@ -97,20 +107,57 @@ function fieldValue(
   return request.fieldValues?.[key] || '';
 }
 
+function invoicesForRequest(
+  request: ExternalEstateServiceRequest,
+  portfolio: ExternalPropertyPortfolio | null
+) {
+  const invoiceIds = new Set([
+    fieldValue(request, 'premiumChargeInvoiceId'),
+    fieldValue(request, 'saleInvoiceId'),
+  ].filter(Boolean));
+  const references = [
+    request.referenceNumber,
+    fieldValue(request, 'legalConveyanceReference'),
+    fieldValue(request, 'listingReference'),
+    fieldValue(request, 'propertyUnit'),
+  ].filter((value): value is string => Boolean(value && value.length > 4));
+
+  return (portfolio?.invoices || []).filter((invoice) => {
+    if (invoiceIds.has(invoice.id)) return true;
+    const source = `${invoice.reference || ''} ${invoice.description || ''}`.toLowerCase();
+    return references.some((reference) => source.includes(reference.toLowerCase()));
+  });
+}
+
 function isApprovedStatus(value: string) {
   const normalized = value.trim().toLowerCase();
   return normalized === 'approved' || normalized.startsWith('approved ');
 }
 
+function isLegalAgreementReleased(request: ExternalEstateServiceRequest) {
+  const status = fieldValue(request, 'legalAgreementReviewStatus').toLowerCase();
+  return status.includes('head of legal') && status.includes('signed');
+}
+
+function isPropertyListingRequest(request: ExternalEstateServiceRequest) {
+  return (
+    request.sourceDepartment === PROPERTY_LISTING_SOURCE ||
+    request.sourceDepartment === SALES_PROPERTY_HANDOFF_SOURCE
+  );
+}
+
 function isApprovedForCustomerAction(request: ExternalEstateServiceRequest) {
+  const acceptanceStatus = fieldValue(
+    request,
+    'customerAcceptanceStatus'
+  ).toLowerCase();
   return (
     !isListingUnavailable(request) &&
     isApprovedStatus(fieldValue(request, 'decisionStatus')) &&
+    isLegalAgreementReleased(request) &&
     Boolean(fieldValue(request, 'generatedAgreementReference')) &&
     (!isRentalRequest(request) || Boolean(fieldValue(request, 'moveInDate'))) &&
-    ['pending', ''].includes(
-      fieldValue(request, 'customerAcceptanceStatus').toLowerCase()
-    )
+    ['pending', '', 'accepted in sales'].includes(acceptanceStatus)
   );
 }
 
@@ -118,6 +165,7 @@ function canUploadSignedAgreement(request: ExternalEstateServiceRequest) {
   return (
     !isListingUnavailable(request) &&
     isApprovedStatus(fieldValue(request, 'decisionStatus')) &&
+    isLegalAgreementReleased(request) &&
     fieldValue(request, 'customerAcceptanceStatus').toLowerCase() ===
       'accepted' &&
     Boolean(fieldValue(request, 'generatedAgreementReference')) &&
@@ -130,6 +178,7 @@ function canDownloadGeneratedAgreement(request: ExternalEstateServiceRequest) {
   return (
     !isListingUnavailable(request) &&
     isApprovedStatus(fieldValue(request, 'decisionStatus')) &&
+    isLegalAgreementReleased(request) &&
     Boolean(fieldValue(request, 'generatedAgreementReference'))
   );
 }
@@ -201,6 +250,7 @@ export function PropertyRequestsView({
   const [requests, setRequests] = React.useState<
     ExternalEstateServiceRequest[]
   >([]);
+  const [portfolio, setPortfolio] = React.useState<ExternalPropertyPortfolio | null>(null);
   const [requestPage, setRequestPage] = React.useState(1);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -222,6 +272,21 @@ export function PropertyRequestsView({
   >({});
   const [previewRequest, setPreviewRequest] =
     React.useState<ExternalEstateServiceRequest | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = React.useState<ExternalPropertyPortfolio['invoices'][number] | null>(null);
+
+  const downloadInvoice = async (invoice: ExternalPropertyPortfolio['invoices'][number]) => {
+    try {
+      const blob = await externalEstateServicesService.downloadPropertyInvoice(invoice.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${invoice.invoiceNumber}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : 'Could not download the invoice.');
+    }
+  };
 
   const downloadGeneratedAgreement = async (
     request: ExternalEstateServiceRequest
@@ -377,11 +442,7 @@ export function PropertyRequestsView({
         file
       );
       const submitted = await externalEstateServicesService.getMyRequests();
-      setRequests(
-        submitted.filter(
-          (item) => item.sourceDepartment === PROPERTY_LISTING_SOURCE
-        )
-      );
+      setRequests(submitted.filter(isPropertyListingRequest));
       setIntakeFiles((current) => ({ ...current, [document.id]: null }));
       toast({
         title: 'Document uploaded',
@@ -404,17 +465,21 @@ export function PropertyRequestsView({
 
     const load = async () => {
       try {
-        const submitted = await externalEstateServicesService.getMyRequests();
+        const [submitted, propertyPortfolio] = await Promise.all([
+          selectedRequestId
+            ? externalEstateServicesService.getRequest(selectedRequestId).then((request) => [request])
+            : externalEstateServicesService.getMyRequests(),
+          selectedRequestId
+            ? externalEstateServicesService.getMyProperties().catch(() => null)
+            : Promise.resolve(null),
+        ]);
         if (mounted) {
-          setRequests(
-            submitted.filter(
-              (request) => request.sourceDepartment === PROPERTY_LISTING_SOURCE
-            )
-          );
+          setRequests(submitted.filter(isPropertyListingRequest));
+          setPortfolio(propertyPortfolio);
         }
       } catch {
         if (mounted) {
-          setError('Could not load your property bids and rental requests.');
+          setError('Could not load your property request.');
         }
       } finally {
         if (mounted) setIsLoading(false);
@@ -425,7 +490,7 @@ export function PropertyRequestsView({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [selectedRequestId]);
 
   const visibleRequests = selectedRequestId
     ? requests.filter((request) => request.id === selectedRequestId)
@@ -455,6 +520,18 @@ export function PropertyRequestsView({
 
   return (
     <>
+      <CentralDocumentViewerDialog
+        open={Boolean(selectedInvoice)}
+        onOpenChange={(open) => { if (!open) setSelectedInvoice(null); }}
+        enableAnnotations={false}
+        file={selectedInvoice ? {
+          title: `Invoice ${selectedInvoice.invoiceNumber}`,
+          fileName: `${selectedInvoice.invoiceNumber}.pdf`,
+          renditionPath: `/api/estate/external/invoices/${encodeURIComponent(selectedInvoice.id)}/pdf`,
+          contentType: 'application/pdf',
+          sourceLabel: 'Customer property invoice',
+        } : null}
+      />
       <CentralDocumentViewerDialog
         open={Boolean(previewRequest)}
         onOpenChange={(open) => {
@@ -552,7 +629,9 @@ export function PropertyRequestsView({
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="font-medium text-slate-900">
-                      {request.referenceNumber || request.title}
+                      {selectedRequestId
+                        ? request.referenceNumber || request.title
+                        : <Link href={`/external-portal/my-property-requests/${request.id}`} className="text-blue-700 hover:underline">{request.referenceNumber || request.title}</Link>}
                     </div>
                     <div className="mt-1 text-slate-600">{request.title}</div>
                   </div>
@@ -561,9 +640,23 @@ export function PropertyRequestsView({
                     <Badge variant="secondary">
                       {workflowStatusLabel(request)}
                     </Badge>
+                    {!selectedRequestId ? <Button asChild size="sm" variant="outline"><Link href={`/external-portal/my-property-requests/${request.id}`}><Eye className="mr-2 h-4 w-4" />View request</Link></Button> : null}
                   </div>
                 </div>
                 <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                  <div>
+                    <span className="text-slate-400">Parcel / property</span>
+                    <div className="mt-1 font-medium text-slate-700">{fieldValue(request, 'listingName') || fieldValue(request, 'listingReference') || fieldValue(request, 'propertyUnit') || 'Not recorded'}</div>
+                    {fieldValue(request, 'listingReference') ? <div>{fieldValue(request, 'listingReference')}</div> : null}
+                  </div>
+                  {fieldValue(request, 'listingLocation') ? <div><span className="text-slate-400">Location</span><div className="mt-1 font-medium text-slate-700">{fieldValue(request, 'listingLocation')}</div></div> : null}
+                  {fieldValue(request, 'listingArea') ? <div><span className="text-slate-400">Area</span><div className="mt-1 font-medium text-slate-700">{fieldValue(request, 'listingArea')} {fieldValue(request, 'listingAreaUnit')}</div></div> : null}
+                  <div>
+                    <span className="text-slate-400">{isSaleOrLeaseRequest(request) ? 'Full-term amount' : 'Monthly rent'}</span>
+                    <div className="mt-1 font-medium text-slate-700">{fieldValue(request, 'offerAmount') || fieldValue(request, 'listingPrice') ? formatMoney(fieldValue(request, 'offerAmount') || fieldValue(request, 'listingPrice'), fieldValue(request, 'currency') || 'GHS') : 'Not recorded'}</div>
+                  </div>
+                  {fieldValue(request, 'requestedLeaseTerm') ? <div><span className="text-slate-400">Term</span><div className="mt-1 font-medium text-slate-700">{fieldValue(request, 'requestedLeaseTerm')}</div></div> : null}
+                  {fieldValue(request, 'groundRentRequired').toLowerCase() === 'yes' ? <div><span className="text-slate-400">Ground rent</span><div className="mt-1 font-medium text-slate-700">Billed separately</div></div> : null}
                   <div>
                     <span className="text-slate-400">Current stage</span>
                     <div className="mt-1 font-medium text-slate-700">
@@ -602,11 +695,11 @@ export function PropertyRequestsView({
                   {isRentalRequest(request) ? (
                     <div>
                       <span className="text-slate-400">
-                        Agreement move-in / billing start
+                        {fieldValue(request, 'requestType').toLowerCase().includes('lease') ? 'Planned move-in' : 'Agreement move-in / billing start'}
                       </span>
                       <div className="mt-1 font-medium text-slate-700">
                         {isFullyExecuted(request)
-                          ? fieldValue(request, 'billingStartDate') ||
+                          ? (fieldValue(request, 'requestType').toLowerCase().includes('lease') ? '' : fieldValue(request, 'billingStartDate')) ||
                             fieldValue(request, 'moveInDate') ||
                             'Pending'
                           : fieldValue(request, 'moveInDate')
@@ -646,7 +739,7 @@ export function PropertyRequestsView({
                   </div>
                 ) : null}
 
-                {isRentalRequest(request) && hasPremiumCharge(request) ? (
+                {hasPremiumCharge(request) ? (
                   <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-4">
                     <div className="flex items-center gap-2 font-medium text-blue-900">
                       <ClipboardList className="h-4 w-4" />
@@ -690,9 +783,63 @@ export function PropertyRequestsView({
                     </div>
                     <p className="mt-3 text-sm text-blue-800">
                       Estate continues agreement processing after Finance
-                      confirms this premium charge as paid or Estate records an
-                      approved waiver.
+                      confirms this premium charge as paid. Issued invoices and
+                      receipts are available under Bills &amp; Receipts.
                     </p>
+                  </div>
+                ) : null}
+
+                {isSaleOrLeaseRequest(request) &&
+                (fieldValue(request, 'agreementExecutionStatus').toLowerCase() === 'fully executed' ||
+                  fieldValue(request, 'saleInvoiceReference')) ? (
+                  <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center gap-2 font-medium text-slate-900">
+                      <ClipboardList className="h-4 w-4" />
+                      {fieldValue(request, 'requestType').toLowerCase().includes('lease') ? 'Lease' : 'Purchase'} balance
+                    </div>
+                    <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+                      <div><span className="text-slate-500">Estate balance</span><div className="mt-1 font-medium">{formatMoney(fieldValue(request, 'estateRemainingAmount') || '0', fieldValue(request, 'currency') || 'GHS')}</div></div>
+                      <div><span className="text-slate-500">Invoice</span><div className="mt-1 font-medium">{fieldValue(request, 'saleInvoiceReference') || (Number(fieldValue(request, 'estateRemainingAmount')) > 0 ? 'Awaiting Finance invoice' : 'No Estate invoice required')}</div></div>
+                      <div><span className="text-slate-500">Payment</span><div className="mt-1 font-medium">{fieldValue(request, 'salePaymentStatus') || 'Awaiting Finance'}</div></div>
+                    </div>
+                    <Link href="/external-portal/my-properties?tab=bills" className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-blue-700 hover:underline">View bills and receipts <ArrowLeft className="h-4 w-4 rotate-180" /></Link>
+                  </div>
+                ) : null}
+
+                {selectedRequestId && isSaleOrLeaseRequest(request) ? (
+                  <div className="mt-4 border-t pt-4 text-sm">
+                    <div className="font-medium text-slate-900">Transfer and conveyance</div>
+                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                      <div><span className="text-slate-500">Legal reference</span><div className="mt-1 font-medium">{fieldValue(request, 'legalConveyanceReference') || 'Not started'}</div></div>
+                      <div><span className="text-slate-500">Status</span><div className="mt-1 font-medium">{fieldValue(request, 'legalConveyanceStatus') || 'Awaiting signed agreement and payment'}</div></div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedRequestId ? (
+                  <div className="mt-4 border-t pt-4 text-sm">
+                    <div className="font-medium text-slate-900">Bills &amp; Receipts</div>
+                    <div className="mt-3 space-y-3">
+                      {invoicesForRequest(request, portfolio).map((invoice) => (
+                        <div key={invoice.id} className="border p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div><div className="font-medium">{invoice.invoiceNumber}</div><div className="text-slate-500">{invoice.description || invoice.reference || 'Property charge'}</div></div>
+                            <div className="text-right"><div className="font-medium">Outstanding {formatMoney(String(invoice.balanceAmount), invoice.currencyCode)}</div><div className="text-slate-500">Paid {formatMoney(String(invoice.paidAmount), invoice.currencyCode)}</div></div>
+                          </div>
+                          <div className="mt-2 flex gap-2">
+                            <Button type="button" size="sm" variant="outline" onClick={() => setSelectedInvoice(invoice)}><Eye className="mr-2 h-4 w-4" />View invoice</Button>
+                            <Button type="button" size="sm" variant="outline" onClick={() => void downloadInvoice(invoice)}><Download className="mr-2 h-4 w-4" />Download</Button>
+                          </div>
+                          {invoice.receipts.map((receipt) => (
+                            <div key={receipt.customerPaymentId} className="mt-2 flex flex-wrap justify-between gap-2 border-t pt-2 text-slate-600">
+                              <span>{receipt.paymentNumber} · {formatDate(receipt.paymentDate)}</span>
+                              <span>{formatMoney(String(receipt.amount), receipt.paymentCurrencyCode)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                      {invoicesForRequest(request, portfolio).length === 0 ? <p className="text-slate-500">No issued bill is linked to this request yet.</p> : null}
+                    </div>
                   </div>
                 ) : null}
 

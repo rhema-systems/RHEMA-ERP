@@ -855,8 +855,8 @@ export function LeaseSetupWorkspace() {
                                   Non-land lease charge
                                 </Badge>
                                 <span className="text-xs text-muted-foreground">
-                                  Use the annual lease charge; ground rent does
-                                  not apply.
+                                  Record the full-term lease amount separately;
+                                  ground rent does not apply.
                                 </span>
                               </>
                             ) : (

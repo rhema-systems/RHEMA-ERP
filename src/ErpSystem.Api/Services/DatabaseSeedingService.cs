@@ -1305,16 +1305,16 @@ namespace ErpSystem.Web.Services
                                 "Legal review note"
                             ]),
                         LegalStep(
-                            "Head of Legal Release",
+                            "Head of Legal Signature",
                             WorkflowStepType.Approval,
                             "Head of Legal",
                             [
                                 "Confirm Legal Officer recommendation",
-                                "Record release decision",
-                                "Return approved reference to Property Management"
+                                "Record Head of Legal signature",
+                                "Dispatch signed agreement to the customer portal"
                             ],
                             [
-                                "Approved / released agreement"
+                                "Head of Legal signed agreement"
                             ])
                     ])
             ];

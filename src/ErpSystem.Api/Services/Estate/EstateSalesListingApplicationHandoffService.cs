@@ -162,7 +162,13 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["listingId"] = request.ListingId.ToString(),
             ["listingRecordType"] = demarcation is null ? "EstateManagedAsset" : "EstateLandDemarcation",
             ["listingReference"] = listingReference,
+            ["listingName"] = listingName,
+            ["listingLocation"] = asset.Location,
+            ["listingArea"] = (demarcation is null ? asset.AreaValue : demarcation.AreaSquareFeet).ToString(),
+            ["listingAreaUnit"] = demarcation is null ? asset.AreaUnit : "sq ft",
             ["listingType"] = demarcation?.ExternalListingType ?? asset.ExternalListingType,
+            ["groundRentRequired"] = (demarcation?.ExternalGroundRentRequired ?? asset.ExternalGroundRentRequired) == true ? "Yes" : "No",
+            ["premiumChargeRequired"] = (demarcation?.ExternalPremiumChargeRequired ?? asset.ExternalPremiumChargeRequired) == true ? "Yes" : "No",
             ["requestType"] = requestLabel,
             ["listingPrice"] = amount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             ["offerAmount"] = requestType == "Purchase" ? amount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
@@ -172,7 +178,7 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["salesPaymentReference"] = TruncateOptional(request.SalesPaymentReference, 200),
             ["estateRemainingAmount"] = estateRemainingAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
             ["salePaymentCheckStatus"] = BuildSalesPaymentCheckStatus(currency, amount, salesAmountPaid, estateRemainingAmount),
-            ["salePaymentStatus"] = requestType == "Purchase"
+            ["salePaymentStatus"] = requestType is "Purchase" or "Lease"
                 ? estateRemainingAmount <= 0m ? "Paid in full" : salesAmountPaid > 0m ? "Part-paid in Sales" : "Pending Estate payment"
                 : null,
             ["requestMessage"] = TruncateOptional(request.Notes, 1000),

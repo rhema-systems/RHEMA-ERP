@@ -2,6 +2,8 @@
 const isStandaloneBuild = process.env.NEXT_OUTPUT === 'standalone';
 
 const nextConfig = {
+  // Keep dev hot-reload artifacts from replacing the production build during local UAT.
+  distDir: process.env.NODE_ENV === 'development' ? '.next-dev' : '.next',
   // `next start` is used for local UAT and needs the regular .next output. Docker opts into
   // standalone explicitly through NEXT_OUTPUT=standalone (see Dockerfile).
   output: isStandaloneBuild ? 'standalone' : undefined,
@@ -47,6 +49,10 @@ const nextConfig = {
   
   // Webpack configuration
   webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
+    if (!dev && !isServer && process.env.NEXT_DISABLE_CLIENT_MINIFY === 'true') {
+      config.optimization.minimize = false;
+    }
+
     return config;
   },
   

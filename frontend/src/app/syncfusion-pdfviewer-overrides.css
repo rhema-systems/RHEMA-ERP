@@ -1,0 +1,11 @@
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-viewer-container,
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-text-layer,
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-text,
+.central-dms-pdf-viewer .e-pdfviewer .e-enable-text-selection,
+.central-dms-pdf-viewer .e-pdfviewer .e-disable-text-selection,
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-text-selection-none {
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}

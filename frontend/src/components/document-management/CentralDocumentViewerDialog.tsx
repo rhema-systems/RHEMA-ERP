@@ -184,6 +184,10 @@ export function CentralDocumentViewerDialog({
   const [previewData, setPreviewData] = React.useState<Uint8Array | null>(
     null
   );
+  const [savedPreview, setSavedPreview] = React.useState<{
+    versionId: string;
+    data: Uint8Array;
+  } | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [downloadingFormat, setDownloadingFormat] = React.useState<
@@ -228,9 +232,16 @@ export function CentralDocumentViewerDialog({
 
   React.useEffect(() => {
     let cancelled = false;
-    setPreviewData(null);
     const currentFile = localFile;
     const secureApiUrl = view.url?.startsWith('/api/') ? view.url : null;
+
+    if (open && currentFile?.versionId && savedPreview?.versionId === currentFile.versionId) {
+      setPreviewData(savedPreview.data);
+      setIsLoadingPreview(false);
+      return () => undefined;
+    }
+
+    setPreviewData(null);
 
     if (open && view.status === 'generated' && currentFile?.pdfData) {
       setPreviewData(currentFile.pdfData);
@@ -307,6 +318,7 @@ export function CentralDocumentViewerDialog({
     localFile?.pdfData,
     view.status,
     view.url,
+    savedPreview,
   ]);
 
   const handleGenerateRendition = async () => {
@@ -364,14 +376,13 @@ export function CentralDocumentViewerDialog({
         annotationStateJson,
         annotatedPdfBlob
       );
+      if (updatedFile?.versionId && annotatedPdfBlob) {
+        const savedPreviewData = await blobToUint8Array(annotatedPdfBlob);
+        setSavedPreview({ versionId: updatedFile.versionId, data: savedPreviewData });
+        setPreviewData(savedPreviewData);
+      }
       if (updatedFile) {
         setLocalFile(updatedFile);
-      }
-      if (annotatedPdfBlob) {
-        const savedPreviewData = await blobToUint8Array(annotatedPdfBlob);
-        window.setTimeout(() => {
-          setPreviewData(savedPreviewData);
-        }, 0);
       }
       setAnnotationSaveMessage(
         updatedFile?.version

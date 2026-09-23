@@ -244,14 +244,27 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return Ok(new { success = true, data = Array.Empty<object>() });
         }
 
+        var portalCustomerIds = await PortalCustomers(tenantId, userId.Value)
+            .Select(customer => customer.Id)
+            .ToListAsync(cancellationToken);
+        var portalCustomerReferences = portalCustomerIds
+            .Select(customerId => customerId.ToString())
+            .ToList();
+
         var query = _db.ProcedureCases
             .AsNoTracking()
             .Where(item => item.TenantId == tenantId
                 && !item.IsDeleted
-                && item.OpenedById == userId.Value
-                && (item.SourceDepartment == "External Portal"
-                    || item.SourceDepartment == "External Portal - Estate Services"
-                    || item.SourceDepartment == "External Portal - Estate Listings"));
+                && ((item.OpenedById == userId.Value
+                        && (item.SourceDepartment == "External Portal"
+                            || item.SourceDepartment == "External Portal - Estate Services"
+                            || item.SourceDepartment == "External Portal - Estate Listings"))
+                    || (item.SourceDepartment == "Sales - Estate Enquiry"
+                        && item.EntityType == "EstatePropertyManagementListingApplication"
+                        && item.Fields.Any(field => !field.IsDeleted
+                            && field.Key == "sourceReference"
+                            && field.Value != null
+                            && portalCustomerReferences.Contains(field.Value)))));
 
         if (string.Equals(source, "estateServices", StringComparison.OrdinalIgnoreCase))
         {
@@ -483,7 +496,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 asset.ProjectUnitCode,
                 asset.Name,
                 asset.Status,
-                TransactionType = asset.Status == EstateManagedAssetStatus.Sold ? "Purchased" : "Rental",
+                TransactionType = asset.Status == EstateManagedAssetStatus.Sold
+                    ? "Purchased"
+                    : asset.ExternalListingType != null && asset.ExternalListingType.Contains("Lease")
+                        ? "Lease"
+                        : "Rental",
                 asset.Location,
                 asset.Town,
                 asset.District,
@@ -491,7 +508,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 AgreementDate = asset.DateOfTenancy,
                 ActualPossessionDate = asset.RightOfEntryDate,
                 asset.LeaseTermYears,
-                MonthlyRent = asset.ExternalMonthlyRent ?? asset.ExternalListingPrice,
+                MonthlyRent = asset.ExternalListingType != null && asset.ExternalListingType.Contains("Lease")
+                    ? null
+                    : asset.ExternalMonthlyRent ?? asset.ExternalListingPrice,
+                FullTermLeaseAmount = asset.ExternalListingType != null && asset.ExternalListingType.Contains("Lease")
+                    ? asset.ExternalListingPrice
+                    : null,
                 CurrencyCode = string.IsNullOrWhiteSpace(asset.ExternalListingCurrency)
                     ? asset.Currency
                     : asset.ExternalListingCurrency,
@@ -665,6 +687,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     asset.ActualPossessionDate,
                     asset.LeaseTermYears,
                     asset.MonthlyRent,
+                    asset.FullTermLeaseAmount,
                     asset.CurrencyCode,
                     asset.NextRentBillingDate,
                     asset.RentGracePeriodDays,
@@ -1325,100 +1348,27 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return BadRequest(new { success = false, message = "The agreement is still under Legal review." });
         }
 
-        var generatedAgreementReference = FieldValue(fields, "generatedAgreementReference");
-        if (string.IsNullOrWhiteSpace(generatedAgreementReference))
-        {
-            return NotFound(new { success = false, message = "The agreement has not been generated for this request yet." });
-        }
-
-        var agreementReference = generatedAgreementReference.Trim();
-        var agreementRecord = await _db.CentralDocumentRecords
+        var signedLegalAgreement = await _db.ProcedureCases
             .AsNoTracking()
-            .Include(record => record.Versions.Where(version => !version.IsDeleted))
-            .Where(record => record.TenantId == tenantId
-                && !record.IsDeleted
-                && record.SourceModule == "Estate"
-                && record.DocumentReference == agreementReference)
-            .OrderByDescending(record => record.UpdatedAt ?? record.CreatedAt)
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.EntityType == "LegalPropertyAgreementReview"
+                && item.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "sourceProcedureCaseId"
+                    && field.Value == requestId.ToString()))
+            .SelectMany(item => item.Documents.Where(document => !document.IsDeleted
+                && document.Name == "Head of Legal signed agreement"
+                && document.FileUrl != null))
+            .OrderByDescending(document => document.UploadedAt)
             .FirstOrDefaultAsync(cancellationToken);
-
-        agreementRecord ??= await _db.CentralDocumentRecords
-            .AsNoTracking()
-            .Include(record => record.Versions.Where(version => !version.IsDeleted))
-            .Where(record => record.TenantId == tenantId
-                && !record.IsDeleted
-                && record.SourceModule == "Estate"
-                && record.SourceRecordId == requestId)
-            .OrderByDescending(record => record.UpdatedAt ?? record.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (agreementRecord is null)
+        if (signedLegalAgreement is null || string.IsNullOrWhiteSpace(signedLegalAgreement.FileUrl))
         {
-            return NotFound(new { success = false, message = "The generated agreement document was not found." });
+            return Conflict(new { success = false, message = "The Head of Legal signed PDF is not yet available for the customer." });
         }
-
-        var version = agreementRecord.Versions
-            .OrderByDescending(item => item.PublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
-            .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.RepositoryPath)
-                || !string.IsNullOrWhiteSpace(item.RenditionPath));
-        var pdfFileName = $"{Path.GetFileNameWithoutExtension(
-            SafeDownloadFileName(version?.FileName, agreementRecord.DocumentReference))}.pdf";
-
-        if (!string.IsNullOrWhiteSpace(version?.RenditionPath))
-        {
-            try
-            {
-                var renditionStream = await _fileStorageService.DownloadFileAsync(
-                    version.RenditionPath,
-                    agreementRecord.Id);
-                return File(renditionStream, "application/pdf", pdfFileName);
-            }
-            catch (FileNotFoundException)
-            {
-                // Fall back to the source document and rebuild the PDF below.
-            }
-        }
-
-        var filePath = FirstNonBlank(version?.RepositoryPath, agreementRecord.RepositoryPath);
-
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            return NotFound(new { success = false, message = "The agreement file is not available for download." });
-        }
-
-        try
-        {
-            var stream = await _fileStorageService.DownloadFileAsync(filePath, version?.FileUploadRecordId ?? agreementRecord.Id);
-            if (IsPdfDocument(version?.ContentType, version?.FileName, filePath))
-            {
-                return File(stream, "application/pdf", pdfFileName);
-            }
-
-            await using (stream)
-            {
-                var preview = await _renditionService.CreatePdfPreviewAsync(
-                    new CentralDocumentPdfPreviewRequest(
-                        stream,
-                        version?.FileName ?? $"{agreementRecord.DocumentReference}.docx",
-                        version?.ContentType ?? "application/octet-stream"),
-                    cancellationToken);
-
-                if (!preview.Success || preview.PdfStream is null)
-                {
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = preview.ErrorMessage ?? "The agreement could not be converted to PDF."
-                    });
-                }
-
-                return File(preview.PdfStream, "application/pdf", pdfFileName);
-            }
-        }
-        catch (FileNotFoundException)
-        {
-            return NotFound(new { success = false, message = "The agreement file was not found in storage." });
-        }
+        var signedStream = await _fileStorageService.DownloadFileAsync(
+            signedLegalAgreement.FileUrl,
+            signedLegalAgreement.Id);
+        return File(signedStream, "application/pdf", SafeDownloadFileName(signedLegalAgreement.FileName, "signed-agreement.pdf"));
     }
 
     [HttpPost("/api/estate/external/requests/{requestId:guid}/signed-agreement")]
@@ -2128,7 +2078,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
         var listingCurrency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
         var listingSalePrice = demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice;
-        var listingPrice = demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
+        var listingPrice = demarcationListing is null
+            ? asset.ExternalListingPrice
+            : ResolveDemarcationLeaseAmount(demarcationListing);
         var listingMonthlyRent = demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent;
         var listingLeaseTermMonths = demarcationListing?.ExternalLeaseTermMonths ?? asset.ExternalLeaseTermMonths;
 
@@ -2222,7 +2174,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 : listingType;
         var publishedAmount = requestType == "Purchase"
             ? listingSalePrice ?? listingPrice
-            : listingMonthlyRent ?? listingPrice;
+            : requestType == "Lease" ? listingPrice ?? listingMonthlyRent : listingMonthlyRent ?? listingPrice;
 
         var fieldValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -2233,10 +2185,24 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["customerName"] = customer.PartnerName,
             ["propertyUnit"] = listingReference,
             ["listingReference"] = listingReference,
+            ["listingId"] = listingId.ToString(),
+            ["listingRecordType"] = demarcationListing is null ? "EstateManagedAsset" : "EstateLandDemarcation",
+            ["listingName"] = listingName,
+            ["listingLocation"] = asset.Location,
+            ["listingArea"] = demarcationListing is null
+                ? asset.AreaValue?.ToString(CultureInfo.InvariantCulture)
+                : demarcationListing.AreaSquareFeet.ToString(CultureInfo.InvariantCulture),
+            ["listingAreaUnit"] = demarcationListing is null ? asset.AreaUnit : "sq ft",
             ["listingType"] = publishedListingType,
             ["requestType"] = requestLabel,
             ["listingPrice"] = publishedAmount?.ToString("0.##"),
             ["offerAmount"] = requestType == "Purchase" ? request.OfferAmount?.ToString("0.##") : null,
+            ["groundRentRequired"] = (demarcationListing?.ExternalGroundRentRequired ?? asset.ExternalGroundRentRequired) == true ? "Yes" : "No",
+            ["premiumChargeRequired"] = (demarcationListing?.ExternalPremiumChargeRequired ?? asset.ExternalPremiumChargeRequired) == true ? "Yes" : "No",
+            ["salesAmountPaid"] = "0.00",
+            ["estateRemainingAmount"] = (requestType == "Purchase" ? request.OfferAmount : publishedAmount)?.ToString("0.00", CultureInfo.InvariantCulture),
+            ["salePaymentStatus"] = requestType is "Purchase" or "Lease" ? "Pending Estate payment" : null,
+            ["salePaymentCheckStatus"] = requestType is "Purchase" or "Lease" ? "No Sales payment recorded; Finance balance invoice required after agreement execution." : null,
             ["currency"] = listingCurrency,
             ["requestedLeaseTerm"] = requestType == "Purchase" || !listingLeaseTermMonths.HasValue
                 ? null
@@ -2256,7 +2222,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["signedAgreementReference"] = null,
             ["moveInDate"] = null,
             ["billingStartDate"] = null,
-            ["billingStartStatus"] = requestType == "Purchase"
+            ["billingStartStatus"] = requestType is "Purchase" or "Lease"
                 ? "Not applicable"
                 : "Blocked - agreement pending",
             ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
@@ -2398,7 +2364,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var price = type == "Rent"
                 ? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent
                 : type == "Lease"
-                    ? demarcationListing?.ExternalMonthlyRent ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalMonthlyRent ?? asset.ExternalListingPrice
+                    ? (demarcationListing is null ? asset.ExternalListingPrice : ResolveDemarcationLeaseAmount(demarcationListing))
                     : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
             var category = await _db.EhcTicketCategories.AsNoTracking().FirstOrDefaultAsync(c =>
                 c.TenantId == tenantId && !c.IsDeleted && c.Code == "PROPERTY-LISTING", cancellationToken);
@@ -2552,7 +2518,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var price = type == "Rent"
                 ? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent
                 : type == "Lease"
-                    ? demarcationListing?.ExternalMonthlyRent ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalMonthlyRent ?? asset.ExternalListingPrice
+                    ? (demarcationListing is null ? asset.ExternalListingPrice : ResolveDemarcationLeaseAmount(demarcationListing))
                     : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
             var contactName = request.ContactName.Trim();
             var contactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim();
@@ -3013,6 +2979,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             asset.ExternalListingPrice,
             asset.ExternalSalePrice,
             asset.ExternalMonthlyRent,
+            asset.ExternalGroundRentRequired,
+            asset.ExternalPremiumChargeRequired,
             asset.ExternalLeaseTermMonths,
             asset.GroundRentPayable,
             asset.GroundRentRatePerAcre,
@@ -3029,6 +2997,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             SourceLabel = "Source: Estate / Property Management -> External Portal"
         };
     }
+
+    private static decimal? ResolveDemarcationLeaseAmount(EstateLandDemarcation demarcation)
+        => string.Equals(demarcation.ExternalListingType, "Lease", StringComparison.OrdinalIgnoreCase)
+            && demarcation.ExternalMonthlyRent.HasValue
+            && demarcation.ExternalListingPrice == demarcation.ExternalMonthlyRent
+            && demarcation.TargetSalePrice is > 0m
+                ? demarcation.TargetSalePrice
+                : demarcation.ExternalListingPrice ?? (string.Equals(demarcation.ExternalListingType, "Lease", StringComparison.OrdinalIgnoreCase)
+                    ? demarcation.TargetSalePrice
+                    : null);
 
     private static object ToExternalListingDto(EstateLandDemarcation demarcation, bool usePublicImageRoute = false)
     {
@@ -3061,9 +3039,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             AreaValue = demarcation.AreaSquareFeet,
             AreaUnit = "square feet",
             demarcation.ExternalListingType,
-            demarcation.ExternalListingPrice,
+            ExternalListingPrice = ResolveDemarcationLeaseAmount(demarcation),
             demarcation.ExternalSalePrice,
             demarcation.ExternalMonthlyRent,
+            demarcation.ExternalGroundRentRequired,
+            demarcation.ExternalPremiumChargeRequired,
             demarcation.ExternalLeaseTermMonths,
             demarcation.GroundRentPayable,
             demarcation.GroundRentRatePerAcre,
@@ -3086,36 +3066,90 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         Guid userId,
         Guid requestId,
         CancellationToken cancellationToken)
-        => await _db.ProcedureCases
+    {
+        var portalCustomerIds = await PortalCustomers(tenantId, userId)
+            .Select(customer => customer.Id)
+            .ToListAsync(cancellationToken);
+        var portalCustomerReferences = portalCustomerIds
+            .Select(customerId => customerId.ToString())
+            .ToList();
+
+        var procedureCase = await _db.ProcedureCases
             .Include(item => item.Fields.Where(field => !field.IsDeleted))
             .Include(item => item.Documents.Where(document => !document.IsDeleted))
             .FirstOrDefaultAsync(item =>
                 item.Id == requestId
                 && item.TenantId == tenantId
                 && !item.IsDeleted
-                && item.OpenedById == userId
-                && item.SourceDepartment == "External Portal - Estate Listings"
                 && item.EntityType == "EstatePropertyManagementListingApplication",
                 cancellationToken);
+
+        return procedureCase is not null
+            && IsOwnedExternalListingCase(procedureCase, userId, portalCustomerReferences)
+                ? procedureCase
+                : null;
+    }
 
     private async Task<ProcedureCase?> LoadOwnedExternalEstateRequestAsync(
         Guid tenantId,
         Guid userId,
         Guid requestId,
         CancellationToken cancellationToken)
-        => await _db.ProcedureCases
+    {
+        var portalCustomerIds = await PortalCustomers(tenantId, userId)
+            .Select(customer => customer.Id)
+            .ToListAsync(cancellationToken);
+        var portalCustomerReferences = portalCustomerIds
+            .Select(customerId => customerId.ToString())
+            .ToList();
+
+        var procedureCase = await _db.ProcedureCases
             .AsNoTracking()
             .Include(item => item.Fields.Where(field => !field.IsDeleted))
             .Include(item => item.Documents.Where(document => !document.IsDeleted))
             .FirstOrDefaultAsync(item =>
                 item.Id == requestId
                 && item.TenantId == tenantId
-                && !item.IsDeleted
-                && item.OpenedById == userId
-                && (item.SourceDepartment == "External Portal"
-                    || item.SourceDepartment == "External Portal - Estate Services"
-                    || item.SourceDepartment == "External Portal - Estate Listings"),
+                && !item.IsDeleted,
                 cancellationToken);
+
+        if (procedureCase is null)
+        {
+            return null;
+        }
+
+        var isDirectPortalRequest = procedureCase.OpenedById == userId
+            && (procedureCase.SourceDepartment == "External Portal"
+                || procedureCase.SourceDepartment == "External Portal - Estate Services"
+                || procedureCase.SourceDepartment == "External Portal - Estate Listings");
+        return isDirectPortalRequest
+            || IsOwnedExternalListingCase(procedureCase, userId, portalCustomerReferences)
+                ? procedureCase
+                : null;
+    }
+
+    private static bool IsOwnedExternalListingCase(
+        ProcedureCase procedureCase,
+        Guid userId,
+        IReadOnlyCollection<string> portalCustomerReferences)
+    {
+        if (procedureCase.EntityType != "EstatePropertyManagementListingApplication")
+        {
+            return false;
+        }
+
+        if (procedureCase.OpenedById == userId
+            && procedureCase.SourceDepartment == "External Portal - Estate Listings")
+        {
+            return true;
+        }
+
+        return procedureCase.SourceDepartment == "Sales - Estate Enquiry"
+            && procedureCase.Fields.Any(field => !field.IsDeleted
+                && field.Key == "sourceReference"
+                && field.Value is not null
+                && portalCustomerReferences.Contains(field.Value));
+    }
 
     private static object ToExternalRequestDto(ProcedureCase procedureCase)
         => new
@@ -3385,7 +3419,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     {
         var reviewStatus = FieldValue(fields, "legalAgreementReviewStatus");
         if (!string.IsNullOrWhiteSpace(reviewStatus)
-            && reviewStatus.Contains("approved", StringComparison.OrdinalIgnoreCase))
+            && reviewStatus.Contains("head of legal", StringComparison.OrdinalIgnoreCase)
+            && reviewStatus.Contains("signed", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -3798,15 +3833,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                         || asset.ExternalListingType == "Lease"
                         || asset.ExternalListingType == "SaleAndRent"
                         || asset.ExternalListingType == "SaleAndLease")
-                    && asset.ExternalMonthlyRent.HasValue
-                    && asset.ExternalMonthlyRent > 0
+                    && (asset.ExternalListingType == "Lease" || asset.ExternalListingType == "SaleAndLease"
+                        ? (asset.ExternalListingPrice ?? asset.ExternalMonthlyRent) > 0
+                        : asset.ExternalMonthlyRent > 0)
                     && (asset.AssetType != EstateManagedAssetType.Land
-                        || asset.ExternalListingType == "Rent"
-                        || asset.ExternalListingType == "SaleAndRent"
-                        || (asset.GroundRentPayable.HasValue
-                            && asset.GroundRentPayable > 0))
-                    && asset.ExternalLeaseTermMonths.HasValue
-                    && asset.ExternalLeaseTermMonths > 0))
+                        || asset.ExternalGroundRentRequired != true
+                        || asset.GroundRentPayable > 0)))
             && ((asset.ExternalListingType == "Sale" && asset.IsAvailableForSale)
                 || (asset.ExternalListingType == "Rent" && asset.IsAvailableForLease)
                 || (asset.ExternalListingType == "Lease" && asset.IsAvailableForLease)
@@ -3823,8 +3855,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     && !asset.Demarcations.Any(item => !item.IsDeleted && !item.BoundaryVerified))
                 || ((asset.AssetType == EstateManagedAssetType.Property
                         || asset.AssetType == EstateManagedAssetType.Facility)
-                    && asset.SourceType == EstateManagedAssetSourceType.ProjectUnit
-                    && asset.IsPublishedFromProject
+                    && (asset.SourceType == EstateManagedAssetSourceType.Imported
+                        || (asset.SourceType == EstateManagedAssetSourceType.ProjectUnit
+                            && asset.IsPublishedFromProject))
                     && asset.Status == EstateManagedAssetStatus.Available)));
 
     private async Task<Guid> ResolvePublicTenantIdAsync(CancellationToken cancellationToken)
