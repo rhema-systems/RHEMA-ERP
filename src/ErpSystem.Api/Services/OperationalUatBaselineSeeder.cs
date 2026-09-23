@@ -133,7 +133,26 @@ public sealed class OperationalUatBaselineSeeder(
         foreach (var augmentation in ExistingActorRoles)
             addedRoles += await EnsureExistingActorRolesAsync(augmentation, cancellationToken);
 
-        await financeDataSeeder.SeedAsync();
+        // Identity and Procurement reconciliation materialize a broad graph in this scoped
+        // context. Finance seeding updates deterministic system accounts and must begin with a
+        // clean tracker; otherwise a stale tracked account can produce a false concurrency
+        // failure after the Finance manifest performs its guarded reconciliation.
+        ResetTrackingAtSeederBoundary();
+        try
+        {
+            await financeDataSeeder.SeedAsync();
+        }
+        catch (InvalidOperationException exception) when (IsPreservableFinanceGovernanceBlocker(exception))
+        {
+            // A user-owned legacy mapping is Finance evidence. Do not silently classify, disable,
+            // or replace it merely to provision the cross-module UAT fixture. Finance can resolve
+            // the reported mapping through its governed workspace while the other UAT masters
+            // continue to reconcile.
+            logger.LogWarning(
+                "Operational UAT Finance reconciliation retained a user-owned mapping for Finance review: {FinanceBlocker}",
+                exception.Message);
+        }
+        ResetTrackingAtSeederBoundary();
         var masterCounts = await EnsureInventoryMasterDataAsync(tenant.Id, cancellationToken);
         var createdResponsibilities = await EnsureResponsibilityScopesAsync(tenant.Id, cancellationToken);
 
@@ -162,6 +181,13 @@ public sealed class OperationalUatBaselineSeeder(
 
         return result;
     }
+
+    internal void ResetTrackingAtSeederBoundary() => db.ChangeTracker.Clear();
+
+    internal static bool IsPreservableFinanceGovernanceBlocker(InvalidOperationException exception) =>
+        exception.Message.StartsWith(
+            "FINANCE_CLASSIFICATION_ENABLED_MAPPING_LINEAGE_INVALID:",
+            StringComparison.Ordinal);
 
     internal async Task<InventoryMasterSeedCounts> EnsureInventoryMasterDataAsync(
         Guid tenantId,

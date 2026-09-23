@@ -19,6 +19,42 @@ public sealed class OperationalUatBaselineSeederTests
         .BuildServiceProvider();
 
     [Fact]
+    public async Task FinanceSeederBoundary_DetachesPreviouslyMaterializedGraph()
+    {
+        await using var db = CreateContext();
+        var tenant = new Tenant
+        {
+            Id = Guid.NewGuid(), Code = "UAT", Name = "Operational UAT",
+            ContactEmail = "uat@example.invalid", Status = TenantStatus.Active,
+            CreatedAt = DateTime.UtcNow, CreatedBy = "Tests"
+        };
+        db.Add(tenant);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Entries().Should().ContainSingle()
+            .Which.State.Should().Be(EntityState.Unchanged);
+
+        var seeder = new OperationalUatBaselineSeeder(
+            db, null!, null!, null!, null!, null!, null!, null!,
+            NullLogger<OperationalUatBaselineSeeder>.Instance);
+
+        seeder.ResetTrackingAtSeederBoundary();
+
+        db.ChangeTracker.Entries().Should().BeEmpty(
+            "Finance reconciliation must not inherit stale entities from access seeding");
+    }
+
+    [Fact]
+    public void FinanceGovernanceBlocker_IsPreservedWithoutMaskingOtherFailures()
+    {
+        OperationalUatBaselineSeeder.IsPreservableFinanceGovernanceBlocker(new InvalidOperationException(
+                "FINANCE_CLASSIFICATION_ENABLED_MAPPING_LINEAGE_INVALID: user-owned mapping requires review."))
+            .Should().BeTrue();
+        OperationalUatBaselineSeeder.IsPreservableFinanceGovernanceBlocker(new InvalidOperationException(
+                "A database update failed."))
+            .Should().BeFalse();
+    }
+
+    [Fact]
     public async Task InventoryMasterPass_Twice_CreatesMissingRecordsAndPreservesExistingValues()
     {
         await using var db = CreateContext();

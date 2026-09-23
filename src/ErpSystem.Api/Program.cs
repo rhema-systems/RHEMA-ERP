@@ -89,8 +89,14 @@ if (args.Length > 0 && args[0] == "seed-operational-uat")
     var tempApp = tempBuilder.Build();
     using (var scope = tempApp.Services.CreateScope())
     {
-        await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.OperationalUatBaselineSeeder>()
+        var result = await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.OperationalUatBaselineSeeder>()
             .SeedAsync();
+        Console.WriteLine(
+            $"OPERATIONAL_UAT_RESULT|users={result.CreatedUsers}|roles={result.AddedRoleAssignments}|" +
+            $"uom={result.CreatedUnitsOfMeasure}|categories={result.CreatedCategories}|" +
+            $"warehouses={result.CreatedWarehouses}|locations={result.CreatedLocations}|" +
+            $"items={result.CreatedItems}|suppliers={result.CreatedSuppliers}|" +
+            $"responsibilities={result.CreatedResponsibilityAssignments}");
     }
 
     Console.WriteLine("Operational UAT baseline seeding completed successfully.");
