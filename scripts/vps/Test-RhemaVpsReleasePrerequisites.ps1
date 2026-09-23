@@ -40,6 +40,16 @@ foreach ($token in @(
         throw "Next.js production runtime apply protection is missing: $token"
     }
 }
+foreach ($token in @(
+        "'ALLOWED_ORIGINS' = `$ExpectedPublicOrigin",
+        "'CorsSettings__AllowedOrigins__0' = `$ExpectedPublicOrigin")) {
+    if (-not $remote.Contains($token)) {
+        throw "Effective VPS CORS reconciliation is missing: $token"
+    }
+}
+if (-not $deploy.Contains('but received $actualOrigin')) {
+    throw 'Public CORS smoke does not report the actual returned origin.'
+}
 foreach ($legacy in @(
         "Join-Path `$stageFrontend 'server.js'",
         "Join-Path `$nextOutput 'standalone\server.js'")) {
