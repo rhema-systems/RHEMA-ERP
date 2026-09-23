@@ -756,8 +756,11 @@ function Invoke-PublicSmoke {
     }
     Assert-True ($badUrlMatches -eq 0) `
         'A public JavaScript asset contains a development API URL.'
-    Assert-True ($expectedOriginMatches -gt 0) `
-        'No deployed JavaScript asset contains the expected VPS API origin.'
+    if ($expectedOriginMatches -eq 0) {
+        Assert-True $AllowConfigurationDrift `
+            'No deployed JavaScript asset contains the expected VPS API origin.'
+        Write-Output "CONFIG_DRIFT|FRONTEND_API_ORIGIN|EXPECTED=$base"
+    }
 
     $allowedHeaders = (& curl.exe -k -sS --max-time 30 -D - -o NUL `
         -X OPTIONS -H "Origin: $base" `

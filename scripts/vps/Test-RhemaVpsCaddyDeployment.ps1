@@ -26,6 +26,9 @@ if ($deploy -notmatch "'/api/tenant'.*'/api/auth/security-settings'") {
 if ($deploy -notmatch "Invoke-PublicSmoke '' -AllowConfigurationDrift") {
     throw 'Dry-run smoke does not tolerate public-origin drift that apply will reconcile.'
 }
+if ($deploy -notmatch 'CONFIG_DRIFT\|FRONTEND_API_ORIGIN') {
+    throw 'Dry-run smoke does not report the previous compiled frontend origin as drift.'
+}
 if ($helper -notmatch 'CONFIG_DRIFT\|\$name\|EXPECTED=\$ExpectedPublicOrigin') {
     throw 'Preflight does not report repairable public-origin drift.'
 }
