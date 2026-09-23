@@ -83,7 +83,10 @@ describe('accounting book settings', () => {
         authUserId = 'checker-id';
         vi.clearAllMocks();
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([primaryBook]);
-        vi.mocked(financeDataService.getCurrencies).mockResolvedValue([{ currencyCode: 'GHS', currencyName: 'Ghanaian Cedi', isActive: true }, { currencyCode: 'USD', currencyName: 'US Dollar', isActive: true }] as never);
+        vi.mocked(financeDataService.getCurrencies).mockResolvedValue([
+            { currencyCode: 'GHS', currencyName: 'Ghanaian Cedi', isActive: true, isBaseCurrency: true },
+            { currencyCode: 'USD', currencyName: 'US Dollar', isActive: true, isBaseCurrency: false },
+        ] as never);
         vi.mocked(financeDataService.getAccountingBook).mockResolvedValue(primaryBook);
         vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue(approvedInitialization);
         vi.mocked(financeDataService.getAccountingBookActivationReadiness).mockResolvedValue({ isReady: true, blockers: [], initializationFingerprint: 'A'.repeat(64), requiredPeriodCount: 1, readyPeriodCount: 1 });
@@ -193,7 +196,7 @@ describe('accounting book settings', () => {
         expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeDisabled();
     });
 
-    it('creates a canonical full-book request without exposing lifecycle shortcuts', async () => {
+    it('excludes the tenant base currency when creating a Parallel book', async () => {
         permissions.add('Finance.AccountingBooks.Manage');
         vi.mocked(financeDataService.createAccountingBook).mockResolvedValue(initializingBook);
 
@@ -202,9 +205,14 @@ describe('accounting book settings', () => {
         fireEvent.change(screen.getByLabelText('Stable code'), { target: { value: 'tax_book' } });
         fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Tax Book' } });
         fireEvent.change(screen.getByLabelText('Accounting purpose / principle'), { target: { value: 'Tax basis' } });
+        fireEvent.click(screen.getByRole('combobox', { name: 'Base accounting book' }));
+        fireEvent.click(screen.getByRole('option', { name: 'IFRS — IFRS Primary' }));
+        fireEvent.change(screen.getByLabelText('Replication start date'), { target: { value: '2026-10-01' } });
         fireEvent.click(screen.getByRole('combobox', { name: 'Functional currency' }));
-        fireEvent.change(screen.getByPlaceholderText('Search code or name…'), { target: { value: 'Ghanaian' } });
-        fireEvent.click(screen.getByText('GHS — Ghanaian Cedi'));
+        expect(screen.queryByText('GHS — Ghanaian Cedi')).not.toBeInTheDocument();
+        expect(screen.getByText('Parallel books are foreign-currency replicas. The tenant base currency GHS is excluded.')).toBeInTheDocument();
+        fireEvent.change(screen.getByPlaceholderText('Search code or name…'), { target: { value: 'US Dollar' } });
+        fireEvent.click(screen.getByText('USD — US Dollar'));
         fireEvent.click(screen.getByRole('button', { name: 'Save book' }));
 
         await waitFor(() => expect(financeDataService.createAccountingBook).toHaveBeenCalledWith(expect.objectContaining({
@@ -212,8 +220,9 @@ describe('accounting book settings', () => {
             name: 'Tax Book',
             purpose: 'Tax basis',
             bookType: 'ParallelFull',
-            functionalCurrencyCode: 'GHS',
-            baseAccountingBookId: null,
+            functionalCurrencyCode: 'USD',
+            baseAccountingBookId: 'book-primary',
+            replicationStartDate: '2026-10-01T00:00:00.000Z',
         })));
         expect(screen.queryByLabelText('Lifecycle state')).not.toBeInTheDocument();
     });

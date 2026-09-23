@@ -474,13 +474,19 @@ export default function AccountingBooksSettingsPage() {
     [books, editing?.id, form.bookType]
   );
   const currencyOptions = useMemo(() => {
+    const existingCode = editing?.functionalCurrencyCode;
     const active = currencies
-      .filter((currency) => currency.isActive)
+      .filter(
+        (currency) =>
+          currency.isActive &&
+          (form.bookType !== 'ParallelFull' ||
+            !currency.isBaseCurrency ||
+            currency.currencyCode === existingCode)
+      )
       .map((currency) => ({
         value: currency.currencyCode,
         label: `${currency.currencyCode} — ${currency.currencyName}`,
       }));
-    const existingCode = editing?.functionalCurrencyCode;
     if (
       existingCode &&
       !active.some((option) => option.value === existingCode)
@@ -491,7 +497,15 @@ export default function AccountingBooksSettingsPage() {
       });
     }
     return active.sort((left, right) => left.value.localeCompare(right.value));
-  }, [currencies, editing?.functionalCurrencyCode]);
+  }, [currencies, editing?.functionalCurrencyCode, form.bookType]);
+  const tenantBaseCurrencyCode = useMemo(
+    () => currencies.find((currency) => currency.isBaseCurrency)?.currencyCode,
+    [currencies]
+  );
+  const parallelCurrencyIsBase =
+    form.bookType === 'ParallelFull' &&
+    Boolean(tenantBaseCurrencyCode) &&
+    form.functionalCurrencyCode === tenantBaseCurrencyCode;
 
   const openEditor = (book?: AccountingBook) => {
     setEditing(book ?? null);
@@ -541,6 +555,14 @@ export default function AccountingBooksSettingsPage() {
 
   const save = async () => {
     if (!form.code.trim() || !form.name.trim() || !form.purpose.trim()) return;
+    if (parallelCurrencyIsBase) {
+      toast({
+        title: 'Choose a foreign currency',
+        description: `Parallel books cannot use the tenant base currency ${tenantBaseCurrencyCode}.`,
+        variant: 'destructive',
+      });
+      return;
+    }
     setSaving(true);
     try {
       const request: SaveAccountingBook = {
@@ -1462,6 +1484,13 @@ export default function AccountingBooksSettingsPage() {
                     </Button>
                   </p>
                 )}
+                {form.bookType === 'ParallelFull' &&
+                  tenantBaseCurrencyCode && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Parallel books are foreign-currency replicas. The tenant
+                      base currency {tenantBaseCurrencyCode} is excluded.
+                    </p>
+                  )}
               </div>
             )}
             <div>
@@ -1628,6 +1657,7 @@ export default function AccountingBooksSettingsPage() {
                 (form.bookType !== 'PrimaryFull' && !form.baseAccountingBookId) ||
                 (form.bookType === 'ParallelFull' &&
                   (!form.replicationStartDate ||
+                    parallelCurrencyIsBase ||
                     currencyLoading ||
                     Boolean(currencyError) ||
                     !currencyOptions.some(
