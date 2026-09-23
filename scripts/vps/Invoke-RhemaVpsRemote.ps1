@@ -1452,21 +1452,56 @@ function Invoke-ResumeFrontend {
     Write-Output 'RESUME_FRONTEND|PASS'
 }
 
+function Invoke-LocalRouteWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [int]$DeadlineSeconds = 180,
+        [int]$AttemptTimeoutSeconds = 30
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($DeadlineSeconds)
+    $attempts = 0
+    $lastFailure = 'No request was attempted.'
+    do {
+        $attempts++
+        try {
+            $response = Invoke-WebRequest $Uri -UseBasicParsing `
+                -TimeoutSec $AttemptTimeoutSeconds
+            if ($response.StatusCode -eq 200) {
+                Write-Output "LOCAL_ROUTE|$Name|200|ATTEMPTS=$attempts"
+                return
+            }
+            $lastFailure = "HTTP $($response.StatusCode)"
+        }
+        catch {
+            $lastFailure = $_.Exception.Message
+        }
+
+        if ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Seconds 3
+        }
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "Local route '$Name' ($Uri) did not return HTTP 200 within $DeadlineSeconds seconds after $attempts attempt(s). Last failure: $lastFailure"
+}
+
 function Invoke-Verify {
     Assert-SyncfusionLicenseConfigured
     Write-ServiceState
     $notRunning = @(Get-ManagedServices | Where-Object { $_.Status -ne 'Running' })
     Assert-True ($notRunning.Count -eq 0) 'One or more VPS services are not running.'
 
+    # Prove the process first, then dependencies and aggregate health. A freshly started
+    # NSSM service can report Running before ASP.NET or Next.js has completed initialization,
+    # so bounded retries distinguish normal warm-up from a genuinely unhealthy endpoint.
     foreach ($item in @(
-            @{ Uri = 'http://127.0.0.1:5000/health'; Name = 'api-health' },
-            @{ Uri = 'http://127.0.0.1:5000/health/ready'; Name = 'api-ready' },
-            @{ Uri = 'http://127.0.0.1:5000/health/live'; Name = 'api-live' },
-            @{ Uri = 'http://127.0.0.1:3001/login'; Name = 'frontend-login' })) {
-        $response = Invoke-WebRequest $item.Uri -UseBasicParsing -TimeoutSec 15
-        Write-Output "LOCAL_ROUTE|$($item.Name)|$($response.StatusCode)"
-        Assert-True ($response.StatusCode -eq 200) `
-            "Local route failed: $($item.Uri)"
+            @{ Uri = 'http://127.0.0.1:5000/health/live'; Name = 'api-live'; Deadline = 60; AttemptTimeout = 10 },
+            @{ Uri = 'http://127.0.0.1:5000/health/ready'; Name = 'api-ready'; Deadline = 180; AttemptTimeout = 30 },
+            @{ Uri = 'http://127.0.0.1:5000/health'; Name = 'api-health'; Deadline = 180; AttemptTimeout = 30 },
+            @{ Uri = 'http://127.0.0.1:3001/login'; Name = 'frontend-login'; Deadline = 180; AttemptTimeout = 30 })) {
+        Invoke-LocalRouteWithRetry -Uri $item.Uri -Name $item.Name `
+            -DeadlineSeconds $item.Deadline -AttemptTimeoutSeconds $item.AttemptTimeout
     }
 
     $history = @(Get-MigrationHistory)
