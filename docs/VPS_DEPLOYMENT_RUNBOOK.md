@@ -605,7 +605,7 @@ If `RhemaERPHTTPSIPProxy` is absent or stopped because the proxy script or IP ce
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps\Repair-RhemaVpsHttpsProxy.ps1
 ```
 
-The repair installs the repository-owned proxy, configures ACME renewal, requests the missing IP certificate, corrects the NSSM service, enables the port 8443 firewall rule, and verifies the local HTTPS health and login routes. After it reports `HTTPS_PROXY_REPAIR|PASS`, rerun the normal `-LocalVps -DryRun` deployment check.
+The repair installs the repository-owned proxy, downloads the pinned official lego ACME client when it is absent, verifies the release manifest and archive SHA-256 hashes, configures renewal, requests the missing IP certificate, corrects the NSSM service, enables the port 8443 firewall rule, and verifies the local HTTPS health and login routes. After it reports `HTTPS_PROXY_REPAIR|PASS`, rerun the normal `-LocalVps -DryRun` deployment check.
 
 ## 2026-07-28 Verified Test Deployment
 

@@ -40,6 +40,75 @@ function Get-HttpsStatusCode {
     return ([string]$output).Trim()
 }
 
+function Install-LegoAcmeClient {
+    param([Parameter(Mandatory = $true)][string]$DestinationPath)
+
+    $version = '5.3.1'
+    $archiveName = "lego_v${version}_windows_amd64.zip"
+    $releaseRoot = "https://github.com/go-acme/lego/releases/download/v${version}"
+    $checksumsName = "lego_${version}_checksums.txt"
+    $expectedChecksumsHash = 'd069acad0ad28bcfc03a9a94ea127ae78c84e6ba5f3387886033abfb1cd88527'
+    $downloadRoot = Join-Path $env:TEMP "rhema-lego-$([Guid]::NewGuid().ToString('N'))"
+    $archivePath = Join-Path $downloadRoot $archiveName
+    $checksumsPath = Join-Path $downloadRoot $checksumsName
+    $extractRoot = Join-Path $downloadRoot 'extract'
+
+    [System.IO.Directory]::CreateDirectory($downloadRoot) | Out-Null
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Write-Output "ACME_CLIENT|DOWNLOAD|lego v$version"
+        Invoke-WebRequest -Uri "$releaseRoot/$checksumsName" `
+            -OutFile $checksumsPath -UseBasicParsing
+        Invoke-WebRequest -Uri "$releaseRoot/$archiveName" `
+            -OutFile $archivePath -UseBasicParsing
+
+        $checksumsHash = (Get-FileHash -LiteralPath $checksumsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($checksumsHash -ne $expectedChecksumsHash) {
+            throw 'The downloaded lego checksum manifest does not match the pinned release hash.'
+        }
+
+        $escapedArchiveName = [Regex]::Escape($archiveName)
+        $checksumLine = Get-Content -LiteralPath $checksumsPath |
+            Where-Object { $_ -match "^([0-9a-fA-F]{64})\s+\*?$escapedArchiveName$" } |
+            Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($checksumLine)) {
+            throw "The checksum manifest does not contain $archiveName."
+        }
+        $expectedArchiveHash = ([Regex]::Match(
+                $checksumLine,
+                '^([0-9a-fA-F]{64})')).Groups[1].Value.ToLowerInvariant()
+        $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($archiveHash -ne $expectedArchiveHash) {
+            throw "The downloaded $archiveName failed SHA-256 verification."
+        }
+
+        Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
+        $downloadedExecutable = Get-ChildItem -LiteralPath $extractRoot `
+            -Filter 'lego.exe' -File -Recurse | Select-Object -First 1
+        if ($null -eq $downloadedExecutable) {
+            throw "The verified $archiveName does not contain lego.exe."
+        }
+
+        [System.IO.Directory]::CreateDirectory(
+            (Split-Path -Parent $DestinationPath)) | Out-Null
+        $temporaryDestination = "$DestinationPath.new"
+        Copy-Item -LiteralPath $downloadedExecutable.FullName `
+            -Destination $temporaryDestination -Force
+        Move-Item -LiteralPath $temporaryDestination `
+            -Destination $DestinationPath -Force
+
+        $versionOutput = & $DestinationPath --version 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch [Regex]::Escape($version)) {
+            throw "The installed ACME client did not report the expected version $version."
+        }
+        Write-Output "ACME_CLIENT|INSTALLED|$($versionOutput.Trim())"
+    }
+    finally {
+        Remove-Item -LiteralPath $downloadRoot -Recurse -Force `
+            -ErrorAction SilentlyContinue
+    }
+}
+
 Assert-Administrator
 
 $rhemaRoot = 'C:\RhemaERP'
@@ -85,7 +154,7 @@ $certificateReady = (Test-Path -LiteralPath $certificatePath -PathType Leaf) -an
 if (-not $certificateReady) {
     Write-Output 'CERTIFICATE|MISSING|Configuring ACME and requesting the IP certificate.'
     if (-not (Test-Path -LiteralPath $legoPath -PathType Leaf)) {
-        throw "The ACME client is missing: $legoPath"
+        Install-LegoAcmeClient -DestinationPath $legoPath
     }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $certificateRepair -PublicIp $PublicIp
     if ($LASTEXITCODE -ne 0) { throw "Certificate renewal setup failed with exit code $LASTEXITCODE." }
