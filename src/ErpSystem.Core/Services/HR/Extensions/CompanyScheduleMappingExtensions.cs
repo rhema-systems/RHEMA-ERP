@@ -61,7 +61,9 @@ public static class CompanyScheduleMappingExtensions
             TechnicalRequirements = entity.TechnicalRequirements,
             SendReminders = entity.SendReminders,
             ReminderDaysBefore = entity.ReminderDaysBefore,
-            ReminderSentDate = entity.ReminderSentDate,
+            // ⚠ As UTC: a datetime2 reads back unspecified and JSON then drops its Z (round 4, lane E).
+            ReminderSentDate = entity.ReminderSentDate is { } reminded ? DateTime.SpecifyKind(reminded, DateTimeKind.Utc) : null,
+            RsvpReminderSentDate = entity.RsvpReminderSentDate is { } chased ? DateTime.SpecifyKind(chased, DateTimeKind.Utc) : null,
             ActualStartTime = entity.ActualStartTime,
             ActualEndTime = entity.ActualEndTime,
             ActualAttendance = entity.ActualAttendance,
@@ -160,7 +162,9 @@ public static class CompanyScheduleMappingExtensions
             TechnicalRequirements = entity.TechnicalRequirements,
             SendReminders = entity.SendReminders,
             ReminderDaysBefore = entity.ReminderDaysBefore,
-            ReminderSentDate = entity.ReminderSentDate,
+            // ⚠ As UTC: a datetime2 reads back unspecified and JSON then drops its Z (round 4, lane E).
+            ReminderSentDate = entity.ReminderSentDate is { } reminded ? DateTime.SpecifyKind(reminded, DateTimeKind.Utc) : null,
+            RsvpReminderSentDate = entity.RsvpReminderSentDate is { } chased ? DateTime.SpecifyKind(chased, DateTimeKind.Utc) : null,
             ActualStartTime = entity.ActualStartTime,
             ActualEndTime = entity.ActualEndTime,
             ActualAttendance = entity.ActualAttendance,

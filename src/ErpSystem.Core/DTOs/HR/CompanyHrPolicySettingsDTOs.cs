@@ -128,6 +128,9 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int OrientationDueLeadDays { get; set; }
     public int OrientationCertificateExpiryLeadDays { get; set; }
     public int OrientationChaseAfterDays { get; set; }
+
+    // Company schedule reminders (round 4, lane N-b2).
+    public int CompanyEventRsvpChaseLeadDays { get; set; }
 }
 
 /// <summary>
@@ -250,4 +253,7 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(0, 90)]  public int OrientationDueLeadDays { get; set; } = 7;
     [Range(0, 365)] public int OrientationCertificateExpiryLeadDays { get; set; } = 30;
     [Range(1, 90)]  public int OrientationChaseAfterDays { get; set; } = 3;
+
+    // Company schedule reminders (round 4, lane N-b2).
+    [Range(0, 60)]  public int CompanyEventRsvpChaseLeadDays { get; set; } = 2;
 }

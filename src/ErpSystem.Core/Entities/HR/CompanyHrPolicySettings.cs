@@ -545,4 +545,19 @@ public class CompanyHrPolicySettings : TenantEntity
     /// </summary>
     [Range(1, 90)]
     public int OrientationChaseAfterDays { get; set; } = 3;
+
+    // ── Company schedule reminders (round 4, lane N-b2) ──────────────────────────────────────
+
+    /// <summary>
+    /// Days before an event's RSVP deadline that everybody who has not answered is chased, once, by
+    /// the company-schedule reminder sweep.
+    /// </summary>
+    /// <remarks>
+    /// A tenant setting rather than a field on each event: the event form already asks for an RSVP
+    /// deadline, and a second date to reason about per event is one more thing an organiser gets wrong.
+    /// ⚠ Non-nullable with a real DEFAULT in the migration — at zero the chase would fall on the
+    /// deadline itself, when answering is already too late to plan by.
+    /// </remarks>
+    [Range(0, 60)]
+    public int CompanyEventRsvpChaseLeadDays { get; set; } = 2;
 }

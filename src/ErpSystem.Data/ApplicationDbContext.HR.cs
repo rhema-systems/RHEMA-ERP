@@ -4399,6 +4399,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 OrientationDueLeadDays         = 7,
                 OrientationCertificateExpiryLeadDays = 30,
                 OrientationChaseAfterDays      = 3,
+                // Round 4, lane N-b2: the RSVP chase, two days before the deadline.
+                CompanyEventRsvpChaseLeadDays  = 2,
                 CreatedAt                      = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt                      = (DateTime?)null,
                 CreatedBy                      = "System",

@@ -1,7 +1,7 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–N done (with I-b; K as K-a, K-b1, K-b2), and N-b1. Next is N-b2, the
-> company-schedule reminders, which has a migration. Then O.**
+> **Status 2026-09-23 — A–N done (with I-b; K as K-a, K-b1, K-b2), and N-b (N-b1, N-b2). Next is O,
+> with P alongside.**
 >
 > | Lane | State |
 > |---|---|
@@ -26,13 +26,14 @@
 > | **K-b2** | **DONE** — 54 ×2, `hr-orientation/run-round4-kb2.mjs`; **no migration**. Onboarding tells people: a plan made **welcomes the new hire** and tells its coordinator and buddy (on hire too — lane I 184 ×2, H6d); a plan changing hands tells only the new holders; a task given tells its assignee; marking a task done that needs signing off tells the coordinator at once. And the page they lead to — the user's call — **"My onboarding"** in the portal: the new hire's plan and who owes each task, the tasks given to the reader with **Mark done**, the new colleagues they are buddy to. K-a's reminders for a task given to somebody now open it, not HR's queues — § 8 |
 > | **N** | **DONE** — 115 ×2, a new suite `hr-templates/run-lane-n.mjs`; **no migration**. **Letter & Email Templates** under HR Settings covers all 44 templates in the eight catalogues (32 emails, 12 printed documents). It has a token palette, a live preview that lists every problem a save would be refused for, save, reset and a test send to the officer's own address. The list comes from the catalogues and a row is stored only when a tenant edits; N2's startup seeding was rejected because a seeded row would freeze its day's wording. **The sender used any tenant's stored wording**, and would still have taken an untouched seeded copy for an edit; both are fixed. Background emails now carry the tenant's legal name, where they printed "Our Company"; so does the careers activation email, where it read "Default Tenant". Candidates are greeted by name, where "Application Received" used their email address. The register § 2.7 lists all 44, checked against the screen both ways. The survey found **four sender behaviours outside the lane**, which become **N-b** — § 8 |
 > | **N-b1** | **DONE** — 32 ×2, `hr-templates/run-lane-nb1.mjs`; **no migration**. **The offer letter goes with the Offer Issued email as a PDF** (the user's call), rendered by the Syncfusion engine the document module already uses; the email says it is attached only when it is. **Under Review** is sent once, on the first move a person makes into a review stage, from either door; the older door had sent it after every move. **Application Withdrawn** is sent from all three live withdrawals; it was unreachable. **Offer Accepted** is sent however the acceptance arrives, and an acceptance by the anonymous link carries the offer tenant's wording. The portal's withdrawal now closes the application's pipeline stage, as HR's always did. ⚠ The first PDF had **empty tables**, because the importer does not read `rem`. It was found by opening the file, then fixed, and the suite now checks the tables' words — § 8 |
+> | **N-b2** | **DONE** — 36 ×2, `hr-templates/run-lane-nb2.mjs`; migration `AddCompanyScheduleReminderSweep` applied to UAT. **Company-schedule reminders send themselves.** An hourly sweep sends each live event's reminder the days before its form asks for, and chases unanswered invitations ahead of the RSVP deadline. Each goes **once**, stamped on the event, in the tenant's wording and under its legal name. The form's **Send reminders / days before** had been ghosts. The RSVP-chase lead is a new tenant setting (2 days, on the policy page). A moved date is reminded again. The manual endpoints, which no screen called, are now buttons on a Reminders card and count as the send. Register § 2.8 — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b1**, the recruitment half of the sender fixes, is done. Next is **N-b2**, the company-schedule reminders, which has a migration. Then O, with P alongside.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). Next is **O**, with P alongside.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names four walks a harness cannot replace;
 > all four are still outstanding.
@@ -823,6 +824,9 @@ by lane K-b2):
 4. **My onboarding**, signed in as three people — the new hire (their plan, who owes what), an IT
    assignee (Mark done, then waiting on the sign-off) and a buddy — each seeing only their own; and a
    notice's link landing each of them on it (K-b2).
+5. **An event's Reminders card** (N-b2): what went and when, or when it will. Press **Send reminder
+   now** and see the card say it went. Also the policy page's **Company schedule reminders** card, and
+   the event form's explained **Send reminders** switch.
 
 **Live probes before building, not after:**
 
@@ -2396,6 +2400,77 @@ Every failure among them is one already named in § 9.2. The API log holds only 
 - the notification processor with no mail server;
 - one payroll-profile failure (defect #23) per employee the suites made;
 - one timed-out clean-up of expired notifications, which belongs to that processor.
+
+### Lane N-b2 — company-schedule reminders that send themselves · DONE 2026-09-23 · 36 assertions ×2
+
+Harness: `dev-harness/hr-templates/run-lane-nb2.mjs`, through the local SMTP sink. Migration
+`20260923200051_AddCompanyScheduleReminderSweep`, applied to UAT. It is guarded SQL; the scaffold's
+`defaultValue: 0` plus an `UpdateData` against one hard-coded seed-row id became `NOT NULL DEFAULT
+(2)`, which fills every tenant's row. It was proved twice up and twice down on a scratch database with
+two settings rows, and verified on UAT (history row, both columns, the named default, the value 2).
+
+**What was built.**
+
+| | |
+|---|---|
+| **The sweep** | `ICompanyEventService.SendDueRemindersAsync(tenantId, now)` runs hourly in `CompanyScheduleReminderBackgroundService`, which is registered in the same change; its start line is in the log. HR's `POST api/CompanySchedule/reminders/run` runs the same code now. It sends each live event's reminder `ReminderDaysBefore` before it, where **Send reminders** is on, to everybody who has not declined. It chases unanswered invitations `CompanyEventRsvpChaseLeadDays` before the RSVP deadline, to nobody who has answered. Each is sent **once** and stamped on the event, and each event is saved as it is sent, so a failed pass costs only what it had not sent. It is tenant-explicit throughout (`SendForTenantAsync`, lane N's lesson), so the sweep's email carries the tenant's wording and legal name. |
+| **Which events** | Only live ones: scheduled, confirmed or rescheduled, not cancelled, and approved where approval is required. A postponed event has no date to be reminded of. |
+| **Moved dates** | A reschedule clears the reminder stamp. An edit clears whichever stamp its changed date invalidates, the start or the RSVP deadline. |
+| **The Reminders card** (event page) | The manual reminder and RSVP-chase endpoints, from round 4's D6, **had no control on any screen**. Their service methods sat on the personal-schedule service, called by nothing. They are now **Send reminder now** and **Chase unanswered now** on a Reminders card. The card says what went and when, or when it will, and pressing a button counts as the send. |
+| **The setting** | `CompanyHrPolicySettings.CompanyEventRsvpChaseLeadDays`, 2 by default, is on the HR policy page's new **Company schedule reminders** card. The event form's **Send reminders** switch now says what it does. Register § 2.8. |
+
+**Decisions.**
+
+| | Decided | Why |
+|---|---|---|
+| 1 | **Hourly, where lane K's sweep is daily** | An event created this morning for tomorrow, reminding a day before, is due today. A daily pass could fall before the event existed and come round again after it. The stamps make cadence a matter of latency, never of duplicates. |
+| 2 | **The RSVP-chase lead is a tenant setting, not a field per event** | The form already asks for a deadline. A second date to reason about per event is one more thing for an organiser to get wrong. |
+| 3 | **A manual send counts as the send** | Otherwise a person HR reminded yesterday is reminded again by the sweep today. Pressing the button again still sends, because HR asked. |
+| 4 | **A reminder attempted with no mail server is stamped** | Consistent with the K-b1 outbox's `NoMailServer` being final. The sweep does not hold reminders back waiting for a mail server to be configured. |
+| 5 | **The sweep's reach was measured before the suite was written** | UAT's demo events: none due for a reminder, and none with an RSVP deadline ahead. The suite re-measures before its first run (at the widest lead it sets) and refuses to run if any demo event would be swept. It cancels every fixture event at the end, so the hourly host never reminds anyone about one. After both runs, no demo event carries a stamp. |
+
+**How it is proved.** Every setting is tested in both positions, with the observed outcome stated
+(register § 2.8). The suite also proves:
+- send-once, down to "not one email" on a second pass;
+- never for a cancelled or unapproved event, and at once on approval;
+- the manual send counted as the send;
+- both kinds of moved date reminded again;
+- the tenant's wording under its legal name;
+- the run-now door refusing an employee and asking a stranger to sign in.
+
+The first run stopped at the approval step. The suite had approved as admin, and approving needs a
+user linked to an employee, so the fixture now uses a second HR officer.
+
+**Neighbouring suites.** The company-schedule suites, whose event, participant, reminder,
+reschedule and edit paths all changed, are all at baseline:
+
+| Suite | Result |
+|---|---|
+| `hr-company-schedule` slices 0–3 | 24, 32, 62, 44 (the area's 162) |
+| lane D-2 | 39 |
+| lane K-a | 55 (it saves the policy settings) |
+| lane N | 115 |
+
+**Two leave suites failed. Neither failure is this lane's; both are older harness problems.**
+
+- **`hr-leave/run-slice13-leaveyear` (10/14).** Its first block passed, including *saving the
+  settings without moving the leave year*, which exercises the new field. Its second block moves the
+  leave year **by SQL**, and the hr-leave SQL helper is hard-wired to `ErpSystemDB` while the API runs
+  on `ErpSystemDB_UAT`. The move landed in the other database: the plan read back January's answer,
+  and the stored year read back empty. The suite's own `exit` handler put the development database's
+  month back to January.
+- **`hr-leave/run-slice6-settings`.** It saved and restored the settings, then died raising a leave
+  request that its long-lived fixture employee already holds for that period, which is litter from
+  earlier runs.
+
+Both suites need their SQL target made configurable before they can prove anything on UAT; that is
+recorded here, not fixed. The API log holds only the known noise: the notification processor, and
+42 failed saves, every one the payroll-profile foreign key (defect #23). Nothing was logged from the
+sweep.
+
+**Frontend:** scoped type-check (`tsconfig.round4-lane-nb2.json`) clean, with a negative control in
+the event page; eslint clean. **Not browser-walked**: the Reminders card and the policy page's new
+card join the walk list.
 
 ---
 

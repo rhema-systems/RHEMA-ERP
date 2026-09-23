@@ -35,6 +35,7 @@ public class CompanyEventService : ICompanyEventService
     /// deadline the invitee has never heard of.
     /// </remarks>
     private readonly ITemplatedEmailService _templatedEmail;
+    private readonly ICompanyHrPolicySettingsService _policySettings;
 
     public CompanyEventService(
         ICompanyEventRepository eventRepository,
@@ -45,8 +46,10 @@ public class CompanyEventService : ICompanyEventService
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ITemplatedEmailService templatedEmail,
-        ILogger<CompanyEventService> logger)
+        ILogger<CompanyEventService> logger,
+        ICompanyHrPolicySettingsService policySettings)
     {
+        _policySettings = policySettings;
         _eventRepository = eventRepository;
         _participantRepository = participantRepository;
         _attendanceRepository = attendanceRepository;
@@ -105,14 +108,17 @@ public class CompanyEventService : ICompanyEventService
     /// TemplatedEmailService already swallows delivery failures and returns false.
     /// </remarks>
     private async Task SendEventEmailAsync(
-        string eventKey, string? toEmail, Dictionary<string, string?> tokens, string description)
+        Guid tenantId, string eventKey, string? toEmail, Dictionary<string, string?> tokens, string description)
     {
         if (string.IsNullOrWhiteSpace(toEmail)) return;
 
         try
         {
-            var send = _templatedEmail.SendAsync(
-                CompanyScheduleEmailCatalog.Module, eventKey, toEmail, tokens);
+            // ⚠ By the EVENT'S tenant (round 4, lane N-b2): the reminder sweep sends with nobody signed
+            // in, and without naming the tenant it would skip the tenant's own wording and print the
+            // configuration's company name.
+            var send = _templatedEmail.SendForTenantAsync(
+                tenantId, CompanyScheduleEmailCatalog.Module, eventKey, toEmail, tokens);
 
             if (await Task.WhenAny(send, Task.Delay(TimeSpan.FromSeconds(10))) == send)
                 await send;
@@ -161,7 +167,7 @@ public class CompanyEventService : ICompanyEventService
             var tokens = EventTokens(ev, name);
             if (enrich is not null) tokens = enrich(tokens);
 
-            await SendEventEmailAsync(eventKey, email, tokens, description);
+            await SendEventEmailAsync(ev.TenantId, eventKey, email, tokens, description);
             sent++;
         }
 
@@ -353,7 +359,14 @@ public class CompanyEventService : ICompanyEventService
         if (entity == null)
             throw new ArgumentException($"Company event with ID '{updateDto.Id}' not found.");
 
+        var startBefore = entity.StartDate;
+        var rsvpDeadlineBefore = entity.RsvpDeadline;
         updateDto.UpdateEntity(entity);
+
+        // An edit that moves a date moves what was reminded of it (round 4, lane N-b2): a reminder or a
+        // chase already sent for the old date is cleared, and the sweep sends it again for the new one.
+        if (entity.StartDate != startBefore) entity.ReminderSentDate = null;
+        if (entity.RsvpDeadline != rsvpDeadlineBefore) entity.RsvpReminderSentDate = null;
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -429,6 +442,10 @@ public class CompanyEventService : ICompanyEventService
         entity.StartTime = rescheduleDto.NewStartTime;
         entity.EndDate = rescheduleDto.NewEndDate;
         entity.EndTime = rescheduleDto.NewEndTime;
+        // A reminder sent for the old date reminds nobody of the new one (round 4, lane N-b2): the
+        // sweep reminds again, ReminderDaysBefore ahead of the new date. The RSVP deadline has not moved,
+        // so its chase stands.
+        entity.ReminderSentDate = null;
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -497,13 +514,7 @@ public class CompanyEventService : ICompanyEventService
             throw new InvalidOperationException(
                 $"{ev.EventName} has been cancelled, so there is nothing left to RSVP to.");
 
-        return await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventRsvpReminder,
-            enrich: null, "RSVP reminder",
-            // ⚠ NotSent as well as Sent. A participant added before the invitation send existed
-            // carries NotSent and has genuinely never been asked — chasing them is the first time
-            // anybody has told them, which is exactly who this is for.
-            filter: p => p.InvitationStatus is InvitationStatus.Sent or InvitationStatus.NotSent,
-            cancellationToken);
+        return await ChaseRsvpsAsync(ev, DateTime.UtcNow, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -515,10 +526,39 @@ public class CompanyEventService : ICompanyEventService
                 $"{ev.EventName} has been cancelled, so a reminder would be telling people to attend "
               + "something that is not happening.");
 
+        return await RemindAsync(ev, DateTime.UtcNow, cancellationToken);
+    }
+
+    /// <summary>
+    /// Chases everybody who has not answered, and stamps the event so it is not chased again — by the
+    /// button or the sweep, whichever comes second (round 4, lane N-b2).
+    /// </summary>
+    private async Task<int> ChaseRsvpsAsync(CompanyEvent ev, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        var sent = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventRsvpReminder,
+            enrich: null, "RSVP reminder",
+            // ⚠ NotSent as well as Sent. A participant added before the invitation send existed
+            // carries NotSent and has genuinely never been asked — chasing them is the first time
+            // anybody has told them, which is exactly who this is for.
+            filter: p => p.InvitationStatus is InvitationStatus.Sent or InvitationStatus.NotSent,
+            cancellationToken);
+
+        ev.RsvpReminderSentDate = nowUtc;
+        await _eventRepository.UpdateAsync(ev);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return sent;
+    }
+
+    /// <summary>
+    /// Reminds every participant who has not declined, and stamps the event so it is not reminded
+    /// again for this date — by the button or the sweep, whichever comes second (lane N-b2).
+    /// </summary>
+    private async Task<int> RemindAsync(CompanyEvent ev, DateTime nowUtc, CancellationToken cancellationToken)
+    {
         // ⚠ Declined participants are NOT reminded. They have said they are not coming; a reminder
         // is the system ignoring the answer it asked for.
-        var daysUntil = (ev.StartDate.Date - DateTime.UtcNow.Date).TotalDays;
-        return await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder,
+        var daysUntil = (ev.StartDate.Date - nowUtc.Date).TotalDays;
+        var sent = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder,
             tokens =>
             {
                 tokens["DaysUntil"] = daysUntil >= 1 ? ((int)daysUntil).ToString() : null;
@@ -527,6 +567,75 @@ public class CompanyEventService : ICompanyEventService
             "event reminder",
             filter: p => p.InvitationStatus != InvitationStatus.Declined,
             cancellationToken);
+
+        ev.ReminderSentDate = nowUtc;
+        await _eventRepository.UpdateAsync(ev);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return sent;
+    }
+
+    /// <inheritdoc />
+    public Task<CompanyScheduleReminderRunDto> RunDueRemindersNowAsync(CancellationToken cancellationToken = default)
+        => SendDueRemindersAsync(GetTenantId(), DateTime.UtcNow, cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>Which events.</b> Live ones only — scheduled, confirmed or rescheduled, not cancelled,
+    /// not postponed (a postponed event has no date to be reminded of), and approved where approval is
+    /// required: an event still waiting for its approval is not yet something to attend. The event's day
+    /// must not have passed, and an RSVP deadline must still be ahead — a chase after it is too late to
+    /// answer.</para>
+    ///
+    /// <para><b>When.</b> Day-granular, as the form asks: the reminder on or after the day that is
+    /// <c>ReminderDaysBefore</c> days before the event; the chase on or after the day that is the lead
+    /// before the deadline. A pass that finds one due sends it at once — a late pass catches up rather
+    /// than skipping — and the sent-date makes every later pass leave it alone.</para>
+    ///
+    /// <para><b>One event at a time.</b> Each is stamped and saved as it is sent, so a failure halfway
+    /// through a pass costs only what was not yet sent, and the next pass sends exactly that.</para>
+    /// </remarks>
+    public async Task<CompanyScheduleReminderRunDto> SendDueRemindersAsync(
+        Guid tenantId, DateTime nowUtc, CancellationToken cancellationToken = default)
+    {
+        var lead = Math.Max(0, (await _policySettings.GetForTenantAsync(tenantId, cancellationToken)).CompanyEventRsvpChaseLeadDays);
+        var today = nowUtc.Date;
+        var run = new CompanyScheduleReminderRunDto { RsvpChaseLeadDays = lead };
+
+        var candidates = await _eventRepository.GetQueryable()
+            .Include(e => e.Organizer)
+            .Where(e => e.TenantId == tenantId && !e.IsDeleted && !e.IsCancelled
+                        && (e.Status == EventStatus.Scheduled || e.Status == EventStatus.Confirmed || e.Status == EventStatus.Rescheduled)
+                        && (!e.RequiresApproval || e.ApprovalDate != null)
+                        && e.StartDate >= today
+                        && ((e.SendReminders && e.ReminderDaysBefore != null && e.ReminderSentDate == null)
+                            || (e.RequiresRsvp && e.RsvpDeadline != null && e.RsvpReminderSentDate == null && e.RsvpDeadline > nowUtc)))
+            .OrderBy(e => e.StartDate)
+            .ToListAsync(cancellationToken);
+
+        foreach (var ev in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (ev.SendReminders && ev.ReminderDaysBefore is { } daysBefore && ev.ReminderSentDate is null
+                && ev.StartDate.Date.AddDays(-Math.Max(0, daysBefore)) <= today)
+            {
+                run.EmailsSent += await RemindAsync(ev, nowUtc, cancellationToken);
+                run.Reminded.Add(ev.EventNumber);
+            }
+
+            if (ev.RequiresRsvp && ev.RsvpDeadline is { } deadline && ev.RsvpReminderSentDate is null
+                && deadline > nowUtc && deadline.Date.AddDays(-lead) <= today)
+            {
+                run.EmailsSent += await ChaseRsvpsAsync(ev, nowUtc, cancellationToken);
+                run.RsvpChased.Add(ev.EventNumber);
+            }
+        }
+
+        if (run.Reminded.Count > 0 || run.RsvpChased.Count > 0)
+            _logger.LogInformation(
+                "Company schedule reminders for tenant {TenantId}: reminded {Reminded}, chased {Chased}, {Emails} email(s).",
+                tenantId, run.Reminded.Count, run.RsvpChased.Count, run.EmailsSent);
+        return run;
     }
 
     public async Task<EventParticipantDto> AddParticipantAsync(CreateEventParticipantDto createDto, CancellationToken cancellationToken = default)
@@ -571,6 +680,7 @@ public class CompanyEventService : ICompanyEventService
             tokens["SpecialRequirements"] = entity.SpecialRequirements;
 
             await SendEventEmailAsync(
+                invitedTo.TenantId,
                 CompanyScheduleEmailCatalog.Events.EventInvitation,
                 entity.Employee?.EmailAddress ?? entity.ExternalParticipantEmail,
                 tokens, "event invitation");

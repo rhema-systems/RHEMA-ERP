@@ -480,7 +480,12 @@ export function EventFormFields({
             <TextareaField form={form} name="cateringRequirements" label="Catering" />
             <TextareaField form={form} name="technicalRequirements" label="Technical" />
           </FieldRow>
-          <SwitchField form={form} name="sendReminders" label="Send reminders" />
+          <SwitchField
+            form={form}
+            name="sendReminders"
+            label="Send reminders"
+            description="Everybody who has not declined is emailed once, automatically, the days before the event set below — and again if the date moves."
+          />
           {sendReminders && <NumberField form={form} name="reminderDaysBefore" label="Days before" />}
           <TextareaField form={form} name="additionalNotes" label="Notes" />
         </CardContent>

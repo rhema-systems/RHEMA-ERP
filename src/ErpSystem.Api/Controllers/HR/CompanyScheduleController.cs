@@ -269,6 +269,15 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<IActionResult> SendEventReminders(Guid eventId, CancellationToken ct)
         => Ok(new { sent = await _eventService.SendEventRemindersAsync(eventId, ct) });
 
+    /// <summary>
+    /// Runs the reminder sweep now for the caller's tenant (round 4, lane N-b2) — exactly the code the
+    /// hourly host runs, so HR can send what is due without waiting, and a test can drive it.
+    /// </summary>
+    [HttpPost("reminders/run")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<CompanyScheduleReminderRunDto>> RunDueReminders(CancellationToken ct)
+        => Ok(await _eventService.RunDueRemindersNowAsync(ct));
+
     [HttpDelete("participants/{participantId:guid}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
     public async Task<IActionResult> RemoveParticipant(Guid participantId)

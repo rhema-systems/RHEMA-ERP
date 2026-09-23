@@ -2649,6 +2649,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // POST api/orientation-notifications/send-queued. ⚠ Registered with its class.
             services.AddHostedService<ErpSystem.Api.Services.HR.OrientationNoticeEmailBackgroundService>();
 
+            // Company schedule reminders (round 4, lane N-b2): hourly — each event's reminder the days
+            // before its form asks for, and the chase of unanswered invitations ahead of the RSVP
+            // deadline, each ONCE (stamped on the event). Logic is scoped
+            // (ICompanyEventService.SendDueRemindersAsync), shared with
+            // POST api/CompanySchedule/reminders/run. ⚠ Registered with its class.
+            services.AddHostedService<ErpSystem.Api.Services.HR.CompanyScheduleReminderBackgroundService>();
+
             // Team reminder engine (round 2, lane F2): daily sweep — a task due within the tenant's
             // lead time, a task already overdue, an objective past its date, a meeting tomorrow, and
             // terms of reference lapsing within thirty days. Sweep logic is scoped

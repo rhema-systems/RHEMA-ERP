@@ -12,6 +12,7 @@ import type {
   CompanyEventDetail,
   CompanyEventSummary,
   CompanyMilestone,
+  CompanyScheduleReminderRun,
   CompleteEvent,
   CompleteEventTask,
   CreateBusinessClosure,
@@ -69,6 +70,27 @@ import type {
 
 class CompanyEventService {
   private readonly baseUrl = '/CompanySchedule';
+
+  /**
+   * Chases everybody who has not answered their invitation. Returns how many were reached. Counts as
+   * the event's RSVP chase: the hourly sweep will not send it again (round 4, lane N-b2).
+   */
+  sendRsvpReminders(eventId: string): Promise<{ sent: number }> {
+    return apiService.post<{ sent: number }>(`${this.baseUrl}/events/${eventId}/rsvp-reminders`, {});
+  }
+
+  /**
+   * Reminds every participant who has not declined. Returns how many were reached. Counts as the
+   * event's reminder for its current date: the hourly sweep will not send it again.
+   */
+  sendEventReminders(eventId: string): Promise<{ sent: number }> {
+    return apiService.post<{ sent: number }>(`${this.baseUrl}/events/${eventId}/reminders`, {});
+  }
+
+  /** Runs the reminder sweep now for the tenant — what the hourly host runs (lane N-b2). */
+  runDueReminders(): Promise<CompanyScheduleReminderRun> {
+    return apiService.post<CompanyScheduleReminderRun>(`${this.baseUrl}/reminders/run`, {});
+  }
 
   getAll(): Promise<CompanyEvent[]> {
     return apiService.get<CompanyEvent[]>(`${this.baseUrl}/events`);
@@ -536,16 +558,6 @@ class PersonalScheduleService {
   /** A unit and its subtree. Gated on the company-schedule WRITE policy — it exposes other people's leave. */
   getTeamSchedule(organizationUnitId: string, from: string, to: string): Promise<TeamSchedule> {
     return apiService.get<TeamSchedule>(`${this.baseUrl}/team-schedule/${organizationUnitId}`, { from, to });
-  }
-
-  /** Chases everybody who has not answered their invitation. Returns how many were reached. */
-  sendRsvpReminders(eventId: string): Promise<{ sent: number }> {
-    return apiService.post<{ sent: number }>(`${this.baseUrl}/events/${eventId}/rsvp-reminders`, {});
-  }
-
-  /** Reminds every participant who has not declined. Returns how many were reached. */
-  sendEventReminders(eventId: string): Promise<{ sent: number }> {
-    return apiService.post<{ sent: number }>(`${this.baseUrl}/events/${eventId}/reminders`, {});
   }
 }
 

@@ -94,7 +94,9 @@ public class CompanyEventDto : BaseDto
     public bool SendReminders { get; set; }
     public int? ReminderDaysBefore { get; set; }
     public DateTime? ReminderSentDate { get; set; }
-    
+    /// <summary>When the RSVP chase went — by the sweep or HR's button (round 4, lane N-b2).</summary>
+    public DateTime? RsvpReminderSentDate { get; set; }
+
     // Completion
     public DateTime? ActualStartTime { get; set; }
     public DateTime? ActualEndTime { get; set; }
@@ -1325,4 +1327,22 @@ public class TeamScheduleDto
     public DateOnly From { get; set; }
     public DateOnly To { get; set; }
     public List<PersonalScheduleDto> Members { get; set; } = new();
+}
+
+/// <summary>
+/// One pass of the company-schedule reminder sweep (round 4, lane N-b2): which events it reminded and
+/// chased, and how many emails that made. The scheduled run and HR's run-now return the same thing.
+/// </summary>
+public class CompanyScheduleReminderRunDto
+{
+    /// <summary>The event numbers whose reminder went this pass — each once, ever, per date.</summary>
+    public List<string> Reminded { get; set; } = new();
+
+    /// <summary>The event numbers whose unanswered invitations were chased this pass.</summary>
+    public List<string> RsvpChased { get; set; } = new();
+
+    public int EmailsSent { get; set; }
+
+    /// <summary>The tenant's RSVP-chase lead, in days, as this pass read it.</summary>
+    public int RsvpChaseLeadDays { get; set; }
 }

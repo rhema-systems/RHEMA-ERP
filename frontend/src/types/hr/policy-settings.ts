@@ -124,6 +124,8 @@ export interface CompanyHrPolicySettings {
   orientationCertificateExpiryLeadDays: number;
   /** Days a task awaiting sign-off, an unattempted assessment or an unsigned acknowledgement waits before it is chased. */
   orientationChaseAfterDays: number;
+  /** Round 4, lane N-b2: days before an event's RSVP deadline that everybody who has not answered is chased, once. */
+  companyEventRsvpChaseLeadDays: number;
 
   createdAt: string;
   createdBy: string | null;

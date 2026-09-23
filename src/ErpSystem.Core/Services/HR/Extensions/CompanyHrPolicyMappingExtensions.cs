@@ -82,6 +82,7 @@ public static class CompanyHrPolicyMappingExtensions
             OrientationDueLeadDays                = entity.OrientationDueLeadDays,
             OrientationCertificateExpiryLeadDays  = entity.OrientationCertificateExpiryLeadDays,
             OrientationChaseAfterDays             = entity.OrientationChaseAfterDays,
+            CompanyEventRsvpChaseLeadDays         = entity.CompanyEventRsvpChaseLeadDays,
         };
     }
 
@@ -154,5 +155,6 @@ public static class CompanyHrPolicyMappingExtensions
         entity.OrientationDueLeadDays             = dto.OrientationDueLeadDays;
         entity.OrientationCertificateExpiryLeadDays = dto.OrientationCertificateExpiryLeadDays;
         entity.OrientationChaseAfterDays          = dto.OrientationChaseAfterDays;
+        entity.CompanyEventRsvpChaseLeadDays      = dto.CompanyEventRsvpChaseLeadDays;
     }
 }

@@ -104,6 +104,7 @@ const schema = z
     orientationDueLeadDays: z.coerce.number().int().min(0).max(90),
     orientationCertificateExpiryLeadDays: z.coerce.number().int().min(0).max(365),
     orientationChaseAfterDays: z.coerce.number().int().min(1).max(90),
+    companyEventRsvpChaseLeadDays: z.coerce.number().int().min(0).max(60),
 
     budgetEnforcementMode: z.string(),
     establishmentEnforcementMode: z.string(),
@@ -224,6 +225,7 @@ export default function PolicySettingsPage() {
       orientationDueLeadDays: data.orientationDueLeadDays,
       orientationCertificateExpiryLeadDays: data.orientationCertificateExpiryLeadDays,
       orientationChaseAfterDays: data.orientationChaseAfterDays,
+      companyEventRsvpChaseLeadDays: data.companyEventRsvpChaseLeadDays ?? 2,
     });
   }, [data, form]);
 
@@ -319,6 +321,7 @@ export default function PolicySettingsPage() {
         orientationDueLeadDays: Number(v.orientationDueLeadDays),
         orientationCertificateExpiryLeadDays: Number(v.orientationCertificateExpiryLeadDays),
         orientationChaseAfterDays: Number(v.orientationChaseAfterDays),
+        companyEventRsvpChaseLeadDays: Number(v.companyEventRsvpChaseLeadDays),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr', 'policy-settings'] });
@@ -884,6 +887,33 @@ export default function PolicySettingsPage() {
               not yet attempted, or an acknowledgement not yet signed. Overdue items are reminded when
               they fall due, again after a week and after a fortnight; anything more than 90 days
               overdue is treated as history.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Company schedule reminders</CardTitle>
+            <CardDescription>
+              Sent automatically, once each. An event&apos;s own reminder goes the number of days
+              before it that its form asks for, when <strong>Send reminders</strong> is on. Everybody
+              who has not answered an invitation is chased once, ahead of the event&apos;s RSVP deadline.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="companyEventRsvpChaseLeadDays"
+                label="Chase unanswered invitations this many days before the RSVP deadline"
+                required
+              />
+            </FieldRow>
+            <p className="text-sm text-muted-foreground">
+              Only live events are reminded: scheduled, confirmed or rescheduled, and approved where
+              approval is required. Moving an event&apos;s date lets it be reminded again for the new
+              date. Pressing <strong>Send reminder now</strong> or <strong>Chase unanswered now</strong> on
+              the event counts as the send, so nobody is told twice.
             </p>
           </CardContent>
         </Card>

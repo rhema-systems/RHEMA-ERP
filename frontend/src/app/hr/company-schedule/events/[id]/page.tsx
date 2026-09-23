@@ -4,9 +4,11 @@ import { use, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  BellRing,
   CalendarClock,
   CheckCircle2,
   Loader2,
+  MailQuestion,
   Pencil,
   Trash2,
   XCircle,
@@ -108,6 +110,25 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
       description: error?.response?.data?.detail ?? error?.message ?? 'Please try again.',
       variant: 'destructive',
     });
+
+  // Round 4, lane N-b2: the reminder and the RSVP chase, sent now. The hourly sweep sends each once
+  // when it falls due; sending it here counts as that send, so nobody is told twice.
+  const remindNow = useMutation({
+    mutationFn: () => companyEventService.sendEventReminders(id),
+    onSuccess: async ({ sent }) => {
+      await refresh();
+      toast({ title: 'Reminder sent', description: `${sent} participant${sent === 1 ? '' : 's'} reminded.` });
+    },
+    onError: fail('Could not send the reminder'),
+  });
+  const chaseNow = useMutation({
+    mutationFn: () => companyEventService.sendRsvpReminders(id),
+    onSuccess: async ({ sent }) => {
+      await refresh();
+      toast({ title: 'Invitations chased', description: `${sent} unanswered invitation${sent === 1 ? '' : 's'} chased.` });
+    },
+    onError: fail('Could not chase the invitations'),
+  });
 
   const approve = useMutation({
     mutationFn: () => companyEventService.approve(id),
@@ -293,6 +314,44 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               {event.rescheduledDate?.slice(0, 10)} — {event.rescheduleReason}
             </Detail>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Reminders</CardTitle></CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <div className="grid gap-6 sm:grid-cols-2">
+            <Detail label="Event reminder">
+              {!event.sendReminders
+                ? 'Off — turn on Send reminders in Edit'
+                : event.reminderSentDate
+                  ? `Sent ${new Date(event.reminderSentDate).toLocaleString()}`
+                  : `Goes ${event.reminderDaysBefore ?? 0} day${event.reminderDaysBefore === 1 ? '' : 's'} before the event, automatically`}
+            </Detail>
+            <Detail label="RSVP chase">
+              {!event.requiresRsvp || !event.rsvpDeadline
+                ? 'No RSVP deadline'
+                : event.rsvpReminderSentDate
+                  ? `Chased ${new Date(event.rsvpReminderSentDate).toLocaleString()}`
+                  : 'Goes automatically ahead of the RSVP deadline, to everybody who has not answered'}
+            </Detail>
+          </div>
+          {open && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => remindNow.mutate()} disabled={remindNow.isPending}>
+                <BellRing className="mr-2 h-4 w-4" /> Send reminder now
+              </Button>
+              {event.requiresRsvp && (
+                <Button variant="outline" onClick={() => chaseNow.mutate()} disabled={chaseNow.isPending}>
+                  <MailQuestion className="mr-2 h-4 w-4" /> Chase unanswered now
+                </Button>
+              )}
+            </div>
+          )}
+          <p className="text-muted-foreground">
+            Each is sent once. Sending it here counts as that send. Moving the event&apos;s date, or its
+            RSVP deadline, lets it go again for the new date.
+          </p>
         </CardContent>
       </Card>
 

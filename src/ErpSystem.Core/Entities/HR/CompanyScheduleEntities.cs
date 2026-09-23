@@ -120,10 +120,14 @@ public class CompanyEvent : TenantEntity
     [MaxLength(1000)]
     public string? TechnicalRequirements { get; set; }
 
-    // Reminders
+    // Reminders — sent by the company-schedule reminder sweep (round 4, lane N-b2): the event reminder
+    // ReminderDaysBefore days ahead when SendReminders is on, and the RSVP chase ahead of RsvpDeadline.
+    // Each is sent ONCE, and the sent-date is what says so; HR's manual buttons stamp the same dates,
+    // and a reschedule clears them, since a reminder for the old date reminds nobody of the new one.
     public bool SendReminders { get; set; }
     public int? ReminderDaysBefore { get; set; }
     public DateTime? ReminderSentDate { get; set; }
+    public DateTime? RsvpReminderSentDate { get; set; }
 
     // Completion
     public DateTime? ActualStartTime { get; set; }

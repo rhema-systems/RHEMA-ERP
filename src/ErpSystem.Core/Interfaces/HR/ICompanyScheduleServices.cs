@@ -34,17 +34,28 @@ public interface ICompanyEventService
     /// <para>⚠ Only the UNANSWERED. Somebody who has already accepted or declined has done what was
     /// asked, and chasing them reads as the system not listening.</para>
     ///
-    /// <para>⚠ An endpoint, not a sweep. Every one of HR's fourteen scheduled sweeps logs intent
-    /// into a dispatch table and delivers nothing — making this the fifteenth would add to that pile
-    /// rather than to the product. Lane K owns turning the sweeps into things that actually send;
-    /// when it lands, this is the method it calls, and until then the organiser can chase from the
-    /// event screen, which is where they already are when they notice.</para>
+    /// <para>Sent by hand from the event screen, and — since round 4, lane N-b2 — by the reminder
+    /// sweep ahead of the RSVP deadline (<see cref="SendDueRemindersAsync"/>). Either way it is
+    /// stamped on the event (<c>RsvpReminderSentDate</c>), so the other does not send it again.
+    /// When D6 was written this had to be an endpoint only: HR's sweeps delivered nothing until lane
+    /// K made one that does.</para>
     /// </remarks>
     Task<int> SendRsvpRemindersAsync(Guid eventId, CancellationToken cancellationToken = default);
 
     /// <summary>Emails every participant that the event is coming up (round 4, D6).</summary>
     /// <inheritdoc cref="SendRsvpRemindersAsync" path="/remarks/para[2]"/>
     Task<int> SendEventRemindersAsync(Guid eventId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The company-schedule reminder sweep for one tenant (round 4, lane N-b2): each live event's
+    /// reminder <c>ReminderDaysBefore</c> days ahead where <c>SendReminders</c> is on, and the chase of
+    /// unanswered invitations <c>CompanyEventRsvpChaseLeadDays</c> ahead of the RSVP deadline — each
+    /// ONCE. Tenant-explicit: the hourly host has no signed-in user.
+    /// </summary>
+    Task<CompanyScheduleReminderRunDto> SendDueRemindersAsync(Guid tenantId, DateTime nowUtc, CancellationToken cancellationToken = default);
+
+    /// <summary>The same sweep, now, for the signed-in HR officer's tenant.</summary>
+    Task<CompanyScheduleReminderRunDto> RunDueRemindersNowAsync(CancellationToken cancellationToken = default);
 
     Task<EventParticipantDto> AddParticipantAsync(CreateEventParticipantDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<EventParticipantDto>> GetParticipantsAsync(Guid eventId, CancellationToken cancellationToken = default);

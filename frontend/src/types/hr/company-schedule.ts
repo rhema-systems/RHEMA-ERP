@@ -183,7 +183,10 @@ export interface CompanyEvent extends AuditFields {
 
   sendReminders: boolean;
   reminderDaysBefore?: number | null;
+  /** When the event's reminder went — by the hourly sweep or HR's button; cleared when the date moves. */
   reminderSentDate?: string | null;
+  /** When the unanswered invitations were chased (round 4, lane N-b2); cleared when the RSVP deadline moves. */
+  rsvpReminderSentDate?: string | null;
 
   actualStartTime?: string | null;
   actualEndTime?: string | null;
@@ -827,4 +830,14 @@ export interface TeamSchedule {
   from: string;
   to: string;
   members: PersonalSchedule[];
+}
+
+/** One pass of the reminder sweep (round 4, lane N-b2) — the scheduled run and run-now return the same. */
+export interface CompanyScheduleReminderRun {
+  /** Event numbers whose reminder went this pass. */
+  reminded: string[];
+  /** Event numbers whose unanswered invitations were chased this pass. */
+  rsvpChased: string[];
+  emailsSent: number;
+  rsvpChaseLeadDays: number;
 }

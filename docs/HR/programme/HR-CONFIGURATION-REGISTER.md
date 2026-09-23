@@ -2,7 +2,7 @@
 
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
 2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5; lane K-b1 — § 2.6;
-lane N — § 2.7, the 44 letter and email templates).
+lane N — § 2.7, the 44 letter and email templates; lane N-b2 — § 2.8, company-schedule reminders).
 
 **Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2), and
 all four of leave's CHILD tables (38)** — plus, not as a full survey, the three `OrientationProgram` notice and
@@ -309,8 +309,8 @@ every render, and the escaped form would have printed their markup as text.
 | `OnboardingOrientation/OnboardingTaskAssigned` | Onboarding Task Assigned | email | a task is added for somebody, or passed to somebody new | background | **Enforced** |
 | `OnboardingOrientation/OnboardingTaskDone` | Onboarding Task Waiting for Sign-off | email | a task needing sign-off is marked done | background | **Enforced** |
 | `CompanySchedule/EventInvitation` | Event Invitation | email | HR adds a participant to an event | signed in | **Enforced** |
-| `CompanySchedule/EventRsvpReminder` | RSVP Reminder | email | HR presses Send RSVP reminders. ⚠ Only then: no sweep sends it, although its description implies timing. Lane N-b2 adds the sweep | signed in | **Enforced** |
-| `CompanySchedule/EventReminder` | Event Reminder | email | HR presses Send reminders. ⚠ Only then, as above, and the event form's **Send reminders / days before** is read by nothing. Lane N-b2 | signed in | **Enforced** |
+| `CompanySchedule/EventRsvpReminder` | RSVP Reminder | email | the hourly sweep chases unanswered invitations `CompanyEventRsvpChaseLeadDays` before the RSVP deadline, **once**; or HR presses **Chase unanswered now**, which counts as the chase. Until lane N-b2 the chase was an API endpoint that no screen called | signed in, or background (sweep) | **Enforced** (§ 2.8) |
+| `CompanySchedule/EventReminder` | Event Reminder | email | the hourly sweep sends it `ReminderDaysBefore` before a live event whose **Send reminders** is on, **once**, and again if the date moves; or HR presses **Send reminder now**, which counts as the send. Until lane N-b2 the form's switch and its days were read by nothing | signed in, or background (sweep) | **Enforced** (§ 2.8) |
 | `CompanySchedule/EventRescheduled` | Event Rescheduled | email | an event is moved | signed in | **Enforced** |
 | `CompanySchedule/EventCancelled` | Event Cancelled | email | an event is cancelled | signed in | **Enforced** |
 | `HrLetters/HrLetterEmploymentConfirmation` | Letter — employment confirmation | document | HR previews or issues an employee's letter request | signed in | **Enforced**: [E1–E4] |
@@ -329,6 +329,38 @@ rows to edit. The screen lists from the catalogues instead. A seeded row would f
 wording, because the resolver prefers a stored row, and lane K-b alone rewrote twelve defaults in one
 day. The seeder stays deferred. The resolver also ignores an untouched seeded copy: `IsSystemDefault`
 with no `UpdatedBy` [G1–G3].
+
+---
+
+## 2.8 Company schedule — reminders that send themselves — added 2026-09-23
+
+Round 4, lane N-b2. Read by the company-schedule reminder sweep
+(`ICompanyEventService.SendDueRemindersAsync`). The sweep runs **hourly** (in
+`CompanyScheduleReminderBackgroundService`), and HR can run the same code now with
+`POST api/CompanySchedule/reminders/run`.
+
+It sweeps only **live** events: scheduled, confirmed or rescheduled, not cancelled, and approved where
+approval is required. Each send is stamped on the event (`ReminderSentDate`, `RsvpReminderSentDate`),
+so it goes **once**. A reschedule or an edit that moves a date clears the matching stamp. HR's
+**Send reminder now** and **Chase unanswered now**, on the event page's Reminders card, stamp the same
+dates. **Two of the three settings were ghosts**: the event form offered them, the database saved them,
+and nothing read them.
+
+| Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
+|---|---|---|---|---|
+| `SendReminders` ("Send reminders") | per event | off | **Enforced**. It was a ghost | [A2] on: an event two days away, 3 days before, reminded everybody who had not declined. [A4] off, the same date: nobody |
+| `ReminderDaysBefore` ("Days before") | per event | none | **Enforced**. It was a ghost | [A5] 3 days before an event in 5: not yet. [A10] the same event at 7: reminded |
+| `CompanyEventRsvpChaseLeadDays` ("Chase unanswered invitations this many days before the RSVP deadline") | `CompanyHrPolicySettings`, the policy page's **Company schedule reminders** card | **2**; migration `AddCompanyScheduleReminderSweep` adds it `NOT NULL DEFAULT (2)` | **Enforced**. New in N-b2 | [B3] a deadline four days away, at 2: not chased. [B6] the same deadline at 5: chased. [B7] restored |
+
+**Also proved:**
+- once [A8–A9];
+- never for a cancelled event, nor one still awaiting approval, and at once when approved [C1–C3];
+- HR's send counts as the send [D1–D4];
+- a moved date is reminded again, for both a reschedule and an edit of the RSVP deadline [E1–E4];
+- the tenant's own wording, under its legal name [F1–F2].
+
+**Not a setting, deliberately:** the hourly cadence. A reminder is day-granular, and the stamp makes
+cadence a matter of latency, never of duplicates.
 
 ---
 
