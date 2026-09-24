@@ -331,6 +331,9 @@ public interface IQualificationCatalogueRepository : IGenericRepository<Qualific
     Task<IEnumerable<Qualification>> GetByTypeAsync(QualificationType type);
     Task<Qualification?> GetByNameAsync(string name);
     Task<bool> NameExistsAsync(string name);
+
+    /// <summary>The tenant's active qualification ladder, lowest rung first (round 4, lane Q).</summary>
+    Task<IEnumerable<QualificationLevel>> GetActiveLevelsAsync(Guid tenantId);
 }
 
 /// <summary>

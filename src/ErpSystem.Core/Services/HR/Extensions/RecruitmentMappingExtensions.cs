@@ -1088,6 +1088,14 @@ public static class RecruitmentMappingExtensions
             Institution = entity.Institution,
             DateAwarded = entity.DateAwarded,
             Grade = entity.Grade,
+            // Round 4, lane Q. The id is the row's own; the effective pair is what the engine scores.
+            // ⚠ The name needs QualificationLevel (and Qualification.QualificationLevel) Included;
+            // the ids do not.
+            QualificationLevelId = entity.QualificationLevelId,
+            EffectiveQualificationLevelId = entity.QualificationLevelId ?? entity.Qualification?.QualificationLevelId,
+            EffectiveQualificationLevelName = entity.QualificationLevelId.HasValue
+                ? entity.QualificationLevel?.Name
+                : entity.Qualification?.QualificationLevel?.Name,
         };
     }
 
@@ -1099,6 +1107,7 @@ public static class RecruitmentMappingExtensions
             JobCandidateId = dto.JobCandidateId,
             QualificationType = dto.QualificationType,
             QualificationId = dto.QualificationId,
+            QualificationLevelId = dto.QualificationLevelId,
             Institution = dto.Institution,
             DateAwarded = dto.DateAwarded,
             Grade = dto.Grade,
@@ -1111,6 +1120,7 @@ public static class RecruitmentMappingExtensions
     {
         entity.QualificationType = dto.QualificationType;
         entity.QualificationId = dto.QualificationId;
+        entity.QualificationLevelId = dto.QualificationLevelId;
         entity.Institution = dto.Institution;
         entity.DateAwarded = dto.DateAwarded;
         entity.Grade = dto.Grade;

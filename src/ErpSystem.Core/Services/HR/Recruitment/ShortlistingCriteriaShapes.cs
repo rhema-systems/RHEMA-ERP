@@ -90,9 +90,16 @@ public static class ShortlistingCriteriaShapes
         },
         new ShortlistingCriteriaShape
         {
+            // Round 4, lane Q. Was ValueKind.Qualification, "scored exactly like Qualification":
+            // a name match, so the type existed in name only, and "A relevant first degree" matched
+            // the WORD "degree", which no Bachelor of Science contains (guide R4-5.2). Now one
+            // value, a rung of the ladder, compared by rank.
             Type = JobShortlistingCriteriaType.EducationLevel, Label = "Education level",
-            ValueKind = ShortlistingValueKind.Qualification, IsList = true, RequiresValues = true,
-            Hint = "Scored exactly like Qualification: the catalogue row first, then the name.",
+            ValueKind = ShortlistingValueKind.QualificationLevel, IsList = false, RequiresValues = true,
+            Hint = "Pick the minimum level on the qualification ladder. A candidate passes when any of "
+                 + "their qualifications sits at that level or higher; levels ranked alike count as "
+                 + "equivalent, so an HND meets \"at least Bachelor's\" when the ladder ranks them "
+                 + "together. Below the level, or with no level on file, is a miss.",
         },
         new ShortlistingCriteriaShape
         {

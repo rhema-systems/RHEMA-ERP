@@ -28,6 +28,17 @@ export interface PublicCatalogueQualification {
   id: string;
   name: string;
   type: QualificationType;
+  /** Round 4, lane Q: the rung the entry sits on, so picking it pre-fills the row's Level. */
+  levelId?: string | null;
+}
+
+/** One rung of the employer's qualification ladder (`GET public/catalogue/qualification-levels`). */
+export interface PublicCatalogueQualificationLevel {
+  id: string;
+  name: string;
+  code?: string | null;
+  /** Higher is more advanced; rungs ranked alike are equivalents. */
+  rank: number;
 }
 
 export interface PublicCatalogueLanguage {
@@ -85,6 +96,14 @@ export interface CareersQualification {
   institution: string;
   dateAwarded: string;
   grade?: string | null;
+  /**
+   * Round 4, lane Q: the rung of the qualification ladder. Sent on save; required for Education
+   * unless the catalogue entry picked sits on one.
+   */
+  qualificationLevelId?: string | null;
+  /** Read only: the rung the engine scores — the row's own, or its catalogue entry's. */
+  effectiveQualificationLevelId?: string | null;
+  effectiveQualificationLevelName?: string | null;
 }
 
 export interface CareersReferee {

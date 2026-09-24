@@ -48,10 +48,15 @@ public static class ShortlistingEvaluator
     /// aggregation is shared rather than copied. Falling through to 100 there handed full marks to
     /// every candidate a criterion could not speak about — which is the ordinary case for a
     /// vacancy screening on an area against people with no address on file.</para>
+    ///
+    /// <para><paramref name="ladder"/> is the tenant's qualification ladder (round 4, lane Q), which
+    /// an "Education level" criterion compares ranks on. Required rather than optional so that no
+    /// caller can forget it and quietly score every such criterion as unanswerable.</para>
     /// </remarks>
     public static ShortlistingScoreResult Score(
         IEnumerable<JobShortlistingCriteria> criteria,
-        ScoringCandidateView view)
+        ScoringCandidateView view,
+        QualificationLadder ladder)
     {
         var breakdown = new List<CriterionScoreResult>();
         decimal totalWeight = 0m;
@@ -60,7 +65,7 @@ public static class ShortlistingEvaluator
 
         foreach (var criterion in criteria)
         {
-            var result = EvaluateCriterion(criterion, view);
+            var result = EvaluateCriterion(criterion, view, ladder);
             breakdown.Add(result);
 
             if (criterion.IsMandatory && !result.Passed)
@@ -88,7 +93,8 @@ public static class ShortlistingEvaluator
 
     public static CriterionScoreResult EvaluateCriterion(
         JobShortlistingCriteria criterion,
-        ScoringCandidateView    view)
+        ScoringCandidateView    view,
+        QualificationLadder     ladder)
     {
         bool passed;
         decimal rawScore;
@@ -103,8 +109,13 @@ public static class ShortlistingEvaluator
                 break;
             }
 
-            case JobShortlistingCriteriaType.Qualification:
             case JobShortlistingCriteriaType.EducationLevel:
+            {
+                (passed, rawScore, notes, autoEvaluated) = EvaluateEducationLevelCriterion(criterion, view, ladder);
+                break;
+            }
+
+            case JobShortlistingCriteriaType.Qualification:
             {
                 // ID-first: the legacy single catalogue FK still passes immediately when the candidate holds it.
                 if (criterion.RequiredQualificationId.HasValue && view.QualificationIds.Contains(criterion.RequiredQualificationId.Value))
@@ -371,6 +382,65 @@ public static class ShortlistingEvaluator
         => (path.EndsWith('/') ? path : path + '/')
             .Contains($"/{areaId}/", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// "Education level, at least …": passes when any of the candidate's qualifications sits on the
+    /// required rung of the ladder or higher (round 4, lane Q; decisions Q-D3 and Q-D4).
+    /// </summary>
+    /// <remarks>
+    /// <para>It compares RANKS, never names. That is the whole repair: the seeded "A relevant first
+    /// degree" criterion matched the word "degree", which no Bachelor of Science contains
+    /// (recruitment guide R4-5.2). Ties pass, because a rank shared on the ladder means
+    /// equivalence: TDC ranks the HND level with the Bachelor's degree on purpose.</para>
+    ///
+    /// <para>Binary, not partial (Q-D3): a diploma is not 80% of a degree, so a lower rung scores 0
+    /// however close it is — unlike years of experience, where a near miss is a near miss.</para>
+    ///
+    /// <para>⚠ No levelled qualification at all is a MISS (Q-D4), scored 0 rather than left out.
+    /// The Location criterion's rule for a candidate with no area follows the same reasoning:
+    /// leaving them out would let a candidate who has shown nothing outrank one who demonstrably
+    /// falls short.</para>
+    ///
+    /// <para>The one case that IS left out is the vacancy's own fault: a criterion that names no rung,
+    /// or a rung no longer on the ladder. That measures nothing about the candidate, so it neither
+    /// lifts nor lowers anybody — the same repair lane A gave an empty list criterion.</para>
+    /// </remarks>
+    private static (bool passed, decimal rawScore, string notes, bool autoEvaluated) EvaluateEducationLevelCriterion(
+        JobShortlistingCriteria criterion, ScoringCandidateView view, QualificationLadder ladder)
+    {
+        var required = criterion.Values
+            .Where(v => !v.IsDeleted && v.Kind == ShortlistingValueKind.QualificationLevel && v.ReferenceId.HasValue)
+            .OrderBy(v => v.SortOrder)
+            .FirstOrDefault();
+
+        if (required is null)
+            return (true, 0m,
+                "This criterion names no level on the qualification ladder, so it measures nothing and is left out of the score. "
+                + "Edit it and pick the minimum level.", false);
+
+        if (!ladder.TryGet(required.ReferenceId!.Value, out var need))
+            return (true, 0m,
+                $"The level this criterion asks for ('{required.Label}') is no longer on the qualification ladder, "
+                + "so it could not be evaluated and is left out of the score.", false);
+
+        var held = view.QualificationLevelIds
+            .Select(id => ladder.TryGet(id, out var rung) ? rung : (QualificationRung?)null)
+            .Where(r => r.HasValue)
+            .Select(r => r!.Value)
+            .ToList();
+
+        if (held.Count == 0)
+            return (false, 0m,
+                $"No qualification with a level on file; the criterion asks for at least {need.Name}. "
+                + "A qualification counts once its level is set on the candidate's record.", true);
+
+        var best = held.MaxBy(r => r.Rank);
+        var passed = best.Rank >= need.Rank;
+        var notes = passed
+            ? $"Highest qualification level: {best.Name} (rank {best.Rank}); at least {need.Name} (rank {need.Rank}) is required."
+            : $"Highest qualification level: {best.Name} (rank {best.Rank}), below the {need.Name} (rank {need.Rank}) required.";
+        return (passed, passed ? 1m : 0m, notes, true);
+    }
+
     /// <remarks>
     /// ⚠ Returns <c>autoEvaluated</c> as of round 4, lane A. An EMPTY criterion used to return
     /// <c>(true, 1m, "defaulting to pass")</c> — full marks, for a criterion that measures nothing,
@@ -601,6 +671,18 @@ public sealed class ScoringCandidateView
     public HashSet<string> CertificationNames  { get; init; } = new();
     public HashSet<string> QualificationNames  { get; init; } = new();
     public HashSet<Guid>   QualificationIds    { get; init; } = new();
+
+    /// <summary>
+    /// The ladder rungs the candidate's qualifications sit on: each one's own level, or else its
+    /// catalogue entry's (round 4, lane Q). Ranks are read from the ladder at scoring time.
+    /// </summary>
+    /// <remarks>
+    /// A set the orchestrator may ADD to after construction: a snapshot written before lane Q
+    /// carries no levels, and they are back-filled from the candidate's live profile, as
+    /// <see cref="GeoAreaPath"/> is from the live tree.
+    /// </remarks>
+    public HashSet<Guid>   QualificationLevelIds { get; init; } = new();
+
     public HashSet<string> LanguageNames       { get; init; } = new();
     public HashSet<Guid>   LanguageIds         { get; init; } = new();
 
@@ -636,6 +718,7 @@ public sealed class ScoringCandidateView
                                     .Where(q => q.QualificationId.HasValue)
                                     .Select(q => q.QualificationId!.Value)
                                     .ToHashSet(),
+            QualificationLevelIds = LevelsOf(c.Qualifications),
             LanguageNames       = c.Languages
                                     .Select(l => l.LanguageName.ToLowerInvariant())
                                     .ToHashSet(),
@@ -644,6 +727,21 @@ public sealed class ScoringCandidateView
                                     .Select(l => l.LanguageId!.Value)
                                     .ToHashSet(),
         };
+
+    /// <summary>
+    /// The effective rung of each live qualification: its own level, or else its catalogue entry's.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The catalogue fallback needs <c>Qualification</c> loaded, which every scoring read already
+    /// includes for the name. Deleted rows are filtered here rather than trusted to the read.
+    /// </remarks>
+    public static HashSet<Guid> LevelsOf(IEnumerable<JobCandidateQualification> qualifications) =>
+        qualifications
+            .Where(q => !q.IsDeleted)
+            .Select(q => q.QualificationLevelId ?? q.Qualification?.QualificationLevelId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .ToHashSet();
 
     // ── Factory: from snapshot ────────────────────────────────────────────
     public static ScoringCandidateView FromSnapshot(ApplicationCandidateSnapshot snap) =>
@@ -675,6 +773,12 @@ public sealed class ScoringCandidateView
             QualificationIds    = snap.Qualifications
                                     .Where(q => q.QualificationId.HasValue)
                                     .Select(q => q.QualificationId!.Value)
+                                    .ToHashSet(),
+            // Empty on a snapshot written before lane Q (QualificationLevelsRecorded is false); the
+            // orchestrator back-fills it from the live profile before scoring.
+            QualificationLevelIds = snap.Qualifications
+                                    .Where(q => q.QualificationLevelId.HasValue)
+                                    .Select(q => q.QualificationLevelId!.Value)
                                     .ToHashSet(),
             LanguageNames       = snap.Languages
                                     .Select(l => l.NormalisedName)
@@ -729,6 +833,7 @@ public sealed class ScoringCandidateView
                                     .Where(q => q.QualificationId.HasValue)
                                     .Select(q => q.QualificationId!.Value)
                                     .ToHashSet(),
+            QualificationLevelIds = LevelsOf(c.Qualifications),
             LanguageNames       = c.Languages
                                     .Select(l => l.LanguageName.ToLowerInvariant())
                                     .ToHashSet(),

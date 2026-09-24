@@ -24,6 +24,7 @@ public class TalentPoolScreeningService : ITalentPoolScreeningService
     private readonly IShortlistingCriteriaResolver _criteriaResolver;
     private readonly ITemplatedEmailService _templatedEmail;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TalentPoolScreeningService> _logger;
 
     public TalentPoolScreeningService(
@@ -38,8 +39,10 @@ public class TalentPoolScreeningService : ITalentPoolScreeningService
         IShortlistingCriteriaResolver criteriaResolver,
         ITemplatedEmailService templatedEmail,
         ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork,
         ILogger<TalentPoolScreeningService> logger)
     {
+        _unitOfWork = unitOfWork;
         _candidateRepository = candidateRepository;
         _vacancyRepository = vacancyRepository;
         _criteriaRepository = criteriaRepository;
@@ -167,12 +170,14 @@ public class TalentPoolScreeningService : ITalentPoolScreeningService
         var tenantId = GetTenantId();
         var filter = request.Filter ?? new TalentPoolFilterDto();
         var members = await _candidateRepository.GetTalentPoolForScreeningAsync(filter, tenantId, cancellationToken);
+        // Once per screen: an "Education level" criterion compares ranks on it (round 4, lane Q).
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, tenantId, cancellationToken);
 
         var rows = new List<TalentPoolScreenRowDto>(members.Count);
         foreach (var member in members)
         {
             var view = ScoringCandidateView.FromCandidate(member);
-            var scored = ShortlistingEvaluator.Score(criteria, view);
+            var scored = ShortlistingEvaluator.Score(criteria, view, ladder);
 
             rows.Add(new TalentPoolScreenRowDto
             {

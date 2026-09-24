@@ -58,7 +58,10 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
             // Round 3, lane C2: the catalogue rows behind a qualification and a skill ride along —
             // no lazy loading here, so without these the mappers' `Qualification?.Name` and
             // `Skill?.Name` were always null on this read.
-            .Include(c => c.Qualifications.Where(q => !q.IsDeleted)).ThenInclude(q => q.Qualification)
+            .Include(c => c.Qualifications.Where(q => !q.IsDeleted)).ThenInclude(q => q.Qualification).ThenInclude(x => x!.QualificationLevel)
+            // Round 4, lane Q: the rung's NAME on a profile read. Scoring needs only the ids,
+            // which ride on the rows and on the catalogue entry above.
+            .Include(c => c.Qualifications.Where(q => !q.IsDeleted)).ThenInclude(q => q.QualificationLevel)
             .Include(c => c.WorkHistories.Where(w => !w.IsDeleted))
             .Include(c => c.Referees.Where(r => !r.IsDeleted))
             .Include(c => c.Skills.Where(s => !s.IsDeleted)).ThenInclude(s => s.Skill)
@@ -447,7 +450,12 @@ public class JobCandidateQualificationRepository : GenericRepository<JobCandidat
 
     public async Task<IEnumerable<JobCandidateQualification>> GetByCandidateIdAsync(Guid candidateId)
     {
+        // ⚠ Round 4, lane Q: these Includes were missing, so a catalogue-linked qualification came
+        // back with a BLANK name on HR's Qualifications tab. The DTO reads Qualification.Name, and
+        // HR's form stores no typed text beside a catalogue pick. The rung names need them too.
         return await _dbSet
+            .Include(q => q.Qualification).ThenInclude(c => c!.QualificationLevel)
+            .Include(q => q.QualificationLevel)
             .Where(q => q.JobCandidateId == candidateId && !q.IsDeleted)
             .OrderByDescending(q => q.DateAwarded)
             .ToListAsync();

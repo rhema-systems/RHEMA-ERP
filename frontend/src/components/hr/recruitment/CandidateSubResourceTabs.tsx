@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { UseFormReturn } from 'react-hook-form';
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
@@ -18,7 +18,7 @@ import {
 import { RelationshipField } from '@/components/hr/employee/tabs/address-fields';
 import { RELATIONSHIP_SCOPES } from '@/types/hr/relationship-type';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
-import { qualificationService } from '@/services/hr/lookup.service';
+import { qualificationService, referenceDimensionService } from '@/services/hr/lookup.service';
 import { languageService } from '@/services/hr/language.service';
 import { skillService } from '@/services/hr/skill.service';
 import { jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
@@ -48,26 +48,48 @@ import {
 
 // ── qualifications ─────────────────────────────────────────────────────────
 
-const qualificationSchema = z
-  .object({
-    qualificationType: z.string().min(1, 'Type is required'),
-    qualificationId: z.string().optional().nullable(),
-    qualificationFreeText: z.string().max(200).optional().nullable(),
-    institution: z.string().min(1, 'Institution is required').max(200),
-    dateAwarded: z.string().min(1, 'Date awarded is required'),
-    grade: z.string().max(100).optional().nullable(),
-  })
-  .refine((v) => !!v.qualificationId || !!v.qualificationFreeText?.trim(), {
-    message: 'Pick a qualification from the lookup or name it',
-    path: ['qualificationFreeText'],
-  });
-type QualificationForm = z.infer<typeof qualificationSchema>;
+const qualificationObject = z.object({
+  qualificationType: z.string().min(1, 'Type is required'),
+  qualificationId: z.string().optional().nullable(),
+  qualificationFreeText: z.string().max(200).optional().nullable(),
+  // Round 4, lane Q: the rung of the qualification ladder (decision Q-D1).
+  qualificationLevelId: z.string().optional().nullable(),
+  institution: z.string().min(1, 'Institution is required').max(200),
+  dateAwarded: z.string().min(1, 'Date awarded is required'),
+  grade: z.string().max(100).optional().nullable(),
+});
+type QualificationForm = z.infer<typeof qualificationObject>;
+
+/**
+ * ⚠ Built per ladder, not once. An Education row needs a level, but only where there is a ladder
+ * to choose from: the server waives the rule for a tenant with no active rung, and this has to
+ * agree with it, or the dialog would refuse what the door accepts.
+ */
+const makeQualificationSchema = (ladderHasRungs: boolean) =>
+  qualificationObject
+    .refine((v) => !!v.qualificationId || !!v.qualificationFreeText?.trim(), {
+      message: 'Pick a qualification from the lookup or name it',
+      path: ['qualificationFreeText'],
+    })
+    .refine((v) => !ladderHasRungs || v.qualificationType !== 'Education' || !!v.qualificationLevelId, {
+      message: "Choose the level: Bachelor's, Master's, HND and so on. Shortlisting compares levels, not names.",
+      path: ['qualificationLevelId'],
+    });
 
 export function CandidateQualificationsTab({ candidateId }: { candidateId: string }) {
   const catalogue = useQuery({
     queryKey: ['hr', 'qualifications', 'active'],
     queryFn: () => qualificationService.getActive(),
   });
+  const levels = useQuery({
+    queryKey: ['hr', 'qualification-levels', 'active'],
+    queryFn: () => referenceDimensionService.getQualificationLevels(true),
+  });
+  const ladder = useMemo(
+    () => [...(levels.data ?? [])].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)),
+    [levels.data],
+  );
+  const schema = useMemo(() => makeQualificationSchema(ladder.length > 0), [ladder.length]);
 
   return (
     <ResourceCollectionTab<CandidateQualification, QualificationForm>
@@ -86,15 +108,18 @@ export function CandidateQualificationsTab({ candidateId }: { candidateId: strin
       columns={[
         { header: 'Qualification', cell: (q) => q.qualificationName || '—' },
         { header: 'Type', cell: (q) => humanizeEnum(q.qualificationType) },
+        // Round 4, lane Q: the rung the engine scores — the row's own, or its catalogue entry's.
+        { header: 'Level', cell: (q) => q.effectiveQualificationLevelName ?? '—' },
         { header: 'Institution', cell: (q) => q.institution },
         { header: 'Awarded', cell: (q) => formatDate(q.dateAwarded) },
         { header: 'Grade', cell: (q) => q.grade ?? '—' },
       ]}
-      schema={qualificationSchema}
+      schema={schema}
       emptyForm={{
         qualificationType: 'Education',
         qualificationId: null,
         qualificationFreeText: null,
+        qualificationLevelId: null,
         institution: '',
         dateAwarded: '',
         grade: null,
@@ -105,15 +130,19 @@ export function CandidateQualificationsTab({ candidateId }: { candidateId: strin
         // The read DTO collapses catalogue and free-text into one name, so an award that is not in
         // the catalogue comes back only as `qualificationName`.
         qualificationFreeText: q.qualificationId ? null : q.qualificationName,
+        // The row's own rung, else the one it inherits from the catalogue, so the dialog opens on
+        // the level the engine is already scoring.
+        qualificationLevelId: q.qualificationLevelId ?? q.effectiveQualificationLevelId ?? null,
         institution: q.institution,
         dateAwarded: q.dateAwarded,
         grade: q.grade ?? null,
       })}
-      dialogHint="Choose the kind first; the lookup narrows to it. Name the award only when it is not listed."
+      dialogHint="Choose the kind first; the lookup narrows to it. Name the award only when it is not listed. Picking from the lookup fills in its level."
       renderFields={(form) => (
         <QualificationFields
           form={form}
-          catalogue={(catalogue.data ?? []) as { id: string; name: string; type: string }[]}
+          catalogue={(catalogue.data ?? []) as { id: string; name: string; type: string; qualificationLevelId?: string | null }[]}
+          ladder={ladder}
         />
       )}
     />
@@ -128,9 +157,11 @@ export function CandidateQualificationsTab({ candidateId }: { candidateId: strin
 function QualificationFields({
   form,
   catalogue,
+  ladder,
 }: {
   form: UseFormReturn<QualificationForm>;
-  catalogue: { id: string; name: string; type: string }[];
+  catalogue: { id: string; name: string; type: string; qualificationLevelId?: string | null }[];
+  ladder: { id: string; name: string; rank: number }[];
 }) {
   const type = form.watch('qualificationType');
   const qualificationId = form.watch('qualificationId') || '';
@@ -146,6 +177,18 @@ function QualificationFields({
     // form is stable; re-running on every keystroke elsewhere is not wanted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qualificationId, listed, catalogue.length]);
+
+  // Round 4, lane Q: picking a catalogue entry that sits on a rung fills in the level — the
+  // catalogue already says what a Bachelor of Science is. Only on a CHANGE of pick: opening an
+  // existing row must not overwrite a level somebody set by hand.
+  const lastPick = useRef(qualificationId);
+  useEffect(() => {
+    if (qualificationId === lastPick.current) return;
+    lastPick.current = qualificationId;
+    const rung = catalogue.find((q) => q.id === qualificationId)?.qualificationLevelId;
+    if (rung) form.setValue('qualificationLevelId', rung, { shouldDirty: true, shouldValidate: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qualificationId, catalogue]);
 
   return (
     <div className="space-y-4">
@@ -169,6 +212,17 @@ function QualificationFields({
       {!listed && (
         <TextField form={form} name="qualificationFreeText" label="Qualification name" required />
       )}
+      {ladder.length > 0 && (
+        <SelectField
+          form={form}
+          name="qualificationLevelId"
+          label="Level"
+          required={type === 'Education'}
+          allowEmpty={type !== 'Education'}
+          emptyLabel="No level (a licence or membership may have none)"
+          options={ladder.map((l) => ({ value: l.id, label: `${l.name} · rank ${l.rank}` }))}
+        />
+      )}
       <FieldRow>
         <TextField form={form} name="institution" label="Institution" required />
         <DateField form={form} name="dateAwarded" label="Date awarded" required />
@@ -185,6 +239,8 @@ function normaliseQualification(values: QualificationForm) {
     qualificationId: values.qualificationId || null,
     // With a catalogue row the name comes from the row; typed text is only kept when there is none.
     qualificationFreeText: values.qualificationId ? null : values.qualificationFreeText || null,
+    // Round 4, lane Q. ⚠ The update is whole-record, so a level left out would be CLEARED.
+    qualificationLevelId: values.qualificationLevelId || null,
     grade: values.grade || null,
   };
 }

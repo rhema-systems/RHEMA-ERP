@@ -8414,6 +8414,15 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.QualificationId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 4, lane Q: the rung the candidate's qualification sits on, when it states one.
+            // Restrict, like the catalogue link: a rung in use is retired, never deleted from under
+            // the qualifications that name it.
+            entity.HasIndex(x => x.QualificationLevelId).HasDatabaseName("IX_CandidateQualification_QualificationLevelId");
+            entity.HasOne(x => x.QualificationLevel)
+                .WithMany()
+                .HasForeignKey(x => x.QualificationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<JobCandidateWorkHistory>(entity =>

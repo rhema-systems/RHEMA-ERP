@@ -1053,6 +1053,23 @@ public class JobCandidateQualification : TenantEntity
     public virtual Qualification? Qualification { get; set; }
 
     /// <summary>
+    /// Where this qualification sits on the tenant's ladder, as the candidate or HR stated it
+    /// (round 4, lane Q; decision Q-D1).
+    /// </summary>
+    /// <remarks>
+    /// <para>The EFFECTIVE level is this, or else the catalogue entry's
+    /// (<c>Qualification.QualificationLevelId</c>). A typed qualification has only this. Both doors
+    /// require it for an Education row, and leave it optional for a licence or a membership, which
+    /// may sit on no rung at all.</para>
+    /// <para>⚠ An "Education level" criterion compares the RANK of this rung. A qualification with
+    /// no effective level can never pass one: it counts as a miss (decision Q-D4).</para>
+    /// </remarks>
+    public Guid? QualificationLevelId { get; set; }
+
+    [ForeignKey(nameof(QualificationLevelId))]
+    public virtual QualificationLevel? QualificationLevel { get; set; }
+
+    /// <summary>
     /// Free-text qualification name entered by the candidate (populated when QualificationId is null).
     /// A recruiter can later reconcile this against the catalogue.
     /// </summary>
@@ -1602,6 +1619,18 @@ public sealed class ApplicationCandidateSnapshot
     /// <summary>Self-reported total years of professional experience from candidate profile.</summary>
     public int? TotalYearsExperience { get; init; }
 
+    /// <summary>
+    /// True on every snapshot written since round 4, lane Q, whose qualifications carry
+    /// <see cref="SnapshotQualification.QualificationLevelId"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The flag is what tells "no level" from "written before levels existed". A qualification
+    /// frozen with no level stays unlevelled: a licence has no rung. On an OLDER snapshot the level
+    /// is back-filled from the candidate's live profile before scoring, as
+    /// <see cref="GeoAreaPath"/> is from the live tree. Absent from old JSON, so it reads false.
+    /// </remarks>
+    public bool QualificationLevelsRecorded { get; init; }
+
     // ── Collections ───────────────────────────────────────────────────────────
 
     public IReadOnlyList<SnapshotSkill>         Skills         { get; init; } = Array.Empty<SnapshotSkill>();
@@ -1642,6 +1671,13 @@ public sealed class SnapshotQualification
 
     /// <summary>Catalogue Qualification ID, when the candidate linked their qualification to the master record.</summary>
     public Guid? QualificationId { get; init; }
+
+    /// <summary>
+    /// The rung of the qualification ladder this qualification sat on when the candidate applied:
+    /// its own stated level, or else its catalogue entry's (round 4, lane Q). Null when it sat on
+    /// none. The rank is read from the live ladder at scoring time.
+    /// </summary>
+    public Guid? QualificationLevelId { get; init; }
 }
 
 /// <summary>Frozen language entry within <see cref="ApplicationCandidateSnapshot"/>.</summary>

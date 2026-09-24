@@ -473,6 +473,11 @@ export interface CandidateQualification {
   institution: string;
   dateAwarded: string;
   grade?: string | null;
+  /** Round 4, lane Q: the rung the row itself states — what a form edits. */
+  qualificationLevelId?: string | null;
+  /** The rung the engine scores: the row's own, or else its catalogue entry's. */
+  effectiveQualificationLevelId?: string | null;
+  effectiveQualificationLevelName?: string | null;
 }
 
 /**
@@ -486,6 +491,11 @@ export interface CandidateQualificationForm {
   institution: string;
   dateAwarded: string;
   grade?: string | null;
+  /**
+   * Round 4, lane Q (decision Q-D1): the rung of the qualification ladder. The server refuses an
+   * Education row without one, unless the catalogue entry picked already sits on a rung.
+   */
+  qualificationLevelId?: string | null;
 }
 
 export interface CandidateWorkHistory {

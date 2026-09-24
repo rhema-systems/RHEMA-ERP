@@ -29,15 +29,15 @@
 > | **N-b1** | **DONE** — 32 ×2, `hr-templates/run-lane-nb1.mjs`; **no migration**. **The offer letter goes with the Offer Issued email as a PDF** (the user's call), rendered by the Syncfusion engine the document module already uses; the email says it is attached only when it is. **Under Review** is sent once, on the first move a person makes into a review stage, from either door; the older door had sent it after every move. **Application Withdrawn** is sent from all three live withdrawals; it was unreachable. **Offer Accepted** is sent however the acceptance arrives, and an acceptance by the anonymous link carries the offer tenant's wording. The portal's withdrawal now closes the application's pipeline stage, as HR's always did. ⚠ The first PDF had **empty tables**, because the importer does not read `rem`. It was found by opening the file, then fixed, and the suite now checks the tables' words — § 8 |
 > | **N-b2** | **DONE** — 36 ×2, `hr-templates/run-lane-nb2.mjs`; migration `AddCompanyScheduleReminderSweep` applied to UAT. **Company-schedule reminders send themselves.** An hourly sweep sends each live event's reminder the days before its form asks for, and chases unanswered invitations ahead of the RSVP deadline. Each goes **once**, stamped on the event, in the tenant's wording and under its legal name. The form's **Send reminders / days before** had been ghosts. The RSVP-chase lead is a new tenant setting (2 days, on the policy page). A moved date is reminded again. The manual endpoints, which no screen called, are now buttons on a Reminders card and count as the send. Register § 2.8 — § 8 |
 > | **O** | **DONE** — 101 ×2, `hr-jobarch/run-round4-o.mjs`; migration `AddTechnicianRoleFlag` applied to UAT. **One answer to "is this person a technician?"**: the stored `CanBeAssignedToMaintenance`, which Maintenance's work-order, labour and schedule gates already read. It follows a position's new **Technician role** flag unless HR sets the person *Include* or *Exclude* by hand, and the DbContext re-establishes that on every save. ⚠ The column had **no writer at all**: 0 of UAT's 2,089 staff, an empty door, every assignment refused. The door carries what HR knows (skills with their certification dates, unit, location, trade) and **null, not 0**, for what it does not. Maintenance's dropdowns now read it, and the every-employee fallback and the root endpoint are gone. **Probationers count as available** (the user's call). The plan's defect 21 was wrong, and so was its O2 formula. Lane H's check-set picker never saved, and cleared the set on every edit; fixed. Hand-off: cross-module defect #29 — § 8 |
-> | **Q** | **IN PROGRESS** (added 2026-09-24) — education level on the ladder, the proper fix for R4-5.2: a Level on each candidate qualification, an *Education level at least …* criterion that compares ranks, the catalogue mapped onto the ladder. Four decisions, all the user's — § 4 lane Q |
-> | **P2a** | **DONE** — the recruitment guide rewritten for round 4, from the code, this log and UAT: § 5.8 scoring, a new chapter **8A** for recruitment tests, § 9 interviews, § 10 offers, § 13 talent pool. **Docs, then a data repair.** It records 18 `R4-…` findings, four of them walks not yet done. **Two blocked the demo, both in the data:** the seeded test blend could not show, because every candidate who sat the paper failed the vacancy's mandatory degree (R4-5.1); and no demo offer got a checklist, because UAT held 44 active check templates and the fallback wants one (R4-10.1). **Both repaired 2026-09-24** (the user's call): three first degrees via scenario 052, giving 81 / 67.5 / 66; 43 fixture templates switched off, and the suites that made them now switch theirs off. The repair found two more: the seeded degree criterion cannot recognise a real degree (R4-5.2, now lane Q), and a rebuild leaves the blend unscored (R4-5.3, fixed in the rebuild script). The four live demo offers raised before the tidy now have TDC's checklist — § 8 |
+> | **Q** | **DONE** 2026-09-24 — 69 ×3, `hr-recruitment/run-round4-q.mjs`; migration `AddCandidateQualificationLevel` applied to UAT. **Education level on the qualification ladder**, the proper fix for R4-5.2 (the user's call). Every candidate qualification carries a **Level**, required for Education at HR's door and the careers profile. An *Education level* criterion compares **ranks**: at or above passes, a tie passes (HND = Bachelor's), below fails, and no level is a **miss** — the four decisions Q-D1..4, all the user's. The catalogue is placed on the ladder by a new scenario 008, 59 of 64 entries. The six live-pipeline criteria are converted, and VAC-000021 still blends to 81 / 67.5 / 66. **Found in passing:** HR's qualification list showed a blank name for every catalogue pick (fixed), and an application HR records by hand takes no snapshot — § 8 |
+> | **P2a** | **DONE** — the recruitment guide rewritten for round 4, from the code, this log and UAT: § 5.8 scoring, a new chapter **8A** for recruitment tests, § 9 interviews, § 10 offers, § 13 talent pool. **Docs, then a data repair.** It records 18 `R4-…` findings, four of them walks not yet done. **Two blocked the demo, both in the data:** the seeded test blend could not show, because every candidate who sat the paper failed the vacancy's mandatory degree (R4-5.1); and no demo offer got a checklist, because UAT held 44 active check templates and the fallback wants one (R4-10.1). **Both repaired 2026-09-24** (the user's call): three first degrees via scenario 052, giving 81 / 67.5 / 66; 43 fixture templates switched off, and the suites that made them now switch theirs off. The repair found two more: the seeded degree criterion cannot recognise a real degree (R4-5.2, now lane Q), and a rebuild leaves the blend unscored (R4-5.3, fixed in the rebuild script). The four live demo offers raised before the tidy now have TDC's checklist, and Rita Amponsah's is *Conditionally Accepted* as the demo story has it — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a is complete** (the recruitment guide). What remains is **P**: P2b, P2c and the walks.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a is complete** (the recruitment guide), **and so is Q** (the level-based fix P2a's repair called for). What remains is **P**: P2b, P2c and the walks.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names four walks a harness cannot replace;
 > all four are still outstanding.
@@ -2843,11 +2843,15 @@ OFR-000017 (Sent).
 - **Verified.** Sets went from 52 to 56 and items from 166 to 186. The offers' own status and
   timestamps are untouched, and a second run wrote nothing. OFR-000017's letter now prints
   *Conditions Precedent* with the five checks.
-- ⚠ **Not done, awaiting the user's confirmation.** OFR-000017 is Rita Amponsah's, the offer
-  scenario 050 meant to be *Conditionally Accepted*. That acceptance was refused for want of a
-  checklist, and would now succeed. Recording it is a separate status change.
+- ✅ **Recorded later the same day, the user's call.** OFR-000017 is Rita Amponsah's, the offer
+  scenario 050 meant to be *Conditionally Accepted*. That acceptance had been refused for want of a
+  checklist. It is now recorded, through the same door and in 050's own words. See the entry after
+  lane Q's.
 
-A rebuilt database has no fixtures, so there the fallback works from the first offer.
+A rebuilt database has no fixtures, so there the fallback works for every offer raised after TDC's
+template exists. ⚠ *Corrected later the same day:* that is not every offer. Scenario 050 raises the
+runbook's draft, OFR-000013, before it creates the template, so on a fresh build the draft had no
+checklist either. 050 now gives it one. See the entry after lane Q's.
 
 **R4-5.3, fixed the same day (the user's call).** `scripts/Invoke-UatDemoScenarios.ps1` runs scenario
 052 once more after the second seeder pass (its new step 4b). The script parses; no full rebuild has
@@ -2864,6 +2868,142 @@ Each had come from a log's paraphrase, not the source. Read the template, not th
 
 ⚠ The rest of the guide still describes the 2026-09-15 walk, and none of round 4's screens has been
 walked in a browser.
+
+### Lane Q — education level on the qualification ladder · DONE 2026-09-24 · 69 assertions ×3
+
+The proper fix for R4-5.2, the user's choice over renaming the criterion to "Bachelor". § 4 carries
+the design and the four decisions: Q-D1, the level is a field; Q-D2, existing rows filled once from
+their names; Q-D3, below fails; Q-D4, no level is a miss.
+
+**What was built.**
+- **The column.** `JobCandidateQualification.QualificationLevelId`. The *effective* level is the
+  row's own, or else its catalogue entry's.
+- **The doors.** Both refuse an Education row without a level, and a rung not on the ladder: HR's
+  candidate tab with 422, the careers profile with 400. A retired rung may stay on its row but cannot
+  be newly chosen. The requirement is waived for a tenant with no active rung.
+- **The careers profile checks everything before writing anything.** Its saves are separate commits,
+  so a refusal mid-loop used to leave the profile's own fields saved and its qualifications not. An
+  unknown catalogue id is still refused first, in its own words.
+- **The engine.** `ShortlistingEvaluator` takes the tenant's ladder (`QualificationLadder`, retired
+  rungs included, so an old criterion stays answerable), read once per scoring run. *Education level*
+  gets its own evaluator and a new value kind, `QualificationLevel` = 7: one value, the minimum rung.
+  The resolver refuses no rung, a typed label, two minimums and a retired rung.
+- **Snapshots.** They freeze each qualification's effective rung and say so
+  (`QualificationLevelsRecorded`). An older one is back-filled from the live profile.
+- **Screens.** A single "at least" picker in the vacancy criteria panel and the talent-pool
+  builder. A Level column and field on HR's Qualifications tab, and a Level on the careers profile,
+  each pre-filled from a catalogue pick. The public catalogue now serves the ladder and each entry's
+  `levelId`.
+- **The migration** `AddCandidateQualificationLevel`, in guarded SQL, with a one-off backfill of
+  typed Education rows from their names, dry-run before it was written. On UAT it gave 110 Bachelor's,
+  37 Master's and 5 HND. The 13 rows it could not read, all the fixture "Something else entirely",
+  were left empty. All 152 are marked `UpdatedBy = AddCandidateQualificationLevel backfill`.
+- **The seeders.** The live-pipeline degree criterion is *Education level, at least Bachelor's*.
+  The history seeder gives each dossier degree its rung, by the migration's own rules.
+
+**Demo data**, each step run twice, the second writing nothing:
+1. **Scenario 008**, new, placed 59 of the catalogue's 64 Education entries. It left five for HR:
+   Associate Degree, the three clinical doctorates and the GCSE.
+2. `dev-harness/hr-recruitment/convert-demo-degree-criteria.mjs` converted the six live-pipeline
+   criteria through the API.
+3. **Scenario 052** renamed its three degrees in place to *BSc Land Economy*, *BA Geography and
+   Regional Planning* and *BSc Real Estate*. They stay on the Bachelor's rung and still blend to
+   **81 / 67.5 / 66**, and the breakdown shows the pass on rank.
+4. **Scenario 050** now sends a level with every Education row, for a rebuild.
+
+Elikem Attipoe's BSc was placed on the Bachelor's rung by the backfill, so the live sitting can pass.
+
+**Two things found by the suite:**
+- ⚠ **An application HR records by hand takes no snapshot.** Only the careers portal and the
+  internal-employee door do, so a hand-recorded application is always scored on the live profile.
+  Q3's first draft assumed otherwise and failed 5 of 68; it now tests through a careers
+  application. Recorded in the guide's § 5.8, not changed.
+- **HR's qualification list read loaded no catalogue entries**, so every catalogue pick showed a
+  **blank name** on the candidate's Qualifications tab. This was confirmed on the running API before
+  the fix, and is fixed with the includes the level names needed anyway. Q7 asserts it.
+
+**Neighbouring suites**, chosen by code path — everything that scores, screens, or writes a candidate
+or careers qualification:
+
+| Suite | Result | Baseline |
+|---|---|---|
+| `run-k` · `run-v` · `run-round4-a` · `run-round4-b` | 81 · 72 · 45 · 96 | same ✅ |
+| `run-candidate-country` · `run-c1` | 43 · 96 | same ✅ |
+| `run-c2` | **89/89** on the final build | 89 ✅ — see below |
+| `slice-b` · `slice-c` · `slice-e` · `slice-f` | 174/176 · 188/190 · 101/105 · 69/69 | same, the § 9.2 stale failures ✅ |
+| `run-round4-e` · `run-round4-e6` · `run-lane5b` | 141 · 86 · 32/34 | same ✅ |
+| `run-lane-nb1` · `run-lane-n` | 32 · 115 | same ✅ |
+
+`run-c2` first read 87/89, for two reasons:
+- **A stale assertion, updated.** It pinned the public catalogue row's shape at
+  `{id, name, type}`, and lane Q added `levelId` on purpose.
+- **A build older than the last edit.** The catalogue-first ordering was written after the user had
+  built, so the API under test lacked it. After a rebuild it reads 89, and the lane Q suite and
+  slice-f were re-run on the same build.
+
+Four suites were updated to send a level, because the doors now require one for Education: `run-k`,
+`slice-b`, `slice-f` and scenario 050. `run-c2` needed none, because its catalogue pick inherits a
+rung once 008 has run.
+
+**The API log** has nothing from lane Q: no missing columns and no constraint failures beyond the
+known ones. Those are the payroll-profile foreign key (defect #23), notification-processor noise, and
+lane N's own deliberate SMTP bounces.
+
+**Frontend:** the scoped type-check (`tsconfig.round4-lane-q.json`) is clean. Its negative control
+caught all three probes: one in the types glob, one in a component and one in the careers page.
+**Not browser-walked**: the level pickers, both Level fields, and the pre-fill from a catalogue pick.
+
+### OFR-000017 conditionally accepted, and scenario 050 made to finish what it starts · DONE 2026-09-24
+
+The user's call: *"record it or close it out how we need to so we finish this once and for all"*.
+
+**Recorded.** `dev-harness/hr-recruitment/record-demo-conditional-acceptance.mjs` took Rita Amponsah's
+offer from *Sent* to *Conditionally Accepted*. It did so as scenario 050 would have:
+- through the same door, `POST /job-offers/{id}/accept-conditionally`;
+- as the same persona, the HR Head;
+- with 050's own note as the candidate's response: *"Accepted subject to release by the current
+  employer at the end of the notice period."*
+
+It checks ten things, and all passed:
+- the status, in the database and through the API;
+- the offer is still conditional;
+- the acceptance date is set;
+- the note matches word for word;
+- the check set is untouched, with five items pending;
+- no offer note was added;
+- no notification was raised against the offer, and none of any kind since the call.
+
+The API log holds only the service's own "conditionally accepted" line. There was no email, and none
+was expected, because only a full acceptance emails the candidate. A second run wrote nothing.
+
+**Why it could not wait.** The offer expires on 30 September. The lifecycle sweep expires *Sent*
+offers, and this door takes only *Sent* or *Negotiating*, so after that date the demo's
+conditionally-accepted example would have been gone for good. At *Conditionally Accepted* the sweep
+leaves it alone.
+
+**Why it would have come back: two defects in scenario 050, both fixed.** The scenario lives in the
+harness, outside the repo.
+1. **Step 19 skipped any offer that already existed.** A step refused on the first run, as this
+   acceptance was, could never be finished by a second. Each step now runs only from the status
+   before it, the idiom 050 already used for its accepted offer. An offer that still ends short of its
+   plan is named in the run's summary line, not in a log line nobody reads. A read-only dry run of the
+   new logic against UAT shows that a re-run writes nothing for any of the three live offers.
+2. **The runbook's draft is raised before TDC's template exists.** That draft is OFR-000013, to Naa
+   Adjeley Sowah. A check set is seeded only when an offer is created, so on a fresh build this draft
+   had no checklist. P2a's repair entry said a rebuilt database was free of the problem; for this one
+   offer it was not. Step 12 now gives the draft TDC's set once the template exists, through the two
+   doors the repair used. On UAT it writes nothing, because the draft already has one.
+
+Rita's own offer was never at risk on a rebuild. Step 19 raises it after the template exists, and
+nothing else creates a template, so it is seeded a set and its acceptance succeeds. Neither scenario
+change has run end to end, because that needs a rebuild. Both parse, and the two doors the draft's
+set uses are the ones the repair script ran on UAT.
+
+**A warning, not acted on.** OFR-000015, Josephine Boateng's, is the register's *issued, awaiting a
+reply* example, and it expires on 2026-09-25. After the next sweep it reads *Expired*, and a re-run of
+050 now says so in its summary.
+
+Not looked at in a browser: the offer's *Conditionally Accepted* state on its screen.
 
 ---
 

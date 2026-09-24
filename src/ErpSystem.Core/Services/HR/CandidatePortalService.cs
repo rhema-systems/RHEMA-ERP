@@ -165,6 +165,43 @@ public sealed class CandidatePortalService : ICandidatePortalService
         return dto;
     }
 
+    /// <summary>
+    /// The rung each incoming qualification will be stored with, under the same rules as HR's door
+    /// (<see cref="QualificationLevelRules"/>; round 4, lane Q, decision Q-D1).
+    /// </summary>
+    /// <remarks>
+    /// Keyed by the DTO row itself, not its id: every new row arrives with <c>Guid.Empty</c>.
+    /// </remarks>
+    private async Task<Dictionary<ExternalQualificationDto, Guid?>> ResolveQualificationLevelsAsync(
+        Guid userId, List<ExternalQualificationDto> incoming, Guid tenantId, CancellationToken ct)
+    {
+        var result = new Dictionary<ExternalQualificationDto, Guid?>(ReferenceEqualityComparer.Instance);
+        if (incoming.Count == 0) return result;
+
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, tenantId, ct);
+        var master = (await _qualificationMasterRepo.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted))
+                     .ToDictionary(x => x.Id);
+        var own = await FindOwnCandidateAsync(userId, tenantId);
+        var current = own is null
+            ? new Dictionary<Guid, Guid?>()
+            : (await _qualificationRepo.FindAsync(q => q.JobCandidateId == own.Id && q.TenantId == tenantId))
+              .ToDictionary(q => q.Id, q => q.QualificationLevelId);
+
+        foreach (var q in incoming)
+        {
+            // The catalogue check FIRST, with the same rule and words the save loop applies: an id
+            // outside the catalogue is the more basic mistake, and answering it with "choose the
+            // level" would misdirect. Checked here, it is also refused before anything is written.
+            var (catalogueId, name) = ResolveCatalogueOrText(
+                q.QualificationId, q.QualificationName, master, x => x.Name, "qualification");
+            var catalogueLevel = catalogueId is { } cid ? master[cid].QualificationLevelId : null;
+            var currentLevel = q.Id != Guid.Empty && current.TryGetValue(q.Id, out var level) ? level : null;
+            result[q] = QualificationLevelRules.Resolve(
+                q.QualificationType, q.QualificationLevelId, catalogueLevel, currentLevel, ladder, name);
+        }
+        return result;
+    }
+
     // ── Save Profile ───────────────────────────────────────────────────────────
     public async Task<CandidatePortalProfileDto> SaveProfileAsync(
         CandidateAccountContext account,
@@ -179,6 +216,11 @@ public sealed class CandidatePortalService : ICandidatePortalService
         // 2026-09-14: this door wrote whatever country id it was handed, unchecked — another
         // tenant's Country row, or a garbage guid, reached the INSERT.
         await RequireCountryAsync(dto.CountryId, tenantId);
+
+        // Round 4, lane Q: every qualification's level is settled HERE, before anything is written.
+        // The saves below are separate commits, so a refusal inside the qualification loop would
+        // leave the profile's own fields saved and its qualifications not: half a profile.
+        var qualificationLevels = await ResolveQualificationLevelsAsync(account.UserId, dto.Qualifications, tenantId, ct);
 
         // Loaded without nav props deliberately — EF tracking child collections during the
         // scalar update would cause duplicate inserts when the collections are patched below.
@@ -301,6 +343,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
                         JobCandidateId        = candidate.Id,
                         QualificationType     = q.QualificationType,
                         QualificationId       = qualificationId,
+                        QualificationLevelId  = qualificationLevels[q],
                         QualificationFreeText = qualificationName,
                         Institution           = q.Institution,
                         DateAwarded           = q.DateAwarded,
@@ -311,6 +354,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
                 {
                     row.QualificationType     = q.QualificationType;
                     row.QualificationId       = qualificationId;
+                    row.QualificationLevelId  = qualificationLevels[q];
                     row.QualificationFreeText = qualificationName;
                     row.Institution           = q.Institution;
                     row.DateAwarded           = q.DateAwarded;
@@ -1127,6 +1171,12 @@ public sealed class CandidatePortalService : ICandidatePortalService
             Institution           = q.Institution,
             DateAwarded           = q.DateAwarded,
             Grade                 = q.Grade,
+            // Round 4, lane Q: the row's own rung, which the form edits, and the one scored.
+            QualificationLevelId            = q.QualificationLevelId,
+            EffectiveQualificationLevelId   = q.QualificationLevelId ?? q.Qualification?.QualificationLevelId,
+            EffectiveQualificationLevelName = q.QualificationLevelId.HasValue
+                                                  ? q.QualificationLevel?.Name
+                                                  : q.Qualification?.QualificationLevel?.Name,
         }).ToList();
 
         dto.Referees = c.Referees.Where(r => !r.IsDeleted).Select(r => new JobCandidateRefereeDto

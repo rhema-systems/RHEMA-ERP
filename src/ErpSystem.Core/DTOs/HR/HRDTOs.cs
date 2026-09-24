@@ -3480,6 +3480,20 @@ public class QualificationCatalogueDto
     public int? QualificationLevelRank { get; set; }
 }
 
+/// <summary>
+/// One rung of the qualification ladder as a picker offers it — round 4, lane Q. The candidate
+/// qualification forms and the criteria panel's "Education level" choose from these.
+/// </summary>
+public class QualificationLevelOptionDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Code { get; set; }
+
+    /// <summary>Higher is more advanced; rungs ranked alike are equivalents.</summary>
+    public int Rank { get; set; }
+}
+
 public class CreateQualificationCatalogueDto
 {
     [Required]

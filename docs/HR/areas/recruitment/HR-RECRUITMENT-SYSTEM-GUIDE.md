@@ -25,10 +25,12 @@ only visible once they are all read. Start at chapter 16 if you want the conclus
 > - **R4-5.1** ✅: the seeded test blend now shows (81, 67.5, 66), because the three candidates who sat
 >   the paper now hold the first degree the vacancy makes mandatory;
 > - **R4-10.1** ✅: TDC's is now the only active check template, so the fallback works, and the four
->   live demo offers raised before the fix have TDC's checklist too;
-> - **R4-5.2**, open, being fixed properly by **round 4 lane Q**: that degree criterion matches the
->   *word* "degree", so no real first degree passes it, including Elikem Attipoe's for the live
->   sitting;
+>   live demo offers raised before the fix have TDC's checklist too. Rita Amponsah's (OFR-000017) is
+>   now *Conditionally Accepted*, as the demo story has it, and scenario 050 no longer leaves the
+>   runbook's draft offer without a checklist on a rebuild;
+> - **R4-5.2** ✅, fixed properly by **round 4 lane Q**: that degree criterion matched the *word*
+>   "degree", so no real first degree passed it. *Education level* now compares ranks on the
+>   qualification ladder, and every candidate qualification carries a Level (§ 5.8);
 > - **R4-5.3** ✅: a rebuild now runs scenario 052 again once the vacancy has its criteria.
 >
 > ⚠ Round 4's screens are **not browser-walked**. Chapters 2–15 elsewhere still describe the
@@ -1483,6 +1485,7 @@ stayed on the application path, because only an application has test results and
      • a criterion with no values
      • "less than" with no maximum stated
      • Age, for a candidate with no date of birth on file
+     • Education level naming no rung, or a rung no longer on the ladder (the vacancy's fault)
    Nothing evaluable at all (totalWeight = 0)  → no score (null) — never 100
 5. Test blend, when TestScoreWeight > 0 and the application has scored test results:
      final = criterionScore × (100 − w)/100  +  average test % × w/100
@@ -1504,7 +1507,8 @@ exist to keep an unanswerable question from scoring well:
 | Criterion | Compared against | Worth knowing |
 |---|---|---|
 | Years of experience | the application's years, against the minimum and maximum | a near miss earns up to 0.8, on either side of the band |
-| Qualification / education, skill, language | catalogue ids first, then names under the criterion's match strategy (Exact, Contains or Fuzzy) | *All required* and *any sufficient* are both honoured |
+| **Education level** *(round 4, lane Q)* | the **rank** of each qualification's rung on the qualification ladder: its own level, or else its catalogue entry's | one value, the minimum rung. At or above passes, a tie passes (the ladder ranks HND with Bachelor's), below fails with no partial credit, and **no levelled qualification is a miss** |
+| Qualification, skill, language | catalogue ids first, then names under the criterion's match strategy (Exact, Contains or Fuzzy) | *All required* and *any sufficient* are both honoured |
 | Certification | names only | a candidate's certificate carries a name, not a catalogue id |
 | Age | computed from the date of birth | with no date of birth the criterion is left out. It used to compute an age of about 2,026 years |
 | Gender | the accepted list | informs the score only, and can never be mandatory |
@@ -1518,9 +1522,30 @@ or nothing, and gave an empty criterion full marks: five of the eight defects la
 who typed "Kumasi", against a Greater Accra criterion. That scores a **miss**, not an exclusion.
 Excluding them would let a candidate with no address outrank one who demonstrably does not match.
 
+**The Education level criterion compares levels, not names** (round 4, lane Q, which closed
+R4-5.2). It used to be scored exactly like Qualification, by name, so "A relevant first degree"
+matched the *word* "degree", which no Bachelor of Science contains. It now works as follows:
+- **The ladder.** It reads the tenant's qualification ladder (*HR Setup → People Reference Data →
+  Qualification Levels*, BECE 10 up to Doctorate 90).
+- **The candidate's level.** Each candidate qualification now carries a **Level** on HR's
+  Qualifications tab and in the careers profile. It is required for an Education row and pre-filled
+  from a catalogue pick. A qualification with no level of its own takes its catalogue entry's.
+- **Four decisions, the user's:**
+  - Q-D1: the level is a field;
+  - Q-D2: existing typed rows were filled once from their names;
+  - Q-D3: below the level fails;
+  - Q-D4: no level is a miss, for the same reason as the Location rule above.
+- **What the numbers say.** A miss is scored, not left out. With the criterion non-mandatory at 40
+  beside 60 of experience, a candidate with no level scores **60**; left out, they would score 100.
+
 **Scoring runs against a snapshot** of the candidate's profile as it stood when they applied
 (`ApplicationCandidateSnapshot`, § 1.3), falling back to the live profile only for rows with no
-snapshot. For a snapshot older than round 4, the candidate's area path is resolved from the live tree.
+snapshot. For a snapshot older than round 4, the candidate's area path is resolved from the live
+tree. Its qualification levels are too, when the snapshot predates lane Q: the snapshot now says
+whether it recorded levels, so a qualification frozen with none stays a miss. ⚠ **Only the careers
+portal and the internal-employee door take a snapshot.** An application HR records by hand has
+none, so it is always scored on the candidate's live profile, including their levels as they stand
+today.
 
 **The test blend now has an input.** Lane E's test engine (chapter 8A) writes one
 `JobApplicantTestResult` per test per candidate when a sitting is finalised, and re-scores the
@@ -1536,22 +1561,22 @@ for whatever went wrong the first time.
 > each, and re-scores them. Each earns 75 on the criteria (degree 40, experience 35, report writing
 > 0 of 25) and is blended to **81, 67.5 and 66**, measured on `ErpSystemDB_UAT`.
 >
-> ⚠ **The criterion itself is still wrong (R4-5.2).** The degrees had to be worded *"Bachelor's
-> degree in …"* to pass. The criterion asks for the word "Degree", matched by containment. Of the
-> qualification catalogue's 186 entries, only *Associate Degree* contains that word, and it is not a
-> first degree. No *Bachelor of Science* picked from the catalogue passes, and neither does a typed
-> *BSc Land Economy*. So a presenter who signs in as Elikem Attipoe and sits the paper live will see
-> that application score **0**: their *BSc Quantity Surveying and Construction Economics* fails the
-> same way.
+> **Since lane Q the degree is judged by level (R4-5.2 closed).** *A relevant first degree* is now
+> *Education level, at least Bachelor's* on all six live-pipeline vacancies. The three degrees are
+> ordinary *BSc Land Economy*, *BA Geography and Regional Planning* and *BSc Real Estate* at the
+> Bachelor's rung, renamed in place from the *"Bachelor's degree in …"* wording the word-match forced
+> on them. The scores are unchanged. Elikem Attipoe's *BSc Quantity Surveying and Construction
+> Economics* was placed on the Bachelor's rung by the migration's backfill, so a live sitting now
+> scores on its paper instead of 0.
 
 ### 5.9 Known gaps
 
-> **Round 4, 2026-09-23: one finding in the demo data. Its repair on 2026-09-24 found two more.**
+> **Round 4, 2026-09-23: one finding in the demo data. Its repair on 2026-09-24 found two more; all three are now fixed.**
 >
 > | | Now |
 > |---|---|
 > | **R4-5.1** | ✅ **Fixed in the data, 2026-09-24.** *Was:* the demo's test blend was invisible. Every candidate who sat the seeded paper on VAC-000021 failed the mandatory degree criterion for want of any qualification on file, and scored 0 whatever their paper said. *Now:* scenario 052 (step 3b) records a first degree for each of the three and re-scores them, giving 81, 67.5 and 66. A second run writes nothing. |
-> | **R4-5.2** | **Open. The seeded criterion "A relevant first degree" cannot recognise a first degree.** `TdcDemoLivePipelineBackfillSeeder` writes it with `RequiredValue = "Degree"`, matched by containment. Only a qualification whose *name* contains the word passes, and before 2026-09-24 none of the tenant's 234 candidate qualifications did. It is mandatory on six live-pipeline vacancies (VAC-000019 to 000024), so anyone scored on them scores 0. That includes the six unscored applicants on VAC-000022 and VAC-000023, and Elikem Attipoe's live sitting on VAC-000021. **The root cause is the engine:** "at least a bachelor's" is a qualification *level*, and no criterion type compares levels. `EducationLevel` is scored exactly like `Qualification`, by name. The cheap repair is `RequiredValue = "Bachelor"`, in the seeder and on the six rows: that matches the catalogue's 24 *Bachelor of …* entries, but still not a typed *BSc …*. |
+> | **R4-5.2** | ✅ **Fixed by round 4 lane Q, 2026-09-24 (the user's choice: the proper fix).** *Was:* the seeded criterion "A relevant first degree" could not recognise a first degree. `TdcDemoLivePipelineBackfillSeeder` wrote it as the word "Degree", matched by containment, and no candidate qualification on the tenant contained it. The root cause was the engine: no criterion type compared qualification levels. *Now:* *Education level* compares RANKS on the qualification ladder (§ 5.8). Every candidate qualification carries a Level, required for Education at both doors. The seeder writes *Education level, at least Bachelor's*, and the six live-pipeline criteria on UAT were converted through the API. The 186-entry catalogue was placed on the ladder by scenario 008, which left five ambiguous entries for HR: Associate Degree, the three clinical doctorates and the GCSE. The 165 typed Education rows on UAT were filled from their names: 110 Bachelor's, 37 Master's and 5 HND, with 13 that cannot be read (all the fixture "Something else entirely") left empty. |
 > | **R4-5.3** | ✅ **Fixed 2026-09-24 (the user's call), in the rebuild script.** *Was:* on a rebuilt database the blend was not scored. Scenario 052 finalises the scripts, and scores them, before VAC-000021 has any criteria, because the backfill seeder runs in the second seeder pass after every scenario. *Now:* `scripts/Invoke-UatDemoScenarios.ps1` runs scenario 052 once more after that pass (step 4b). The second run re-scores what it finds unscored and writes nothing else. ⚠ Parse-checked, not yet exercised by a full rebuild. |
 >
 > **✅ All eight closed, 2026-09-15 → 16.** Read the findings as history.
@@ -1917,6 +1942,23 @@ boundary, clearly drawn, and the edit page repeats it in its subtitle.
 The tab manages both through `talentPoolService`, not through the candidate controller. The page
 comment explains the switch: *"the rich endpoints record the source, reason and review date the old
 one-click toggle silently dropped."* The talent-pool chapter covers the segment side properly.
+
+> **The Qualifications tab since round 4, lane Q.** The table above records the 2026-09-15 walk,
+> when these sub-resource tabs were not writable (G-7.1, since closed). What lane Q changed:
+> - **A Level column**, showing the rung the scoring engine reads: the row's own, or its catalogue
+>   entry's.
+> - **A Level field** in the dialog.
+>   - It is **required for an Education row** when the tenant has a ladder.
+>   - It is optional for a licence, certification or membership, which may sit on no rung.
+>   - Picking a catalogue entry that sits on a rung fills it in.
+>   - The door refuses an Education row without one, and a rung not on the ladder (both 422). A
+>     rung since retired may stay on a row but cannot be newly chosen.
+> - **A pre-existing defect, found and fixed in passing.** The list read loaded no catalogue entries,
+>   so a qualification picked from the catalogue showed a **blank name**: HR's form stores no typed
+>   text beside a catalogue pick.
+>
+> The careers profile applies the same rules. Its refusal is a 400, and it comes before anything is
+> saved.
 
 ### 7.6 `/hr/recruitment/candidates/[id]/edit`
 
@@ -2456,12 +2498,12 @@ application:
 presenter can sit it live. Because the paper has a written answer, the script then lands in the
 marking queue rather than finalising itself.
 
-⚠ **Show the blend on the three above, not on the live sitting.** Once Elikem's script is finalised,
-that application scores **0**: the degree criterion cannot recognise a *BSc*, only a qualification
-whose name contains the word "degree" (R4-5.2, § 5.9). The test result itself still shows correctly
-on the marking desk. *Score all* on this vacancy would also give Ebenezer Okyere 0, since that
-candidate holds no qualification at all. That is why the scenario re-scores the three above one at
-a time.
+**The live sitting now scores too** (since round 4 lane Q). The degree criterion compares the
+Bachelor's *rung*, and Elikem's *BSc Quantity Surveying and Construction Economics* sits on it, so
+once the script is finalised the application blends like the three above. Until lane Q it scored 0,
+because the criterion matched the word "degree" (R4-5.2). ⚠ *Score all* on this vacancy would still
+give Ebenezer Okyere 0, correctly: that candidate holds no qualification at all, which is a miss.
+That is why the scenario re-scores the three above one at a time.
 
 ⚠ The seed sends **no invitation email**: the demo candidates carry real-looking addresses.
 
@@ -2497,7 +2539,7 @@ pipeline. Recorded 2026-09-24, not changed.
 |---|---|
 | **R4-8A.1** | **An untimed paper opened online and never submitted blocks a paper sitting for good.** A timed one expires on the sweep; an untimed one has no clock, and HR has no action to cancel an attempt. The candidate list says so in words (*"ask the candidate to submit it"*). A cancel-attempt action is the fix, if it ever bites. |
 | **R4-8A.2** | **Not browser-walked.** The candidate sitting a paper end to end in the careers portal, including a refresh mid-test, is walk 2 in the round 4 plan's § 5. The demo leaves Elikem Attipoe's paper unsat for exactly that. |
-| **R4-8A.3** | **The blend's demo:** fixed for the three paper scripts on 2026-09-24 (R4-5.1). It is still blocked for a live sitting by Elikem Attipoe, whose degree the criterion cannot recognise (R4-5.2). |
+| **R4-8A.3** | ✅ **The blend's demo:** fixed for the three paper scripts on 2026-09-24 (R4-5.1), and for a live sitting by Elikem Attipoe by lane Q the same day (R4-5.2): the degree criterion now compares levels, and that candidate's BSc sits on the Bachelor's rung. |
 | **R4-8A.4** | **The "already sat" refusal points at a copy action that does not exist.** *"Retire it and copy it into a new paper"*. Onboarding and orientation got Copy in round 4 lane J; recruitment tests did not. Changing a paper someone has sat means writing a new one by hand. *Impact: low; the refusal itself is right.* |
 
 ---
@@ -3157,7 +3199,7 @@ guarantees the outcome it exists to avoid."*
 >
 > | | Now |
 > |---|---|
-> | **R4-10.1** | ✅ **Fixed in the data for new offers, 2026-09-24. Four live demo offers are still to repair.** *Was:* no demo offer got a check set. The fallback needs the tenant's *single* active template, and UAT held **44**: the demo's *TDC Standard Pre-Employment Checks* plus 43 harness fixtures (12 *"R4H Standard checks …"*, 31 *"E2E RecD Template …"*). No demo post names a template either, because the position form's picker never saved until round 4 lane O fixed it. So a demo offer printed no checklist, and **Accept conditionally** was refused. *Now:* the 43 fixtures are switched off (backup: `dev-harness/hr-recruitment/fixture-check-templates-retired-2026-09-24.csv`), and TDC's is the only active template, so every offer raised from now on starts from it. The four scripts that made the fixtures now switch theirs off however they end: lane H's suite, slice-d, `run-g` and lane I's. **The four live demo offers raised before the fix were given TDC's checklist the same day** (the user's call): OFR-000013 (Draft), OFR-000015 (Sent), OFR-000016 (Negotiating) and OFR-000017 (Sent). Each got one set of five items, through the real doors, via `dev-harness/hr-recruitment/repair-demo-offer-checklists.mjs`, which writes nothing on a second run. OFR-000017's letter now prints *Conditions Precedent* with the five checks. ⚠ **Still open:** OFR-000017, Rita Amponsah's, is the offer scenario 050 meant to be *Conditionally Accepted*. It stays *Sent* until that acceptance is recorded, which now succeeds because a check set exists. A rebuilt database does not have the problem, because it holds no fixtures. |
+> | **R4-10.1** | ✅ **Fixed 2026-09-24, in the data and in the scenario that builds it.** *Was:* no demo offer got a check set. The fallback needs the tenant's *single* active template, and UAT held **44**: the demo's *TDC Standard Pre-Employment Checks* plus 43 harness fixtures (12 *"R4H Standard checks …"*, 31 *"E2E RecD Template …"*). No demo post names a template either, because the position form's picker never saved until round 4 lane O fixed it. So a demo offer printed no checklist, and **Accept conditionally** was refused. *Now:* the 43 fixtures are switched off (backup: `dev-harness/hr-recruitment/fixture-check-templates-retired-2026-09-24.csv`), and TDC's is the only active template, so every offer raised from now on starts from it. The four scripts that made the fixtures now switch theirs off however they end: lane H's suite, slice-d, `run-g` and lane I's. **The four live demo offers raised before the fix were given TDC's checklist the same day** (the user's call): OFR-000013 (Draft), OFR-000015 (Sent), OFR-000016 (Negotiating) and OFR-000017 (Sent). Each got one set of five items, through the real doors, via `dev-harness/hr-recruitment/repair-demo-offer-checklists.mjs`, which writes nothing on a second run. OFR-000017's letter now prints *Conditions Precedent* with the five checks. **Rita Amponsah's offer (OFR-000017) was then conditionally accepted the same day** (the user's call), as scenario 050 always meant: through 050's door, as its persona and in its own words, via `dev-harness/hr-recruitment/record-demo-conditional-acceptance.mjs`, which writes nothing on a second run. It sent no email and raised no notification; both were checked. Left at *Sent*, it would have expired on 30 September, and the door refuses an expired offer. **A rebuilt database was not free of the problem either, as this row first said.** Scenario 050 raises the runbook's draft (OFR-000013) *before* it creates TDC's template, so on a fresh build that draft had no checklist. 050 now gives it one once the template exists. It also used to skip any offer that already existed, so a refused step could never be finished by a re-run. It now carries each live offer on to its planned state and names any that falls short in its summary. |
 > | **R4-10.2** | **An offer with no expiry date never expires.** The sweep expires `Sent` offers past their expiry, and 21 `Sent` offers on UAT have none. Offers raised since lane G are proposed an expiry, and HR can still clear it. |
 > | **R4-10.3** | **Two defaults are thinner than the plan hoped.** Annual leave comes from the annual leave type's standard days, not a grade rule, because none exists. `NdaRequired` has no source at all. Both are said on screen rather than guessed. |
 > | **R4-10.4** | **The offer-response token is stored in clear**, like the interview confirmations (R4-9.2). Procurement's hashed design is the model; the test engine already follows it. |
@@ -3718,7 +3760,13 @@ a vacancy refuses:
 - a mandatory gender;
 - a numeric criterion with no bound;
 - a list criterion with no values;
-- an area off the tree.
+- an area off the tree;
+- since round 4 lane Q, an *Education level* with no rung, a typed level, two minimums, or a retired
+  rung.
+
+Its builder offers *Education level* as a single "at least" picker over the ladder, the same one
+the vacancy's criteria panel shows. ⚠ A pool member has no application and so no snapshot, which
+means the screen always reads their **live** levels.
 
 A vacancy with **no** criteria is refused too (422), and the message names the tab that fixes it.
 The alternative, a table of *"Not measurable"* against everybody, would read as "the pool is useless"

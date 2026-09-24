@@ -105,6 +105,20 @@ public class TdcDemoLivePipelineBackfillSeeder
             .Where(p => p.TenantId == tenantId && !p.IsDeleted)
             .ToDictionaryAsync(p => p.Id, p => p, ct);
 
+        // Round 4, lane Q. "A relevant first degree" was a Qualification criterion asking for the
+        // WORD "Degree", matched by containment, which no Bachelor of Science contains, so every
+        // applicant on every live vacancy failed it (recruitment guide R4-5.2). It is now an
+        // Education level criterion, at least the Bachelor's rung, compared by rank. The ladder
+        // is built by scenario 005, which runs before this second pass. Without it the criterion
+        // is left out, not guessed.
+        var bachelors = await _context.Set<QualificationLevel>().IgnoreQueryFilters()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.IsActive && l.Code == "BDEG")
+            .FirstOrDefaultAsync(ct);
+        if (bachelors is null)
+            _logger.LogWarning(
+                "No active 'BDEG' rung on the qualification ladder: the live vacancies get no first-degree criterion. "
+                + "Run scenario 005, which builds the ladder, then this pass again.");
+
         var added = 0;
         foreach (var vacancy in bare)
         {
@@ -112,18 +126,29 @@ public class TdcDemoLivePipelineBackfillSeeder
             var title = position?.Title ?? vacancy.CustomAdvertTitle ?? "the post";
             var minYears = position?.MinimumExperienceYears is int my && my > 0 ? my : 4;
 
-            var criteria = new[]
+            if (bachelors is not null)
             {
-                new JobShortlistingCriteria
+                var degree = new JobShortlistingCriteria
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, JobVacancyId = vacancy.Id,
                     CriteriaName = "A relevant first degree",
                     Description = $"A first degree in a discipline relevant to the post of {title}.",
-                    Type = JobShortlistingCriteriaType.Qualification,
-                    RequiredValue = "Degree", IsMandatory = true, Weight = 40,
-                    MatchStrategy = ValueMatchStrategy.Contains, MatchMode = MandatoryMatchMode.AllRequired,
+                    Type = JobShortlistingCriteriaType.EducationLevel,
+                    RequiredValue = bachelors.Name, IsMandatory = true, Weight = 40,
                     CreatedAt = now, CreatedBy = By,
-                },
+                };
+                _context.Set<JobShortlistingCriteria>().Add(degree);
+                _context.Set<JobShortlistingCriteriaValue>().Add(new JobShortlistingCriteriaValue
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, JobShortlistingCriteriaId = degree.Id,
+                    Kind = ShortlistingValueKind.QualificationLevel, ReferenceId = bachelors.Id,
+                    Label = bachelors.Name, SortOrder = 0, CreatedAt = now, CreatedBy = By,
+                });
+                added++;
+            }
+
+            var criteria = new[]
+            {
                 new JobShortlistingCriteria
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, JobVacancyId = vacancy.Id,

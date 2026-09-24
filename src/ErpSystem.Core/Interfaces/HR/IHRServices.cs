@@ -429,6 +429,12 @@ public interface IQualificationCatalogueService
     /// authenticated tenant claim to resolve. The tenant comes from the required X-Tenant-Id header.
     /// </summary>
     Task<IEnumerable<QualificationCatalogueDto>> GetActiveAsync(Guid tenantId);
+
+    /// <summary>
+    /// The tenant's active qualification ladder, lowest rung first — round 4, lane Q. Tenant-explicit
+    /// for the careers portal, whose qualification form offers a Level from it.
+    /// </summary>
+    Task<IEnumerable<QualificationLevelOptionDto>> GetActiveLevelsAsync(Guid tenantId);
     Task<IEnumerable<QualificationCatalogueDto>> GetByTypeAsync(QualificationType type);
     Task<QualificationCatalogueDto?> GetByNameAsync(string name);
     Task<QualificationCatalogueDto> CreateAsync(CreateQualificationCatalogueDto dto);

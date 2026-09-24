@@ -1429,6 +1429,17 @@ public class JobCandidateQualificationDto : BaseDto
     public string Institution { get; set; } = string.Empty;
     public DateOnly DateAwarded { get; set; }
     public string? Grade { get; set; }
+
+    /// <summary>The rung the row itself states (round 4, lane Q). What a form edits.</summary>
+    public Guid? QualificationLevelId { get; set; }
+
+    /// <summary>
+    /// The rung the engine scores: <see cref="QualificationLevelId"/>, or else the catalogue entry's.
+    /// </summary>
+    public Guid? EffectiveQualificationLevelId { get; set; }
+
+    /// <summary>The effective rung's name, so a list is readable without a second call.</summary>
+    public string? EffectiveQualificationLevelName { get; set; }
 }
 
 public class CreateJobCandidateQualificationDto : CreateDtoBase
@@ -1440,6 +1451,12 @@ public class CreateJobCandidateQualificationDto : CreateDtoBase
     public QualificationType QualificationType { get; set; }
 
     public Guid? QualificationId { get; set; }
+
+    /// <summary>
+    /// The rung of the qualification ladder (round 4, lane Q). Required for Education unless the
+    /// catalogue entry picked already sits on one; optional otherwise.
+    /// </summary>
+    public Guid? QualificationLevelId { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -1461,6 +1478,12 @@ public class UpdateJobCandidateQualificationDto : UpdateDtoBase
     public QualificationType QualificationType { get; set; }
 
     public Guid? QualificationId { get; set; }
+
+    /// <summary>
+    /// The rung of the qualification ladder (round 4, lane Q). ⚠ Whole-record, like every field
+    /// here: an update that omits it clears it.
+    /// </summary>
+    public Guid? QualificationLevelId { get; set; }
 
     [Required]
     [MaxLength(200)]
@@ -6125,6 +6148,12 @@ public class ExternalQualificationDto
 
     /// <summary>Optional link to the Qualification catalogue. Null when the candidate typed free text.</summary>
     public Guid? QualificationId { get; set; }
+
+    /// <summary>
+    /// The rung of the qualification ladder (round 4, lane Q). The careers profile requires it for
+    /// Education unless the catalogue entry picked already sits on one.
+    /// </summary>
+    public Guid? QualificationLevelId { get; set; }
 
     [Required]
     [MaxLength(200)]

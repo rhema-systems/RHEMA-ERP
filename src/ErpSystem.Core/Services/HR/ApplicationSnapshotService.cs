@@ -38,6 +38,9 @@ public sealed class ApplicationSnapshotService : IApplicationSnapshotService
                     DisplayName    = display,
                     Institution    = q.Institution.Trim(),
                     QualificationId = q.QualificationId,
+                    // Round 4, lane Q: the EFFECTIVE rung, frozen with the rest — its own, or else
+                    // the catalogue entry's (loaded with the name above).
+                    QualificationLevelId = q.QualificationLevelId ?? q.Qualification?.QualificationLevelId,
                 };
             })
             .Where(q => q.NormalisedName.Length > 0)
@@ -80,6 +83,7 @@ public sealed class ApplicationSnapshotService : IApplicationSnapshotService
                                        ? null
                                        : candidate.GeoArea!.Path,
             TotalYearsExperience = candidate.TotalYearsExperience,
+            QualificationLevelsRecorded = true,   // round 4, lane Q
             Skills               = skills.AsReadOnly(),
             Qualifications       = qualifications.AsReadOnly(),
             Languages            = languages.AsReadOnly(),

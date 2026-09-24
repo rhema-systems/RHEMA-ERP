@@ -25,6 +25,7 @@ import type {
   PublicCatalogueIdentificationType,
   PublicCatalogueLanguage,
   PublicCatalogueQualification,
+  PublicCatalogueQualificationLevel,
   PublicCatalogueSkill,
   PublicTenant,
   PublicVacancy,
@@ -103,6 +104,11 @@ class PublicCareersService {
 
   getCatalogueQualifications(tenantId: string): Promise<PublicCatalogueQualification[]> {
     return publicFetch<PublicCatalogueQualification[]>(`/public/catalogue/qualifications`, tenantId);
+  }
+
+  /** Round 4, lane Q: the employer's qualification ladder, lowest rung first. */
+  getCatalogueQualificationLevels(tenantId: string): Promise<PublicCatalogueQualificationLevel[]> {
+    return publicFetch<PublicCatalogueQualificationLevel[]>(`/public/catalogue/qualification-levels`, tenantId);
   }
 
   getCatalogueLanguages(tenantId: string): Promise<PublicCatalogueLanguage[]> {

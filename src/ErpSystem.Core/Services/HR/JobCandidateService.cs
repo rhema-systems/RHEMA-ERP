@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Recruitment;
 using ErpSystem.Core.Services.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -1129,10 +1130,44 @@ public class JobCandidateService : IJobCandidateService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        createDto.QualificationLevelId = await ResolveQualificationLevelAsync(
+            createDto.QualificationType, createDto.QualificationLevelId, createDto.QualificationId,
+            createDto.QualificationFreeText, currentLevelId: null, current, cancellationToken);
         var entity = createDto.ToEntity(current, createdByUserId);
         await _qualificationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ReadQualificationBackAsync(entity);
+    }
+
+    /// <summary>
+    /// The level a qualification may be stored with at HR's door (round 4, lane Q; decision Q-D1):
+    /// a live rung, and one at all for Education unless the catalogue entry picked sits on a rung.
+    /// </summary>
+    /// <remarks>The careers profile applies the same <see cref="QualificationLevelRules"/>.</remarks>
+    private async Task<Guid?> ResolveQualificationLevelAsync(
+        QualificationType type, Guid? statedLevelId, Guid? catalogueId, string? typedName,
+        Guid? currentLevelId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, tenantId, cancellationToken);
+        var catalogue = catalogueId is { } cid
+            ? await _unitOfWork.Repository<Qualification>().GetQueryable()
+                .Where(q => q.Id == cid && q.TenantId == tenantId && !q.IsDeleted)
+                .Select(q => new { q.Name, q.QualificationLevelId })
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+        return QualificationLevelRules.Resolve(
+            type, statedLevelId, catalogue?.QualificationLevelId, currentLevelId, ladder, catalogue?.Name ?? typedName);
+    }
+
+    /// <summary>
+    /// The saved row, re-read with its catalogue entry and rung. A row built by hand has neither
+    /// navigation loaded, so its DTO would name no level, and no catalogue entry either.
+    /// </summary>
+    private async Task<JobCandidateQualificationDto> ReadQualificationBackAsync(JobCandidateQualification entity)
+    {
+        var saved = (await _qualificationRepository.GetByCandidateIdAsync(entity.JobCandidateId))
+            .FirstOrDefault(q => q.Id == entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<JobCandidateQualificationDto>> GetQualificationsAsync(Guid candidateId, CancellationToken cancellationToken = default)
@@ -1145,11 +1180,14 @@ public class JobCandidateService : IJobCandidateService
     public async Task<JobCandidateQualificationDto> UpdateQualificationAsync(UpdateJobCandidateQualificationDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedQualificationAsync(updateDto.Id);
+        updateDto.QualificationLevelId = await ResolveQualificationLevelAsync(
+            updateDto.QualificationType, updateDto.QualificationLevelId, updateDto.QualificationId,
+            updateDto.QualificationFreeText, entity.QualificationLevelId, entity.TenantId, cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _qualificationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ReadQualificationBackAsync(entity);
     }
 
     public async Task<bool> DeleteQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default)

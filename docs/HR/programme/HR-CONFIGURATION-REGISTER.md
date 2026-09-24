@@ -395,6 +395,28 @@ been refused.
 
 Suspended, inactive and terminated staff stay out.
 
+## 2.10 The qualification ladder, as shortlisting reads it `QualificationLevel` · `Qualification` · `JobCandidateQualification` — added 2026-09-24
+
+Round 4, lane Q (the proper fix for recruitment guide R4-5.2). The ladder (*HR Setup → People
+Reference Data → Qualification Levels*) existed before this lane, with 11 rungs on UAT from scenario
+005, but **nothing read it**. Since lane Q, an *Education level* shortlisting criterion compares the
+RANK of a candidate's qualifications against its minimum rung. So the ladder, and where each
+qualification sits on it, are now settings with a consequence: they decide scores.
+
+| Setting (the form's label) | Where | Default | Status | Proof — `hr-recruitment/run-round4-q.mjs`, both positions |
+|---|---|---|---|---|
+| `QualificationLevel.Rank` ("Rank") | per rung, the Qualification Levels screen | scenario 005's ladder: BECE 10 … Doctorate 90, with HND and Bachelor's both at 50 | **Enforced**. Newly read | Q2: the required rung passes (100); a tie passes (HND meets "at least Bachelor's"); below fails, and disqualifies when mandatory (0); a higher rung beside a lower one is judged by the higher |
+| `QualificationLevel.IsActive` | per rung | active | **Enforced** | Q1: a retired rung cannot be newly chosen on a qualification, nor as a criterion's minimum (422). The server also lets a rung retired after use stay on its row; that direction is not exercised |
+| `Qualification.QualificationLevelId` ("Level" on the catalogue form) | per catalogue entry | none. Scenario 008 places the demo catalogue's Education entries, 59 of 64, and leaves five for HR | **Enforced**. Newly read | Q1: a catalogue pick with no level of its own inherits the entry's rung. Q2: it passes on that rung (100). Q5: the careers catalogue carries it (`levelId`), so the portal can pre-fill |
+| `JobCandidateQualification.QualificationLevelId` ("Level") | per candidate qualification, HR's Qualifications tab and the careers profile | none. The migration's one-off backfill filled 152 typed rows from their names | **Enforced**. New | Q1 / Q6: an Education row without one is refused at both doors (422 / 400), a licence needs none, and a stranger id is refused. Q2: none at all is a miss, **60 not 100** when non-mandatory. Q3: frozen into a careers application's snapshot, and back-filled only when the snapshot predates levels |
+
+**The rule's second position, recorded because it is easy to miss:** a tenant with **no active
+rung** cannot be asked for a level. Both doors then waive the Education requirement, and the forms
+hide the field. The waiver is in the code, and no suite proves it: the demo tenant has a ladder.
+
+**Not settings:** `Qualification.Type` (Education, Certification…) is a category and ranks nothing.
+It still decides where a Level is *required*: for Education only.
+
 ---
 
 ## 3. Leave — per leave type

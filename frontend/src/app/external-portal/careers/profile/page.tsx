@@ -51,7 +51,8 @@ interface FieldSpec {
   type: 'text' | 'date' | 'number' | 'checkbox' | 'select' | 'textarea';
   /** Fixed enum members (humanised), or a list computed from the draft — a dependent dropdown. */
   options?: readonly string[] | ((draft: Row) => Option[]);
-  required?: boolean;
+  /** Fixed, or decided by the draft: a qualification's Level is required only for Education. */
+  required?: boolean | ((draft: Row) => boolean);
   /** Shown only when this answers true for the draft (a certificate number under the tick). */
   visibleWhen?: (draft: Row) => boolean;
   /** Runs after the field changes and may rewrite the draft (mirror a catalogue name, clear a pick). */
@@ -97,9 +98,11 @@ function CollectionEditor({
   };
 
   const visible = (f: FieldSpec, draft: Row) => !f.visibleWhen || f.visibleWhen(draft);
+  const isRequired = (f: FieldSpec, draft: Row) =>
+    typeof f.required === 'function' ? f.required(draft) : !!f.required;
   const missingRequired = editing
     ? fields.some(
-        (f) => visible(f, editing.draft) && f.required && !String(editing.draft[f.name] ?? '').trim(),
+        (f) => visible(f, editing.draft) && isRequired(f, editing.draft) && !String(editing.draft[f.name] ?? '').trim(),
       )
     : false;
 
@@ -162,7 +165,7 @@ function CollectionEditor({
                   <div key={f.name} className={f.type === 'textarea' ? 'sm:col-span-2' : ''}>
                     <Label className="text-xs">
                       {f.label}
-                      {f.required && <span className="ml-0.5 text-red-500">*</span>}
+                      {isRequired(f, editing.draft) && <span className="ml-0.5 text-red-500">*</span>}
                     </Label>
                     {f.type === 'select' ? (
                       <Select
@@ -343,6 +346,13 @@ export default function CandidateProfilePage() {
     enabled: !!tenantId,
     staleTime: 5 * 60 * 1000,
   });
+  // Round 4, lane Q: the employer's qualification ladder, which each qualification's Level picks from.
+  const qualificationLevels = useQuery({
+    queryKey: ['careers', 'catalogue', 'qualification-levels', tenantId],
+    queryFn: () => publicCareersService.getCatalogueQualificationLevels(tenantId),
+    enabled: !!tenantId,
+    staleTime: 5 * 60 * 1000,
+  });
   const skillCatalogue = useQuery({
     queryKey: ['careers', 'catalogue', 'skills', tenantId],
     queryFn: () => publicCareersService.getCatalogueSkills(tenantId),
@@ -418,6 +428,8 @@ export default function CandidateProfilePage() {
         qualificationType: q.qualificationType,
         qualificationId: q.qualificationId ?? '',
         qualificationName: q.qualificationName,
+        // The row's own rung, else the one it inherits from the catalogue entry.
+        qualificationLevelId: q.qualificationLevelId ?? q.effectiveQualificationLevelId ?? '',
         institution: q.institution,
         dateAwarded: q.dateAwarded?.slice(0, 10) ?? '',
         grade: q.grade ?? '',
@@ -509,6 +521,7 @@ export default function CandidateProfilePage() {
           // typed name only counts when there is none.
           qualificationId: q.qualificationId || null,
           qualificationName: q.qualificationName,
+          qualificationLevelId: q.qualificationLevelId || null,
           institution: q.institution,
           dateAwarded: q.dateAwarded,
           grade: str(q.grade),
@@ -600,6 +613,8 @@ export default function CandidateProfilePage() {
   const idTypeName = (idTypes.data ?? []).find((t) => t.id === form.nationalIdTypeId)?.name ?? p?.nationalIdTypeName ?? null;
   const identityLabel = [idTypeName, form.nationalIdNumber].filter(Boolean).join(' ') || null;
   const qualifications = qualificationCatalogue.data ?? [];
+  // Lowest rung first, the order a candidate reads a ladder in.
+  const ladder = [...(qualificationLevels.data ?? [])].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
   const skills = skillCatalogue.data ?? [];
   const languages = languageCatalogue.data ?? [];
 
@@ -842,7 +857,7 @@ export default function CandidateProfilePage() {
           is asked for only when nothing listed fits. */}
       <CollectionEditor
         title="Qualifications"
-        hint="Choose the kind first, then pick from the list. Name the award only if it is not listed."
+        hint="Choose the kind first, then pick from the list. Name the award only if it is not listed, and give its level."
         rows={children.qualifications}
         onChange={(rows) => setChildren((c) => ({ ...c, qualifications: rows }))}
         summarize={(q) => [q.qualificationName, q.institution].filter(Boolean).join(' · ')}
@@ -870,7 +885,12 @@ export default function CandidateProfilePage() {
             },
             onChange: (draft, value) => {
               const picked = qualifications.find((q) => q.id === value);
-              return { ...draft, qualificationName: picked ? picked.name : '' };
+              // Round 4, lane Q: an entry that sits on a rung brings its level with it.
+              return {
+                ...draft,
+                qualificationName: picked ? picked.name : '',
+                qualificationLevelId: picked?.levelId ?? draft.qualificationLevelId,
+              };
             },
           },
           {
@@ -879,6 +899,18 @@ export default function CandidateProfilePage() {
             type: 'text',
             required: true,
             visibleWhen: (draft) => !draft.qualificationId,
+          },
+          // Round 4, lane Q (decision Q-D1): the level, because shortlisting compares levels
+          // rather than names. Required for an education qualification when the employer has a
+          // ladder; a licence or membership may sit on no rung.
+          {
+            name: 'qualificationLevelId',
+            label: 'Level',
+            type: 'select',
+            emptyLabel: 'No level',
+            visibleWhen: () => ladder.length > 0,
+            required: (draft) => draft.qualificationType === 'Education' && ladder.length > 0,
+            options: () => ladder.map((l) => ({ value: l.id, label: l.name })),
           },
           { name: 'institution', label: 'Institution', type: 'text', required: true },
           { name: 'dateAwarded', label: 'Date awarded', type: 'date', required: true },

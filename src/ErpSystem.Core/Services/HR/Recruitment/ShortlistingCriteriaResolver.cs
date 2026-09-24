@@ -118,6 +118,13 @@ public sealed class ShortlistingCriteriaResolver : IShortlistingCriteriaResolver
                 .GetQueryable()
                 .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.IsActive)
                 .ToDictionaryAsync(a => a.Id, a => a.Name),
+            // Round 4, lane Q. Active rungs only, on the same terms as an area: a criterion written
+            // earlier against a rung since retired keeps working, because the evaluator reads the
+            // rank from the whole ladder, retired rungs included.
+            ShortlistingValueKind.QualificationLevel => await _unitOfWork.Repository<QualificationLevel>()
+                .GetQueryable()
+                .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.IsActive)
+                .ToDictionaryAsync(l => l.Id, l => l.Name),
             _ => new Dictionary<Guid, string>(),
         };
 
@@ -132,9 +139,12 @@ public sealed class ShortlistingCriteriaResolver : IShortlistingCriteriaResolver
                 if (kind is ShortlistingValueKind.Text or ShortlistingValueKind.Gender)
                     throw new InvalidOperationException($"A {shape.Label} criterion takes typed values, not a catalogue id.");
                 if (!master.TryGetValue(key, out var name))
-                    throw new InvalidOperationException(kind == ShortlistingValueKind.GeoArea
-                        ? "The area chosen is not on the tenant's active geography tree. Pick one from the cascade."
-                        : $"The {shape.Label.ToLowerInvariant()} chosen is not in the catalogue. Pick one from the list.");
+                    throw new InvalidOperationException(kind switch
+                    {
+                        ShortlistingValueKind.GeoArea => "The area chosen is not on the tenant's active geography tree. Pick one from the cascade.",
+                        ShortlistingValueKind.QualificationLevel => "The level chosen is not an active level on the qualification ladder. Pick one from the list.",
+                        _ => $"The {shape.Label.ToLowerInvariant()} chosen is not in the catalogue. Pick one from the list.",
+                    });
                 referenceId = key;
                 label = name;
             }
@@ -142,6 +152,11 @@ public sealed class ShortlistingCriteriaResolver : IShortlistingCriteriaResolver
             {
                 label = rawLabel?.Trim() ?? string.Empty;
                 if (label.Length == 0) continue;
+                // Round 4, lane Q. A typed "Bachelor's" is exactly what the criterion stopped
+                // matching on: the level is compared by RANK, so only a rung has one.
+                if (kind == ShortlistingValueKind.QualificationLevel)
+                    throw new InvalidOperationException(
+                        "An Education level criterion takes a level from the qualification ladder, not typed text. Pick the minimum level.");
                 if (kind == ShortlistingValueKind.Gender)
                 {
                     if (label.Equals("any", StringComparison.OrdinalIgnoreCase)) label = "Any";
@@ -160,6 +175,12 @@ public sealed class ShortlistingCriteriaResolver : IShortlistingCriteriaResolver
         if (rows.Count == 0 && shape.RequiresValues)
             throw new InvalidOperationException(
                 $"A {shape.Label} criterion needs at least one accepted value — with none it passes every candidate and measures nothing.");
+
+        // Round 4, lane Q: the first single-valued shape. "At least Bachelor's AND at least HND"
+        // has no meaning, and the evaluator would silently read only the first.
+        if (!shape.IsList && rows.Count > 1)
+            throw new InvalidOperationException(
+                $"A {shape.Label} criterion takes one value, the minimum. Remove the others.");
         return rows;
     }
 

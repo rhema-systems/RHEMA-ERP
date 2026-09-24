@@ -658,6 +658,15 @@ public class JobApplicationService : IJobApplicationService
 
     public async Task<ApplicationAutoScoreDto> EvaluateLoadedApplicationScoreAsync(JobApplication application, CancellationToken cancellationToken = default)
     {
+        // Round 4, lane Q: an "Education level" criterion compares ranks on the tenant's ladder,
+        // read here once per application — or once per batch, by EvaluateAllScoresForVacancyAsync.
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, GetTenantId(), cancellationToken);
+        return await EvaluateLoadedApplicationScoreAsync(application, ladder, cancellationToken);
+    }
+
+    private async Task<ApplicationAutoScoreDto> EvaluateLoadedApplicationScoreAsync(
+        JobApplication application, QualificationLadder ladder, CancellationToken cancellationToken)
+    {
         if (application.TenantId != GetTenantId())
             throw new ArgumentException($"Job application '{application.Id}' not found.");
 
@@ -670,6 +679,7 @@ public class JobApplicationService : IJobApplicationService
         // Fall back to the live candidate entity for legacy rows that predate the
         // snapshot feature.  The log line makes this visible in diagnostics.
         ScoringCandidateView scoringView;
+        var backfillQualificationLevels = false;
         if (!string.IsNullOrEmpty(application.ProfileSnapshotJson))
         {
             try
@@ -679,6 +689,7 @@ public class JobApplicationService : IJobApplicationService
                 if (snap is not null)
                 {
                     scoringView = ScoringCandidateView.FromSnapshot(snap);
+                    backfillQualificationLevels = !snap.QualificationLevelsRecorded;
                 }
                 else
                 {
@@ -742,6 +753,14 @@ public class JobApplicationService : IJobApplicationService
         if (scoringView.GeoAreaPath is null && scoringView.GeoAreaId is { } candidateAreaId)
             scoringView.GeoAreaPath = await ResolveGeoAreaPathAsync(candidateAreaId, cancellationToken);
 
+        // Round 4, lane Q. A snapshot written before qualification levels existed carries none, so
+        // they are read from the candidate's live profile: the answer a recruiter looking at the
+        // record today would give, and the choice GeoAreaPath makes above. A snapshot that DID
+        // record levels is scored exactly as frozen: a qualification it holds with no level sat on
+        // no rung when the candidate applied.
+        if (backfillQualificationLevels && candidate is not null)
+            scoringView.QualificationLevelIds.UnionWith(ScoringCandidateView.LevelsOf(candidate.Qualifications));
+
         // ── The shared engine ─────────────────────────────────────────────────
         //
         // Round 4, lane B. Evaluating every criterion regardless of a mandatory miss, scoring that
@@ -749,7 +768,7 @@ public class JobApplicationService : IJobApplicationService
         // marks are three rules the talent-pool screen has to follow too — over a candidate who has
         // no application at all. They moved into ShortlistingEvaluator whole, comments and lane A
         // repairs included, so there is one copy rather than two that agree until they do not.
-        var scored = ShortlistingEvaluator.Score(liveCriteria, scoringView);
+        var scored = ShortlistingEvaluator.Score(liveCriteria, scoringView, ladder);
         var breakdown = scored.Breakdown;
         var allMandatoryPassed = scored.AllMandatoryPassed;
         var totalWeight = scored.TotalWeight;
@@ -882,10 +901,13 @@ public class JobApplicationService : IJobApplicationService
                      && a.Status != ApplicationStatus.Rejected)
             .ToList();
 
+        // The ladder once for the batch, not once per application (round 4, lane Q).
+        var ladder = await QualificationLadder.LoadAsync(_unitOfWork, tenantId, cancellationToken);
+
         var results = new List<ApplicationAutoScoreDto>(scoreable.Count);
         foreach (var app in scoreable)
         {
-            var result = await EvaluateLoadedApplicationScoreAsync(app, cancellationToken);
+            var result = await EvaluateLoadedApplicationScoreAsync(app, ladder, cancellationToken);
             results.Add(result);
         }
 
@@ -2696,6 +2718,7 @@ public class JobApplicationService : IJobApplicationService
                 JobCandidateId         = candidate.Id,
                 QualificationType      = q.QualificationType,
                 QualificationId        = null,          // external — no catalogue link yet
+                QualificationLevelId   = q.QualificationLevelId,   // round 4, lane Q
                 QualificationFreeText  = q.QualificationName.Trim(),
                 Institution            = q.Institution.Trim(),
                 DateAwarded            = q.DateAwarded,
@@ -2783,6 +2806,9 @@ public class JobApplicationService : IJobApplicationService
                     DisplayName     = display,
                     Institution     = q.Institution.Trim(),
                     QualificationId = q.QualificationId,
+                    // Round 4, lane Q. What the form stated; this path links no catalogue entry,
+                    // so there is no catalogue level to fall back on.
+                    QualificationLevelId = q.QualificationLevelId,
                 };
             }).Where(q => q.NormalisedName.Length > 0).ToList();
 
@@ -2824,6 +2850,7 @@ public class JobApplicationService : IJobApplicationService
                                            ? null
                                            : candidate.GeoArea!.Path,
                 TotalYearsExperience = null,   // not collected on the external form
+                QualificationLevelsRecorded = true,   // round 4, lane Q
                 Skills               = snapshotSkills.AsReadOnly(),
                 Qualifications       = snapshotQuals.AsReadOnly(),
                 Languages            = snapshotLangs.AsReadOnly(),

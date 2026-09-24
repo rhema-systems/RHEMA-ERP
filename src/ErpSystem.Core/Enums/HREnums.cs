@@ -2510,6 +2510,19 @@ public enum ShortlistingValueKind
     /// </remarks>
     [Description("Geographic Area")]
     GeoArea = 6,
+
+    /// <summary>
+    /// A rung of the tenant's qualification ladder — round 4, lane Q.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The value's <c>ReferenceId</c> is a <c>QualificationLevel.Id</c>: the MINIMUM an
+    /// "Education level" criterion accepts. Matching is by <b>rank</b>, never by the label. A
+    /// candidate passes when any of their qualifications sits on that rung or higher, so ties pass:
+    /// with HND and Bachelor's both at 50, an HND meets "at least Bachelor's". Appended, never
+    /// renumbered: the kind is stored as an integer.
+    /// </remarks>
+    [Description("Qualification Level")]
+    QualificationLevel = 7,
 }
 
 /// <summary>

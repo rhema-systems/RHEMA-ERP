@@ -160,8 +160,24 @@ public class PublicRecruitmentController : ControllerBase
 
         var quals = await _qualificationCatalogueService.GetActiveAsync(tenantId);
         // Round 3, lane C2: the careers form filters the catalogue by the row's kind (Education,
-        // Certification, …), so the kind rides along as its enum name.
-        return Ok(quals.Select(q => new { q.Id, q.Name, Type = q.Type.ToString() }));
+        // Certification, …), so the kind rides along as its enum name. Round 4, lane Q: and the
+        // rung the entry sits on, so picking it pre-fills the row's Level.
+        return Ok(quals.Select(q => new { q.Id, q.Name, Type = q.Type.ToString(), LevelId = q.QualificationLevelId }));
+    }
+
+    /// <summary>
+    /// The tenant's active qualification ladder, lowest rung first — round 4, lane Q. The careers
+    /// profile's qualification rows choose their Level from it.
+    /// </summary>
+    [HttpGet("catalogue/qualification-levels")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCatalogueQualificationLevels(CancellationToken ct = default)
+    {
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
+
+        var levels = await _qualificationCatalogueService.GetActiveLevelsAsync(tenantId);
+        return Ok(levels.Select(l => new { l.Id, l.Name, l.Code, l.Rank }));
     }
 
     // Round 3, lane C1. Three more catalogues the careers profile form picks from. Each is the

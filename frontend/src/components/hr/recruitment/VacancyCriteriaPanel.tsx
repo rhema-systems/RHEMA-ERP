@@ -35,7 +35,7 @@ import { certificationService } from '@/services/hr/certification.service';
 import { languageService } from '@/services/hr/language.service';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
 import { skillService } from '@/services/hr/skill.service';
-import { qualificationService } from '@/services/hr/lookup.service';
+import { qualificationService, referenceDimensionService } from '@/services/hr/lookup.service';
 import { GENDERS } from '@/types/hr/recruitment-pipeline';
 import {
   MANDATORY_MATCH_MODES,
@@ -207,6 +207,17 @@ export function VacancyCriteriaPanel({
     queryFn: () => languageService.getActive(),
     enabled: open && valueKind === 'Language',
   });
+  // Round 4, lane Q: the ladder an "Education level" criterion picks its minimum from. The same key
+  // as the qualification catalogue form's level picker, so the two share one cache entry.
+  const levels = useQuery({
+    queryKey: ['hr', 'qualification-levels', 'active'],
+    queryFn: () => referenceDimensionService.getQualificationLevels(true),
+    enabled: open && valueKind === 'QualificationLevel',
+  });
+  const ladder = useMemo(
+    () => [...(levels.data ?? [])].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)),
+    [levels.data],
+  );
 
   const catalogue: { id: string; name: string }[] = useMemo(() => {
     switch (valueKind) {
@@ -360,6 +371,8 @@ export function VacancyCriteriaPanel({
       return `${label} · ${op} ${c.minValue ?? '—'}${c.maxValue != null ? `–${c.maxValue}` : ''}`;
     }
     const labels = c.values?.length ? c.values.map((v) => v.label) : (c.requiredValue ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+    // Round 4, lane Q: a level is a minimum, and the row should say so.
+    if (s?.valueKind === 'QualificationLevel' && labels.length > 0) return `${label} · at least ${labels[0]}`;
     if (labels.length > 0) return `${label} · ${labels.join(', ')}`;
     if (c.requiredQualificationId || c.requiredSkillId) return `${label} · from the catalogue`;
     return label;
@@ -569,7 +582,7 @@ export function VacancyCriteriaPanel({
                   Accepted values
                   {shape.requiresValues && <span className="ml-0.5 text-red-500">*</span>}
                 </Label>
-                {picked.length > 0 && (
+                {picked.length > 0 && valueKind !== 'QualificationLevel' && (
                   <div className="flex flex-wrap gap-1.5">
                     {picked.map((v, i) => (
                       <Badge key={`${v.referenceId ?? 'text'}:${v.label}`} variant="secondary" className="gap-1 pr-1">
@@ -610,6 +623,46 @@ export function VacancyCriteriaPanel({
                         ))}
                     </SelectContent>
                   </Select>
+                )}
+                {/* Round 4, lane Q. ONE value, the minimum rung; a new pick replaces it rather than
+                    adding a second, which the server refuses. Ranks are shown because they are the
+                    comparison: rungs with the same number are equivalents. */}
+                {valueKind === 'QualificationLevel' && (
+                  <div className="space-y-1.5">
+                    <Select
+                      value={picked[0]?.referenceId ?? NONE}
+                      onValueChange={(v) => {
+                        if (v === NONE) {
+                          setPicked([]);
+                          return;
+                        }
+                        const rung = ladder.find((l) => l.id === v);
+                        if (rung) setPicked([{ referenceId: rung.id, label: rung.name }]);
+                      }}
+                    >
+                      <SelectTrigger id="criteriaLevelPicker">
+                        <SelectValue placeholder={levels.isLoading ? 'Loading the ladder…' : 'The minimum level'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>{levels.isLoading ? 'Loading…' : 'Choose the minimum level'}</SelectItem>
+                        {/* A rung retired since the criterion was saved stays selectable in its own edit. */}
+                        {picked[0]?.referenceId && !ladder.some((l) => l.id === picked[0].referenceId) && (
+                          <SelectItem value={picked[0].referenceId}>{picked[0].label} (retired)</SelectItem>
+                        )}
+                        {ladder.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>
+                            {l.name} · rank {l.rank}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!levels.isLoading && ladder.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        This organisation has no qualification ladder yet. Build it under HR Setup →
+                        People Reference Data → Qualification Levels, then come back.
+                      </p>
+                    )}
+                  </div>
                 )}
                 {valueKind === 'Gender' && (
                   <div className="flex flex-wrap gap-4">

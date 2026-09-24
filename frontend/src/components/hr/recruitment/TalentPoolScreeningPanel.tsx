@@ -63,7 +63,7 @@ import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import { certificationService } from '@/services/hr/certification.service';
 import { jobInterviewService } from '@/services/hr/interviews.service';
 import { languageService } from '@/services/hr/language.service';
-import { qualificationService } from '@/services/hr/lookup.service';
+import { qualificationService, referenceDimensionService } from '@/services/hr/lookup.service';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
 import { jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
 import { skillService } from '@/services/hr/skill.service';
@@ -671,6 +671,17 @@ function AdHocCriteriaEditor({
     queryFn: () => languageService.getActive(),
     enabled: open && valueKind === 'Language',
   });
+  // Round 4, lane Q: the rungs an "Education level" criterion picks its minimum from — the same
+  // cache entry as the vacancy criteria panel's.
+  const levels = useQuery({
+    queryKey: ['hr', 'qualification-levels', 'active'],
+    queryFn: () => referenceDimensionService.getQualificationLevels(true),
+    enabled: open && valueKind === 'QualificationLevel',
+  });
+  const ladder = useMemo(
+    () => [...(levels.data ?? [])].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)),
+    [levels.data],
+  );
 
   const catalogue: { id: string; name: string }[] = useMemo(() => {
     switch (valueKind) {
@@ -891,6 +902,34 @@ function AdHocCriteriaEditor({
                   An area matches candidates recorded in it and anywhere beneath it.
                 </p>
               </div>
+            ) : valueKind === 'QualificationLevel' ? (
+              // Round 4, lane Q: ONE value, the minimum rung. A new pick replaces the old one.
+              <div className="space-y-1.5">
+                <Label>At least</Label>
+                <Select
+                  value={picked[0]?.referenceId ?? NONE}
+                  onValueChange={(v) => {
+                    const rung = ladder.find((l) => l.id === v);
+                    setPicked(rung ? [{ referenceId: rung.id, label: rung.name }] : []);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={levels.isLoading ? 'Loading the ladder…' : 'The minimum level'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>Choose the minimum level</SelectItem>
+                    {ladder.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.name} · rank {l.rank}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  A candidate passes with any qualification at this level or higher. Levels ranked alike
+                  count as equivalent; below it, or with no level on file, is a miss.
+                </p>
+              </div>
             ) : valueKind === 'Gender' ? (
               <div className="space-y-1.5">
                 <Label>Accepted</Label>
@@ -933,7 +972,7 @@ function AdHocCriteriaEditor({
               </div>
             )}
 
-            {picked.length > 0 && (
+            {picked.length > 0 && valueKind !== 'QualificationLevel' && (
               <div className="flex flex-wrap gap-2">
                 {picked.map((v, i) => (
                   <Badge key={`${v.label}-${i}`} variant="secondary" className="gap-1">

@@ -655,6 +655,11 @@ export const SHORTLISTING_VALUE_KINDS = [
    * accepts everything beneath it.
    */
   'GeoArea',
+  /**
+   * Round 4, lane Q — a rung of the qualification ladder: the MINIMUM an "Education level"
+   * criterion accepts. One value only. Matching is by rank, so rungs ranked alike are equivalents.
+   */
+  'QualificationLevel',
 ] as const;
 export type ShortlistingValueKind = (typeof SHORTLISTING_VALUE_KINDS)[number];
 
