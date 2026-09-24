@@ -3472,7 +3472,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         TaxGroupId = line.TaxGroupId,
                         TransactionDate = invoice.InvoiceDate,
                         TransactionType = ResolveApTaxTransactionType(line),
-                        SupplierId = invoice.BusinessPartnerId
+                        BusinessPartnerId = invoice.BusinessPartnerId,
+                        BusinessPartnerRole = BusinessPartnerRoleType.Supplier
                     }, cancellationToken);
 
                     foreach (var breakdown in taxResult.TaxBreakdowns.Where(t => t.TaxAmount > 0m))
@@ -3567,7 +3568,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     TaxGroupId = lineDto.TaxGroupId,
                     TransactionDate = invoiceDate,
                     TransactionType = ResolveApTaxTransactionType(lineDto.LineItemType),
-                    SupplierId = supplierId
+                    BusinessPartnerId = supplierId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Supplier
                 }, cancellationToken);
 
                 return (

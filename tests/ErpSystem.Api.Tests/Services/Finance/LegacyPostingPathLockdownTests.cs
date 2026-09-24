@@ -503,6 +503,26 @@ public sealed class LegacyPostingPathLockdownTests
             .And.NotContain("RenameColumn(\n                name: \"CustomerId\"");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void TaxCalculation_ShouldUseOneCanonicalCounterpartyAndExplicitRole()
+    {
+        var root = FindRepositoryRoot();
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "TaxDtos.cs"));
+        var request = dto[dto.IndexOf("public class TaxCalculationRequestDto", StringComparison.Ordinal)..dto.IndexOf("public class TaxCalculationResultDto", StringComparison.Ordinal)];
+        var engine = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "Taxation", "TaxCalculationEngine.cs"));
+
+        request.Should().Contain("public Guid? BusinessPartnerId")
+            .And.Contain("public BusinessPartnerRoleType? BusinessPartnerRole")
+            .And.NotContain("CustomerId")
+            .And.NotContain("SupplierId");
+        engine.Should().Contain("request.BusinessPartnerId")
+            .And.Contain("request.BusinessPartnerRole")
+            .And.NotContain("request.CustomerId")
+            .And.NotContain("request.SupplierId");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

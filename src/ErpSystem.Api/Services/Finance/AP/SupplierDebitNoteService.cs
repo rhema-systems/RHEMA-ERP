@@ -1051,7 +1051,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     TaxGroupId = dto.TaxGroupId,
                     TransactionDate = note.DebitNoteDate,
                     TransactionType = ResolveApTaxTransactionType(lineItemType),
-                    SupplierId = note.VendorId
+                    BusinessPartnerId = note.VendorId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Supplier
                 }, cancellationToken)
                 : new TaxCalculationResultDto { BaseAmount = net, GrandTotal = net };
             var calculatedTax = Round(taxResult.TotalTaxAmount);

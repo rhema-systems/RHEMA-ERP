@@ -69,6 +69,9 @@ must not be interpreted as a promise that they override Finance settings.
   legal name and TIN. Posting revalidates that captured evidence and takes the AR control account
   only from tenant Finance settings; Procurement-owned partner account fields have no posting
   effect.
+- Tax-calculation requests carry one `BusinessPartnerId` and an explicit `BusinessPartnerRole`.
+  Threshold and customer-type rules no longer infer identity from mutually exclusive legacy
+  `SupplierId`/`CustomerId` fields.
 
 ## Withholding contract
 

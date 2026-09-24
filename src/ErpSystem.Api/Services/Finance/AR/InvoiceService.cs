@@ -1266,7 +1266,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                         : TaxTransactionType.SaleOfGoods,
                     BaseAmount = taxableBase,
                     TaxGroupId = line.TaxGroupId,
-                    CustomerId = invoice.BusinessPartnerId,
+                    BusinessPartnerId = invoice.BusinessPartnerId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Customer,
                     TransactionDate = invoice.InvoiceDate
                 }, cancellationToken);
                 line.TaxAmount = taxResult.TotalTaxAmount;
@@ -1931,7 +1932,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     TransactionType = line.LineItemType == LineItemType.GLAccount
                         ? TaxTransactionType.SaleOfServices
                         : TaxTransactionType.SaleOfGoods,
-                    CustomerId = invoice.BusinessPartnerId
+                    BusinessPartnerId = invoice.BusinessPartnerId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Customer
                 }, cancellationToken);
 
                 foreach (var breakdown in taxResult.TaxBreakdowns.Where(t => t.TaxAmount > 0m))

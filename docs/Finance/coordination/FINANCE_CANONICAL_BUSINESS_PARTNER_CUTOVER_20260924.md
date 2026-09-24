@@ -223,3 +223,6 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   test passes, 37/37 AR invoice regressions unrelated to the known FX-direction defect pass, and EF
   reports no pending model changes. The excluded foreign-opening invoice test remains the previously
   documented approved-rate snapshot-direction mismatch.
+- Tax-calculation commands now use one canonical `BusinessPartnerId` plus an explicit
+  `BusinessPartnerRole`; AP, AR and debit-note producers no longer send separate supplier/customer
+  identity fields into the Finance tax engine.
