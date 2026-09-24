@@ -104,6 +104,37 @@ export default function OrientationSessionDetailPage() {
     enabled: !!id,
   });
 
+  // Round 4, lane R: what closing the session will do to its participants, read when the Completed
+  // confirmation opens, so it can say so before it is pressed. On a programme that is only its
+  // session, the people the register shows attending complete; on any other it completes nobody.
+  const { data: completionPreview, isLoading: loadingPreview } = useQuery({
+    queryKey: ['hr', 'orientation-sessions', id, 'completion-preview'],
+    queryFn: () => employeeOrientationService.getSessionCompletionPreview(id),
+    enabled: !!id && pendingStatus === 'Completed',
+    staleTime: 0,
+    retry: false,
+  });
+
+  const completedDescription = (() => {
+    const stamp = 'The actual end time is stamped automatically if it has not been set.';
+    if (loadingPreview) return `${stamp} Checking the register…`;
+    if (!completionPreview) return stamp;
+    const programme = completionPreview.programTitle ?? 'the programme';
+    if (!completionPreview.completesByAttendance)
+      return `${stamp} It completes nobody: ${programme} is completed by its own content, assessment and declaration.`;
+    const n = completionPreview.willComplete;
+    const m = completionPreview.notShownAttending;
+    const people = (k: number) => `${k} participant${k === 1 ? '' : 's'}`;
+    const attended = completionPreview.requiresAcknowledgement
+      ? `${people(n)} the register shows attending will have their attendance confirmed; each completes ${programme} once their declaration is signed.`
+      : `${people(n)} the register shows attending will complete ${programme}.`;
+    const rest =
+      m > 0
+        ? ` ${people(m)} ${m === 1 ? 'is' : 'are'} not shown attending and stay open: mark the register first, or mark them completed from the enrolments screen.`
+        : '';
+    return `${stamp} ${attended}${rest}`;
+  })();
+
   const invalidate = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey }),
@@ -140,6 +171,8 @@ export default function OrientationSessionDetailPage() {
     try {
       await orientationSessionService.changeStatus(id, { sessionId: id, newStatus: pendingStatus });
       await invalidate();
+      if (pendingStatus === 'Completed')
+        await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-enrollments'] });
       toast({ title: 'Status changed', description: `Now ${pendingStatus}.` });
       setPendingStatus(null);
       return true;
@@ -451,11 +484,13 @@ export default function OrientationSessionDetailPage() {
         onOpenChange={(o) => !o && setPendingStatus(null)}
         title={`Change status to ${pendingStatus}?`}
         description={
-          pendingStatus === 'InProgress' || pendingStatus === 'Completed'
-            ? 'The actual start or end time is stamped automatically if it has not been set.'
-            : pendingStatus === 'Cancelled'
-              ? 'Participants keep their records, but this run will not go ahead.'
-              : 'This changes who can enrol on the session.'
+          pendingStatus === 'Completed'
+            ? completedDescription
+            : pendingStatus === 'InProgress'
+              ? 'The actual start time is stamped automatically if it has not been set.'
+              : pendingStatus === 'Cancelled'
+                ? 'Participants keep their records, but this run will not go ahead.'
+                : 'This changes who can enrol on the session.'
         }
         confirmText="Change status"
         isLoading={busy}

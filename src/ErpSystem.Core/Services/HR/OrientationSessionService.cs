@@ -21,6 +21,7 @@ public class OrientationSessionService : IOrientationSessionService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IOnboardingOrientationNotices _notices;
+    private readonly IEmployeeOrientationService _enrolments;
     private readonly ILogger<OrientationSessionService> _logger;
 
     public OrientationSessionService(
@@ -32,6 +33,7 @@ public class OrientationSessionService : IOrientationSessionService
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IOnboardingOrientationNotices notices,
+        IEmployeeOrientationService enrolments,
         ILogger<OrientationSessionService> logger)
     {
         _sessionRepository = sessionRepository;
@@ -42,6 +44,7 @@ public class OrientationSessionService : IOrientationSessionService
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _notices = notices;
+        _enrolments = enrolments;
         _logger = logger;
     }
 
@@ -337,6 +340,13 @@ public class OrientationSessionService : IOrientationSessionService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Orientation session {Code} status changed to {Status}", entity.SessionCode, changeDto.NewStatus);
+
+        // Round 4, lane R (R-D2): a session marked Completed completes the people its register shows
+        // there, on a programme that is only its session. This runs after the status is saved, so a
+        // failure here leaves the session completed, and saving the register again finishes the job.
+        if (changeDto.NewStatus == OrientationSessionStatus.Completed)
+            await _enrolments.CompleteAttendedOnSessionAsync(entity.Id, updatedByUserId, cancellationToken);
+
         return true;
     }
 
@@ -655,6 +665,11 @@ public class OrientationSessionService : IOrientationSessionService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Round 4, lane R: a register saved on a session already marked Completed completes the people
+        // it now shows there, so the order HR marks the register and closes the session does not matter.
+        if (session.Status == OrientationSessionStatus.Completed)
+            await _enrolments.CompleteAttendedOnSessionAsync(session.Id, markedByUserId, cancellationToken);
 
         // Re-read through the includes chain: the DTO's EmployeeId comes off the enrollment navigation,
         // which these tracked entities never loaded, and that id is also the key the name hydrator uses

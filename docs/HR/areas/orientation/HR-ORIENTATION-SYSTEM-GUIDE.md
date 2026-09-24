@@ -8,6 +8,10 @@
 - round 4's execution log — lanes I, I-b, J, K-a, K-b1, K-b2, L and M, which rebuilt most of what
   this module does automatically.
 
+**Updated the same day for lane R**, which made a programme completable: every enrolment on a
+programme that requires a declaration now has one to sign, and a programme that is only its live
+session is completed by attending it. That closed **O-15**.
+
 It describes what the code is built to do. Where a screen promises something the server does not
 do, the step says so rather than smoothing it over. ⚠ **Nothing in it has been walked in a
 browser.** Every screen was read, not clicked.
@@ -65,7 +69,7 @@ what you can safely show.
 |---|---|
 | **1 · Rebuild the database, then check it.** | The harness suites for this module leave their fixtures live (**D-1**): on UAT, 505 programmes, 1,523 enrolments and 6,727 overdue onboarding tasks. On such a database no number in this guide holds. § 2.2 is a thirty-second check that you are on a clean rebuild |
 | **2 · `hr.head` is offered every delete, and can make only one.** | Every delete and remove in the module needs `HR.Orientation.Admin`, which the HR role does not hold: a programme, a session, a module, a content item, a question, a prerequisite, a rule, a category, a template, a template task, a facilitator. Each answers 403 (**O-10**). Do not press them. **The exception is a template's audience** (chapter 16): HR can remove one, and its trash button acts at once, with no confirmation |
-| **3 · Nobody can finish a programme in this demo.** | New Employee Onboarding and the code of conduct course need a signed declaration that no screen can create. The Q3 briefing has nothing that ever evaluates completion (**O-15**). Do not promise a completion or a certificate. The one completed enrolment, with certificate OCERT-2026-00001, is the seeder's |
+| **3 · A completion cannot be undone from a screen.** | Since lane R a participant completes a programme through the screens: the content, the quiz and the signed declaration (chapter 18). On a programme that is only its live session, HR's *Completed* on the session does it, or *Mark completed* on the enrolment (chapters 6 and 7). Completing issues the certificate and tells the person, and nothing on a screen reopens it. Finish Kojo Ansah's induction once per rebuild; chapter 21 undoes it with SQL |
 | **4 · Never open a participant's page as HR.** | *View progress* on the enrolments screen, and a name on the dashboard's overdue list, open the participant's own player with its buttons live. A signature made there records HR's IP address against the participant (**O-4**) |
 | **5 · An onboarding plan is fixed once it is made.** | No screen edits, cancels or deletes a plan, removes a task or reopens one (**O-32**, **O-36**). Everything you add in a demo stays; chapter 21 undoes it with SQL |
 | **6 · Fill in every number box.** | An empty number box is sent as 0. *Max participants* and *Validity (months)* are then refused, although both placeholders say they may be left empty (**O-9**, **O-44**) |
@@ -240,13 +244,19 @@ stranded every enrolment on the programme short of 100% (the area 15 harness fou
 ⚠ **Every** live item means every one: an item or module marked *Optional* is counted too
 (**O-58**).
 
-⚠ **Nothing but these three acts evaluates the gates:** tracking content, submitting the quiz and
-signing a declaration. Two consequences follow for the demo database (**O-15**, Rule 3):
-- **the acknowledgement gate cannot open.** A declaration is created per enrolment, only by an HR
-  endpoint no screen calls. So New Employee Onboarding and the code of conduct course stop at
-  *Pending acknowledgement*;
-- **a programme with no content and no quiz never completes.** The Q3 briefing gives its participant
-  nothing to track or submit, and the attendance register is not read.
+**Since lane R, every gate opens through the screens:**
+- **The declaration** is copied onto every enrolment the moment it is made — by HR, by a rule or by a
+  renewal — from the words written on the programme (chapter 14). The participant signs it on the
+  player's *Declarations* tab. Editing the words later changes no declaration already made.
+- **A programme that is only its live session** — no content, no quiz, delivered in person,
+  virtually or blended — has *attendance confirmed* as its content gate. Two doors confirm it.
+  HR marks the session *Completed*, which confirms everybody the register shows Present, Late or
+  Partial on some day. Or HR uses *Mark completed* on one enrolment, with a note. Recording
+  attendance on its own completes nothing.
+
+Before lane R neither could happen. A declaration could be made only by an HR endpoint no screen
+called, and only tracking, submitting and signing ever evaluated completion. So no enrolment made
+through the product could complete on any seeded programme (**O-15**, now closed).
 
 ⚠ **"Overdue" is worked out, not stored.** Nothing writes the *Overdue* completion status except the
 demo seeder. The overdue lists read *"past its due date and not completed or exempted"* — and that
@@ -453,7 +463,7 @@ Task Queues. As `new.hire`, open *My Orientations* and *My Onboarding*.
 - [ ] the API has been up for **20 minutes** since its last start, so both sweeps have run;
 - [ ] it is **at least two days after the build**, so the twenty-nine are enrolled (§ 2.1);
 - [ ] you know what has moved with the date (Rule 8);
-- [ ] you will not promise a completion or a certificate (Rule 3);
+- [ ] you will finish Kojo Ansah's induction once, and only once (Rule 3);
 - [ ] you will not open a participant's page as HR (Rule 4).
 
 ---
@@ -757,8 +767,13 @@ left to right, a **status badge**, a **Change status…** select, **Run again**,
 - **Change status…** offers every status except the current one — **any status can follow any
   status** (**O-13**). The confirmation reads, for example, *"Change status to EnrollmentOpen?"* —
   the raw value — with one of three lines:
-  - to *In progress* or *Completed*: *"The actual start or end time is stamped automatically if it has
-    not been set."*;
+  - to *In progress*: *"The actual start time is stamped automatically if it has not been set."*;
+  - to *Completed*: the same about the end time, then what closing the session will do, read from
+    the server as the dialog opens (lane R). For example: *"1 participant the register shows
+    attending will complete Q3 Product Launch Briefing. 2 participants are not shown attending and
+    stay open: mark the register first, or mark them completed from the enrolments screen."* On a
+    programme with content it says *"It completes nobody: … is completed by its own content,
+    assessment and declaration."*;
   - to *Cancelled*: *"Participants keep their records, but this run will not go ahead."*;
   - to anything else: *"This changes who can enrol on the session."*
 - 🚫 **Delete session** is `HR.Orientation.Admin`, and **403 for `hr.head`** (Rule 2, **O-10**).
@@ -859,6 +874,16 @@ because the seeder saved an empty mark for day 1.
 🚫 **Do not save a register here** — the session has not happened, and times are recorded against
 today. Show it; do not press **Save day 1**.
 
+Then choose *Change status… → Completed*, read the confirmation, and press **Cancel**. On a clean
+rebuild it reads *"…0 participants the register shows attending will complete Q3 Product Launch
+Briefing. 1 participant is not shown attending and stays open: …"*, because the seeder's mark is
+*Not recorded*.
+
+> *"A briefing that is only its live session is completed by attending it — so closing the session
+> completes the people the register shows there, and it says who before anything is written.
+> Somebody who came to another run, or who is not on the register, HR marks completed by hand, with a
+> note."*
+
 **7 — 🚫 DO NOT PRESS the trash button.** It is Admin-only (Rule 2). If a session is not going to
 run, **Change status… → Cancelled** is the action, and it tells everybody on it.
 
@@ -874,6 +899,7 @@ run, **Change status… → Cancelled** is the action, and it tells everybody on
 | Facilitators | `GET` / `POST …/{id}/facilitators` · `PUT …/facilitators/{id}` | Read / Write |
 | 🚫 **Remove facilitator** | `DELETE …/facilitators/{id}` | **`HR.Orientation.Admin`** |
 | The register | `GET` / `POST …/{id}/attendance` | Read / Write |
+| The *Completed* confirmation's count | `GET api/employee-orientations/session/{id}/completion-preview` | `HR.Orientation.Read` |
 | Vendor and trainer lists | `GET api/training-vendors/active` · `GET api/trainers/vendor/{id}` | `HR.Training.Read` — the HR role holds it; a role without it is told so in the dialog |
 
 Tables: `OrientationSessions`, `OrientationSessionFacilitators`, `OrientationAttendanceRecords`.
@@ -883,7 +909,12 @@ Tables: `OrientationSessions`, `OrientationSessionFacilitators`, `OrientationAtt
 - A **Draft going live** tells its employee facilitators.
 - A **live session cancelled or postponed** tells everybody on it.
 - Saving a **live** session with a new time or place tells everybody on it, with *Was:* and *Now:*.
-- No status change touches an enrolment.
+- **Completed**, on a programme that is only its live session, confirms attendance for every
+  seat-holder the register shows Present, Late or Partial on some day, and runs the completion rule
+  for each: the certificate, and the notice (lane R). A register saved on a session already
+  *Completed* does the same for the people it then shows. Marking it *Completed* again changes
+  nothing.
+- No other status change touches an enrolment.
 
 **Delete** is refused while anybody holds a seat — and a *Completed* enrolment still holds one — so a
 session that ran with people on it can never be deleted, whatever its status.
@@ -961,6 +992,7 @@ A row does not click.
 | **Re-enrol** | on the person's latest row on the programme, when HR ended it: *Withdrawn*, *Cancelled* or *No show* |
 | **Open the next cycle now** | on the person's latest row, when it is *Completed* on a **recurring** programme |
 | **Issue certificate** / **Reissue certificate** | *Completed*, on a programme that issues certificates. It appears on any row, not only the latest |
+| **Mark completed** | on a programme that is only its live session, when the enrolment is not completed, not waiting on its declaration, and not ended by HR (lane R) |
 | **Withdraw** (red) | any status but *Withdrawn* and *Cancelled*, so also *Completed* and *No show* (**O-25**) |
 
 "Latest" means the newest of the rows **on screen** for that person and programme (**O-21**).
@@ -987,7 +1019,7 @@ The buttons are **Cancel** · **Enrol N**. The result is reported twice:
 
 The page then switches to that programme.
 
-**Three confirmations from the row menu:**
+**Four confirmations from the row menu:**
 - **Issue** / **Reissue certificate** — *"Issue Abdul-Rahman Aryee a certificate?"* … *"with the
   next serial and the programme's validity. They are told, in-app and by email."* A reissue names
   the certificate it replaces.
@@ -995,6 +1027,12 @@ The page then switches to that programme.
   one *"stays on the record"*.
 - **Withdraw from this programme** — *"… keeps their record, but their seat is freed and their
   enrollment closed."* A **Reason** is required. The buttons are **Keep them on** · **Withdraw**.
+- **Mark completed** — *"… is its live session, so attending it is what completes it. Record that …
+  attended — somebody enrolled without a session, or whom the register does not show. Completing it
+  issues any certificate and tells them."* A **Note** is required, up to 1,000 characters. The
+  buttons are **Cancel** · **Mark completed**. The toast reads *"Marked completed"*, or, on a
+  programme that also asks for a declaration, *"Attendance confirmed — It completes once the
+  declaration is signed."*
 
 **Empty:** *"Nothing to show"*, with *"Choose a programme to see who is on it."*, *"Nothing is
 overdue."*, *"Nothing falls due in the next fortnight."* or *"No enrollments match."* The same appears
@@ -1023,9 +1061,8 @@ Point at **Kojo Ansah's** row: 0%, *"Scored 100% — Passed"*.
 > *"Kojo has passed the knowledge check before opening a single module. The order is Kojo's to
 > choose; what the system insists on is that all of it is done."*
 
-⚠ **CAREFUL — do not say Kojo will be certified on finishing.** Kojo cannot finish. The programme
-requires a signed declaration and no screen can create one, so the enrolment will stop at *Pending
-acknowledgement* (**O-15**, Rule 3).
+> *"When the content is done too, Kojo signs the declaration on the same page, and the certificate
+> is issued the moment it completes — you will see it happen in the portal."*
 
 **3 — Scope → *Overdue*.** One row: the seeder's overdue person on **Anti-Harassment & Code of
 Conduct**, due six days before the build. The *Overdue* tile reads **1**.
@@ -1076,6 +1113,7 @@ OCERT-2026-00001 and writes to its holder.
 | **Re-enrol** · **Open the next cycle** | `POST api/employee-orientations` | `HR.Orientation.Write` |
 | **Issue / Reissue certificate** | `POST …/{id}/certificates` | `HR.Orientation.Write` |
 | **Withdraw** | `POST …/{id}/withdraw` | `HR.Orientation.Write` |
+| **Mark completed** | `POST …/{id}/confirm-attendance` | `HR.Orientation.Write` |
 
 Tables: `EmployeeOrientations`, `OrientationCertificates`, `OrientationNotifications`.
 - Every write needs the signed-in account linked to an employee.
@@ -1095,12 +1133,23 @@ so must the session: *"Session OSN-… cannot take enrolments: it is still a dra
 
 **What an enrolment gets:**
 - *Confirmed* and *Not started*;
+- its own declaration, *Presented*, when the programme requires one, in the programme's words or
+  a default made from its title (lane R);
 - *Waitlisted*, with a position, when the session is full and waitlists;
 - refused, for **the whole batch**, when the session is full and does not waitlist: *"The selected
   session is full and does not allow a waitlist."*
 
 The due date is the enrolment date plus the programme's deadline. When the programme's **Send
 reminders** is on, the person is told: *"Enrolled by HR."*
+
+**What *Mark completed* does:** it records that the person attended, with the note and the officer
+from the sign-in, and runs the completion rule. It refuses:
+- a programme that is not only its live session — *"Only a programme that is its live session can
+  be marked completed by hand. "…" is completed by working through its content."*;
+- an enrolment HR ended — *"This enrolment was ended (Withdrawn). Re-enrol the person first if they
+  are to be marked completed."*;
+- one already completed, or already confirmed and waiting on its declaration;
+- a blank note.
 
 **What a withdrawal does:** it sets the enrolment status and stores the reason. Nothing else:
 - the completion status stays as it was (**O-2**);
@@ -1115,7 +1164,7 @@ certificate itself, so this item is for completions from before that, and for re
 
 | Gap | |
 |---|---|
-| **O-15 · No enrolment made in the product can reach *Completed* on any of the three seeded programmes.** New Employee Onboarding and Anti-Harassment & Code of Conduct require a signed declaration. A declaration is a row created per enrolment, and only by an HR endpoint that **no screen calls**. The programme form has the switch *Requires an acknowledgement*, and no field for the text. So a participant finishes the content, passes the quiz and stops at *Pending acknowledgement*, with no Declarations tab to sign, while the sweep chases them to sign. The Q3 Product Launch Briefing has no content and no quiz. Only tracking content, submitting a quiz or signing a declaration ever evaluates completion; attendance is not read. **The one completed enrolment on the demo database is the seeder's.** Measured on UAT: 19 declarations in the tenant, the seeder's one and 18 harness fixtures | |
+| **O-15 · ✅ Closed by lane R (2026-09-24).** No enrolment made in the product could reach *Completed* on any of the three seeded programmes. A declaration was a row per enrolment that only an HR endpoint no screen called could create, and a programme with no content and no quiz had nothing that evaluated completion. Now every enrolment on a programme that requires a declaration is given one when it is made, and a programme that is only its live session is completed by attendance (§ 1.4). Measured on UAT after the migration: 195 declarations backfilled, and no live enrolment that needs one is without it | |
 | **O-19 · A bulk enrolment can over-fill a capped session.** Each person's seat check counts the saved seats, and the batch is saved once at the end. So everybody in it sees the count from before the batch: with two seats left, five picks are all *Confirmed*. On a full session that waitlists, everybody in the batch gets the same position. *"(N seats left)"* is true only before you press | |
 | **O-20 · Nobody already on a programme can be put on a session.** No screen can do it: the enrolment update that places a person on a session has no caller in the frontend; the dialog skips anyone already on the programme; *Re-enrol* never sends a session; and automatic enrolments are made without one. So the six starters, and everybody the hire rule enrols, can never be booked onto a **Corporate Induction Day**. The one route is to withdraw them and enrol them again with the session, which leaves a withdrawn row behind (**O-2**) | |
 | **O-21 · "The latest row" is judged among the rows on screen.** In *By completion status*, *Overdue* and *Due in 14 days* a person's newer enrolment may not be loaded, so an older row is treated as the latest. *Open the next cycle now* is then offered on cycle 1 while cycle 2 is under way, and the server refuses. It is correct only in *By programme* | |
@@ -1907,7 +1956,11 @@ problems:
 - *"It has no modules, so there is nothing for a participant to work through."*
 - *"It requires an assessment but has no questions, so nobody enrolled on it can complete it."*
 
-It appears only after publishing, never before (**O-46**).
+It appears only after publishing, never before (**O-46**). Since lane R, a programme that is only its
+live session is not called incomplete for having no modules. It shows **"Completed by attendance"**
+instead: *"This programme is its live session: nothing to work through and no assessment. A
+participant completes it when HR marks their session Completed and the register shows them there,
+or when HR marks the enrolment completed on the enrolments screen."*
 
 **Five tabs.**
 
@@ -1916,7 +1969,7 @@ It appears only after publishing, never before (**O-46**).
 | Card | Fields |
 |---|---|
 | **Programme** — *"Code … — issued on creation and fixed."* | **Title** * · **Description** · **Objectives** · **Category** (*"Uncategorised"*, or an active category) · **Type** * · **Default delivery mode** * · **Priority** * · **Audience scope** * — ⚠ a label only, which decides nothing (**O-50**) · **Estimated duration (minutes)** · **Owner** — *"Who is accountable for this programme?"*, shown empty even when set (**O-43**) |
-| **Completion requirements** — *"What a participant has to do before the programme counts as finished."* | **Requires an assessment**, then **Passing score (%)** · **Requires an acknowledgement** — *"A declaration the participant signs — recorded with their IP and a tamper hash."* ⚠ There is no field for the declaration's text, and nothing creates one (**O-15**) · **Completion deadline (days from enrollment)** |
+| **Completion requirements** — *"What a participant has to do before the programme counts as finished."* | **Requires an assessment**, then **Passing score (%)** · **Requires an acknowledgement** — *"A declaration the participant signs — recorded with their IP and a tamper hash."* — then **Declaration title** * and **Declaration text**, both required while it is on: the words each enrolment gets its own copy of (lane R) · **Completion deadline (days from enrollment)** |
 | **Certificate** | **Issues a certificate** — *"Issued automatically, with a serial, when an enrolment completes…"*, then **Validity (months)** — *"Leave empty for a certificate that does not expire"*, which cannot be left empty (**O-44**) |
 | **Recurrence & lifecycle** | **Recurs** — *"Everyone who completes it is enrolled again one period after completing…"* — then **Frequency** (*Monthly* · *Quarterly* · *Semi-annually* · *Annually* · *Every two years*) · **Send reminders** · **Effective from** / **Effective to** — *"Outside these dates nothing enrols anyone — not the audience rules, not a renewal, not "Enrol audience now". …"* · **Version** · **Tags** |
 
@@ -2015,9 +2068,10 @@ sessions**, **37 enrolled**, **1 completed**. Walk the tabs:
 > enrolled on it is not a list somebody keeps: it is one rule — everybody, as long as they are new —
 > firing within a day or two of their joining."*
 
-⚠ **CAREFUL — do not claim the declaration is authored here.** *Requires an acknowledgement* is a
-switch with no text behind it, and nothing creates the declaration a participant would sign (**O-15**,
-Rule 3).
+Point at **Declaration title** and **Declaration text** under *Requires an acknowledgement*.
+
+> *"And this is what each of them signs. Every enrolment gets its own copy of these words when it is
+> made — so if we change them tomorrow, nobody's signed declaration changes with them."*
 
 ⚠ **CAREFUL — do not press *Save changes* on a seeded programme.** It clears the programme's owning
 unit without saying so (**O-43**).
@@ -2497,7 +2551,7 @@ Under them, a progress card. It says *"You are on the waitlist at position N…"
 |---|---|---|
 | **Content (N)** | always | a card per module (*Optional*, *In order*, *~N min*, the description). Each item has a tick, a lock or a circle, its type, *"· optional"*, *"· N min"*, *"· finish the item above first"* and *"· done …"*. Its buttons are **Open** — the link, in a new tab — or **Start** when there is no link, and **Mark done**. *In order* is enforced by the screen only |
 | **Assessment (N)** | when the paper has questions | the whole paper at once: *"Last attempt: 100% — passed — Attempt 1. Submitting again replaces this result."*, each question with its hint (*"Choose one · 1 points"*, *"Choose all that apply"*, *"Free text — recorded but not auto-marked"*), and the explanations once graded. **Submit assessment** confirms *"…Unanswered questions score zero, and submitting replaces any previous attempt."* The pass mark is never shown (**O-59**) |
-| **Declarations (N)** | only when a declaration exists (**O-15**) | each with its text, *"Signing this is recorded with your IP address and a tamper hash."*, and **I agree** — *"Your name, the time, and your IP address are recorded against it. This cannot be undone."* — or **Decline**, with a required reason |
+| **Declarations (N)** | when a declaration exists — which, since lane R, is every enrolment on a programme that requires one | each with its text, *"Signing this is recorded with your IP address and a tamper hash."*, and **I agree** — *"Your name, the time, and your IP address are recorded against it. This cannot be undone."* — or **Decline**, with a required reason |
 | **Feedback** | always | *"How was it?"* — **Overall**, **Content**, **Facilitator** and **Relevance to your job**, each 1 to 5 stars; **Comments**; **Send anonymously**; **Send feedback**. One response per orientation |
 | **Certificate** | when one exists | *"Certificate OCERT-… — Issued …, expires …."*, each certificate's status, and **Verify** where it has a link. There is no download (**O-61**) |
 
@@ -2509,7 +2563,7 @@ Under them, a progress card. It says *"You are on the waitlist at position N…"
 > *"Kojo's own view. One programme, a month to finish it, and the knowledge check already passed."*
 
 **2 — Open it.** Tiles: **Progress 0%** · **Content done 0 of 6** · **Assessment 100%, Passed** ·
-**Due …**. Tabs: *Content (6)*, *Assessment (3)*, *Feedback* — and no *Declarations* tab (**O-15**).
+**Due …**. Tabs: *Content (6)*, *Assessment (3)*, *Declarations (1)*, *Feedback*.
 
 **3 — *Content*.** Four module cards, in order. The first is *Welcome & Company Overview*, with the
 *CEO Welcome Message* (*Video · 7 min*) and *Company History & Values*.
@@ -2531,15 +2585,29 @@ CEO Welcome Message"*. **Progress 17%**; **Content done 1 of 6**.
 ⚠ **CAREFUL — do not submit it again.** A retake replaces the passing attempt, and a lower score marks
 the enrolment *Failed* — even on a completed programme (**O-59**).
 
-**6 — *Feedback*.** Show the form and do not send it: there is one response per orientation, and an
+**6 — 🔴 LIVE WRITE 12 — *Mark done* on the other five items:** *Company History & Values*, the
+*Employee Handbook*, the *Code of Conduct*, *Email & Collaboration Tools*, and the *Onboarding
+Knowledge Check* (press *Start*, then *Mark done*). **Progress 100%**. The header reads
+*PendingAcknowledgement*, and the progress card says *"1 declaration still need signing before this
+can be completed."* (**O-63**).
+
+> *"Everything Kojo has to work through is done, and the knowledge check is passed. One thing is
+> left, and it is Kojo's to do: the declaration."*
+
+**7 — 🔴 LIVE WRITE 13 — *Declarations* → *Code of Conduct Acknowledgement* → *I agree*.** The
+dialog reads *"Sign this declaration? — Your name, the time, and your IP address are recorded
+against it. This cannot be undone."* The toast reads *"Signed"*. The header now reads
+**Completed**, and a **Certificate** tab appears: *"Certificate OCERT-2026-0000N — Issued …, expires
+…."*, twenty-four months on.
+
+> *"That is the whole induction, done by the person it is for: the content, the knowledge check and
+> the signature. The certificate is issued the moment it completes, Kojo has been told, and HR sees
+> it on the enrolments screen without doing anything."*
+
+*Undo:* chapter 21 — once per rebuild (Rule 3).
+
+**8 — *Feedback*.** Show the form and do not send it: there is one response per orientation, and an
 empty one uses it up (**O-63**).
-
-⚠ **CAREFUL — do not mark all six items done in front of people.** The enrolment would stop at
-*Pending acknowledgement*, with nothing to sign (**O-15**, Rule 3). Say instead:
-
-> *"The design is that, with the content done and the quiz passed, the participant signs a
-> declaration, and signing it completes the programme and issues the certificate. The declaration
-> is the part still to be built."*
 
 ### ⚙ Behind the page
 
@@ -2642,7 +2710,7 @@ signed code of conduct* marked **Yours to do**.
 **2 — *Tasks given to you — 1 to do*.** *Return the signed code of conduct* — *"Part of your own
 onboarding · coordinated by Akpene Amoah"*, due today, *"Signed off by Akpene Amoah"*.
 
-**3 — 🔴 LIVE WRITE 12 — *Mark done*.** Note: *"Signed copy handed to the HR counter."* The dialog
+**3 — 🔴 LIVE WRITE 14 — *Mark done*.** Note: *"Signed copy handed to the HR counter."* The dialog
 reads *"Akpene Amoah signs it off after you do, and is told it is ready."* The toast reads *"Marked
 done — waiting for sign-off — Akpene Amoah has been told it is ready to sign off."* The task now reads
 *"Done — waiting for Akpene Amoah to sign it off."*
@@ -2650,7 +2718,7 @@ done — waiting for sign-off — Akpene Amoah has been told it is ready to sign
 > *"Kojo says it is done. It is not closed yet: a second person signs it off, and the system has
 > already told them."*
 
-**4 — 🔴 LIVE WRITE 13 — sign in as `hr.head`.**
+**4 — 🔴 LIVE WRITE 15 — sign in as `hr.head`.**
 1. *My Notifications* has *"Return the signed code of conduct for Kojo Ansah is done — waiting for
    your sign-off"*.
 2. Open **Task Queues → Verification**. One task.
@@ -2709,15 +2777,15 @@ you mean to demonstrate on again.
 | 1–3 | a copy of the October induction day, its facilitators confirmed, opened for enrolment | as a **SuperAdmin**, the session's trash button; nobody holds a seat, so it is allowed. As HR: *Change status… → Cancelled*. The Head of HR's *"You are facilitating…"* notice stays |
 | 4 | Efua Seidu on the compliance course, and the notice that told Efua | the SQL below. *Withdraw* is not an undo: it leaves a withdrawn row, which the triggers screen reports as *Ended by HR* and the overdue lists count (**O-2**) |
 | 5 | *Create the corporate email account* completed | the SQL below; nothing reopens a task |
-| 6, 12, 13 | *Return the signed code of conduct* — added, marked done, verified | the SQL below; nothing removes a task |
+| 6, 14, 15 | *Return the signed code of conduct* — added, marked done, verified | the SQL below; nothing removes a task |
 | 7–9 | *Q4 Product Launch Briefing*, its module and its content item | as a **SuperAdmin**, the programme's trash button; a Draft may be deleted |
 | 10 | a reminder run | nothing: each item is sent once, and the log keeps it |
-| 11 | *CEO Welcome Message* marked done for Kojo Ansah | the SQL below |
+| 11–13 | Kojo Ansah's induction: the six items marked done, the declaration signed, the completion and its certificate | the SQL below. The quiz Kojo sat before the demo stays passed, and the *Completed* notice stays |
 
 Run the SQL as a database administrator, against the demo database only:
 
 ```sql
--- Chapter 21 reset. Undoes LIVE WRITES 4, 5, 6 (with 12 and 13) and 11 on the demo database.
+-- Chapter 21 reset. Undoes LIVE WRITES 4, 5, 6 (with 14 and 15) and 11 to 13 on the demo database.
 DECLARE @t uniqueidentifier = (SELECT TenantId FROM Employees WHERE EmployeeNumber = 'TDC/00063' AND IsDeleted = 0);
 DECLARE @kojo uniqueidentifier = (SELECT Id FROM Employees WHERE TenantId = @t AND EmployeeNumber = 'TDC/00063' AND IsDeleted = 0);
 DECLARE @efua uniqueidentifier = (SELECT Id FROM Employees WHERE TenantId = @t AND EmployeeNumber = 'TDC/00017' AND IsDeleted = 0);
@@ -2737,18 +2805,24 @@ UPDATE EmployeeOrientations SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME()
 UPDATE OnboardingTasks SET Status = 1, CompletedDate = NULL, CompletedById = NULL, CompletionNotes = NULL
   WHERE OnboardingPlanId = @plan AND TaskName = 'Create the corporate email account' AND IsDeleted = 0;
 
--- LIVE WRITES 6, 12 and 13: the task added to Kojo Ansah's plan.
+-- LIVE WRITES 6, 14 and 15: the task added to Kojo Ansah's plan.
 UPDATE OnboardingTasks SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME()
   WHERE OnboardingPlanId = @plan AND TaskName = 'Return the signed code of conduct' AND IsDeleted = 0;
 
--- LIVE WRITE 11: the CEO Welcome Message marked done on Kojo Ansah's induction.
+-- LIVE WRITES 11 to 13: Kojo Ansah's induction, completed. The content marked done, the declaration
+-- signed, and the completion with its certificate. The quiz Kojo sat before the demo stays passed.
 DECLARE @kojoEnrolment uniqueidentifier = (SELECT eo.Id FROM EmployeeOrientations eo
   JOIN OrientationPrograms p ON p.Id = eo.ProgramId
   WHERE eo.TenantId = @t AND eo.EmployeeId = @kojo AND p.ProgramCode = 'ORI-ONB-001' AND eo.IsDeleted = 0);
-UPDATE cp SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME()
-  FROM OrientationContentProgresses cp JOIN OrientationContentItems ci ON ci.Id = cp.ContentItemId
-  WHERE cp.EmployeeOrientationId = @kojoEnrolment AND ci.Title = 'CEO Welcome Message' AND cp.IsDeleted = 0;
-UPDATE EmployeeOrientations SET ProgressPercentage = 0 WHERE Id = @kojoEnrolment;
+UPDATE OrientationContentProgresses SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME()
+  WHERE EmployeeOrientationId = @kojoEnrolment AND IsDeleted = 0;
+UPDATE OrientationAcknowledgements SET Status = 2, SignedAt = NULL, SignatureIpAddress = NULL, SignatureHash = NULL
+  WHERE EmployeeOrientationId = @kojoEnrolment AND IsDeleted = 0;
+UPDATE OrientationCertificates SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME()
+  WHERE EmployeeOrientationId = @kojoEnrolment AND IsDeleted = 0;
+UPDATE EmployeeOrientations SET ProgressPercentage = 0, CompletionStatus = 2, EnrollmentStatus = 2, CompletedAt = NULL,
+    AcknowledgementSigned = 0, CertificateIssued = 0, CertificateSerialNumber = NULL, CertificateExpiresAt = NULL
+  WHERE Id = @kojoEnrolment;
 ```
 
 ⚠ The script finds the rows by name: the task titles and the employee numbers TDC/00063 and
@@ -2772,11 +2846,12 @@ For a room that has fifteen minutes for this module, as `hr.head` unless marked:
 | 2 | **Enrollments** | New Employee Onboarding: thirty-seven people, twenty-nine of them enrolled by the rule. **LIVE WRITE 4**: two asked for, one enrolled, one skipped | 7 |
 | 3 | **Enrollment Triggers** | Kojo Ansah: the hire rule's window lapsed, so HR enrolled Kojo by hand; the template the placement would get, with its score. Nana Legal: the rule fired by itself | 8 |
 | 4 | **Onboarding plan** | Kojo's plan: owners, the section queues, the comment thread. **LIVE WRITE 6**: a task that needs a second signature | 10 |
-| 5 | **My Onboarding**, as `new.hire` | **LIVE WRITE 12**: Kojo marks it done | 19 |
-| 6 | **Task Queues**, as `hr.head` | **LIVE WRITE 13**: the Head of HR verifies it | 19, 11 |
+| 5 | **My Orientations**, as `new.hire` | **LIVE WRITES 12–13**: Kojo finishes the induction and signs; the certificate follows | 18 |
+| 6 | **My Onboarding**, as `new.hire` | **LIVE WRITE 14**: Kojo marks the task done | 19 |
+| 7 | **Task Queues**, as `hr.head` | **LIVE WRITE 15**: the Head of HR verifies it | 19, 11 |
 
-Leave the programme page (chapter 14) and the portal player (chapter 18) out of a short run. Both lead
-towards a completion that cannot happen (Rule 3).
+Leave the programme page (chapter 14) out of a short run. A completion is final from any screen
+(Rule 3), so run step 5 once per rebuild.
 
 ---
 
@@ -2784,13 +2859,12 @@ towards a completion that cannot happen (Rule 3).
 
 **65 in the code** (`O-…`, each in its chapter's gap block, except O-1 in § 1.1) and **four in the
 demo data** (`D-…`).
-None was fixed by this guide.
+None was fixed by this guide. **O-15 was closed by lane R the same day** (§ 1.4, chapter 7).
 
 ### Demo-breaking — know these before you present
 
 | # | Finding | Chapter |
 |---|---|---|
-| **O-15** | No enrolment made in the product can reach *Completed* on any of the three seeded programmes: nothing creates a declaration, and a programme with no content has nothing that evaluates completion | 7, 14, 18 |
 | **O-4** | HR can act inside a participant's own player — mark content done, sit the quiz, sign the declaration. The screens show nothing; the signature records HR's IP address, and only an audit column holds HR's user id | 4, 7, 18 |
 | **O-20** | Nobody already on a programme can be put on a session, so the induction days can never be filled with the starters | 7 |
 | **O-59** | The quiz can be re-sat for ever, even after completion, and a lower score turns a completed programme *Failed*; the answer key travels with the paper after the first attempt | 18 |
@@ -2831,7 +2905,7 @@ None was fixed by this guide.
 | O-12 | The session's Overview goes stale after a status change, and can erase the stamped actuals | 6 |
 | O-13 | Session status has no rules, and shows raw values | 6 |
 | O-14 | The logistics fields do not follow the delivery mode | 6 |
-| O-15 | No enrolment made in the product can reach *Completed* on the seeded programmes | 7 |
+| O-15 | ✅ *Closed by lane R.* No enrolment made in the product could reach *Completed* on the seeded programmes | 7 |
 | O-16 | *Run again* says the facilitators are asked to confirm; nothing asks them | 6 |
 | O-17 | The register's times are hung on today's date | 6 |
 | O-18 | A failed attendance read can overwrite the day with *Present* | 6 |
@@ -2937,7 +3011,7 @@ decides, by ownership.
 |---|---|---|---|---|
 | `api/orientation-programs` | every read, the reach count and the trigger diagnosis | create, copy, update, status, and every module, content item, prerequisite, rule and question add or edit; **Enrol audience now** | **delete** — the programme, a module, a content item, a prerequisite, a rule, a question; **the trigger sweep's run** | — |
 | `api/orientation-sessions` | every read but one | create, copy, update, status, facilitators, attendance | **delete** a session or a facilitator | `GET {id}`: when and where a session is |
-| `api/employee-orientations` | the HR lists: by programme, session, status, overdue, due soon; expiring certificates | enrol, bulk-enrol, update (no caller), withdraw, **add a declaration** (no caller), issue and revoke certificates | **delete** an enrolment (no caller) | everything the participant does: the enrolment, its content and progress, the paper and its submission, declarations and signing, feedback, certificates |
+| `api/employee-orientations` | the HR lists: by programme, session, status, overdue, due soon; expiring certificates; a session's completion preview | enrol, bulk-enrol, update (no caller), withdraw, **Mark completed** (`{id}/confirm-attendance`), **add a declaration** (no caller — since lane R each enrolment is given its own), issue and revoke certificates | **delete** an enrolment (no caller) | everything the participant does: the enrolment, its content and progress, the paper and its submission, declarations and signing, feedback, certificates |
 | `api/orientation-categories` | every read | create, update | **delete** | — |
 | `api/orientation-dashboard` | the dashboard | — | — | — |
 | `api/orientation-notifications` | by recipient, by enrolment, recent | **send queued**, create | — | my notices, unread count, mark read |

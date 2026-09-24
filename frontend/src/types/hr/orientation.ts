@@ -758,6 +758,11 @@ export interface OrientationProgramSummary {
   /** Round 4, lane L — Active and in its effective dates: what an enrolment picker may offer. */
   acceptsEnrolment?: boolean;
   closedBecause?: string | null;
+  /**
+   * Round 4, lane R — the programme is only its live session: nothing to work through, no
+   * assessment, delivered live. Attendance completes it, and HR may mark an enrolment completed.
+   */
+  completesByAttendance?: boolean;
   moduleCount: number;
   enrollmentCount: number;
   completedCount: number;
@@ -780,6 +785,9 @@ export interface OrientationProgram extends AuditFields {
   requiresAssessment: boolean;
   passingScorePercent?: number | null;
   requiresAcknowledgement: boolean;
+  /** Round 4, lane R — the declaration each enrolment gets its own copy of. */
+  acknowledgementTitle?: string | null;
+  acknowledgementText?: string | null;
   completionDeadlineDays?: number | null;
   isCertificateIssued: boolean;
   certificateValidityMonths?: number | null;
@@ -795,6 +803,8 @@ export interface OrientationProgram extends AuditFields {
   ownerOrganizationUnitName?: string | null;
   moduleCount: number;
   sessionCount: number;
+  /** Round 4, lane R — see {@link OrientationProgramSummary.completesByAttendance}. */
+  completesByAttendance?: boolean;
   enrollmentCount: number;
   completedCount: number;
   modules: OrientationModule[];
@@ -818,6 +828,9 @@ export interface OrientationProgramCreateRequest {
   requiresAssessment: boolean;
   passingScorePercent?: number | null;
   requiresAcknowledgement: boolean;
+  /** Round 4, lane R — sent only while an acknowledgement is required. */
+  acknowledgementTitle?: string | null;
+  acknowledgementText?: string | null;
   completionDeadlineDays?: number | null;
   isCertificateIssued: boolean;
   certificateValidityMonths?: number | null;
@@ -1218,6 +1231,11 @@ export interface EmployeeOrientation extends AuditFields {
   attemptCount: number;
   isPassed: boolean;
   acknowledgementSigned: boolean;
+  /** Round 4, lane R — attendance confirmed, on a programme that is only its session. */
+  attendanceConfirmedAt?: string | null;
+  attendanceConfirmedByEmployeeId?: string | null;
+  attendanceConfirmedByName?: string | null;
+  attendanceConfirmationNote?: string | null;
   certificateIssued: boolean;
   certificateSerialNumber?: string | null;
   certificateExpiresAt?: string | null;
@@ -1258,6 +1276,30 @@ export interface BulkEnrollOrientationRequest {
 export interface WithdrawOrientationRequest {
   enrollmentId: string;
   withdrawalReason: string;
+}
+
+/**
+ * Round 4, lane R — HR's "Mark completed" on an enrolment whose programme is only its live
+ * session. The note says why; the officer is recorded.
+ */
+export interface ConfirmOrientationAttendanceRequest {
+  employeeOrientationId: string;
+  note: string;
+}
+
+/** Round 4, lane R — what marking a session Completed would do to its participants. */
+export interface OrientationSessionCompletionPreview {
+  sessionId: string;
+  programTitle?: string | null;
+  /** False when the programme has content or an assessment: those complete it, not the session. */
+  completesByAttendance: boolean;
+  /** Attendance alone does not complete it: the declaration is still to be signed. */
+  requiresAcknowledgement: boolean;
+  /** Seat-holders the register shows attending on at least one day, not yet confirmed. */
+  willComplete: number;
+  /** Seat-holders with no attended day on the register: they stay open. */
+  notShownAttending: number;
+  alreadyConfirmed: number;
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────

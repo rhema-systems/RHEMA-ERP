@@ -68,7 +68,11 @@ public class OrientationDataSeeder
             estimatedMinutes: 240, requiresAssessment: true, passingScore: 70, requiresAck: true,
             isCertificate: true, certValidityMonths: 24, deadlineDays: 30,
             description: "Everything a new joiner needs in their first month: company overview, policies, systems and a knowledge check.",
-            objectives: "Understand company culture, complete mandatory policy acknowledgements, and pass the onboarding knowledge check.");
+            objectives: "Understand company culture, complete mandatory policy acknowledgements, and pass the onboarding knowledge check.",
+            // Round 4, lane R: the words each enrolment's declaration is copied from. The same words
+            // the seeded completion below signed, so the demo's one signature reads like the rest.
+            ackTitle: "Code of Conduct Acknowledgement",
+            ackText: "I confirm that I have read, understood and agree to abide by the Company Code of Conduct.");
 
         var antiHarassment = await GetOrCreateProgramAsync(tenantId, "ORI-CMP-001", "Anti-Harassment & Code of Conduct",
             complianceCat.Id, OrientationProgramType.Compliance, OrientationDeliveryMode.SelfPacedOnline,
@@ -77,6 +81,8 @@ public class OrientationDataSeeder
             isCertificate: true, certValidityMonths: 12, deadlineDays: 14,
             description: "Annual mandatory training on workplace conduct, anti-harassment policy and reporting channels.",
             objectives: "Recognise unacceptable conduct, understand reporting channels, and acknowledge the code of conduct.",
+            ackTitle: "Anti-Harassment Declaration",
+            ackText: "I confirm that I have completed the anti-harassment training, that I understand what harassment is and how to report it, and that I will uphold the Code of Conduct.",
             // Round 4, lane I-b: it says "annual", so it recurs annually — the nightly sweep opens each
             // person's next cycle 351 days after they complete it (a year less the 14-day deadline),
             // so the refresher falls due on the anniversary and the 12-month certificate never lapses.
@@ -145,7 +151,8 @@ public class OrientationDataSeeder
         int estimatedMinutes, bool requiresAssessment, decimal? passingScore, bool requiresAck,
         bool isCertificate, int? certValidityMonths, int deadlineDays,
         string description, string objectives,
-        OrientationRecurrenceFrequency? recurs = null)
+        OrientationRecurrenceFrequency? recurs = null,
+        string? ackTitle = null, string? ackText = null)
     {
         var existing = await _context.OrientationPrograms
             .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.ProgramCode == code);
@@ -168,6 +175,8 @@ public class OrientationDataSeeder
             RequiresAssessment = requiresAssessment,
             PassingScorePercent = passingScore,
             RequiresAcknowledgement = requiresAck,
+            AcknowledgementTitle = ackTitle,
+            AcknowledgementText = ackText,
             CompletionDeadlineDays = deadlineDays,
             IsCertificateIssued = isCertificate,
             CertificateValidityMonths = certValidityMonths,
@@ -502,6 +511,10 @@ public class OrientationDataSeeder
                 CreatedBy = SeedUser,
             };
             _context.EmployeeOrientations.Add(inProgress);
+            // Round 4, lane R: every enrolment on a programme that requires a declaration has one to sign.
+            _context.OrientationAcknowledgements.Add(OrientationCompletionRules.NewDeclaration(
+                inProgress, onboarding.AcknowledgementTitle, onboarding.AcknowledgementText, onboarding.Title,
+                inProgress.EnrolledAt, SeedUser));
             await _context.SaveChangesAsync();
             await SeedContentProgressAsync(tenantId, inProgress, onboarding.Id, completeAll: false);
             await _context.SaveChangesAsync();
@@ -510,7 +523,7 @@ public class OrientationDataSeeder
         // 3) A NOT-STARTED mandatory compliance enrollment (overdue).
         if (employees.Count > 2)
         {
-            _context.EmployeeOrientations.Add(new EmployeeOrientation
+            var overdue = new EmployeeOrientation
             {
                 TenantId = tenantId,
                 ProgramId = compliance.Id,
@@ -522,7 +535,11 @@ public class OrientationDataSeeder
                 CompletionStatus = OrientationCompletionStatus.Overdue,
                 NextDueDate = now.AddDays(-6),
                 CreatedBy = SeedUser,
-            });
+            };
+            _context.EmployeeOrientations.Add(overdue);
+            _context.OrientationAcknowledgements.Add(OrientationCompletionRules.NewDeclaration(
+                overdue, compliance.AcknowledgementTitle, compliance.AcknowledgementText, compliance.Title,
+                overdue.EnrolledAt, SeedUser));
             await _context.SaveChangesAsync();
         }
 

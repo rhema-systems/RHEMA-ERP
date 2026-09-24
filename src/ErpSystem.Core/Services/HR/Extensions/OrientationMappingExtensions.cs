@@ -13,6 +13,9 @@ namespace ErpSystem.Application.HR.Extensions;
 /// </summary>
 public static class OrientationMappingExtensions
 {
+    /// <summary>Round 4, lane R: whitespace is no text, so a blank declaration falls back to the default.</summary>
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     // ========================================================================
     // SECTION 1 — CATALOG
     // ========================================================================
@@ -104,6 +107,8 @@ public static class OrientationMappingExtensions
             RequiresAssessment = entity.RequiresAssessment,
             PassingScorePercent = entity.PassingScorePercent,
             RequiresAcknowledgement = entity.RequiresAcknowledgement,
+            AcknowledgementTitle = entity.AcknowledgementTitle,
+            AcknowledgementText = entity.AcknowledgementText,
             CompletionDeadlineDays = entity.CompletionDeadlineDays,
             IsCertificateIssued = entity.IsCertificateIssued,
             CertificateValidityMonths = entity.CertificateValidityMonths,
@@ -174,6 +179,8 @@ public static class OrientationMappingExtensions
             RequiresAssessment = dto.RequiresAssessment,
             PassingScorePercent = dto.PassingScorePercent,
             RequiresAcknowledgement = dto.RequiresAcknowledgement,
+            AcknowledgementTitle = Blank(dto.AcknowledgementTitle),
+            AcknowledgementText = Blank(dto.AcknowledgementText),
             CompletionDeadlineDays = dto.CompletionDeadlineDays,
             IsCertificateIssued = dto.IsCertificateIssued,
             CertificateValidityMonths = dto.CertificateValidityMonths,
@@ -204,6 +211,8 @@ public static class OrientationMappingExtensions
         entity.RequiresAssessment = dto.RequiresAssessment;
         entity.PassingScorePercent = dto.PassingScorePercent;
         entity.RequiresAcknowledgement = dto.RequiresAcknowledgement;
+        entity.AcknowledgementTitle = Blank(dto.AcknowledgementTitle);
+        entity.AcknowledgementText = Blank(dto.AcknowledgementText);
         entity.CompletionDeadlineDays = dto.CompletionDeadlineDays;
         entity.IsCertificateIssued = dto.IsCertificateIssued;
         entity.CertificateValidityMonths = dto.CertificateValidityMonths;
@@ -731,6 +740,9 @@ public static class OrientationMappingExtensions
             AttemptCount = entity.AttemptCount,
             IsPassed = entity.IsPassed,
             AcknowledgementSigned = entity.AcknowledgementSigned,
+            AttendanceConfirmedAt = entity.AttendanceConfirmedAt,
+            AttendanceConfirmedByEmployeeId = entity.AttendanceConfirmedByEmployeeId,
+            AttendanceConfirmationNote = entity.AttendanceConfirmationNote,
             CertificateIssued = entity.CertificateIssued,
             CertificateSerialNumber = entity.CertificateSerialNumber,
             CertificateExpiresAt = entity.CertificateExpiresAt,

@@ -1,9 +1,8 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
 > **Status 2026-09-24 — A–O and Q done (with I-b; K as K-a, K-b1, K-b2; N-b as N-b1, N-b2), and all
-> of P2: the recruitment, company schedule and orientation guides. What remains is P: the eight walks
-> in § 5 — and a decision on P2c's O-15, which blocks every completion in the orientation demo and has
-> no lane (§ 8).**
+> of P2: the recruitment, company schedule and orientation guides, and **R**, which closed P2c's O-15:
+> orientation can be completed. What remains is P's eight walks in § 5.**
 >
 > | Lane | State |
 > |---|---|
@@ -33,14 +32,15 @@
 > | **Q** | **DONE** 2026-09-24 — 69 ×3, `hr-recruitment/run-round4-q.mjs`; migration `AddCandidateQualificationLevel` applied to UAT. **Education level on the qualification ladder**, the proper fix for R4-5.2 (the user's call). Every candidate qualification carries a **Level**, required for Education at HR's door and the careers profile. An *Education level* criterion compares **ranks**: at or above passes, a tie passes (HND = Bachelor's), below fails, and no level is a **miss** — the four decisions Q-D1..4, all the user's. The catalogue is placed on the ladder by a new scenario 008, 59 of 64 entries. The six live-pipeline criteria are converted, and VAC-000021 still blends to 81 / 67.5 / 66. **Found in passing:** HR's qualification list showed a blank name for every catalogue pick (fixed), and an application HR records by hand takes no snapshot — § 8 |
 > | **P2a** | **DONE** — the recruitment guide rewritten for round 4, from the code, this log and UAT: § 5.8 scoring, a new chapter **8A** for recruitment tests, § 9 interviews, § 10 offers, § 13 talent pool. **Docs, then a data repair.** It records 18 `R4-…` findings, four of them walks not yet done. **Two blocked the demo, both in the data:** the seeded test blend could not show, because every candidate who sat the paper failed the vacancy's mandatory degree (R4-5.1); and no demo offer got a checklist, because UAT held 44 active check templates and the fallback wants one (R4-10.1). **Both repaired 2026-09-24** (the user's call): three first degrees via scenario 052, giving 81 / 67.5 / 66; 43 fixture templates switched off, and the suites that made them now switch theirs off. The repair found two more: the seeded degree criterion cannot recognise a real degree (R4-5.2, now lane Q), and a rebuild leaves the blend unscored (R4-5.3, fixed in the rebuild script). The four live demo offers raised before the tidy now have TDC's checklist, and Rita Amponsah's is *Conditionally Accepted* as the demo story has it — § 8 |
 > | **P2b** | **DONE** 2026-09-24 — the company schedule guide rewritten for round 4, from the code, this log and UAT. **Docs only: nothing fixed, no data changed.** The six rules become eight: C-4 and C-6 fixed; C-1, C-2 and C-5 in part; C-3 unchanged; and two new rules about the demo database. Also § 1, the prep, the event and booking chapters, two new chapters (**10A** *My schedule*, **10B** *Team schedule*), and § 18–21. It records **26 `R4-…` findings**. **Four are in the demo data:** the lane D suites leave 60 live events and 15 rooms on UAT; the company-schedule slices leave no current fiscal year; the seeded second booking has never existed, because `head.dev` holds no permission; and there is no mail server, so no round 4 email is delivered. **Five statements from 2026-09-17 corrected**, none a round 4 change: the Approve walk had no button, the seeded bookings, the fiscal tables (HR's are singular; the plural pair is Finance's), and § 19's SQL and stop command — § 8 |
-> | **P2c** | **DONE** 2026-09-24 — **a new guide**, `areas/orientation/HR-ORIENTATION-SYSTEM-GUIDE.md`: the whole Orientation & Onboarding group, its setup screens and the two portal pages. 20 screens, 23 chapters, 13 live writes, a reset chapter and a 15-minute short path. From the code, this log's lanes I–M and UAT, read-only. **Docs only: nothing fixed, no data changed.** **65 code findings `O-…` and four in the data `D-…`.** ⚠ **One blocks the demo and has no lane — O-15:** no enrolment made in the product can reach *Completed* on any seeded programme. Two need a signed declaration, which only an HR endpoint no screen calls can create; the third has nothing that evaluates completion. So K-b1's certificate at completion has never fired through a screen. Also: HR can act inside a participant's player (O-4); nobody already on a programme can be put on a session, so L's induction days stay empty (O-20); a rebuild auto-enrols 29 other-module personas (D-3); scenario 145 duplicates the default template on every re-run (D-2, a harness fix offered) — § 8 |
+> | **R** | **DONE** 2026-09-24 — 58 ×2, `hr-orientation/run-round4-r.mjs`; migration `AddOrientationDeclarationsAndAttendanceCompletion` applied to UAT; lanes I, J, K-a, K-b1, K-b2 and M and the area 15 suites at baseline. **Orientation can be completed** (P2c's O-15). The declaration's words live on the programme, and a copy is staged with every enrolment — HR's, a rule's, a renewal's; 195 backfilled, Kojo Ansah's among them. A programme that is only its live session completes when HR marks the session *Completed*, for the people the register shows there, or by HR's *Mark completed* with a note. The whole path — content, quiz, signature, certificate — now runs through the screens. Decisions R-D1..R-D4, the user's — § 8 |
+> | **P2c** | **DONE** 2026-09-24 — **a new guide**, `areas/orientation/HR-ORIENTATION-SYSTEM-GUIDE.md`: the whole Orientation & Onboarding group, its setup screens and the two portal pages. 20 screens, 23 chapters, 13 live writes, a reset chapter and a 15-minute short path. From the code, this log's lanes I–M and UAT, read-only. **Docs only: nothing fixed, no data changed.** **65 code findings `O-…` and four in the data `D-…`.** ⚠ **One blocked the demo — O-15, closed the same day by lane R:** no enrolment made in the product could reach *Completed* on any seeded programme. Two need a signed declaration, which only an HR endpoint no screen called could create; the third had nothing that evaluated completion. So K-b1's certificate at completion had never fired through a screen. Also: HR can act inside a participant's player (O-4); nobody already on a programme can be put on a session, so L's induction days stay empty (O-20); a rebuild auto-enrols 29 other-module personas (D-3); scenario 145 duplicates the default template on every re-run (D-2, a harness fix offered) — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a, P2b and P2c are complete** (the recruitment, company schedule and orientation guides), **and so is Q** (the level-based fix P2a's repair called for). What remains is **P**: the walks — and P2c's O-15, which needs a lane or a decision.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a, P2b and P2c are complete** (the recruitment, company schedule and orientation guides), **and so is Q** (the level-based fix P2a's repair called for). **R is complete** (P2c's O-15, orientation that can be completed). What remains is **P**'s walks.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names eight walks a harness cannot replace;
 > all eight are still outstanding. The seventh was added by P2b: lane D-2's log listed its screens
@@ -865,6 +865,66 @@ name. Four facts make the fix larger than a new value:
   - A new suite, `hr-recruitment/run-round4-q.mjs`, plus the neighbours re-run on count.
   - Guide § 5.8's criterion table, R4-5.2 closed, and the configuration register.
 
+### Lane R — Orientation that can be completed (added 2026-09-24: P2c's O-15)
+
+**The lane exists because P2c found that no enrolment made in the product can reach *Completed* on
+any seeded programme.** Three facts:
+
+| Fact | Consequence |
+|---|---|
+| A declaration is a row per enrolment, created only by `POST employee-orientations/{id}/acknowledgements`, which no screen calls. The programme has the switch *Requires an acknowledgement* and nowhere to write the text | New Employee Onboarding and the code of conduct course stop at *Pending acknowledgement* for everybody |
+| Only tracking content, submitting a quiz and signing a declaration evaluate completion | A programme with no content and no quiz — the Q3 briefing — never completes. The register is not read |
+| The lane I, K and L suites made their declarations through the API | Completion, and K-b1's certificate at completion, were proved in the suites and unreachable through the screens |
+
+**Decisions, the user's (2026-09-24):**
+
+| # | Decision |
+|---|---|
+| R-D1 | **The declaration's text lives on the programme**, and each enrolment gets its own copy when it is created. Editing the text later never rewrites what somebody has already signed. |
+| R-D2 | **A programme that is only its live session completes when HR marks the session *Completed***, for the people the register shows attending: Present, Late or Partial on at least one day. Recording attendance on its own completes nothing. |
+| R-D3 | **HR's *Mark completed* is offered on those programmes only**, with a required note and the officer recorded. Everywhere else the content, the quiz and the declaration stay the proof. |
+| R-D4 | **O-15 only.** O-20, placing somebody already enrolled onto a session, waits. |
+
+*"Only its live session"* is read as three conditions together: no live content, no required
+assessment, and a live delivery mode (*In person*, *Virtual instructor*, *Blended*). So a
+self-paced programme with no content and only a declaration still completes when it is signed.
+
+- **R1 Schema.** One migration, which the user scaffolds and I rewrite as guarded SQL:
+  - `OrientationProgram.AcknowledgementTitle` (300) and `AcknowledgementText` (4000);
+  - `EmployeeOrientation.AttendanceConfirmedAt`, `AttendanceConfirmedByEmployeeId` (no FK, like
+    `EnrolledByEmployeeId`) and `AttendanceConfirmationNote` (1000);
+  - the seeded programmes' declaration text (ORI-ONB-001 and ORI-CMP-001), filling empty ones only;
+  - a declaration for every live enrolment on a programme that requires one and has none — Kojo
+    Ansah's among them.
+- **R2 Declarations at enrolment.**
+  - HR's single and bulk enrol, the trigger sweep and the renewals each stage the declaration with
+    the enrolment, in the same save.
+  - Its title and text are the programme's. When the programme has none, a default is built from
+    its title, so no enrolment is ever left with nothing to sign.
+- **R3 Completion by attendance.** For a programme that is only its session, the completion rule's
+  content gate becomes *attendance confirmed*. Two doors confirm it:
+  - the session marked *Completed*, for every seat-holder the register shows attending; and a
+    register saved on a session already completed, for the people it marks;
+  - HR's *Mark completed* on one enrolment, with a note.
+
+  Either door runs the ordinary rule: the certificate, the notice, and a declaration still to sign
+  if the programme requires one.
+- **R4 Screens.**
+  - The programme form gets *Declaration title* and *Declaration text* under *Requires an
+    acknowledgement*, required while it is on.
+  - The enrolments screen gets *Mark completed* on those programmes' open enrolments.
+  - The session page's *Change status → Completed* says how many will complete, and how many the
+    register does not show.
+- **R5 Demo.**
+  - The seeder gives the two programmes their text, and its two unfinished enrolments their
+    declarations.
+  - Scenario 145's template guard reads `/onboarding-plan-templates/all` (P2c's D-2).
+- **R6 Harness and docs.**
+  - A new suite, `hr-orientation/run-round4-r.mjs`: the whole path through the real doors for all
+    three shapes, green twice.
+  - Lanes I, J, K-a, K-b1, K-b2, L and M re-run on count.
+  - The orientation guide: Rule 3, O-15 closed, and the walks that can now complete.
+
 ### Lane P — Documentation, harnesses, demo data
 
 - **P1** `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-4-PLAN.md` — this plan, in the house format, with
@@ -934,8 +994,9 @@ by lane K-b2, the fifth by N-b2, the sixth by O, the seventh by P2b, and the eig
    3. Add a **Free Text** question. O-45 predicts that *Save* does nothing, with no message.
    4. On a session's page, **Change status → In progress**, then **Save changes** on the Overview
       without leaving the tab. O-12 predicts that the actual start just stamped is erased.
-   5. As `new.hire`, open *New Employee Onboarding*: no **Declarations** tab (O-15). Mark all six
-      items done only on a disposable enrolment, and see it stop at *Pending acknowledgement*.
+   5. As `new.hire`, finish *New Employee Onboarding* (lane R): the six items, then the
+      **Declarations** tab and *I agree*, then the **Certificate** tab. Once per rebuild; the guide's
+      chapter 21 undoes it.
 
 **Live probes before building, not after:**
 
@@ -3212,6 +3273,90 @@ the question dialog, the session form after a status change, and the missing Dec
 walked a participant from enrolment to certificate through the screens, and the suites made their
 declarations through the API, where the product has no door. **When a harness creates a
 prerequisite through the API, find the screen that creates it too — or record that there is none.**
+
+### Lane R — orientation that can be completed · DONE 2026-09-24 · 58 assertions ×2
+
+P2c's O-15, built on the user's decisions R-D1..R-D4 (§ 4). Migration
+`AddOrientationDeclarationsAndAttendanceCompletion` was scaffolded by the user, rewritten as guarded
+SQL, and applied to UAT.
+
+**What was built.**
+- **The words live on the programme.** `OrientationProgram.AcknowledgementTitle` and
+  `AcknowledgementText` are on the create, update and read DTOs and on the copy. The programme form
+  has *Declaration title* and *Declaration text*, required while *Requires an acknowledgement* is on.
+- **Every enrolment gets a declaration.** `OrientationCompletionRules.NewDeclaration` is the one
+  definition, beside the entities. It copies the programme's words onto a *Presented* declaration in
+  the same save as the enrolment, at every door: HR's single and bulk enrol, a rule's enrolment, and
+  a renewal.
+  - A programme with the switch on and no words gets a default made from its title, so no enrolment
+    is ever left with nothing to sign.
+  - The seeder does the same for its two unfinished enrolments.
+- **Completion by attendance.** `OrientationCompletionRules.CompletesByAttendance` means no live
+  content, no required assessment, and a live delivery mode. For such a programme the completion
+  rule's content gate is `AttendanceConfirmedAt`. Two doors set it:
+  - the session marked *Completed*: every seat-holder the register shows Present, Late or Partial
+    on some day. The session service calls `CompleteAttendedOnSessionAsync` after the status is
+    saved, and again after a register is saved on a session that is already completed;
+  - HR's *Mark completed*, `POST employee-orientations/{id}/confirm-attendance` on the Write policy.
+    It needs a note and takes the officer from the token. It is refused on any other programme, on
+    an enrolment HR ended, and on one already completed.
+- **The screens.**
+  - The session's *Completed* confirmation says how many will complete and how many the register
+    does not show (`GET …/session/{id}/completion-preview`).
+  - The enrolments screen has *Mark completed*.
+  - The programme page says *"Completed by attendance"*, and no longer calls such a programme
+    incomplete for having no modules.
+- **The data.** The migration's backfill gave 195 live enrolments their declaration: 194 on
+  ORI-ONB-001, Kojo Ansah's among them, and 1 on ORI-CMP-001. It also gave the two seeded programmes
+  their words.
+- **Scenario 145** (P2c's D-2). Its template guard reads `/onboarding-plan-templates/all`. Its other
+  creation guards no longer swallow a failed read: a failed read now stops the run instead of
+  creating a duplicate.
+
+**One reading of mine, within R-D3.** "Only its live session" is read as three conditions together:
+no live content, no required assessment, and a live delivery mode. So a self-paced programme whose
+only requirement is a declaration still completes on signing (block D). Without the third condition
+it would wait for an attendance nobody could take.
+
+**Verification.** The migration's SQL was proved on a scratch database first: Up twice (the second a
+no-op), Down twice, and Up again. Then a new suite, `hr-orientation/run-round4-r.mjs`, ran **58 ×2**:
+
+| Block | What it proves |
+|---|---|
+| **A** | a declaration at every door; the default words; the snapshot (editing the words later changes no declaration already made); a rule's enrolment; a copy carries the words |
+| **B** | the whole path through the real doors — content, quiz, signature — ending *Completed* with its certificate. No HR endpoint touched a declaration |
+| **C** | completion by attendance, in both positions. The register alone completes nobody. Closing the session completes the person shown attending, with the officer, the note, the certificate and one notice. A register saved afterwards completes the next (Late counts). Closing it again changes nothing. *Mark completed* and every refusal. A blended programme completes nobody. A session-only programme that also asks for a declaration waits for the signature (Partial counts) |
+| **D** | a self-paced programme whose only requirement is a declaration completes on signing |
+| **E** | the next cycle of a recurring programme gets its own declaration, in the words as they stand today, and the first cycle keeps the words it was signed in. The tenant sweep ran for real, as lane I's does, and enrolled only the renewal |
+| **F** | the migration: the seeded words, Kojo's declaration, 195 rows, and no live enrolment that needs a declaration left without one |
+
+**Neighbours, on count:**
+
+| Suite | Result | Baseline | |
+|---|---|---|---|
+| `run-round4-i` (lanes I, I-b, L) | 184/184 | 184 | ✅ |
+| `run-round4-j` | 93/94, then **94/94** | 94 | ✅ once block Z's account listed the two new columns |
+| `run-round4-k` (K-a) | 55/55 | 55 | ✅ |
+| `run-round4-kb` (K-b1) | 84/84 | 84 | ✅ |
+| `run-round4-kb2` (K-b2) | 54/54 | 54 | ✅ |
+| `run-round4-m` | 54/54 | 54 | ✅ |
+| `run` (area 15) | 107 passed | 107 | ✅ — its declaration programme's enrolments now carry two: the one lane R stages, and the one the suite adds through HR's endpoint. Signing either completes it |
+| `run-lane6-feedback` | 20 passed | 20 | ✅ |
+
+**The harness found one thing, and it was lane J's block Z working as designed.** The two new
+programme columns were in neither its *copied* nor its *own* list, so the suite failed until somebody
+decided. They are copied: `CloneAsync` carries them, and block A proves it. The account now says so.
+
+**The guide.** `HR-ORIENTATION-SYSTEM-GUIDE.md` was updated the same day:
+- O-15 is closed;
+- Rule 3 is now *"a completion cannot be undone from a screen"*;
+- § 1.4, and chapters 6, 7, 14 and 18, now show the new behaviour. Kojo finishes the induction in the
+  walk, as LIVE WRITES 12–13, and chapter 19's writes are renumbered 14–15;
+- the reset SQL was recompiled under `NOEXEC`, and the short path and § 23 were updated.
+
+§ 5's walk 8 now expects Kojo to finish.
+
+**Not browser-walked**, like the rest of round 4.
 
 ---
 

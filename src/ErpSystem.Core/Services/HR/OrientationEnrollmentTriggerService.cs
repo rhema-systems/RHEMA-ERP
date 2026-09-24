@@ -1047,6 +1047,7 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                 if (!run.Preview)
                 {
                     await repository.AddAsync(entity);
+                    await StageDeclarationAsync(entity, programme.Program);
                     // Lane K-b: staged with the enrolment, committed by the same save.
                     await _notices.EnrolledAsync(entity, programme.Program.Notice, null,
                         $"Enrolled by the audience rule \"{rule.RuleName}\".", cancellationToken);
@@ -1179,6 +1180,7 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                 if (!run.Preview)
                 {
                     await repository.AddAsync(entity);
+                    await StageDeclarationAsync(entity, programme.Program);
                     await _notices.EnrolledAsync(entity, programme.Program.Notice, null,
                         $"{programme.Program.Title} recurs {OrientationTriggerWindows.Describe(frequency)}: this is your next cycle.",
                         cancellationToken);
@@ -1351,7 +1353,8 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                          && (programId == null || p.Id == programId)
                          && (!activeOnly || p.Status == OrientationProgramStatus.Active))
                 .Select(p => new ProgrammeInfo(p.Id, p.ProgramCode, p.Title, p.Status, p.CompletionDeadlineDays,
-                    p.IsRecurring, p.RecurrenceFrequency, p.EffectiveFrom, p.EffectiveTo, p.EnableReminders))
+                    p.IsRecurring, p.RecurrenceFrequency, p.EffectiveFrom, p.EffectiveTo, p.EnableReminders,
+                    p.RequiresAcknowledgement, p.AcknowledgementTitle, p.AcknowledgementText))
                 .ToListAsync(cancellationToken))
             .Where(p => !activeOnly || p.IsInEffect(today))
             .ToList();
@@ -1440,7 +1443,8 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
     private sealed record ProgrammeInfo(
         Guid Id, string Code, string Title, OrientationProgramStatus Status, int? CompletionDeadlineDays,
         bool IsRecurring, OrientationRecurrenceFrequency? RecurrenceFrequency,
-        DateTime? EffectiveFrom, DateTime? EffectiveTo, bool EnableReminders)
+        DateTime? EffectiveFrom, DateTime? EffectiveTo, bool EnableReminders,
+        bool RequiresAcknowledgement, string? AcknowledgementTitle, string? AcknowledgementText)
     {
         /// <summary>What an enrolment notice needs of the programme (lane K-b).</summary>
         public OrientationNoticeProgramme Notice => new(Id, Title, EnableReminders);
@@ -1461,6 +1465,19 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                 return $"The programme's effective period ended on {DateOnly.FromDateTime(ends):d MMM yyyy}; it enrols nobody after that.";
             return null;
         }
+    }
+
+    /// <summary>
+    /// Round 4, lane R: a programme that requires a declaration gets one per enrolment — a rule's and a
+    /// renewal's as much as HR's — staged with it, in the same save. A renewal's next cycle is signed
+    /// afresh, in the programme's words as they stand today.
+    /// </summary>
+    private async Task StageDeclarationAsync(EmployeeOrientation enrollment, ProgrammeInfo programme)
+    {
+        if (!programme.RequiresAcknowledgement) return;
+        await _unitOfWork.Repository<OrientationAcknowledgement>().AddAsync(OrientationCompletionRules.NewDeclaration(
+            enrollment, programme.AcknowledgementTitle, programme.AcknowledgementText, programme.Title,
+            enrollment.EnrolledAt, enrollment.CreatedBy));
     }
 
     private sealed record ProgrammeRules(

@@ -72,6 +72,15 @@ public class EmployeeOrientationsController : ControllerBase
     public async Task<ActionResult<IEnumerable<EmployeeOrientationSummaryDto>>> GetBySession(Guid sessionId)
         => Ok(await _service.GetBySessionIdAsync(sessionId));
 
+    /// <summary>
+    /// Round 4, lane R: what marking the session Completed would do — how many the register shows
+    /// attending, and how many it does not — for the status confirmation to say before it is pressed.
+    /// </summary>
+    [HttpGet("session/{sessionId:guid}/completion-preview")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
+    public async Task<ActionResult<OrientationSessionCompletionPreviewDto>> GetSessionCompletionPreview(Guid sessionId)
+        => Ok(await _service.PreviewSessionCompletionAsync(sessionId));
+
     [HttpGet("completion-status/{status}")]
     [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<EmployeeOrientationSummaryDto>>> GetByCompletionStatus(OrientationCompletionStatus status)
@@ -138,6 +147,23 @@ public class EmployeeOrientationsController : ControllerBase
 
         await _service.WithdrawAsync(dto, userId);
         return Ok(new { message = "Enrollment withdrawn." });
+    }
+
+    /// <summary>
+    /// Round 4, lane R: HR's "Mark completed" on an enrolment whose programme is only its live
+    /// session — for somebody enrolled without a session, or whom the register does not show. The note
+    /// says why; the officer is recorded. The completion rule still runs, so a declaration the
+    /// programme requires is still to be signed.
+    /// </summary>
+    [HttpPost("{id:guid}/confirm-attendance")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
+    public async Task<ActionResult<EmployeeOrientationDto>> ConfirmAttendance(Guid id, [FromBody] ConfirmOrientationAttendanceDto dto)
+    {
+        if (id != dto.EmployeeOrientationId) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (_currentUser.EmployeeId is not { } userId) return BadRequest("Your user account is not linked to an employee record.");
+
+        return Ok(await _service.ConfirmAttendanceAsync(dto, userId));
     }
 
     [HttpDelete("{id:guid}")]

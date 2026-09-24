@@ -152,10 +152,13 @@ public class OrientationProgramService : IOrientationProgramService
             .ToDictionaryAsync(x => x.ProgramId, x => x.Count, cancellationToken);
 
         var enrollmentCounts = await _enrollmentRepository.GetProgramEnrollmentCountsAsync(tenantId, ids);
+        var liveContent = await LiveContentCountsAsync(tenantId, ids, cancellationToken);
 
         foreach (var summary in summaries)
         {
             summary.ModuleCount = moduleCounts.TryGetValue(summary.Id, out var m) ? m : 0;
+            summary.CompletesByAttendance = OrientationCompletionRules.CompletesByAttendance(
+                liveContent.TryGetValue(summary.Id, out var live) ? live : 0, summary.RequiresAssessment, summary.DefaultDeliveryMode);
             if (enrollmentCounts.TryGetValue(summary.Id, out var e))
             {
                 summary.EnrollmentCount = e.Enrolled;
@@ -184,7 +187,26 @@ public class OrientationProgramService : IOrientationProgramService
             dto.CompletedCount = e.Completed;
         }
 
+        var liveContent = await LiveContentCountsAsync(tenantId, new[] { dto.Id }, cancellationToken);
+        dto.CompletesByAttendance = OrientationCompletionRules.CompletesByAttendance(
+            liveContent.TryGetValue(dto.Id, out var live) ? live : 0, dto.RequiresAssessment, dto.DefaultDeliveryMode);
+
         return dto;
+    }
+
+    /// <summary>
+    /// Live content items per programme: active items on active modules — the same count the completion
+    /// gate reads — for <see cref="OrientationCompletionRules.CompletesByAttendance"/> (round 4, lane R).
+    /// </summary>
+    private async Task<Dictionary<Guid, int>> LiveContentCountsAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> programIds, CancellationToken cancellationToken)
+    {
+        return await _contentItemRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.IsActive
+                     && c.Module.IsActive && !c.Module.IsDeleted && programIds.Contains(c.Module.ProgramId))
+            .GroupBy(c => c.Module.ProgramId)
+            .Select(g => new { ProgramId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.ProgramId, x => x.Count, cancellationToken);
     }
 
     // ====================================================================
@@ -377,6 +399,8 @@ public class OrientationProgramService : IOrientationProgramService
             RequiresAssessment = source.RequiresAssessment,
             PassingScorePercent = source.PassingScorePercent,
             RequiresAcknowledgement = source.RequiresAcknowledgement,
+            AcknowledgementTitle = source.AcknowledgementTitle,
+            AcknowledgementText = source.AcknowledgementText,
             CompletionDeadlineDays = source.CompletionDeadlineDays,
             IsCertificateIssued = source.IsCertificateIssued,
             CertificateValidityMonths = source.CertificateValidityMonths,

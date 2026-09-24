@@ -296,6 +296,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         ApplyDueDate(entity, program);
 
         await _enrollmentRepository.AddAsync(entity);
+        await StageDeclarationAsync(entity, program);
         // Lane K-b: the person is told in the same save that enrols them.
         await _notices.EnrolledAsync(entity, OrientationNoticeProgramme.From(program), session, null, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -336,6 +337,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
             ApplyDueDate(entity, program);
 
             await _enrollmentRepository.AddAsync(entity);
+            await StageDeclarationAsync(entity, program);
             await _notices.EnrolledAsync(entity, OrientationNoticeProgramme.From(program), session, null, cancellationToken);
             created.Add(entity);
         }
@@ -746,6 +748,186 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         await _acknowledgementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
+    }
+
+    // ====================================================================
+    // DECLARATIONS AND COMPLETION BY ATTENDANCE (round 4, lane R)
+    // ====================================================================
+
+    /// <summary>
+    /// A programme that requires a declaration gets one per enrolment, staged now, in the same save as
+    /// the enrolment. The words are the programme's, copied, so editing them later never rewrites
+    /// what somebody has already signed (R-D1).
+    /// </summary>
+    private async Task StageDeclarationAsync(EmployeeOrientation enrollment, OrientationProgram program)
+    {
+        if (!program.RequiresAcknowledgement) return;
+        await _acknowledgementRepository.AddAsync(OrientationCompletionRules.NewDeclaration(
+            enrollment, program.AcknowledgementTitle, program.AcknowledgementText, program.Title,
+            DateTime.UtcNow, enrollment.CreatedBy));
+    }
+
+    /// <summary>
+    /// HR's "Mark completed" (R-D3). It is offered only on a programme that is only its live session,
+    /// for somebody enrolled without a session or whom the register does not show. The note says why.
+    /// </summary>
+    /// <remarks>
+    /// It confirms attendance; it does not skip the other gates. A programme that requires a
+    /// declaration still waits for the signature, and reads Pending acknowledgement until then.
+    /// </remarks>
+    public async Task<EmployeeOrientationDto> ConfirmAttendanceAsync(
+        ConfirmOrientationAttendanceDto dto, Guid officerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var enrollment = await GetOwnedEnrollmentAsync(dto.EmployeeOrientationId);
+        var program = await GetOwnedProgramAsync(enrollment.ProgramId);
+        var tenantId = GetTenantId();
+
+        var liveContent = await CountLiveContentItemsAsync(program.Id, tenantId);
+        if (!OrientationCompletionRules.CompletesByAttendance(liveContent, program.RequiresAssessment, program.DefaultDeliveryMode))
+            throw new InvalidOperationException(
+                "Only a programme that is its live session can be marked completed by hand. " +
+                $"\"{program.Title}\" is completed by " +
+                (liveContent > 0 ? "working through its content."
+                    : program.RequiresAssessment ? "passing its assessment."
+                    : "signing its declaration, because it is not delivered live."));
+        if (IsEndedByHr(enrollment.EnrollmentStatus))
+            throw new InvalidOperationException(
+                $"This enrolment was ended ({enrollment.EnrollmentStatus}). Re-enrol the person first if they are to be marked completed.");
+        if (enrollment.CompletionStatus is OrientationCompletionStatus.Completed or OrientationCompletionStatus.Exempted)
+            throw new InvalidOperationException("This enrolment is already completed.");
+        if (enrollment.AttendanceConfirmedAt is { } confirmed)
+            throw new InvalidOperationException(
+                $"Attendance on this enrolment was already confirmed on {confirmed:d MMM yyyy}; it is waiting for its declaration to be signed.");
+
+        var note = dto.Note?.Trim();
+        if (string.IsNullOrWhiteSpace(note))
+            throw new InvalidOperationException("Say why it is being marked completed: the session they attended, or where.");
+
+        var now = DateTime.UtcNow;
+        enrollment.AttendanceConfirmedAt = now;
+        enrollment.AttendanceConfirmedByEmployeeId = officerEmployeeId;
+        enrollment.AttendanceConfirmationNote = note;
+        enrollment.LastActivityAt = now;
+        enrollment.StartedAt ??= now;
+        enrollment.UpdatedAt = now;
+        enrollment.UpdatedBy = officerEmployeeId.ToString();
+
+        await EvaluateCompletionAsync(enrollment, program, now, cancellationToken);
+        await _enrollmentRepository.UpdateAsync(enrollment);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Attendance confirmed by hand on orientation enrolment {EnrolmentId}", enrollment.Id);
+
+        return await ReadEnrollmentAsync(enrollment.Id);
+    }
+
+    /// <summary>
+    /// The session was marked Completed (R-D2). On a programme that is only its live session, every
+    /// seat-holder the register shows attending on at least one day has their attendance confirmed,
+    /// and the completion rule runs for each. Returns how many completed.
+    /// </summary>
+    /// <remarks>
+    /// <para>Called by the session service after the status change is saved. It is called again after
+    /// a register is saved on a session already completed, so the order HR does the two in does not
+    /// matter. Re-running it is harmless: a confirmation is made once.</para>
+    /// <para>It is reached through the session, not addressed by an enrolment id. So it does not pass
+    /// the participant record check; the session's own Write policy gated the act.</para>
+    /// </remarks>
+    public async Task<int> CompleteAttendedOnSessionAsync(
+        Guid sessionId, Guid officerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var plan = await PlanSessionCompletionAsync(sessionId, GetTenantId(), cancellationToken);
+        if (plan is null || plan.Session.Status != OrientationSessionStatus.Completed
+            || !plan.CompletesByAttendance || plan.ToConfirm.Count == 0)
+            return 0;
+
+        var now = DateTime.UtcNow;
+        var completed = 0;
+        foreach (var enrollment in plan.ToConfirm)
+        {
+            enrollment.AttendanceConfirmedAt = now;
+            enrollment.AttendanceConfirmedByEmployeeId = officerEmployeeId;
+            enrollment.AttendanceConfirmationNote =
+                $"Attended {plan.Session.SessionCode}; the session was marked completed on {now:d MMM yyyy}.";
+            enrollment.LastActivityAt = now;
+            enrollment.StartedAt ??= now;
+
+            await EvaluateCompletionAsync(enrollment, plan.Program, now, cancellationToken);
+            await _enrollmentRepository.UpdateAsync(enrollment);
+            if (enrollment.CompletionStatus == OrientationCompletionStatus.Completed) completed++;
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Session {Code} completed: attendance confirmed for {Confirmed}, {Completed} completed",
+            plan.Session.SessionCode, plan.ToConfirm.Count, completed);
+        return completed;
+    }
+
+    /// <summary>What marking the session Completed would do, for its confirmation to say first.</summary>
+    public async Task<OrientationSessionCompletionPreviewDto> PreviewSessionCompletionAsync(
+        Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var plan = await PlanSessionCompletionAsync(sessionId, GetTenantId(), cancellationToken)
+                   ?? throw new ArgumentException($"Orientation session with ID '{sessionId}' not found.");
+
+        return new OrientationSessionCompletionPreviewDto
+        {
+            SessionId = plan.Session.Id,
+            ProgramTitle = plan.Program.Title,
+            CompletesByAttendance = plan.CompletesByAttendance,
+            RequiresAcknowledgement = plan.Program.RequiresAcknowledgement,
+            WillComplete = plan.CompletesByAttendance ? plan.ToConfirm.Count : 0,
+            NotShownAttending = plan.CompletesByAttendance ? plan.NotShownAttending : 0,
+            AlreadyConfirmed = plan.AlreadyConfirmed,
+        };
+    }
+
+    private sealed record SessionCompletionPlan(
+        OrientationSession Session,
+        OrientationProgram Program,
+        bool CompletesByAttendance,
+        List<EmployeeOrientation> ToConfirm,
+        int NotShownAttending,
+        int AlreadyConfirmed);
+
+    /// <summary>
+    /// The seat-holders on a session, split three ways. Those the register shows attending, and not
+    /// yet confirmed or completed. Those it does not show. Those already confirmed.
+    /// </summary>
+    private async Task<SessionCompletionPlan?> PlanSessionCompletionAsync(
+        Guid sessionId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var session = await _sessionRepository.GetByIdAsync(sessionId);
+        if (session == null || session.TenantId != tenantId || session.IsDeleted) return null;
+        var program = await _programRepository.GetByIdAsync(session.ProgramId);
+        if (program == null || program.TenantId != tenantId) return null;
+
+        var liveContent = await CountLiveContentItemsAsync(program.Id, tenantId);
+        var byAttendance = OrientationCompletionRules.CompletesByAttendance(liveContent, program.RequiresAssessment, program.DefaultDeliveryMode);
+
+        var seatHolders = await _enrollmentRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && !e.IsDeleted && e.SessionId == sessionId
+                        && OrientationEnrollmentStatuses.Occupying.Contains(e.EnrollmentStatus))
+            .ToListAsync(cancellationToken);
+
+        var ids = seatHolders.Select(e => e.Id).ToList();
+        var attended = (await _unitOfWork.Repository<OrientationAttendanceRecord>().GetQueryable()
+                .Where(a => a.TenantId == tenantId && !a.IsDeleted && ids.Contains(a.EnrollmentId)
+                            && OrientationCompletionRules.Attended.Contains(a.AttendanceStatus))
+                .Select(a => a.EnrollmentId)
+                .Distinct()
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        var open = seatHolders
+            .Where(e => e.AttendanceConfirmedAt == null
+                        && e.CompletionStatus is not (OrientationCompletionStatus.Completed or OrientationCompletionStatus.Exempted))
+            .ToList();
+        var toConfirm = open.Where(e => attended.Contains(e.Id)).ToList();
+
+        return new SessionCompletionPlan(
+            session, program, byAttendance, toConfirm,
+            NotShownAttending: open.Count - toConfirm.Count,
+            AlreadyConfirmed: seatHolders.Count(e => e.AttendanceConfirmedAt != null));
     }
 
     // ====================================================================
@@ -1181,7 +1363,14 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         // unsatisfiable gate by a different route.
         var tenantId = GetTenantId();
         var contentCount = await CountLiveContentItemsAsync(enrollment.ProgramId, tenantId);
-        var contentDone = contentCount == 0 || enrollment.ProgressPercentage >= 100;
+
+        // Round 4, lane R: a programme that is only its live session has nothing to work through, so
+        // its content gate is attendance confirmed. Either the session was marked Completed with the
+        // register showing them there, or HR marked the enrolment completed. Before this, nothing
+        // ever evaluated such a programme, so none of its enrolments could complete.
+        var contentDone = OrientationCompletionRules.CompletesByAttendance(contentCount, program.RequiresAssessment, program.DefaultDeliveryMode)
+            ? enrollment.AttendanceConfirmedAt != null
+            : contentCount == 0 || enrollment.ProgressPercentage >= 100;
 
         var assessmentDone = !program.RequiresAssessment || (enrollment.AttemptCount > 0 && enrollment.IsPassed);
         var acknowledgementDone = !program.RequiresAcknowledgement || enrollment.AcknowledgementSigned;

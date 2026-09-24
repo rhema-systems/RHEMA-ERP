@@ -74,6 +74,8 @@ export const orientationProgramSchema = z
     requiresAssessment: z.boolean(),
     passingScorePercent: z.coerce.number().min(0).max(100).optional(),
     requiresAcknowledgement: z.boolean(),
+    acknowledgementTitle: z.string().max(300).optional().or(z.literal('')),
+    acknowledgementText: z.string().max(4000).optional().or(z.literal('')),
     completionDeadlineDays: z.coerce.number().min(0).max(3650).optional(),
     isCertificateIssued: z.boolean(),
     certificateValidityMonths: z.coerce.number().min(1).max(600).optional(),
@@ -98,7 +100,18 @@ export const orientationProgramSchema = z
   .refine(
     (v) => !v.effectiveFrom || !v.effectiveTo || v.effectiveFrom <= v.effectiveTo,
     { message: 'The end of the effective window cannot precede its start.', path: ['effectiveTo'] },
-  );
+  )
+  // Round 4, lane R: a programme that requires a declaration has to say what is being declared. Every
+  // enrolment gets its own copy of these words to sign; before this there were no words at all, so
+  // nothing could be signed and no enrolment on such a programme could complete.
+  .refine((v) => !v.requiresAcknowledgement || !!v.acknowledgementTitle?.trim(), {
+    message: 'Give the declaration a title.',
+    path: ['acknowledgementTitle'],
+  })
+  .refine((v) => !v.requiresAcknowledgement || !!v.acknowledgementText?.trim(), {
+    message: 'Write the declaration the participant signs.',
+    path: ['acknowledgementText'],
+  });
 
 export type OrientationProgramFormValues = z.infer<typeof orientationProgramSchema>;
 
@@ -115,6 +128,8 @@ export const emptyOrientationProgram: OrientationProgramFormValues = {
   requiresAssessment: false,
   passingScorePercent: undefined,
   requiresAcknowledgement: false,
+  acknowledgementTitle: '',
+  acknowledgementText: '',
   completionDeadlineDays: undefined,
   isCertificateIssued: false,
   certificateValidityMonths: undefined,
@@ -154,6 +169,12 @@ export function toOrientationProgramRequest(values: OrientationProgramFormValues
       ? ((blank(values.passingScorePercent) as number | null) ?? null)
       : null,
     requiresAcknowledgement: values.requiresAcknowledgement,
+    acknowledgementTitle: values.requiresAcknowledgement
+      ? ((blank(values.acknowledgementTitle) as string | null) ?? null)
+      : null,
+    acknowledgementText: values.requiresAcknowledgement
+      ? ((blank(values.acknowledgementText) as string | null) ?? null)
+      : null,
     completionDeadlineDays: (blank(values.completionDeadlineDays) as number | null) ?? null,
     isCertificateIssued: values.isCertificateIssued,
     certificateValidityMonths: values.isCertificateIssued
@@ -201,6 +222,7 @@ export function OrientationProgramForm({
   });
 
   const requiresAssessment = !!form.watch('requiresAssessment');
+  const requiresAcknowledgement = !!form.watch('requiresAcknowledgement');
   const isCertificateIssued = !!form.watch('isCertificateIssued');
   const isRecurring = !!form.watch('isRecurring');
 
@@ -307,6 +329,24 @@ export function OrientationProgramForm({
             label="Requires an acknowledgement"
             description="A declaration the participant signs — recorded with their IP and a tamper hash."
           />
+          {requiresAcknowledgement && (
+            <>
+              <TextField
+                form={form}
+                name="acknowledgementTitle"
+                label="Declaration title"
+                required
+                placeholder="e.g. Code of Conduct Acknowledgement"
+              />
+              <TextareaField
+                form={form}
+                name="acknowledgementText"
+                label="Declaration text"
+                rows={4}
+                placeholder="What the participant confirms. Each enrolment gets its own copy to sign, so editing this later does not change what anybody has already signed."
+              />
+            </>
+          )}
           <NumberField
             form={form}
             name="completionDeadlineDays"

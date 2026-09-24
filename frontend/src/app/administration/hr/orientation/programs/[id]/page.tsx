@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseFormReturn } from 'react-hook-form';
 import { z } from 'zod';
-import { Loader2, AlertTriangle, Copy, Trash2, Users, UserPlus } from 'lucide-react';
+import { Loader2, AlertTriangle, Copy, Trash2, Users, UserPlus, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -493,7 +493,9 @@ export default function OrientationProgramDetailPage() {
   }
 
   // Warnings that only matter once a programme is live. A draft is allowed to be incomplete.
-  const noModules = program.moduleCount === 0;
+  // Round 4, lane R: a programme that is only its live session has no modules by design — attendance
+  // completes it — so an empty module list is only a defect on a programme that is not one.
+  const noModules = program.moduleCount === 0 && !program.completesByAttendance;
   const assessmentWithoutQuestions =
     program.requiresAssessment && program.assessmentQuestions.length === 0;
   const isActive = program.status === 'Active';
@@ -580,6 +582,18 @@ export default function OrientationProgramDetailPage() {
         </Alert>
       )}
 
+      {program.completesByAttendance && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>Completed by attendance</AlertTitle>
+          <AlertDescription>
+            This programme is its live session: nothing to work through and no assessment. A
+            participant completes it when HR marks their session Completed and the register shows them
+            there, or when HR marks the enrolment completed on the enrolments screen.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Tabs defaultValue="overview">
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -612,6 +626,8 @@ export default function OrientationProgramDetailPage() {
               requiresAssessment: program.requiresAssessment,
               passingScorePercent: program.passingScorePercent ?? undefined,
               requiresAcknowledgement: program.requiresAcknowledgement,
+              acknowledgementTitle: program.acknowledgementTitle ?? '',
+              acknowledgementText: program.acknowledgementText ?? '',
               completionDeadlineDays: program.completionDeadlineDays ?? undefined,
               isCertificateIssued: program.isCertificateIssued,
               certificateValidityMonths: program.certificateValidityMonths ?? undefined,

@@ -99,6 +99,9 @@ public class OrientationProgramDto : BaseDto
     public bool RequiresAssessment { get; set; }
     public decimal? PassingScorePercent { get; set; }
     public bool RequiresAcknowledgement { get; set; }
+    /// <summary>Round 4, lane R — the declaration each enrolment gets a copy of.</summary>
+    public string? AcknowledgementTitle { get; set; }
+    public string? AcknowledgementText { get; set; }
     public int? CompletionDeadlineDays { get; set; }
 
     // Certificate
@@ -125,6 +128,10 @@ public class OrientationProgramDto : BaseDto
     // Roll-up counts
     public int ModuleCount { get; set; }
     public int SessionCount { get; set; }
+
+    /// <summary>Round 4, lane R: the programme is only its live session, so attendance completes it
+    /// (<c>OrientationCompletionRules.CompletesByAttendance</c>).</summary>
+    public bool CompletesByAttendance { get; set; }
     public int EnrollmentCount { get; set; }
     public int CompletedCount { get; set; }
 
@@ -159,6 +166,10 @@ public class OrientationProgramSummaryDto
 
     /// <summary>Round 4, lane L: Active and in its effective dates — what an enrolment picker may offer.</summary>
     public bool AcceptsEnrolment { get; set; }
+
+    /// <summary>Round 4, lane R: only its live session — attendance completes it, and HR may mark an
+    /// enrolment completed.</summary>
+    public bool CompletesByAttendance { get; set; }
 
     /// <summary>Why not ("it has been retired"), when <see cref="AcceptsEnrolment"/> is false.</summary>
     public string? ClosedBecause { get; set; }
@@ -205,6 +216,14 @@ public class CreateOrientationProgramDto : CreateDtoBase
     public decimal? PassingScorePercent { get; set; }
 
     public bool RequiresAcknowledgement { get; set; }
+    /// <summary>Round 4, lane R — the declaration each enrolment gets a copy of. Blank means a default
+    /// made from the title; the form requires it whenever an acknowledgement is required.</summary>
+    [MaxLength(300)]
+    public string? AcknowledgementTitle { get; set; }
+
+    [MaxLength(4000)]
+    public string? AcknowledgementText { get; set; }
+
     public int? CompletionDeadlineDays { get; set; }
 
     public bool IsCertificateIssued { get; set; }
@@ -262,6 +281,14 @@ public class UpdateOrientationProgramDto : UpdateDtoBase
     public decimal? PassingScorePercent { get; set; }
 
     public bool RequiresAcknowledgement { get; set; }
+    /// <summary>Round 4, lane R — the declaration each enrolment gets a copy of. Blank means a default
+    /// made from the title; the form requires it whenever an acknowledgement is required.</summary>
+    [MaxLength(300)]
+    public string? AcknowledgementTitle { get; set; }
+
+    [MaxLength(4000)]
+    public string? AcknowledgementText { get; set; }
+
     public int? CompletionDeadlineDays { get; set; }
 
     public bool IsCertificateIssued { get; set; }
@@ -1015,6 +1042,12 @@ public class EmployeeOrientationDto : BaseDto
 
     public bool AcknowledgementSigned { get; set; }
 
+    /// <summary>Round 4, lane R: attendance confirmed, on a programme that is only its session.</summary>
+    public DateTime? AttendanceConfirmedAt { get; set; }
+    public Guid? AttendanceConfirmedByEmployeeId { get; set; }
+    public string? AttendanceConfirmedByName { get; set; }
+    public string? AttendanceConfirmationNote { get; set; }
+
     public bool CertificateIssued { get; set; }
     public string? CertificateSerialNumber { get; set; }
     public DateTime? CertificateExpiresAt { get; set; }
@@ -1115,6 +1148,45 @@ public class WithdrawOrientationDto
     [Required]
     [MaxLength(1000)]
     public string WithdrawalReason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Round 4, lane R: HR's "Mark completed" on an enrolment whose programme is only its live session —
+/// for somebody enrolled without a session, or whom the register does not show. The note says why.
+/// </summary>
+public class ConfirmOrientationAttendanceDto
+{
+    [Required]
+    public Guid EmployeeOrientationId { get; set; }
+
+    [Required]
+    [MaxLength(1000)]
+    public string Note { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Round 4, lane R: what marking a session Completed will do to its participants, for the status
+/// confirmation to say before it is pressed.
+/// </summary>
+public class OrientationSessionCompletionPreviewDto
+{
+    public Guid SessionId { get; set; }
+    public string? ProgramTitle { get; set; }
+
+    /// <summary>False when the programme has content or an assessment — those complete it, not the session.</summary>
+    public bool CompletesByAttendance { get; set; }
+
+    /// <summary>Attendance alone does not complete it: the declaration is still to be signed.</summary>
+    public bool RequiresAcknowledgement { get; set; }
+
+    /// <summary>Seat-holders the register shows attending on at least one day, not yet confirmed.</summary>
+    public int WillComplete { get; set; }
+
+    /// <summary>Seat-holders with no attended day on the register — they stay open.</summary>
+    public int NotShownAttending { get; set; }
+
+    /// <summary>Seat-holders whose attendance is already confirmed.</summary>
+    public int AlreadyConfirmed { get; set; }
 }
 
 #endregion

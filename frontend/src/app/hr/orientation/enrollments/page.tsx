@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   RotateCcw,
   Award,
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -125,6 +126,12 @@ export default function OrientationEnrollmentsPage() {
   // one here for somebody who completed before that, and reissues. There was no button at all.
   const [certifyTarget, setCertifyTarget] = useState<EmployeeOrientationSummary | null>(null);
 
+  // Round 4, lane R (R-D3): a programme that is only its live session is completed by attending it.
+  // The session marked Completed does that for the people its register shows there; HR marks the rest
+  // here, one enrolment at a time, with a note saying why.
+  const [completeTarget, setCompleteTarget] = useState<EmployeeOrientationSummary | null>(null);
+  const [completeNote, setCompleteNote] = useState('');
+
   const { data: programs = [] } = useQuery({
     queryKey: ['hr', 'orientation-programs'],
     queryFn: () => orientationProgramService.getAll(),
@@ -135,6 +142,10 @@ export default function OrientationEnrollmentsPage() {
   );
   const certificatedProgramIds = useMemo(
     () => new Set(programs.filter((p) => p.isCertificateIssued).map((p) => p.id)),
+    [programs],
+  );
+  const attendanceProgramIds = useMemo(
+    () => new Set(programs.filter((p) => p.completesByAttendance).map((p) => p.id)),
     [programs],
   );
 
@@ -367,6 +378,53 @@ export default function OrientationEnrollmentsPage() {
         variant: 'destructive',
       });
       return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeMarkCompleted = () => {
+    setCompleteTarget(null);
+    setCompleteNote('');
+  };
+
+  const runMarkCompleted = async () => {
+    if (!completeTarget) return;
+    if (!completeNote.trim()) {
+      toast({
+        title: 'A note is required',
+        description: 'Say why: the session they attended, or where.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const updated = await employeeOrientationService.confirmAttendance(completeTarget.id, {
+        employeeOrientationId: completeTarget.id,
+        note: completeNote.trim(),
+      });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-enrollments'] });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-programs'] });
+      // The completion rule still ran: a programme that requires a declaration waits for it.
+      toast(
+        updated.completionStatus === 'Completed'
+          ? {
+              title: 'Marked completed',
+              description: `${completeTarget.employeeName ?? 'The participant'} has completed ${completeTarget.programTitle ?? 'the programme'}, and has been told.`,
+            }
+          : {
+              title: 'Attendance confirmed',
+              description: 'It completes once the declaration is signed.',
+            },
+      );
+      closeMarkCompleted();
+    } catch (error: any) {
+      toast({
+        title: 'Could not mark it completed',
+        description: error?.message || 'Failed to mark it completed.',
+        variant: 'destructive',
+      });
     } finally {
       setBusy(false);
     }
@@ -609,6 +667,16 @@ export default function OrientationEnrollmentsPage() {
                                 <DropdownMenuItem onClick={() => setCertifyTarget(e)}>
                                   <Award className="mr-2 h-4 w-4" />
                                   {e.certificateIssued ? 'Reissue certificate' : 'Issue certificate'}
+                                </DropdownMenuItem>
+                              )}
+                            {attendanceProgramIds.has(e.programId) &&
+                              !ENDED_BY_HR.includes(e.enrollmentStatus) &&
+                              e.completionStatus !== 'Completed' &&
+                              e.completionStatus !== 'Exempted' &&
+                              e.completionStatus !== 'PendingAcknowledgement' && (
+                                <DropdownMenuItem onClick={() => setCompleteTarget(e)}>
+                                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                                  Mark completed
                                 </DropdownMenuItem>
                               )}
                             {e.enrollmentStatus !== 'Withdrawn' &&
@@ -881,6 +949,44 @@ export default function OrientationEnrollmentsPage() {
             <Button variant="destructive" onClick={runWithdraw} disabled={busy}>
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Withdraw
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={completeTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) closeMarkCompleted();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark completed</DialogTitle>
+            <DialogDescription>
+              {completeTarget
+                ? `${completeTarget.programTitle ?? 'This programme'} is its live session, so attending it is what completes it. Record that ${completeTarget.employeeName ?? 'this participant'} attended — somebody enrolled without a session, or whom the register does not show. Completing it issues any certificate and tells them.`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="complete-note">Note</Label>
+            <Textarea
+              id="complete-note"
+              rows={3}
+              maxLength={1000}
+              value={completeNote}
+              onChange={(e) => setCompleteNote(e.target.value)}
+              placeholder="Which session they attended, or where."
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeMarkCompleted} disabled={busy}>
+              Cancel
+            </Button>
+            <Button onClick={runMarkCompleted} disabled={busy}>
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Mark completed
             </Button>
           </DialogFooter>
         </DialogContent>

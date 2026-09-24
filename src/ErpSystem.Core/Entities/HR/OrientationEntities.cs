@@ -88,6 +88,84 @@ public static class OrientationSessionEnrolment
     };
 }
 
+/// <summary>
+/// Round 4, lane R: the two things completion needs that only the programme can say. The first is
+/// whether it is completed by attendance. The second is the declaration each enrolment signs.
+/// </summary>
+/// <remarks>
+/// <para>P2c found that no enrolment made through the product could reach Completed on any seeded
+/// programme. There were two causes:</para>
+/// <list type="bullet">
+///   <item>A declaration was a row per enrolment, and the only thing that could create one was an HR
+///   endpoint that no screen called.</item>
+///   <item>A programme with no content and no quiz gave its participant nothing to track and nothing
+///   to submit, and only tracking, submitting and signing ever evaluated completion.</item>
+/// </list>
+/// <para>Decisions R-D1..R-D3, the user's (2026-09-24):</para>
+/// <list type="bullet">
+///   <item>The text lives on the programme, and each enrolment gets its own copy when it is
+///   created.</item>
+///   <item>A programme that is only its live session completes when HR marks the session Completed,
+///   for the people its register shows attending.</item>
+///   <item>HR's "Mark completed" is offered on those programmes only.</item>
+/// </list>
+/// </remarks>
+public static class OrientationCompletionRules
+{
+    /// <summary>The register marks that count as having been there.</summary>
+    public static readonly OrientationAttendanceStatus[] Attended =
+    {
+        OrientationAttendanceStatus.Present,
+        OrientationAttendanceStatus.Late,
+        OrientationAttendanceStatus.Partial,
+    };
+
+    /// <summary>Somebody is present at a time and place, or on a link: in person, virtual, blended.</summary>
+    public static bool IsLiveDelivery(OrientationDeliveryMode mode) =>
+        mode is OrientationDeliveryMode.InPerson or OrientationDeliveryMode.VirtualInstructor or OrientationDeliveryMode.Blended;
+
+    /// <summary>
+    /// A programme that is only its live session: nothing to work through, no assessment to pass, and
+    /// delivered live. For such a programme the content gate is "attendance confirmed".
+    /// </summary>
+    /// <remarks>
+    /// A self-paced programme with no content — a declaration and nothing else — is not one of these.
+    /// Signing completes it, as it did before.
+    /// </remarks>
+    public static bool CompletesByAttendance(int liveContentItems, bool requiresAssessment, OrientationDeliveryMode deliveryMode) =>
+        liveContentItems == 0 && !requiresAssessment && IsLiveDelivery(deliveryMode);
+
+    /// <summary>The declaration's heading: the programme's, or one made from its title.</summary>
+    public static string DeclarationTitle(string? title, string programTitle)
+    {
+        var heading = string.IsNullOrWhiteSpace(title) ? $"{programTitle} — declaration" : title.Trim();
+        return heading.Length <= 300 ? heading : heading[..300];
+    }
+
+    /// <summary>The declaration's words: the programme's, or a plain undertaking naming it.</summary>
+    public static string DeclarationText(string? text, string programTitle) =>
+        string.IsNullOrWhiteSpace(text)
+            ? $"I confirm that I have completed {programTitle}, that I understand what it sets out, and that I will abide by it."
+            : text.Trim();
+
+    /// <summary>
+    /// The declaration an enrolment will sign, copied from its programme now. Staged with the
+    /// enrolment, in the same save, by every door that creates one: HR's single and bulk enrol, the
+    /// trigger sweep and the renewals.
+    /// </summary>
+    public static OrientationAcknowledgement NewDeclaration(
+        EmployeeOrientation enrollment, string? title, string? text, string programTitle, DateTime now, string? createdBy) => new()
+    {
+        TenantId = enrollment.TenantId,
+        EmployeeOrientationId = enrollment.Id,
+        Title = DeclarationTitle(title, programTitle),
+        AcknowledgementText = DeclarationText(text, programTitle),
+        Status = OrientationAcknowledgementStatus.Presented,
+        PresentedAt = now,
+        CreatedBy = createdBy,
+    };
+}
+
 // ===========================================================
 //  SECTION 1 — CATALOG (Category, Program, Modules, Content)
 // ===========================================================
@@ -164,6 +242,21 @@ public class OrientationProgram : TenantEntity
     public decimal? PassingScorePercent { get; set; }
 
     public bool RequiresAcknowledgement { get; set; }
+
+    // ── The declaration participants sign (round 4, lane R) ──────────────────
+    // Before this the programme carried only the switch: nothing held the words, nothing created a
+    // declaration for an enrolment, and every enrolment on a programme that required one stopped at
+    // PendingAcknowledgement for ever. Each enrolment now gets its own copy of these at the moment it
+    // is created (OrientationCompletionRules.NewDeclaration), so editing them later never rewrites
+    // what somebody has already signed.
+
+    /// <summary>Heading of the declaration. Blank means a default built from the programme's title.</summary>
+    [MaxLength(300)]
+    public string? AcknowledgementTitle { get; set; }
+
+    /// <summary>The words the participant signs. Blank means a default built from the programme's title.</summary>
+    [MaxLength(4000)]
+    public string? AcknowledgementText { get; set; }
 
     /// <summary>Days after enrollment (or trigger) within which to complete.</summary>
     public int? CompletionDeadlineDays { get; set; }
@@ -594,6 +687,24 @@ public class EmployeeOrientation : TenantEntity
 
     // Acknowledgement summary
     public bool AcknowledgementSigned { get; set; }
+
+    // ── Attendance confirmed (round 4, lane R) ───────────────────────────────
+    // A programme that is only its live session has nothing to track and nothing to submit, so no
+    // act ever evaluated its completion. For such a programme the content gate is this confirmation
+    // instead, made by one of two doors: the session marked Completed, for the people its register
+    // shows there, or HR's "Mark completed" on the enrolment, with a note. See
+    // OrientationCompletionRules.CompletesByAttendance.
+
+    /// <summary>When attendance was confirmed. Null until it is.</summary>
+    public DateTime? AttendanceConfirmedAt { get; set; }
+
+    /// <summary>The officer who confirmed it: who marked the session completed, or who marked this
+    /// enrolment completed. No FK, like <see cref="EnrolledByEmployeeId"/>.</summary>
+    public Guid? AttendanceConfirmedByEmployeeId { get; set; }
+
+    /// <summary>How it was confirmed: the session and its register, or HR's own note.</summary>
+    [MaxLength(1000)]
+    public string? AttendanceConfirmationNote { get; set; }
 
     // Certificate summary
     public bool CertificateIssued { get; set; }

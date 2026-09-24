@@ -171,6 +171,14 @@ public interface IEmployeeOrientationService
     Task<IEnumerable<OrientationAcknowledgementDto>> GetAcknowledgementsAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
     Task<OrientationAcknowledgementDto> SignAcknowledgementAsync(SignOrientationAcknowledgementDto signDto, string? ipAddress, Guid signedByUserId, CancellationToken cancellationToken = default);
 
+    // Completion by attendance (round 4, lane R) — for a programme that is only its live session
+    /// <summary>HR's "Mark completed": confirms attendance on one enrolment, with a note, and runs the completion rule.</summary>
+    Task<EmployeeOrientationDto> ConfirmAttendanceAsync(ConfirmOrientationAttendanceDto dto, Guid officerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>The session was marked Completed: confirms attendance for everybody its register shows there. Returns how many completed.</summary>
+    Task<int> CompleteAttendedOnSessionAsync(Guid sessionId, Guid officerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>What marking the session Completed would do, for its confirmation to say first.</summary>
+    Task<OrientationSessionCompletionPreviewDto> PreviewSessionCompletionAsync(Guid sessionId, CancellationToken cancellationToken = default);
+
     // Feedback
     Task<OrientationFeedbackDto> SubmitFeedbackAsync(CreateOrientationFeedbackDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OrientationFeedbackDto>> GetFeedbackAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
