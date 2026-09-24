@@ -41,9 +41,8 @@ export default function ApSuppliersPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">AP Suppliers</h1>
         <p className="mt-2 max-w-4xl text-muted-foreground">
-          Finance read-only view of every supplier identity accepted by AP. Shared Business
-          Partners remain governed in Procurement; Finance preserves legacy AP identities and
-          creates their controlled link only when a transaction requires it.
+          Finance read-only view of canonical Business Partners with Supplier or Contractor
+          roles. Transaction readiness comes from the approved, effective AP profile.
         </p>
       </div>
 
@@ -72,8 +71,8 @@ export default function ApSuppliersPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Supplier</TableHead>
-                    <TableHead>AP identity</TableHead>
-                    <TableHead>Shared master</TableHead>
+                    <TableHead>AP readiness</TableHead>
+                    <TableHead>Role/profile</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -91,28 +90,30 @@ export default function ApSuppliersPage() {
                         No AP suppliers match this search.
                       </TableCell>
                     </TableRow>
-                  ) : visibleSuppliers.map((supplier) => {
-                    const isLinked = Boolean(supplier.supplierId && supplier.businessPartnerId);
-                    const isSharedOnly = Boolean(!supplier.supplierId && supplier.businessPartnerId);
-                    return (
-                      <TableRow key={`${supplier.id}:${supplier.supplierId ?? 'pending'}`}>
+                  ) : visibleSuppliers.map((supplier) => (
+                      <TableRow key={supplier.businessPartnerRoleId}>
                         <TableCell>
                           <div className="font-medium">{supplier.name}</div>
                           <div className="text-xs text-muted-foreground">{supplier.code}</div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={supplier.supplierId ? 'default' : 'secondary'}>
-                            {supplier.supplierId ? 'Transaction ready' : 'Linked on first use'}
+                          <Badge variant={supplier.isTransactionReady ? 'default' : 'secondary'}>
+                            {supplier.isTransactionReady ? 'Transaction ready' : 'Setup incomplete'}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {isLinked ? 'Linked Business Partner' : isSharedOnly ? 'Approved Business Partner' : 'Legacy AP supplier'}
+                          <div>{supplier.isTransactionReady ? 'Approved AP profile' : supplier.readinessMessage}</div>
+                          {!supplier.isTransactionReady && (
+                            <div className="text-xs text-muted-foreground">{supplier.readinessCode}</div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-2">
                             <Button
                               size="sm"
                               variant="outline"
+                              disabled={!supplier.isTransactionReady}
+                              title={supplier.isTransactionReady ? undefined : supplier.readinessMessage}
                               onClick={() => router.push(`/finance/ap/invoices/create?supplierId=${supplier.id}`)}
                             >
                               <FileText className="mr-2 h-4 w-4" /> Invoice
@@ -120,6 +121,8 @@ export default function ApSuppliersPage() {
                             <Button
                               size="sm"
                               variant="outline"
+                              disabled={!supplier.isTransactionReady}
+                              title={supplier.isTransactionReady ? undefined : supplier.readinessMessage}
                               onClick={() => router.push(`/finance/ap/payments/create?supplierId=${supplier.id}`)}
                             >
                               <WalletCards className="mr-2 h-4 w-4" /> Payment
@@ -127,8 +130,7 @@ export default function ApSuppliersPage() {
                           </div>
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
+                  ))}
                 </TableBody>
               </Table>
             </div>

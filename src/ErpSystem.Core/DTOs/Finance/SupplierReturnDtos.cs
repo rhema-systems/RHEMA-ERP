@@ -265,21 +265,6 @@ public sealed class SupplierDebitNoteQueryDto
     public string? Search { get; set; }
 }
 
-/// <summary>
-/// Finance-owned durable pairing between the shared Business Partner master and the legacy AP
-/// Supplier master. Other module owners keep control of both source records; Finance owns only
-/// this settlement identity and never writes their operational state.
-/// </summary>
-public sealed class ApSupplierIdentityDto
-{
-    public Guid BusinessPartnerId { get; set; }
-    public Guid SupplierId { get; set; }
-    public string PartnerCode { get; set; } = string.Empty;
-    public string SupplierCode { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    public bool IsVerified { get; set; }
-}
-
 public sealed class SupplierDebitNoteApplicationCreateDto
 {
     [System.ComponentModel.DataAnnotations.Required]

@@ -60,7 +60,6 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IWithholdingTaxCertificateService? _withholdingTaxService;
         private readonly IExchangeRateService? _exchangeRateService;
         private ExchangeRateQuoteSide? _settlementQuoteSide;
-        private readonly IApSupplierIdentityService? _apSupplierIdentityService;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
         private readonly IFinancePaymentDimensionAdapter? _paymentDimensions;
 
@@ -92,7 +91,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             IProcurementControlEventService? procurementControlEvents = null,
             IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
             IExchangeRateService? exchangeRateService = null,
-            IApSupplierIdentityService? apSupplierIdentityService = null,
             IControlledFileUploadService? controlledFiles = null,
             ICentralDocumentRepositoryFileService? centralDocuments = null,
             IFinanceSourceDimensionService? sourceDimensions = null,
@@ -115,7 +113,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             _procurementControlEvents = procurementControlEvents;
             _invoicePaymentSod = invoicePaymentSod;
             _exchangeRateService = exchangeRateService;
-            _apSupplierIdentityService = apSupplierIdentityService;
             _controlledFiles = controlledFiles;
             _centralDocuments = centralDocuments;
             _sourceDimensions = sourceDimensions;

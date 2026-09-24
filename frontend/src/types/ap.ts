@@ -27,13 +27,14 @@ export interface ApInvoiceSupplier {
     currency?: string | null;
 }
 
-/**
- * Supplier option for invoice entry. `id` may be a canonical Supplier id or an approved
- * Business Partner id; the Finance invoice command resolves it to the persisted Supplier id.
- */
+/** Canonical Business Partner AP-role option with explicit transaction readiness. */
 export interface ApInvoiceSupplierEntryOption extends ApInvoiceSupplier {
-    supplierId?: string | null;
-    businessPartnerId?: string | null;
+    businessPartnerId: string;
+    businessPartnerRoleId: string;
+    roleType: 'Supplier' | 'Contractor';
+    isTransactionReady: boolean;
+    readinessCode: string;
+    readinessMessage: string;
 }
 
 export interface ApGoodsInvoiceEntry {
@@ -623,17 +624,6 @@ export interface SupplierDebitNote {
     financeDimensions?: FinanceSourceDocumentDimension;
 }
 
-/**
- * Explicit bridge between Finance's business-partner master and Procurement's supplier master.
- * The identifiers are intentionally kept separate; clients must not infer identity from names or codes.
- */
-export interface ApSupplierIdentity {
-    businessPartnerId: string;
-    supplierId: string;
-    displayName: string;
-    isVerified: boolean;
-}
-
 export interface SupplierDebitNoteLineRequest {
     id?: string;
     originalVendorInvoiceLineItemId?: string;
@@ -680,7 +670,8 @@ export interface SupplierDebitNoteApplicationResult {
 }
 
 export interface VendorPaymentCreateRequest {
-    supplierId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     paymentDate: string;
     totalAmount: number;
     paymentMethod?: VendorPaymentMethod;

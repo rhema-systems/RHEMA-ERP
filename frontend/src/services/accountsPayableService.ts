@@ -40,8 +40,7 @@ import type {
     SupplierDebitNoteStatus,
     SupplierDebitNoteApplication,
     SupplierDebitNoteApplicationRequest,
-    SupplierDebitNoteApplicationResult,
-    ApSupplierIdentity
+    SupplierDebitNoteApplicationResult
 } from '../types/ap';
 import type { FinanceSourceDocumentDimension } from '../types/finance';
 import type { PurchaseOrderSupplierDefaultsDto } from './purchasingService';
@@ -79,7 +78,7 @@ export interface VendorPaymentQuery {
     page?: number;
     pageSize?: number;
     searchTerm?: string;
-    supplierId?: string;
+    businessPartnerId?: string;
     status?: string;
     paymentMethod?: string;
     paymentMethodId?: string;
@@ -166,7 +165,7 @@ class AccountsPayableService {
         return apiService.get<VendorInvoiceDistribution>(`/ap/invoices/${id}/distribution`);
     }
 
-    /** Returns invoice-entry options spanning approved Business Partners and AP Suppliers. */
+    /** Returns canonical Business Partner AP roles, including corrective readiness feedback. */
     public async getInvoiceSupplierEntryOptions(): Promise<ApInvoiceSupplierEntryOption[]> {
         return apiService.get<ApInvoiceSupplierEntryOption[]>(`${this.baseUrl}/invoices/entry-suppliers`);
     }
@@ -283,7 +282,7 @@ class AccountsPayableService {
         if (query.page) params.append('Page', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
         if (query.searchTerm) params.append('SearchTerm', query.searchTerm);
-        if (query.supplierId) params.append('SupplierId', query.supplierId);
+        if (query.businessPartnerId) params.append('BusinessPartnerId', query.businessPartnerId);
         if (query.status) params.append('Status', query.status);
         if (query.paymentMethod) params.append('PaymentMethod', query.paymentMethod);
         if (query.paymentMethodId) params.append('PaymentMethodId', query.paymentMethodId);
@@ -650,12 +649,6 @@ class AccountsPayableService {
     }
 
     // --- Finance-owned Supplier Debit Notes ---
-
-    public async getApSupplierIdentity(id: string): Promise<ApSupplierIdentity> {
-        return apiService.get<ApSupplierIdentity>(
-            `${this.baseUrl}/supplier-identities/${encodeURIComponent(id)}`,
-        );
-    }
 
     public async getSupplierDebitNotes(query: SupplierDebitNoteQuery = {}): Promise<SupplierDebitNote[]> {
         return apiService.get<SupplierDebitNote[]>(`${this.baseUrl}/supplier-debit-notes`, { ...query });

@@ -2,10 +2,12 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -226,69 +228,50 @@ namespace ErpSystem.Api.Controllers.Finance
             try { tenantId = _currentUserService.GetRequiredFinanceTenantId(); }
             catch (InvalidOperationException) { return Forbid(); }
 
-            // Include inactive/deleted identities in collision checks; neither a stale link nor
-            // an approved partner may bypass an unavailable canonical Finance supplier.
-            var allSuppliers = await _dbContext.Suppliers.IgnoreQueryFilters().AsNoTracking()
-                .Where(s => s.TenantId == tenantId).ToListAsync(cancellationToken);
-            var allPartners = await _dbContext.BusinessPartners.IgnoreQueryFilters().AsNoTracking()
-                .Where(p => p.TenantId == tenantId).ToListAsync(cancellationToken);
-            var links = await _dbContext.ApSupplierIdentityLinks
-                .AsNoTracking()
-                .Where(link => link.TenantId == tenantId && !link.IsDeleted)
+            var partners = await _dbContext.BusinessPartners.AsNoTracking()
+                .Where(partner => partner.TenantId == tenantId && !partner.IsDeleted)
+                .OrderBy(partner => partner.PartnerName)
+                .ThenBy(partner => partner.PartnerCode)
                 .ToListAsync(cancellationToken);
-            var matchedPartnerIds = new HashSet<Guid>();
+            var roles = await _dbContext.Set<BusinessPartnerRole>().AsNoTracking()
+                .Where(role => role.TenantId == tenantId && !role.IsDeleted &&
+                    (role.RoleType == BusinessPartnerRoleType.Supplier ||
+                     role.RoleType == BusinessPartnerRoleType.Contractor))
+                .ToListAsync(cancellationToken);
+            var roleIds = roles.Select(role => role.Id).ToHashSet();
+            var profiles = await _dbContext.Set<BusinessPartnerApProfileVersion>().AsNoTracking()
+                .Include(profile => profile.WithholdingDefaults)
+                .Where(profile => profile.TenantId == tenantId && !profile.IsDeleted &&
+                    roleIds.Contains(profile.BusinessPartnerRoleId))
+                .ToListAsync(cancellationToken);
+
+            var accountingDate = DateTime.UtcNow.Date;
             var options = new List<ApInvoiceSupplierEntryOptionDto>();
-            foreach (var supplier in allSuppliers.Where(ApInvoiceSupplierEligibility.IsActiveSupplier))
+            foreach (var partner in partners)
             {
-                var exactMatches = allPartners.Where(partner =>
-                    ApInvoiceSupplierEligibility.IsLinked(supplier, partner)).ToList();
-                var supplierLinks = links.Where(link => link.SupplierId == supplier.Id).ToList();
-                if (exactMatches.Count > 1 || supplierLinks.Count > 1)
-                    continue;
-                var partner = supplierLinks.Count == 1
-                    ? allPartners.SingleOrDefault(candidate => candidate.Id == supplierLinks[0].BusinessPartnerId)
-                    : exactMatches.SingleOrDefault();
-                if (supplierLinks.Count == 1 &&
-                    (partner == null || links.Count(link => link.BusinessPartnerId == partner.Id) != 1 ||
-                     exactMatches.Any(candidate => candidate.Id != partner.Id)))
-                    continue;
-                if (partner != null &&
-                    (!ApInvoiceSupplierEligibility.IsEligiblePartner(partner, true) ||
-                     partner.ApprovalStatus != BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus ||
-                     links.Any(link => link.BusinessPartnerId == partner.Id && link.SupplierId != supplier.Id) ||
-                     allSuppliers.Any(other => other.Id != supplier.Id &&
-                         ApInvoiceSupplierEligibility.IsLinked(other, partner))))
-                    continue;
-
-                if (partner != null)
-                    matchedPartnerIds.Add(partner.Id);
-
-                options.Add(new ApInvoiceSupplierEntryOptionDto
+                var partnerRoles = roles.Where(role => role.BusinessPartnerId == partner.Id)
+                    .OrderBy(role => role.RoleType)
+                    .ToList();
+                foreach (var role in partnerRoles)
                 {
-                    Id = supplier.Id,
-                    SupplierId = supplier.Id,
-                    BusinessPartnerId = partner?.Id,
-                    Code = partner?.PartnerCode ?? supplier.SupplierCode,
-                    Name = partner?.PartnerName ?? supplier.Name,
-                    PaymentTermId = partner?.PaymentTermId ?? supplier.PaymentTermId,
-                    Currency = partner?.Currency
-                });
+                    var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAp(
+                        partner, role, profiles, accountingDate);
+                    options.Add(new ApInvoiceSupplierEntryOptionDto
+                    {
+                        Id = partner.Id,
+                        BusinessPartnerId = partner.Id,
+                        BusinessPartnerRoleId = role.Id,
+                        RoleType = role.RoleType.ToString(),
+                        Code = partner.PartnerCode,
+                        Name = partner.PartnerName,
+                        PaymentTermId = readiness.ApProfile?.PaymentTermId,
+                        Currency = partner.Currency,
+                        IsTransactionReady = readiness.IsReady,
+                        ReadinessCode = readiness.Code,
+                        ReadinessMessage = readiness.Message
+                    });
+                }
             }
-            options.AddRange(allPartners
-                .Where(partner => ApInvoiceSupplierEligibility.IsEligiblePartner(partner, false) &&
-                    partner.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
-                    !matchedPartnerIds.Contains(partner.Id) &&
-                    !links.Any(link => link.BusinessPartnerId == partner.Id) &&
-                    !allSuppliers.Any(supplier => ApInvoiceSupplierEligibility.IsLinked(supplier, partner)))
-                .Select(partner => new ApInvoiceSupplierEntryOptionDto
-                {
-                    Id = partner.Id,
-                    BusinessPartnerId = partner.Id,
-                    Code = partner.PartnerCode,
-                    Name = partner.PartnerName,
-                    PaymentTermId = partner.PaymentTermId,
-                    Currency = partner.Currency
-                }));
 
             return Ok(options
                 .OrderBy(option => option.Name)

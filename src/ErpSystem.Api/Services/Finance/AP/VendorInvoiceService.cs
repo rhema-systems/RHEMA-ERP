@@ -52,7 +52,6 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
         private readonly ErpSystem.Core.Interfaces.Inventory.ILandedCostService? _landedCosts;
-        private readonly IApSupplierIdentityService? _apSupplierIdentityService;
 
         public VendorInvoiceService(
             IUnitOfWork unitOfWork,
@@ -71,8 +70,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             IFinanceBudgetCommitmentService? budgetCommitments = null,
             IFinanceSourceDimensionService? sourceDimensions = null,
             ErpSystem.Core.Interfaces.Inventory.ILandedCostService? landedCosts = null,
-            IWorkflowIntegrationService? workflowIntegration = null,
-            IApSupplierIdentityService? apSupplierIdentityService = null)
+            IWorkflowIntegrationService? workflowIntegration = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -93,7 +91,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             _budgetCommitments = budgetCommitments;
             _sourceDimensions = sourceDimensions;
             _landedCosts = landedCosts;
-            _apSupplierIdentityService = apSupplierIdentityService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();

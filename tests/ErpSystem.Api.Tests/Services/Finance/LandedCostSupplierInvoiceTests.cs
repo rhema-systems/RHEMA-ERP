@@ -87,27 +87,10 @@ public class LandedCostSupplierInvoiceTests
         user.SetupGet(u => u.UserId).Returns(Guid.NewGuid().ToString()); user.SetupGet(u => u.UserName).Returns("AP officer");
         var numbering = new Mock<IDocumentNumberingService>(); var number = 0;
         numbering.Setup(n => n.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => $"INV-{++number}");
-        var supplierIdentity = new Mock<IApSupplierIdentityService>();
-        supplierIdentity.Setup(service => service.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid partnerId, CancellationToken _) =>
-            {
-                var partner = _partners.Single(item => item.Id == partnerId);
-                var supplier = _suppliers.Single(item =>
-                    string.Equals(item.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase));
-                return Task.FromResult(new ApSupplierIdentityDto
-                {
-                    BusinessPartnerId = partner.Id,
-                    SupplierId = supplier.Id,
-                    PartnerCode = partner.PartnerCode,
-                    SupplierCode = supplier.SupplierCode,
-                    DisplayName = supplier.Name,
-                    IsVerified = true
-                });
-            });
         _service = new VendorInvoiceService(_unit.Object, user.Object, Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<VendorInvoiceService>>(), numbering.Object, Mock.Of<IWorkflowService>(), financePostingEngine: _finance.Object,
             sourceDimensions: Mock.Of<IFinanceSourceDimensionService>(), landedCosts: _landed.Object,
-            workflowIntegration: _approval.Object, apSupplierIdentityService: supplierIdentity.Object);
+            workflowIntegration: _approval.Object);
         _landed.Setup(s => s.PostToInventoryAsync(_cost.Id, It.IsAny<Guid>())).ReturnsAsync(() => { _cost.Status = "Posted"; return true; });
     }
 

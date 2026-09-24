@@ -122,9 +122,8 @@ public sealed class SupplierDebitNoteFoundationTests
                 nameof(SupplierDebitNoteTaxComponent.TaxId)
             }));
 
-        var identity = model.FindEntityType(typeof(ApSupplierIdentityLink));
-        identity.Should().NotBeNull();
-        identity!.GetIndexes().Count(index => index.IsUnique).Should().Be(2);
+        model.GetEntityTypes().Should().NotContain(entity =>
+            entity.ClrType.Name == "ApSupplierIdentityLink");
     }
 
     [Fact]
@@ -132,8 +131,9 @@ public sealed class SupplierDebitNoteFoundationTests
     public void MigrationRepairsHistoricalTablesAndCreatesApplicationConstraints()
     {
         using var context = CreateContext();
-        context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+        var migrationIds = context.GetService<IMigrationsAssembly>().Migrations.Keys;
+        migrationIds.Should().Contain("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+        migrationIds.Should().Contain("20260924122044_DropApSupplierIdentityBridge");
         var sql = ArchivedMigrationSource.Read("20260818103000_AddSupplierDebitNoteLifecycleAndApplications.cs");
 
         sql.Should().Contain("OBJECT_ID(N'[dbo].[SupplierDebitNotes]', N'U') IS NULL");
@@ -217,11 +217,8 @@ public sealed class SupplierDebitNoteFoundationTests
         paymentService.Should().NotContain("s.Name == partner.PartnerName");
         paymentService.Should().NotContain("Auto-created from business partner");
 
-        var identityService = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApSupplierIdentityService.cs"));
-        identityService.Should().Contain("LookupAsync");
-        identityService.Should().Contain("item.IsActive");
-        identityService.Should().NotContain("PartnerName ==");
+        File.Exists(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "ApSupplierIdentityService.cs")).Should().BeFalse();
 
         var invoiceService = File.ReadAllText(Path.Combine(
             root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "VendorInvoiceService.cs"));
@@ -241,7 +238,7 @@ public sealed class SupplierDebitNoteFoundationTests
         form.Should().MatchRegex(@"return\s+linkedDraftLine\(\s*source,");
         form.Should().Contain("disabled={isLinkedNote}");
         form.Should().Contain("Frozen source-invoice rate");
-        form.Should().Contain("one unambiguous AP supplier identity");
+        form.Should().Contain("businessPartnerId: vendorId");
         form.Should().NotContain("const approvedRate = await resolveApprovedRate();");
     }
 
@@ -250,22 +247,20 @@ public sealed class SupplierDebitNoteFoundationTests
     public void ApSupplierEntryUsesOneGovernedFinanceIdentityBoundary()
     {
         var root = FindRepositoryRoot();
-        var identityService = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApSupplierIdentityService.cs"));
-        identityService.Should().Contain("BusinessPartnerLifecyclePolicy.IsOperationallyApproved");
-        identityService.Should().Contain("BuildFinanceSupplierProjection(partner)");
-        identityService.Should().Contain("BusinessPartnerProjection");
-        identityService.Should().NotContain("partner.PartnerName ==");
+        File.Exists(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "ApSupplierIdentityService.cs")).Should().BeFalse();
 
         var invoiceService = File.ReadAllText(Path.Combine(
             root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "VendorInvoiceService.cs"));
-        invoiceService.Should().Contain("_apSupplierIdentityService.ResolveAsync");
+        invoiceService.Should().Contain("ResolveCanonicalApPartnerAsync");
+        invoiceService.Should().NotContain("_apSupplierIdentityService");
         invoiceService.Should().NotContain("s.Name == partner.PartnerName");
         invoiceService.Should().NotContain("Auto-created from business partner");
 
         var reportsService = File.ReadAllText(Path.Combine(
             root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApReportsService.cs"));
-        reportsService.Should().Contain("Repository<ApSupplierIdentityLink>");
+        reportsService.Should().Contain("Repository<BusinessPartnerRole>");
+        reportsService.Should().NotContain("Repository<ApSupplierIdentityLink>");
         reportsService.Should().NotContain("string.Equals(s.Name, partner.PartnerName");
         reportsService.Should().NotContain("string.Equals(p.PrimaryEmail, supplier.Email");
 
@@ -276,8 +271,9 @@ public sealed class SupplierDebitNoteFoundationTests
 
         var supplierRegister = File.ReadAllText(Path.Combine(
             root, "frontend", "src", "app", "finance", "ap", "suppliers", "page.tsx"));
-        supplierRegister.Should().Contain("Linked on first use");
-        supplierRegister.Should().Contain("Legacy AP supplier");
+        supplierRegister.Should().Contain("canonical Business Partners");
+        supplierRegister.Should().Contain("Transaction ready");
+        supplierRegister.Should().Contain("Setup incomplete");
 
         var sidebar = File.ReadAllText(Path.Combine(
             root, "frontend", "src", "components", "layout", "sidebar.tsx"));

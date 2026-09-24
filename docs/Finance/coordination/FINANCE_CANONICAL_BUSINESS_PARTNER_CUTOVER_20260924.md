@@ -148,4 +148,22 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
 - The repository-wide frontend type-check remains red on pre-existing unrelated Inventory,
   Procurement, Civil Engineering and stale Next generated-type errors; no WHT contract error was
   reported from the files changed in this slice.
+- The transitional `ApSupplierIdentityLink` entity, service, controller, DI registration and AP
+  runtime lookups have been removed. Invoice/payment supplier selection and the Finance AP
+  supplier register now project canonical active Supplier/Contractor roles and their effective
+  AP-profile readiness directly; incomplete partners remain visible with a corrective reason and
+  cannot start an AP transaction.
+- The DEBUG GL integration fixture now provisions a canonical Business Partner Supplier role and
+  approved AP profile instead of constructing a legacy Supplier-linked invoice.
+- Migration `DropApSupplierIdentityBridge` is intentionally limited to dropping the obsolete
+  `ApSupplierIdentityLinks` table; its rollback recreates only that table and its constraints. It
+  has not been applied. The migration designer and current model snapshot contain no bridge entity,
+  and EF reports no pending model changes.
+- Focused bridge-retirement regressions: 30 passed, 0 failed across canonical invoice identity,
+  payment batching, supplier debit-note architecture and WHT lifecycle. API/test builds pass with
+  zero errors (existing repository warnings remain); `git diff --check` is clean.
+- Frontend type-check still reports the pre-existing Next App Router named-export error on the AP
+  invoice page plus unrelated repository baseline errors. No new contract/type error was reported
+  for the bridge-removal changes in the AP service/types, debit-note form, payment page or supplier
+  register.
 - No database or accounting data was mutated.

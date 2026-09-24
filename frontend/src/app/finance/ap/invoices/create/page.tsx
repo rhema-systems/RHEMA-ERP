@@ -174,9 +174,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     } = useQuery({
         queryKey: ['ap-invoice-entry-suppliers'],
         queryFn: async () => {
-            // The Finance entry projection includes approved Business Partners that do not yet
-            // have a canonical Supplier row. The invoice command resolves either identity and
-            // persists Supplier.Id inside its controlled transaction.
+            // Finance consumes canonical Business Partner roles directly. Incomplete AP profiles
+            // remain visible with a corrective readiness explanation.
             const suppliers = await accountsPayableService.getInvoiceSupplierEntryOptions();
             return { items: suppliers };
         },
@@ -709,8 +708,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         return formatCurrency(amount, watchCurrencyCode);
     };
 
-    const onSupplierChange = async (supplierId: string, preservePurchaseOrderId?: string) => {
-        const selectionKey = `${supplierId}:${preservePurchaseOrderId || ''}`;
+    const onSupplierChange = async (selectionId: string, preservePurchaseOrderId?: string) => {
+        const supplier = suppliersData?.items?.find(item =>
+            item.businessPartnerRoleId === selectionId || item.businessPartnerId === selectionId);
+        if (!supplier || !supplier.isTransactionReady) return;
+        const supplierId = supplier.businessPartnerId;
+        const selectionKey = `${supplier.businessPartnerRoleId}:${preservePurchaseOrderId || ''}`;
         if (supplierSelectionRef.current === selectionKey) return;
         if (!isEditMode && form.getValues('supplierId') !== supplierId) {
             setWithholdingDecision(null); setWithholdingRateOverride(null); setWithholdingPromptOpen(false); withholdingPromptKey.current = '';
@@ -724,9 +727,6 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         form.setValue('acceptedSupplyKind', undefined);
         form.setValue('acceptedSupplySourceId', undefined);
         setSelectedPurchaseOrderId(preservePurchaseOrderId || '');
-        if (!suppliersData?.items) return;
-
-        const supplier = suppliersData.items.find(s => s.id === supplierId);
         if (supplier) {
             setSelectedSupplier(supplier);
             const selectedTerm = paymentTerms.find(term => term.id === supplier.paymentTermId)
@@ -897,6 +897,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             const request = {
                 ...invoiceData,
                 businessPartnerId: supplierId,
+                businessPartnerRoleId: selectedSupplier?.businessPartnerRoleId,
                 apAccountId: data.apAccountId || undefined,
                 expenseAccountId: data.expenseAccountId || undefined,
                 paymentTermsDays: !isOpeningBalance && applySupplierDefaults && supplierDefaults?.paymentTermId === data.paymentTermId && !manualSupplierDefaults.current.has('paymentTermId') && !manualSupplierDefaults.current.has('dueDate')
@@ -1105,18 +1106,21 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             <CommandGroup>
                                                 {filteredSuppliers.map((supplier: any) => (
                                                     <div
-                                                        key={supplier.id}
+                                                        key={supplier.businessPartnerRoleId}
                                                         onClick={() => {
-                                                            onSupplierChange(supplier.id);
+                                                            if (!supplier.isTransactionReady) return;
+                                                            onSupplierChange(supplier.businessPartnerRoleId);
                                                             setSupplierComboOpen(false);
                                                             setSupplierSearch('');
                                                         }}
-                                                        className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                                                        title={supplier.isTransactionReady ? undefined : supplier.readinessMessage}
+                                                        className={cn("relative flex select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none",
+                                                            supplier.isTransactionReady ? "cursor-pointer hover:bg-accent hover:text-accent-foreground" : "cursor-not-allowed opacity-60")}
                                                     >
-                                                        <Check className={cn("mr-2 h-4 w-4", selectedSupplier?.id === supplier.id ? "opacity-100" : "opacity-0")} />
+                                                        <Check className={cn("mr-2 h-4 w-4", selectedSupplier?.businessPartnerRoleId === supplier.businessPartnerRoleId ? "opacity-100" : "opacity-0")} />
                                                         <div className="flex flex-col">
-                                                            <span className="font-medium">{supplier.name}</span>
-                                                            <span className="text-xs text-muted-foreground">{supplier.code}</span>
+                                                            <span className="font-medium">{supplier.name} · {supplier.roleType}</span>
+                                                            <span className="text-xs text-muted-foreground">{supplier.code}{supplier.isTransactionReady ? '' : ` · ${supplier.readinessMessage}`}</span>
                                                         </div>
                                                     </div>
                                                 ))}

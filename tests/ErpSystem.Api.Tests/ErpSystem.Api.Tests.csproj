@@ -264,7 +264,6 @@
     <Compile Include="Services\Finance\SubledgerReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ManagementReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\BaseDeltaReportDocumentBuilderTests.cs" />
-    <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePartnerDefaultsTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />

@@ -271,6 +271,8 @@ export default function NewVendorPaymentPage() {
         )
     );
     const supplierOptions = suppliersData ?? [];
+    const selectedSupplierOption = supplierOptions.find(option =>
+        option.businessPartnerId === selectedSupplierId && option.isTransactionReady);
     const lockedSupplierName =
         linkedInvoice?.supplierName ||
         supplierOptions.find((supplier) => supplier.id === selectedSupplierId)?.name ||
@@ -649,8 +651,11 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
+            const { supplierId, ...paymentData } = data;
             const payment = await accountsPayableService.createPayment({
-                ...data,
+                ...paymentData,
+                businessPartnerId: supplierId,
+                businessPartnerRoleId: selectedSupplierOption?.businessPartnerRoleId,
                 paymentDate: data.paymentDate.toISOString(),
                 // Cross/foreign invoice WHT is converted and validated per allocation by the
                 // API. A native header sum would mix currencies and must never become statutory
@@ -894,10 +899,12 @@ export default function NewVendorPaymentPage() {
                                 ) : (
                                     <Select
                                         onValueChange={(val) => {
-                                            if (val !== selectedSupplierId) clearAllocationState();
-                                            form.setValue('supplierId', val);
+                                            const option = supplierOptions.find(item => item.businessPartnerRoleId === val);
+                                            if (!option?.isTransactionReady) return;
+                                            if (option.businessPartnerId !== selectedSupplierId) clearAllocationState();
+                                            form.setValue('supplierId', option.businessPartnerId);
                                         }}
-                                        value={form.watch('supplierId') || undefined}
+                                        value={selectedSupplierOption?.businessPartnerRoleId}
                                         disabled={isSubmitting || !!existingAdvancePaymentId}
                                     >
                                         <SelectTrigger>
@@ -905,9 +912,11 @@ export default function NewVendorPaymentPage() {
                                         </SelectTrigger>
                                         <SelectContent>
                                             {supplierOptions.map((supplier) => (
-                                                <SelectItem key={supplier.id} value={supplier.id}>
-                                                    {supplier.name}
+                                                <SelectItem key={supplier.businessPartnerRoleId} value={supplier.businessPartnerRoleId}
+                                                    disabled={!supplier.isTransactionReady}>
+                                                    {supplier.name} · {supplier.roleType}
                                                     {supplier.code ? ` (${supplier.code})` : ''}
+                                                    {!supplier.isTransactionReady ? ` — ${supplier.readinessMessage}` : ''}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

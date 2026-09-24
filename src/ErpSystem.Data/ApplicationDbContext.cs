@@ -249,7 +249,6 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<SupplierDebitNoteLineItem> SupplierDebitNoteLineItems { get; set; }
     public DbSet<SupplierDebitNoteTaxComponent> SupplierDebitNoteTaxComponents { get; set; }
     public DbSet<SupplierDebitNoteApplication> SupplierDebitNoteApplications { get; set; }
-    public DbSet<ApSupplierIdentityLink> ApSupplierIdentityLinks { get; set; }
     public DbSet<FinancePurchaseOrder> FinancePurchaseOrders { get; set; }
     public DbSet<FinancePurchaseOrderItem> FinancePurchaseOrderItems { get; set; }
     public DbSet<FinancePurchaseOrderReceipt> FinancePurchaseOrderReceipts { get; set; }
@@ -2605,30 +2604,6 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.SupplierDebitNoteLineItemId, e.CalculationOrder, e.TaxId })
-                .IsUnique();
-        });
-
-        builder.Entity<ApSupplierIdentityLink>(entity =>
-        {
-            entity.ToTable("ApSupplierIdentityLinks");
-            entity.Property(e => e.MappingSource).HasMaxLength(40).IsRequired();
-            entity.HasOne(e => e.BusinessPartner)
-                .WithMany()
-                .HasForeignKey(e => e.BusinessPartnerId)
-                .OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Supplier)
-                .WithMany()
-                .HasForeignKey(e => e.SupplierId)
-                .OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Tenant)
-                .WithMany()
-                .HasForeignKey(e => e.TenantId)
-                .OnDelete(DeleteBehavior.Restrict);
-            entity.HasIndex(e => new { e.TenantId, e.BusinessPartnerId })
-                .HasDatabaseName("UX_ApSupplierIdentityLinks_Tenant_BusinessPartner")
-                .IsUnique();
-            entity.HasIndex(e => new { e.TenantId, e.SupplierId })
-                .HasDatabaseName("UX_ApSupplierIdentityLinks_Tenant_Supplier")
                 .IsUnique();
         });
 

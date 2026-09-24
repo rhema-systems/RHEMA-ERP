@@ -2724,19 +2724,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             DateTime endExclusive,
             CancellationToken cancellationToken)
         {
-            var suppliers = await _unitOfWork.Repository<Supplier>()
-                .GetQueryable(s => s.TenantId == TenantId)
+            var apPartnerIds = await _unitOfWork.Repository<BusinessPartnerRole>()
+                .GetQueryable(role => role.TenantId == TenantId && !role.IsDeleted &&
+                    (role.RoleType == BusinessPartnerRoleType.Supplier ||
+                     role.RoleType == BusinessPartnerRoleType.Contractor))
+                .Select(role => role.BusinessPartnerId)
+                .Distinct()
                 .ToListAsync(cancellationToken);
-
             var partners = await _unitOfWork.Repository<BusinessPartner>()
-                .GetQueryable(p =>
-                    p.TenantId == TenantId &&
-                    (p.PartnerType == "Supplier" || p.PartnerType == "Contractor" || p.PartnerType == "Both"))
-                .ToListAsync(cancellationToken);
-
-            var identityLinks = await _unitOfWork.Repository<ApSupplierIdentityLink>()
-                .GetQueryable(link => link.TenantId == TenantId && !link.IsDeleted)
-                .AsNoTracking()
+                .GetQueryable(partner => partner.TenantId == TenantId &&
+                    apPartnerIds.Contains(partner.Id))
                 .ToListAsync(cancellationToken);
 
             var selectedIds = requestedSupplierIds.Count > 0
@@ -2746,31 +2743,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             var selections = new List<SupplierLedgerSelection>();
             foreach (var id in selectedIds)
             {
-                var supplier = suppliers.FirstOrDefault(s => s.Id == id);
                 var partner = partners.FirstOrDefault(p => p.Id == id);
-
-                var identityLink = identityLinks.SingleOrDefault(link =>
-                    link.SupplierId == id || link.BusinessPartnerId == id);
-                if (supplier == null && identityLink != null)
-                    supplier = suppliers.SingleOrDefault(item => item.Id == identityLink.SupplierId);
-                if (partner == null && identityLink != null)
-                    partner = partners.SingleOrDefault(item => item.Id == identityLink.BusinessPartnerId);
-
-                if (supplier == null && partner != null)
-                    supplier = FindMatchingSupplier(partner, suppliers);
-
-                if (partner == null && supplier != null)
-                    partner = FindMatchingSupplierPartner(supplier, partners);
-
-                if (supplier == null && partner == null)
+                if (partner == null)
                     continue;
 
                 selections.Add(new SupplierLedgerSelection(
-                    supplier?.Id,
-                    partner?.Id,
-                    partner?.PartnerCode ?? supplier?.SupplierCode ?? string.Empty,
-                    partner?.PartnerName ?? supplier?.Name ?? "Supplier",
-                    partner?.Currency ?? "GHS"));
+                    null,
+                    partner.Id,
+                    partner.PartnerCode,
+                    partner.PartnerName,
+                    partner.Currency ?? "GHS"));
             }
 
             return selections

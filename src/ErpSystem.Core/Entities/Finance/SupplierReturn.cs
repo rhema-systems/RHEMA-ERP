@@ -330,29 +330,6 @@ public class SupplierDebitNoteTaxComponent : TenantEntity
 }
 
 /// <summary>
-/// Finance-owned mapping between Procurement's Business Partner and Supplier masters. The bridge
-/// is the only durable identity used by AP settlement; Finance never mutates either source master.
-/// </summary>
-public class ApSupplierIdentityLink : TenantEntity
-{
-    [Required]
-    public Guid BusinessPartnerId { get; set; }
-    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
-
-    [Required]
-    public Guid SupplierId { get; set; }
-    public virtual Supplier Supplier { get; set; } = null!;
-
-    [Required]
-    [MaxLength(40)]
-    public string MappingSource { get; set; } = "ExactCode";
-
-    public bool IsVerified { get; set; }
-    public DateTime? VerifiedAtUtc { get; set; }
-    public Guid? VerifiedById { get; set; }
-}
-
-/// <summary>
 /// Applies a posted supplier debit note to one invoice within one vendor-payment settlement.
 /// The application carries no new GL entry: the debit note has already reduced AP control and
 /// the payment posts only its cash/discount/WHT components. This row is the immutable subledger
