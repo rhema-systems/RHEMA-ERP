@@ -2047,8 +2047,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         "The foreign-currency supplier advance is missing its approved origin-rate evidence.");
                 }
 
-                var apAccountId = supplier.DefaultApAccountId
-                    ?? settings.ControlAccountApId
+                var apAccountId = settings.ControlAccountApId
                     ?? throw new InvalidOperationException("AP control account is not configured for this tenant.");
                 var advanceAccountId = settings.SupplierAdvanceAccountId
                     ?? throw new InvalidOperationException("Supplier advance account is not configured for this tenant.");
@@ -5283,8 +5282,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var exchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
             var accountCache = new Dictionary<Guid, Account>();
 
-            var apAccountId = supplier.DefaultApAccountId
-                ?? settings.ControlAccountApId
+            var apAccountId = settings.ControlAccountApId
                 ?? throw new InvalidOperationException("AP control account is not configured for this tenant.");
             await ResolvePaymentPostingAccountAsync(apAccountId, "AP control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
@@ -6449,7 +6447,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 : payment.CurrencyCode.Trim().ToUpperInvariant();
             var exchangeRate = payment.ExchangeRate <= 0m ? 1m : payment.ExchangeRate;
             var baseAmount = decimal.Round(payment.TotalAmount * exchangeRate, 2, MidpointRounding.AwayFromZero);
-            var apAccountId = supplier.DefaultApAccountId ?? await _unitOfWork.Repository<FinanceSettings>()
+            var apAccountId = await _unitOfWork.Repository<FinanceSettings>()
                 .GetQueryable(s => s.TenantId == TenantId && !s.IsDeleted)
                 .Select(s => s.ControlAccountApId)
                 .FirstOrDefaultAsync(cancellationToken);

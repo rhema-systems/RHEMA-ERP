@@ -93,4 +93,8 @@ tooling have passed local verification.
 - Data/EF model build: passed, zero errors (existing repository warnings remain).
 - Focused profile-policy tests: 4 passed, 0 failed.
 - Migration `CanonicalBusinessPartnerFinanceProfiles` generated and inspected; not applied.
+- AP invoice and payment posting now resolve the AP control account exclusively from tenant
+  Finance settings. Partner, legacy Supplier and document-level AP overrides are ignored.
+- Focused AP control-authority regressions: 4 passed, 0 failed (invoice posting, payment posting,
+  draft defaults and explicit-default preservation).
 - No database or accounting data was mutated.

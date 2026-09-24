@@ -723,7 +723,7 @@ public sealed partial class ApPaymentPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task CrossTenantApControlAccount_ShouldBeRejected()
+    public async Task LegacySupplierApControlOverride_ShouldBeIgnoredInFavorOfFinanceSettings()
     {
         var tenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();
@@ -735,10 +735,12 @@ public sealed partial class ApPaymentPostingMigrationTests
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
-        var act = () => service.PostAsync(fixture.Payment.Id);
+        var result = await service.PostAsync(fixture.Payment.Id);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP payment posting AP control account was not found for this tenant.");
+        result.Status.Should().Be(VendorPaymentStatus.Processed);
+        var journal = await db.JournalEntries.Include(x => x.Transactions).SingleAsync(x => x.Id == result.JournalEntryId);
+        journal.Transactions.Should().Contain(line => line.AccountId == fixture.ApAccount.Id && line.DebitAmount > 0m);
+        journal.Transactions.Should().NotContain(line => line.AccountId == otherApAccount.Id);
     }
 
     [Fact]

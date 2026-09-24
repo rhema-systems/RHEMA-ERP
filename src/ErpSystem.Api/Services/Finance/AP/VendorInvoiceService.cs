@@ -387,7 +387,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Status = VendorInvoiceStatus.Draft,
                 ApprovalStatus = "Draft",
                 ExpenseAccountId = dto.ExpenseAccountId,
-                ApAccountId = dto.ApAccountId,
+                // Transitional column retained until the approved reset; new invoices never store
+                // a per-document AP control-account override.
+                ApAccountId = null,
                 Notes = dto.Notes,
                 Reference = dto.Reference,
                 IsOpeningBalance = dto.IsOpeningBalance,
@@ -585,7 +587,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ? InvoiceMatchingType.ThreeWay
                 : dto.MatchingType;
             invoice.ExpenseAccountId = dto.ExpenseAccountId;
-            invoice.ApAccountId = dto.ApAccountId;
+            invoice.ApAccountId = null;
             invoice.Notes = dto.Notes;
             invoice.Reference = dto.Reference;
             invoice.IsOpeningBalance = dto.IsOpeningBalance;
@@ -2873,9 +2875,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var exchangeRate = NormalizeExchangeRate(invoice.ExchangeRate);
             var accountCache = new Dictionary<Guid, Account>();
 
-            var apAccountId = invoice.ApAccountId
-                ?? supplier.DefaultApAccountId
-                ?? settings.ControlAccountApId
+            var apAccountId = settings.ControlAccountApId
                 ?? throw new InvalidOperationException("AP control account is not configured for this tenant.");
             await ResolvePostingAccountAsync(apAccountId, "AP control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 

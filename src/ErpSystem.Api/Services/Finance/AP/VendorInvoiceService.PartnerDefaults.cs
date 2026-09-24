@@ -228,7 +228,9 @@ public partial class VendorInvoiceService
         var source = await GetSupplierDefaultsAsync(dto.SupplierId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
         if (source == null) return null;
         var defaults = source.PostingDefaults;
-        dto.ApAccountId ??= defaults.DefaultApAccountId;
+        // AP control-account authority belongs exclusively to tenant Finance settings. Partner
+        // defaults may influence expense/tax/payment treatment but must never route AP control.
+        dto.ApAccountId = null;
         dto.ExpenseAccountId ??= defaults.DefaultExpenseAccountId;
 
         int? capturedDays = null;

@@ -377,6 +377,7 @@
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">
     <Compile Include="$(TdcFocusedTestFile)" />
     <Compile Include="$(TdcFocusedTestSupportFile)" Condition="'$(TdcFocusedTestSupportFile)' != ''" />
+    <Compile Include="$(TdcFocusedTestSupportFile2)" Condition="'$(TdcFocusedTestSupportFile2)' != ''" />
   </ItemGroup>
 
 </Project>
