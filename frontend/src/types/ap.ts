@@ -57,8 +57,13 @@ export interface VendorInvoice {
     id: string;
     invoiceNumber: string;
     supplierInvoiceNumber?: string;
-    supplierId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
+    businessPartnerApProfileVersionId?: string;
+    businessPartnerCode: string;
     supplierName: string;
+    businessPartnerLegalName?: string;
+    businessPartnerTaxIdentificationNumber?: string;
     purchaseOrderId?: string;
     purchaseOrderNumber?: string;
     invoiceDate: string;
@@ -279,7 +284,8 @@ export interface VendorInvoiceMatchExceptionReportRow {
     exceptionId: string;
     vendorInvoiceId: string;
     invoiceNumber: string;
-    supplierId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     supplierName: string;
     purchaseOrderId: string;
     purchaseOrderNumber: string;
@@ -319,7 +325,8 @@ export interface VendorInvoiceCreateRequest {
     applySupplierWithholdingDefaults?: boolean | null;
     withholdingTaxRateOverride?: number | null;
     supplierInvoiceNumber?: string;
-    supplierId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     purchaseOrderId?: string;
     acceptedSupplyKind?: ProcurementAcceptedSupplyKind;
     acceptedSupplySourceId?: string;
@@ -372,7 +379,7 @@ export interface ProcurementAcceptedSupplyOptions {
     worksHandoffRoute: string;
 }
 
-export interface VendorInvoiceUpdateRequest extends VendorInvoiceCreateRequest {
+export interface VendorInvoiceUpdateRequest extends Omit<VendorInvoiceCreateRequest, 'businessPartnerId' | 'businessPartnerRoleId'> {
     id: string;
 }
 

@@ -18,8 +18,14 @@ public class VendorInvoiceDto
     public string InvoiceNumber { get; set; } = string.Empty;
     public string? SupplierInvoiceNumber { get; set; }
 
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public string BusinessPartnerCode { get; set; } = string.Empty;
     public string SupplierName { get; set; } = string.Empty;
+    public string? BusinessPartnerLegalName { get; set; }
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
+
 
     public Guid? PurchaseOrderId { get; set; }
     public string? PurchaseOrderNumber { get; set; }
@@ -106,7 +112,14 @@ public class VendorInvoiceCreateDto
     public string? SupplierInvoiceNumber { get; set; }
 
     [Required]
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+
+    /// <summary>
+    /// Required when the partner has both active Supplier and Contractor roles; otherwise the
+    /// server resolves the partner's single AP role for the invoice accounting date.
+    /// </summary>
+    public Guid? BusinessPartnerRoleId { get; set; }
+
 
     public Guid? PurchaseOrderId { get; set; }
 
@@ -214,7 +227,7 @@ public class VendorInvoiceQueryDto
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
     public string? SearchTerm { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public VendorInvoiceStatus? Status { get; set; }
     public string? ApprovalStatus { get; set; }
     public InvoiceMatchingStatus? MatchingStatus { get; set; }

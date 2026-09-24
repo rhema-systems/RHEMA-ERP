@@ -2583,42 +2583,6 @@ public class LandAcquisitionsController : ControllerBase
             ?? throw new InvalidOperationException("The selected external surveyor could not be found in the vendor list.");
 
         var surveyorName = surveyorPartner.LegalName ?? surveyorPartner.PartnerName;
-        var supplierCode = !string.IsNullOrWhiteSpace(surveyorPartner.PartnerCode)
-            ? surveyorPartner.PartnerCode
-            : TrimAssetIdentifier($"SURVEYOR-{NormalizeAssetReference(surveyorName)}", 50);
-        var supplier = await _context.Set<Supplier>()
-            .FirstOrDefaultAsync(item =>
-                item.TenantId == acquisition.TenantId &&
-                !item.IsDeleted &&
-                (item.SupplierCode == supplierCode || item.Name == surveyorName),
-                cancellationToken);
-
-        var supplierWasCreated = false;
-        if (supplier == null)
-        {
-            supplier = new Supplier
-            {
-                Id = Guid.NewGuid(),
-                TenantId = acquisition.TenantId,
-                SupplierCode = supplierCode,
-                Name = surveyorName,
-                Description = $"External surveyor created from land acquisition {acquisition.ProjectReference}.",
-                SupplierType = "Vendor",
-                Country = surveyorPartner.PhysicalCountry ?? "Ghana",
-                PaymentTerms = surveyorPartner.PaymentTerms ?? "Due on receipt",
-                LeadTimeDays = 0,
-                IsWithholdingTaxApplicable = false,
-                TaxTreatment = TaxTreatment.OutOfScope,
-                IsActive = true,
-                Status = "Active",
-                CreatedById = userId == Guid.Empty ? null : userId,
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
-            };
-            _context.Set<Supplier>().Add(supplier);
-            supplierWasCreated = true;
-        }
-
         var sourceReference = BuildSurveyorPaymentSourceReference(acquisition.Id);
         var invoice = await _context.Set<VendorInvoice>()
             .Include(item => item.LineItems)
@@ -2633,15 +2597,10 @@ public class LandAcquisitionsController : ControllerBase
 
         if (invoice == null)
         {
-            if (supplierWasCreated)
-            {
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-
             var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
             {
                 SupplierInvoiceNumber = BuildSurveyorPaymentInvoiceNumber(acquisition.ProjectReference),
-                SupplierId = supplier.Id,
+                BusinessPartnerId = surveyorPartner.Id,
                 InvoiceDate = DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = SnapshotDate(surveySnapshot, "surveyorFeeDueDate") ?? DateTime.UtcNow,
@@ -2689,7 +2648,7 @@ public class LandAcquisitionsController : ControllerBase
         values["surveyorSource"] = "External";
         values["surveyorBusinessPartnerId"] = surveyorPartner.Id;
         values["surveyorName"] = surveyorName;
-        values["accountsPayableSupplierId"] = invoice.SupplierId;
+        values["accountsPayableSupplierId"] = invoice.BusinessPartnerId;
         values["accountsPayableInvoiceId"] = invoice.Id;
         values["accountsPayableInvoiceNumber"] = invoice.InvoiceNumber;
         values["accountsPayableInvoiceStatus"] = invoice.Status.ToString();
@@ -2804,7 +2763,7 @@ public class LandAcquisitionsController : ControllerBase
                     ? surveyorPayment.Notes ?? $"Accounts Payable payment {surveyorPayment.PaymentNumber} is {surveyorPayment.Status}."
                     : $"Accounts Payable payment {surveyorPayment.PaymentNumber} is {surveyorPayment.Status}; paid {invoice.CurrencyCode} {amountPaid:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
 
-        values["accountsPayableSupplierId"] = invoice.SupplierId;
+        values["accountsPayableSupplierId"] = invoice.BusinessPartnerId;
         values["accountsPayableInvoiceId"] = invoice.Id;
         values["accountsPayableInvoiceNumber"] = invoice.InvoiceNumber;
         values["accountsPayableInvoiceStatus"] = invoice.Status.ToString();
@@ -2881,45 +2840,10 @@ public class LandAcquisitionsController : ControllerBase
             vendorPartner?.LegalName ??
             vendorPartner?.PartnerName;
 
-        if (string.IsNullOrWhiteSpace(vendorName))
+        if (vendorPartner == null || string.IsNullOrWhiteSpace(vendorName))
         {
-            throw new InvalidOperationException("Select or record the acquisition vendor before creating the Accounts Payable request.");
-        }
-
-        var supplierCode = !string.IsNullOrWhiteSpace(vendorPartner?.PartnerCode)
-            ? vendorPartner.PartnerCode
-            : TrimAssetIdentifier($"LAND-VENDOR-{NormalizeAssetReference(vendorName)}", 50);
-        var supplier = await _context.Set<Supplier>()
-            .FirstOrDefaultAsync(item =>
-                item.TenantId == acquisition.TenantId &&
-                !item.IsDeleted &&
-                (item.SupplierCode == supplierCode || item.Name == vendorName),
-                cancellationToken);
-
-        var supplierWasCreated = false;
-        if (supplier == null)
-        {
-            supplier = new Supplier
-            {
-                Id = Guid.NewGuid(),
-                TenantId = acquisition.TenantId,
-                SupplierCode = supplierCode,
-                Name = vendorName,
-                Description = $"Land acquisition vendor created from {acquisition.ProjectReference}.",
-                SupplierType = "Vendor",
-                Country = vendorPartner?.PhysicalCountry ?? "Ghana",
-                PaymentTerms = vendorPartner?.PaymentTerms ?? "Due on receipt",
-                LeadTimeDays = 0,
-                IsWithholdingTaxApplicable = false,
-                TaxTreatment = TaxTreatment.OutOfScope,
-                IsActive = true,
-                Status = "Active",
-                CreatedById = userId == Guid.Empty ? null : userId,
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
-            };
-            _context.Set<Supplier>().Add(supplier);
-            supplierWasCreated = true;
+            throw new InvalidOperationException(
+                "Select an approved Business Partner for the acquisition vendor before creating the Accounts Payable request.");
         }
 
         var sourceReference = $"LAND-VENDOR-PAYMENT:{acquisition.Id:N}";
@@ -2936,16 +2860,11 @@ public class LandAcquisitionsController : ControllerBase
 
         if (invoice == null)
         {
-            if (supplierWasCreated)
-            {
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-
             var dueDate = SnapshotDate(negotiationSnapshot, "agreementPaymentDueDate") ?? DateTime.UtcNow;
             var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
             {
                 SupplierInvoiceNumber = acquisition.Agreement?.BoardApprovalReference ?? SnapshotText(approvalSnapshot, "boardApprovalReference") ?? acquisition.ProjectReference,
-                SupplierId = supplier.Id,
+                BusinessPartnerId = vendorPartner.Id,
                 InvoiceDate = DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = dueDate,
@@ -2994,7 +2913,7 @@ public class LandAcquisitionsController : ControllerBase
         {
             ["vendorBusinessPartnerId"] = vendorPartner?.Id,
             ["vendorName"] = vendorName,
-            ["accountsPayableSupplierId"] = invoice.SupplierId,
+            ["accountsPayableSupplierId"] = invoice.BusinessPartnerId,
             ["accountsPayableInvoiceId"] = invoice.Id,
             ["accountsPayableInvoiceNumber"] = invoice.InvoiceNumber,
             ["accountsPayableInvoiceStatus"] = invoice.Status.ToString(),
@@ -3081,47 +3000,10 @@ public class LandAcquisitionsController : ControllerBase
 
         if (invoice == null)
         {
-            var supplier = await _context.Set<Supplier>()
-                .FirstOrDefaultAsync(item =>
-                    item.TenantId == acquisition.TenantId &&
-                    !item.IsDeleted &&
-                    (item.SupplierCode == payee.PartnerCode || item.Name == payee.PartnerName),
-                    cancellationToken);
-            var supplierWasCreated = false;
-            if (supplier == null)
-            {
-                supplier = new Supplier
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = acquisition.TenantId,
-                    SupplierCode = payee.PartnerCode,
-                    Name = payee.PartnerName,
-                    Description = "Government stamp duty payee created by the Land Acquisition integration.",
-                    SupplierType = "Vendor",
-                    Country = "Ghana",
-                    PaymentTerms = "Due on receipt",
-                    LeadTimeDays = 0,
-                    IsWithholdingTaxApplicable = false,
-                    TaxTreatment = TaxTreatment.OutOfScope,
-                    IsActive = true,
-                    Status = "Active",
-                    CreatedById = userId == Guid.Empty ? null : userId,
-                    CreatedAt = DateTime.UtcNow,
-                    CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
-                };
-                _context.Set<Supplier>().Add(supplier);
-                supplierWasCreated = true;
-            }
-
-            if (supplierWasCreated)
-            {
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-
             var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
             {
                 SupplierInvoiceNumber = assessment.AssessmentReference,
-                SupplierId = supplier.Id,
+                BusinessPartnerId = payee.Id,
                 InvoiceDate = assessment.AssessmentDate ?? DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = DateTime.UtcNow,
@@ -3165,8 +3047,8 @@ public class LandAcquisitionsController : ControllerBase
             }
         }
 
-        // The payable is linked to Procurement.Supplier, while the payee above is the shared business partner.
-        payment.AccountsPayableSupplierId = invoice.SupplierId;
+        // Finance stores the canonical Business Partner identity; no parallel Supplier record is created.
+        payment.AccountsPayableSupplierId = invoice.BusinessPartnerId;
         payment.AccountsPayableInvoiceId = invoice.Id;
         payment.AccountsPayablePaymentId = null;
         payment.IsPaid = false;
@@ -3175,7 +3057,7 @@ public class LandAcquisitionsController : ControllerBase
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, new Dictionary<string, object?>
         {
-            ["accountsPayableSupplierId"] = invoice.SupplierId,
+            ["accountsPayableSupplierId"] = invoice.BusinessPartnerId,
             ["accountsPayableInvoiceId"] = invoice.Id,
             ["accountsPayableInvoiceNumber"] = invoice.InvoiceNumber,
             ["accountsPayableInvoiceStatus"] = invoice.Status.ToString(),
@@ -3214,38 +3096,16 @@ public class LandAcquisitionsController : ControllerBase
             throw new InvalidOperationException("Other acquisition service costs must have a total amount greater than zero.");
         }
 
-        var supplierCode = "LAND-ACQ-OTHER-COSTS";
-        var supplierName = "Land Acquisition Other Service Providers";
-        var supplier = await _context.Set<Supplier>()
-            .FirstOrDefaultAsync(item =>
+        const string supplierCode = "LAND-ACQ-OTHER-COSTS";
+        var partner = await _context.Set<BusinessPartner>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item =>
                 item.TenantId == acquisition.TenantId &&
                 !item.IsDeleted &&
-                (item.SupplierCode == supplierCode || item.Name == supplierName),
-                cancellationToken);
-        if (supplier == null)
-        {
-            supplier = new Supplier
-            {
-                Id = Guid.NewGuid(),
-                TenantId = acquisition.TenantId,
-                SupplierCode = supplierCode,
-                Name = supplierName,
-                Description = "Generic supplier for estate land acquisition service costs captured before land creation.",
-                SupplierType = "Vendor",
-                Country = "Ghana",
-                PaymentTerms = "Due on receipt",
-                LeadTimeDays = 0,
-                IsWithholdingTaxApplicable = false,
-                TaxTreatment = TaxTreatment.OutOfScope,
-                IsActive = true,
-                Status = "Active",
-                CreatedById = userId == Guid.Empty ? null : userId,
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
-            };
-            _context.Set<Supplier>().Add(supplier);
-            await _context.SaveChangesAsync(cancellationToken);
-        }
+                item.PartnerCode == supplierCode,
+                cancellationToken)
+            ?? throw new InvalidOperationException(
+                "Configure the LAND-ACQ-OTHER-COSTS Business Partner and its approved AP profile before creating this payable.");
 
         var sourceReference = $"LAND-OTHER-COSTS:{acquisition.Id:N}";
         var invoice = await _context.Set<VendorInvoice>()
@@ -3270,7 +3130,7 @@ public class LandAcquisitionsController : ControllerBase
             var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
             {
                 SupplierInvoiceNumber = $"OTHER-{acquisition.ProjectReference}",
-                SupplierId = supplier.Id,
+                BusinessPartnerId = partner.Id,
                 InvoiceDate = DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = earliestDueDate,
@@ -3312,7 +3172,7 @@ public class LandAcquisitionsController : ControllerBase
         }
 
         var values = SnapshotToObjectDictionary(paymentSnapshot);
-        values["otherAccountsPayableSupplierId"] = invoice.SupplierId;
+        values["otherAccountsPayableSupplierId"] = invoice.BusinessPartnerId;
         values["otherAccountsPayableInvoiceId"] = invoice.Id;
         values["otherAccountsPayableInvoiceNumber"] = invoice.InvoiceNumber;
         values["otherAccountsPayableInvoiceStatus"] = invoice.Status.ToString();
@@ -3394,7 +3254,7 @@ public class LandAcquisitionsController : ControllerBase
                 : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {paidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
 
         var values = SnapshotToObjectDictionary(paymentSnapshot);
-        values["otherAccountsPayableSupplierId"] = invoice.SupplierId;
+        values["otherAccountsPayableSupplierId"] = invoice.BusinessPartnerId;
         values["otherAccountsPayableInvoiceId"] = invoice.Id;
         values["otherAccountsPayableInvoiceNumber"] = invoice.InvoiceNumber;
         values["otherAccountsPayableInvoiceStatus"] = invoice.Status.ToString();
@@ -3569,7 +3429,7 @@ public class LandAcquisitionsController : ControllerBase
         {
             ["vendorBusinessPartnerId"] = SnapshotText(paymentSnapshot, "vendorBusinessPartnerId"),
             ["vendorName"] = SnapshotText(paymentSnapshot, "vendorName"),
-            ["accountsPayableSupplierId"] = invoice.SupplierId,
+            ["accountsPayableSupplierId"] = invoice.BusinessPartnerId,
             ["accountsPayableInvoiceId"] = invoice.Id,
             ["accountsPayableInvoiceNumber"] = invoice.InvoiceNumber,
             ["accountsPayableInvoiceStatus"] = invoice.Status.ToString(),

@@ -1109,7 +1109,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         if (receipt.VendorInvoiceId.HasValue)
         {
             var existingInvoice = await _dbContext.VendorInvoices
-                .Include(i => i.Supplier)
+                .Include(i => i.BusinessPartner)
                 .Include(i => i.LineItems)
                     .ThenInclude(li => li.GLAccount)
                 .Include(i => i.PaymentAllocations)
@@ -1163,7 +1163,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             TenantId = tenantId,
             InvoiceNumber = invoiceNumber,
             SupplierInvoiceNumber = receipt.ReceiptNumber,
-            SupplierId = supplier.Id,
+            BusinessPartnerId = supplier.Id,
             SupplierName = supplier.Name,
             InvoiceDate = receipt.ReceiptDate,
             ReceivedDate = now,
@@ -1268,7 +1268,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         await transaction.CommitAsync(cancellationToken);
 
         var savedInvoice = await _dbContext.VendorInvoices
-            .Include(i => i.Supplier)
+            .Include(i => i.BusinessPartner)
             .Include(i => i.LineItems)
                 .ThenInclude(li => li.GLAccount)
             .Include(i => i.PaymentAllocations)
@@ -1464,7 +1464,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             Id = invoice.Id,
             InvoiceNumber = invoice.InvoiceNumber,
             SupplierInvoiceNumber = invoice.SupplierInvoiceNumber,
-            SupplierId = invoice.SupplierId,
+            BusinessPartnerId = invoice.BusinessPartnerId,
             SupplierName = invoice.SupplierName,
             PurchaseOrderId = invoice.PurchaseOrderId,
             PurchaseOrderNumber = invoice.PurchaseOrder?.OrderNumber,

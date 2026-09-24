@@ -224,7 +224,7 @@ export default function NewVendorPaymentPage() {
             preselectedAmount ||
             0,
         );
-        form.setValue('supplierId', linkedInvoice.supplierId);
+        form.setValue('supplierId', linkedInvoice.businessPartnerId);
         form.setValue('totalAmount', amountDue);
         form.setValue('currencyCode', linkedInvoice.currencyCode || functionalCurrencyCode);
         form.setValue('exchangeRate', Number(linkedInvoice.exchangeRate) || 1);

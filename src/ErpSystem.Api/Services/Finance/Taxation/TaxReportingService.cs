@@ -123,7 +123,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 && l.VendorInvoice.InvoiceDate.Date <= toDate)
             .ToListAsync(cancellationToken);
 
-        foreach (var line in apLines.Where(l => SourceFiltersMatch(request, VendorInvoiceDocumentType, l.VendorInvoice.InvoiceNumber, null, l.VendorInvoice.SupplierId)))
+        foreach (var line in apLines.Where(l => SourceFiltersMatch(request, VendorInvoiceDocumentType, l.VendorInvoice.InvoiceNumber, null, l.VendorInvoice.BusinessPartnerId)))
         {
             var isPosted = line.VendorInvoice.JournalEntryId.HasValue && postedJournalSet.Contains(line.VendorInvoice.JournalEntryId.Value);
             if (!isPosted)
@@ -863,7 +863,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 d.InvoiceNumber,
                 d.InvoiceDate.Date,
                 null,
-                d.SupplierId,
+                d.BusinessPartnerId,
                 d.SupplierName,
                 d.JournalEntryId,
                 d.JournalEntryId.HasValue && postedJournalIds.Contains(d.JournalEntryId.Value)));

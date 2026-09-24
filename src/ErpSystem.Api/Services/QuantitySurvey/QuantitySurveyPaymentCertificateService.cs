@@ -484,7 +484,7 @@ public sealed class QuantitySurveyPaymentCertificateService(
 
         var invoice = await vendorInvoices.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = contract.BusinessPartnerId,
+            BusinessPartnerId = contract.BusinessPartnerId,
             SupplierInvoiceNumber = entity.CertificateNumber,
             InvoiceDate = entity.IssueDate,
             ReceivedDate = DateTime.UtcNow,

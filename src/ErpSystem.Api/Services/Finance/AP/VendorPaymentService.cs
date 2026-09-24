@@ -467,7 +467,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             !candidate.IsDeleted);
                     if (invoice == null)
                         throw new KeyNotFoundException($"Vendor invoice with Id '{requestedAllocation.VendorInvoiceId}' not found.");
-                    if (invoice.SupplierId != supplier.Id)
+                    if (invoice.BusinessPartnerId != supplier.Id)
                         throw new InvalidOperationException("A selected invoice does not belong to this payment supplier.");
                     withholdingInvoices.Add(invoice);
 
@@ -1709,7 +1709,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Concat(payment.Allocations.Where(item => !item.IsDeleted && !item.IsReversal).Select(item => item.VendorInvoiceId))
                 .Distinct().ToList();
             var whtInvoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(invoice =>
-                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.SupplierId == payment.SupplierId &&
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == payment.SupplierId &&
                 whtInvoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
             if (whtInvoices.Count != whtInvoiceIds.Count)
                 throw new InvalidOperationException("A selected WHT invoice does not belong to this payment supplier and tenant.");
@@ -1757,7 +1757,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         "AP_PAYMENT_BALANCE_RESERVED",
                         $"Invoice '{invoice.InvoiceNumber}' has no unreserved outstanding balance.");
 
-                if (invoice.SupplierId != payment.SupplierId)
+                if (invoice.BusinessPartnerId != payment.SupplierId)
                 {
                     throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' does not belong to this payment's supplier.");
                 }
@@ -2079,7 +2079,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         .GetQueryable(i => i.TenantId == TenantId && i.Id == requested.VendorInvoiceId && !i.IsDeleted)
                         .FirstOrDefaultAsync(cancellationToken)
                         ?? throw new InvalidOperationException("Supplier advance application invoice was not found for this tenant.");
-                    if (invoice.SupplierId != payment.SupplierId)
+                    if (invoice.BusinessPartnerId != payment.SupplierId)
                         throw new InvalidOperationException("Supplier advance can only be applied to invoices for the same supplier.");
                     if (!invoice.JournalEntryId.HasValue)
                         throw new InvalidOperationException($"Supplier advance cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
@@ -2969,7 +2969,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             !item.IsDeleted)
                         .SingleOrDefaultAsync(cancellationToken)
                         ?? throw new KeyNotFoundException($"Vendor invoice with Id '{request.VendorInvoiceId}' was not found.");
-                    if (invoice.SupplierId != payment.SupplierId)
+                    if (invoice.BusinessPartnerId != payment.SupplierId)
                         throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' does not belong to this payment's supplier.");
                     if (!invoice.JournalEntryId.HasValue)
                         throw new InvalidOperationException($"Supplier debit note cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
@@ -3297,7 +3297,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var invoicePage = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.SupplierId == resolvedSupplierId.Value &&
+                    i.BusinessPartnerId == resolvedSupplierId.Value &&
                     (i.Status == VendorInvoiceStatus.Approved ||
                      i.Status == VendorInvoiceStatus.PartiallyPaid ||
                      i.Status == VendorInvoiceStatus.Overdue) &&
@@ -3809,7 +3809,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
                     dto.InvoiceIds.Contains(i.Id) && !i.IsDeleted)
-                .Include(i => i.Supplier)
+                .Include(i => i.BusinessPartner)
                 .ToListAsync(cancellationToken);
 
             if (invoices.Count != dto.InvoiceIds.Count)
@@ -3854,7 +3854,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     i.TenantId == TenantId &&
                     dto.InvoiceIds.Contains(i.Id) &&
                     !i.IsDeleted)
-                .Include(i => i.Supplier)
+                .Include(i => i.BusinessPartner)
                 .ToListAsync(cancellationToken);
             var availableBalanceByInvoice = new Dictionary<Guid, decimal>();
             foreach (var invoice in invoices.OrderBy(item => item.Id))
@@ -3919,7 +3919,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             // guarantees that every later allocation matches its payment.
             var bySupplierAndCurrency = invoices.GroupBy(invoice => new
             {
-                invoice.SupplierId,
+                invoice.BusinessPartnerId,
                 CurrencyCode = NormalizeCurrency(
                     invoice.CurrencyCode,
                     baseCurrencyCode)
@@ -3929,7 +3929,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var group in bySupplierAndCurrency)
             {
-                var supplier = group.First().Supplier;
+                var supplier = group.First().BusinessPartner;
                 var supplierTotal = group.Sum(i => availableBalanceByInvoice[i.Id]);
 
                 var paymentNumber = await GeneratePaymentNumberAsync(cancellationToken);
@@ -3938,7 +3938,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Id = Guid.NewGuid(),
                     TenantId = TenantId,
                     PaymentNumber = paymentNumber,
-                    SupplierId = group.Key.SupplierId,
+                    SupplierId = group.Key.BusinessPartnerId,
                     PaymentDate = dto.BatchDate,
                     TotalAmount = supplierTotal,
                     AllocatedAmount = 0,
@@ -5200,7 +5200,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         $"Supplier debit note '{application.SupplierDebitNote.DebitNoteNumber}' does not belong to this payment's supplier.");
                 if (application.VendorInvoice == null ||
                     application.VendorInvoice.TenantId != tenantId ||
-                    application.VendorInvoice.SupplierId != payment.SupplierId ||
+                    application.VendorInvoice.BusinessPartnerId != payment.SupplierId ||
                     !application.VendorInvoice.JournalEntryId.HasValue ||
                     application.VendorInvoice.Status == VendorInvoiceStatus.Voided)
                     throw new InvalidOperationException("AP payment supplier-credit application references an invalid invoice.");
@@ -6276,7 +6276,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var functionalWht = RoundMoney(allocations.Sum(item => item.WithholdingTaxFunctionalAmount));
             var invoiceIds = allocations.Select(item => item.VendorInvoiceId).Distinct().ToList();
             var withholdingInvoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(invoice =>
-                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.SupplierId == payment.SupplierId &&
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == payment.SupplierId &&
                 invoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
             if (withholdingInvoices.Count != invoiceIds.Count)
                 throw new InvalidOperationException("A selected WHT invoice does not belong to this payment supplier and tenant.");

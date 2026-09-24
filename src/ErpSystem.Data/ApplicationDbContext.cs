@@ -2158,10 +2158,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "CK_VendorInvoice_AcceptedSupplyPurchaseOrder",
                     "[AcceptedSupplyKind] IS NULL OR [AcceptedSupplyKind] = 3 OR [PurchaseOrderId] IS NOT NULL");
             });
-            entity.HasOne(e => e.Supplier)
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.SupplierId)
+                .HasForeignKey(e => e.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerRole)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerRoleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerApProfileVersion)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerApProfileVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.BusinessPartnerId, e.InvoiceDate });
             entity.HasOne(e => e.PurchaseOrder)
                 .WithMany()
                 .HasForeignKey(e => e.PurchaseOrderId)

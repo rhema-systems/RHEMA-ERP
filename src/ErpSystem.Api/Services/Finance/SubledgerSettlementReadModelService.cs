@@ -505,7 +505,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             var balance = BuildBalance(
                 tenantId,
                 SubledgerSettlementModules.AccountsPayable,
-                invoice.SupplierId,
+                invoice.BusinessPartnerId,
                 VendorInvoiceType,
                 invoice.Id,
                 invoice.InvoiceNumber,
@@ -538,7 +538,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 var application = BuildApplication(
                     tenantId,
                     SubledgerSettlementModules.AccountsPayable,
-                    invoice.SupplierId,
+                    invoice.BusinessPartnerId,
                     VendorInvoiceType,
                     invoice.Id,
                     VendorPaymentType,

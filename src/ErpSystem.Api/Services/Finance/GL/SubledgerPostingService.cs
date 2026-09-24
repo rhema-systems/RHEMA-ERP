@@ -192,7 +192,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var tenantId = TenantId;
             var invoice = await _context.Set<VendorInvoice>()
                 .Include(i => i.LineItems)
-                .Include(i => i.Supplier) // BusinessPartner
+                .Include(i => i.BusinessPartner)
                 .FirstOrDefaultAsync(i => i.TenantId == tenantId && i.Id == vendorInvoiceId && !i.IsDeleted, cancellationToken);
 
             if (invoice == null) throw new ArgumentException($"Vendor Invoice {vendorInvoiceId} not found.");
@@ -216,7 +216,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var settings = await GetSettingsAsync(cancellationToken);
 
             // Resolve AP Control Account
-            var apAccountId = invoice.Supplier.DefaultApAccountId ?? settings.ControlAccountApId;
+            var apAccountId = settings.ControlAccountApId;
             if (apAccountId == null) throw new InvalidOperationException("AP Control Account not configured.");
 
             var invoiceCurrencyCode = NormalizeCurrency(invoice.CurrencyCode);
@@ -343,7 +343,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 }
                 else // Expense
                 {
-                    var expenseAccId = line.GLAccountId ?? invoice.Supplier.DefaultExpenseAccountId;
+                    var expenseAccId = line.GLAccountId ?? invoice.BusinessPartner.DefaultExpenseAccountId;
                     if (expenseAccId == null) throw new InvalidOperationException($"No Expense Account specified for AP line '{line.Description}'.");
 
                     transactions.Add(new CreateAccountTransactionDto

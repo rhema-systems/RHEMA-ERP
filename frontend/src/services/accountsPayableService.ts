@@ -61,7 +61,7 @@ export interface VendorInvoiceQuery {
     page?: number;
     pageSize?: number;
     searchTerm?: string;
-    supplierId?: string;
+    businessPartnerId?: string;
     status?: string;
     approvalStatus?: string;
     matchingStatus?: string;
@@ -137,7 +137,7 @@ class AccountsPayableService {
         if (query.page) params.append('Page', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
         if (query.searchTerm) params.append('SearchTerm', query.searchTerm);
-        if (query.supplierId) params.append('SupplierId', query.supplierId);
+        if (query.businessPartnerId) params.append('BusinessPartnerId', query.businessPartnerId);
         if (query.status) params.append('Status', query.status);
         if (query.approvalStatus) params.append('ApprovalStatus', query.approvalStatus);
         if (query.matchingStatus) params.append('MatchingStatus', query.matchingStatus);

@@ -12,27 +12,12 @@ public partial class VendorInvoiceService
 {
     /// <summary>Read-only projection; never creates or updates a Finance supplier identity.</summary>
     public async Task<PurchaseOrderSupplierDefaultsDto?> GetSupplierDefaultsAsync(
-        Guid supplierId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null)
+        Guid businessPartnerId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null)
     {
         var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(candidate =>
-            candidate.Id == supplierId && candidate.TenantId == TenantId && !candidate.IsDeleted)
-            .Include(candidate => candidate.PaymentTerm).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-        Supplier? supplier = null;
-        if (partner == null)
-        {
-            supplier = await _unitOfWork.Repository<Supplier>().GetQueryable(candidate =>
-                candidate.Id == supplierId && candidate.TenantId == TenantId && !candidate.IsDeleted)
-                .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-            if (supplier == null) throw new KeyNotFoundException("The selected supplier was not found in the current tenant.");
-            var matches = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(candidate =>
-                candidate.TenantId == TenantId && !candidate.IsDeleted &&
-                (candidate.Id == supplier.Id ||
-                 (!string.IsNullOrWhiteSpace(supplier.SupplierCode) && candidate.PartnerCode == supplier.SupplierCode)))
-                .Include(candidate => candidate.PaymentTerm).AsNoTracking().Take(2).ToListAsync(cancellationToken);
-            if (matches.Count > 1)
-                throw new InvalidOperationException("The supplier maps to multiple business partners. Resolve the supplier mapping before applying defaults.");
-            partner = matches.SingleOrDefault();
-        }
+            candidate.Id == businessPartnerId && candidate.TenantId == TenantId && !candidate.IsDeleted)
+            .Include(candidate => candidate.PaymentTerm).AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw new KeyNotFoundException("The selected Business Partner was not found in the current tenant.");
 
         if (purchaseOrderId.HasValue)
         {
@@ -50,7 +35,7 @@ public partial class VendorInvoiceService
                 return await WithholdingProjectionAsync(snapshot, partner, invoiceDate, cancellationToken);
             }
         }
-        return partner == null ? null : await WithholdingProjectionAsync(
+        return await WithholdingProjectionAsync(
             BusinessPartnerPostingDefaults.Snapshot(partner), partner, invoiceDate, cancellationToken);
     }
 
@@ -80,11 +65,11 @@ public partial class VendorInvoiceService
         {
             if (dto.ApplySupplierWithholdingDefaults == true && !dto.WithholdingTaxRateOverride.HasValue)
                 dto.WithholdingTaxRateOverride = await ConfirmedSupplierRateAsync(
-                    dto.SupplierId, dto.PurchaseOrderId, dto.InvoiceDate, dto.WithholdingTaxId.Value, cancellationToken);
+                    dto.BusinessPartnerId, dto.PurchaseOrderId, dto.InvoiceDate, dto.WithholdingTaxId.Value, cancellationToken);
             dto.ApplySupplierWithholdingDefaults = true;
             return false;
         }
-        var source = await GetSupplierDefaultsAsync(dto.SupplierId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
+        var source = await GetSupplierDefaultsAsync(dto.BusinessPartnerId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
         var withholding = source?.WithholdingDefault;
         if (withholding?.Required != true && dto.ApplySupplierWithholdingDefaults != true) return false;
         if (!dto.ApplySupplierWithholdingDefaults.HasValue)
@@ -122,7 +107,7 @@ public partial class VendorInvoiceService
                 dto.WithholdingTaxRateOverride ??= invoice.WithholdingTaxRateOverride ?? invoice.WithholdingTaxRate;
             else if (!invoice.WithholdingTaxId.HasValue && dto.ApplySupplierWithholdingDefaults == true && !dto.WithholdingTaxRateOverride.HasValue)
                 dto.WithholdingTaxRateOverride = await ConfirmedSupplierRateAsync(
-                    invoice.SupplierId, dto.PurchaseOrderId, dto.InvoiceDate, dto.WithholdingTaxId.Value, cancellationToken);
+                    invoice.BusinessPartnerId, dto.PurchaseOrderId, dto.InvoiceDate, dto.WithholdingTaxId.Value, cancellationToken);
             dto.ApplySupplierWithholdingDefaults ??= true;
             return false;
         }
@@ -136,7 +121,7 @@ public partial class VendorInvoiceService
                 dto.WithholdingTaxId = invoice.WithholdingTaxId;
                 return false;
             }
-            var source = await GetSupplierDefaultsAsync(invoice.SupplierId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
+            var source = await GetSupplierDefaultsAsync(invoice.BusinessPartnerId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
             var withholding = source?.WithholdingDefault;
             if (withholding?.Message != null || withholding?.TaxId == null)
                 throw new InvalidOperationException(withholding?.Message ?? "Select a configured purchase WHT rule for this invoice.");
@@ -222,10 +207,10 @@ public partial class VendorInvoiceService
     /// Supplier withholding has its own automatic create hook and does not use this opt-in.
     /// </summary>
     private async Task<int?> ApplyBusinessPartnerCreateDefaultsAsync(
-        VendorInvoiceCreateDto dto, Supplier supplier, CancellationToken cancellationToken)
+        VendorInvoiceCreateDto dto, BusinessPartner supplier, CancellationToken cancellationToken)
     {
         if (dto.ApplyBusinessPartnerDefaults != true || dto.IsOpeningBalance) return null;
-        var source = await GetSupplierDefaultsAsync(dto.SupplierId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
+        var source = await GetSupplierDefaultsAsync(dto.BusinessPartnerId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
         if (source == null) return null;
         var defaults = source.PostingDefaults;
         // AP control-account authority belongs exclusively to tenant Finance settings. Partner

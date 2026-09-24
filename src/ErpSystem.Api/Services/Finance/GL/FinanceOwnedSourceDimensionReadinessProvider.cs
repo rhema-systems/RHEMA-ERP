@@ -222,7 +222,7 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
         var settings = await _db.FinanceSettings.AsNoTracking()
             .SingleOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
         var invoices = await _db.VendorInvoices.AsNoTracking()
-            .Include(item => item.Supplier)
+            .Include(item => item.BusinessPartner)
             .Include(item => item.LineItems.Where(line => !line.IsDeleted))
             .Where(item => item.TenantId == tenantId && !item.IsDeleted
                 && (item.Status == VendorInvoiceStatus.Draft
@@ -288,7 +288,7 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
             || string.Equals(line.LineItemType, "Product", StringComparison.OrdinalIgnoreCase);
         return isInventory
             ? line.GLAccountId ?? settings?.ControlAccountInventoryId
-            : line.GLAccountId ?? invoice.ExpenseAccountId ?? invoice.Supplier?.DefaultExpenseAccountId;
+            : line.GLAccountId ?? invoice.ExpenseAccountId ?? invoice.BusinessPartner?.DefaultExpenseAccountId;
     }
 
     private async Task<IReadOnlyList<ReadinessDocument>> LoadSupplierDebitNotesAsync(

@@ -913,13 +913,13 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             return null;
 
         var invoice = await _db.VendorInvoices
-            .Include(item => item.Supplier)
+            .Include(item => item.BusinessPartner)
             .Include(item => item.LineItems.Where(line => !line.IsDeleted))
             .FirstOrDefaultAsync(item =>
                 item.TenantId == TenantId && item.Id == invoiceId && !item.IsDeleted,
                 cancellationToken)
             ?? throw new KeyNotFoundException("Original supplier invoice was not found for this tenant.");
-        if (invoice.SupplierId != supplierId)
+        if (invoice.BusinessPartnerId != supplierId)
             throw new InvalidOperationException("Original invoice does not belong to the selected supplier.");
         if (!invoice.JournalEntryId.HasValue)
             throw new InvalidOperationException("A supplier debit note can only reference a posted supplier invoice.");

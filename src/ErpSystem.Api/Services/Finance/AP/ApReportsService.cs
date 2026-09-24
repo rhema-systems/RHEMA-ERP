@@ -146,7 +146,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             queryable = ApplyPostedApInvoiceFilter(queryable);
 
             if (supplierId.HasValue)
-                queryable = queryable.Where(i => i.SupplierId == supplierId.Value);
+                queryable = queryable.Where(i => i.BusinessPartnerId == supplierId.Value);
 
             var invoices = await queryable.ToListAsync(cancellationToken);
             var adjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
@@ -176,7 +176,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var invoice in invoices)
             {
-                var detail = GetOrCreateDetail(invoice.SupplierId, invoice.SupplierName);
+                var detail = GetOrCreateDetail(invoice.BusinessPartnerId, invoice.SupplierName);
                 var balance = invoice.TotalAmount - invoice.PaidAmount;
                 AddToSupplierAgingBucket(detail, balance, invoice.DueDate, invoice.InvoiceDate, date);
                 detail.InvoiceCount++;
@@ -237,11 +237,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             queryable = ApplyPostedApInvoiceFilter(queryable);
 
             if (supplierId.HasValue)
-                queryable = queryable.Where(i => i.SupplierId == supplierId.Value);
+                queryable = queryable.Where(i => i.BusinessPartnerId == supplierId.Value);
 
             var invoices = await queryable.ToListAsync(cancellationToken);
             var adjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
-            var bySupplier = invoices.GroupBy(i => i.SupplierId).ToDictionary(g => g.Key, g => g.ToList());
+            var bySupplier = invoices.GroupBy(i => i.BusinessPartnerId).ToDictionary(g => g.Key, g => g.ToList());
             var adjustmentsBySupplier = adjustments
                 .Where(a => a.SupplierId.HasValue)
                 .GroupBy(a => a.SupplierId!.Value)
@@ -2411,12 +2411,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
                                       item.RequestedAtUtc >= from.Date && item.RequestedAtUtc < endExclusive)
                 .AsNoTracking()
-                .Include(item => item.VendorInvoice).ThenInclude(invoice => invoice.Supplier)
+                .Include(item => item.VendorInvoice).ThenInclude(invoice => invoice.BusinessPartner)
                 .Include(item => item.PurchaseOrder)
                 .Include(item => item.Variances)
                 .Include(item => item.Evidence);
             if (supplierId.HasValue)
-                query = query.Where(item => item.VendorInvoice.SupplierId == supplierId.Value);
+                query = query.Where(item => item.VendorInvoice.BusinessPartnerId == supplierId.Value);
 
             var source = await query.OrderByDescending(item => item.RequestedAtUtc).ToListAsync(cancellationToken);
             var rows = source.Select(item => new VendorInvoiceMatchExceptionReportRowDto
@@ -2424,7 +2424,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ExceptionId = item.Id,
                 VendorInvoiceId = item.VendorInvoiceId,
                 InvoiceNumber = item.VendorInvoice.InvoiceNumber,
-                SupplierId = item.VendorInvoice.SupplierId,
+                SupplierId = item.VendorInvoice.BusinessPartnerId,
                 SupplierName = item.VendorInvoice.SupplierName,
                 PurchaseOrderId = item.PurchaseOrderId,
                 PurchaseOrderNumber = item.PurchaseOrder.OrderNumber,
@@ -2778,7 +2778,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     i.Status != VendorInvoiceStatus.Draft &&
                     i.Status != VendorInvoiceStatus.Voided &&
                     i.Status != VendorInvoiceStatus.Rejected)
-                .Select(i => i.SupplierId)
+                .Select(i => i.BusinessPartnerId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
 
@@ -2828,7 +2828,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var invoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.SupplierId == supplierId &&
+                    i.BusinessPartnerId == supplierId &&
                     i.InvoiceDate < endExclusive &&
                     i.Status != VendorInvoiceStatus.Draft &&
                     i.Status != VendorInvoiceStatus.Voided &&

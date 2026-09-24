@@ -442,7 +442,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     useEffect(() => {
         if (!isEditMode || !editInvoice || !suppliersData?.items || editHydratedRef.current) return;
 
-        const supplier = suppliersData.items.find(item => item.id === editInvoice.supplierId);
+        const supplier = suppliersData.items.find(item => item.id === editInvoice.businessPartnerId);
         if (!supplier) return;
 
         editHydratedRef.current = true;
@@ -463,7 +463,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             : addDays(invoiceDate, editInvoice.paymentTermsDays || 30);
 
         form.reset({
-            supplierId: editInvoice.supplierId,
+            supplierId: editInvoice.businessPartnerId,
             supplierInvoiceNumber: editInvoice.supplierInvoiceNumber || '',
             purchaseOrderId: editInvoice.purchaseOrderId || undefined,
             acceptedSupplyKind: editInvoice.acceptedSupplyKind,
@@ -893,8 +893,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             }
             const defaultsPlan = supplierDefaults ? planApSupplierDefaults(data, supplierDefaults, manualSupplierDefaults.current,
                 new Set((taxGroupsData || []).map(group => group.id))) : null;
+            const { supplierId, ...invoiceData } = data;
             const request = {
-                ...data,
+                ...invoiceData,
+                businessPartnerId: supplierId,
                 apAccountId: data.apAccountId || undefined,
                 expenseAccountId: data.expenseAccountId || undefined,
                 paymentTermsDays: !isOpeningBalance && applySupplierDefaults && supplierDefaults?.paymentTermId === data.paymentTermId && !manualSupplierDefaults.current.has('paymentTermId') && !manualSupplierDefaults.current.has('dueDate')
@@ -997,7 +999,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         isEditMode &&
         editInvoice &&
         suppliersData &&
-        !suppliersData.items.some(item => item.id === editInvoice.supplierId)
+        !suppliersData.items.some(item => item.id === editInvoice.businessPartnerId)
     );
 
     if (

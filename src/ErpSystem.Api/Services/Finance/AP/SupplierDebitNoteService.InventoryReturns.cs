@@ -70,7 +70,7 @@ public sealed partial class SupplierDebitNoteService
             x.TenantId == TenantId && !x.IsDeleted && x.BusinessPartnerId == source.SupplierId, cancellationToken);
         if (identity == null) return Array.Empty<InventoryReturnCreditSourceDto>();
         var invoices = await _db.Set<VendorInvoice>().AsNoTracking().Include(x => x.LineItems)
-            .Where(x => x.TenantId == TenantId && !x.IsDeleted && x.SupplierId == identity.SupplierId &&
+            .Where(x => x.TenantId == TenantId && !x.IsDeleted && x.BusinessPartnerId == identity.BusinessPartnerId &&
                 x.PurchaseOrderId == source.PurchaseOrderId && x.JournalEntryId.HasValue && x.Status != VendorInvoiceStatus.Voided &&
                 _db.JournalEntries.Any(j => j.Id == x.JournalEntryId && j.TenantId == TenantId && !j.IsDeleted && !j.IsReversed &&
                     j.PostingStatus == "Posted" && j.SourceDocumentType == "VendorInvoice" && j.SourceDocumentId == x.Id))
@@ -216,7 +216,7 @@ public sealed partial class SupplierDebitNoteService
         }
         var invoice = await _db.Set<VendorInvoice>().Include(x => x.LineItems).SingleAsync(x =>
             x.Id == candidates[0].InvoiceId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
-        await ValidateInvoiceAsync(invoice.Id, invoice.SupplierId, cancellationToken);
+        await ValidateInvoiceAsync(invoice.Id, invoice.BusinessPartnerId, cancellationToken);
         await RequirePostedOriginalInvoiceAsync(invoice, cancellationToken);
         await EnsureReturnDispatchPostedAsync(source, invoice, source.ShippedDate!.Value.Date, cancellationToken);
         return true;

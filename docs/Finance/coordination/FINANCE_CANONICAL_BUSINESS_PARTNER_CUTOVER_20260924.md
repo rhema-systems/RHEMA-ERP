@@ -71,7 +71,13 @@ tooling have passed local verification.
 
 ## Current status
 
-`PHASE_2_FOUNDATION_IMPLEMENTED_NOT_APPLIED`
+`PHASE_3_FINANCE_AP_AR_CONVERSION_IN_PROGRESS`
+
+On 24 September 2026 the product owner authorized execution of every remaining implementation,
+verification, migration/reseed-tooling and ordered local/rehearsal/UAT step through completion.
+That authorization does not waive the control evidence below: each destructive environment step
+must still resolve the exact database target, create and restore-verify a backup, produce the
+readiness/deletion manifest and pass its environment gate. Unknown targets must never be guessed.
 
 ## Phase 1 dependency findings
 
@@ -97,4 +103,20 @@ tooling have passed local verification.
   Finance settings. Partner, legacy Supplier and document-level AP overrides are ignored.
 - Focused AP control-authority regressions: 4 passed, 0 failed (invoice posting, payment posting,
   draft defaults and explicit-default preservation).
+- AP invoice creation now accepts only canonical `BusinessPartnerId`, resolves an active
+  Supplier/Contractor role and the approved AP profile effective on the invoice date, and stores
+  immutable partner, role and profile evidence. It never creates a parallel Supplier identity.
+- Estate, Quantity Survey, landed-cost and Finance purchase-order AP producers now pass canonical
+  Business Partner identity. Estate no longer manufactures shadow Supplier rows for payables;
+  missing governed AP setup fails with a corrective configuration message.
+- Focused canonical AP-invoice regressions: 3 passed, 0 failed (identity snapshot, effective-date
+  fail-closed behavior, and explicit dual-role selection).
+- Migration `CanonicalVendorInvoiceBusinessPartnerIdentity` generated and inspected; not applied.
+  It refuses to run while `VendorInvoice` contains data, preventing a legacy Supplier GUID from
+  being silently reinterpreted as a Business Partner GUID before the verified Finance reset.
+- Release API build: passed, zero errors (existing repository warnings remain).
+- The default Finance test project currently exposes the expected breaking-contract cleanup:
+  legacy test fixtures still construct `VendorInvoice.SupplierId`/`Supplier`. Those fixtures must
+  be converted to governed Business Partner role/profile setup before the full suite can pass;
+  no compatibility alias will be added to conceal the unfinished conversion.
 - No database or accounting data was mutated.

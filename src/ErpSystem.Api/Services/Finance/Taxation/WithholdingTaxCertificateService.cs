@@ -211,7 +211,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         if (invoiceIds.Count > 0)
         {
             var invoices = await _context.Set<VendorInvoice>().AsNoTracking().Where(invoice =>
-                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.SupplierId == dto.SupplierId &&
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == dto.SupplierId &&
                 invoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
             if (invoices.Count != invoiceIds.Count)
                 throw new InvalidOperationException("A selected WHT invoice does not belong to this supplier and tenant.");
