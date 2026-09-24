@@ -488,7 +488,7 @@ public sealed class GhanaTaxReportingExportFoundationTests
             Id = Guid.NewGuid(),
             TenantId = fixture.TenantId,
             PaymentNumber = "CP-WHT-001",
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             PaymentDate = new DateTime(2026, 7, 10),
             TotalAmount = 88m,
             AllocatedAmount = 88m,

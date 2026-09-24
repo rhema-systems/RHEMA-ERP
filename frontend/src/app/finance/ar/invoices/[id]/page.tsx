@@ -152,7 +152,7 @@ export default function InvoiceDetailsPage() {
                         </Button>
                     )}
                     {showRecordReceipt && (
-                        <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
+                        <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
                             <CreditCard className="mr-2 h-4 w-4" /> Record Receipt
                         </Button>
                     )}

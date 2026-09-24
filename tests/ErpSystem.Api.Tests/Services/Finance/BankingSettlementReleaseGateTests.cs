@@ -955,7 +955,7 @@ public sealed class BankingSettlementReleaseGateTests
             Id = Guid.NewGuid(),
             TenantId = setup.TenantId,
             PaymentNumber = "CP-CHEQUE-001",
-            CustomerId = customer.Id,
+            BusinessPartnerId = customer.Id,
             PaymentDate = new DateTime(2026, 7, 5),
             TotalAmount = amount,
             AllocatedAmount = amount,

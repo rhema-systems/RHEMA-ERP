@@ -8,7 +8,8 @@ namespace ErpSystem.Core.DTOs.AR;
 
 public class PaymentCreateDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
     public string PaymentMethod { get; set; } = "Cash";
@@ -62,7 +63,7 @@ public class PaymentUpdateDto
 public class PaymentQueryDto
 {
     public string? SearchTerm { get; set; }
-    public Guid? CustomerId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public string? PaymentMethod { get; set; }
     public Guid? PaymentMethodId { get; set; }
     public string? Status { get; set; }

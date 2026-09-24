@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
-using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Entities.Procurement;
 
 namespace ErpSystem.Core.Entities.Finance;
 
@@ -18,8 +18,30 @@ public class CustomerPayment : BusinessEntity
     public string PaymentNumber { get; set; } = string.Empty;
 
     [Required]
-    public Guid CustomerId { get; set; }
-    public virtual Customer Customer { get; set; } = null!;
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+
+    [Required]
+    public Guid BusinessPartnerRoleId { get; set; }
+    public virtual BusinessPartnerRole BusinessPartnerRole { get; set; } = null!;
+
+    [Required]
+    public Guid BusinessPartnerArProfileVersionId { get; set; }
+    public virtual BusinessPartnerArProfileVersion BusinessPartnerArProfileVersion { get; set; } = null!;
+
+    [Required]
+    [MaxLength(50)]
+    public string BusinessPartnerCode { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(200)]
+    public string BusinessPartnerName { get; set; } = string.Empty;
+
+    [MaxLength(200)]
+    public string? BusinessPartnerLegalName { get; set; }
+
+    [MaxLength(100)]
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
 
     [Required]
     public DateTime PaymentDate { get; set; } = DateTime.UtcNow;

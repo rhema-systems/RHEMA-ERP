@@ -139,8 +139,13 @@ export interface InvoiceLineItemRequest {
 export interface CustomerPayment {
     id: string;
     paymentNumber: string;
-    customerId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId: string;
+    businessPartnerArProfileVersionId: string;
+    businessPartnerCode: string;
     customerName: string;
+    businessPartnerLegalName?: string;
+    businessPartnerTaxIdentificationNumber?: string;
     paymentDate: string;
     totalAmount: number;
     allocatedAmount: number;
@@ -194,7 +199,8 @@ export interface CustomerPayment {
 }
 
 export interface PaymentCreateRequest {
-    customerId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     paymentDate: string;
     totalAmount: number;
     paymentMethod: string;

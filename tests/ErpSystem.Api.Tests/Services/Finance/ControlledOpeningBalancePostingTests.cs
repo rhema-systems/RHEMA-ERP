@@ -1127,7 +1127,7 @@ public sealed class ControlledOpeningBalancePostingTests
         });
         var customerBatch = await service.CreateCustomerAdvanceBatchAsync(new CreateCustomerAdvanceOpeningBalanceDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             SourceReference = "TDC-AR-ADV-001",
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
@@ -1261,7 +1261,7 @@ public sealed class ControlledOpeningBalancePostingTests
         });
         var arBatch = await service.CreateArWithholdingBatchAsync(new CreateArWithholdingOpeningBalanceDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             TaxId = fixture.WithholdingTax.Id,
             WithholdingTaxAccountId = fixture.WhtReceivable.Id,
             SourceReference = "TDC-WHT-CERT-001",
@@ -2549,7 +2549,7 @@ public sealed class ControlledOpeningBalancePostingTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FinalSignOff")]
     [Trait("Category", "Schema")]
-    public void CustomerPaymentModel_ShouldNotCreateLegacyCustomerIdShadowColumn()
+    public void CustomerPaymentModel_ShouldUseCanonicalBusinessPartnerIdentityAndProfileEvidence()
     {
         using var db = CreateContext();
 
@@ -2557,9 +2557,13 @@ public sealed class ControlledOpeningBalancePostingTests
         var customerEntity = db.Model.FindEntityType(typeof(ErpSystem.Core.Entities.Sales.Customer));
 
         customerPaymentEntity.Should().NotBeNull();
-        customerPaymentEntity!.FindProperty("CustomerId").Should().NotBeNull();
-        customerPaymentEntity.FindProperty("CustomerId1").Should().BeNull();
-        customerPaymentEntity.FindNavigation(nameof(CustomerPayment.Customer)).Should().BeNull();
+        customerPaymentEntity!.FindProperty("CustomerId").Should().BeNull();
+        customerPaymentEntity.FindProperty(nameof(CustomerPayment.BusinessPartnerId)).Should().NotBeNull();
+        customerPaymentEntity.FindProperty(nameof(CustomerPayment.BusinessPartnerRoleId)).Should().NotBeNull();
+        customerPaymentEntity.FindProperty(nameof(CustomerPayment.BusinessPartnerArProfileVersionId)).Should().NotBeNull();
+        customerPaymentEntity.FindNavigation(nameof(CustomerPayment.BusinessPartner)).Should().NotBeNull();
+        customerPaymentEntity.FindNavigation(nameof(CustomerPayment.BusinessPartnerRole)).Should().NotBeNull();
+        customerPaymentEntity.FindNavigation(nameof(CustomerPayment.BusinessPartnerArProfileVersion)).Should().NotBeNull();
         customerEntity?.FindNavigation("Payments").Should().BeNull();
     }
 

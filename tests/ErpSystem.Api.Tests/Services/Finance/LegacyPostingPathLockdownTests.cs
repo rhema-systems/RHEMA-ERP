@@ -430,6 +430,42 @@ public sealed class LegacyPostingPathLockdownTests
             .And.NotContain("RenameColumn(\n                name: \"SupplierId\"");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void CustomerReceipts_ShouldUseGovernedCanonicalBusinessPartnerIdentity()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "PaymentService.cs"));
+        var entity = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Entities", "Finance", "CustomerPayment.cs"));
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "AR", "PaymentCrudDtos.cs"));
+        var createDto = dto[dto.IndexOf("public class PaymentCreateDto", StringComparison.Ordinal)..dto.IndexOf("public class PaymentUpdateDto", StringComparison.Ordinal)];
+        var migrationPath = Directory.GetFiles(
+                Path.Combine(root, "src", "ErpSystem.Data", "Migrations"),
+                "*CanonicalCustomerPaymentBusinessPartnerIdentity.cs")
+            .Single(path => !path.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase));
+        var migration = File.ReadAllText(migrationPath);
+
+        entity.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid BusinessPartnerRoleId")
+            .And.Contain("public Guid BusinessPartnerArProfileVersionId")
+            .And.Contain("public string BusinessPartnerCode")
+            .And.Contain("public string BusinessPartnerName")
+            .And.NotContain("public Guid CustomerId");
+        createDto.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid? BusinessPartnerRoleId")
+            .And.NotContain("public Guid CustomerId");
+        service.Should().Contain("BusinessPartnerFinanceProfilePolicy.ResolveAr")
+            .And.Contain("BusinessPartnerArProfileVersionId = counterparty.Profile.Id")
+            .And.Contain("BusinessPartnerCode = customer.PartnerCode")
+            .And.NotContain("dto.CustomerId")
+            .And.NotContain("payment.CustomerId");
+        migration.Should().Contain("IF EXISTS (SELECT 1 FROM [CustomerPayment])")
+            .And.Contain("requires a fresh Finance transactional database")
+            .And.Contain("DropColumn(\n                name: \"CustomerId\"")
+            .And.NotContain("RenameColumn(\n                name: \"CustomerId\"");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

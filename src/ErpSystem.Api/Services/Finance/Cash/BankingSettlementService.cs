@@ -1069,7 +1069,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 CaseNumber = item.CaseNumber,
                 CustomerPaymentId = item.CustomerPaymentId,
                 PaymentNumber = item.CustomerPayment.PaymentNumber,
-                CustomerId = item.CustomerPayment.CustomerId,
+                CustomerId = item.CustomerPayment.BusinessPartnerId,
                 BankDepositBatchId = item.BankDepositBatchId,
                 DepositNumber = item.BankDepositBatch == null ? null : item.BankDepositBatch.DepositNumber,
                 BankAccountId = item.BankAccountId,
@@ -1770,7 +1770,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
         loaded.CustomerPayment.ClearedDate = null;
         loaded.CustomerPayment.AllocatedAmount = 0m;
         var customer = await _context.BusinessPartners.FirstOrDefaultAsync(
-            value => value.TenantId == tenantId && value.Id == loaded.CustomerPayment.CustomerId,
+            value => value.TenantId == tenantId && value.Id == loaded.CustomerPayment.BusinessPartnerId,
             cancellationToken);
         if (customer != null)
         {
@@ -2622,7 +2622,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
         IReadOnlyCollection<ReturnedChequeCase> cases,
         CancellationToken cancellationToken)
     {
-        var customerIds = cases.Select(item => item.CustomerPayment.CustomerId).Distinct().ToArray();
+        var customerIds = cases.Select(item => item.CustomerPayment.BusinessPartnerId).Distinct().ToArray();
         var customerNames = await _context.BusinessPartners
             .AsNoTracking()
             .Where(item => item.TenantId == TenantId && customerIds.Contains(item.Id))
@@ -2633,8 +2633,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
             CaseNumber = item.CaseNumber,
             CustomerPaymentId = item.CustomerPaymentId,
             PaymentNumber = item.CustomerPayment.PaymentNumber,
-            CustomerId = item.CustomerPayment.CustomerId,
-            CustomerName = customerNames.GetValueOrDefault(item.CustomerPayment.CustomerId, "Customer"),
+            CustomerId = item.CustomerPayment.BusinessPartnerId,
+            CustomerName = item.CustomerPayment.BusinessPartnerName,
             BankDepositBatchId = item.BankDepositBatchId,
             DepositNumber = item.BankDepositBatch?.DepositNumber,
             BankAccountId = item.BankAccountId,

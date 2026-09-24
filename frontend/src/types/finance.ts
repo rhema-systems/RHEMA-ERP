@@ -2052,17 +2052,20 @@ export interface CreateSpecializedOpeningBalanceDto {
 
 export interface CreateSupplierAdvanceOpeningBalanceDto
   extends CreateSpecializedOpeningBalanceDto {
-  supplierId: string;
+  businessPartnerId: string;
+  businessPartnerRoleId?: string;
 }
 
 export interface CreateCustomerAdvanceOpeningBalanceDto
   extends CreateSpecializedOpeningBalanceDto {
-  customerId: string;
+  businessPartnerId: string;
+  businessPartnerRoleId?: string;
 }
 
 export interface CreateApWithholdingOpeningBalanceDto
   extends CreateSpecializedOpeningBalanceDto {
-  supplierId: string;
+  businessPartnerId: string;
+  businessPartnerRoleId?: string;
   taxId: string;
   withholdingTaxAccountId: string;
   taxableBase: number;
@@ -2071,7 +2074,8 @@ export interface CreateApWithholdingOpeningBalanceDto
 
 export interface CreateArWithholdingOpeningBalanceDto
   extends CreateSpecializedOpeningBalanceDto {
-  customerId: string;
+  businessPartnerId: string;
+  businessPartnerRoleId?: string;
   taxId: string;
   withholdingTaxAccountId: string;
   certificateNumber?: string;

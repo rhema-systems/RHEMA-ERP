@@ -700,7 +700,7 @@ public sealed class TaxReportingService : ITaxReportingService
         var postedJournals = await LoadPostedJournalIdsAsync(journalIds, cancellationToken);
         var postingEvents = await LoadPostingEventsAsync(new[] { CustomerPaymentDocumentType }, cancellationToken);
 
-        var partnerIds = payments.Select(p => p.CustomerId).Distinct().ToList();
+        var partnerIds = payments.Select(p => p.BusinessPartnerId).Distinct().ToList();
         var partnerNames = await _context.Set<BusinessPartner>()
             .AsNoTracking()
             .Where(p => p.TenantId == TenantId && partnerIds.Contains(p.Id))
@@ -709,7 +709,7 @@ public sealed class TaxReportingService : ITaxReportingService
         var lines = new List<GhanaTaxWithholdingLineDto>();
         var diagnostics = new List<TaxReportDiagnosticDto>();
 
-        foreach (var payment in payments.Where(p => SourceFiltersMatch(request, CustomerPaymentDocumentType, p.PaymentNumber, p.CustomerId, null)))
+        foreach (var payment in payments.Where(p => SourceFiltersMatch(request, CustomerPaymentDocumentType, p.PaymentNumber, p.BusinessPartnerId, null)))
         {
             if (!payment.JournalEntryId.HasValue || !postedJournals.Contains(payment.JournalEntryId.Value))
             {
@@ -729,7 +729,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 continue;
             }
 
-            partnerNames.TryGetValue(payment.CustomerId, out var customerName);
+            partnerNames.TryGetValue(payment.BusinessPartnerId, out var customerName);
 
             if (includeStandardWithholding && payment.WithholdingTaxAmount > 0m)
             {
@@ -743,7 +743,7 @@ public sealed class TaxReportingService : ITaxReportingService
                         SourceDocumentId = payment.Id,
                         SourceDocumentNumber = payment.PaymentNumber,
                         SourceDocumentDate = payment.PaymentDate.Date,
-                        CounterpartyId = payment.CustomerId,
+                        CounterpartyId = payment.BusinessPartnerId,
                         CounterpartyName = customerName,
                         TaxId = payment.WithholdingTaxId,
                         TaxCode = payment.WithholdingTax?.Code,
@@ -780,7 +780,7 @@ public sealed class TaxReportingService : ITaxReportingService
                         SourceDocumentId = payment.Id,
                         SourceDocumentNumber = payment.PaymentNumber,
                         SourceDocumentDate = payment.PaymentDate.Date,
-                        CounterpartyId = payment.CustomerId,
+                        CounterpartyId = payment.BusinessPartnerId,
                         CounterpartyName = customerName,
                         TaxId = payment.VatWithholdingTaxId,
                         TaxCode = payment.VatWithholdingTax?.Code,

@@ -69,8 +69,13 @@ namespace ErpSystem.Core.DTOs.Finance
     {
         public Guid Id { get; set; }
         public string PaymentNumber { get; set; } = string.Empty;
-        public Guid CustomerId { get; set; }
+        public Guid BusinessPartnerId { get; set; }
+        public Guid BusinessPartnerRoleId { get; set; }
+        public Guid BusinessPartnerArProfileVersionId { get; set; }
+        public string BusinessPartnerCode { get; set; } = string.Empty;
         public string CustomerName { get; set; } = string.Empty;
+        public string? BusinessPartnerLegalName { get; set; }
+        public string? BusinessPartnerTaxIdentificationNumber { get; set; }
         public DateTime PaymentDate { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal AllocatedAmount { get; set; }

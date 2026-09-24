@@ -1595,10 +1595,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<CustomerPayment>(entity =>
         {
             entity.ToTable("CustomerPayment");
-            entity.Ignore(e => e.Customer);
-            entity.HasOne<BusinessPartner>()
+            entity.HasIndex(e => e.BusinessPartnerId);
+            entity.HasIndex(e => e.BusinessPartnerRoleId);
+            entity.HasIndex(e => e.BusinessPartnerArProfileVersionId);
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.CustomerId)
+                .HasForeignKey(e => e.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerRole)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerRoleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerArProfileVersion)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerArProfileVersionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.BankAccount)
                 .WithMany()

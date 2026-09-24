@@ -382,7 +382,7 @@ public class CustomerService : ICustomerService
             .GetQueryable(p =>
                 p.TenantId == TenantId &&
                 !p.IsDeleted &&
-                p.CustomerId == customerId);
+                p.BusinessPartnerId == customerId);
     }
 
     private async Task<string> GenerateCustomerCodeAsync(CancellationToken cancellationToken)
@@ -531,7 +531,12 @@ public class CustomerService : ICustomerService
         {
             Id = payment.Id,
             PaymentNumber = payment.PaymentNumber,
-            CustomerId = payment.CustomerId,
+            BusinessPartnerId = payment.BusinessPartnerId,
+            BusinessPartnerRoleId = payment.BusinessPartnerRoleId,
+            BusinessPartnerArProfileVersionId = payment.BusinessPartnerArProfileVersionId,
+            BusinessPartnerCode = payment.BusinessPartnerCode,
+            BusinessPartnerLegalName = payment.BusinessPartnerLegalName,
+            BusinessPartnerTaxIdentificationNumber = payment.BusinessPartnerTaxIdentificationNumber,
             CustomerName = customer.PartnerName,
             PaymentDate = payment.PaymentDate,
             TotalAmount = payment.TotalAmount,

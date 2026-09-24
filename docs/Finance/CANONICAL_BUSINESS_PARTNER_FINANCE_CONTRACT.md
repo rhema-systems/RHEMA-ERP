@@ -56,6 +56,14 @@ must not be interpreted as a promise that they override Finance settings.
   data edits do not rewrite accounting evidence.
 - Reversals reuse the original canonical partner and role, then revalidate the profile effective on
   the reversal date. They never create or look up a legacy Supplier/Customer shadow record.
+- AR receipts use `BusinessPartnerId`, the selected Customer `BusinessPartnerRoleId`, and the
+  approved `BusinessPartnerArProfileVersionId` effective on the receipt date. The receipt stores
+  immutable partner code, name, legal name and TIN snapshots; allocation, banking settlement,
+  controlled-document, tax and reporting paths consume that evidence rather than a parallel
+  Finance Customer identity.
+- Specialized customer-advance and AR-withholding opening balances use the same governed Customer
+  role/profile resolution. A cutover row cannot bypass canonical readiness merely because it is
+  classified as opening evidence.
 
 ## Withholding contract
 

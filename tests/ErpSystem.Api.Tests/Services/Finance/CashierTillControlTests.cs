@@ -151,7 +151,7 @@ public sealed class CashierTillControlTests
 
         var action = () => service.CreateAsync(new PaymentCreateDto
         {
-            CustomerId = Guid.NewGuid(),
+            BusinessPartnerId = Guid.NewGuid(),
             PaymentDate = DateTime.UtcNow,
             TotalAmount = 100m,
             PaymentMethod = "CreditNote",

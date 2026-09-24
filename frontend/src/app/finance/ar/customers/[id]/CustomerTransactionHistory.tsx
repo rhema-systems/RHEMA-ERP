@@ -39,7 +39,7 @@ export function CustomerTransactionHistory({ customerId }: CustomerTransactionHi
 
     const { data: payments, isLoading: paymentsLoading } = useQuery({
         queryKey: ['customer-payments', customerId],
-        queryFn: () => arService.getPayments({ customerId, pageSize: 50 })
+        queryFn: () => arService.getPayments({ businessPartnerId: customerId, pageSize: 50 })
     });
 
     const isLoading = invoicesLoading || paymentsLoading;

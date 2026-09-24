@@ -501,7 +501,7 @@ public sealed class ArReceiptPostingMigrationTests
         SeedTenant(db, otherTenantId, "OTH");
         var otherArAccount = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var otherCustomer = SeedCustomer(db, otherTenantId, otherArAccount.Id);
-        fixture.Payment.CustomerId = otherCustomer.Id;
+        fixture.Payment.BusinessPartnerId = otherCustomer.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
@@ -1126,6 +1126,29 @@ public sealed class ArReceiptPostingMigrationTests
         var taxAccount = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var discountAccount = SeedAccount(db, tenantId, "5200", AccountType.Expense);
         var customer = SeedCustomer(db, tenantId, arAccount.Id);
+        var customerRole = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerId = customer.Id,
+            RoleType = BusinessPartnerRoleType.Customer,
+            Status = BusinessPartnerRoleStatus.Active,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        var arProfile = new BusinessPartnerArProfileVersion
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerRoleId = customerRole.Id,
+            VersionNumber = 1,
+            Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2026, 1, 1),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.BusinessPartnerRoles.Add(customerRole);
+        db.BusinessPartnerArProfileVersions.Add(arProfile);
         var bankAccount = SeedBankAccount(db, tenantId, bankGlAccount.Id);
 
         db.Set<FinanceSettings>().Add(new FinanceSettings
@@ -1160,7 +1183,13 @@ public sealed class ArReceiptPostingMigrationTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "CP-2026-00001",
-            CustomerId = customer.Id,
+            BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = customerRole.Id,
+            BusinessPartnerArProfileVersionId = arProfile.Id,
+            BusinessPartnerCode = customer.PartnerCode,
+            BusinessPartnerName = customer.PartnerName,
+            BusinessPartnerLegalName = customer.LegalName,
+            BusinessPartnerTaxIdentificationNumber = customer.TaxIdentificationNumber,
             PaymentDate = new DateTime(2026, 7, 5),
             TotalAmount = allocationAmount,
             AllocatedAmount = allocationAmount,

@@ -1122,11 +1122,11 @@ namespace ErpSystem.Api.Services.Finance.GL
             var customer = await _context.Set<BusinessPartner>()
                 .FirstOrDefaultAsync(p =>
                     p.TenantId == payment.TenantId &&
-                    p.Id == payment.CustomerId &&
+                    p.Id == payment.BusinessPartnerId &&
                     !p.IsDeleted &&
                     (p.PartnerType == "Customer" || p.PartnerType == "Both"),
                     cancellationToken)
-                ?? throw new InvalidOperationException($"Customer business partner {payment.CustomerId} not found for AR payment.");
+                ?? throw new InvalidOperationException($"Customer Business Partner {payment.BusinessPartnerId} not found for AR payment.");
 
             var sourceDocumentType = payment.IsCreditNote ? "CustomerCreditNote" : "CustomerPayment";
             var existingPaymentJournal = await GetExistingSourceJournalAsync(

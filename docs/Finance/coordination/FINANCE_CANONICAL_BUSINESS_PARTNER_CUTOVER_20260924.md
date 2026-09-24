@@ -188,3 +188,24 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   Finance type contract.
 - The rebuilt Data and API assemblies compile the guarded migration with zero errors, and EF reports
   no model changes pending after `CanonicalSubledgerAdjustmentBusinessPartnerIdentity`.
+- AR receipts now accept `BusinessPartnerId` plus an optional explicit Customer role, resolve the
+  approved AR profile effective on the receipt date, and freeze the role/profile IDs and immutable
+  partner code/name/legal-name/TIN evidence. Receipt allocation, banking settlement, controlled
+  documents, tax reports, AR reports, subledger posting, Estate and fixed-asset producers now use
+  the canonical identity.
+- The legacy startup SQL that recreated `FK_CustomerPayment_BusinessPartners_CustomerId` has been
+  removed. Migration `CanonicalCustomerPaymentBusinessPartnerIdentity` is generated but not
+  applied; it refuses any non-empty `CustomerPayment` table and creates clean canonical identity
+  columns after the approved Finance reset rather than reinterpreting an old GUID as a role ID.
+- Customer-advance and AR-withholding opening balances now resolve and snapshot the governed
+  Customer role/profile too. Frontend receipt and opening-balance commands send
+  `businessPartnerId`; no legacy receipt `customerId` API alias remains.
+- API and default API-test-project builds pass with zero errors. The two focused canonical receipt
+  architecture/model tests pass (2/2), and the AR receipt posting suite is 28/30: the remaining two
+  failures are its pre-existing foreign-exchange snapshot-direction mismatch, reached only after
+  canonical role/profile readiness passed. EF reports no pending model changes.
+- Repository-wide frontend type-check remains red on its documented baseline; filtering the output
+  to the changed AR receipt, AR service/type and opening-balance files returns no errors. The Core
+  test project remains uncompilable on pre-existing legacy Supplier fixtures removed by the earlier
+  AP bridge cutover; this receipt slice adds no Core-project compile failure.
+- No migration or database reset has been executed in this checkpoint.

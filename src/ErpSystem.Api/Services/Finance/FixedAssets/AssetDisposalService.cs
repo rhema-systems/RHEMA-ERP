@@ -807,7 +807,7 @@ public class AssetDisposalService : IAssetDisposalService
 
         var receiptRequest = new PaymentCreateDto
         {
-            CustomerId = disposal.BuyerBusinessPartnerId.Value,
+            BusinessPartnerId = disposal.BuyerBusinessPartnerId.Value,
             PaymentDate = disposal.DisposalDate.Date,
             TotalAmount = invoice.TotalAmount,
             PaymentMethod = "Configured",

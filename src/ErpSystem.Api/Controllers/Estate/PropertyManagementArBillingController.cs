@@ -684,7 +684,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             "CustomerPayment",
             payment.Id,
             $"/finance/ar/payments/{payment.Id}",
-            BillingMetadata(payment.PaymentNumber, payment.CustomerId, payment.CustomerName, payment.TotalAmount, payment.CurrencyCode, request.SourceRecordReference, request.PropertyUnit),
+            BillingMetadata(payment.PaymentNumber, payment.BusinessPartnerId, payment.CustomerName, payment.TotalAmount, payment.CurrencyCode, request.SourceRecordReference, request.PropertyUnit),
             cancellationToken);
 
         return Ok(payment);

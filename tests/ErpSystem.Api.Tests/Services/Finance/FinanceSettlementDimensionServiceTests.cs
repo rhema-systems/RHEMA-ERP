@@ -292,7 +292,7 @@ public sealed class FinanceSettlementDimensionServiceTests
         var payment = new CustomerPayment
         {
             Id = Guid.NewGuid(), TenantId = tenantId, PaymentNumber = "CR-DIM-1",
-            CustomerId = invoice.BusinessPartnerId, PaymentDate = new DateTime(2026, 2, 1),
+            BusinessPartnerId = invoice.BusinessPartnerId, PaymentDate = new DateTime(2026, 2, 1),
             TotalAmount = 13m, CurrencyCode = "GHS", ExchangeRate = 1m,
             PaymentMethod = "BankTransfer", Status = "Pending"
         };

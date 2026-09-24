@@ -1467,7 +1467,7 @@ public sealed class ArCreditNotePostingMigrationTests
         {
             Id = Guid.NewGuid(),
             TenantId = fixture.CreditNote.TenantId,
-            CustomerId = fixture.Invoice.BusinessPartnerId,
+            BusinessPartnerId = fixture.Invoice.BusinessPartnerId,
             PaymentNumber = "CP-2026-00001",
             PaymentDate = fixture.CreditNote.DocumentDate,
             TotalAmount = amount,

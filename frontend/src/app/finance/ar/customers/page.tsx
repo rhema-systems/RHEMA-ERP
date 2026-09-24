@@ -188,7 +188,7 @@ export default function CustomersPage() {
                                                         <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/invoices/new?customerId=${customer.id}`); }}>
                                                             <FileText className="mr-2 h-4 w-4" /> New Invoice
                                                         </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/receipts/new?customerId=${customer.id}`); }}>
+                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/receipts/new?businessPartnerId=${customer.id}`); }}>
                                                             <DollarSign className="mr-2 h-4 w-4" /> Record Receipt
                                                         </DropdownMenuItem>
                                                     </DropdownMenuContent>

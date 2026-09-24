@@ -568,7 +568,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var openingPayments = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
-                    p.CustomerId == customerId &&
+                    p.BusinessPartnerId == customerId &&
                     p.PaymentDate < fromDate)
                 .ToListAsync(cancellationToken);
 
@@ -592,7 +592,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var periodPayments = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
-                    p.CustomerId == customerId &&
+                    p.BusinessPartnerId == customerId &&
                     p.PaymentDate >= fromDate &&
                     p.PaymentDate <= toDate)
                 .OrderBy(p => p.PaymentDate)
@@ -1261,7 +1261,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     p.Status != "Pending" &&
                     p.Status != "Cancelled" &&
                     p.Status != "Bounced")
-                .Select(p => p.CustomerId)
+                .Select(p => p.BusinessPartnerId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
 
@@ -1329,7 +1329,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var payments = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
-                    p.CustomerId == customer.CustomerId &&
+                    p.BusinessPartnerId == customer.CustomerId &&
                     p.PaymentDate < endExclusive &&
                     p.Status != "Pending" &&
                     p.Status != "Cancelled" &&

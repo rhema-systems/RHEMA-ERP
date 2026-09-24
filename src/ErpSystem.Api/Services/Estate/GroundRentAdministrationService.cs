@@ -641,7 +641,7 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
         var payment = await _paymentService.CreateAsync(
             new PaymentCreateDto
             {
-                CustomerId = charge.GroundRentAccount.CustomerBusinessPartnerId,
+                BusinessPartnerId = charge.GroundRentAccount.CustomerBusinessPartnerId,
                 PaymentDate = request.PaymentDate == default ? DateTime.UtcNow.Date : request.PaymentDate.Date,
                 TotalAmount = request.Amount,
                 PaymentMethod = string.IsNullOrWhiteSpace(request.PaymentMethod) ? "Cash" : request.PaymentMethod.Trim(),

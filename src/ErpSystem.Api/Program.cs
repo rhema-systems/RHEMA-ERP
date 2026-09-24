@@ -528,7 +528,6 @@ if (args.Length > 0 && args[0] == "repair-finance-po-schema")
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await RepairFinanceSettingsSchemaAsync(db);
-        await RepairCustomerPaymentSchemaAsync(db);
         await RepairFinancePurchaseOrderSchemaAsync(db);
     }
 
@@ -1065,7 +1064,6 @@ async Task InitializeDatabaseAsync(
         await RepairDevelopmentMigrationHistoryIfNeededAsync(app.Environment, context, logger, migrationCts.Token);
         await context.Database.MigrateAsync(migrationCts.Token);
         await RepairFinanceSettingsSchemaAsync(context, migrationCts.Token);
-        await RepairCustomerPaymentSchemaAsync(context, migrationCts.Token);
         await RepairFinancePurchaseOrderSchemaAsync(context, migrationCts.Token);
     }
     catch (OperationCanceledException ex)
@@ -1220,47 +1218,6 @@ static async Task<bool> TableExistsAsync(
             await connection.CloseAsync();
         }
     }
-}
-
-static async Task RepairCustomerPaymentSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
-{
-    await context.Database.ExecuteSqlRawAsync("""
-IF OBJECT_ID(N'[dbo].[CustomerPayment]', N'U') IS NOT NULL
-   AND OBJECT_ID(N'[dbo].[BusinessPartners]', N'U') IS NOT NULL
-BEGIN
-    DECLARE @legacyCustomerFk sysname;
-
-    SELECT TOP (1) @legacyCustomerFk = fk.[name]
-    FROM sys.foreign_keys fk
-    INNER JOIN sys.foreign_key_columns fkc
-        ON fkc.constraint_object_id = fk.[object_id]
-    INNER JOIN sys.columns pc
-        ON pc.[object_id] = fkc.parent_object_id
-       AND pc.column_id = fkc.parent_column_id
-    WHERE fk.parent_object_id = OBJECT_ID(N'[dbo].[CustomerPayment]')
-      AND fk.referenced_object_id = OBJECT_ID(N'[dbo].[Customers]')
-      AND pc.[name] = N'CustomerId';
-
-    IF @legacyCustomerFk IS NOT NULL
-    BEGIN
-        DECLARE @dropSql nvarchar(max) =
-            N'ALTER TABLE [dbo].[CustomerPayment] DROP CONSTRAINT [' + REPLACE(@legacyCustomerFk, N']', N']]') + N']';
-        EXEC sp_executesql @dropSql;
-    END;
-
-    IF NOT EXISTS (
-        SELECT 1
-        FROM sys.foreign_keys
-        WHERE [name] = N'FK_CustomerPayment_BusinessPartners_CustomerId'
-          AND [parent_object_id] = OBJECT_ID(N'[dbo].[CustomerPayment]')
-    )
-    BEGIN
-        ALTER TABLE [dbo].[CustomerPayment] WITH NOCHECK
-            ADD CONSTRAINT [FK_CustomerPayment_BusinessPartners_CustomerId]
-            FOREIGN KEY ([CustomerId]) REFERENCES [dbo].[BusinessPartners] ([Id]);
-    END;
-END
-""", cancellationToken);
 }
 
 static async Task RepairFinanceSettingsSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)

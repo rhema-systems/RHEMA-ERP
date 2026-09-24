@@ -1048,7 +1048,7 @@ public sealed class GhanaStatutoryTaxEngineTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "CP-WHT-001",
-            CustomerId = customer.Id,
+            BusinessPartnerId = customer.Id,
             PaymentDate = new DateTime(2026, 7, 6),
             TotalAmount = 88m,
             AllocatedAmount = 100m,

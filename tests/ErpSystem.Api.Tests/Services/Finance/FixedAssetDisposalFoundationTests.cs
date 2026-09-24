@@ -266,7 +266,7 @@ public sealed class FixedAssetDisposalFoundationTests
         completed.CustomerPaymentId.Should().NotBeNull();
         services.PaymentService.Verify(service => service.CreateAsync(
             It.Is<PaymentCreateDto>(payment =>
-                payment.CustomerId == fixture.Buyer.Id &&
+                payment.BusinessPartnerId == fixture.Buyer.Id &&
                 payment.TotalAmount == 1100m &&
                 payment.BankAccountId == bank.Id &&
                 payment.TransactionReference == "BANK-ADVICE-001" &&
@@ -1074,7 +1074,7 @@ public sealed class FixedAssetDisposalFoundationTests
             {
                 Id = Guid.NewGuid(),
                 PaymentNumber = $"RCP-{Guid.NewGuid():N}"[..20],
-                CustomerId = dto.CustomerId,
+                BusinessPartnerId = dto.BusinessPartnerId,
                 PaymentDate = dto.PaymentDate,
                 TotalAmount = dto.TotalAmount,
                 CurrencyCode = dto.CurrencyCode,

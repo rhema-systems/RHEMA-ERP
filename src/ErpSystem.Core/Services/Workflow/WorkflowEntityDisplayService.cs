@@ -821,10 +821,10 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 
             if (key == Normalize("CustomerPayment"))
             {
-                var payment = await _unitOfWork.Repository<CustomerPayment>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.Customer);
+                var payment = await _unitOfWork.Repository<CustomerPayment>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.BusinessPartner);
                 info.EntityType = "CustomerPayment";
                 info.EntityNumber = payment?.PaymentNumber;
-                info.EntityName = payment?.Customer?.CustomerName;
+                info.EntityName = payment?.BusinessPartnerName;
                 info.ActionUrl = $"/finance/ar/payments";
                 return info;
             }
