@@ -88,6 +88,9 @@ public static class FinancePermissions
     public const string ApproveApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Approve";
     public const string PostApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Post";
     public const string ReverseApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Reverse";
+    public const string ManageBusinessPartnerFinanceProfiles = "Finance.BusinessPartners.Profiles.Manage";
+    public const string ApproveBusinessPartnerFinanceProfiles = "Finance.BusinessPartners.Profiles.Approve";
+    public const string OverrideApWithholding = "Finance.AP.OverrideWithholding";
 
     public const string ManageArInvoices = "Finance.AR.Invoices.Manage";
     public const string CreateArInvoices = "Finance.AR.Invoices.Create";
@@ -228,6 +231,9 @@ public static class FinancePermissions
         new(EditApInvoices, "Edit AP Invoices", "Edit draft supplier invoices.", CategoryAccountsPayable),
         new(DeleteApInvoices, "Delete AP Invoices", "Delete draft supplier invoices.", CategoryAccountsPayable),
         new(MaintainApInvoices, "Maintain AP Invoices", "Create and update supplier invoices.", CategoryAccountsPayable),
+        new(ManageBusinessPartnerFinanceProfiles, "Manage Business Partner Finance Profiles", "Prepare effective-dated AP and AR defaults on the canonical Business Partner.", CategoryAccountsPayable),
+        new(ApproveBusinessPartnerFinanceProfiles, "Approve Business Partner Finance Profiles", "Independently approve effective-dated AP and AR defaults.", CategoryAccountsPayable),
+        new(OverrideApWithholding, "Override AP Withholding", "Override a supplier withholding default with a mandatory reason and audit evidence.", CategoryAccountsPayable),
         new(SubmitApInvoices, "Submit AP Invoices", "Submit supplier invoices for approval.", CategoryAccountsPayable),
         new(ApproveApInvoices, "Approve AP Invoices", "Approve or reject supplier invoices.", CategoryAccountsPayable),
         new(PostApInvoices, "Post AP Invoices", "Post approved supplier invoices to the ledger.", CategoryAccountsPayable),

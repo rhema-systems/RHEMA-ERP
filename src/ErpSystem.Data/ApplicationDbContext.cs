@@ -773,6 +773,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     // Business Partner Management (Unified Supplier/Contractor)
     public DbSet<BusinessPartner> BusinessPartners { get; set; }
+    public DbSet<BusinessPartnerRole> BusinessPartnerRoles { get; set; }
+    public DbSet<BusinessPartnerApProfileVersion> BusinessPartnerApProfileVersions { get; set; }
+    public DbSet<BusinessPartnerApWhtDefault> BusinessPartnerApWhtDefaults { get; set; }
+    public DbSet<BusinessPartnerArProfileVersion> BusinessPartnerArProfileVersions { get; set; }
     public DbSet<PartnerCategory> PartnerCategories { get; set; }
     public DbSet<BusinessPartnerCategory> BusinessPartnerCategories { get; set; }
     public DbSet<ContractorSpecialization> ContractorSpecializations { get; set; }
@@ -1203,6 +1207,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         base.OnModelCreating(builder);
         ErpSystem.Data.Configurations.InventorySupplierReturnFinanceConfiguration.Configure(builder);
         ErpSystem.Data.Configurations.BusinessPartnerPostingDefaultsConfiguration.Configure(builder);
+        ErpSystem.Data.Configurations.BusinessPartnerFinanceProfileConfiguration.Configure(builder);
 
         // Apply entity configurations
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
