@@ -1,7 +1,8 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–O done (with I-b; K as K-a, K-b1, K-b2; N-b as N-b1, N-b2). What remains is
-> P: the guide rewrites (P2) and the six walks in § 5.**
+> **Status 2026-09-23 — A–O done (with I-b; K as K-a, K-b1, K-b2; N-b as N-b1, N-b2), and P2a, the
+> recruitment guide. What remains is P: P2b and P2c (the company schedule and orientation guides) and
+> the six walks in § 5.**
 >
 > | Lane | State |
 > |---|---|
@@ -9,7 +10,7 @@
 > | **C** | **DONE** — 46 ×2, `run-round4-c.mjs` |
 > | **F** | **DONE** — 103 ×2, `run-round4-f.mjs`; both migrations applied to UAT |
 > | **G** | **DONE** — 41 ×2, `run-round4-g.mjs`; committed |
-> | **H** | **DONE** — 36 ×2, `run-round4-h.mjs` |
+> | **H** | **DONE** — 36 ×2, `run-round4-h.mjs`; **37** since 2026-09-24, when the suite began switching its template off again and asserting it (P2a's repair, § 8) |
 > | **B** | **DONE** — 96 ×2, `run-round4-b.mjs`; **no migration**; all 16 neighbouring suites at baseline |
 > | **D-1** | **DONE** — 58 ×2, `run-round4-d.mjs`; migration `AddInterviewPanelClashOverrideAndRoomBooking` applied to UAT. D1–D4 + D8, the recruitment half |
 > | **D-2** | **DONE** — 39 ×2, `hr-company-schedule/run-round4-d.mjs`; migration `AddCompanyEventOriginalWindowAndUniqueNumbers` applied to UAT. D5–D7 |
@@ -28,13 +29,15 @@
 > | **N-b1** | **DONE** — 32 ×2, `hr-templates/run-lane-nb1.mjs`; **no migration**. **The offer letter goes with the Offer Issued email as a PDF** (the user's call), rendered by the Syncfusion engine the document module already uses; the email says it is attached only when it is. **Under Review** is sent once, on the first move a person makes into a review stage, from either door; the older door had sent it after every move. **Application Withdrawn** is sent from all three live withdrawals; it was unreachable. **Offer Accepted** is sent however the acceptance arrives, and an acceptance by the anonymous link carries the offer tenant's wording. The portal's withdrawal now closes the application's pipeline stage, as HR's always did. ⚠ The first PDF had **empty tables**, because the importer does not read `rem`. It was found by opening the file, then fixed, and the suite now checks the tables' words — § 8 |
 > | **N-b2** | **DONE** — 36 ×2, `hr-templates/run-lane-nb2.mjs`; migration `AddCompanyScheduleReminderSweep` applied to UAT. **Company-schedule reminders send themselves.** An hourly sweep sends each live event's reminder the days before its form asks for, and chases unanswered invitations ahead of the RSVP deadline. Each goes **once**, stamped on the event, in the tenant's wording and under its legal name. The form's **Send reminders / days before** had been ghosts. The RSVP-chase lead is a new tenant setting (2 days, on the policy page). A moved date is reminded again. The manual endpoints, which no screen called, are now buttons on a Reminders card and count as the send. Register § 2.8 — § 8 |
 > | **O** | **DONE** — 101 ×2, `hr-jobarch/run-round4-o.mjs`; migration `AddTechnicianRoleFlag` applied to UAT. **One answer to "is this person a technician?"**: the stored `CanBeAssignedToMaintenance`, which Maintenance's work-order, labour and schedule gates already read. It follows a position's new **Technician role** flag unless HR sets the person *Include* or *Exclude* by hand, and the DbContext re-establishes that on every save. ⚠ The column had **no writer at all**: 0 of UAT's 2,089 staff, an empty door, every assignment refused. The door carries what HR knows (skills with their certification dates, unit, location, trade) and **null, not 0**, for what it does not. Maintenance's dropdowns now read it, and the every-employee fallback and the root endpoint are gone. **Probationers count as available** (the user's call). The plan's defect 21 was wrong, and so was its O2 formula. Lane H's check-set picker never saved, and cleared the set on every edit; fixed. Hand-off: cross-module defect #29 — § 8 |
+> | **Q** | **IN PROGRESS** (added 2026-09-24) — education level on the ladder, the proper fix for R4-5.2: a Level on each candidate qualification, an *Education level at least …* criterion that compares ranks, the catalogue mapped onto the ladder. Four decisions, all the user's — § 4 lane Q |
+> | **P2a** | **DONE** — the recruitment guide rewritten for round 4, from the code, this log and UAT: § 5.8 scoring, a new chapter **8A** for recruitment tests, § 9 interviews, § 10 offers, § 13 talent pool. **Docs, then a data repair.** It records 18 `R4-…` findings, four of them walks not yet done. **Two blocked the demo, both in the data:** the seeded test blend could not show, because every candidate who sat the paper failed the vacancy's mandatory degree (R4-5.1); and no demo offer got a checklist, because UAT held 44 active check templates and the fallback wants one (R4-10.1). **Both repaired 2026-09-24** (the user's call): three first degrees via scenario 052, giving 81 / 67.5 / 66; 43 fixture templates switched off, and the suites that made them now switch theirs off. The repair found two more: the seeded degree criterion cannot recognise a real degree (R4-5.2, now lane Q), and a rebuild leaves the blend unscored (R4-5.3, fixed in the rebuild script). The four live demo offers raised before the tidy now have TDC's checklist — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). What remains is **P**.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a is complete** (the recruitment guide). What remains is **P**: P2b, P2c and the walks.
 >
 > ⚠ **Nothing in round 4 has been browser-walked.** § 5 names four walks a harness cannot replace;
 > all four are still outstanding.
@@ -798,12 +801,73 @@ technician position appears in `technicians` **without** being individually tick
 in a unit merely *named* "Maintenance" no longer appears by that fact alone; and that the skill rows
 carry their certification dates.
 
+### Lane Q — Education level on the ladder (added 2026-09-24: the proper fix for R4-5.2)
+
+**The lane exists because P2a's data repair found that no real degree can pass the seeded
+"A relevant first degree" criterion.** That criterion matches the word "degree" in a qualification's
+name. Four facts make the fix larger than a new value:
+
+| Fact | Consequence |
+|---|---|
+| `EducationLevel` is shaped *"Scored exactly like Qualification"*: a name match | The type exists in name only; nothing compares levels |
+| A ranked ladder exists, 11 `QualificationLevels` from BECE (10) to Doctorate (90), with HND and Bachelor's tied at 50 as equivalents | It is created by scenario 005, and nothing reads it |
+| None of the 186 catalogue qualifications has a `QualificationLevelId` | A catalogue pick carries no level either |
+| 211 of 237 candidate qualifications are typed text, with no catalogue link | Most candidates have no route to a level at all |
+
+**Decisions, the user's (2026-09-24):**
+
+| # | Decision |
+|---|---|
+| Q-D1 | **A Level field on each candidate qualification**, from the ladder. It is pre-filled from the catalogue entry when one is picked, **required for Education**, and optional for licences, memberships and the rest. |
+| Q-D2 | **Existing rows are filled once from their names** (BSc, BA or Bachelor → Bachelor's; MSc, MBA or Master → Master's; HND; Diploma; PhD; WASSCE…). A name that cannot be read stays empty, and is reported. |
+| Q-D3 | **Below the required level fails the criterion**: 0, and disqualified if mandatory. No partial credit. |
+| Q-D4 | **No qualification with a level counts as a miss** (0), like Location's no-area rule. |
+
+- **Q1 Schema.**
+  - Add `JobCandidateQualification.QualificationLevelId`: nullable, a foreign key to the ladder.
+  - The *effective* level is the qualification's own, or else its catalogue entry's.
+  - One migration, which the user scaffolds and I rewrite as guarded SQL, does three things: adds
+    the column; runs the Q-D2 backfill on typed rows, filling empty ones only; and maps the 186
+    catalogue entries onto the ladder by name, also filling empty ones only, so a level HR later
+    sets is never overwritten.
+- **Q2 Doors.**
+  - The candidate-qualification create, update and read DTOs carry the level.
+  - Both doors refuse an Education row with no level, and a level that is not an active rung of the
+    tenant's ladder. The doors are HR's candidate tab and the careers profile.
+  - The catalogue read carries each entry's level, so both forms can pre-fill it.
+  - The careers portal reads the ladder from its public catalogue.
+- **Q3 Engine.**
+  - `EducationLevel` takes a new value kind, `QualificationLevel`, appended to the enum and never
+    renumbered: one value, the minimum rung. The resolver validates it.
+  - The evaluator compares **ranks**: at or above passes (1), below fails (0), no levelled
+    qualification is a miss (0). Its notes name the best rung found and the one required.
+  - The ladder is read once per scoring run by each caller: an application, *Score all* and the
+    talent-pool screen.
+  - Snapshots gain the effective level. An older snapshot back-fills from the catalogue and the live
+    profile, as `GeoAreaPath` does.
+- **Q4 Screens.**
+  - The criteria panel gets a level picker for *Education level*, which the talent-pool screen
+    shares.
+  - Both qualification forms get a Level select.
+- **Q5 Demo.**
+  - The backfill seeder writes the first-degree criterion as *Education level at least Bachelor's*.
+  - Scenario 005 maps the catalogue onto the ladder it creates.
+  - Scenario 050 sends a level with every qualification it records, Elikem's included.
+  - Scenario 052's three degrees become plain *BSc …* rows at Bachelor's level.
+  - UAT's six live-pipeline criteria are converted through the API, and VAC-000021's three scripts
+    are re-scored one at a time.
+- **Q6 Harness and docs.**
+  - A new suite, `hr-recruitment/run-round4-q.mjs`, plus the neighbours re-run on count.
+  - Guide § 5.8's criterion table, R4-5.2 closed, and the configuration register.
+
 ### Lane P — Documentation, harnesses, demo data
 
 - **P1** `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-4-PLAN.md` — this plan, in the house format, with
   a per-slice log.
 - **P2** Rewrite the affected guide sections: recruitment §5.8 (scoring), §9 (interviews), §10
   (offers), §13 (talent pool); the company schedule guide's six rules; a new orientation guide.
+  Split into **P2a** (the recruitment guide, with a new chapter 8A for lane E: DONE 2026-09-23),
+  **P2b** (company schedule) and **P2c** (orientation).
 - **P3** Harnesses per lane, each green **twice**, plus the existing suites re-run on count
   (`hr-recruitment` slices A–F, `hr-orientation`, `hr-company-schedule`, `hr-jobarch`).
 - **P4** `demo-coverage-manifest.csv` rows and seeding for every new fillable column.
@@ -2647,6 +2711,159 @@ register's own rule.
 **Frontend:** the scoped type-check (`tsconfig.round4-lane-o.json`) is clean. Its negative control
 passed: three probes, in a types glob and a page glob, and all three were caught. Eslint is clean
 apart from one pre-existing warning. **Not browser-walked** — walk 6 in § 5.
+
+### P2a — the recruitment guide, rewritten for round 4 · DONE 2026-09-23 · docs; its two demo findings repaired in the data 2026-09-24
+
+`docs/HR/areas/recruitment/HR-RECRUITMENT-SYSTEM-GUIDE.md`, written from the code, this log and
+`ErpSystemDB_UAT`. It keeps the guide's layers: what it is, on the page, who can use it, behind the
+page, known gaps.
+
+| Chapter | Now covers |
+|---|---|
+| § 5.8 scoring | The engine as it stands: no score versus 0 versus a score; what is left out when it cannot be evaluated; how each kind of criterion answers; Location on the geography tree, with the deliberate "no area is a miss" rule; the snapshot; the blend's input |
+| **8A** *(new)* | Recruitment tests: writing a paper, giving it, sitting it online, marking, paper sittings, the demo, and the endpoints and enums |
+| § 9 interviews | Apportioned slots; the clash check binding across seven sources, with its override; suggest-slots and room booking; blind scoring; the panelist's worklist; the printed paper |
+| § 10 offers | Each default and where it comes from; the 14 statuses and the nightly expiry; what issuing does, the PDF included; acceptance emails from all three paths; the letter's checklist headings as the template writes them |
+| § 13 talent pool | The five filters; the Screen tab (new § 13.5); the three-tier fit score (§ 13.6). The gaps move to § 13.7, and nothing outside the guide cited the old numbers |
+
+Also updated: the guide's status block; its "How to read" table; § 1.3's screen table, which gains an
+Assessments row outside the 32 walked; and § 8.4's tiles, where the panel tile is now "Shortlisting
+panel score", as G-9.5 relabelled it on screen.
+
+**The findings.** The rewrite recorded 16, marked `R4-…` above each chapter's closed history, and
+fixed none. The data repair on 2026-09-24, below, fixed the two demo blockers and added R4-5.2 and
+R4-5.3, making 18.
+
+**Two blocked the demo, both in the data.** Both were re-measured on UAT before staging:
+- **R4-5.1: the test blend cannot be shown.** VAC-000021 carries the seeded paper at 30%. Its three
+  marked candidates scored 19/20, 10/20 and 9/20, and each has an auto score of **0** and **no
+  qualification on file**. The mandatory *A relevant first degree* fails at step 3, so the blend at
+  step 5 never runs.
+- **R4-10.1: no demo offer gets a checklist.** UAT holds **44** active check templates: TDC's own,
+  12 *"R4H Standard checks …"* from lane H's suite, and 31 *"E2E RecD Template …"* from slice-d. The
+  fallback wants exactly one, so it seeds nothing. The 16 posts that name a template are all
+  fixtures. So no demo offer prints a checklist, and *Accept conditionally* is refused.
+
+**One more in the data.** R4-10.2: 21 of UAT's 28 `Sent` offers have no expiry date, so the sweep
+never expires them.
+
+**Eight in the code**, none blocking:
+- R4-8A.1: an untimed online attempt blocks a paper sitting, with no cancel action.
+- R4-8A.4: the "already sat" refusal points at a copy action tests do not have.
+- R4-9.1: a reschedule drops the candidates who no longer fit, and only the log says so.
+- R4-9.2 and R4-10.4: the interview confirmation and offer-response tokens are stored in clear.
+- R4-10.3: the leave default comes from the leave type, and `NdaRequired` has no source.
+- R4-13.1: publishing through the API without restating the title erases it.
+- R4-13.2: booking advances the pipeline best effort, and only the log shows a refusal.
+
+**Four are walks not yet done**: R4-8A.2, R4-9.3, R4-10.5 and R4-13.3. Only the first, and part of
+R4-9.3, match walks in § 5 (walks 2 and 1). The offer form and the talent pool's Screen tab were
+proved by harness only. R4-8A.3 points at R4-5.1.
+
+**Repaired in the data on 2026-09-24 (the user's call: a first degree for each, not a non-mandatory
+criterion).**
+
+*R4-5.1.* Scenario 052 gained step 3b, which records a first degree for Comfort Asiedu, Ishmael
+Tetteh-Okine and Gifty Mensah, and step 6b, which re-scores those three one at a time. It does not
+use *score-all*, which would also have scored Ebenezer Okyere and Elikem Attipoe.
+- **Guards:** before the run, every guard in 052 was proved to answer correctly on UAT: one paper
+  among 69, one assignment, the weight already 30, Elikem already on the vacancy, all three scripts
+  entered.
+- **Run 1:** qualifications went from 234 to 237 and nothing else moved. The scores went from 0 to
+  exactly **81, 67.5 and 66**. In each breakdown the degree now passes (40), experience passes (35)
+  and report writing fails (0 of 25); 75 on the criteria, blended at 30% with 95%, 50% and 45%.
+- **Run 2:** wrote nothing. The state, timestamps included, is identical.
+
+*The repair found two more, both recorded in the guide and not fixed:*
+- **R4-5.2: the criterion cannot recognise a first degree.** `TdcDemoLivePipelineBackfillSeeder`
+  writes *A relevant first degree* as the literal word "Degree", matched by containment.
+  - Only a qualification whose name contains that word passes. Of the qualification catalogue's 186
+    entries only *Associate Degree* does, and before the repair none of the tenant's 234 candidate
+    qualifications did.
+  - So the degrees had to be worded *"Bachelor's degree in …"*.
+  - The criterion is mandatory on six live-pipeline vacancies, VAC-000019 to 000024.
+  - Elikem Attipoe's live sitting will still score 0, because a *BSc Quantity Surveying* does not
+    contain the word.
+  - The root cause is in the engine: no criterion type compares qualification *levels*.
+- **R4-5.3: a rebuild leaves the blend unscored.** Scenario 052 scores before the second seeder pass
+  gives the vacancy its criteria. A second run of 052, or *Score all*, fixes it.
+
+*R4-10.1.* The tidy had four steps:
+1. **Backup.** The 43 fixture templates were saved to
+   `dev-harness/hr-recruitment/fixture-check-templates-retired-2026-09-24.csv`: 12 from lane H, 31
+   from slice-d's fixture, and 16 fixture posts naming them.
+2. **Switch-off.** One transaction switched them off. It would have rolled back unless it matched
+   exactly 43 rows, and they are marked `UpdatedBy = round4-P2a-fixture-tidy-2026-09-24`.
+3. **Check.** TDC's *Standard Pre-Employment Checks* is now the only active template.
+4. **Suites.** Every script that made one now switches its own off:
+   - lane H's suite, with an asserted switch-off, so it counts **37** from now on (36 + 1);
+   - slice-d's `run.mjs` and `verify-benefits.mjs`;
+   - `run-g`;
+   - lane I's suite, which builds slice-d's fixture in its block H.
+
+   Each switches off at the end, and again on a fatal error, since Node hands a failed top-level
+   `await` to an `uncaughtException` handler and waits for the PUT. slice-d's `build()` and lane H's
+   suite also sweep up their own leftovers first, for a run killed outright.
+
+⚠ **The suites could not be the proof of the tidy.** `run-g` still dies at § 9.3 #1's wall, and in
+the first batch it did so before its switch-off existed on the fatal path. That left one fixture
+template active while lane G, N-b1, lane O and W3 slice 9 ran, so those runs said nothing about the
+single-template path. They were re-run with exactly one active template.
+
+| Suite | Batch 1 (a leftover active from run-g onward) | Batch 2 (one active) | Baseline |
+|---|---|---|---|
+| lane H `run-round4-h` ×2 | **37/37** · **37/37** | — | 36, and 37 with the tidy assertion ✅ |
+| slice-d `run.mjs` ×2 | stops at 75/98 · 75/98 | — | stops at 75/98 on § 9.3 #1 ✅ |
+| slice-d `verify-benefits.mjs` | **23/23** | — | not recorded before |
+| `run-g` | stops at the § 9.3 #1 422, template left **active** | stops at the same line, template **switched off** on the way out | stops at § 9.3 #1 ✅ |
+| lane G `run-round4-g` | 41/41 | **41/41** | 41 ✅ |
+| N-b1 `run-lane-nb1` | 32/32 | **32/32** | 32 ✅ |
+| lane O `run-round4-o` | 101/101 | **101/101** | 101 ✅ |
+| lane I `run-round4-i` | **184/184**, sweeping run-g's leftover | — | 184 ✅ |
+| W3 `run-slice9-recruitment` | cannot run on UAT: its `w3.*` users do not exist there (login 401) | — | — |
+
+After every run in batch 2, TDC's was the only active template. **The proof is in the offers, not
+the counts.** Every offer that batch 2 raised on a post naming no template now starts from TDC's
+five-item checklist: lane G's OFR-000178, and N-b1's OFR-000179 to 000183. The one exception is
+run-g's OFR-000177. It was raised while run-g's own fixture template was also active, and with two
+active the fallback correctly seeds nothing.
+
+**The API log** gained about 4,000 error lines across both batches, and none touches templates,
+qualifications or scoring:
+- the notification processor, as always;
+- 68 refused `PayrollEmployeeProfiles` inserts (defect #23), one per fixture employee;
+- three bulk updates of `Notifications` that failed while N-b1's SMTP sink was up.
+
+**The four live demo offers raised before the tidy.** The checklist is seeded when an offer is
+*created*, so these had none: OFR-000013 (Draft), OFR-000015 (Sent), OFR-000016 (Negotiating) and
+OFR-000017 (Sent).
+- **Repaired, the user's call.** `dev-harness/hr-recruitment/repair-demo-offer-checklists.mjs`,
+  working as the HR Head through the real doors, gave each one check set with the note a seeded set
+  carries, and TDC's five items.
+- **Verified.** Sets went from 52 to 56 and items from 166 to 186. The offers' own status and
+  timestamps are untouched, and a second run wrote nothing. OFR-000017's letter now prints
+  *Conditions Precedent* with the five checks.
+- ⚠ **Not done, awaiting the user's confirmation.** OFR-000017 is Rita Amponsah's, the offer
+  scenario 050 meant to be *Conditionally Accepted*. That acceptance was refused for want of a
+  checklist, and would now succeed. Recording it is a separate status change.
+
+A rebuilt database has no fixtures, so there the fallback works from the first offer.
+
+**R4-5.3, fixed the same day (the user's call).** `scripts/Invoke-UatDemoScenarios.ps1` runs scenario
+052 once more after the second seeder pass (its new step 4b). The script parses; no full rebuild has
+exercised it yet. **R4-5.2 is fixed properly by lane Q** (§ 4), the user's choice over a cheaper
+repair.
+
+**A lesson from writing it.** Three of my draft claims were wrong and were corrected against the code
+before staging:
+- what can still be done to a paper once somebody has sat it;
+- the `ScoreSource` names;
+- the letter's headings, which are *"Pre-employment Requirements"* and *"Conditions Precedent"*.
+
+Each had come from a log's paraphrase, not the source. Read the template, not the account of it.
+
+⚠ The rest of the guide still describes the 2026-09-15 walk, and none of round 4's screens has been
+walked in a browser.
 
 ---
 

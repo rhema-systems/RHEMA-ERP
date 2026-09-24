@@ -5,6 +5,35 @@
 Chapter 1 is the shared background; chapters 2–15 are one per screen group; chapter 16 is what is
 only visible once they are all read. Start at chapter 16 if you want the conclusions first.
 
+> ## Updated 2026-09-23 for round 4 of the demo feedback
+>
+> Round 4 (`docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-4-PLAN.md`) rebuilt four parts of the module
+> and added one. These chapters were rewritten from the code, the round's execution log and the demo
+> database:
+>
+> | Chapter | What changed | Lanes |
+> |---|---|---|
+> | **§ 5.8** How a score is computed | Location on the geography tree, the eight scoring defects fixed, the test blend live, the engine shared | A, B, E |
+> | **8A** *(new)* `/hr/recruitment/assessments` | Recruitment tests: written, assigned, sat online or on paper, marked, fed into the score | E-a, E-b |
+> | **§ 9** Interviews | Slots apportioned; the clash check binding across seven sources; the printed paper; the panelist's own scorecard; blind scoring | C, D-1, F |
+> | **§ 10** Offers | Defaults with their sources, currency, placement, validity; the real checklist in the letter; the letter attached; acceptance emails | G, H, N-b1 |
+> | **§ 13** Talent pool | Screened by a vacancy's real criteria, then invited or booked; the filters wired; the three-tier fit score | B |
+>
+> **Round 4's findings are marked `R4-…`** in each chapter's gap block, above the closed history.
+> **They are open unless marked fixed.** The two that broke the demo were repaired in the data on
+> 2026-09-24, and the repair found two more:
+> - **R4-5.1** ✅: the seeded test blend now shows (81, 67.5, 66), because the three candidates who sat
+>   the paper now hold the first degree the vacancy makes mandatory;
+> - **R4-10.1** ✅: TDC's is now the only active check template, so the fallback works, and the four
+>   live demo offers raised before the fix have TDC's checklist too;
+> - **R4-5.2**, open, being fixed properly by **round 4 lane Q**: that degree criterion matches the
+>   *word* "degree", so no real first degree passes it, including Elikem Attipoe's for the live
+>   sitting;
+> - **R4-5.3** ✅: a rebuild now runs scenario 052 again once the vacancy has its criteria.
+>
+> ⚠ Round 4's screens are **not browser-walked**. Chapters 2–15 elsewhere still describe the
+> 2026-09-15 walk.
+
 > ## ⚠ READ THIS BEFORE ANY GAP IN THIS DOCUMENT
 >
 > **The 70 gaps recorded here were closed between 2026-09-15 and 2026-09-16.** Sixty-eight were
@@ -50,6 +79,7 @@ only visible once they are all read. Start at chapter 16 if you want the conclus
 | Know who can see or do what | the **Who can use it** section of its chapter |
 | Know what *used to* be wrong, and what fixed it | the **Known gaps** block in each chapter, and Appendix C — every finding is closed and annotated |
 | Know what is wrong **now** | `docs/HR/areas/recruitment/HR-RECRUITMENT-GAP-CLOSURE-PLAN.md`. Two things remain open, both by decision; this guide's gap blocks are history, not a to-do list |
+| Know what round 4 changed, and what it found | the **Updated 2026-09-23** block above; chapters 5.8, 8A, 9, 10 and 13; and the `R4-…` rows at the top of their gap blocks, which are **open** |
 
 Every chapter is titled by its route, exactly as typed in the browser.
 
@@ -188,6 +218,7 @@ The thirty-two screens are grouped as follows, and this guide follows that order
 | Postings | `/postings` |
 | Candidates | list, `new`, `[id]`, `[id]/edit` |
 | Applications | list, `[id]` |
+| Assessments *(round 4, not in the 32)* | `/assessments`, `[id]`, `paper`, `record`; the papers are written at `/administration/hr/recruitment/tests` and `tests/[id]`, and sat at `/careers/assessments` and `[id]` |
 | Interviews | list, `new`, `[id]`, `[id]/score/[intervieweeId]` |
 | Offers | list, `new`, `[id]`, `[id]/edit` |
 | Pre-employment checks | `/pre-employment-checks` |
@@ -1428,34 +1459,101 @@ Two behaviours here are deliberate and easy to miss:
 
 ### 5.8 How a score is computed
 
-Worth writing down exactly, because the number drives auto-shortlisting.
+> **Rewritten 2026-09-23 for round 4** (lanes A, B and E). The version walked on 2026-09-15 ended
+> *"Steps 5 and 6 never execute in practice"*. Since lane E they do. Lane A also changed what
+> several criteria answer, and lane B moved the engine. What follows is the code as it now stands.
+
+Worth writing down exactly, because the number drives auto-shortlisting, and a recruiter defending
+a shortlist will be asked how it was reached.
+
+**Where the rules live.** In one engine, `ShortlistingEvaluator`
+(`Services/HR/Recruitment/ShortlistingEvaluator.cs`), which both scoring callers use: an
+application scored against its vacancy, and a talent-pool member screened against one (§ 13.5).
+Lane B moved it out of `JobApplicationService` so that the two cannot drift apart. Steps 5 and 6
+stayed on the application path, because only an application has test results and an internal flag.
 
 ```
-1. No criteria on the vacancy      → AutoScore = null.   Never auto-shortlisted.
-2. Evaluate EVERY criterion        → full breakdown stored as JSON, even after a failure
-3. Any MANDATORY criterion failed  → AutoScore = 0
-4. Otherwise:
-     criterionScore = earned / totalWeight × 100
-   where a criterion the engine cannot evaluate (type "Other") is excluded
-   from BOTH earned and totalWeight — it neither lifts nor lowers anybody
-5. Test blend (if TestScoreWeight > 0 and scored tests exist):
-     final = criterionScore × (100 − w)/100  +  avgTestPct × w/100
-6. Internal boost (if InternalCandidateBoostPoints > 0 and candidate is internal):
+1. No live criteria on the vacancy        → no score (null). Never auto-shortlisted.
+2. Evaluate EVERY criterion                → full breakdown stored as JSON, even after a failure
+3. Any MANDATORY criterion failed          → score 0 — and STOP: steps 5 and 6 do not run
+4. Otherwise, over the criteria the engine could evaluate:
+     criterionScore = earned ÷ totalWeight × 100
+   A criterion it cannot evaluate is left out of BOTH sides — it neither lifts nor lowers anybody:
+     • type Other (judged by a person, off-system)
+     • a criterion with no values
+     • "less than" with no maximum stated
+     • Age, for a candidate with no date of birth on file
+   Nothing evaluable at all (totalWeight = 0)  → no score (null) — never 100
+5. Test blend, when TestScoreWeight > 0 and the application has scored test results:
+     final = criterionScore × (100 − w)/100  +  average test % × w/100
+6. Internal boost, when InternalCandidateBoostPoints > 0 and the application is internal:
      final = min(100, final + boost)
 ```
 
-Step 1 is a repaired defect worth knowing: it used to write **100**, so "auto-shortlist by score"
-on a vacancy with no criteria admitted every applicant. Step 4's exclusion of unevaluable criteria
-is the same shape — they used to pass everyone with full marks.
+**Three states, not two.** A **0** means *measured, and disqualified by a mandatory criterion*. **No
+score** means *nothing could be measured*. Auto-shortlisting admits neither. Four of the rules above
+exist to keep an unanswerable question from scoring well:
+- step 1's null used to be **100**, so auto-shortlisting admitted everyone;
+- an unevaluable criterion used to pass with full marks;
+- an empty criterion used to "default to pass";
+- a vacancy screening on an area, scored against people with no address, would have given every one
+  of them 100.
 
-Scoring runs against a **snapshot** of the candidate's profile as it stood when they applied
-(`ApplicationCandidateSnapshot`, § 1.3), falling back to the live profile only for legacy rows
-with no snapshot.
+**How each kind of criterion answers.** A list criterion earns partial credit, matched ÷ listed:
 
-Steps 5 and 6 never execute in practice — see G-5.2.
+| Criterion | Compared against | Worth knowing |
+|---|---|---|
+| Years of experience | the application's years, against the minimum and maximum | a near miss earns up to 0.8, on either side of the band |
+| Qualification / education, skill, language | catalogue ids first, then names under the criterion's match strategy (Exact, Contains or Fuzzy) | *All required* and *any sufficient* are both honoured |
+| Certification | names only | a candidate's certificate carries a name, not a catalogue id |
+| Age | computed from the date of birth | with no date of birth the criterion is left out. It used to compute an age of about 2,026 years |
+| Gender | the accepted list | informs the score only, and can never be mandatory |
+| Location | **areas on the geography tree**, by containment: an accepted area matches anyone recorded in it or anywhere beneath it | *Equals* means exactly that tier; *Not equals* means none may match, all or nothing. A candidate with no area is matched on their typed city against the areas' names |
+
+**The Location criterion was rebuilt in round 4** (lane A). It used to be a substring match on a
+free-text city. It honoured two operators, matched one way round, ignored *all required*, scored all
+or nothing, and gave an empty criterion full marks: five of the eight defects lane A's audit found.
+
+⚠ **One rule here is deliberate and easy to "fix" wrongly.** Take a candidate with no area on file
+who typed "Kumasi", against a Greater Accra criterion. That scores a **miss**, not an exclusion.
+Excluding them would let a candidate with no address outrank one who demonstrably does not match.
+
+**Scoring runs against a snapshot** of the candidate's profile as it stood when they applied
+(`ApplicationCandidateSnapshot`, § 1.3), falling back to the live profile only for rows with no
+snapshot. For a snapshot older than round 4, the candidate's area path is resolved from the live tree.
+
+**The test blend now has an input.** Lane E's test engine (chapter 8A) writes one
+`JobApplicantTestResult` per test per candidate when a sitting is finalised, and re-scores the
+application at once. The blend averages every scored row. That is why a re-sit **replaces** the row
+instead of adding one: averaging a re-sit with the attempt it replaced would penalise the candidate
+for whatever went wrong the first time.
+
+> **On the demo database the blend now shows (R4-5.1, fixed in the data 2026-09-24).** VAC-000021,
+> *Estates Officer — Housing*, carries the seeded aptitude paper at a **30%** weight. Three candidates
+> sat it, scoring 95%, 50% and 45%. Until 2026-09-24 **all three scored 0**: the vacancy's mandatory
+> criterion *A relevant first degree* failed for each of them, because they had **no qualifications
+> on file**, so step 3 stopped before step 5 was reached. Scenario 052 now records a first degree for
+> each, and re-scores them. Each earns 75 on the criteria (degree 40, experience 35, report writing
+> 0 of 25) and is blended to **81, 67.5 and 66**, measured on `ErpSystemDB_UAT`.
+>
+> ⚠ **The criterion itself is still wrong (R4-5.2).** The degrees had to be worded *"Bachelor's
+> degree in …"* to pass. The criterion asks for the word "Degree", matched by containment. Of the
+> qualification catalogue's 186 entries, only *Associate Degree* contains that word, and it is not a
+> first degree. No *Bachelor of Science* picked from the catalogue passes, and neither does a typed
+> *BSc Land Economy*. So a presenter who signs in as Elikem Attipoe and sits the paper live will see
+> that application score **0**: their *BSc Quantity Surveying and Construction Economics* fails the
+> same way.
 
 ### 5.9 Known gaps
 
+> **Round 4, 2026-09-23: one finding in the demo data. Its repair on 2026-09-24 found two more.**
+>
+> | | Now |
+> |---|---|
+> | **R4-5.1** | ✅ **Fixed in the data, 2026-09-24.** *Was:* the demo's test blend was invisible. Every candidate who sat the seeded paper on VAC-000021 failed the mandatory degree criterion for want of any qualification on file, and scored 0 whatever their paper said. *Now:* scenario 052 (step 3b) records a first degree for each of the three and re-scores them, giving 81, 67.5 and 66. A second run writes nothing. |
+> | **R4-5.2** | **Open. The seeded criterion "A relevant first degree" cannot recognise a first degree.** `TdcDemoLivePipelineBackfillSeeder` writes it with `RequiredValue = "Degree"`, matched by containment. Only a qualification whose *name* contains the word passes, and before 2026-09-24 none of the tenant's 234 candidate qualifications did. It is mandatory on six live-pipeline vacancies (VAC-000019 to 000024), so anyone scored on them scores 0. That includes the six unscored applicants on VAC-000022 and VAC-000023, and Elikem Attipoe's live sitting on VAC-000021. **The root cause is the engine:** "at least a bachelor's" is a qualification *level*, and no criterion type compares levels. `EducationLevel` is scored exactly like `Qualification`, by name. The cheap repair is `RequiredValue = "Bachelor"`, in the seeder and on the six rows: that matches the catalogue's 24 *Bachelor of …* entries, but still not a typed *BSc …*. |
+> | **R4-5.3** | ✅ **Fixed 2026-09-24 (the user's call), in the rebuild script.** *Was:* on a rebuilt database the blend was not scored. Scenario 052 finalises the scripts, and scores them, before VAC-000021 has any criteria, because the backfill seeder runs in the second seeder pass after every scenario. *Now:* `scripts/Invoke-UatDemoScenarios.ps1` runs scenario 052 once more after that pass (step 4b). The second run re-scores what it finds unscored and writes nothing else. ⚠ Parse-checked, not yet exercised by a full rebuild. |
+>
 > **✅ All eight closed, 2026-09-15 → 16.** Read the findings as history.
 >
 > | | Now |
@@ -1978,8 +2076,15 @@ address or leaving to create the candidate first (G-8.5).
 
 ### 8.4 The detail page
 
+**The candidate's photograph** now shows in the header, and on the pipeline board's cards and the
+screening rows (round 4, lane B5), through the same gated `GatedPhoto` as the candidate screens.
+A `CandidateHasPhoto` flag on each read stops a 30-row board from firing 30 requests that would
+404. The Auto score tile is § 5.8's number, test blend included (chapter 8A).
+
 **Four tiles:** Status, Auto score (amber with *"Stale — re-score before relying on it"* when
-stale), Panel score (`AggregatedReviewScore`, hinted *"Finalized reviews only"*), Current stage.
+stale), **Shortlisting panel score** (`AggregatedReviewScore`, hinted *"Finalized reviews only"*;
+relabelled from *Panel score* by G-9.5, because it is the screening panel's and not the interview
+panel's), Current stage.
 
 **Header actions:** *Re-score*, and then either a link to the existing offer (showing its number
 and status) or an **Extend an offer** button. The page comment is candid about the gate: *"Raising
@@ -2149,11 +2254,274 @@ the client all said A. Two endpoints already did this correctly; the rest did no
 
 ---
 
+## 8A. `/hr/recruitment/assessments` — recruitment tests
+
+**Files:**
+
+| Who | Route | Page |
+|---|---|---|
+| HR, writing the paper | `/administration/hr/recruitment/tests` | the list |
+| | `/administration/hr/recruitment/tests/[id]` | the builder: Questions, Sections, Preview |
+| HR, giving and marking it | `/hr/recruitment/assessments` | the marking desk: Marking and Assignments tabs |
+| | `/hr/recruitment/assessments/[id]` | marking one script |
+| | `/hr/recruitment/assessments/paper` | printing |
+| | `/hr/recruitment/assessments/record` | entering a script sat on paper |
+| The candidate | `/careers/assessments` and `/careers/assessments/[id]` | files under `app/external-portal/careers/assessments/` |
+
+**Written:** 2026-09-23 from the code, the round 4 execution log (lanes E-a and E-b) and the demo
+database. It is new in round 4, so the 2026-09-15 walk never saw it. ⚠ **Not browser-walked**
+(R4-8A.2, § 8A.10).
+
+### 8A.1 What a recruitment test is
+
+**A paper HR writes once and gives to many candidates**: an aptitude test, a trade test, a
+situational-judgement paper. It is anything a candidate sits against a clock and that can be marked
+from what they answered. The score goes where the vacancy tells it to: into the shortlisting score,
+at the vacancy's `TestScoreWeight` (§ 5.8).
+
+Before round 4 there was no such thing. `JobApplicantTestResult` recorded a mark that HR typed in,
+and nothing else: no questions, no answers, no delivery, and so no input to the blend.
+
+```
+ RecruitmentTest            the paper: name, instructions, duration, pass mark, attempts, shuffles
+      │
+      ▼
+ RecruitmentTestSection ─▶ RecruitmentTestQuestion ─▶ RecruitmentTestQuestionOption (IsCorrect)
+                            single choice · multi-select · true/false · numeric · free text
+ RecruitmentTestAssignment  the paper given to a VACANCY (every live applicant) or to named
+      │                     applications, with a window, a "required" flag and extra attempts
+      ▼
+ RecruitmentTestSitting     one attempt by one application — Online or Paper
+      │
+      ▼
+ RecruitmentTestAnswer      one per question
+      │  when the sitting is finalised
+      ▼
+ JobApplicantTestResult     ONE row per test per candidate — what the shortlisting score reads
+```
+
+**The one row per test per candidate is load-bearing.** The blend averages every scored result, so
+the row belongs to the **latest finalised attempt** and moves with it. The attempt history stays in
+the sittings. The first build minted a row per sitting, which averaged a re-sit with the attempt it
+replaced; that was found by designing the re-sit test before it was ever run.
+
+### 8A.2 Who can use it
+
+| Who | May |
+|---|---|
+| HR with `HR.Recruitment.Read` | see papers, assignments, sittings and results |
+| HR with `HR.Recruitment.Write` | write papers, assign, invite, grant attempts, mark, finalise, record paper sittings (17 endpoints) |
+| HR with `HR.Recruitment.Admin` | delete a paper |
+| A candidate, signed in to the careers portal | see and sit **their own** assignments (`api/candidate/assessments*`) |
+
+⚠ **The candidate's read never carries `IsCorrect`.** A paper sent to the portal is the candidate
+projection, and so is the paper HR enters a script against (§ 8A.6). A marker records what was
+ticked; they do not type it in while looking at the key.
+
+### 8A.3 On the page — writing a paper
+
+`/administration/hr/recruitment/tests` lists the papers: *"Aptitude and knowledge papers, sat online
+by candidates and marked by the system."* A paper is a draft until **activated**, and *"only an
+active paper can be assigned to a vacancy"*. Activation checks that the paper can be marked.
+
+⚠ **Once anybody has sat a paper, it is a record.** Its questions can no longer be edited, and the
+paper cannot be deleted. Editing an answered question would rewrite what that person was marked on,
+and the marking key on file would stop matching the script in the drawer. It can only be
+**retired** (made inactive), and its sittings stay as they were.
+
+The refusal says to *"copy it into a new paper"*. There is **no copy action** for tests, so that
+means writing the new paper by hand. Deleting a paper nobody has sat also deletes its assignments.
+
+The builder has three tabs:
+- **Questions**, grouped into sections. Each question carries its marks, and its correct option,
+  options or expected number where one applies.
+- **Sections**.
+- **Preview**, showing exactly what the candidate will see.
+
+⚠ *"A paper with no questions cannot be activated — it could only ever score zero."*
+
+| Setting | Meaning |
+|---|---|
+| Duration | minutes on the clock from Start; none = an untimed paper |
+| Pass mark | a percentage of the **whole** paper |
+| Maximum attempts | normally 1; HR can grant more per assignment (§ 8A.5) |
+| Shuffle questions / options | per candidate, online only — a printed paper is never shuffled, so one key fits every script |
+
+### 8A.4 On the page — giving it
+
+**Assign a test**, on the marking desk, gives an active paper to either:
+- a **vacancy**, meaning every *live* application it has now or later; or
+- **named applications**.
+
+Each assignment has an opening and closing time and a *required* flag. Who an assignment reaches is
+one rule, `RecruitmentTestReach`, shared by the printer and the portal. A withdrawn or rejected
+applicant is therefore neither printed a paper nor allowed to open one.
+
+**Invite** sends the `TestInvitation` email, which names the test, its duration, its deadline and its
+attempts. ⚠ It is deliberately **not** the pipeline's `AssessmentPending` notice, which carries none
+of those and points at the dashboard. With that notice, a candidate could open a timed paper on a
+phone with ten minutes to spare.
+
+The **Assignments** tab lists each assignment with who it reaches, and two shortcuts: *"Print named
+papers for a sitting session"* and *"Record a script sat on paper"*.
+
+### 8A.5 Sitting it online
+
+The candidate opens it from `/careers/assessments`:
+- **Start** creates the sitting and its clock (`MustSubmitBy`).
+- **Progress is saved on the server as they go**, not in the tab, so a refresh loses nothing.
+- There is **one Submit**.
+
+Three rules decide the hard cases:
+
+| Case | What happens | Why |
+|---|---|---|
+| **Submitted late** | The late payload is **ignored**. The sitting is marked on what was saved in time, with a 2-minute grace for clock skew, and reads *Expired*. | Refusing loses work done in time; accepting late answers makes the clock decorative. |
+| **Two tabs open** | Reopening re-issues the sitting's token; the stale tab's autosave is refused. | Otherwise a second tab's twenty-minute-old answers overwrite the fresh ones. |
+| **Walked away** | The nightly recruitment sweep expires the sitting and marks it on what it had saved. | Block O of the lane E suite proves it: 2 marks saved of 15, marked out of 15. |
+
+The sitting token is stored **SHA-256 hashed** with only its last four characters in clear: the
+procurement onboarding-token design, applied here first in HR.
+
+⚠ `start` and `submit` are rate-limited to 5 a minute **per signed-in user**, not per IP, so an
+exam hall behind one router does not lock itself out.
+
+**Re-sits.** An assignment allows the paper's maximum attempts. HR can grant one more, with a
+reason recorded (`assignments/{id}/extra-attempt`). The ledger row follows the latest finalised
+attempt.
+
+### 8A.6 Marking
+
+**The machine marks what it can.**
+- The denominator is **every gradable question on the paper**, answered or not. Orientation's engine
+  once divided by the questions that came back, and that fix is carried here.
+- A multi-select question is right only on the **exact set** of options.
+- A numeric answer is compared against the expected number.
+
+**A paper of closed questions finalises itself at submit.** The result row is written, the
+application re-scored and the result released, with no second click. A paper with **written
+answers** waits for a person, and the candidate sees nothing until it is finalised.
+
+`/hr/recruitment/assessments` opens on the **Marking** tab, which filters by *Awaiting marking*,
+*Time expired* and *In progress*. Its empty state explains the split: *"A paper of closed questions
+only is marked and finalised on submission; one with written answers waits here."*
+
+`/hr/recruitment/assessments/[id]` marks one script:
+- the **Closed questions** as the machine marked them;
+- the **Written answers** for a person to mark;
+- **Finalise**, which is disabled while any written answer is unmarked.
+
+### 8A.7 On paper
+
+**Printing** (`/assessments/paper`) offers a **Question paper** or a **Marking key**. The question
+paper prints blank, or as one named paper per candidate an assignment reaches, in **surname order**
+for the sign-in desk. The key carries the correct choices, the expected numbers, the marking notes
+and the rules the server applies online. The pages reuse the interview paper's print stylesheet
+(§ 9.5), not a copy of it.
+
+**Entering a script** (`/assessments/record`, *"Record a paper sitting"*) takes **what the candidate
+ticked, never a mark**. The server then marks it with the same marker the portal uses. Written
+answers carry the hand-marker's marks, and the sitting finalises in the same call. The result row
+reads *"Sat on paper … entered by HR"* and records the venue and the invigilator, an employee.
+
+Five rules, each a decision rather than an accident:
+
+| Rule | Why |
+|---|---|
+| How a sitting was sat is a **column** (`Mode`: Online or Paper) | A candidate's own submission and a script typed in by HR are different kinds of evidence, and a recruitment decision can be challenged. |
+| A double tick, or words in a number box, is **recorded** and marked wrong by the key | Refusing it would force HR to "correct" the script on the way in. |
+| Every written answer must carry its mark on entry | Otherwise the published score would be missing the essay. |
+| The window is judged by the date it was **sat**, not the day it is typed | A paper sat on the last day and typed in the next week is on time. |
+| Refused while an online attempt is still running | Two live attempts would finalise in either order, and the result row belongs to the last one. |
+
+### 8A.8 The demo
+
+Scenario `052-recruitment-tests` seeded TDC's *Numerical and Verbal Reasoning* paper:
+- **TEST-0045**: 40 minutes, pass mark 50%, one attempt, options shuffled;
+- three sections, eight questions, 20 marks: three single-choice, two numeric, one true/false, one
+  multi-select and one written;
+- on **VAC-000021**, *Estates Officer — Housing*, weighted at **30%**.
+
+Three scripts are entered as sat on paper and marked. Each candidate also holds the first degree the
+vacancy makes mandatory (step 3b of the scenario, added 2026-09-24), so the blend shows on the
+application:
+
+| Candidate | Paper | Result | Application score (criteria 75, blended at 30%) |
+|---|---|---|---|
+| Comfort Asiedu | 95% | pass | **81** |
+| Ishmael Tetteh-Okine | 50% | pass, exactly on the mark | **67.5** |
+| Gifty Mensah | 45% | fail; its blank question still counts towards the total | **66** |
+
+**Elikem Attipoe**, the demo careers account, is on the same vacancy with the paper **unsat**, so a
+presenter can sit it live. Because the paper has a written answer, the script then lands in the
+marking queue rather than finalising itself.
+
+⚠ **Show the blend on the three above, not on the live sitting.** Once Elikem's script is finalised,
+that application scores **0**: the degree criterion cannot recognise a *BSc*, only a qualification
+whose name contains the word "degree" (R4-5.2, § 5.9). The test result itself still shows correctly
+on the marking desk. *Score all* on this vacancy would also give Ebenezer Okyere 0, since that
+candidate holds no qualification at all. That is why the scenario re-scores the three above one at
+a time.
+
+⚠ The seed sends **no invitation email**: the demo candidates carry real-looking addresses.
+
+⚠ **Comfort Asiedu is in two stories.** Scenario 050 § 20 uses the first applicant on this vacancy
+for its *hire starting soon*. So the same application that sat the paper and scores 81 also carries
+an accepted offer, OFR-000019, and a hire record, while its status still reads *New*. The
+screening screen and the hires list therefore show the same person at opposite ends of the
+pipeline. Recorded 2026-09-24, not changed.
+
+### 8A.9 Behind the page
+
+| Control | Endpoint | Service | Tables |
+|---|---|---|---|
+| Papers, the builder | `GET/POST/PUT/DELETE api/hr/recruitment/tests`, `…/{id}/activate`, `…/{id}/retire`, `…/sections`, `…/questions` | `RecruitmentTestService` | `RecruitmentTests`, `RecruitmentTestSections`, `RecruitmentTestQuestions`, `RecruitmentTestQuestionOptions` |
+| Preview; the print | `GET …/{id}/preview`; `GET …/{id}/paper` | the same; `RecruitmentTestPaperCatalog` (HR-editable wording) | — |
+| Assign, invite, reach, extra attempt | `…/assignments`, `…/assignments/{id}/invite`, `…/assignments/{id}/candidates`, `…/assignments/{id}/extra-attempt` | the same; `RecruitmentTestReach` | `RecruitmentTestAssignments` |
+| The marking desk; one script | `GET …/sittings`, `GET …/sittings/{id}`, `POST …/sittings/answers/{answerId}/mark`, `POST …/sittings/{id}/finalise` | the same; `RecruitmentTestMarker` | `RecruitmentTestSittings`, `RecruitmentTestAnswers`, then `JobApplicantTestResults` |
+| A script sat on paper | `POST …/sittings/paper` | the same marker | as above, `Mode = Paper` |
+| The candidate | `GET api/candidate/assessments`, `POST …/{assignmentId}/start`, `GET …/sittings/{id}`, `PUT …/sittings/{id}/progress`, `POST …/sittings/{id}/submit` | the same | as above |
+| The nightly expiry | `RecruitmentLifecycleSweepService` → `ExpireOverdueSittingsAsync` | — | `RecruitmentTestSittings` |
+
+**Enums:**
+
+| Enum | Values |
+|---|---|
+| `RecruitmentQuestionType` | SingleChoice 1, MultiSelect 2, TrueFalse 3, FreeText 4, Numeric 5 |
+| `RecruitmentSittingStatus` | NotStarted 1, InProgress 2, AwaitingMarking 3, Marked 4, Expired 5, Cancelled 6 |
+| `RecruitmentSittingMode` | Online 1, Paper 2 |
+
+### 8A.10 Known gaps
+
+| | Finding |
+|---|---|
+| **R4-8A.1** | **An untimed paper opened online and never submitted blocks a paper sitting for good.** A timed one expires on the sweep; an untimed one has no clock, and HR has no action to cancel an attempt. The candidate list says so in words (*"ask the candidate to submit it"*). A cancel-attempt action is the fix, if it ever bites. |
+| **R4-8A.2** | **Not browser-walked.** The candidate sitting a paper end to end in the careers portal, including a refresh mid-test, is walk 2 in the round 4 plan's § 5. The demo leaves Elikem Attipoe's paper unsat for exactly that. |
+| **R4-8A.3** | **The blend's demo:** fixed for the three paper scripts on 2026-09-24 (R4-5.1). It is still blocked for a live sitting by Elikem Attipoe, whose degree the criterion cannot recognise (R4-5.2). |
+| **R4-8A.4** | **The "already sat" refusal points at a copy action that does not exist.** *"Retire it and copy it into a new paper"*. Onboarding and orientation got Copy in round 4 lane J; recruitment tests did not. Changing a paper someone has sat means writing a new one by hand. *Impact: low; the refusal itself is right.* |
+
+---
+
 ## 9. `/hr/recruitment/interviews` — the sessions and their scorecards
 
-**Files:** `page.tsx` (240), `new/page.tsx` (396), `[id]/page.tsx` (388),
-`[id]/score/[intervieweeId]/page.tsx` (524)
-**Walked:** 2026-09-15
+**Files:**
+
+| File | Lines |
+|---|---|
+| `page.tsx` | 240 |
+| `new/page.tsx` | 431 |
+| `[id]/page.tsx` | 396 |
+| `[id]/paper/page.tsx` (new in round 4) | 320 |
+| `[id]/score/[intervieweeId]/page.tsx` | 32 — a wrapper around the shared `InterviewScorecardForm` |
+
+The panelist's own route is `/me/panel` and `/me/panel/[interviewId]/score/[intervieweeId]`.
+
+**Walked:** 2026-09-15. **Updated 2026-09-23 for round 4:**
+- lane C: slots apportioned across the day;
+- lane D-1: the clash check made binding;
+- lane F: the printed paper, the panelist's own scorecard and blind scoring.
+
+⚠ Round 4's parts are written from the code and the execution log, and are **not browser-walked**.
 
 ### 9.1 What an interview is
 
@@ -2179,6 +2547,18 @@ round number, a type and a mode — and then *many* candidates and *many* paneli
 
 So the scorecard grid is **candidates × panelists**: five candidates seen by three panelists is
 fifteen `JobInterviewScoreSummary` rows.
+
+**Round 4 gave the session four more facts.**
+
+| Fact | Columns | Lane |
+|---|---|---|
+| **How its day was laid out** | `JobInterviews.SlotMinutes`, `SlotBufferMinutes`, `BreaksJson`, so a reschedule can lay it out again | C |
+| **The room it holds** | `RoomBookingId`, a company-schedule booking (§ 9.4) | D-1 |
+| **Who overrode a clash, and why** | `PanelClashOverrideReason`, `…Detail`, `…OverriddenById`, `…OverriddenAt` | D-1 |
+| **How each scorecard was filed** | on `JobInterviewScoreSummaries`: `ScoreSource` (the panelist themselves, or HR entering a paper sheet) and `FiledByHrOnBehalfOfEmployeeId` | F |
+
+A banked question can also carry a `ScoringGuide`, which tells a panelist what a good answer looks
+like (`JobInterviewQuestionDetails`, lane F).
 
 **An interview is opened from a vacancy**, never standalone, and the candidates bookable into it
 are that vacancy's applicants — *"an application for another role is refused."*
@@ -2216,6 +2596,28 @@ about what it costs.
 **Two anonymous endpoints** sit at the bottom of the controller: `confirm-panelist/{token}` and
 `confirm-attendance/{token}`. They are reached from an emailed link by candidates and external
 panelists who have no login at all, authorised by a single-use token and rate-limited.
+⚠ Those confirmation tokens are still **stored in clear**. The recruitment test engine hashes its
+tokens (§ 8A.5); these and the offer's do not yet (round 4 plan § 9.4).
+
+**Blind scoring (round 4, lane F).** Every scorecard read used to be gated on *read* access, so a
+panelist could read a colleague's totals, recommendation and private comments before filing their
+own. Now a panelist sees nobody else's card for a candidate **until they have filed their own for
+that candidate**. That is per candidate, not per interview.
+
+Four read paths had to be blinded: the list, the card by id, its `/entries`, and `finalized-scores`.
+Blinding the list alone would have been theatre, because the card ids sit in the page of any screen
+that ever showed them.
+
+**HR is never blinded**, because HR files on a panelist's behalf and has to see what is already
+recorded. HR's Scores tab tells a blinded panelist that the view is narrowed. It no longer claims
+*"The panel has not scored this candidate"*, which for them may be flatly false.
+
+**The panelist's own door (round 4, lane F5).** A panelist no longer goes through HR's desk:
+- `/me/panel` is a **worklist** of the scorecards they owe, from `GET api/job-interviews/me/scorecard-worklist`;
+- each row opens `/me/panel/[interviewId]/score/[intervieweeId]`.
+
+Both routes render the **same** `InterviewScorecardForm` against the one upsert endpoint. ⚠ Keep it
+that way: two forms against one endpoint is how a scorecard gets silently replaced.
 
 ### 9.3 `/hr/recruitment/interviews` — the schedule
 
@@ -2243,7 +2645,8 @@ Zod-validated, with a cross-field rule: *"The session must end after it starts."
 |---|---|
 | The session | Vacancy\*, Round (1–20), Format (`JobInterviewType`), Mode (`InterviewMode`), date, start, end, location or link, instructions for the candidate |
 | Candidates | checkbox list of that vacancy's applications, showing each one's status |
-| Panel | `PanelMemberPicker` (employees **and** external associates) plus `PanelAvailabilityPanel`, which checks the chosen panel against the chosen slot |
+| Panel | `PanelMemberPicker` (employees **and** external associates) plus `PanelAvailabilityPanel`: *"Checks the panel against their other interviews, meetings, room bookings, training, leave, travel and any closure that day. A confirmed clash blocks the save unless you give a reason."* It also answers **When is everyone free?** |
+| Clash override | a reason box, e.g. *"Kofi has moved his 10:00 meeting to make room for this."* Only used when there is a hard clash to override |
 | Questions | an optional preset |
 
 Three behaviours the form states plainly and which are true of the server:
@@ -2260,6 +2663,40 @@ Three behaviours the form states plainly and which are true of the server:
 One implementation note: `<input type="time">` yields `HH:mm` and the API takes a `TimeSpan`, so
 the form appends `:00`.
 
+**The clash check binds (round 4, lane D-1).** It used to be advisory, it knew three things
+(interviews, leave and travel), and no write path called it. Now it runs on **create, update and
+reschedule**, and reads seven sources through `IPanelistCommitmentSource`:
+
+| Source | Hard when |
+|---|---|
+| another interview | always — a panelist cannot be in two sessions |
+| a meeting the panelist **attends** | it is Confirmed **and** they accepted. The company schedule's own check reads only the *organiser*, so a board meeting's twelve attendees all read as free |
+| a room booking | it is Confirmed |
+| a training nomination | never — it warns |
+| leave | never — it warns |
+| travel | never — it warns |
+| a closure or public holiday | never — it warns |
+
+**Hard refuses; soft warns.** A hard clash is confirmed **and** exact to the minute. Leave and travel
+are recorded by the **day**, so they cannot answer "is the 09:00 hour free?". A check that refused
+on them would overrule somebody about their own time on evidence that does not reach the question.
+
+A hard clash is refused **unless a reason is given**, and that reason is recorded on the interview
+with who gave it and when. A reason typed where there is no clash is **discarded**, because a record
+of an override that never happened is worse than none. The check compares each candidate's **own
+slot** where one exists, not the session window. The answer lists `sourcesConsulted`, so a source
+dropped from registration cannot silently answer "free". Externals are checked against every source
+that can apply to them.
+
+**When is everyone free?** (`GET api/job-interviews/suggest-slots`) offers the next windows in a
+fortnight, of the same length, where the whole panel has no hard clash. A slot with only a soft
+clash is still **offered**, with the clash named beside it. Withholding it on day-granular evidence
+would be the system making HR's call.
+
+**The room.** An interview can hold a company-schedule room booking (`RoomBookingId`), not just name
+a room in `LocationOrLink`. **One interview per booking**: two interviews on one hold would be the
+double-booking the hold exists to prevent.
+
 ### 9.5 `/hr/recruitment/interviews/[id]` — the session
 
 **Serves two audiences.** Nearly everything is conditioned on `canManage`, and the page says why:
@@ -2273,6 +2710,60 @@ cancelled interview instead offers **Delete**.
 a new confirmation link — the old one stops working, and any attendance they had already confirmed
 is cleared."* The session then permanently shows *"Moved from {date} — {reason}"*.
 
+⚠ **A reschedule re-lays the day before the emails go out** (round 4, lane C4). It used to move the
+session and leave every candidate's slot behind, then email them their old time against the new
+date, with a fresh token confirming it. Now:
+- an **apportioned** session is laid out again by its own rule, on the new window;
+- a session whose slots were typed by hand has them **cleared**, because they described the old day.
+
+If the new window is shorter, the candidates who no longer fit **lose their slot**. That is logged,
+not shown, and they are told the session time.
+
+**Apportioning the day (round 4, lane C).** The session page carries an **Apportion slots** card
+while the session is live: *"Preview first — nothing is written until you apply."*
+
+| Field | Meaning |
+|---|---|
+| Minutes per candidate | 5–480 |
+| Gap between candidates | 0–120 minutes: *"Turnaround for notes and fetching the next person. Never added after the last slot."* |
+| Breaks | rows of from, to and what for (e.g. *Lunch*) |
+
+**Preview** returns the timetable and a verdict. When everyone fits, it lists the times. When they
+don't, it **names** who will not fit and says *"The window is free again from HH:mm — pick a date
+for the rest."* **Apply to N candidates** writes the plan. Applying clears any time those candidates
+already had, *"so nobody is left holding an appointment the timetable no longer keeps"*.
+
+The rules are arithmetic, in `InterviewSlotApportioner`:
+- a slot must not **run into** a break, which is more than not starting inside one;
+- overlapping breaks merge;
+- the buffer falls **between** slots only.
+
+Every slot write is validated on the server, on every path: create, add a candidate, edit a slot,
+apportion. A slot must sit inside the session window, must not overlap another candidate and must
+not fall in a break. None of this was checked before round 4.
+
+**Printing (round 4, lane F).** The session's **Questions** tab links to `[id]/paper`. A panelist
+reaches their own score sheet from their `/me/panel` row and from the scorecard itself. The paper
+has three variants:
+- **Scoring sheets**: *"One sheet per candidate per panelist, with empty score boxes. The thing that
+  gets signed."* It can be narrowed to one panelist or to chosen candidates.
+- **Question list**: *"The drawn questions alone, with no score boxes — for the panel to read
+  beforehand."*
+- **Full pack**: *"A cover page naming the whole panel and the day's timetable, then every scoring
+  sheet."*
+
+The sheet count is stated **before** the print dialog opens. There is deliberately no auto-print:
+the page can produce a dozen sheets, and the filters decide how many. The document is composed on
+the server from an HR-editable `Interviews` template catalogue, so its wording changes without a
+deployment (Letter & Email Templates, HR Settings). Each question carries its weight, its band and
+the achievable weighted total, and its scoring guide where the bank has one.
+
+**A sheet scored on paper is entered by HR** on the panelist's scorecard route. The server records
+`ScoreSource = PaperSheet` (as against `Online`), with `FiledByHrOnBehalfOfEmployeeId` naming the
+HR employee. It is an employee id, not a user id, like every HR actor column. The source is derived
+from who is calling, never taken from the payload: a provenance the caller could assert would be
+worth nothing in an audit.
+
 **Closing has a state guard** that was once missing: *"Completion had no state guard at all, so a
 cancelled interview could be marked complete — reviving a session nobody attended, and with it
 every downstream read that keys off Completed."*
@@ -2282,6 +2773,10 @@ each scorecard), **Panel** (internal and external panelists, confirmations, atte
 **Questions** (the plans and their drawn questions), **Scorecards** (the grid).
 
 ### 9.6 The scorecard — `[id]/score/[intervieweeId]`
+
+> **Since round 4** this route is a 32-line wrapper around `InterviewScorecardForm`. The panelist's
+> own `/me/panel/[interviewId]/score/[intervieweeId]` renders the same form, and everything below
+> describes that one form. Blind scoring (§ 9.2) applies to what it shows of colleagues' cards.
 
 One panelist's card for one candidate. Whose card it is comes from `?panelistId=` when HR arrives
 from the candidate list, otherwise from the caller's own panel seat — and the page is explicit that
@@ -2343,6 +2838,14 @@ reaches the application record. See G-9.5.
 
 ### 9.8 Known gaps
 
+> **Round 4, 2026-09-23: three open items, none a defect in what was built.**
+>
+> | | Now |
+> |---|---|
+> | **R4-9.1** | **A reschedule into a shorter window drops the candidates who no longer fit, and only the log says so.** They lose their slot and are told the session time. A notice to HR naming them is the fix, if it bites. |
+> | **R4-9.2** | **The panelist and attendance confirmation tokens are stored in clear.** The test engine's are hashed (§ 8A.5); these and the offer's are not (round 4 plan § 9.4). |
+> | **R4-9.3** | **Not browser-walked**: the apportion card and its timetable (the round 4 plan's walk 1), the availability panel's hard/soft rendering, and *When is everyone free?* |
+>
 > **✅ All six closed, 2026-09-15 → 16.** Read the findings as history.
 >
 > | | Now |
@@ -2415,8 +2918,14 @@ closing a hole where any authenticated user could file or read a scorecard in so
 
 ## 10. `/hr/recruitment/offers` — the terms
 
-**Files:** `page.tsx` (157), `new/page.tsx` (375), `[id]/page.tsx` (660), `[id]/edit/page.tsx` (353)
-**Walked:** 2026-09-15
+**Files:** `page.tsx` (212), `new/page.tsx` (562), `[id]/page.tsx` (701), `[id]/edit/page.tsx` (355)
+**Walked:** 2026-09-15. **Updated 2026-09-23 for round 4:**
+- lane G: defaults with their sources, the currency picker, the placement controls;
+- lane D-10: an offer validity period;
+- lane H: the pre-employment checklist, seeded and printed in the letter;
+- lane N-b1: the letter attached to Offer Issued, and Offer Accepted sent however it arrives.
+
+⚠ Round 4's parts are not browser-walked.
 
 ### 10.1 What an offer is
 
@@ -2442,9 +2951,34 @@ service refuses explicitly instead.
 What the caller *does* supply is the negotiated part: base salary, bonus, commission, start date,
 contract length, probation and notice overrides, leave, NDA, conditionality, additional terms.
 
+**Round 4 proposes the negotiated part too** (lane G). `GET api/job-offers/defaults?applicationId=`
+returns a value for each field and, beside each, **where it came from**:
+
+| Field | Comes from |
+|---|---|
+| probation and notice | the position |
+| annual leave | the **annual leave type's standard days**. No entitlement is keyed on grade in this system, so none is implied |
+| weekly hours | the work schedule |
+| contract duration | the employment type |
+| place of work | the vacancy's unit |
+| grade, level, notch and base salary | the position's grade: notch, else the level's midpoint, else the grade's minimum |
+| currency | the company profile |
+| expiry | today plus the **offer validity period** (`OfferValidityDays`, 14 by default, on the HR policy page) |
+| start date | the requisition's required-by date |
+| *conditional* | ticked when the post needs a licence, a certification or a guarantor |
+
+`NdaRequired` has no source anywhere, so it is left alone rather than guessed. **A value that could
+not be derived carries no source line at all.** It is listed instead under *"You will need to supply
+these"*, because a confident caption under an empty box is the same fault as an empty criterion
+scoring full marks.
+
+Stating provenance is what makes a default checkable. It found a data-corruption bug two lanes away:
+the weekly hours were right (40), while the source line read *"Standard hours for a **0**
+contract"*. That was a vacancy whose employment type a partial update had zeroed (round 4 defect 31).
+
 ### 10.2 The lifecycle
 
-Thirteen statuses (§ 1.4), and the path forks on one flag — `IsConditional`.
+Fourteen statuses (§ 1.4), and the path forks on one flag — `IsConditional`.
 
 ```
   Draft ──submit──▶ PendingApproval ──approve──▶ Approved ──issue──▶ Sent
@@ -2466,21 +3000,33 @@ Thirteen statuses (§ 1.4), and the path forks on one flag — `IsConditional`.
 ```
 
 `Revoke` is reachable from anything not in `UNREVOKABLE_OFFER_STATUSES` and lands on `Withdrawn`.
-`Expired` is never written at all (G-2.4).
+A revision leaves its predecessor `Superseded` (14).
 
-**Issuing does three things**, and this is the module's best hand-over between steps:
+**`Expired` is now written** by the nightly recruitment sweep (`RecruitmentLifecycleSweepService`,
+every 24 hours), for a `Sent` offer whose expiry date has passed. This walk first recorded that it
+was never written (G-2.4). ⚠ An offer issued **with no expiry date never expires**: UAT holds 21
+`Sent` offers with none (R4-10.2).
+
+**Issuing does four things**, and this is the module's best hand-over between steps:
 
 1. sets `Sent`, stamps `OfferDate`, applies the expiry;
 2. mints an `OfferCandidateToken` (a `Guid`, with `ExpiresAt` defaulting to the offer expiry or
-   +14 days) and **emails the candidate their response link**;
-3. **advances the pipeline** to the Offer stage type.
+   +14 days). ⚠ It is stored in clear (R4-10.4);
+3. **emails the candidate their response link, with the offer letter attached** as
+   `Offer letter <number>.pdf` (round 4, lane N-b1). The email says the letter is attached only when
+   it really is: a letter that cannot be rendered costs the attachment, never the email;
+4. **advances the pipeline** to the Offer stage type.
+
+**Offer Accepted is sent however the acceptance arrives** (lane N-b1): HR recording it, the
+candidate's emailed link, or the careers portal. Before round 4 only HR's record sent it. The
+anonymous link carries the offer's tenant, so the email uses that tenant's own wording and name.
 
 Compare G-9.4, where closing an interview does none of that.
 
 ### 10.3 `/hr/recruitment/offers` — the list
 
 One dropdown with three kinds of view: **All offers**, **Expiring within 7 days**, and each of the
-thirteen statuses. Each runs its own purpose-built read — the page comment notes there is *"no
+statuses. Each runs its own purpose-built read — the page comment notes there is *"no
 general paged search on this controller"*.
 
 Columns: Offer (number, with `v2` when versioned), Candidate, Role (title over employment type),
@@ -2501,6 +3047,25 @@ taken server-side (§ 10.1). Two server rules apply at creation:
   matters: previously *"an offer for a post whose benefits came through a BENEFIT GROUP would have
   listed none of them — the candidate would have been sent an offer letter missing most of the
   package."*
+
+**What round 4 put on the form:**
+
+| Part | What it does |
+|---|---|
+| **Seeded from the defaults** (§ 10.1) | Each derived value shows its source beneath it. The *"You will need to supply these"* box lists what could not be derived. Every value stays editable |
+| **Placement** card | **Location level** and **Duty station**, *"printed on the offer letter as the place of work"*. ⚠ `locationId` had been in the form's state and payload all along, **bound to no control**, so every earlier offer sent null while the letter printed `{{LocationName}}` |
+| **Currency** | Finance's currency list (`CurrencyPicker`), on the offer and on each benefit line. The server refuses an unknown code on create, update, add-benefit **and** update-benefit. Three guarded paths and one unguarded would be a control with a door next to it |
+| **Salary level and notch** | pickers under the position's grade, feeding the base salary |
+
+**The check set is seeded when the offer is created** (lane H). It comes from the position's own
+pre-employment check template. Failing that, it uses the tenant's **single** active template, and
+failing that, nothing. ⚠ With **several** active templates and no choice on the post, nothing is
+seeded. It will not guess, because an offer letter commits the company in writing to what the
+candidate must produce. On the demo database that rule currently seeds nothing for any demo offer
+(R4-10.1). The set remains editable afterwards, on the offer's **Pre-employment checks** tab.
+
+This is also what makes **Accept conditionally** reachable without hand work. It refuses an offer
+with no check set, correctly, because the condition in *"conditionally accepted"* **is** the check set.
 
 **Nothing gates creation on the application's status** — only that the application resolves to a
 vacancy and a position. This confirms G-8.4.
@@ -2526,6 +3091,28 @@ tried twice."*
 
 **Six tabs:** Overview (four info cards — the role, compensation, dates and terms, additional
 terms), Benefits, Pre-employment checks, Letter, Notes, Workflow.
+
+**The letter now carries the real checklist, on every offer** (lane H). It used to list check items
+only on a conditional offer, by name alone. Where no check set existed it **invented five**:
+- *"Satisfactory employment references"*;
+- *"Verification of stated qualifications"*;
+- *"Confirmation of the right to work"*;
+- *"Satisfactory background / criminal-record check"*;
+- *"Medical fitness assessment"*.
+
+These are things the system does not track, cannot chase and will never mark complete. They are
+gone. The letter now prints the offer's own items, with each item's instructions, whether it is
+mandatory or blocking, and its expected days, under one of two headings:
+
+| Offer | Heading (the shipped template) | Then |
+|---|---|---|
+| not conditional | *"Pre-employment Requirements"* | *"Please arrange the following before your start date. They do not affect this offer, but your appointment cannot be finalised until they are complete:"* |
+| conditional | *"Conditions Precedent"* | *"This offer is conditional upon satisfactory completion of the following pre-employment checks:"* |
+
+The template tokens are `{{PreEmploymentChecklist}}` and `{{HasPreEmploymentChecks}}`.
+`{{ConditionsList}}` keeps its old meaning, conditional offers only, so a letter a tenant has already
+reworded behaves as it did. The wording itself is editable under **HR Settings → Letter & Email
+Templates** (round 4 lane N), without a deployment.
 
 **Revising** clones every term forward, applies the three overridable fields
 (`NewBaseSalary`, `NewProposedStartDate`, `NewAdditionalTerms`), carries the benefits across, and
@@ -2566,6 +3153,16 @@ guarantees the outcome it exists to avoid."*
 
 ### 10.8 Known gaps
 
+> **Round 4, 2026-09-23 — measured against `ErpSystemDB_UAT`.**
+>
+> | | Now |
+> |---|---|
+> | **R4-10.1** | ✅ **Fixed in the data for new offers, 2026-09-24. Four live demo offers are still to repair.** *Was:* no demo offer got a check set. The fallback needs the tenant's *single* active template, and UAT held **44**: the demo's *TDC Standard Pre-Employment Checks* plus 43 harness fixtures (12 *"R4H Standard checks …"*, 31 *"E2E RecD Template …"*). No demo post names a template either, because the position form's picker never saved until round 4 lane O fixed it. So a demo offer printed no checklist, and **Accept conditionally** was refused. *Now:* the 43 fixtures are switched off (backup: `dev-harness/hr-recruitment/fixture-check-templates-retired-2026-09-24.csv`), and TDC's is the only active template, so every offer raised from now on starts from it. The four scripts that made the fixtures now switch theirs off however they end: lane H's suite, slice-d, `run-g` and lane I's. **The four live demo offers raised before the fix were given TDC's checklist the same day** (the user's call): OFR-000013 (Draft), OFR-000015 (Sent), OFR-000016 (Negotiating) and OFR-000017 (Sent). Each got one set of five items, through the real doors, via `dev-harness/hr-recruitment/repair-demo-offer-checklists.mjs`, which writes nothing on a second run. OFR-000017's letter now prints *Conditions Precedent* with the five checks. ⚠ **Still open:** OFR-000017, Rita Amponsah's, is the offer scenario 050 meant to be *Conditionally Accepted*. It stays *Sent* until that acceptance is recorded, which now succeeds because a check set exists. A rebuilt database does not have the problem, because it holds no fixtures. |
+> | **R4-10.2** | **An offer with no expiry date never expires.** The sweep expires `Sent` offers past their expiry, and 21 `Sent` offers on UAT have none. Offers raised since lane G are proposed an expiry, and HR can still clear it. |
+> | **R4-10.3** | **Two defaults are thinner than the plan hoped.** Annual leave comes from the annual leave type's standard days, not a grade rule, because none exists. `NdaRequired` has no source at all. Both are said on screen rather than guessed. |
+> | **R4-10.4** | **The offer-response token is stored in clear**, like the interview confirmations (R4-9.2). Procurement's hashed design is the model; the test engine already follows it. |
+> | **R4-10.5** | **Not browser-walked**: the defaults and their source lines, the placement card, the currency picker, and the letter's checklist headings. |
+>
 > **✅ All five closed, 2026-09-15 → 16.** Read the findings as history.
 >
 > | | Now |
@@ -3009,8 +3606,13 @@ tables, this is carefully done.
 
 ## 13. `/hr/recruitment/talent-pool` — the candidate CRM
 
-**File:** `page.tsx` (833)
-**Walked:** 2026-09-15
+**File:** `page.tsx` (990), with `TalentPoolScreeningPanel` for the Screen tab (new in round 4)
+**Walked:** 2026-09-15. **Updated 2026-09-23 for round 4, lane B:**
+- the pool screened by a vacancy's real criteria, then acted on;
+- the filters the server always had;
+- HR able to record a candidate's professional profile.
+
+⚠ Round 4's parts are not browser-walked.
 
 ### 13.1 What it is, and what it is not
 
@@ -3051,6 +3653,24 @@ headline, employer"* server-side, alongside filters for status, source, segment 
 review* checkbox — all combining into one paged read. The full candidate register (§ 7.3) offers
 only an exact-email lookup. If G-7.6 is ever addressed, this is the endpoint that already does it.
 
+**Round 4 wired the five filters the server always had** (lane B2):
+- **Work arrangement**;
+- **Experience (yrs)**, minimum and maximum;
+- **Available before**;
+- **Not engaged for (days)**;
+- **Sort by**.
+
+It also added **Where they are**: a place on the geography tree, matching every candidate recorded
+there **or anywhere beneath it**. That is the same containment rule the Location criterion uses
+(§ 5.8).
+
+**HR can now record a candidate's professional profile.** `TotalYearsExperience`,
+`PreferredWorkArrangement`, `AvailableFrom`, `Headline` and three related fields used to be
+writable **only by the candidate**, through their own portal profile. Yet the pool's fit score reads
+three of them. A career fair, a referral or an unsolicited CV reaches the pool by HR typing it in,
+so the people HR knew most about could never rank above the "nothing on file" tier. They are now on
+HR's candidate form. Expected salary and work authorisation stay the candidate's own.
+
 Columns: Candidate, Segments (as badges), Status, Added, Last engaged, Next review, Experience.
 
 **Bulk operations** work on the selected rows — `AssignSegment`, `RemoveSegment`, `SetStatus` —
@@ -3077,26 +3697,88 @@ column server-side (G-13.4).
 Deleting a segment needs `RecruitmentAdmin`; un-assigning a candidate from one stays at Write —
 *"the same-object-authoring rule"*.
 
-### 13.5 Matching — the 40/30/20 rubric
+### 13.5 The Screen tab — the pool against a vacancy's real criteria (round 4, lane B)
 
-Two directions, one rubric: `MatchToVacancyAsync` (pool → one vacancy, shown on the vacancy's
-*Pool matches* tab) and `MatchCandidateToVacanciesAsync` (one candidate → vacancies, shown on the
-candidate's talent-pool tab).
+**What it is for.** *"Who do we already have for this?"*, answered by the same rules a vacancy's
+applications are scored by, not by a rough fit.
 
-Only **Active** pool members are considered. Each scores out of **90**, not 100:
+**Screen the pool** runs a vacancy's live shortlisting criteria over the Active pool members
+(`POST api/talent-pool/screen/{vacancyId}`). Each member gets:
+- a **criteria score out of 100**;
+- pass or fail per criterion;
+- the full breakdown.
 
-| Criterion | Points | Awarded when |
-|---|---|---|
-| Experience | +40 | the vacancy states no minimum, **or** the candidate meets it |
-| Work mode | +30 | the candidate is open to *Any*, **or** their preference matches the vacancy's mode |
-| Availability | +20 | the candidate has no `AvailableFrom`, **or** it has passed |
+It is the **same engine** as § 5.8, `ShortlistingEvaluator`, over the candidate's profile rather than
+an application's snapshot. The lane's suite checks that claim directly: it gives one pool member an
+application against the same vacancy, scores it, and requires the two numbers to be equal.
 
-Each awarded point carries a human-readable reason (*"Meets experience requirement (5 yr)"*,
-*"Open to any work arrangement"*, *"Available now"*), and an unavailable candidate still gets a
-reason line stating their date.
+**Screening without a vacancy.** An **ad-hoc** criteria set, built on the tab
+(`POST api/talent-pool/screen`), answers *"who do we have?"* with nothing open yet. It refuses what
+a vacancy refuses:
+- a mandatory gender;
+- a numeric criterion with no bound;
+- a list criterion with no values;
+- an area off the tree.
 
-This too replaced a dead path: *"this used to be a stub returning MatchScore 0 for everyone, which
-is worse than no score because a column of zeros reads as 'nobody fits'."*
+A vacancy with **no** criteria is refused too (422), and the message names the tab that fixes it.
+The alternative, a table of *"Not measurable"* against everybody, would read as "the pool is useless"
+rather than "this vacancy has not said what it wants yet".
+
+**Three states, as in § 5.8.** A member whose record cannot answer the criteria shows **Not
+measurable** (*"The criteria asked questions this record cannot answer."*), never 0. A 0 would mean
+"measured, and missed everything". Not measurable sorts last.
+
+**Acting on the result:**
+
+| Action | What it does |
+|---|---|
+| **Invite to apply** | Creates an application for each selected member through the ordinary create path, with `ApplicationSource = TalentPool` (12). It logs an `InvitedToApply` engagement event and sends the `TalentPoolInvitation` email. ⚠ Refused **for the whole request** when the vacancy is not open: an invitation to apply for a filled post embarrasses the organisation in the candidate's inbox. |
+| **Book for interview** | Adds members who have **already applied** to a chosen interview session, which advances their pipeline stage, best effort (§ 9.4). A member who has not applied is **skipped**, with a reason naming the button above. An application is never manufactured, because that would lose the record of who decided this person should be considered. |
+
+Both return partial results. *"Skipped, and why"* lists each row that did not go through: the pool's
+usual convention. An ad-hoc screen has no vacancy to invite anyone to, and says *"Screen against a
+vacancy to invite these candidates to apply."*
+
+### 13.6 Matching — the fit score, out of 90
+
+Two directions: `MatchToVacancyAsync` (pool → one vacancy, shown on the vacancy's *Pool matches*
+tab) and `MatchCandidateToVacanciesAsync` (one candidate → vacancies, shown on the candidate's
+talent-pool tab). Only **Active** pool members are considered. It is a quick **fit** on three facts,
+not the criteria score, and each is scored out of **90**.
+
+> **Rewritten 2026-09-23.** This section described the 40/30/20 rubric as walked on 2026-09-15,
+> which awarded full points for the *absence* of a constraint (G-13.2). The rules below are the three
+> tiers that replaced it: a genuine match scores full, an unconstrained-but-known situation scores
+> partial, and silence scores little.
+
+**Pool → vacancy** (`MatchToVacancyAsync`):
+
+| Fact | Full | Partial | Little or none |
+|---|---|---|---|
+| Experience (0–40) | **40**: meets the vacancy's minimum | **25**: no minimum set, and years on file | **10**: no minimum, none on file · **0**: below the minimum, or none on file against one |
+| Work arrangement (0–30) | **30**: prefers the vacancy's own mode | **20**: open to *Any* | **0**: prefers another mode |
+| Availability (0–20) | **20**: available now | — | **5**: availability not on file · **0**: available only from a later date |
+
+**Candidate → vacancies** (`MatchCandidateToVacanciesAsync`) scores experience and work arrangement
+the same way. Its third fact is the **vacancy**, not the candidate:
+
+| Fact | Full | Partial | None |
+|---|---|---|---|
+| Still open to apply (0–20) | **20**: the deadline is ahead | **15**: no deadline set, and genuinely still open | **0**: applications closed |
+
+That asymmetry is deliberate, and the code says why: *"An open-ended vacancy is genuinely still open
+— unlike a blank availability on a candidate, this absence IS the fact."*
+
+Every point carries a reason line, e.g. *"Meets experience requirement (5 yr, has 7)"*, *"Open to any
+work arrangement"*, *"Availability not on file"*. `MatchScoreMax` travels with the score, so the
+bare number has a denominator.
+
+**Two scores side by side** (decision D-7). A vacancy's *Pool matches* panel shows this fit score
+**and**, beside it, the criteria score out of 100 from § 13.5. They answer different questions, so
+they are not merged.
+
+This matcher also replaced a dead path: *"this used to be a stub returning MatchScore 0 for
+everyone, which is worse than no score because a column of zeros reads as 'nobody fits'."*
 
 **A detail worth not 'fixing'.** The work-mode comparison is
 `c.PreferredWorkArrangement.ToString() == vacancy.WorkMode.ToString()` — a comparison of enum
@@ -3106,8 +3788,16 @@ Any=0, OnSite=1, Hybrid=2, Remote=3. Comparing numerically would silently match 
 Hybrid. It is fragile — renaming a member in either enum breaks it with no compiler error — but it
 is not a bug.
 
-### 13.6 Known gaps
+### 13.7 Known gaps
 
+> **Round 4, 2026-09-23.**
+>
+> | | Now |
+> |---|---|
+> | **R4-13.1** | **Publishing a vacancy through the API without restating its title erases it.** `TransitionJobVacancyDto.CustomAdvertTitle` is `string?`, and null means "clear it". The invitation email then reads *"Invited to apply:  (VAC-000131)"*, a blank where the role should be. The screens post the whole form, so they never show it. Not fixed: making null mean "leave it" would remove the only way to clear a title. |
+> | **R4-13.2** | **Book for interview advances the pipeline best effort.** A pipeline whose stages are non-skippable refuses the jump. The booking stands, and only the log carries the warning. Right for the candidate, since a booking should not be undone because the pipeline has an opinion about order, but invisible to HR. |
+> | **R4-13.3** | **Not browser-walked**: the Screen tab, the ad-hoc criteria builder, and both bulk actions. |
+>
 > **✅ All four closed, 2026-09-15 → 16.** Read the findings as history.
 >
 > | | Now |
