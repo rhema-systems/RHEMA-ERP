@@ -947,7 +947,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             _context.SubledgerUnappliedSettlementBalances.Add(BuildUnappliedBalance(
                 tenantId,
                 SubledgerSettlementModules.AccountsPayable,
-                payment.SupplierId,
+                payment.BusinessPartnerId,
                 VendorPaymentType,
                 payment.Id,
                 payment.PaymentNumber,

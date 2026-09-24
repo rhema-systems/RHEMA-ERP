@@ -1120,7 +1120,7 @@ public sealed class CoreFinancialReportingFoundationTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             InvoiceNumber = number,
-            SupplierId = supplierId,
+            BusinessPartnerId = supplierId,
             SupplierName = "Supplier",
             InvoiceDate = new DateTime(2026, 7, 10),
             DueDate = new DateTime(2026, 7, 31),

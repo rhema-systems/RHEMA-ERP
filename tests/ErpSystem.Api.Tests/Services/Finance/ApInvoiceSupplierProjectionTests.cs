@@ -48,7 +48,7 @@ public sealed class ApInvoiceSupplierProjectionTests
             ErpSystem.Core.Entities.Finance.VendorInvoiceStatus status, decimal quantity) => new()
         {
             Id = Guid.NewGuid(), TenantId = invoiceTenant, PurchaseOrderId = po.Id,
-            SupplierId = supplier.Id, SupplierName = supplier.Name, InvoiceNumber = Guid.NewGuid().ToString(), Status = status,
+            BusinessPartnerId = supplier.Id, SupplierName = supplier.Name, InvoiceNumber = Guid.NewGuid().ToString(), Status = status,
             LineItems = [new() { Id = Guid.NewGuid(), TenantId = invoiceTenant,
                 PurchaseOrderItemId = poLine, Description = "Goods", Quantity = quantity }]
         };
@@ -306,7 +306,7 @@ public sealed class ApInvoiceSupplierProjectionTests
         var supplier = Supplier(tenant, "INACTIVE-EDIT", "Inactive", isActive: false);
         var invoice = new ErpSystem.Core.Entities.Finance.VendorInvoice
         {
-            Id = Guid.NewGuid(), TenantId = tenant, SupplierId = supplier.Id, SupplierName = supplier.Name,
+            Id = Guid.NewGuid(), TenantId = tenant, BusinessPartnerId = supplier.Id, SupplierName = supplier.Name,
             InvoiceNumber = "VI-UNTOUCHED", Status = ErpSystem.Core.Entities.Finance.VendorInvoiceStatus.Draft
         };
         db.Suppliers.Add(supplier);

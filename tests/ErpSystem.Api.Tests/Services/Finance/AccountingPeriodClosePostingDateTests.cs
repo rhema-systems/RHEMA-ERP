@@ -199,7 +199,7 @@ public sealed class AccountingPeriodClosePostingDateTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             InvoiceNumber = "AP-001",
-            SupplierId = Guid.NewGuid(),
+            BusinessPartnerId = Guid.NewGuid(),
             SupplierName = "Supplier",
             InvoiceDate = new DateTime(2026, 7, 10),
             CurrencyCode = "GHS",

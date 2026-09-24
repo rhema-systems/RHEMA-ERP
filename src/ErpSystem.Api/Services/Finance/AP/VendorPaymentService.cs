@@ -146,7 +146,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
 
             var payment = await query
-                .Include(p => p.Supplier)
+                .Include(p => p.BusinessPartner)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.VendorInvoice)
                 .Include(p => p.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
@@ -178,7 +178,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var payment = await _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
-                .Include(item => item.Supplier)
+                .Include(item => item.BusinessPartner)
                 .Include(item => item.BankAccount)
                 .Include(item => item.ConfiguredPaymentMethod)
                 .Include(item => item.Allocations)
@@ -270,16 +270,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 queryable = queryable.Where(p =>
                     p.PaymentNumber.Contains(query.SearchTerm) ||
-                    p.Supplier.Name.Contains(query.SearchTerm) ||
+                    p.BusinessPartner.PartnerName.Contains(query.SearchTerm) ||
                     (p.TransactionReference != null && p.TransactionReference.Contains(query.SearchTerm)) ||
                     (p.ChequeNumber != null && p.ChequeNumber.Contains(query.SearchTerm)));
             }
 
-            if (query.SupplierId.HasValue)
+            if (query.BusinessPartnerId.HasValue)
             {
-                var resolvedSupplierId = await ResolveSupplierIdForQueryAsync(query.SupplierId.Value, cancellationToken);
+                var resolvedSupplierId = await ResolveBusinessPartnerIdForQueryAsync(query.BusinessPartnerId.Value, cancellationToken);
                 queryable = resolvedSupplierId.HasValue
-                    ? queryable.Where(p => p.SupplierId == resolvedSupplierId.Value)
+                    ? queryable.Where(p => p.BusinessPartnerId == resolvedSupplierId.Value)
                     : queryable.Where(p => false);
             }
 
@@ -309,8 +309,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     ? queryable.OrderByDescending(p => p.PaymentNumber)
                     : queryable.OrderBy(p => p.PaymentNumber),
                 "supplier" => query.SortDescending
-                    ? queryable.OrderByDescending(p => p.Supplier.Name)
-                    : queryable.OrderBy(p => p.Supplier.Name),
+                    ? queryable.OrderByDescending(p => p.BusinessPartner.PartnerName)
+                    : queryable.OrderBy(p => p.BusinessPartner.PartnerName),
                 "amount" => query.SortDescending
                     ? queryable.OrderByDescending(p => p.TotalAmount)
                     : queryable.OrderBy(p => p.TotalAmount),
@@ -320,7 +320,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var payments = await queryable
                 .Skip((query.Page - 1) * query.PageSize)
                 .Take(query.PageSize)
-                .Include(p => p.Supplier)
+                .Include(p => p.BusinessPartner)
                 .Include(p => p.BankAccount)
                 .Include(p => p.ConfiguredPaymentMethod)
                 .Include(p => p.Allocations)
@@ -343,7 +343,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (supplierOrBusinessPartnerId == Guid.Empty)
                 return new List<PostedSupplierAdvanceDto>();
 
-            var supplierId = await ResolveSupplierIdForQueryAsync(supplierOrBusinessPartnerId, cancellationToken);
+            var supplierId = await ResolveBusinessPartnerIdForQueryAsync(supplierOrBusinessPartnerId, cancellationToken);
             if (!supplierId.HasValue)
                 return new List<PostedSupplierAdvanceDto>();
 
@@ -351,7 +351,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .GetQueryable(payment =>
                     payment.TenantId == TenantId &&
                     !payment.IsDeleted &&
-                    payment.SupplierId == supplierId.Value &&
+                    payment.BusinessPartnerId == supplierId.Value &&
                     payment.IsSupplierAdvance &&
                     payment.JournalEntryId.HasValue &&
                     payment.TotalAmount > payment.AllocatedAmount &&
@@ -364,8 +364,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 {
                     Id = payment.Id,
                     PaymentNumber = payment.PaymentNumber,
-                    SupplierId = payment.SupplierId,
-                    SupplierName = payment.Supplier.Name,
+                    BusinessPartnerId = payment.BusinessPartnerId,
+                    SupplierName = payment.BusinessPartner.PartnerName,
                     PaymentDate = payment.PaymentDate,
                     TotalAmount = payment.TotalAmount,
                     AllocatedAmount = payment.AllocatedAmount,
@@ -400,7 +400,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     cancellationToken);
             }
 
-            var supplier = await ResolveSupplierForPaymentAsync(dto.SupplierId, cancellationToken);
+            var apPartner = await ResolvePartnerForPaymentAsync(
+                dto.BusinessPartnerId, dto.BusinessPartnerRoleId, dto.PaymentDate, cancellationToken);
+            var supplier = apPartner.Partner;
 
             // Resolve and persist the effective account, including the tenant default. Leaving the
             // source field null would make later list, trace, and approval scope decisions depend on
@@ -525,7 +527,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 whtCalculation = await _withholdingTaxService.CalculateApWithholdingAsync(new WhtCalculationRequestDto
                 {
                     TaxId = dto.WithholdingTaxId.Value,
-                    SupplierId = supplier.Id,
+                    BusinessPartnerId = supplier.Id,
                     PaymentDate = dto.PaymentDate,
                     TaxableBase = taxableBase,
                     VendorInvoiceIds = withholdingInvoices.Select(invoice => invoice.Id).Distinct().ToList()
@@ -549,7 +551,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 PaymentNumber = paymentNumber,
-                SupplierId = supplier.Id,
+                BusinessPartnerId = supplier.Id,
+                BusinessPartnerRoleId = apPartner.Role.Id,
+                BusinessPartnerApProfileVersionId = apPartner.Profile.Id,
+                BusinessPartnerCode = supplier.PartnerCode,
+                BusinessPartnerName = supplier.PartnerName,
+                BusinessPartnerLegalName = supplier.LegalName,
+                BusinessPartnerTaxIdentificationNumber = supplier.TaxIdentificationNumber,
                 PaymentDate = dto.PaymentDate,
                 TotalAmount = dto.TotalAmount,
                 AllocatedAmount = 0,
@@ -606,7 +614,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 // Refresh the payment to get updated amounts
                 payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(p => p.Id == payment.Id)
-                    .Include(p => p.Supplier)
+                    .Include(p => p.BusinessPartner)
                     .Include(p => p.BankAccount)
                     .Include(p => p.ConfiguredPaymentMethod)
                     .Include(p => p.Allocations)
@@ -1318,7 +1326,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 var payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
-                    .Include(item => item.Supplier)
+                    .Include(item => item.BusinessPartner)
                     .Include(item => item.BankAccount)
                     .Include(item => item.ConfiguredPaymentMethod)
                     .Include(item => item.Allocations)
@@ -1397,7 +1405,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     SourceDocumentTenantId = payment.TenantId,
                     PostingAction = "Reverse",
                     SourceDocumentReference = payment.PaymentNumber,
-                    Description = $"Reverse vendor payment {payment.PaymentNumber} - {payment.Supplier.Name}",
+                    Description = $"Reverse vendor payment {payment.PaymentNumber} - {payment.BusinessPartner.PartnerName}",
                     PostingDate = reversalDate,
                     JournalType = "AP Payment Reversal",
                     AccountingBookCode = "IFRS",
@@ -1709,7 +1717,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Concat(payment.Allocations.Where(item => !item.IsDeleted && !item.IsReversal).Select(item => item.VendorInvoiceId))
                 .Distinct().ToList();
             var whtInvoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(invoice =>
-                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == payment.SupplierId &&
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == payment.BusinessPartnerId &&
                 whtInvoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
             if (whtInvoices.Count != whtInvoiceIds.Count)
                 throw new InvalidOperationException("A selected WHT invoice does not belong to this payment supplier and tenant.");
@@ -1757,7 +1765,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         "AP_PAYMENT_BALANCE_RESERVED",
                         $"Invoice '{invoice.InvoiceNumber}' has no unreserved outstanding balance.");
 
-                if (invoice.BusinessPartnerId != payment.SupplierId)
+                if (invoice.BusinessPartnerId != payment.BusinessPartnerId)
                 {
                     throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' does not belong to this payment's supplier.");
                 }
@@ -2079,7 +2087,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         .GetQueryable(i => i.TenantId == TenantId && i.Id == requested.VendorInvoiceId && !i.IsDeleted)
                         .FirstOrDefaultAsync(cancellationToken)
                         ?? throw new InvalidOperationException("Supplier advance application invoice was not found for this tenant.");
-                    if (invoice.BusinessPartnerId != payment.SupplierId)
+                    if (invoice.BusinessPartnerId != payment.BusinessPartnerId)
                         throw new InvalidOperationException("Supplier advance can only be applied to invoices for the same supplier.");
                     if (!invoice.JournalEntryId.HasValue)
                         throw new InvalidOperationException($"Supplier advance cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
@@ -2917,7 +2925,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 var payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(item => item.TenantId == TenantId && item.Id == paymentId && !item.IsDeleted)
-                    .Include(item => item.Supplier)
+                    .Include(item => item.BusinessPartner)
                     .Include(item => item.PaymentBatch)
                     .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted))
                     .Include(item => item.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
@@ -2945,7 +2953,6 @@ namespace ErpSystem.Api.Services.Finance.AP
                             item.Id == request.SupplierDebitNoteId &&
                             !item.IsDeleted)
                         .Include(item => item.Vendor)
-                        .Include(item => item.Supplier)
                         .Include(item => item.Applications.Where(application => !application.IsDeleted))
                         .SingleOrDefaultAsync(cancellationToken)
                         ?? throw new KeyNotFoundException($"Supplier debit note with Id '{request.SupplierDebitNoteId}' was not found.");
@@ -2953,7 +2960,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         !note.PostingEventId.HasValue ||
                         !note.JournalEntryId.HasValue)
                         throw new InvalidOperationException($"Supplier debit note '{note.DebitNoteNumber}' must be posted before application.");
-                    if (!note.SupplierId.HasValue || note.SupplierId.Value != payment.SupplierId)
+                    if (note.VendorId != payment.BusinessPartnerId)
                         throw new InvalidOperationException($"Supplier debit note '{note.DebitNoteNumber}' does not belong to this payment's supplier.");
                     if (payment.PaymentDate.Date < note.DebitNoteDate.Date)
                         throw new InvalidOperationException(
@@ -2969,7 +2976,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             !item.IsDeleted)
                         .SingleOrDefaultAsync(cancellationToken)
                         ?? throw new KeyNotFoundException($"Vendor invoice with Id '{request.VendorInvoiceId}' was not found.");
-                    if (invoice.BusinessPartnerId != payment.SupplierId)
+                    if (invoice.BusinessPartnerId != payment.BusinessPartnerId)
                         throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' does not belong to this payment's supplier.");
                     if (!invoice.JournalEntryId.HasValue)
                         throw new InvalidOperationException($"Supplier debit note cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
@@ -3237,7 +3244,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             CancellationToken cancellationToken = default)
         {
             var now = DateTime.UtcNow;
-            var resolvedSupplierId = await ResolveSupplierIdForQueryAsync(supplierId, cancellationToken);
+            var resolvedSupplierId = await ResolveBusinessPartnerIdForQueryAsync(supplierId, cancellationToken);
             if (!resolvedSupplierId.HasValue)
             {
                 return new List<OutstandingVendorInvoiceDto>();
@@ -3385,7 +3392,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var payment = await _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == id)
-                .Include(p => p.Supplier)
+                .Include(p => p.BusinessPartner)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (payment == null)
@@ -3444,7 +3451,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(p => p.TenantId == TenantId && p.Id == id && !p.IsDeleted)
-                    .Include(p => p.Supplier)
+                    .Include(p => p.BusinessPartner)
                     .Include(p => p.Allocations.Where(a => !a.IsDeleted))
                         .ThenInclude(a => a.VendorInvoice)
                     .Include(p => p.SupplierDebitNoteApplications.Where(application => !application.IsDeleted))
@@ -3938,7 +3945,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Id = Guid.NewGuid(),
                     TenantId = TenantId,
                     PaymentNumber = paymentNumber,
-                    SupplierId = group.Key.BusinessPartnerId,
+                    BusinessPartnerId = group.Key.BusinessPartnerId,
+                    BusinessPartnerRoleId = group.First().BusinessPartnerRoleId,
+                    BusinessPartnerApProfileVersionId = group.First().BusinessPartnerApProfileVersionId,
+                    BusinessPartnerCode = group.First().BusinessPartnerCode,
+                    BusinessPartnerName = group.First().SupplierName,
+                    BusinessPartnerLegalName = group.First().BusinessPartnerLegalName,
+                    BusinessPartnerTaxIdentificationNumber = group.First().BusinessPartnerTaxIdentificationNumber,
                     PaymentDate = dto.BatchDate,
                     TotalAmount = supplierTotal,
                     AllocatedAmount = 0,
@@ -4051,7 +4064,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .GetQueryable(b => b.TenantId == TenantId && b.Id == batchId)
                 .Include(b => b.Items)
                     .ThenInclude(i => i.VendorPayment)
-                        .ThenInclude(p => p.Supplier)
+                        .ThenInclude(p => p.BusinessPartner)
                 .Include(b => b.Items)
                     .ThenInclude(i => i.Invoices)
                         .ThenInclude(i => i.VendorInvoice)
@@ -4094,7 +4107,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Take(query.PageSize)
                 .Include(b => b.Items)
                     .ThenInclude(i => i.VendorPayment)
-                        .ThenInclude(p => p.Supplier)
+                        .ThenInclude(p => p.BusinessPartner)
                 .Include(b => b.Items)
                     .ThenInclude(i => i.Invoices)
                         .ThenInclude(i => i.VendorInvoice)
@@ -4941,7 +4954,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var payment = await _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == id && !p.IsDeleted)
-                .Include(p => p.Supplier)
+                .Include(p => p.BusinessPartner)
                 .Include(p => p.BankAccount)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.VendorInvoice)
@@ -5194,13 +5207,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                     !application.SupplierDebitNote.PostingEventId.HasValue ||
                     !application.SupplierDebitNote.JournalEntryId.HasValue)
                     throw new InvalidOperationException("AP payment references an unposted or cross-tenant supplier debit note.");
-                if (!application.SupplierDebitNote.SupplierId.HasValue ||
-                    application.SupplierDebitNote.SupplierId.Value != payment.SupplierId)
+                if (application.SupplierDebitNote.VendorId != payment.BusinessPartnerId)
                     throw new InvalidOperationException(
                         $"Supplier debit note '{application.SupplierDebitNote.DebitNoteNumber}' does not belong to this payment's supplier.");
                 if (application.VendorInvoice == null ||
                     application.VendorInvoice.TenantId != tenantId ||
-                    application.VendorInvoice.BusinessPartnerId != payment.SupplierId ||
+                    application.VendorInvoice.BusinessPartnerId != payment.BusinessPartnerId ||
                     !application.VendorInvoice.JournalEntryId.HasValue ||
                     application.VendorInvoice.Status == VendorInvoiceStatus.Voided)
                     throw new InvalidOperationException("AP payment supplier-credit application references an invalid invoice.");
@@ -5481,8 +5493,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PostingAction = "Post",
                 SourceDocumentReference = payment.PaymentNumber,
                 Description = isSupplierAdvance
-                    ? $"Supplier advance {payment.PaymentNumber} - {supplier.Name}"
-                    : $"Vendor payment {payment.PaymentNumber} - {supplier.Name}",
+                    ? $"Supplier advance {payment.PaymentNumber} - {payment.BusinessPartnerName}"
+                    : $"Vendor payment {payment.PaymentNumber} - {payment.BusinessPartnerName}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AP Payment",
                 AccountingBookCode = "IFRS",
@@ -5542,17 +5554,17 @@ namespace ErpSystem.Api.Services.Finance.AP
             return configuredTax?.TaxPayableAccountId;
         }
 
-        private async Task<Supplier> ResolvePaymentSupplierForPostingAsync(VendorPayment payment, CancellationToken cancellationToken)
+        private async Task<BusinessPartner> ResolvePaymentSupplierForPostingAsync(VendorPayment payment, CancellationToken cancellationToken)
         {
-            var supplier = await _unitOfWork.Repository<Supplier>()
-                .GetQueryable(s => s.TenantId == TenantId && s.Id == payment.SupplierId && !s.IsDeleted)
+            var supplier = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(s => s.TenantId == TenantId && s.Id == payment.BusinessPartnerId && !s.IsDeleted)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (supplier == null)
-                throw new InvalidOperationException("AP payment supplier was not found for this tenant.");
+                throw new InvalidOperationException("The AP payment Business Partner was not found for this tenant.");
 
-            if (!supplier.IsActive || supplier.IsBlacklisted || string.Equals(supplier.Status, "Inactive", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Supplier '{supplier.Name}' is not active for AP payment posting.");
+            if (!supplier.IsActive || supplier.IsBlacklisted)
+                throw new InvalidOperationException($"Business Partner '{supplier.PartnerName}' is not active for AP payment posting.");
 
             return supplier;
         }
@@ -6276,7 +6288,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var functionalWht = RoundMoney(allocations.Sum(item => item.WithholdingTaxFunctionalAmount));
             var invoiceIds = allocations.Select(item => item.VendorInvoiceId).Distinct().ToList();
             var withholdingInvoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(invoice =>
-                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == payment.SupplierId &&
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == payment.BusinessPartnerId &&
                 invoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
             if (withholdingInvoices.Count != invoiceIds.Count)
                 throw new InvalidOperationException("A selected WHT invoice does not belong to this payment supplier and tenant.");
@@ -6308,7 +6320,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 new WhtCalculationRequestDto
                 {
                     TaxId = payment.WithholdingTaxId.Value,
-                    SupplierId = payment.SupplierId,
+                    BusinessPartnerId = payment.BusinessPartnerId,
                     PaymentDate = payment.PaymentDate,
                     TaxableBase = taxableBase,
                     // Allocation edits and posting revalidate an already persisted payment.
@@ -6332,89 +6344,52 @@ namespace ErpSystem.Api.Services.Finance.AP
             payment.WithholdingTaxAccountId = calculation.TaxPayableAccountId;
         }
 
-        private async Task<Supplier> ResolveSupplierForPaymentAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
+        private sealed record CanonicalPaymentPartner(
+            BusinessPartner Partner,
+            BusinessPartnerRole Role,
+            BusinessPartnerApProfileVersion Profile);
+
+        private async Task<CanonicalPaymentPartner> ResolvePartnerForPaymentAsync(
+            Guid businessPartnerId,
+            Guid? requestedRoleId,
+            DateTime accountingDate,
+            CancellationToken cancellationToken)
         {
-            var supplierRepository = _unitOfWork.Repository<Supplier>();
-            var directSupplier = await supplierRepository
-                .GetQueryable(s =>
-                    s.TenantId == TenantId &&
-                    !s.IsDeleted &&
-                    s.IsActive &&
-                    s.Id == supplierOrBusinessPartnerId)
-                .SingleOrDefaultAsync(cancellationToken);
-            if (directSupplier != null)
-            {
-                if (directSupplier.IsBlacklisted || string.Equals(directSupplier.Status, "Inactive", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"Supplier '{directSupplier.Name}' is not eligible for AP payment entry.");
-                return directSupplier;
-            }
-
-            Guid canonicalSupplierId;
-            if (_apSupplierIdentityService != null)
-            {
-                // Payment entry is a Finance command, so it may create the durable exact-ID/code
-                // bridge and AP's internal Supplier projection from an approved Business Partner.
-                // It must never pair identities by mutable name or email.
-                canonicalSupplierId = (await _apSupplierIdentityService.ResolveAsync(
-                    supplierOrBusinessPartnerId, cancellationToken)).SupplierId;
-            }
-            else
-            {
-                // Legacy test hosts may not register the bridge. Preserve only exact Supplier-ID
-                // operation; Business Partner translation fails closed instead of guessing.
-                canonicalSupplierId = supplierOrBusinessPartnerId;
-            }
-
-            var supplier = await supplierRepository
-                .GetQueryable(s =>
-                    s.TenantId == TenantId &&
-                    !s.IsDeleted &&
-                    s.IsActive &&
-                    s.Id == canonicalSupplierId)
+            var partner = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryableIncludingDeleted(x => x.TenantId == TenantId && x.Id == businessPartnerId)
                 .SingleOrDefaultAsync(cancellationToken)
-                ?? throw new InvalidOperationException(
-                    "An active, unambiguous AP supplier identity is required before payment entry.");
-
-            if (supplier.IsBlacklisted || string.Equals(supplier.Status, "Inactive", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Supplier '{supplier.Name}' is not eligible for AP payment entry.");
-
-            return supplier;
+                ?? throw new KeyNotFoundException("The selected Business Partner was not found in the current tenant.");
+            var roles = await _unitOfWork.Repository<BusinessPartnerRole>()
+                .GetQueryable(x => x.TenantId == TenantId && x.BusinessPartnerId == businessPartnerId &&
+                    !x.IsDeleted && x.Status == BusinessPartnerRoleStatus.Active &&
+                    (x.RoleType == BusinessPartnerRoleType.Supplier || x.RoleType == BusinessPartnerRoleType.Contractor))
+                .AsNoTracking().ToListAsync(cancellationToken);
+            if (requestedRoleId.HasValue)
+                roles = roles.Where(x => x.Id == requestedRoleId.Value).ToList();
+            else if (roles.Count > 1)
+                throw new InvalidOperationException(
+                    "Select the Supplier or Contractor role for this AP payment because the Business Partner has both roles.");
+            var role = roles.SingleOrDefault();
+            var profiles = role is null
+                ? new List<BusinessPartnerApProfileVersion>()
+                : await _unitOfWork.Repository<BusinessPartnerApProfileVersion>()
+                    .GetQueryable(x => x.TenantId == TenantId && x.BusinessPartnerRoleId == role.Id && !x.IsDeleted)
+                    .Include(x => x.WithholdingDefaults).AsNoTracking().ToListAsync(cancellationToken);
+            var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAp(partner, role, profiles, accountingDate);
+            if (!readiness.IsReady || readiness.ApProfile is null || role is null)
+                throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
+            return new CanonicalPaymentPartner(partner, role, readiness.ApProfile);
         }
 
-        private async Task<Guid?> ResolveSupplierIdForQueryAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
+        private async Task<Guid?> ResolveBusinessPartnerIdForQueryAsync(Guid businessPartnerId, CancellationToken cancellationToken)
         {
-            var supplierRepository = _unitOfWork.Repository<Supplier>();
-            var supplierId = await supplierRepository
-                .GetQueryable(s =>
-                    s.TenantId == TenantId &&
-                    !s.IsDeleted &&
-                    s.Id == supplierOrBusinessPartnerId)
-                .Select(s => (Guid?)s.Id)
+            return await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryableIncludingDeleted(x => x.TenantId == TenantId && x.Id == businessPartnerId)
+                .Select(x => (Guid?)x.Id)
                 .FirstOrDefaultAsync(cancellationToken);
-
-            if (supplierId.HasValue)
-            {
-                return supplierId;
-            }
-
-            if (_apSupplierIdentityService == null)
-                return null;
-
-            try
-            {
-                // Query translation is strictly side-effect free. Lookup may expose one exact
-                // ID/code candidate but never persists a link, guesses by name, or creates a
-                // Procurement master record.
-                return (await _apSupplierIdentityService.LookupAsync(
-                    supplierOrBusinessPartnerId, cancellationToken)).SupplierId;
-            }
-            catch (KeyNotFoundException)
-            {
-                return null;
-            }
         }
 
-        private async Task CreateCashTransactionForPaymentAsync(VendorPayment payment, Supplier supplier, CancellationToken cancellationToken)
+        private async Task CreateCashTransactionForPaymentAsync(VendorPayment payment, BusinessPartner supplier, CancellationToken cancellationToken)
         {
             if (!payment.BankAccountId.HasValue)
             {
@@ -6473,8 +6448,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 BaseAmount = baseAmount,
                 PaymentMethodId = payment.PaymentMethodId,
                 ReferenceNumber = payment.PaymentNumber,
-                PayeeOrPayer = supplier.Name,
-                Description = $"AP Vendor Payment {payment.PaymentNumber} - {supplier.Name}",
+                PayeeOrPayer = payment.BusinessPartnerName,
+                Description = $"AP Vendor Payment {payment.PaymentNumber} - {payment.BusinessPartnerName}",
                 GLAccountId = apAccountId,
                 IsReconciled = false,
                 IsPosted = true,
@@ -6572,8 +6547,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 Id = payment.Id,
                 PaymentNumber = payment.PaymentNumber,
-                SupplierId = payment.SupplierId,
-                SupplierName = payment.Supplier?.Name ?? string.Empty,
+                BusinessPartnerId = payment.BusinessPartnerId,
+                SupplierName = payment.BusinessPartner?.PartnerName ?? string.Empty,
                 PaymentDate = payment.PaymentDate,
                 TotalAmount = payment.TotalAmount,
                 AllocatedAmount = payment.AllocatedAmount,
@@ -6772,7 +6747,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Id = i.Id,
                     VendorPaymentId = i.VendorPaymentId,
                     PaymentNumber = i.VendorPayment?.PaymentNumber ?? string.Empty,
-                    SupplierName = i.VendorPayment?.Supplier?.Name ?? string.Empty,
+                    SupplierName = i.VendorPayment?.BusinessPartner?.PartnerName ?? string.Empty,
                     Amount = i.Amount,
                     ItemStatus = i.ItemStatus,
                     FailureReason = i.FailureReason,

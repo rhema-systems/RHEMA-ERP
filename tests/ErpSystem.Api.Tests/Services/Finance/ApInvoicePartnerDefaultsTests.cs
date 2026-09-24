@@ -490,10 +490,10 @@ public sealed class ApInvoicePartnerDefaultsTests
         fixture.Context.BusinessPartners.Add(fixture.Partner);
         await fixture.Context.SaveChangesAsync();
         var request = fixture.Request();
-        request.SupplierId = fixture.Partner.Id;
+        request.BusinessPartnerId = fixture.Partner.Id;
         var invoice = await fixture.Service.CreateAsync(request);
         var supplier = await fixture.Context.Suppliers.SingleAsync();
-        supplier.Id.Should().Be(invoice.SupplierId);
+        supplier.Id.Should().Be(invoice.BusinessPartnerId);
         supplier.SupplierCode.Should().Be(fixture.Partner.PartnerCode);
         supplier.DefaultApAccountId.Should().Be(fixture.Partner.DefaultApAccountId);
         supplier.DefaultExpenseAccountId.Should().Be(fixture.Partner.DefaultExpenseAccountId);
@@ -577,7 +577,7 @@ public sealed class ApInvoicePartnerDefaultsTests
         }
         public VendorInvoiceCreateDto Request() => new()
         {
-            SupplierId = Supplier.Id, ApplyBusinessPartnerDefaults = true, ApplySupplierWithholdingDefaults = true,
+            BusinessPartnerId = Supplier.Id, ApplyBusinessPartnerDefaults = true, ApplySupplierWithholdingDefaults = true,
             InvoiceDate = new DateTime(2026, 9, 13),
             CurrencyCode = "GHS", LineItems = [new() { Description = "Goods", Quantity = 1, UnitPrice = 100 }]
         };

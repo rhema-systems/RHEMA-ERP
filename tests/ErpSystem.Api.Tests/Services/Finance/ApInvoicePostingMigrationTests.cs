@@ -380,7 +380,7 @@ public sealed class ApInvoicePostingMigrationTests
 
         var created = await service.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             SupplierInvoiceNumber = "SUP-DISCOUNT-001",
             InvoiceDate = new DateTime(2026, 7, 6),
             DueDate = new DateTime(2026, 8, 5),
@@ -770,7 +770,7 @@ public sealed class ApInvoicePostingMigrationTests
 
         var action = () => service.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             InvoiceDate = new DateTime(2026, 7, 5),
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
@@ -851,7 +851,7 @@ public sealed class ApInvoicePostingMigrationTests
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherSupplier = SeedSupplier(db, otherTenantId, fixture.ApAccount.Id, fixture.ExpenseAccount.Id);
-        fixture.Invoice.SupplierId = otherSupplier.Id;
+        fixture.Invoice.BusinessPartnerId = otherSupplier.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
@@ -1454,7 +1454,7 @@ public sealed class ApInvoicePostingMigrationTests
             TenantId = tenantId,
             InvoiceNumber = "VI-2026-00001",
             SupplierInvoiceNumber = "SUP-001",
-            SupplierId = supplier.Id,
+            BusinessPartnerId = supplier.Id,
             SupplierName = supplier.Name,
             InvoiceDate = new DateTime(2026, 7, 5),
             ReceivedDate = new DateTime(2026, 7, 5),

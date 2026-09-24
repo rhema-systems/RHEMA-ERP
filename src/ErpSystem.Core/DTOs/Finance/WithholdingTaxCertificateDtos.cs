@@ -83,7 +83,7 @@ public sealed class WhtCertificateVersionDto
 public sealed class WhtCalculationRequestDto
 {
     public Guid TaxId { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public DateTime PaymentDate { get; set; }
     public decimal TaxableBase { get; set; }
     public Guid? ExcludeVendorPaymentId { get; set; }

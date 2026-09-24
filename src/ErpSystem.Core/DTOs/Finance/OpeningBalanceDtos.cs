@@ -135,7 +135,8 @@ public abstract class CreateSpecializedOpeningBalanceDto
 
 public sealed class CreateSupplierAdvanceOpeningBalanceDto : CreateSpecializedOpeningBalanceDto
 {
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
 }
 
 public sealed class CreateCustomerAdvanceOpeningBalanceDto : CreateSpecializedOpeningBalanceDto
@@ -145,7 +146,8 @@ public sealed class CreateCustomerAdvanceOpeningBalanceDto : CreateSpecializedOp
 
 public sealed class CreateApWithholdingOpeningBalanceDto : CreateSpecializedOpeningBalanceDto
 {
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
     public Guid TaxId { get; set; }
     public Guid WithholdingTaxAccountId { get; set; }
     public decimal TaxableBase { get; set; }

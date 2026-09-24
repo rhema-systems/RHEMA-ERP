@@ -520,8 +520,13 @@ public sealed class VendorInvoiceMatchExceptionReportRowDto
     public Guid ExceptionId { get; set; }
     public Guid VendorInvoiceId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public string BusinessPartnerCode { get; set; } = string.Empty;
     public string SupplierName { get; set; } = string.Empty;
+    public string? BusinessPartnerLegalName { get; set; }
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
     public Guid PurchaseOrderId { get; set; }
     public string PurchaseOrderNumber { get; set; } = string.Empty;
     public VendorInvoiceMatchExceptionStatus Status { get; set; }
@@ -568,7 +573,7 @@ public class VendorPaymentDto
 {
     public Guid Id { get; set; }
     public string PaymentNumber { get; set; } = string.Empty;
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
@@ -645,7 +650,7 @@ public sealed class PostedSupplierAdvanceDto
 {
     public Guid Id { get; set; }
     public string PaymentNumber { get; set; } = string.Empty;
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
@@ -659,7 +664,10 @@ public sealed class PostedSupplierAdvanceDto
 public class VendorPaymentCreateDto
 {
     [Required]
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+
+    /// <summary>Required only when both Supplier and Contractor roles are active.</summary>
+    public Guid? BusinessPartnerRoleId { get; set; }
 
     [Required]
     public DateTime PaymentDate { get; set; }
@@ -822,7 +830,7 @@ public class VendorPaymentQueryDto
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
     public string? SearchTerm { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public VendorPaymentStatus? Status { get; set; }
     public VendorPaymentMethod? PaymentMethod { get; set; }
     public Guid? PaymentMethodId { get; set; }

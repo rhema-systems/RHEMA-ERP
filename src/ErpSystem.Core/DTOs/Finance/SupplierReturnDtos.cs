@@ -83,8 +83,11 @@ public class SupplierDebitNoteDto
     public string DebitNoteNumber { get; set; } = string.Empty;
     public string? SupplierCreditNoteReference { get; set; }
     public Guid VendorId { get; set; }
-    /// <summary>Canonical AP Supplier identity paired with the selected Business Partner.</summary>
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public string BusinessPartnerCode { get; set; } = string.Empty;
+    public string? BusinessPartnerLegalName { get; set; }
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
     public string VendorName { get; set; } = string.Empty;
     public Guid? SupplierReturnId { get; set; }
     public Guid? OriginalVendorInvoiceId { get; set; }
@@ -175,6 +178,7 @@ public sealed class SupplierDebitNoteApplicationDto
 public class CreateSupplierDebitNoteDto
 {
     public Guid VendorId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
     public Guid? OriginalVendorInvoiceId { get; set; }
 
     [System.ComponentModel.DataAnnotations.MaxLength(100)]
@@ -253,7 +257,7 @@ public sealed class SupplierDebitNoteQueryDto
 {
     public Guid? InventoryPurchaseReturnId { get; set; }
     public Guid? VendorId { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public Guid? OriginalVendorInvoiceId { get; set; }
     public ErpSystem.Core.Entities.Finance.SupplierDebitNoteStatus? Status { get; set; }
     public DateTime? FromDate { get; set; }

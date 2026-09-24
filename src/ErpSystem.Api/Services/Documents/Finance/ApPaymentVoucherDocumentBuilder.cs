@@ -141,7 +141,7 @@ public sealed class ApPaymentVoucherDocumentBuilder : IDocumentBuilder
         // different tenant's payment.
         var payment = await _context.Set<VendorPayment>()
             .AsNoTracking()
-            .Include(item => item.Supplier)
+            .Include(item => item.BusinessPartner)
             .Include(item => item.BankAccount)
             .Include(item => item.ConfiguredPaymentMethod)
             .Include(item => item.PaymentBatch)
@@ -421,12 +421,12 @@ public sealed class ApPaymentVoucherDocumentBuilder : IDocumentBuilder
             row.RelativeItem(1.55f).Border(1).BorderColor(Colors.Grey.Lighten2).Padding(9).Column(column =>
             {
                 column.Item().Text("Payee").FontSize(7.5f).FontColor(Colors.Grey.Darken1);
-                column.Item().Text(payment.Supplier?.Name ?? "-").Bold().FontSize(11);
-                column.Item().PaddingTop(2).Text($"Supplier: {payment.Supplier?.SupplierCode ?? payment.SupplierId.ToString()}")
+                column.Item().Text(payment.BusinessPartnerName).Bold().FontSize(11);
+                column.Item().PaddingTop(2).Text($"Business Partner: {payment.BusinessPartnerCode}")
                     .FontSize(8).FontColor(Colors.Grey.Darken1);
-                if (!string.IsNullOrWhiteSpace(payment.Supplier?.TaxId))
+                if (!string.IsNullOrWhiteSpace(payment.BusinessPartnerTaxIdentificationNumber))
                 {
-                    column.Item().Text($"Tax ID: {payment.Supplier.TaxId}").FontSize(8).FontColor(Colors.Grey.Darken1);
+                    column.Item().Text($"Tax ID: {payment.BusinessPartnerTaxIdentificationNumber}").FontSize(8).FontColor(Colors.Grey.Darken1);
                 }
             });
 

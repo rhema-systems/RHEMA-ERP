@@ -215,6 +215,7 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementClassificationLayoutPhase3Tests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\CanonicalVendorInvoiceBusinessPartnerTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentEvidenceOptionalApprovalTests.cs" />

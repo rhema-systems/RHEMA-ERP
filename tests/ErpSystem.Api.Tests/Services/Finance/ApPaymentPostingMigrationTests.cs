@@ -126,7 +126,7 @@ public sealed partial class ApPaymentPostingMigrationTests
 
         var calculate = () => calculator.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
-            SupplierId = otherSupplier.Id, TaxId = tax.Id, PaymentDate = fixture.Payment.PaymentDate,
+            BusinessPartnerId = otherSupplier.Id, TaxId = tax.Id, PaymentDate = fixture.Payment.PaymentDate,
             TaxableBase = 100m, VendorInvoiceIds = new() { fixture.Invoice.Id }
         });
 
@@ -158,7 +158,7 @@ public sealed partial class ApPaymentPostingMigrationTests
 
         var nextPayment = await calculator.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
-            TaxId = tax.Id, SupplierId = fixture.Supplier.Id,
+            TaxId = tax.Id, BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = fixture.Payment.PaymentDate.AddDays(1), TaxableBase = 50m
         });
         nextPayment.CumulativeBefore.Should().Be(100m);
@@ -193,7 +193,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         fixture.Payment.WithholdingTaxAmount = 10m;
         db.Set<VendorPayment>().Add(new VendorPayment
         {
-            TenantId = tenantId, PaymentNumber = "VP-WHT-PRIOR", SupplierId = fixture.Supplier.Id,
+            TenantId = tenantId, PaymentNumber = "VP-WHT-PRIOR", BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = fixture.Payment.PaymentDate.AddDays(-1), TotalAmount = 50m,
             CurrencyCode = "GHS", ExchangeRate = 1m, Status = VendorPaymentStatus.Processed,
             WithholdingTaxId = tax.Id, WithholdingTaxBaseAmount = 50m
@@ -689,7 +689,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherSupplier = SeedSupplier(db, otherTenantId, fixture.ApAccount.Id);
-        fixture.Payment.SupplierId = otherSupplier.Id;
+        fixture.Payment.BusinessPartnerId = otherSupplier.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
@@ -1251,7 +1251,7 @@ public sealed partial class ApPaymentPostingMigrationTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "VP-2026-00001",
-            SupplierId = supplier.Id,
+            BusinessPartnerId = supplier.Id,
             PaymentDate = new DateTime(2026, 7, 5),
             TotalAmount = allocationAmount,
             AllocatedAmount = allocationAmount,
@@ -1484,7 +1484,7 @@ public sealed partial class ApPaymentPostingMigrationTests
             TenantId = tenantId,
             InvoiceNumber = invoiceNumber,
             SupplierInvoiceNumber = invoiceNumber,
-            SupplierId = supplier.Id,
+            BusinessPartnerId = supplier.Id,
             SupplierName = supplier.Name,
             InvoiceDate = invoiceDate,
             ReceivedDate = invoiceDate,

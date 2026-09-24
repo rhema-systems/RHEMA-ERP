@@ -1085,7 +1085,7 @@ public sealed class FixedAssetCapitalizationFoundationTests
             TenantId = tenantId,
             InvoiceNumber = invoiceNumber,
             SupplierInvoiceNumber = $"{invoiceNumber}-SUP",
-            SupplierId = supplier.Id,
+            BusinessPartnerId = supplier.Id,
             SupplierName = supplier.Name,
             InvoiceDate = new DateTime(2026, 7, 5),
             ReceivedDate = new DateTime(2026, 7, 5),

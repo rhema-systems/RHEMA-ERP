@@ -60,7 +60,7 @@ public sealed class WhtComplianceLifecycleTests
 
         var invoice = await service.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             SupplierInvoiceNumber = "SUP-WHT-CONFIG-001",
             InvoiceDate = new DateTime(2026, 7, 10),
             DueDate = new DateTime(2026, 8, 9),
@@ -105,7 +105,7 @@ public sealed class WhtComplianceLifecycleTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "VP-WHT-PRIOR",
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = new DateTime(2026, 3, 5),
             TotalAmount = 1_500m,
             AllocatedAmount = 1_500m,
@@ -121,21 +121,21 @@ public sealed class WhtComplianceLifecycleTests
         var below = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = fixture.Tax.Id,
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = new DateTime(2026, 5, 1),
             TaxableBase = 400m
         });
         var crossing = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = fixture.Tax.Id,
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = new DateTime(2026, 5, 1),
             TaxableBase = 600m
         });
         var newYear = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = fixture.Tax.Id,
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = new DateTime(2027, 1, 10),
             TaxableBase = 1_000m
         });
@@ -343,7 +343,7 @@ public sealed class WhtComplianceLifecycleTests
             Id = Guid.NewGuid(),
             TenantId = fixture.TenantId,
             PaymentNumber = paymentNumber,
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = paymentDate,
             TotalAmount = 925m,
             AllocatedAmount = 925m,

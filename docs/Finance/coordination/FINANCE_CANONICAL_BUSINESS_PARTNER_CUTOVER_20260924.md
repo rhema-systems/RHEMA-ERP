@@ -115,8 +115,24 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   It refuses to run while `VendorInvoice` contains data, preventing a legacy Supplier GUID from
   being silently reinterpreted as a Business Partner GUID before the verified Finance reset.
 - Release API build: passed, zero errors (existing repository warnings remain).
-- The default Finance test project currently exposes the expected breaking-contract cleanup:
-  legacy test fixtures still construct `VendorInvoice.SupplierId`/`Supplier`. Those fixtures must
-  be converted to governed Business Partner role/profile setup before the full suite can pass;
-  no compatibility alias will be added to conceal the unfinished conversion.
+- Vendor payments now use canonical `BusinessPartnerId`, governed role/profile references and
+  immutable code/name/legal-name/TIN snapshots. Batch-created payments inherit the exact
+  canonical evidence frozen on their source invoices.
+- Supplier debit notes now use their Business Partner (`VendorId`) plus governed role/profile
+  references and immutable identity snapshots. Payment application ownership compares canonical
+  Business Partner identity; it no longer compares a legacy Supplier GUID with a Business Partner
+  GUID. Inventory-return credits also use the canonical partner directly rather than the identity
+  bridge.
+- Opening AP balances, AP reports, WHT certificate/calculation flows, payment vouchers, workflow
+  display, audit reporting and settlement read models consume the canonical payment identity.
+- Migration `CanonicalApSettlementBusinessPartnerIdentity` generated and inspected; not applied.
+  It refuses to run while either `VendorPayment` or `SupplierDebitNotes` contains data, enforcing
+  the approved verified Finance-reset prerequisite instead of reinterpreting legacy identifiers.
+- Release API build: passed, zero errors. Default test-project build: passed, zero errors.
+- Focused canonical AP settlement regressions: 14 passed, 0 failed (canonical invoice identity,
+  payment batch creation/reservation, and supplier debit-note model mapping). EF reports no
+  pending model changes and `git diff --check` reports no whitespace errors.
+- Broader legacy Finance fixtures still expose pre-existing accounting-book setup assumptions and
+  old Supplier-based WHT fixtures. They are not being hidden with compatibility aliases; fixture
+  conversion and bridge removal remain part of Phase 3.
 - No database or accounting data was mutated.

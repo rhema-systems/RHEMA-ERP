@@ -69,7 +69,7 @@ public class LandedCostSupplierInvoiceTests
         var invoiceRepo = Repo(_invoices);
         invoiceRepo.Setup(r => r.AddAsync(It.IsAny<VendorInvoice>())).ReturnsAsync((VendorInvoice invoice) =>
         {
-            _invoices.Add(invoice); invoice.Supplier = _suppliers.Single(s => s.Id == invoice.SupplierId);
+            _invoices.Add(invoice); invoice.BusinessPartner = _partners.Single(s => s.Id == invoice.BusinessPartnerId);
             foreach (var line in invoice.LineItems) { line.VendorInvoice = invoice; _lines.Add(line); }
             return invoice;
         });
@@ -155,7 +155,7 @@ public class LandedCostSupplierInvoiceTests
     {
         _partner.PartnerType = "Contractor";
         var created = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
-        Assert.Equal(_supplier.Id, created.SupplierId);
+        Assert.Equal(_supplier.Id, created.BusinessPartnerId);
         Assert.Equal(VendorInvoiceStatus.Draft, created.Status);
         Assert.Null(created.JournalEntryId);
         Assert.Single(_suppliers);
@@ -192,7 +192,7 @@ public class LandedCostSupplierInvoiceTests
 
         var first = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
         var canonical = Assert.Single(await db.Suppliers.ToListAsync());
-        Assert.Equal(canonical.Id, first.SupplierId);
+        Assert.Equal(canonical.Id, first.BusinessPartnerId);
         Assert.Equal(_partner.PartnerCode, canonical.SupplierCode);
         Assert.Equal(VendorInvoiceStatus.Draft, first.Status);
         var retry = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
@@ -273,9 +273,9 @@ public class LandedCostSupplierInvoiceTests
         _partners.Add(partner); _suppliers.Add(supplier);
         var request = Request(); request.Charges[1].SupplierId = partner.Id;
         var result = await _service.CreateFromLandedCostAsync(_cost.Id, request, _producer);
-        Assert.Equal(2, result.Count); Assert.Equal(2, result.Select(i => i.SupplierId).Distinct().Count());
-        Assert.Equal(310, result.Single(i => i.SupplierId == _supplier.Id).TotalAmount);
-        Assert.Equal(50, result.Single(i => i.SupplierId == supplier.Id).TotalAmount);
+        Assert.Equal(2, result.Count); Assert.Equal(2, result.Select(i => i.BusinessPartnerId).Distinct().Count());
+        Assert.Equal(310, result.Single(i => i.BusinessPartnerId == _supplier.Id).TotalAmount);
+        Assert.Equal(50, result.Single(i => i.BusinessPartnerId == supplier.Id).TotalAmount);
     }
 
     [Theory]

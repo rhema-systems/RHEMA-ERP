@@ -66,11 +66,8 @@ public sealed partial class SupplierDebitNoteService
         Guid returnId, CancellationToken cancellationToken = default)
     {
         var source = await RequireDispatchedReturnAsync(returnId, cancellationToken);
-        var identity = await _db.Set<ApSupplierIdentityLink>().AsNoTracking().SingleOrDefaultAsync(x =>
-            x.TenantId == TenantId && !x.IsDeleted && x.BusinessPartnerId == source.SupplierId, cancellationToken);
-        if (identity == null) return Array.Empty<InventoryReturnCreditSourceDto>();
         var invoices = await _db.Set<VendorInvoice>().AsNoTracking().Include(x => x.LineItems)
-            .Where(x => x.TenantId == TenantId && !x.IsDeleted && x.BusinessPartnerId == identity.BusinessPartnerId &&
+            .Where(x => x.TenantId == TenantId && !x.IsDeleted && x.BusinessPartnerId == source.SupplierId &&
                 x.PurchaseOrderId == source.PurchaseOrderId && x.JournalEntryId.HasValue && x.Status != VendorInvoiceStatus.Voided &&
                 _db.JournalEntries.Any(j => j.Id == x.JournalEntryId && j.TenantId == TenantId && !j.IsDeleted && !j.IsReversed &&
                     j.PostingStatus == "Posted" && j.SourceDocumentType == "VendorInvoice" && j.SourceDocumentId == x.Id))
@@ -111,8 +108,7 @@ public sealed partial class SupplierDebitNoteService
                     return await GetRequiredAsync(existing.Id, producer, cancellationToken);
                 }
                 var source = await RequireDispatchedReturnAsync(returnId, cancellationToken);
-                var identity = await _supplierIdentity.ResolveByBusinessPartnerAsync(source.SupplierId, cancellationToken);
-                var invoice = await ValidateInvoiceAsync(dto.OriginalVendorInvoiceId, identity.SupplierId, cancellationToken)
+                var invoice = await ValidateInvoiceAsync(dto.OriginalVendorInvoiceId, source.SupplierId, cancellationToken)
                     ?? throw new InvalidOperationException("RTV_ORIGINAL_INVOICE_REQUIRED: select the posted supplier invoice.");
                 await RequirePostedOriginalInvoiceAsync(invoice, cancellationToken);
                 var invoiceQuantities = await ReturnInvoiceQuantitiesAsync(source, cancellationToken);
@@ -124,6 +120,7 @@ public sealed partial class SupplierDebitNoteService
                 var created = await CreateCoreAsync(new CreateSupplierDebitNoteDto
                 {
                     VendorId = source.SupplierId, OriginalVendorInvoiceId = invoice.Id,
+                    BusinessPartnerRoleId = invoice.BusinessPartnerRoleId,
                     SupplierCreditNoteReference = RequiredText(dto.SupplierCreditNoteReference, "Supplier credit reference"),
                     DebitNoteDate = date, Reason = TrimToNull(dto.Reason) ?? source.ReturnReason,
                     CurrencyCode = invoice.CurrencyCode, ExchangeRate = invoice.ExchangeRate,

@@ -719,10 +719,10 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 
             if (key == Normalize("VendorPayment"))
             {
-                var payment = await _unitOfWork.Repository<VendorPayment>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.Supplier);
+                var payment = await _unitOfWork.Repository<VendorPayment>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.BusinessPartner);
                 info.EntityType = "VendorPayment";
                 info.EntityNumber = payment?.PaymentNumber;
-                info.EntityName = payment?.Supplier?.Name;
+                info.EntityName = payment?.BusinessPartner?.PartnerName;
                 info.ActionUrl = $"/finance/ap/payments/{entityId}";
                 return info;
             }

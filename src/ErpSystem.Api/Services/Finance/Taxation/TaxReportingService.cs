@@ -606,7 +606,7 @@ public sealed class TaxReportingService : ITaxReportingService
         var lines = new List<GhanaTaxWithholdingLineDto>();
         var diagnostics = new List<TaxReportDiagnosticDto>();
 
-        foreach (var payment in payments.Where(p => SourceFiltersMatch(request, VendorPaymentDocumentType, p.PaymentNumber, null, p.SupplierId)))
+        foreach (var payment in payments.Where(p => SourceFiltersMatch(request, VendorPaymentDocumentType, p.PaymentNumber, null, p.BusinessPartnerId)))
         {
             if (!payment.JournalEntryId.HasValue || !postedJournals.Contains(payment.JournalEntryId.Value))
             {
@@ -639,7 +639,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 SourceDocumentId = payment.Id,
                 SourceDocumentNumber = payment.PaymentNumber,
                 SourceDocumentDate = payment.PaymentDate.Date,
-                CounterpartyId = payment.SupplierId,
+                CounterpartyId = payment.BusinessPartnerId,
                 TaxId = payment.WithholdingTaxId,
                 TaxCode = payment.WithholdingTax?.Code,
                 TaxName = payment.WithholdingTax?.Name,

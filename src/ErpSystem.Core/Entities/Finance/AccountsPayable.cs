@@ -492,11 +492,29 @@ public class VendorPayment : TenantEntity
     [MaxLength(50)]
     public string PaymentNumber { get; set; } = string.Empty;
 
-    // ── Supplier ────────────────────────────────────────────────────────
+    // ── Canonical Business Partner ─────────────────────────────────────
 
     [Required]
-    public Guid SupplierId { get; set; }
-    public virtual Supplier Supplier { get; set; } = null!;
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+
+    /// <summary>
+    /// Role/profile lineage is captured at payment creation. Settlement may continue after the
+    /// role is inactivated, but new advances must still resolve an approved effective AP profile.
+    /// </summary>
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public virtual BusinessPartnerRole? BusinessPartnerRole { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public virtual BusinessPartnerApProfileVersion? BusinessPartnerApProfileVersion { get; set; }
+
+    [Required, MaxLength(50)]
+    public string BusinessPartnerCode { get; set; } = string.Empty;
+    [Required, MaxLength(200)]
+    public string BusinessPartnerName { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? BusinessPartnerLegalName { get; set; }
+    [MaxLength(100)]
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
 
     // ── Financial ───────────────────────────────────────────────────────
 

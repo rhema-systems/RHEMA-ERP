@@ -94,7 +94,9 @@ public sealed class SupplierDebitNoteFoundationTests
         var note = model.FindEntityType(typeof(SupplierDebitNote));
         note!.FindProperty(nameof(SupplierDebitNote.RowVersion))!.IsConcurrencyToken.Should().BeTrue();
         note.FindProperty(nameof(SupplierDebitNote.ExchangeRate))!.GetColumnType().Should().Be("decimal(18,6)");
-        note.FindProperty(nameof(SupplierDebitNote.SupplierId)).Should().NotBeNull();
+        note.FindProperty(nameof(SupplierDebitNote.BusinessPartnerRoleId)).Should().NotBeNull();
+        note.FindProperty(nameof(SupplierDebitNote.BusinessPartnerApProfileVersionId)).Should().NotBeNull();
+        note.FindProperty(nameof(SupplierDebitNote.BusinessPartnerCode)).Should().NotBeNull();
 
         var line = model.FindEntityType(typeof(SupplierDebitNoteLineItem));
         line!.FindProperty(nameof(SupplierDebitNoteLineItem.OriginalAccountTransactionId)).Should().NotBeNull();

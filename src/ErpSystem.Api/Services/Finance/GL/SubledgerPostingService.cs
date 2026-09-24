@@ -476,7 +476,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var tenantId = TenantId;
             var payment = await _context.Set<VendorPayment>()
-                .Include(p => p.Supplier)
+                .Include(p => p.BusinessPartner)
                 .Include(p => p.Allocations)
                 .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Id == vendorPaymentId && !p.IsDeleted, cancellationToken);
 
@@ -498,7 +498,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var settings = await GetSettingsAsync(cancellationToken);
 
-            var apAccountId = payment.Supplier.DefaultApAccountId ?? settings.ControlAccountApId;
+            var apAccountId = settings.ControlAccountApId;
             if (apAccountId == null) throw new InvalidOperationException("AP Control Account not configured.");
 
             var bankAccountId = payment.BankAccountId ?? settings.DefaultBankAccountId;
@@ -590,7 +590,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var jeDto = new CreateJournalEntryDto
             {
                 TransactionDate = payment.PaymentDate,
-                Description = $"Vendor Payment {payment.PaymentNumber} - {payment.Supplier.Name}",
+                Description = $"Vendor Payment {payment.PaymentNumber} - {payment.BusinessPartnerName}",
                 Reference = payment.PaymentNumber,
                 SourceModule = "AP",
                 SourceDocumentId = payment.Id,
@@ -614,7 +614,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var tenantId = TenantId;
             var allocation = await _context.Set<VendorPaymentAllocation>()
                 .Include(a => a.VendorPayment)
-                    .ThenInclude(p => p.Supplier)
+                    .ThenInclude(p => p.BusinessPartner)
                 .Include(a => a.VendorInvoice)
                 .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == allocationId && !a.IsDeleted, cancellationToken);
 
@@ -635,7 +635,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var settings = await GetSettingsAsync(cancellationToken);
-            var apAccountId = allocation.VendorPayment.Supplier.DefaultApAccountId ?? settings.ControlAccountApId;
+            var apAccountId = settings.ControlAccountApId;
             if (apAccountId == null) throw new InvalidOperationException("AP Control Account not configured.");
 
             var discountReceivedAccountId = settings.DiscountReceivedAccountId;

@@ -2475,9 +2475,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.VendorId)
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Supplier)
+            entity.HasOne(e => e.BusinessPartnerRole)
                 .WithMany()
-                .HasForeignKey(e => e.SupplierId)
+                .HasForeignKey(e => e.BusinessPartnerRoleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerApProfileVersion)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerApProfileVersionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.SupplierReturn)
                 .WithMany()
@@ -2683,10 +2687,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasTrigger("TR_VendorPayment_OptionalApproval");
                 table.HasTrigger("TR_VendorPayment_DirectEvidence");
             });
-            entity.HasOne(e => e.Supplier)
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.SupplierId)
+                .HasForeignKey(e => e.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerRole)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerRoleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerApProfileVersion)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerApProfileVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.TenantId, e.BusinessPartnerId, e.PaymentDate });
             entity.HasOne(e => e.BankAccount)
                 .WithMany()
                 .HasForeignKey(e => e.BankAccountId)

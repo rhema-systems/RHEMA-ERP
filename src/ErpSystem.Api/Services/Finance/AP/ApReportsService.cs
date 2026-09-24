@@ -2270,7 +2270,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     p.PaymentDate <= toDate &&
                     p.Status != VendorPaymentStatus.Voided &&
                     p.WithholdingTaxAmount > 0)
-                .Include(p => p.Supplier)
+                .Include(p => p.BusinessPartner)
                 .Include(p => p.Allocations)
                 .ToListAsync(cancellationToken);
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
@@ -2282,11 +2282,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 CurrencyCode = baseCurrencyCode,
                 TotalWithheld = payments.Sum(p => p.WithholdingTaxAmount),
                 TransactionCount = payments.Count,
-                SupplierCount = payments.Select(p => p.SupplierId).Distinct().Count()
+                SupplierCount = payments.Select(p => p.BusinessPartnerId).Distinct().Count()
             };
 
             summary.BySupplier = payments
-                .GroupBy(p => new { p.SupplierId, p.Supplier.Name, p.Supplier.TaxId })
+                .GroupBy(p => new
+                {
+                    SupplierId = p.BusinessPartnerId,
+                    Name = p.BusinessPartnerName,
+                    TaxId = p.BusinessPartnerTaxIdentificationNumber
+                })
                 .Select(g => new WithholdingTaxBySupplierDto
                 {
                     SupplierId = g.Key.SupplierId,
@@ -2424,7 +2429,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ExceptionId = item.Id,
                 VendorInvoiceId = item.VendorInvoiceId,
                 InvoiceNumber = item.VendorInvoice.InvoiceNumber,
-                SupplierId = item.VendorInvoice.BusinessPartnerId,
+                BusinessPartnerId = item.VendorInvoice.BusinessPartnerId,
+                BusinessPartnerRoleId = item.VendorInvoice.BusinessPartnerRoleId,
+                BusinessPartnerApProfileVersionId = item.VendorInvoice.BusinessPartnerApProfileVersionId,
+                BusinessPartnerCode = item.VendorInvoice.BusinessPartnerCode,
+                BusinessPartnerLegalName = item.VendorInvoice.BusinessPartnerLegalName,
+                BusinessPartnerTaxIdentificationNumber = item.VendorInvoice.BusinessPartnerTaxIdentificationNumber,
                 SupplierName = item.VendorInvoice.SupplierName,
                 PurchaseOrderId = item.PurchaseOrderId,
                 PurchaseOrderNumber = item.PurchaseOrder.OrderNumber,
@@ -2789,7 +2799,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     p.Status != VendorPaymentStatus.Draft &&
                     p.Status != VendorPaymentStatus.Voided &&
                     p.Status != VendorPaymentStatus.Failed)
-                .Select(p => p.SupplierId)
+                .Select(p => p.BusinessPartnerId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
 
@@ -2863,7 +2873,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var payments = await _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
-                    p.SupplierId == supplierId &&
+                    p.BusinessPartnerId == supplierId &&
                     p.PaymentDate < endExclusive &&
                     p.Status != VendorPaymentStatus.Draft &&
                     p.Status != VendorPaymentStatus.Voided &&

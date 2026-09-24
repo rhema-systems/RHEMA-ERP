@@ -1118,7 +1118,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var supplierBatch = await service.CreateSupplierAdvanceBatchAsync(new CreateSupplierAdvanceOpeningBalanceDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             SourceReference = "TDC-AP-ADV-001",
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
@@ -1198,7 +1198,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var batch = await service.CreateSupplierAdvanceBatchAsync(new CreateSupplierAdvanceOpeningBalanceDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             SourceReference = "TDC-USD-ADV-001",
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
@@ -1248,7 +1248,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var apBatch = await service.CreateApWithholdingBatchAsync(new CreateApWithholdingOpeningBalanceDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             TaxId = fixture.WithholdingTax.Id,
             WithholdingTaxAccountId = fixture.WhtPayable.Id,
             SourceReference = "TDC-WHT-PAY-001",
@@ -1306,7 +1306,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var act = () => service.CreateApWithholdingBatchAsync(new CreateApWithholdingOpeningBalanceDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             TaxId = fixture.WithholdingTax.Id,
             WithholdingTaxAccountId = fixture.Equity.Id,
             OpeningDate = new DateTime(2026, 1, 1),
