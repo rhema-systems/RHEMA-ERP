@@ -135,4 +135,17 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
 - Broader legacy Finance fixtures still expose pre-existing accounting-book setup assumptions and
   old Supplier-based WHT fixtures. They are not being hidden with compatibility aliases; fixture
   conversion and bridge removal remain part of Phase 3.
+- WHT certificates, calculation requests, remittance liabilities and remittance lines now expose
+  `BusinessPartnerId` end to end in the entity model, API DTOs, service filters and frontend
+  contracts. The old `SupplierId` column labels no longer conceal canonical Business Partner
+  values.
+- Migration `CanonicalWhtBusinessPartnerIdentity` generated and inspected; not applied. It refuses
+  to run while either WHT certificate or remittance-line data exists, preserving the verified
+  Finance-reset gate before the columns are renamed.
+- WHT lifecycle and controlled-certificate fixtures now use canonical Business Partners, active
+  Supplier roles, approved AP profiles/defaults and a valid Primary-book lineage. Focused WHT
+  regressions: 9 passed, 0 failed. EF reports no pending model changes.
+- The repository-wide frontend type-check remains red on pre-existing unrelated Inventory,
+  Procurement, Civil Engineering and stale Next generated-type errors; no WHT contract error was
+  reported from the files changed in this slice.
 - No database or accounting data was mutated.

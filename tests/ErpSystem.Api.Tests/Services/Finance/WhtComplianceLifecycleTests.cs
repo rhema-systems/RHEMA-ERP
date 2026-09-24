@@ -60,7 +60,7 @@ public sealed class WhtComplianceLifecycleTests
 
         var invoice = await service.CreateAsync(new VendorInvoiceCreateDto
         {
-            BusinessPartnerId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Partner.Id,
             SupplierInvoiceNumber = "SUP-WHT-CONFIG-001",
             InvoiceDate = new DateTime(2026, 7, 10),
             DueDate = new DateTime(2026, 8, 9),
@@ -105,7 +105,7 @@ public sealed class WhtComplianceLifecycleTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "VP-WHT-PRIOR",
-            BusinessPartnerId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Partner.Id,
             PaymentDate = new DateTime(2026, 3, 5),
             TotalAmount = 1_500m,
             AllocatedAmount = 1_500m,
@@ -121,21 +121,21 @@ public sealed class WhtComplianceLifecycleTests
         var below = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = fixture.Tax.Id,
-            BusinessPartnerId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Partner.Id,
             PaymentDate = new DateTime(2026, 5, 1),
             TaxableBase = 400m
         });
         var crossing = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = fixture.Tax.Id,
-            BusinessPartnerId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Partner.Id,
             PaymentDate = new DateTime(2026, 5, 1),
             TaxableBase = 600m
         });
         var newYear = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = fixture.Tax.Id,
-            BusinessPartnerId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Partner.Id,
             PaymentDate = new DateTime(2027, 1, 10),
             TaxableBase = 1_000m
         });
@@ -292,15 +292,39 @@ public sealed class WhtComplianceLifecycleTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
-        var supplier = new Supplier
+        var partner = new BusinessPartner
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            SupplierCode = "SUP-WHT-001",
-            Name = "TDC Test Supplier",
-            TaxId = "C0000000001",
-            IsActive = true,
-            Status = "Active"
+            PartnerCode = "SUP-WHT-001",
+            PartnerName = "TDC Test Supplier",
+            LegalName = "TDC Test Supplier Limited",
+            TaxIdentificationNumber = "C0000000001",
+            PartnerType = "Supplier",
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
+            Currency = "GHS",
+            IsActive = true
+        };
+        var role = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = partner.Id,
+            RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2025, 1, 1)
+        };
+        var profile = new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2025, 1, 1), SubjectToWithholding = true,
+            ApprovedAtUtc = new DateTime(2025, 1, 1), ApprovedById = Guid.NewGuid()
+        };
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "BASE", Name = "Ghana Statutory Primary",
+            Purpose = "Ghana Statutory", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
         };
         var tax = new Tax
         {
@@ -315,9 +339,18 @@ public sealed class WhtComplianceLifecycleTests
             ThresholdAmount = 2_000m,
             IsActive = true
         };
-        db.Suppliers.Add(supplier);
+        db.BusinessPartners.Add(partner);
+        db.Set<BusinessPartnerRole>().Add(role);
+        db.Set<BusinessPartnerApProfileVersion>().Add(profile);
+        db.Set<BusinessPartnerApWhtDefault>().Add(new BusinessPartnerApWhtDefault
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ApProfileVersionId = profile.Id,
+            CategoryCode = "SERVICES", CategoryName = "Services",
+            WithholdingTaxId = tax.Id, IsDefaultForAp = true, IsActive = true
+        });
+        db.AccountingBooks.Add(book);
         db.Taxes.Add(tax);
-        return new WhtFixture(tenantId, supplier, tax);
+        return new WhtFixture(tenantId, partner, role, profile, tax, book);
     }
 
     private static VendorPayment SeedPostedWhtPayment(
@@ -336,14 +369,22 @@ public sealed class WhtComplianceLifecycleTests
             Description = $"Posted AP payment {paymentNumber}",
             SourceModule = "AP",
             SourceDocumentType = "VendorPayment",
-            PostingStatus = "Posted"
+            PostingStatus = "Posted",
+            AccountingBookId = fixture.Book.Id,
+            BookClassification = fixture.Book.Code
         };
         var payment = new VendorPayment
         {
             Id = Guid.NewGuid(),
             TenantId = fixture.TenantId,
             PaymentNumber = paymentNumber,
-            BusinessPartnerId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Partner.Id,
+            BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id,
+            BusinessPartnerCode = fixture.Partner.PartnerCode,
+            BusinessPartnerName = fixture.Partner.PartnerName,
+            BusinessPartnerLegalName = fixture.Partner.LegalName,
+            BusinessPartnerTaxIdentificationNumber = fixture.Partner.TaxIdentificationNumber,
             PaymentDate = paymentDate,
             TotalAmount = 925m,
             AllocatedAmount = 925m,
@@ -364,5 +405,11 @@ public sealed class WhtComplianceLifecycleTests
         return payment;
     }
 
-    private sealed record WhtFixture(Guid TenantId, Supplier Supplier, Tax Tax);
+    private sealed record WhtFixture(
+        Guid TenantId,
+        BusinessPartner Partner,
+        BusinessPartnerRole Role,
+        BusinessPartnerApProfileVersion Profile,
+        Tax Tax,
+        AccountingBook Book);
 }

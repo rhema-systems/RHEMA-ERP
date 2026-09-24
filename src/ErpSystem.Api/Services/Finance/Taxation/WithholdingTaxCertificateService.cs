@@ -298,7 +298,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 VendorPaymentId = payment.Id,
                 PaymentNumber = payment.PaymentNumber,
                 PaymentDate = payment.PaymentDate,
-                SupplierId = payment.BusinessPartnerId,
+                BusinessPartnerId = payment.BusinessPartnerId,
                 SupplierName = payment.BusinessPartnerName,
                 SupplierTin = payment.BusinessPartnerTaxIdentificationNumber,
                 CurrencyCode = functionalCurrency,
@@ -757,7 +757,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 TenantId = TenantId,
                 VendorPaymentId = payment.Id,
                 CertificateId = activeCertificate?.Id,
-                SupplierId = payment.BusinessPartnerId,
+                BusinessPartnerId = payment.BusinessPartnerId,
                 TaxId = payment.WithholdingTaxId,
                 JournalEntryId = payment.JournalEntryId,
                 PaymentNumber = payment.PaymentNumber,
@@ -794,9 +794,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 && payment.JournalEntryId.HasValue
                 && _context.Set<JournalEntry>().Any(journal => journal.TenantId == tenantId && !journal.IsDeleted
                     && journal.Id == payment.JournalEntryId && journal.PostingStatus == PostedStatus));
-        if (query.SupplierId.HasValue)
+        if (query.BusinessPartnerId.HasValue)
         {
-            payments = payments.Where(payment => payment.BusinessPartnerId == query.SupplierId.Value);
+            payments = payments.Where(payment => payment.BusinessPartnerId == query.BusinessPartnerId.Value);
         }
         if (query.FromDate.HasValue)
         {
@@ -941,7 +941,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             SupersedesCertificateId = supersedesCertificateId,
             LifecycleReason = lifecycleReason,
             PaymentNumber = payment.PaymentNumber,
-            SupplierId = payment.BusinessPartnerId,
+            BusinessPartnerId = payment.BusinessPartnerId,
             SupplierName = payment.BusinessPartnerName,
             SupplierTin = payment.BusinessPartnerTaxIdentificationNumber,
             PaymentDate = payment.PaymentDate.Date,
@@ -1118,7 +1118,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             VendorPaymentId = payment.Id,
             PaymentNumber = payment.PaymentNumber,
             PaymentStatus = payment.Status,
-            SupplierId = payment.BusinessPartnerId,
+            BusinessPartnerId = payment.BusinessPartnerId,
             SupplierName = current?.SupplierName ?? payment.BusinessPartnerName,
             SupplierTin = current?.SupplierTin ?? payment.BusinessPartnerTaxIdentificationNumber,
             PaymentDate = current?.PaymentDate ?? payment.PaymentDate,
@@ -1192,7 +1192,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                     CertificateId = line.CertificateId,
                     PaymentNumber = line.PaymentNumber,
                     PaymentDate = line.PaymentDate,
-                    SupplierId = line.SupplierId,
+                    BusinessPartnerId = line.BusinessPartnerId,
                     SupplierName = line.SupplierName,
                     SupplierTin = line.SupplierTin,
                     TaxCode = line.TaxCode,

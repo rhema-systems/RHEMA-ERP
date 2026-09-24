@@ -384,7 +384,7 @@ export default function NewVendorPaymentPage() {
                         const choice = invoiceWithholdingChoice(invoice);
                         const calculation = !existingAdvancePaymentId && choice?.taxId
                             ? await taxDataService.calculateApWithholding({
-                                taxId: choice.taxId, supplierId: form.getValues('supplierId'),
+                                taxId: choice.taxId, businessPartnerId: form.getValues('supplierId'),
                                 paymentDate: form.getValues('paymentDate').toISOString(),
                                 taxableBase: invoice.balanceAmount,
                                 vendorInvoiceIds: [invoice.invoiceId],
@@ -595,7 +595,7 @@ export default function NewVendorPaymentPage() {
             if (data.withholdingTaxId && !requiresServerFunctionalWithholding) {
                 verifiedWithholding = await taxDataService.calculateApWithholding({
                     taxId: data.withholdingTaxId,
-                    supplierId: data.supplierId,
+                    businessPartnerId: data.supplierId,
                     paymentDate: data.paymentDate.toISOString(),
                     taxableBase: withholdingTaxableBase,
                     vendorInvoiceIds: paymentAllocations.map(allocation => allocation.vendorInvoiceId),
@@ -813,7 +813,7 @@ export default function NewVendorPaymentPage() {
                     sum + (next.cash[invoiceId] || 0) + (next.discounts[invoiceId] || 0) + (next.withholding[invoiceId] || 0), 0);
                 const calculation = await taxDataService.calculateApWithholding({
                     taxId,
-                    supplierId: selectedSupplierId,
+                    businessPartnerId: selectedSupplierId,
                     paymentDate: form.getValues('paymentDate').toISOString(),
                     taxableBase,
                     vendorInvoiceIds: Object.keys(next.cash),
@@ -831,7 +831,7 @@ export default function NewVendorPaymentPage() {
                     if (Math.abs(rebuiltTaxableBase - taxableBase) > 0.01) {
                         finalCalculation = await taxDataService.calculateApWithholding({
                             taxId,
-                            supplierId: selectedSupplierId,
+                            businessPartnerId: selectedSupplierId,
                             paymentDate: form.getValues('paymentDate').toISOString(),
                             taxableBase: rebuiltTaxableBase,
                             vendorInvoiceIds: Object.keys(next.cash),

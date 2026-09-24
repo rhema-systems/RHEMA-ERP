@@ -189,7 +189,7 @@ export interface WhtCertificate {
     vendorPaymentId: string;
     paymentNumber: string;
     paymentStatus: string;
-    supplierId: string;
+    businessPartnerId: string;
     supplierName: string;
     supplierTin?: string | null;
     paymentDate: string;
@@ -236,7 +236,7 @@ export interface WhtCertificateQuery {
     page?: number;
     pageSize?: number;
     searchTerm?: string;
-    supplierId?: string;
+    businessPartnerId?: string;
     fromDate?: string;
     toDate?: string;
     status?: string;
@@ -249,7 +249,7 @@ export interface GenerateWhtCertificateDto {
 
 export interface WhtCalculationRequest {
     taxId: string;
-    supplierId: string;
+    businessPartnerId: string;
     paymentDate: string;
     taxableBase: number;
     excludeVendorPaymentId?: string;
@@ -276,7 +276,7 @@ export interface WhtRemittanceLiability {
     vendorPaymentId: string;
     paymentNumber: string;
     paymentDate: string;
-    supplierId: string;
+    businessPartnerId: string;
     supplierName: string;
     supplierTin?: string | null;
     currencyCode: string;
@@ -318,7 +318,7 @@ export interface WhtRemittanceLine {
     certificateId?: string | null;
     paymentNumber: string;
     paymentDate: string;
-    supplierId: string;
+    businessPartnerId: string;
     supplierName: string;
     supplierTin?: string | null;
     taxCode?: string | null;
