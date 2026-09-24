@@ -1103,7 +1103,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             .ThenByDescending(item => item.CreatedDate)
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException(
-                $"PARALLEL_EXCHANGE_RATE_REQUIRED: {sourceCurrency}/{targetCurrency} approved rate is missing for accounting date {accountingDate:yyyy-MM-dd}.");
+                $"PARALLEL_EXCHANGE_RATE_REQUIRED: Posting was not completed because the active {targetCurrency} Parallel book requires an approved {sourceCurrency}/{targetCurrency} exchange rate for accounting date {accountingDate:yyyy-MM-dd}. No Primary or Parallel ledger posting was committed. Add and approve the missing rate under Finance > Exchange Rates, then retry the posting action.");
         // Canonical storage is source-to-target: 1 BaseCurrency = Rate TargetCurrency.
         if (rate.Rate <= 0m)
             throw new InvalidOperationException("PARALLEL_EXCHANGE_RATE_INVALID: Approved Parallel source-to-target rate must be greater than zero.");

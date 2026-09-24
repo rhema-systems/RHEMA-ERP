@@ -21,6 +21,7 @@ import {
     getAccountingBookName,
 } from '@/lib/finance/accounting-books';
 import { getJournalAuditActorLine } from '@/lib/finance/journal-entry-audit';
+import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
 import { getWorkflowVisibility } from '@/components/workflow/workflowVisibility';
 
 export default function JournalEntryDetailPage() {
@@ -315,8 +316,9 @@ export default function JournalEntryDetailPage() {
                 description: 'Journal entry posted to the General Ledger.',
             });
             await fetchEntry();
-        } catch (err: any) {
-            toast({ title: 'Error', description: err?.message || 'Failed to post', variant: 'destructive' });
+        } catch (err: unknown) {
+            const postingError = getFinancePostingErrorPresentation(err, 'Failed to post the journal entry.');
+            toast({ ...postingError, variant: 'destructive' });
         } finally {
             setActionLoading(null);
         }

@@ -35,6 +35,7 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useState } from 'react';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
+import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
@@ -47,12 +48,6 @@ export default function InvoiceDetailsPage() {
     const [showSubmitConfirmation, setShowSubmitConfirmation] = useState(false);
     const [showPostConfirmation, setShowPostConfirmation] = useState(false);
     const workflow = useWorkflowSummary({ entityType: 'Invoice', entityId: id });
-    const errorDescription = (error: any, fallback: string) => {
-        const details = error?.response?.data ?? error?.response ?? error;
-        const message = details?.detail || details?.error || details?.message || fallback;
-        return details?.code ? `${message} (${details.code})` : message;
-    };
-
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
         queryFn: () => arService.getInvoice(id),
@@ -70,10 +65,14 @@ export default function InvoiceDetailsPage() {
                 : saved.status === 'Approved' ? 'The configured approval process completed. A user with invoice posting permission can now select Post.'
                 : 'Invoice submitted to the Finance approval workflow.' });
         },
-        onError: (error: any) => {
+        onError: (error: unknown) => {
+            const postingError = getFinancePostingErrorPresentation(
+                error,
+                'Failed to submit the customer invoice.',
+                'Submission failed',
+            );
             toast({
-                title: 'Error',
-                description: errorDescription(error, 'Failed to submit invoice'),
+                ...postingError,
                 variant: 'destructive',
             });
         },
@@ -87,8 +86,10 @@ export default function InvoiceDetailsPage() {
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
             toast({ title: 'Posted', description: 'Invoice released and posted to the general ledger.' });
         },
-        onError: (error: any) => toast({ title: 'Unable to post', variant: 'destructive',
-            description: errorDescription(error, 'Failed to post invoice') }),
+        onError: (error: unknown) => {
+            const postingError = getFinancePostingErrorPresentation(error, 'Failed to post the customer invoice.');
+            toast({ ...postingError, variant: 'destructive' });
+        },
     });
 
     if (isLoading) {

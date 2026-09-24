@@ -1313,8 +1313,12 @@ public sealed class FinancePostingEngineTests
         var action = () => CreateService(db, tenantId)
             .PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("PARALLEL_EXCHANGE_RATE_REQUIRED:*");
+        var failure = await action.Should().ThrowAsync<InvalidOperationException>();
+        failure.WithMessage("PARALLEL_EXCHANGE_RATE_REQUIRED:*");
+        failure.Which.Message.Should().Contain("GHS/USD")
+            .And.Contain("No Primary or Parallel ledger posting was committed")
+            .And.Contain("Finance > Exchange Rates")
+            .And.Contain("retry the posting action");
         (await db.JournalEntries.CountAsync()).Should().Be(0);
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
     }

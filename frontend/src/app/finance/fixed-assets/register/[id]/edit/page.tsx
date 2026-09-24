@@ -149,7 +149,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       toast({ title: 'Activated', description: 'Asset is now active and eligible for depreciation.' });
       router.refresh();
     } catch (error: unknown) {
-      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to activate.', variant: 'destructive' });
+      toast({ title: 'Asset was not activated', description: error instanceof Error ? error.message : 'The asset could not be activated. Review its placed-in-service date and readiness, then retry.', variant: 'destructive' });
     }
   };
 
@@ -161,7 +161,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       toast({ title: 'On Hold', description: 'Asset is now on hold. Depreciation is suspended.' });
       router.refresh();
     } catch (error: unknown) {
-      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed.', variant: 'destructive' });
+      toast({ title: 'Asset was not placed on hold', description: error instanceof Error ? error.message : 'The hold was not saved. Refresh the asset and retry with a reason.', variant: 'destructive' });
     }
   };
 
@@ -171,7 +171,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       toast({ title: 'Resumed', description: 'Asset is active again. Depreciation will resume.' });
       router.refresh();
     } catch (error: unknown) {
-      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed.', variant: 'destructive' });
+      toast({ title: 'Asset was not resumed', description: error instanceof Error ? error.message : 'The asset remains on hold. Refresh its current status and retry.', variant: 'destructive' });
     }
   };
 

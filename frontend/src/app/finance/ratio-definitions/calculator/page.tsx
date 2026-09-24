@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Calculator, TrendingUp, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import type { RatioDefinition, RatioCalculationResult } from '@/types/unit-accounts';
+import { toast } from 'sonner';
 
 // MOCK DATA
 const MOCK_RATIOS: RatioDefinition[] = [
@@ -133,7 +134,7 @@ export default function RatioCalculatorPage() {
         if (selectedRatioId && MOCK_RESULTS[selectedRatioId]) {
             setResult(MOCK_RESULTS[selectedRatioId]);
         } else {
-            // alert('Please select a ratio to calculate.');
+            toast.error('Select a ratio before calculating.');
         }
     };
 

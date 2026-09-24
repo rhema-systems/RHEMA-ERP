@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { leaseAccountingService, type CreateLeaseContractDto, type PaymentFrequency } from '@/services/finance/leaseAccountingService';
 import { apiService } from '@/services/api.service';
+import { toast } from 'sonner';
 
 interface BusinessPartner {
   id: string;
@@ -52,7 +53,7 @@ export default function NewLeasePage() {
       const result = await leaseAccountingService.create(form);
       router.push(`/finance/fixed-assets/leases/${result.id}`);
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Failed to create lease');
+      toast.error(error instanceof Error ? error.message : 'The lease was not created. Review its dates, lessor and payment terms, then retry.');
     } finally {
       setSaving(false);
     }
