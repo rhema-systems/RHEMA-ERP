@@ -1,8 +1,9 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-24 — A–O and Q done (with I-b; K as K-a, K-b1, K-b2; N-b as N-b1, N-b2), and P2a
-> and P2b, the recruitment and company schedule guides. What remains is P: P2c (the orientation
-> guide) and the seven walks in § 5.**
+> **Status 2026-09-24 — A–O and Q done (with I-b; K as K-a, K-b1, K-b2; N-b as N-b1, N-b2), and all
+> of P2: the recruitment, company schedule and orientation guides. What remains is P: the eight walks
+> in § 5 — and a decision on P2c's O-15, which blocks every completion in the orientation demo and has
+> no lane (§ 8).**
 >
 > | Lane | State |
 > |---|---|
@@ -32,17 +33,19 @@
 > | **Q** | **DONE** 2026-09-24 — 69 ×3, `hr-recruitment/run-round4-q.mjs`; migration `AddCandidateQualificationLevel` applied to UAT. **Education level on the qualification ladder**, the proper fix for R4-5.2 (the user's call). Every candidate qualification carries a **Level**, required for Education at HR's door and the careers profile. An *Education level* criterion compares **ranks**: at or above passes, a tie passes (HND = Bachelor's), below fails, and no level is a **miss** — the four decisions Q-D1..4, all the user's. The catalogue is placed on the ladder by a new scenario 008, 59 of 64 entries. The six live-pipeline criteria are converted, and VAC-000021 still blends to 81 / 67.5 / 66. **Found in passing:** HR's qualification list showed a blank name for every catalogue pick (fixed), and an application HR records by hand takes no snapshot — § 8 |
 > | **P2a** | **DONE** — the recruitment guide rewritten for round 4, from the code, this log and UAT: § 5.8 scoring, a new chapter **8A** for recruitment tests, § 9 interviews, § 10 offers, § 13 talent pool. **Docs, then a data repair.** It records 18 `R4-…` findings, four of them walks not yet done. **Two blocked the demo, both in the data:** the seeded test blend could not show, because every candidate who sat the paper failed the vacancy's mandatory degree (R4-5.1); and no demo offer got a checklist, because UAT held 44 active check templates and the fallback wants one (R4-10.1). **Both repaired 2026-09-24** (the user's call): three first degrees via scenario 052, giving 81 / 67.5 / 66; 43 fixture templates switched off, and the suites that made them now switch theirs off. The repair found two more: the seeded degree criterion cannot recognise a real degree (R4-5.2, now lane Q), and a rebuild leaves the blend unscored (R4-5.3, fixed in the rebuild script). The four live demo offers raised before the tidy now have TDC's checklist, and Rita Amponsah's is *Conditionally Accepted* as the demo story has it — § 8 |
 > | **P2b** | **DONE** 2026-09-24 — the company schedule guide rewritten for round 4, from the code, this log and UAT. **Docs only: nothing fixed, no data changed.** The six rules become eight: C-4 and C-6 fixed; C-1, C-2 and C-5 in part; C-3 unchanged; and two new rules about the demo database. Also § 1, the prep, the event and booking chapters, two new chapters (**10A** *My schedule*, **10B** *Team schedule*), and § 18–21. It records **26 `R4-…` findings**. **Four are in the demo data:** the lane D suites leave 60 live events and 15 rooms on UAT; the company-schedule slices leave no current fiscal year; the seeded second booking has never existed, because `head.dev` holds no permission; and there is no mail server, so no round 4 email is delivered. **Five statements from 2026-09-17 corrected**, none a round 4 change: the Approve walk had no button, the seeded bookings, the fiscal tables (HR's are singular; the plural pair is Finance's), and § 19's SQL and stop command — § 8 |
+> | **P2c** | **DONE** 2026-09-24 — **a new guide**, `areas/orientation/HR-ORIENTATION-SYSTEM-GUIDE.md`: the whole Orientation & Onboarding group, its setup screens and the two portal pages. 20 screens, 23 chapters, 13 live writes, a reset chapter and a 15-minute short path. From the code, this log's lanes I–M and UAT, read-only. **Docs only: nothing fixed, no data changed.** **65 code findings `O-…` and four in the data `D-…`.** ⚠ **One blocks the demo and has no lane — O-15:** no enrolment made in the product can reach *Completed* on any seeded programme. Two need a signed declaration, which only an HR endpoint no screen calls can create; the third has nothing that evaluates completion. So K-b1's certificate at completion has never fired through a screen. Also: HR can act inside a participant's player (O-4); nobody already on a programme can be put on a session, so L's induction days stay empty (O-20); a rebuild auto-enrols 29 other-module personas (D-3); scenario 145 duplicates the default template on every re-run (D-2, a harness fix offered) — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a and P2b are complete** (the recruitment and company schedule guides), **and so is Q** (the level-based fix P2a's repair called for). What remains is **P**: P2c and the walks.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a, P2b and P2c are complete** (the recruitment, company schedule and orientation guides), **and so is Q** (the level-based fix P2a's repair called for). What remains is **P**: the walks — and P2c's O-15, which needs a lane or a decision.
 >
-> ⚠ **Nothing in round 4 has been browser-walked.** § 5 names seven walks a harness cannot replace;
-> all seven are still outstanding. The seventh was added by P2b: lane D-2's log listed its screens
-> as not walked, and § 5 did not.
+> ⚠ **Nothing in round 4 has been browser-walked.** § 5 names eight walks a harness cannot replace;
+> all eight are still outstanding. The seventh was added by P2b: lane D-2's log listed its screens
+> as not walked, and § 5 did not. The eighth was added by P2c, for the orientation guide's claims
+> made from the code.
 >
 > ⚠ **Lane B moved the scoring engine.** `ScoringCandidateView` and `EvaluateCriterion` were private
 > members of `JobApplicationService`; they are now `ShortlistingEvaluator` in
@@ -869,7 +872,8 @@ name. Four facts make the fix larger than a new value:
 - **P2** Rewrite the affected guide sections: recruitment §5.8 (scoring), §9 (interviews), §10
   (offers), §13 (talent pool); the company schedule guide's six rules; a new orientation guide.
   Split into **P2a** (the recruitment guide, with a new chapter 8A for lane E: DONE 2026-09-23),
-  **P2b** (company schedule) and **P2c** (orientation).
+  **P2b** (company schedule: DONE 2026-09-24) and **P2c** (orientation, a new guide: DONE
+  2026-09-24).
 - **P3** Harnesses per lane, each green **twice**, plus the existing suites re-run on count
   (`hr-recruitment` slices A–F, `hr-orientation`, `hr-company-schedule`, `hr-jobarch`).
 - **P4** `demo-coverage-manifest.csv` rows and seeding for every new fillable column.
@@ -888,7 +892,7 @@ assertions.
 assertions with zero failures is a regression signal, not a pass.*
 
 **Things a harness cannot prove, so they are walked in the browser** (three planned; the fourth added
-by lane K-b2, the fifth by N-b2, the sixth by O, and the seventh by P2b):
+by lane K-b2, the fifth by N-b2, the sixth by O, the seventh by P2b, and the eighth by P2c):
 
 1. The apportionment panel and the timetable it draws (lane C).
 2. The candidate sitting a test end to end in the careers portal, including refresh mid-test (E4).
@@ -922,6 +926,16 @@ by lane K-b2, the fifth by N-b2, the sixth by O, and the seventh by P2b):
    4. The event page and the bookings register as `hr.head`: **no Delete**. As `admin`: Delete
       present. Then the event's **Remove participant** as `hr.head`, which the guide's R4-6.6 says is
       still offered and still 403s.
+8. **The orientation guide's claims made from the code** (added by P2c; the guide marks each one
+   *not browser-walked*). On a disposable session and programme:
+   1. Create a session and leave **Max participants** empty. O-9 predicts a refusal under the field.
+   2. On a programme's Overview, switch **Issues a certificate** on and then off, and save. O-44
+      predicts that nothing happens, with no message.
+   3. Add a **Free Text** question. O-45 predicts that *Save* does nothing, with no message.
+   4. On a session's page, **Change status → In progress**, then **Save changes** on the Overview
+      without leaving the tab. O-12 predicts that the actual start just stamped is erased.
+   5. As `new.hire`, open *New Employee Onboarding*: no **Declarations** tab (O-15). Mark all six
+      items done only on a disposable enrolment, and see it stop at *Pending acknowledgement*.
 
 **Live probes before building, not after:**
 
@@ -3106,6 +3120,98 @@ harness does to one.
 the guide read the button's name and not the one line of JSX that decides whether it renders. The
 stop-the-API command had never been run either. **A step that names a control needs the control's
 condition; a step that names a command needs the command run once.**
+
+### P2c — the orientation & onboarding guide, new · DONE 2026-09-24 · docs
+
+`docs/HR/areas/orientation/HR-ORIENTATION-SYSTEM-GUIDE.md` is the series' first guide for the
+module. It was written from three sources:
+- the code, through five read-only surveys: the landing, dashboard and sessions; the enrolments and
+  the triggers; onboarding; the catalogue; the reminders and the portal;
+- this log's lanes I, I-b, J, K-a, K-b1, K-b2, L and M;
+- `ErpSystemDB_UAT`, measured read-only, with the API up.
+
+It covers 20 screens in 23 chapters, in the series' five-part format, with 13 live writes, a reset
+chapter, a 15-minute short path, and appendices for the routes and the permission map. The reset
+SQL was compiled against UAT under `SET NOEXEC ON` and not run. **Nothing was fixed and no data
+was changed.**
+
+**Eight rules.**
+1. Rebuild the database, and check it.
+2. `hr.head` is offered every delete and can make only one: a template's audience.
+3. Nobody can finish a programme.
+4. Never open a participant's page as HR.
+5. A plan is fixed once it is made.
+6. Fill in every number box.
+7. Nothing is emailed.
+8. Every date is relative to the build.
+
+**The findings: 65 in the code (`O-1`…`O-65`) and four in the demo data (`D-1`…`D-4`), all in the
+guide's § 23.**
+
+**⚠ One blocks the demo, and no lane owns it — O-15. No enrolment made in the product can reach
+*Completed* on any of the three seeded programmes.**
+- New Employee Onboarding and the code of conduct course require a signed declaration. A declaration
+  is a row per enrolment, and the only thing that creates one is
+  `POST employee-orientations/{id}/acknowledgements`, which **no screen calls**. The programme form
+  has the switch *Requires an acknowledgement* and no field for the text. So a participant finishes
+  the content, passes the quiz, and stops at *Pending acknowledgement* with nothing to sign, while the
+  sweep chases them to sign it.
+- The Q3 briefing has no content and no quiz. Only three acts evaluate completion — tracking content,
+  submitting a quiz, signing a declaration — so nothing ever completes it. The attendance register is
+  not read.
+- Measured on UAT: 19 declarations in the tenant, the seeder's one and 18 harness fixtures. Kojo
+  Ansah's enrolment has none.
+- **So lane K-b1's certificate at completion has never fired through a screen** on either
+  certificated programme. The only completed enrolment is the seeder's. The lane I, K and L harnesses
+  created their declarations through the API, so the gate was satisfiable in the suites and not in
+  the product.
+
+The guide's Rule 3 keeps it out of a demonstration. Fixing it is a decision for the user. There are
+two ways: create the declaration at enrolment from text held on the programme, or give HR a screen
+that adds one.
+
+**What the guide found about round 4's own lanes:**
+
+| Lane | |
+|---|---|
+| **L** | The two induction days L seeded can never hold anybody already on the programme. The enrolment update that places a person on a session has no caller, the enrol dialog skips anyone already on the programme, and automatic enrolments have no session (**O-20**) |
+| **K-a** | *Assessment not attempted* can never fire: it needs *Pending assessment*, which nothing writes. A *Failed* enrolment gets no reminder at all (**O-55**) |
+| **I** | The hire rule enrols the other modules' personas on every rebuild, because they are all employed on the build day: 29 of them, two days after UAT's build (**D-3**). Only recruitment's confirm-start makes a plan, although the triggers screen's card promises one to any *"confirmed hire"* (**O-29**) |
+| **I4 / K-b2** | The hire hook's comment says *"HR can hand the plan to someone else from the plan screen"*. No control does that; the plan update has no caller (**O-32**) |
+| **J** | *Copy* on a programme accepts a 300-character title that the programme's own form then refuses (**O-42**) |
+
+**Worth fixing after O-15:**
+- **O-4** — HR can act inside a participant's own player, including signing the declaration.
+- **O-59** — the quiz can be re-sat after completion, and the answer key comes back after the first
+  attempt.
+- **O-58** — optional content is counted towards completion.
+- **O-19** — bulk enrolment over-fills a capped session.
+- **O-26** — the record check is by role, the policies by permission.
+- **O-34** — editing an asset erases its dates.
+- **O-38** — the Overdue queue ignores the plan's status.
+- **O-10** — every Admin-only delete is offered to the HR desk.
+- **O-43**, **O-44**, **O-45** — the programme form: the owning unit wiped, the validity that cannot
+  be left empty, the question dialog that saves nothing.
+
+**The four in the demo data:**
+- **D-1** — the harness litter. UAT holds 505 programmes, 1,523 enrolments, 820 plans (811 of them
+  cancelled fixtures, carrying 6,664 overdue tasks) and 122 active templates. A rebuild has 3, 39, 6
+  and 2.
+- **D-2** — scenario 145 makes a new *TDC New Starter Checklist* on every re-run, and moves the
+  default to it. It looks the template up through `GET /onboarding-plan-templates`, which does not
+  exist, and its `.catch(() => [])` reads the 404 as "none yet". UAT holds eleven. **The fix is one
+  line in the harness** — `/onboarding-plan-templates/all` — and is offered, not made.
+- **D-3** — the 29 personas, above. It is correct behaviour on odd data, and the guide uses it as the
+  proof that the rule fires.
+- **D-4** — no mail server, as in P2b.
+
+**Walks.** § 5 gains **walk 8**, for the guide's claims made from the code: the empty number boxes,
+the question dialog, the session form after a status change, and the missing Declarations tab.
+
+**A lesson from writing it.** Every lane that touched completion was proved green. None of them
+walked a participant from enrolment to certificate through the screens, and the suites made their
+declarations through the API, where the product has no door. **When a harness creates a
+prerequisite through the API, find the screen that creates it too — or record that there is none.**
 
 ---
 

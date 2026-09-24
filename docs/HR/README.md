@@ -57,7 +57,7 @@ docs/HR/
   README.md            this index
   areas/               one folder per functional area — the system guide plus that area's plans
     recruitment/  leave/  performance/  attendance/  travel/
-    company-schedule/  employees/  she/
+    company-schedule/  orientation/  employees/  she/
   integration/         every boundary HR shares with another module
     handoffs/          reports raised with another module's owner
   programme/           where the work stands: finish plan, ledger, open questions, demo rounds
@@ -119,6 +119,12 @@ demonstration workbook.
 | Document | What it answers | Read it when |
 |---|---|---|
 | [`HR-COMPANY-SCHEDULE-SYSTEM-GUIDE.md`](areas/company-schedule/HR-COMPANY-SCHEDULE-SYSTEM-GUIDE.md) | The whole **Company Schedule** menu group — four menu items (two added in round 4: *My Schedule* and *Team Schedule*) + 6 unlisted screens, the 4 setup areas under Administration → HR → Company Schedule, and the Company Profile screen (same permission family, different menu). 19 screens over 13 tables | Written 2026-09-17; **updated 2026-09-24 for round 4** (lanes D-1, D-2, N-b2). Also a demonstration workbook: 14 numbered live writes, a reset chapter and a 20-minute short path. **Read the eight rules above chapter 1 first.** Round 4 hid the event page's red Delete from `hr.head` but left eight other Admin-only removes on offer (C-1), keeps a rescheduled event's original dates without showing them (C-2), enforces the room's own rules (C-4) and stopped numbers repeating (C-6). Approve is still a flag (C-3), and closures still reach neither leave nor attendance (C-5). The two new rules are about the demo database: **nothing is emailed on it** (no mail server), and it must be **freshly rebuilt**, because the harness leaves fixtures behind. 26 round 4 findings, `R4-…`, listed in § 21 |
+
+### `areas/orientation/` — Orientation & Onboarding
+
+| Document | What it answers | Read it when |
+|---|---|---|
+| [`HR-ORIENTATION-SYSTEM-GUIDE.md`](areas/orientation/HR-ORIENTATION-SYSTEM-GUIDE.md) | The whole **Orientation & Onboarding** menu group — 9 screens, from the dashboard to the onboarding task queues — the 8 setup screens under Administration → HR → Orientation & Onboarding, and the 3 portal pages: *My Orientations*, one programme, *My Onboarding*. **20 screens over 27 tables**, and the round 4 automation behind them: the triggers, the renewals, the plan on hire, the reminders and the notices | Written 2026-09-24 (round 4, P2c), from the code and `ErpSystemDB_UAT`, read-only; **not browser-walked**. Also a demonstration workbook: 13 numbered live writes, a reset chapter and a 15-minute short path. **Read the eight rules above chapter 1 first** — above all **Rule 3: nobody can finish a programme on the demo database** (O-15): two seeded programmes need a declaration no screen can create, and the third has nothing that evaluates completion. Also: never open a participant's page as HR (Rule 4, O-4), `hr.head` is offered every delete and can make only one (Rule 2), a plan is fixed once made (Rule 5), and nothing is emailed (Rule 7). 65 code findings `O-…` and four data findings `D-…`, listed in § 23 |
 
 ### `areas/employees/` — Employees & job analysis
 
