@@ -159,16 +159,13 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var adjustment in adjustments)
             {
-                if (!adjustment.CustomerId.HasValue)
-                    continue;
-
                 var amount = GetSignedSubledgerAmount(adjustment);
                 if (amount == 0)
                     continue;
 
                 var aging = GetOrCreateCustomerAging(
-                    adjustment.CustomerId.Value,
-                    adjustment.Customer?.PartnerName ?? "Customer");
+                    adjustment.BusinessPartnerId,
+                    adjustment.BusinessPartnerName);
                 AddToAgingBucket(aging, amount, adjustment.DueDate, adjustment.AdjustmentDate, effectiveDate);
             }
 
@@ -299,16 +296,13 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var adjustment in adjustments)
             {
-                if (!adjustment.CustomerId.HasValue)
-                    continue;
-
                 var amount = GetSignedSubledgerAmount(adjustment);
                 if (amount == 0)
                     continue;
 
                 var detailedAging = GetOrCreateDetailed(
-                    adjustment.CustomerId.Value,
-                    adjustment.Customer?.PartnerName ?? "Customer");
+                    adjustment.BusinessPartnerId,
+                    adjustment.BusinessPartnerName);
                 var daysOverdue = GetDaysOverdue(adjustment.DueDate, adjustment.AdjustmentDate, effectiveDate);
 
                 detailedAging.Invoices.Add(new InvoiceAgingDto
@@ -432,14 +426,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var adjustment in adjustments)
             {
-                if (!adjustment.CustomerId.HasValue)
-                    continue;
-
                 var amount = GetSignedSubledgerFunctionalAmount(adjustment);
                 if (amount == 0)
                     continue;
 
-                var aging = GetOrCreate(adjustment.CustomerId.Value, adjustment.Customer?.PartnerName ?? "Customer");
+                var aging = GetOrCreate(adjustment.BusinessPartnerId, adjustment.BusinessPartnerName);
                 AddToAgingBucket(aging, amount, adjustment.DueDate, adjustment.AdjustmentDate, effectiveDate);
             }
 
@@ -524,14 +515,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var adjustment in adjustments)
             {
-                if (!adjustment.CustomerId.HasValue)
-                    continue;
-
                 var amount = GetSignedSubledgerFunctionalAmount(adjustment);
                 if (amount == 0)
                     continue;
 
-                var row = GetOrCreate(adjustment.CustomerId.Value, adjustment.Customer?.PartnerName ?? "Customer");
+                var row = GetOrCreate(adjustment.BusinessPartnerId, adjustment.BusinessPartnerName);
                 row.Invoices.Add(MapArAdjustmentToAgingInvoice(adjustment, effectiveDate, functionalCurrencyCode));
             }
 
@@ -1011,10 +999,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                     a.Module == SubledgerModules.AccountsReceivable &&
                     a.Status == SubledgerAdjustmentStatuses.Posted &&
                     !a.IsDeleted)
-                .Include(a => a.Customer);
+                .Include(a => a.BusinessPartner);
 
             if (customerId.HasValue)
-                query = query.Where(a => a.CustomerId == customerId.Value);
+                query = query.Where(a => a.BusinessPartnerId == customerId.Value);
 
             return query.ToListAsync(cancellationToken);
         }
@@ -1282,9 +1270,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                     a.TenantId == TenantId &&
                     a.Module == SubledgerModules.AccountsReceivable &&
                     a.Status == SubledgerAdjustmentStatuses.Posted &&
-                    a.CustomerId.HasValue &&
+                    a.BusinessPartnerId != Guid.Empty &&
                     a.AdjustmentDate < endExclusive)
-                .Select(a => a.CustomerId!.Value)
+                .Select(a => a.BusinessPartnerId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
 

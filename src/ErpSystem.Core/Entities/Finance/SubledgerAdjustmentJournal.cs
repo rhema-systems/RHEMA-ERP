@@ -42,11 +42,33 @@ public class SubledgerAdjustmentJournal : TenantEntity
     [MaxLength(30)]
     public string Purpose { get; set; } = SubledgerAdjustmentPurposes.StandardAdjustment;
 
-    public Guid? CustomerId { get; set; }
-    public virtual BusinessPartner? Customer { get; set; }
+    [Required]
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
 
-    public Guid? SupplierId { get; set; }
-    public virtual Supplier? Supplier { get; set; }
+    [Required]
+    public Guid BusinessPartnerRoleId { get; set; }
+    public virtual BusinessPartnerRole BusinessPartnerRole { get; set; } = null!;
+
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public virtual BusinessPartnerApProfileVersion? BusinessPartnerApProfileVersion { get; set; }
+
+    public Guid? BusinessPartnerArProfileVersionId { get; set; }
+    public virtual BusinessPartnerArProfileVersion? BusinessPartnerArProfileVersion { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string BusinessPartnerCode { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(200)]
+    public string BusinessPartnerName { get; set; } = string.Empty;
+
+    [MaxLength(200)]
+    public string? BusinessPartnerLegalName { get; set; }
+
+    [MaxLength(100)]
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
 
     [Required]
     public DateTime AdjustmentDate { get; set; } = DateTime.UtcNow;

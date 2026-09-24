@@ -167,3 +167,24 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   for the bridge-removal changes in the AP service/types, debit-note form, payment page or supplier
   register.
 - No database or accounting data was mutated.
+- Subledger adjustment journals now accept one canonical `BusinessPartnerId`, resolve the exact
+  active Customer or Supplier/Contractor role plus the approved effective AR/AP profile, and retain
+  role/profile IDs and immutable partner identity snapshots. The runtime no longer accepts or
+  resolves separate `CustomerId`/`SupplierId` fields and does not create legacy Supplier shadows.
+- AP/AR aging and detailed-ledger projections now group subledger adjustments by canonical Business
+  Partner identity and display the transaction snapshot name. The creation UI uses the canonical AP
+  readiness selector and refuses disabled/incomplete role options.
+- Migration `CanonicalSubledgerAdjustmentBusinessPartnerIdentity` has been generated but not
+  applied. It explicitly refuses to run while any subledger adjustment row exists; after the
+  approved Finance reset it drops the legacy identity columns and creates clean canonical partner,
+  role, profile and snapshot columns without GUID reinterpretation.
+- The focused canonical subledger architecture/migration regression passes (1/1). The complete
+  `LegacyPostingPathLockdownTests` class is 12/13: its one failure is the pre-existing
+  `MigrationOnlyCommand_ShouldPreserveAspNetCoreProductionDefault` source assertion, unrelated to
+  this slice. API and test-project compilation pass with zero errors; existing warnings remain.
+- Repository-wide frontend type-check remains red on the documented baseline (including the AP
+  invoice App Router export and unrelated Inventory/Procurement/Civil Engineering fixtures). After
+  correcting the nullable AP currency option, it reports no error in the changed subledger page or
+  Finance type contract.
+- The rebuilt Data and API assemblies compile the guarded migration with zero errors, and EF reports
+  no model changes pending after `CanonicalSubledgerAdjustmentBusinessPartnerIdentity`.

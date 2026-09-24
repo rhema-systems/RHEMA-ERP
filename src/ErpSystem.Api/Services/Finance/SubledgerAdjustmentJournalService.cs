@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -41,8 +42,8 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         var normalizedModule = NormalizeModule(module, allowNull: true);
         var query = _context.SubledgerAdjustmentJournals
             .AsNoTracking()
-            .Include(a => a.Customer)
-            .Include(a => a.Supplier)
+            .Include(a => a.BusinessPartner)
+            .Include(a => a.BusinessPartnerRole)
             .Include(a => a.ContraAccount)
             .Include(a => a.JournalEntry)
             .Where(a => a.TenantId == TenantId && !a.IsDeleted);
@@ -98,8 +99,8 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         {
             Module = original.Module,
             Purpose = original.Purpose,
-            CustomerId = original.CustomerId,
-            SupplierId = original.SupplierId,
+            BusinessPartnerId = original.BusinessPartnerId,
+            BusinessPartnerRoleId = original.BusinessPartnerRoleId,
             AdjustmentDate = (dto.ReversalDate ?? DateTime.UtcNow).Date,
             DueDate = original.DueDate,
             AdjustmentType = string.Equals(original.AdjustmentType, SubledgerAdjustmentTypes.Debit, StringComparison.OrdinalIgnoreCase)
@@ -173,7 +174,12 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         if (contraAccount.Id == controlAccount.Id)
             throw new InvalidOperationException("Contra GL account cannot be the same as the subledger control account.");
 
-        var counterparty = await ResolveCounterpartyAsync(module, dto.CustomerId, dto.SupplierId, cancellationToken);
+        var counterparty = await ResolveCounterpartyAsync(
+            module,
+            dto.BusinessPartnerId,
+            dto.BusinessPartnerRoleId,
+            dto.AdjustmentDate,
+            cancellationToken);
         var baseCurrencyCode = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync()) ?? "GHS";
         var currencyCode = NormalizeCurrency(dto.CurrencyCode) ?? baseCurrencyCode;
         var exchangeRate = dto.ExchangeRate <= 0 ? 1m : dto.ExchangeRate;
@@ -197,8 +203,14 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             Module = module,
             AdjustmentNumber = adjustmentNumber,
             Purpose = purpose,
-            CustomerId = module == SubledgerModules.AccountsReceivable ? counterparty.Customer?.Id : null,
-            SupplierId = module == SubledgerModules.AccountsPayable ? counterparty.Supplier?.Id : null,
+            BusinessPartnerId = counterparty.Partner.Id,
+            BusinessPartnerRoleId = counterparty.Role.Id,
+            BusinessPartnerApProfileVersionId = counterparty.ApProfile?.Id,
+            BusinessPartnerArProfileVersionId = counterparty.ArProfile?.Id,
+            BusinessPartnerCode = counterparty.Partner.PartnerCode,
+            BusinessPartnerName = counterparty.Partner.PartnerName,
+            BusinessPartnerLegalName = counterparty.Partner.LegalName,
+            BusinessPartnerTaxIdentificationNumber = counterparty.Partner.TaxIdentificationNumber,
             AdjustmentDate = dto.AdjustmentDate.Date,
             DueDate = dto.DueDate?.Date,
             AdjustmentType = adjustmentType,
@@ -230,11 +242,11 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         adjustment.UpdatedAt = DateTime.UtcNow;
         adjustment.UpdatedBy = UserName;
 
-        if (module == SubledgerModules.AccountsReceivable && counterparty.Customer != null)
+        if (module == SubledgerModules.AccountsReceivable)
         {
-            counterparty.Customer.OutstandingBalance = (counterparty.Customer.OutstandingBalance ?? 0m) + GetSignedBaseAmount(adjustment);
-            counterparty.Customer.UpdatedAt = DateTime.UtcNow;
-            counterparty.Customer.UpdatedBy = UserName;
+            counterparty.Partner.OutstandingBalance = (counterparty.Partner.OutstandingBalance ?? 0m) + GetSignedBaseAmount(adjustment);
+            counterparty.Partner.UpdatedAt = DateTime.UtcNow;
+            counterparty.Partner.UpdatedBy = UserName;
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -316,102 +328,66 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
 
     private async Task<CounterpartyResult> ResolveCounterpartyAsync(
         string module,
-        Guid? customerId,
-        Guid? supplierId,
+        Guid businessPartnerId,
+        Guid? requestedRoleId,
+        DateTime accountingDate,
         CancellationToken cancellationToken)
     {
-        if (module == SubledgerModules.AccountsReceivable)
-        {
-            if (!customerId.HasValue)
-                throw new InvalidOperationException("Customer is required for AR adjustment journals.");
+        if (businessPartnerId == Guid.Empty)
+            throw new InvalidOperationException("Business Partner is required for subledger adjustment journals.");
 
-            var customer = await _context.Set<BusinessPartner>()
-                .FirstOrDefaultAsync(p =>
-                    p.TenantId == TenantId &&
-                    p.Id == customerId.Value &&
-                    !p.IsDeleted &&
-                    (p.PartnerType == "Customer" || p.PartnerType == "Both"),
-                    cancellationToken)
-                ?? throw new InvalidOperationException("Customer business partner was not found.");
-
-            return new CounterpartyResult(customer.PartnerName, customer, null);
-        }
-
-        if (!supplierId.HasValue)
-            throw new InvalidOperationException("Supplier is required for AP adjustment journals.");
-
-        var supplier = await _context.Set<Supplier>()
-            .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.Id == supplierId.Value && !s.IsDeleted, cancellationToken)
-            ?? await ResolveSupplierFromBusinessPartnerAsync(supplierId.Value, cancellationToken)
-            ?? throw new InvalidOperationException("Supplier or supplier business partner was not found.");
-
-        return new CounterpartyResult(supplier.Name, null, supplier);
-    }
-
-    private async Task<Supplier?> ResolveSupplierFromBusinessPartnerAsync(
-        Guid supplierBusinessPartnerId,
-        CancellationToken cancellationToken)
-    {
         var partner = await _context.Set<BusinessPartner>()
             .FirstOrDefaultAsync(p =>
                 p.TenantId == TenantId &&
                 !p.IsDeleted &&
-                p.Id == supplierBusinessPartnerId,
-                cancellationToken);
+                p.Id == businessPartnerId,
+                cancellationToken)
+            ?? throw new InvalidOperationException("The Business Partner was not found for this tenant.");
 
-        if (partner == null)
-            return null;
-        if (string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Customer business partners cannot be used for AP adjustment journals.");
-        if (partner.IsBlacklisted)
-            throw new InvalidOperationException($"Business partner '{partner.PartnerName}' is blacklisted and cannot be used for AP adjustment journals.");
+        var expectedRoleTypes = module == SubledgerModules.AccountsReceivable
+            ? new[] { BusinessPartnerRoleType.Customer }
+            : new[] { BusinessPartnerRoleType.Supplier, BusinessPartnerRoleType.Contractor };
+        var roles = await _context.Set<BusinessPartnerRole>()
+            .Where(role => role.TenantId == TenantId &&
+                role.BusinessPartnerId == partner.Id &&
+                !role.IsDeleted &&
+                expectedRoleTypes.Contains(role.RoleType))
+            .OrderBy(role => role.RoleType)
+            .ToListAsync(cancellationToken);
 
-        var supplier = await _context.Set<Supplier>()
-            .FirstOrDefaultAsync(s =>
-                s.TenantId == TenantId &&
-                !s.IsDeleted &&
-                (s.SupplierCode == partner.PartnerCode || s.Name == partner.PartnerName),
-                cancellationToken);
-
-        if (supplier != null)
-            return supplier;
-
-        supplier = new Supplier
+        var role = requestedRoleId.HasValue
+            ? roles.SingleOrDefault(candidate => candidate.Id == requestedRoleId.Value)
+            : roles.Count == 1
+                ? roles[0]
+                : null;
+        if (role is null)
         {
-            Id = Guid.NewGuid(),
-            TenantId = TenantId,
-            SupplierCode = string.IsNullOrWhiteSpace(partner.PartnerCode)
-                ? $"BP-{partner.Id.ToString("N")[..8].ToUpperInvariant()}"
-                : partner.PartnerCode,
-            Name = partner.PartnerName,
-            SupplierType = partner.PartnerType.Contains("Manufacturer", StringComparison.OrdinalIgnoreCase)
-                ? "Manufacturer"
-                : "Vendor",
-            Address = partner.PhysicalAddress ?? partner.MailingAddress,
-            City = partner.PhysicalCity ?? partner.MailingCity,
-            State = partner.PhysicalState ?? partner.MailingState,
-            Country = partner.PhysicalCountry ?? partner.MailingCountry,
-            Phone = partner.PrimaryPhone ?? partner.SecondaryPhone,
-            Email = partner.PrimaryEmail,
-            Website = partner.Website,
-            PrimaryContactName = partner.PrimaryContactName,
-            PrimaryContactPhone = partner.PrimaryPhone ?? partner.SecondaryPhone,
-            PrimaryContactEmail = partner.PrimaryEmail,
-            TaxId = partner.TaxIdentificationNumber,
-            PaymentTerms = partner.PaymentTerms,
-            CreditLimit = partner.CreditLimit,
-            IsActive = partner.IsActive,
-            Status = partner.RegistrationStatus,
-            IsBlacklisted = partner.IsBlacklisted,
-            BlacklistReason = partner.BlacklistReason,
-            PaymentTermId = partner.PaymentTermId,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = UserName
-        };
+            throw new InvalidOperationException(roles.Count > 1
+                ? "Select the Business Partner role to use for this adjustment."
+                : $"The Business Partner does not have the required {module} role.");
+        }
 
-        _context.Set<Supplier>().Add(supplier);
-        await _context.SaveChangesAsync(cancellationToken);
-        return supplier;
+        if (module == SubledgerModules.AccountsReceivable)
+        {
+            var profiles = await _context.Set<BusinessPartnerArProfileVersion>()
+                .Where(profile => profile.TenantId == TenantId &&
+                    profile.BusinessPartnerRoleId == role.Id && !profile.IsDeleted)
+                .ToListAsync(cancellationToken);
+            var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAr(partner, role, profiles, accountingDate);
+            if (!readiness.IsReady)
+                throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
+            return new CounterpartyResult(partner, role, null, readiness.ArProfile);
+        }
+
+        var apProfiles = await _context.Set<BusinessPartnerApProfileVersion>()
+            .Include(profile => profile.WithholdingDefaults)
+            .Where(profile => profile.TenantId == TenantId &&
+                profile.BusinessPartnerRoleId == role.Id && !profile.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var apReadiness = BusinessPartnerFinanceProfilePolicy.ResolveAp(partner, role, apProfiles, accountingDate);
+        if (!apReadiness.IsReady)
+            throw new InvalidOperationException($"{apReadiness.Code}: {apReadiness.Message}");
+        return new CounterpartyResult(partner, role, apReadiness.ApProfile, null);
     }
 
     private Task<SubledgerAdjustmentJournal?> LoadAdjustmentAsync(
@@ -420,8 +396,8 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         CancellationToken cancellationToken)
     {
         var query = _context.SubledgerAdjustmentJournals
-            .Include(a => a.Customer)
-            .Include(a => a.Supplier)
+            .Include(a => a.BusinessPartner)
+            .Include(a => a.BusinessPartnerRole)
             .Include(a => a.ContraAccount)
             .Include(a => a.JournalEntry)
             .Where(a => a.TenantId == TenantId && a.Id == id && !a.IsDeleted);
@@ -440,10 +416,14 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             Module = adjustment.Module,
             AdjustmentNumber = adjustment.AdjustmentNumber,
             Purpose = adjustment.Purpose,
-            CustomerId = adjustment.CustomerId,
-            CustomerName = adjustment.Customer?.PartnerName,
-            SupplierId = adjustment.SupplierId,
-            SupplierName = adjustment.Supplier?.Name,
+            BusinessPartnerId = adjustment.BusinessPartnerId,
+            BusinessPartnerRoleId = adjustment.BusinessPartnerRoleId,
+            BusinessPartnerApProfileVersionId = adjustment.BusinessPartnerApProfileVersionId,
+            BusinessPartnerArProfileVersionId = adjustment.BusinessPartnerArProfileVersionId,
+            BusinessPartnerCode = adjustment.BusinessPartnerCode,
+            BusinessPartnerName = adjustment.BusinessPartnerName,
+            BusinessPartnerLegalName = adjustment.BusinessPartnerLegalName,
+            BusinessPartnerTaxIdentificationNumber = adjustment.BusinessPartnerTaxIdentificationNumber,
             AdjustmentDate = adjustment.AdjustmentDate,
             DueDate = adjustment.DueDate,
             AdjustmentType = adjustment.AdjustmentType,
@@ -574,5 +554,12 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             : (isDebit ? -adjustment.BaseCurrencyAmount : adjustment.BaseCurrencyAmount);
     }
 
-    private sealed record CounterpartyResult(string Name, BusinessPartner? Customer, Supplier? Supplier);
+    private sealed record CounterpartyResult(
+        BusinessPartner Partner,
+        BusinessPartnerRole Role,
+        BusinessPartnerApProfileVersion? ApProfile,
+        BusinessPartnerArProfileVersion? ArProfile)
+    {
+        public string Name => Partner.PartnerName;
+    }
 }

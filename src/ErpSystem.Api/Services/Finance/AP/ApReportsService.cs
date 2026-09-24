@@ -187,14 +187,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var adjustment in adjustments)
             {
-                if (!adjustment.SupplierId.HasValue)
-                    continue;
-
                 var amount = GetSignedApSubledgerAmount(adjustment);
                 if (amount == 0)
                     continue;
 
-                var detail = GetOrCreateDetail(adjustment.SupplierId.Value, adjustment.Supplier?.Name ?? "Supplier");
+                var detail = GetOrCreateDetail(adjustment.BusinessPartnerId, adjustment.BusinessPartnerName);
                 AddToSupplierAgingBucket(detail, amount, adjustment.DueDate, adjustment.AdjustmentDate, date);
                 detail.InvoiceCount++;
 
@@ -243,8 +240,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var adjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
             var bySupplier = invoices.GroupBy(i => i.BusinessPartnerId).ToDictionary(g => g.Key, g => g.ToList());
             var adjustmentsBySupplier = adjustments
-                .Where(a => a.SupplierId.HasValue)
-                .GroupBy(a => a.SupplierId!.Value)
+                .GroupBy(a => a.BusinessPartnerId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             foreach (var detail in report.SupplierDetails)
@@ -1970,14 +1966,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var adjustment in adjustments)
             {
-                if (!adjustment.SupplierId.HasValue)
-                    continue;
-
                 var amount = GetSignedApSubledgerFunctionalAmount(adjustment);
                 if (amount == 0)
                     continue;
 
-                var detail = GetOrCreateDetail(adjustment.SupplierId.Value, adjustment.Supplier?.Name ?? "Supplier");
+                var detail = GetOrCreateDetail(adjustment.BusinessPartnerId, adjustment.BusinessPartnerName);
                 AddToSupplierAgingBucket(detail, amount, adjustment.DueDate, adjustment.AdjustmentDate, date);
                 detail.InvoiceCount++;
 
@@ -2574,10 +2567,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     a.Module == SubledgerModules.AccountsPayable &&
                     a.Status == SubledgerAdjustmentStatuses.Posted &&
                     !a.IsDeleted)
-                .Include(a => a.Supplier);
+                .Include(a => a.BusinessPartner);
 
             if (supplierId.HasValue)
-                query = query.Where(a => a.SupplierId == supplierId.Value);
+                query = query.Where(a => a.BusinessPartnerId == supplierId.Value);
 
             return query.ToListAsync(cancellationToken);
         }
@@ -2790,9 +2783,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     a.TenantId == TenantId &&
                     a.Module == SubledgerModules.AccountsPayable &&
                     a.Status == SubledgerAdjustmentStatuses.Posted &&
-                    a.SupplierId.HasValue &&
+                    a.BusinessPartnerId != Guid.Empty &&
                     a.AdjustmentDate < endExclusive)
-                .Select(a => a.SupplierId!.Value)
+                .Select(a => a.BusinessPartnerId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
 

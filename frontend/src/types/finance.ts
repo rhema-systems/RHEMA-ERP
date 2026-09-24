@@ -1280,10 +1280,14 @@ export interface SubledgerAdjustmentJournal {
   module: SubledgerModule;
   adjustmentNumber: string;
   purpose: SubledgerAdjustmentPurpose;
-  customerId?: string;
-  customerName?: string;
-  supplierId?: string;
-  supplierName?: string;
+  businessPartnerId: string;
+  businessPartnerRoleId: string;
+  businessPartnerApProfileVersionId?: string;
+  businessPartnerArProfileVersionId?: string;
+  businessPartnerCode: string;
+  businessPartnerName: string;
+  businessPartnerLegalName?: string;
+  businessPartnerTaxIdentificationNumber?: string;
   adjustmentDate: string;
   dueDate?: string;
   adjustmentType: SubledgerAdjustmentType;
@@ -1312,8 +1316,8 @@ export interface SubledgerAdjustmentJournal {
 export interface CreateSubledgerAdjustmentJournalDto {
   module: SubledgerModule;
   purpose?: SubledgerAdjustmentPurpose;
-  customerId?: string;
-  supplierId?: string;
+  businessPartnerId: string;
+  businessPartnerRoleId?: string;
   adjustmentDate: string;
   dueDate?: string;
   adjustmentType: SubledgerAdjustmentType;

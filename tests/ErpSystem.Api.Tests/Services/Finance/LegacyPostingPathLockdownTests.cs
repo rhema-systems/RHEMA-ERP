@@ -378,6 +378,58 @@ public sealed class LegacyPostingPathLockdownTests
         journalPage.Should().NotContain("ALL_ACTIVE_BOOKS_CODE");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void SubledgerAdjustments_ShouldUseGovernedCanonicalBusinessPartnerIdentity()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "SubledgerAdjustmentJournalService.cs"));
+        var entity = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Entities", "Finance", "SubledgerAdjustmentJournal.cs"));
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "SubledgerAdjustmentJournalDtos.cs"));
+        var page = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "subledger-adjustments", "new", "page.tsx"));
+        var migrationPath = Directory.GetFiles(
+                Path.Combine(root, "src", "ErpSystem.Data", "Migrations"),
+                "*CanonicalSubledgerAdjustmentBusinessPartnerIdentity.cs")
+            .Single(path => !path.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase));
+        var migration = File.ReadAllText(migrationPath);
+
+        entity.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid BusinessPartnerRoleId")
+            .And.Contain("public Guid? BusinessPartnerApProfileVersionId")
+            .And.Contain("public Guid? BusinessPartnerArProfileVersionId")
+            .And.Contain("public string BusinessPartnerCode")
+            .And.Contain("public string BusinessPartnerName");
+        entity.Should().NotContain("public Guid? CustomerId")
+            .And.NotContain("public Guid? SupplierId");
+
+        dto.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid? BusinessPartnerRoleId");
+        dto.Should().NotContain("public Guid? CustomerId")
+            .And.NotContain("public Guid? SupplierId");
+
+        service.Should().Contain("BusinessPartnerFinanceProfilePolicy.ResolveAr")
+            .And.Contain("BusinessPartnerFinanceProfilePolicy.ResolveAp")
+            .And.Contain("BusinessPartnerCode = counterparty.Partner.PartnerCode")
+            .And.Contain("BusinessPartnerName = counterparty.Partner.PartnerName");
+        service.Should().NotContain("_context.Set<Supplier>()")
+            .And.NotContain("new Supplier")
+            .And.NotContain("dto.CustomerId")
+            .And.NotContain("dto.SupplierId");
+
+        page.Should().Contain("businessPartnerId: data.businessPartnerId")
+            .And.Contain("accountsPayableService.getInvoiceSupplierEntryOptions()")
+            .And.NotContain("customerId: data")
+            .And.NotContain("supplierId: data");
+
+        migration.Should().Contain("IF EXISTS (SELECT 1 FROM [dbo].[SubledgerAdjustmentJournals])")
+            .And.Contain("requires the approved Finance transaction reset")
+            .And.Contain("DropColumn(\n                name: \"CustomerId\"")
+            .And.Contain("DropColumn(\n                name: \"SupplierId\"")
+            .And.NotContain("RenameColumn(\n                name: \"CustomerId\"")
+            .And.NotContain("RenameColumn(\n                name: \"SupplierId\"");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

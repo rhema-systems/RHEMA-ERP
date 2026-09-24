@@ -4411,15 +4411,25 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.Module, e.AdjustmentDate });
             entity.HasIndex(e => new { e.TenantId, e.Module, e.Purpose, e.AdjustmentDate });
             entity.Property(e => e.Purpose).HasMaxLength(30).IsRequired();
-            entity.HasIndex(e => e.CustomerId);
-            entity.HasIndex(e => e.SupplierId);
-            entity.HasOne(e => e.Customer)
+            entity.HasIndex(e => e.BusinessPartnerId);
+            entity.HasIndex(e => e.BusinessPartnerRoleId);
+            entity.HasIndex(e => e.BusinessPartnerApProfileVersionId);
+            entity.HasIndex(e => e.BusinessPartnerArProfileVersionId);
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.CustomerId)
+                .HasForeignKey(e => e.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.Supplier)
+            entity.HasOne(e => e.BusinessPartnerRole)
                 .WithMany()
-                .HasForeignKey(e => e.SupplierId)
+                .HasForeignKey(e => e.BusinessPartnerRoleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerApProfileVersion)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerApProfileVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerArProfileVersion)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerArProfileVersionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.ContraAccount)
                 .WithMany()

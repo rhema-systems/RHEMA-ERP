@@ -44,6 +44,19 @@ Procurement's existing Accounts-tab fields remain visible for its owner to ratio
 Fields without an implemented Finance consumer have no posting effect. Their continued presence
 must not be interpreted as a promise that they override Finance settings.
 
+## Transaction identity evidence
+
+- New Finance AP, AR and subledger-adjustment commands accept `BusinessPartnerId`; they do not
+  accept legacy `SupplierId` or `CustomerId` identity aliases.
+- A posting resolves and stores the exact active role plus the approved AP or AR profile version
+  effective on its accounting date. A partner identity without governed role/profile readiness is
+  rejected with the policy's corrective readiness code and message.
+- Posted transactions retain immutable partner code, display name, legal name and TIN snapshots.
+  Reports group by `BusinessPartnerId` while displaying those historical snapshots, so later master
+  data edits do not rewrite accounting evidence.
+- Reversals reuse the original canonical partner and role, then revalidate the profile effective on
+  the reversal date. They never create or look up a legacy Supplier/Customer shadow record.
+
 ## Withholding contract
 
 - Supplier/Contractor AP profiles may hold several category-specific WHT defaults and exactly one
