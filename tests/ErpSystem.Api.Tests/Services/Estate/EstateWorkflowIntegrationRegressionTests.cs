@@ -7,6 +7,23 @@ namespace ErpSystem.Api.Tests.Services.Estate;
 public sealed class EstateWorkflowIntegrationRegressionTests
 {
     [Fact]
+    public void PublishedWorkflowDocuments_ReplaceCatalogRequirements_AndCatalogStagesRemainFallback()
+    {
+        var service = ReadSource("src", "ErpSystem.Api", "Services", "ProcedureCaseService.cs");
+        var workspace = Slice(service,
+            "private async Task<WorkspaceSeed> BuildWorkspaceSeedAsync",
+            "private static IReadOnlyList<string> BuildConfiguredWorkflowChecklist");
+
+        workspace.Should().Contain("documents = await BuildWorkflowDocumentSeedsAsync(workflowDefinitionId);");
+        workspace.Should().Contain("\"Legal\" => _legalCatalog.GetProcedureWorkspace(entityType)?.Stages");
+        workspace.Should().Contain("\"PropertyManagement\" => _propertyManagementCatalog.GetProcedureWorkspace(entityType)?.Stages");
+        workspace.Should().Contain("\"Facilities\" => _facilitiesCatalog.GetProcedureWorkspace(entityType)?.Stages");
+        workspace.Should().Contain("\"Planning\" => _planningCatalog.GetProcedureWorkspace(entityType)?.Stages");
+        service.Should().Contain("if (request.HasIntakeAttachment)");
+        service.Should().Contain("CanManageOwnIntakeAttachment(procedureCase, document)");
+    }
+
+    [Fact]
     public void PropertyListingRequests_PersistPortalMetadataAndExposeApprovalFields()
     {
         var workspace = new PropertyManagementProcedureCatalogService()

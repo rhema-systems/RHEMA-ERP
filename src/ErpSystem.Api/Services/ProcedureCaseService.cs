@@ -351,6 +351,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             });
         }
 
+        if (request.HasIntakeAttachment)
+        {
+            procedureCase.Documents.Add(new ProcedureCaseDocument
+            {
+                TenantId = tenantId,
+                Name = "Case intake attachment",
+                RequiredFrom = firstStage.Name,
+                ProvidedBy = "Internal",
+                IsMandatory = false,
+                CreatedById = userId,
+                CreatedAt = now
+            });
+        }
+
         procedureCase.Activities.Add(Activity(tenantId, userId, procedureCase.Id, "Created", firstStage.Name, "Procedure case opened."));
 
         // Procedure cases are source records for workflow; keep creation, workflow startup, and linkage atomic.
@@ -857,6 +871,41 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             tenantId,
             userId,
             isUpload: false);
+    }
+
+    public async Task<ProcedureCaseDetailDto?> LinkCentralDocumentAsync(Guid id, Guid documentId, Guid recordId)
+    {
+        var procedureCase = await LoadCaseAsync(id, asTracking: false);
+        var document = procedureCase?.Documents.FirstOrDefault(item => item.Id == documentId);
+        if (procedureCase is null || document is null)
+        {
+            return null;
+        }
+        EnsureCanModifyDocument(procedureCase, document);
+
+        var tenantId = RequireTenantId();
+        var record = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .Include(item => item.Versions.Where(version => !version.IsDeleted))
+            .FirstOrDefaultAsync(item => item.Id == recordId && item.TenantId == tenantId && !item.IsDeleted);
+        var version = record is null ? null : ResolveCurrentDocumentVersion(record);
+        if (record is null || (string.IsNullOrWhiteSpace(record.ExternalDocumentUrl)
+            && (version is null || (string.IsNullOrWhiteSpace(version.RepositoryPath)
+                && string.IsNullOrWhiteSpace(version.RenditionPath)
+                && !version.FileUploadRecordId.HasValue))))
+        {
+            throw new InvalidOperationException("Select a DMS document with an available file.");
+        }
+
+        return await UpdateDocumentAttachmentAsync(
+            procedureCase,
+            document,
+            version?.FileName ?? record.Title,
+            $"/document-management/records/{record.Id}",
+            document.Notes,
+            tenantId,
+            RequireUserId(),
+            isUpload: true);
     }
 
     private async Task<ProcedureCaseDetailDto> UpdateDocumentAttachmentAsync(
@@ -4424,11 +4473,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var workflowStage = stages.FirstOrDefault(stage => stage.WorkflowDefinitionId.HasValue);
         if (workflowStage?.WorkflowDefinitionId is { } workflowDefinitionId)
         {
-            var workflowDocuments = await BuildWorkflowDocumentSeedsAsync(workflowDefinitionId);
-            if (workflowDocuments.Count > 0)
-            {
-                documents = workflowDocuments;
-            }
+            documents = await BuildWorkflowDocumentSeedsAsync(workflowDefinitionId);
         }
 
         return new WorkspaceSeed(title, stages, fields, documents, workflowStage?.WorkflowDefinitionId, workflowStage?.WorkflowDefinitionName);
@@ -5361,6 +5406,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
     private void EnsureCanModifyDocument(ProcedureCase procedureCase, ProcedureCaseDocument document)
     {
+        if (CanManageOwnIntakeAttachment(procedureCase, document))
+        {
+            return;
+        }
         EnsureCanEdit(procedureCase);
 
         if (!IsDocumentRequiredInCurrentStage(procedureCase, document))
@@ -5399,7 +5448,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     }
 
     private bool CanModifyDocumentInCurrentStage(ProcedureCase procedureCase, ProcedureCaseDocument document)
-        => CanEdit(procedureCase) && IsDocumentRequiredInCurrentStage(procedureCase, document);
+        => CanManageOwnIntakeAttachment(procedureCase, document)
+            || (CanEdit(procedureCase) && IsDocumentRequiredInCurrentStage(procedureCase, document));
+
+    private bool CanManageOwnIntakeAttachment(ProcedureCase procedureCase, ProcedureCaseDocument document)
+        => document.Name == "Case intake attachment"
+            && procedureCase.CurrentStageIndex == 0
+            && !IsCompleted(procedureCase)
+            && UserOwnsCase(procedureCase)
+            && IsDocumentRequiredInCurrentStage(procedureCase, document);
 
     private static bool IsDocumentRequiredInCurrentStage(ProcedureCase procedureCase, ProcedureCaseDocument document)
         => string.IsNullOrWhiteSpace(document.RequiredFrom)

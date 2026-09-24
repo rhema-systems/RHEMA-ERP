@@ -54,6 +54,7 @@ import {
   type CentralDocumentGenerationTemplate,
   type CentralDocumentVersionDownloadFormat,
   type CentralDocumentRecordDetail,
+  type CentralDocumentRecord,
   type GeneratedCentralDocumentResult,
 } from '@/services/document-management.service';
 import {
@@ -100,7 +101,7 @@ const LEGAL_PROPERTY_MATTERS = new Set([
 ]);
 
 const LEGAL_NEW_MATTER_FIELD_KEYS = new Set([
-  'sourceRecordReference', 'transactionType', 'agreementReference',
+  'sourceRecordReference', 'transactionType',
   'propertyFileReference', 'propertyNumber', 'courtProcessType',
   'courtName', 'caseNumber', 'claimantName', 'defendantName',
   'claimAmount', 'serviceDate', 'responseDeadline',
@@ -554,6 +555,13 @@ export function ProcedureCaseWorkspace({
   const [versionHistoryLoading, setVersionHistoryLoading] = React.useState(false);
   const [versionHistoryError, setVersionHistoryError] = React.useState<string | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
+  const [intakeAttachmentMode, setIntakeAttachmentMode] = React.useState<'upload' | 'dms'>('upload');
+  const [intakeAttachmentFile, setIntakeAttachmentFile] = React.useState<File | null>(null);
+  const [intakeDmsSearch, setIntakeDmsSearch] = React.useState('');
+  const [intakeDmsRecords, setIntakeDmsRecords] = React.useState<CentralDocumentRecord[]>([]);
+  const [intakeDmsRecordId, setIntakeDmsRecordId] = React.useState('');
+  const [isLoadingIntakeDms, setIsLoadingIntakeDms] = React.useState(false);
+  const [linkDocumentTargetId, setLinkDocumentTargetId] = React.useState<string | null>(null);
   const [newLegalFields, setNewLegalFields] = React.useState<Record<string, string | null>>(prefilledFieldValues);
   const [legalAssetSearch, setLegalAssetSearch] = React.useState(searchParams.get('field_propertyNumber') || '');
   const [legalAssets, setLegalAssets] = React.useState<EstateManagedAsset[]>([]);
@@ -627,6 +635,27 @@ export function ProcedureCaseWorkspace({
   const legalIntakeFields = intakeFields.filter((field) =>
     LEGAL_NEW_MATTER_FIELD_KEYS.has(field.key)
   );
+  React.useEffect(() => {
+    if ((!isCreateDialogOpen || intakeAttachmentMode !== 'dms') && !linkDocumentTargetId) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setIsLoadingIntakeDms(true);
+      void documentManagementService.getRecords(undefined, {
+        search: intakeDmsSearch.trim() || undefined,
+        take: 50,
+      }).then((records) => {
+        if (active) setIntakeDmsRecords(records.filter((record) => record.currentVersion || record.externalDocumentUrl));
+      }).catch(() => {
+        if (active) setIntakeDmsRecords([]);
+      }).finally(() => {
+        if (active) setIsLoadingIntakeDms(false);
+      });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [isCreateDialogOpen, intakeAttachmentMode, intakeDmsSearch, linkDocumentTargetId]);
   const legalAssetOptions = selectedLegalAsset && !legalAssets.some((asset) => asset.id === selectedLegalAsset.id)
     ? [selectedLegalAsset, ...legalAssets]
     : legalAssets;
@@ -1361,8 +1390,27 @@ export function ProcedureCaseWorkspace({
         fieldValues: module === 'Legal'
           ? { ...prefilledFieldValues, ...newLegalFields, applicantName: newCase.applicantName }
           : prefilledFieldValues,
+        hasIntakeAttachment: Boolean(intakeAttachmentMode === 'upload' ? intakeAttachmentFile : intakeDmsRecordId),
       });
-      setSelectedCase(created);
+      let attachedCase = created;
+      const intakeDocument = created.documents.find((document) => document.name === 'Case intake attachment');
+      try {
+        if (intakeDocument && intakeAttachmentMode === 'upload' && intakeAttachmentFile) {
+          attachedCase = await procedureCaseService.uploadDocument(created.id, intakeDocument.id, intakeAttachmentFile);
+        } else if (intakeDocument && intakeAttachmentMode === 'dms' && intakeDmsRecordId) {
+          attachedCase = await documentManagementService.attachRecordToCase(intakeDmsRecordId, created.id, intakeDocument.id);
+        }
+      } catch (attachmentError) {
+        toast({
+          title: 'Case created, attachment not saved',
+          description: attachmentError instanceof Error ? attachmentError.message : 'Open the case to attach the document.',
+          variant: 'destructive',
+        });
+      }
+      setSelectedCase(attachedCase);
+      setIntakeAttachmentFile(null);
+      setIntakeDmsRecordId('');
+      setIntakeDmsSearch('');
       setNewCase({
         title: defaultTitle,
         referenceNumber: '',
@@ -1478,7 +1526,7 @@ export function ProcedureCaseWorkspace({
     setError(null);
     try {
       const selectedFile = documentFiles[document.id];
-      if (selectedFile && document.centralDocumentRecordId) {
+      if (selectedFile && document.centralDocumentRecordId && document.name !== 'Case intake attachment') {
         const version = await documentManagementService.uploadVersionFile(
           document.centralDocumentRecordId,
           {
@@ -1530,6 +1578,32 @@ export function ProcedureCaseWorkspace({
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save document.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const linkDmsDocument = async () => {
+    if (!selectedCase || !linkDocumentTargetId || !intakeDmsRecordId) return;
+    setIsSaving(true);
+    try {
+      const updated = await documentManagementService.attachRecordToCase(
+        intakeDmsRecordId,
+        selectedCase.id,
+        linkDocumentTargetId
+      );
+      setSelectedCase(updated);
+      setLinkDocumentTargetId(null);
+      setIntakeDmsRecordId('');
+      setIntakeDmsSearch('');
+      await loadCases();
+      toast({ title: 'DMS document attached', variant: 'success' });
+    } catch (err) {
+      toast({
+        title: 'Unable to attach document',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      });
     } finally {
       setIsSaving(false);
     }
@@ -2255,6 +2329,33 @@ export function ProcedureCaseWorkspace({
           ))}
         </div>
       ) : null}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium">Case attachment</label>
+        <div className="inline-flex rounded-md border border-border" role="group" aria-label="Attachment source">
+          <Button type="button" size="sm" variant={intakeAttachmentMode === 'upload' ? 'default' : 'ghost'} aria-pressed={intakeAttachmentMode === 'upload'} onClick={() => setIntakeAttachmentMode('upload')}>
+            <FileUp className="mr-2 h-4 w-4" /> Upload file
+          </Button>
+          <Button type="button" size="sm" variant={intakeAttachmentMode === 'dms' ? 'default' : 'ghost'} aria-pressed={intakeAttachmentMode === 'dms'} onClick={() => setIntakeAttachmentMode('dms')}>
+            <BookTemplate className="mr-2 h-4 w-4" /> Choose from DMS
+          </Button>
+        </div>
+        {intakeAttachmentMode === 'upload' ? (
+          <Input type="file" aria-label="Upload case attachment" accept=".pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.gif,.bmp,.webp" onChange={(event) => setIntakeAttachmentFile(event.target.files?.[0] ?? null)} />
+        ) : (
+          <>
+            <Input aria-label="Search DMS documents" placeholder="Search DMS title or reference" value={intakeDmsSearch} onChange={(event) => { setIntakeDmsSearch(event.target.value); setIntakeDmsRecordId(''); }} />
+            <Select value={intakeDmsRecordId || undefined} onValueChange={setIntakeDmsRecordId}>
+              <SelectTrigger aria-label="DMS document"><SelectValue placeholder={isLoadingIntakeDms ? 'Loading documents' : 'Select a document'} /></SelectTrigger>
+              <SelectContent>
+                {intakeDmsRecords.map((record) => (
+                  <SelectItem key={record.id} value={record.id}>{record.documentReference} - {record.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!isLoadingIntakeDms && intakeDmsRecords.length === 0 ? <p className="text-xs text-muted-foreground">No matching DMS documents.</p> : null}
+          </>
+        )}
+      </div>
       {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-department">Source department</label> : null}
       <Select
         value={newCase.organizationUnitId || undefined}
@@ -2343,7 +2444,7 @@ export function ProcedureCaseWorkspace({
             <div>
               <CardTitle>{terminology.title}</CardTitle>
             </div>
-            {module !== 'Legal' ? (
+            {module !== 'Legal' && module !== 'Planning' ? (
               <Badge variant={selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'}>
                 {selectedCase?.usesConfiguredWorkflow ? 'Administration workflow' : 'Procedure stages'}
               </Badge>
@@ -3020,9 +3121,10 @@ export function ProcedureCaseWorkspace({
                     {visibleDocuments.map((document) => {
                       const isDmsDocument =
                         isDocumentManagementDocument(document);
+                      const updatesDmsVersion = isDmsDocument && document.name !== 'Case intake attachment';
                       const canModifyDocument =
                         document.canUploadAtCurrentStage &&
-                        selectedCase.canEditCurrentStage;
+                        (selectedCase.canEditCurrentStage || document.name === 'Case intake attachment');
                       const documentStageLabel = document.requiredFrom
                         ? `Required at ${document.requiredFrom}`
                         : 'Current stage document';
@@ -3292,7 +3394,7 @@ export function ProcedureCaseWorkspace({
                                     Selected: {documentFiles[document.id]?.name}
                                   </div>
                                 ) : null}
-                                {!isDmsDocument ? (
+                                {!updatesDmsVersion ? (
                                   <Textarea
                                     placeholder="Notes"
                                     value={document.notes ?? ''}
@@ -3317,17 +3419,31 @@ export function ProcedureCaseWorkspace({
                                   disabled={
                                     !canModifyDocument ||
                                     isSaving ||
-                                    (isDmsDocument &&
+                                    (updatesDmsVersion &&
                                       !documentFiles[document.id])
                                   }
                                   onClick={() => void saveDocument(document)}
                                 >
                                   <FileUp className="h-4 w-4" />
-                                  {isDmsDocument
+                                  {updatesDmsVersion
                                     ? 'Upload edited version'
                                     : documentFiles[document.id]
                                     ? 'Upload document'
                                     : 'Save notes'}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full gap-2"
+                                  disabled={isSaving}
+                                  onClick={() => {
+                                    setIntakeDmsSearch('');
+                                    setIntakeDmsRecordId('');
+                                    setLinkDocumentTargetId(document.id);
+                                  }}
+                                >
+                                  <BookTemplate className="h-4 w-4" />
+                                  Choose from DMS
                                 </Button>
                               </>
                             )}
@@ -3392,6 +3508,25 @@ export function ProcedureCaseWorkspace({
             <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
           ) : null}
           {renderCreateCaseForm()}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(linkDocumentTargetId)} onOpenChange={(open) => { if (!open) setLinkDocumentTargetId(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>Choose DMS document</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <Input aria-label="Search DMS documents" placeholder="Search title or reference" value={intakeDmsSearch} onChange={(event) => { setIntakeDmsSearch(event.target.value); setIntakeDmsRecordId(''); }} />
+            <Select value={intakeDmsRecordId || undefined} onValueChange={setIntakeDmsRecordId}>
+              <SelectTrigger aria-label="DMS document"><SelectValue placeholder={isLoadingIntakeDms ? 'Loading documents' : 'Select a document'} /></SelectTrigger>
+              <SelectContent>
+                {intakeDmsRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.documentReference} - {record.title}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {!isLoadingIntakeDms && intakeDmsRecords.length === 0 ? <p className="text-xs text-muted-foreground">No matching DMS documents.</p> : null}
+            <Button className="w-full" disabled={!intakeDmsRecordId || isSaving} onClick={() => void linkDmsDocument()}>
+              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BookTemplate className="mr-2 h-4 w-4" />}
+              Attach document
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
       <Dialog open={isLegalAssetContextOpen} onOpenChange={setIsLegalAssetContextOpen}>
