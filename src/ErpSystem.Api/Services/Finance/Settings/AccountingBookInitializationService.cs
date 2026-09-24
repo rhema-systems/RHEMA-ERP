@@ -32,6 +32,134 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         IFinanceAuditService audit, IBookBalanceReadModelService? bookBalances = null)
         => (_db, _currentUser, _workflow, _audit, _bookBalances) = (db, currentUser, workflow, audit, bookBalances);
 
+    public async Task<int> ApplyGovernedParallelOpeningAsync(Guid accountingBookId,
+        CancellationToken cancellationToken = default)
+    {
+        var book = await _db.AccountingBooks.SingleOrDefaultAsync(item => item.Id == accountingBookId
+            && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("Accounting book was not found.");
+        if (book.BookType != AccountingBookType.ParallelFull
+            || book.ParallelOpeningMode != ParallelBookOpeningMode.GovernedOpeningConversion)
+            return 0;
+        if (book.LifecycleStatus != AccountingBookLifecycleStatus.Initializing)
+            throw new InvalidOperationException("PARALLEL_OPENING_STATE_INVALID: Governed opening conversion may be applied only while the Parallel book is Initializing.");
+        if (_bookBalances == null)
+            throw new InvalidOperationException("PARALLEL_OPENING_BALANCE_PROJECTION_UNAVAILABLE: Parallel opening balance projection is unavailable.");
+
+        var initialization = await Query().Include(item => item.Lines)
+            .Where(item => item.AccountingBookId == book.Id
+                && item.InitializationStatus == AccountingBookInitializationStatus.Approved)
+            .OrderByDescending(item => item.Version).FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("PARALLEL_OPENING_EVIDENCE_REQUIRED: Approved governed opening evidence is required before activation.");
+        if (initialization.Mode != AccountingBookInitializationMode.BaseBookCopyAtCutoff)
+            throw new InvalidOperationException("PARALLEL_OPENING_EVIDENCE_INVALID: Governed opening conversion requires base-book copy evidence.");
+        ValidateParallelCutoffContinuity(book, initialization.CutoffDate);
+        await EnsureEvidenceUnchangedAsync(initialization, cancellationToken);
+
+        if (await _db.FinancePostingEvents.AsNoTracking().AnyAsync(item => item.TenantId == TenantId
+            && item.AccountingBookId == book.Id && item.SourceDocumentType == WorkflowEntityType
+            && item.SourceDocumentId == initialization.Id && item.PostingAction == "GovernedOpeningConversion",
+            cancellationToken))
+            return 0;
+
+        var sourceBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.Id == initialization.SourceAccountingBookId && item.TenantId == TenantId && !item.IsDeleted,
+            cancellationToken) ?? throw new InvalidOperationException("PARALLEL_OPENING_SOURCE_INVALID: The governed Primary source book is unavailable.");
+        var now = DateTime.UtcNow;
+        var actorId = Guid.TryParse(_currentUser.UserId, out var parsedActorId) ? parsedActorId : (Guid?)null;
+        var lines = initialization.Lines.Where(item => !item.IsDeleted && (item.OpeningDebit != 0m || item.OpeningCredit != 0m))
+            .OrderBy(item => item.AccountId).Select((line, index) => new AccountTransaction
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, AccountId = line.AccountId,
+                TransactionDate = initialization.CutoffDate.Date,
+                Description = $"{book.Code} governed opening conversion",
+                DebitAmount = line.OpeningDebit, CreditAmount = line.OpeningCredit,
+                FunctionalCurrencyCode = book.FunctionalCurrencyCode!,
+                TransactionCurrency = sourceBook.FunctionalCurrencyCode,
+                TransactionDebitAmount = line.BaseBookSignedBalance > 0m ? line.BaseBookSignedBalance : 0m,
+                TransactionCreditAmount = line.BaseBookSignedBalance < 0m ? Math.Abs(line.BaseBookSignedBalance) : 0m,
+                ForeignCurrencyAmount = Math.Abs(line.BaseBookSignedBalance),
+                ExchangeRateId = line.TranslationExchangeRateId, ExchangeRate = line.TranslationRate,
+                ExchangeRateSource = line.TranslationRateSource, ExchangeRateDate = line.TranslationRateDate,
+                SourceModule = "FIN", SourceDocumentId = initialization.Id,
+                SourceDocumentType = WorkflowEntityType, SourceReferenceNumber = initialization.IdempotencyKey,
+                BookClassification = book.Code, AccountingBookId = book.Id,
+                FiscalPeriodId = initialization.CutoffFiscalPeriodId, PostedDate = now,
+                PostingStatus = "Posted", LineNumber = index + 1,
+                TransactionTag = "Parallel opening conversion", CreatedAt = now,
+                CreatedBy = _currentUser.UserName, CreatedById = actorId
+            }).ToList();
+        if (lines.Count == 0) return 0;
+        var debit = RoundMoney(lines.Sum(item => item.DebitAmount));
+        var credit = RoundMoney(lines.Sum(item => item.CreditAmount));
+        if (debit != credit)
+            throw new InvalidOperationException("PARALLEL_OPENING_UNBALANCED: Approved governed opening evidence is not balanced.");
+
+        var distinctRates = initialization.Lines.Where(item => item.TranslationExchangeRateId.HasValue)
+            .Select(item => item.TranslationExchangeRateId!.Value).Distinct().ToArray();
+        var singleRate = distinctRates.Length == 1
+            ? await _db.ExchangeRates.SingleOrDefaultAsync(item => item.Id == distinctRates[0]
+                && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
+            : null;
+        var journal = new JournalEntry
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            JournalEntryNumber = $"FXOPEN-{initialization.CutoffDate:yyyyMMdd}-{initialization.Id:N}"[..47],
+            JournalType = "Opening Balance", EntryDate = initialization.CutoffDate.Date,
+            Description = $"{book.Code} governed opening conversion from {sourceBook.Code}",
+            ReferenceNumber = initialization.IdempotencyKey, SourceModule = "FIN",
+            OriginModuleCode = "FIN", SourceDocumentId = initialization.Id,
+            SourceDocumentType = WorkflowEntityType, TotalDebitAmount = debit,
+            TotalCreditAmount = credit, BalanceDifference = debit - credit, IsBalanced = true,
+            IsMultiCurrency = true, PrimaryCurrency = book.FunctionalCurrencyCode,
+            BookClassification = book.Code, AccountingBookId = book.Id,
+            FiscalPeriodId = initialization.CutoffFiscalPeriodId, PostingDate = now,
+            PostedByUserId = actorId, PostingStatus = "Posted",
+            ApprovalStatus = "Approved initialization evidence",
+            ReplicationExchangeRateId = singleRate?.Id, ReplicationExchangeRate = singleRate?.Rate,
+            ReplicationRateDate = singleRate?.EffectiveDate.Date, ReplicationRateSource = singleRate?.RateSource,
+            CreatedAt = now, CreatedBy = _currentUser.UserName, CreatedById = actorId,
+            Transactions = lines
+        };
+        foreach (var line in lines) line.JournalEntryId = journal.Id;
+        var postingEvent = new FinancePostingEvent
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, SourceModule = "FIN", OriginModuleCode = "FIN",
+            SourceDocumentType = WorkflowEntityType, SourceDocumentId = initialization.Id,
+            PostingAction = "GovernedOpeningConversion", SourceDocumentReference = initialization.IdempotencyKey,
+            IdempotencyKey = $"parallel-opening:{book.Id:N}:{initialization.Id:N}",
+            RequestFingerprintVersion = "FINPOST-PARALLEL-OPENING-V1",
+            RequestFingerprint = initialization.ReconciliationFingerprint,
+            JournalEntryId = journal.Id, PostingStatus = "Posted", PostingDate = initialization.CutoffDate.Date,
+            RequestedAt = now, PostedAt = now, RequestedByUserId = actorId,
+            TotalDebitAmount = debit, TotalCreditAmount = credit,
+            FunctionalCurrencyCode = book.FunctionalCurrencyCode!, HasForeignCurrencyLines = true,
+            PrimaryTransactionCurrencyCode = sourceBook.FunctionalCurrencyCode,
+            PrimaryExchangeRateId = singleRate?.Id, PrimaryExchangeRate = singleRate?.Rate,
+            PrimaryExchangeRateDate = singleRate?.EffectiveDate.Date,
+            BookClassification = book.Code, AccountingBookId = book.Id,
+            CreatedAt = now, CreatedBy = _currentUser.UserName, CreatedById = actorId
+        };
+        _db.JournalEntries.Add(journal);
+        _db.FinancePostingEvents.Add(postingEvent);
+        await _bookBalances.ApplyPostingAsync(TenantId, book.Id, book.Code,
+            initialization.CutoffFiscalPeriodId, book.FunctionalCurrencyCode!, lines, now, actorId, cancellationToken);
+        if (distinctRates.Length > 0)
+        {
+            var rates = await _db.ExchangeRates.Where(item => distinctRates.Contains(item.Id)
+                && item.TenantId == TenantId && !item.IsDeleted).ToListAsync(cancellationToken);
+            foreach (var rate in rates)
+            {
+                rate.HasBeenUsedInTransactions = true;
+                rate.TransactionCount += lines.Count(item => item.ExchangeRateId == rate.Id);
+                rate.FirstUsedDate ??= now;
+                rate.LastUsedDate = now;
+            }
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+        return 1;
+    }
+
     public async Task<int> ReplayHistoricalParallelTransactionsAsync(Guid accountingBookId,
         CancellationToken cancellationToken = default)
     {
@@ -223,6 +351,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         if (!Enum.TryParse<AccountingBookInitializationMode>(mode, true, out var parsedMode)) throw new InvalidOperationException("Initialization mode is invalid.");
         ValidateModeForBook(book, parsedMode);
         if (cutoffDate == default) throw new InvalidOperationException("An initialization cutoff date is required.");
+        ValidateParallelCutoffContinuity(book, cutoffDate);
         var cutoffPeriods = (await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted).ToListAsync(cancellationToken))
             .Where(item => item.EndDate.Date == cutoffDate.Date).ToList();
         if (cutoffPeriods.Count != 1) throw new InvalidOperationException("INITIALIZATION_CUTOFF_PERIOD_INVALID: Cutoff must be the end date of exactly one live same-tenant fiscal period.");
@@ -723,6 +852,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
     private async Task<Prepared> PrepareEvidenceAsync(AccountingBook book, AccountingBook? source, AccountingBookInitializationMode mode, DateTime cutoff,
         string idempotencyKey, string reason, IReadOnlyCollection<AccountingBookInitializationLineDto> requested, CancellationToken ct)
     {
+        ValidateParallelCutoffContinuity(book, cutoff);
         var cutoffPeriods = (await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted).ToListAsync(ct))
             .Where(item => item.EndDate.Date == cutoff.Date).ToList();
         if (cutoffPeriods.Count != 1)
@@ -885,6 +1015,16 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         };
         if (mode != expected)
             throw new InvalidOperationException($"PARALLEL_INITIALIZATION_MODE_INVALID: {book.ParallelOpeningMode} requires {expected} evidence.");
+    }
+
+    private static void ValidateParallelCutoffContinuity(AccountingBook book, DateTime cutoff)
+    {
+        if (book.BookType != AccountingBookType.ParallelFull) return;
+        if (!book.ReplicationStartDate.HasValue)
+            throw new InvalidOperationException("PARALLEL_REPLICATION_START_REQUIRED: A Parallel replication start date is required.");
+        if (cutoff.Date.AddDays(1) != book.ReplicationStartDate.Value.Date)
+            throw new InvalidOperationException(
+                $"PARALLEL_OPENING_CUTOFF_GAP: The opening cutoff must be the day immediately before the replication start date ({book.ReplicationStartDate:dd/MM/yyyy}) so no Primary activity is omitted or duplicated.");
     }
 
     private sealed record TranslationEvidence(Guid? ExchangeRateId, decimal? Multiplier, DateTime? RateDate,

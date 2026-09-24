@@ -43,13 +43,14 @@ public sealed class AccountingBookService : IAccountingBookService
         if (!includeInactive) query = query.Where(book => book.IsActive);
         var books = await query.OrderBy(book => book.SortOrder).ThenBy(book => book.Code).ToListAsync(cancellationToken);
         var used = await GetUsedBookIdsAsync(books.Select(item => item.Id), cancellationToken);
+        var protectedAccountLabels = await GetProtectedAccountLabelsAsync(books, cancellationToken);
         var reversible = await GetReversibleDesignationAsync(cancellationToken);
         var result = new List<AccountingBookDto>();
         foreach (var item in books)
         {
             var readiness = await GetActivationReadinessAsync(item, cancellationToken);
             result.Add(Map(item, used.Contains(item.Id), readiness,
-                reversible?.NewPrimaryBookId == item.Id ? reversible : null));
+                reversible?.NewPrimaryBookId == item.Id ? reversible : null, protectedAccountLabels));
         }
         return result;
     }
@@ -59,8 +60,9 @@ public sealed class AccountingBookService : IAccountingBookService
         var book = await BookQuery().AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Accounting book was not found.");
         var reversible = await GetReversibleDesignationAsync(cancellationToken);
+        var protectedAccountLabels = await GetProtectedAccountLabelsAsync(new[] { book }, cancellationToken);
         return Map(book, await HasUseAsync(id, cancellationToken), await GetActivationReadinessAsync(book, cancellationToken),
-            reversible?.NewPrimaryBookId == id ? reversible : null);
+            reversible?.NewPrimaryBookId == id ? reversible : null, protectedAccountLabels);
     }
 
     public async Task EnsureTenantDefaultsAsync(CancellationToken cancellationToken = default)
@@ -455,12 +457,14 @@ public sealed class AccountingBookService : IAccountingBookService
         {
             var target = book.PendingLifecycleStatus!.Value;
             if (target == AccountingBookLifecycleStatus.Active
-                && book.BookType == AccountingBookType.ParallelFull
-                && book.ParallelOpeningMode == ParallelBookOpeningMode.HistoricalReplay)
+                && book.BookType == AccountingBookType.ParallelFull)
             {
                 if (_initialization == null)
-                    throw new InvalidOperationException("Historical Parallel replay is unavailable.");
-                await _initialization.ReplayHistoricalParallelTransactionsAsync(book.Id, ct);
+                    throw new InvalidOperationException("Parallel opening initialization is unavailable.");
+                if (book.ParallelOpeningMode == ParallelBookOpeningMode.GovernedOpeningConversion)
+                    await _initialization.ApplyGovernedParallelOpeningAsync(book.Id, ct);
+                else if (book.ParallelOpeningMode == ParallelBookOpeningMode.HistoricalReplay)
+                    await _initialization.ReplayHistoricalParallelTransactionsAsync(book.Id, ct);
             }
             book.LifecycleStatus = target;
             if (target == AccountingBookLifecycleStatus.Initializing) book.InitializationStartedAtUtc ??= DateTime.UtcNow;
@@ -798,8 +802,21 @@ public sealed class AccountingBookService : IAccountingBookService
     {
         var item = await BookQuery().AsNoTracking().SingleAsync(book => book.Id == id, ct);
         var reversible = await GetReversibleDesignationAsync(ct);
+        var protectedAccountLabels = await GetProtectedAccountLabelsAsync(new[] { item }, ct);
         return Map(item, await HasUseAsync(id, ct), await GetActivationReadinessAsync(item, ct),
-            reversible?.NewPrimaryBookId == id ? reversible : null);
+            reversible?.NewPrimaryBookId == id ? reversible : null, protectedAccountLabels);
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, string>> GetProtectedAccountLabelsAsync(
+        IEnumerable<AccountingBook> books, CancellationToken ct)
+    {
+        var accountIds = books.SelectMany(item => new Guid?[]
+            { item.CurrencyTranslationReserveAccountId, item.CurrencyRoundingAccountId })
+            .Where(item => item.HasValue).Select(item => item!.Value).Distinct().ToArray();
+        if (accountIds.Length == 0) return new Dictionary<Guid, string>();
+        return await _db.Accounts.AsNoTracking().Where(item => item.TenantId == TenantId
+                && accountIds.Contains(item.Id) && !item.IsDeleted)
+            .ToDictionaryAsync(item => item.Id, item => $"{item.AccountNumber} — {item.AccountName}", ct);
     }
 
     public async Task<DeltaBookLedgerInquiryDto> GetDeltaLedgerAsync(Guid id, DateTime? fromDate = null,
@@ -941,7 +958,8 @@ public sealed class AccountingBookService : IAccountingBookService
         };
     }
     private static AccountingBookDto Map(AccountingBook book, bool used, AccountingBookActivationReadinessDto readiness,
-        AccountingBookPrimaryDesignation? reversible = null) => new()
+        AccountingBookPrimaryDesignation? reversible = null,
+        IReadOnlyDictionary<Guid, string>? protectedAccountLabels = null) => new()
     {
         Id = book.Id, TenantId = book.TenantId, Code = book.Code, Name = book.Name, Description = book.Description,
         Purpose = book.Purpose, BookType = book.BookType.ToString(), LifecycleStatus = book.LifecycleStatus.ToString(),
@@ -951,7 +969,11 @@ public sealed class AccountingBookService : IAccountingBookService
         ParallelOpeningMode = book.ParallelOpeningMode?.ToString(),
         ParallelTranslationMethod = book.ParallelTranslationMethod?.ToString(),
         CurrencyTranslationReserveAccountId = book.CurrencyTranslationReserveAccountId,
+        CurrencyTranslationReserveAccountLabel = book.CurrencyTranslationReserveAccountId.HasValue
+            ? protectedAccountLabels?.GetValueOrDefault(book.CurrencyTranslationReserveAccountId.Value) : null,
         CurrencyRoundingAccountId = book.CurrencyRoundingAccountId,
+        CurrencyRoundingAccountLabel = book.CurrencyRoundingAccountId.HasValue
+            ? protectedAccountLabels?.GetValueOrDefault(book.CurrencyRoundingAccountId.Value) : null,
         InitializationStartedAtUtc = book.InitializationStartedAtUtc, IsActive = book.IsActive, IsDefault = book.IsDefault,
         AllowsPosting = book.AllowsPosting, IsSystemDefined = book.IsSystemDefined, SortOrder = book.SortOrder,
         PendingLifecycleStatus = book.PendingLifecycleStatus?.ToString(), PendingTransitionReason = book.PendingTransitionReason,

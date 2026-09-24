@@ -19,7 +19,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? ParallelOpeningMode { get; set; }
         public string? ParallelTranslationMethod { get; set; }
         public Guid? CurrencyTranslationReserveAccountId { get; set; }
+        public string? CurrencyTranslationReserveAccountLabel { get; set; }
         public Guid? CurrencyRoundingAccountId { get; set; }
+        public string? CurrencyRoundingAccountLabel { get; set; }
         public DateTime? InitializationStartedAtUtc { get; set; }
         public bool IsActive { get; set; }
         public bool IsDefault { get; set; }

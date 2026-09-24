@@ -134,7 +134,8 @@ public sealed class AccountingBookModelV2Tests
         await db.SaveChangesAsync();
 
         var service = new AccountingBookInitializationService(
-            db, User(tenantId).Object, Mock.Of<IWorkflowService>(), Audit().Object);
+            db, User(tenantId).Object, Mock.Of<IWorkflowService>(), Audit().Object,
+            new BookBalanceReadModelService(db));
         await service.EnsureDeltaStructureAsync(parallel.Id);
 
         parallel.CurrencyTranslationReserveAccountId.Should().NotBeNull();
@@ -196,7 +197,8 @@ public sealed class AccountingBookModelV2Tests
         await db.SaveChangesAsync();
 
         var service = new AccountingBookInitializationService(
-            db, User(tenantId).Object, Mock.Of<IWorkflowService>(), Audit().Object);
+            db, User(tenantId).Object, Mock.Of<IWorkflowService>(), Audit().Object,
+            new BookBalanceReadModelService(db));
         await service.EnsureDeltaStructureAsync(parallel.Id);
         var preparation = await service.PrepareAsync(parallel.Id,
             nameof(AccountingBookInitializationMode.BaseBookCopyAtCutoff), period.EndDate, primary.Id);
@@ -207,6 +209,81 @@ public sealed class AccountingBookModelV2Tests
             item.SourceSignedBalance == 1000m && item.AuthoritativeSignedBalance == 80m
             && item.TranslationExchangeRateId == rate.Id && item.TranslationRate == 0.08m);
         preparation.Accounts.Single(item => item.AccountId == equity.Id).AuthoritativeSignedBalance.Should().Be(-80m);
+
+        var configured = await service.ConfigureAsync(parallel.Id, new ConfigureAccountingBookInitializationDto
+        {
+            Mode = nameof(AccountingBookInitializationMode.BaseBookCopyAtCutoff),
+            CutoffDate = period.EndDate, CutoffFiscalPeriodId = period.Id,
+            CutoffFiscalPeriodCode = period.PeriodCode, SourceAccountingBookId = primary.Id,
+            SourceAccountingBookCode = primary.Code, IdempotencyKey = "usd-opening-2025",
+            Reason = "Establish translated opening balances",
+            Lines = preparation.Accounts.Select(item => new AccountingBookInitializationLineDto
+            {
+                AccountId = item.AccountId, AccountNumber = item.AccountNumber, AccountName = item.AccountName,
+                CurrencyCode = preparation.FunctionalCurrencyCode,
+                OpeningDebit = item.AuthoritativeSignedBalance > 0m ? item.AuthoritativeSignedBalance : 0m,
+                OpeningCredit = item.AuthoritativeSignedBalance < 0m ? Math.Abs(item.AuthoritativeSignedBalance) : 0m,
+                BaseBookSignedBalance = item.SourceSignedBalance,
+                TranslationExchangeRateId = item.TranslationExchangeRateId,
+                TranslationRate = item.TranslationRate, TranslationRateDate = item.TranslationRateDate,
+                TranslationRateType = item.TranslationRateType, TranslationRateSource = item.TranslationRateSource
+            }).ToArray()
+        });
+        var initialization = await db.AccountingBookInitializations.Include(item => item.Lines)
+            .SingleAsync(item => item.Id == configured.Id);
+        initialization.InitializationStatus = AccountingBookInitializationStatus.Approved;
+        initialization.ApprovedByUserId = Guid.NewGuid();
+        initialization.ApprovedAtUtc = DateTime.UtcNow;
+        parallel.LifecycleStatus = AccountingBookLifecycleStatus.Initializing;
+        await db.SaveChangesAsync();
+
+        (await service.ApplyGovernedParallelOpeningAsync(parallel.Id)).Should().Be(1);
+        (await service.ApplyGovernedParallelOpeningAsync(parallel.Id)).Should().Be(0);
+        var openingJournal = await db.JournalEntries.Include(item => item.Transactions).SingleAsync(item =>
+            item.AccountingBookId == parallel.Id && item.SourceDocumentId == initialization.Id);
+        openingJournal.TotalDebitAmount.Should().Be(80m);
+        openingJournal.TotalCreditAmount.Should().Be(80m);
+        openingJournal.Transactions.Should().OnlyContain(item => item.FunctionalCurrencyCode == "USD");
+        (await db.AccountBalances.SingleAsync(item => item.AccountingBookId == parallel.Id
+            && item.AccountId == asset.Id)).ClosingBalance.Should().Be(80m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountingBookId == parallel.Id
+            && item.AccountId == equity.Id)).ClosingBalance.Should().Be(-80m);
+        (await db.FinancePostingEvents.CountAsync(item => item.AccountingBookId == parallel.Id
+            && item.PostingAction == "GovernedOpeningConversion")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ParallelOpening_RejectsAnyGapBetweenCutoffAndLiveReplication()
+    {
+        await using var db = Context();
+        var tenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "V2GAP", Name = "V2 Gap", BaseCurrency = "GHS", Status = TenantStatus.Active });
+        var primary = Book(tenantId, "BASE", AccountingBookType.PrimaryFull, null, AccountingBookLifecycleStatus.Active);
+        var parallel = Book(tenantId, "USD_PARALLEL", AccountingBookType.ParallelFull, primary.Id, AccountingBookLifecycleStatus.Configuring);
+        parallel.FunctionalCurrencyCode = "USD";
+        parallel.ReplicationStartDate = new DateTime(2026, 1, 2);
+        parallel.ParallelOpeningMode = ParallelBookOpeningMode.ZeroOpening;
+        db.AccountingBooks.AddRange(primary, parallel);
+        var asset = Account(tenantId, "1000", AccountType.Asset);
+        db.Accounts.Add(asset);
+        AddPrimaryMapping(db, tenantId, primary, asset, "ASSET");
+        db.FiscalPeriods.Add(new FiscalPeriod
+        {
+            TenantId = tenantId, FiscalYearId = Guid.NewGuid(), PeriodName = "December 2025",
+            PeriodCode = "2025-12", PeriodNumber = 12, PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2025, 12, 31),
+            PeriodDays = 31, PeriodStatus = "Closed", IsClosed = true
+        });
+        await db.SaveChangesAsync();
+        var service = new AccountingBookInitializationService(
+            db, User(tenantId).Object, Mock.Of<IWorkflowService>(), Audit().Object);
+
+        var action = () => service.PrepareAsync(parallel.Id,
+            nameof(AccountingBookInitializationMode.IndependentOpeningBalances),
+            new DateTime(2025, 12, 31), null);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("PARALLEL_OPENING_CUTOFF_GAP:*");
     }
 
     [Fact]

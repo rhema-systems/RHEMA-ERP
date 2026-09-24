@@ -1741,6 +1741,22 @@ export default function AccountingBooksSettingsPage() {
                   </span>
                   <p>{detail.activationReady ? 'Ready' : 'Not ready'}</p>
                 </div>
+                {typeOf(detail) === 'ParallelFull' && (
+                  <>
+                    <div>
+                      <span className="text-muted-foreground">
+                        Currency translation reserve
+                      </span>
+                      <p>{detail.currencyTranslationReserveAccountLabel || 'Provisioned during initialization'}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">
+                        Currency rounding account
+                      </span>
+                      <p>{detail.currencyRoundingAccountLabel || 'Provisioned during initialization'}</p>
+                    </div>
+                  </>
+                )}
                 <div className="sm:col-span-2">
                   <span className="text-muted-foreground">
                     Readiness evidence

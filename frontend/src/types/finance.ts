@@ -201,7 +201,9 @@ export interface AccountingBook {
   parallelOpeningMode?: ParallelBookOpeningMode | null;
   parallelTranslationMethod?: ParallelBookTranslationMethod | null;
   currencyTranslationReserveAccountId?: string | null;
+  currencyTranslationReserveAccountLabel?: string | null;
   currencyRoundingAccountId?: string | null;
+  currencyRoundingAccountLabel?: string | null;
   initializationStartedAtUtc?: string | null;
   isActive: boolean;
   isDefault: boolean;
