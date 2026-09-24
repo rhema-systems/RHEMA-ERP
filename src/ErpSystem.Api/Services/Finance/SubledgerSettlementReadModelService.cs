@@ -736,7 +736,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             var balance = BuildBalance(
                 tenantId,
                 SubledgerSettlementModules.AccountsReceivable,
-                invoice.CustomerId,
+                invoice.BusinessPartnerId,
                 CustomerInvoiceType,
                 invoice.Id,
                 invoice.InvoiceNumber,
@@ -775,7 +775,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 balance.Applications.Add(BuildApplication(
                     tenantId,
                     SubledgerSettlementModules.AccountsReceivable,
-                    invoice.CustomerId,
+                    invoice.BusinessPartnerId,
                     CustomerInvoiceType,
                     invoice.Id,
                     CustomerPaymentType,
@@ -801,7 +801,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 balance.Applications.Add(BuildApplication(
                     tenantId,
                     SubledgerSettlementModules.AccountsReceivable,
-                    invoice.CustomerId,
+                    invoice.BusinessPartnerId,
                     CustomerInvoiceType,
                     invoice.Id,
                     CustomerCreditNoteType,
@@ -826,7 +826,7 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 balance.Applications.Add(BuildApplication(
                     tenantId,
                     SubledgerSettlementModules.AccountsReceivable,
-                    invoice.CustomerId,
+                    invoice.BusinessPartnerId,
                     CustomerInvoiceType,
                     invoice.Id,
                     SalesCreditNoteType,

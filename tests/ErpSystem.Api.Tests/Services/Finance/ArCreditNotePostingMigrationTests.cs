@@ -793,7 +793,7 @@ public sealed class ArCreditNotePostingMigrationTests
 
         var act = () => service.CreateCreditNoteAsync(new CreditNoteCreateDto
         {
-            CustomerId = fixture.BusinessPartner.Id,
+            BusinessPartnerId = fixture.BusinessPartner.Id,
             CreditNoteDate = new DateTime(2026, 7, 5),
             Amount = 100m,
             Reason = "Commercial credit memo",

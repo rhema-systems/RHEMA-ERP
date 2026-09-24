@@ -1553,6 +1553,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.ApprovalRequired).HasDefaultValue(true).ValueGeneratedNever();
             entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.BusinessPartnerCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.BusinessPartnerLegalName).HasMaxLength(200);
+            entity.Property(e => e.BusinessPartnerTin).HasMaxLength(100);
             entity.Property(e => e.CustomerAddress).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(500);
             entity.Property(e => e.Reference).HasMaxLength(100);
@@ -1567,11 +1570,21 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.EarlyPaymentDiscountPercentage).HasColumnType("decimal(18,4)");
             entity.Property(e => e.EarlyPaymentDiscountAmount).HasColumnType("decimal(18,2)");
-            entity.Ignore(e => e.CustomerId);
             entity.Ignore(e => e.BalanceAmount);
+            entity.HasIndex(e => e.BusinessPartnerId);
+            entity.HasIndex(e => e.BusinessPartnerRoleId);
+            entity.HasIndex(e => e.BusinessPartnerArProfileVersionId);
             entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
                 .HasForeignKey(e => e.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerRole)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerRoleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BusinessPartnerArProfileVersion)
+                .WithMany()
+                .HasForeignKey(e => e.BusinessPartnerArProfileVersionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.TaxGroup)
                 .WithMany()

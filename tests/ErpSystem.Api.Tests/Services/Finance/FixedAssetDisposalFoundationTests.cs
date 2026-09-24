@@ -218,7 +218,7 @@ public sealed class FixedAssetDisposalFoundationTests
         completed.SettlementInvoiceAmount.Should().Be(1100m);
         services.InvoiceService.Verify(service => service.CreateAsync(
             It.Is<InvoiceCreateDto>(invoice =>
-                invoice.CustomerId == fixture.Buyer.Id &&
+                invoice.BusinessPartnerId == fixture.Buyer.Id &&
                 invoice.Reference!.StartsWith("FA-DISPOSAL:") &&
                 invoice.LineItems.Count == 1 &&
                 invoice.LineItems[0].LineItemType == nameof(LineItemType.FixedAssetDisposal) &&
@@ -1049,7 +1049,7 @@ public sealed class FixedAssetDisposalFoundationTests
                 {
                     Id = Guid.NewGuid(),
                     InvoiceNumber = $"INV-{Guid.NewGuid():N}"[..20],
-                    CustomerId = dto.CustomerId,
+                    BusinessPartnerId = dto.BusinessPartnerId,
                     InvoiceDate = dto.InvoiceDate,
                     SubTotal = subtotal,
                     TotalAmount = subtotal,

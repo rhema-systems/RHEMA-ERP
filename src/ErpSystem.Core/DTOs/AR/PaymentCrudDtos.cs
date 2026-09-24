@@ -81,7 +81,7 @@ public class PaymentQueryDto
 public class InvoiceQueryDto
 {
     public string? SearchTerm { get; set; }
-    public Guid? CustomerId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public string? Status { get; set; }
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
@@ -95,7 +95,8 @@ public class InvoiceQueryDto
 
 public class InvoiceCreateDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
     public DateTime InvoiceDate { get; set; }
     public DateTime? DueDate { get; set; }
     public string? Reference { get; set; }
@@ -203,7 +204,7 @@ public class PaymentAllocationResultDto
 
 public class CreditNoteCreateDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public DateTime CreditNoteDate { get; set; }
     public decimal Amount { get; set; }
     public string Reason { get; set; } = string.Empty;

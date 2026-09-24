@@ -22461,6 +22461,25 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("BusinessPartnerId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("BusinessPartnerArProfileVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BusinessPartnerCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("BusinessPartnerLegalName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("BusinessPartnerRoleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BusinessPartnerTin")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -22581,6 +22600,10 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BusinessPartnerId");
+
+                    b.HasIndex("BusinessPartnerArProfileVersionId");
+
+                    b.HasIndex("BusinessPartnerRoleId");
 
                     b.HasIndex("ExchangeRateId");
 
@@ -183085,6 +183108,18 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartnerArProfileVersion", "BusinessPartnerArProfileVersion")
+                        .WithMany()
+                        .HasForeignKey("BusinessPartnerArProfileVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartnerRole", "BusinessPartnerRole")
+                        .WithMany()
+                        .HasForeignKey("BusinessPartnerRoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", "ExchangeRateRecord")
                         .WithMany()
                         .HasForeignKey("ExchangeRateId")
@@ -183107,6 +183142,10 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("BusinessPartner");
+
+                    b.Navigation("BusinessPartnerArProfileVersion");
+
+                    b.Navigation("BusinessPartnerRole");
 
                     b.Navigation("ExchangeRateRecord");
 

@@ -763,7 +763,7 @@ public class AssetDisposalService : IAssetDisposalService
         }).ToArray();
         var invoiceRequest = new InvoiceCreateDto
         {
-            CustomerId = disposal.BuyerBusinessPartnerId.Value,
+            BusinessPartnerId = disposal.BuyerBusinessPartnerId.Value,
             InvoiceDate = disposal.DisposalDate.Date,
             DueDate = disposal.SettlementMode == AssetDisposalSettlementMode.ImmediateReceipt
                 ? disposal.DisposalDate.Date

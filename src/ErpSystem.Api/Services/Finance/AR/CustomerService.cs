@@ -474,7 +474,12 @@ public class CustomerService : ICustomerService
         {
             Id = invoice.Id,
             InvoiceNumber = invoice.InvoiceNumber,
-            CustomerId = invoice.CustomerId,
+            BusinessPartnerId = invoice.BusinessPartnerId,
+            BusinessPartnerRoleId = invoice.BusinessPartnerRoleId,
+            BusinessPartnerArProfileVersionId = invoice.BusinessPartnerArProfileVersionId,
+            BusinessPartnerCode = invoice.BusinessPartnerCode,
+            BusinessPartnerLegalName = invoice.BusinessPartnerLegalName,
+            BusinessPartnerTin = invoice.BusinessPartnerTin,
             CustomerName = invoice.CustomerName,
             CustomerAddress = invoice.CustomerAddress,
             InvoiceDate = invoice.InvoiceDate,

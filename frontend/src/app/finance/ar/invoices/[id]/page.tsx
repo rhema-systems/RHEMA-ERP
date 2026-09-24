@@ -152,7 +152,7 @@ export default function InvoiceDetailsPage() {
                         </Button>
                     )}
                     {showRecordReceipt && (
-                        <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
+                        <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
                             <CreditCard className="mr-2 h-4 w-4" /> Record Receipt
                         </Button>
                     )}
@@ -207,7 +207,7 @@ export default function InvoiceDetailsPage() {
                             <p className="font-bold text-lg">{invoice.customerName}</p>
                             {/* We would fetch detailed customer address here ideally, assuming it's usually on the invoice object or we fetch it separately */}
                             <p className="text-sm text-muted-foreground mt-1">
-                                Customer ID: {invoice.customerId}
+                                Business Partner ID: {invoice.businessPartnerId}
                             </p>
                         </div>
                         <div className="text-right">

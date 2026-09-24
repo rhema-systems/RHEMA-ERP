@@ -72,7 +72,12 @@ export interface InvoiceLineItem {
 export interface Invoice {
     id: string;
     invoiceNumber: string;
-    customerId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId: string;
+    businessPartnerArProfileVersionId: string;
+    businessPartnerCode: string;
+    businessPartnerLegalName?: string;
+    businessPartnerTin?: string;
     customerName: string;
     customerAddress?: string;
     invoiceDate: string;
@@ -106,7 +111,8 @@ export interface Invoice {
 }
 
 export interface InvoiceCreateRequest {
-    customerId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     invoiceDate: string;
     dueDate?: string;
     currencyCode: string;

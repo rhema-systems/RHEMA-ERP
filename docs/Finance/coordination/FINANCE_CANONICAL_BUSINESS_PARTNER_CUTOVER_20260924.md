@@ -209,3 +209,17 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   test project remains uncompilable on pre-existing legacy Supplier fixtures removed by the earlier
   AP bridge cutover; this receipt slice adds no Core-project compile failure.
 - No migration or database reset has been executed in this checkpoint.
+- AR invoice commands and query filters now expose `BusinessPartnerId`, not `CustomerId`. Creation
+  resolves the Customer role and approved AR profile effective on invoice date, and the invoice
+  freezes the selected role/profile plus immutable partner identity snapshots. Posting revalidates
+  that evidence and uses only the Finance-controlled tenant AR control account.
+- Migration `CanonicalInvoiceBusinessPartnerEvidence` is fail-closed and remains unapplied. It
+  refuses a non-empty `Invoices` table because legacy rows cannot be assigned trustworthy governed
+  Customer role/profile evidence during an automated migration.
+- Customer shortcuts, invoice creation/filtering and receipt links use the canonical browser/API
+  field. The repository-wide frontend type-check retains its unrelated baseline failures; filtering
+  to the changed AR invoice/customer files returns no errors.
+- API and API-test-project builds pass with zero errors. The focused canonical-invoice architecture
+  test passes, 37/37 AR invoice regressions unrelated to the known FX-direction defect pass, and EF
+  reports no pending model changes. The excluded foreign-opening invoice test remains the previously
+  documented approved-rate snapshot-direction mismatch.

@@ -64,6 +64,11 @@ must not be interpreted as a promise that they override Finance settings.
 - Specialized customer-advance and AR-withholding opening balances use the same governed Customer
   role/profile resolution. A cutover row cannot bypass canonical readiness merely because it is
   classified as opening evidence.
+- AR invoices use `BusinessPartnerId`, the selected Customer role and the approved AR profile
+  effective on invoice date. They freeze the role/profile IDs plus partner code, display name,
+  legal name and TIN. Posting revalidates that captured evidence and takes the AR control account
+  only from tenant Finance settings; Procurement-owned partner account fields have no posting
+  effect.
 
 ## Withholding contract
 

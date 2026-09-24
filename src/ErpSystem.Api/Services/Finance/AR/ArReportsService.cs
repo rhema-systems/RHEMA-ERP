@@ -153,7 +153,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var invoice in invoices)
             {
-                var aging = GetOrCreateCustomerAging(invoice.CustomerId, invoice.CustomerName);
+                var aging = GetOrCreateCustomerAging(invoice.BusinessPartnerId, invoice.CustomerName);
                 AddToAgingBucket(aging, invoice.BalanceAmount, invoice.DueDate, invoice.InvoiceDate, effectiveDate);
             }
 
@@ -277,7 +277,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var invoice in invoices)
             {
-                var detailedAging = GetOrCreateDetailed(invoice.CustomerId, invoice.CustomerName);
+                var detailedAging = GetOrCreateDetailed(invoice.BusinessPartnerId, invoice.CustomerName);
                 var daysOverdue = GetDaysOverdue(invoice.DueDate, invoice.InvoiceDate, effectiveDate);
 
                 detailedAging.Invoices.Add(new InvoiceAgingDto
@@ -791,7 +791,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var overdueInvoices = await ApplyPostedArInvoiceFilter(overdueQuery).ToListAsync(cancellationToken);
 
             var customerGroups = overdueInvoices
-                .GroupBy(i => new { i.CustomerId, i.CustomerName })
+                .GroupBy(i => new { CustomerId = i.BusinessPartnerId, i.CustomerName })
                 .Select(g => new OverdueCustomerDto
                 {
                     CustomerId = g.Key.CustomerId,
@@ -888,7 +888,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (query.GroupBy == "Customer")
             {
-                var customerGroups = invoices.GroupBy(i => new { i.CustomerId, i.CustomerName });
+                var customerGroups = invoices.GroupBy(i => new { CustomerId = i.BusinessPartnerId, i.CustomerName });
                 summary = customerGroups.Select(g => new SalesSummaryDto
                 {
                     CustomerId = g.Key.CustomerId,

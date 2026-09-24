@@ -15,7 +15,7 @@ vi.mock('@/components/finance/ar/ArInvoicePrintDocument.module.css', () => ({ de
 vi.mock('@/components/finance/dimensions/source-document-dimension-panel', () => ({ SourceDocumentDimensionEvidence: () => null }));
 import Page from './page';
 
-const invoice = { id: 'invoice-1', invoiceNumber: 'AR-1', customerId: 'customer-1', customerName: 'Customer',
+const invoice = { id: 'invoice-1', invoiceNumber: 'AR-1', businessPartnerId: 'customer-1', customerName: 'Customer',
   invoiceDate: '2026-09-12', dueDate: null, lineItems: [], totalAmount: 100, paidAmount: 0, balanceAmount: 100,
   currencyCode: 'GHS', status: 'Draft', approvalRequired: true };
 const direct = { entityType: 'Invoice', entityId: 'invoice-1', approvalRequired: false, hasActiveInstance: false, hasWorkflowHistory: false };

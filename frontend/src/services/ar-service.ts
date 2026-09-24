@@ -40,7 +40,7 @@ export interface CustomerQuery {
 export interface InvoiceQuery {
     page?: number;
     pageSize?: number;
-    customerId?: string;
+    businessPartnerId?: string;
     startDate?: string;
     endDate?: string;
     status?: string;
@@ -114,7 +114,7 @@ class ArService {
         const params = new URLSearchParams();
         if (query.page) params.append('PageNumber', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
-        if (query.customerId) params.append('CustomerId', query.customerId);
+        if (query.businessPartnerId) params.append('BusinessPartnerId', query.businessPartnerId);
         if (query.startDate) params.append('StartDate', query.startDate);
         if (query.endDate) params.append('EndDate', query.endDate);
         if (query.status) params.append('Status', query.status);

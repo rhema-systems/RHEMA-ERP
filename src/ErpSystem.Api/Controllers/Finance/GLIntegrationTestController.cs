@@ -197,7 +197,7 @@ public class GLIntegrationTestController : ControllerBase
             // 3. AR Invoice (Inventory)
             var arInvoice = new Invoice
             {
-                CustomerId = customer.Id,
+                BusinessPartnerId = customer.Id,
                 InvoiceNumber = $"INV-{DateTime.Now.Ticks}",
                 InvoiceDate = DateTime.UtcNow,
                 DueDate = DateTime.UtcNow.AddDays(30),

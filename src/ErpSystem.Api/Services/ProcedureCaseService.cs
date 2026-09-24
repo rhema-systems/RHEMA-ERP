@@ -2442,7 +2442,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var invoice = await _invoiceService.CreateAsync(
             new InvoiceCreateDto
                 {
-                    CustomerId = customerId,
+                    BusinessPartnerId = customerId,
                     InvoiceDate = DateTime.UtcNow.Date,
                     DueDate = DateTime.UtcNow.Date,
                     Reference = paymentRequestReference,

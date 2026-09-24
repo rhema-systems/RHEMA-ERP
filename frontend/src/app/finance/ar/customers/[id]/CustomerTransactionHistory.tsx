@@ -34,7 +34,7 @@ interface Transaction {
 export function CustomerTransactionHistory({ customerId }: CustomerTransactionHistoryProps) {
     const { data: invoices, isLoading: invoicesLoading } = useQuery({
         queryKey: ['customer-invoices', customerId],
-        queryFn: () => arService.getInvoices({ customerId, pageSize: 50 })
+        queryFn: () => arService.getInvoices({ businessPartnerId: customerId, pageSize: 50 })
     });
 
     const { data: payments, isLoading: paymentsLoading } = useQuery({

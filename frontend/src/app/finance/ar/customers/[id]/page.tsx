@@ -107,7 +107,7 @@ export default function CustomerDetailsPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/new?customerId=${id}`)}>
+                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/new?businessPartnerId=${id}`)}>
                                 Create Invoice
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${id}`)}>

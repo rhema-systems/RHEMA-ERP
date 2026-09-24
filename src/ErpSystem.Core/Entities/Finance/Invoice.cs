@@ -20,12 +20,23 @@ namespace ErpSystem.Core.Entities.Finance
         public Guid BusinessPartnerId { get; set; }
         public virtual BusinessPartner? BusinessPartner { get; set; }
 
-        [NotMapped]
-        public Guid CustomerId
-        {
-            get => BusinessPartnerId;
-            set => BusinessPartnerId = value;
-        }
+        [Required]
+        public Guid BusinessPartnerRoleId { get; set; }
+        public virtual BusinessPartnerRole? BusinessPartnerRole { get; set; }
+
+        [Required]
+        public Guid BusinessPartnerArProfileVersionId { get; set; }
+        public virtual BusinessPartnerArProfileVersion? BusinessPartnerArProfileVersion { get; set; }
+
+        [Required]
+        [MaxLength(50)]
+        public string BusinessPartnerCode { get; set; } = string.Empty;
+
+        [MaxLength(200)]
+        public string? BusinessPartnerLegalName { get; set; }
+
+        [MaxLength(100)]
+        public string? BusinessPartnerTin { get; set; }
 
         [Required]
         [MaxLength(200)]
