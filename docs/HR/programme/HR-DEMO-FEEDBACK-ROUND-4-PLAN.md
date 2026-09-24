@@ -1,8 +1,8 @@
 # HR demo feedback, round 4 — Recruitment, Onboarding/Orientation, Miscellaneous
 
-> **Status 2026-09-23 — A–O done (with I-b; K as K-a, K-b1, K-b2; N-b as N-b1, N-b2), and P2a, the
-> recruitment guide. What remains is P: P2b and P2c (the company schedule and orientation guides) and
-> the six walks in § 5.**
+> **Status 2026-09-24 — A–O and Q done (with I-b; K as K-a, K-b1, K-b2; N-b as N-b1, N-b2), and P2a
+> and P2b, the recruitment and company schedule guides. What remains is P: P2c (the orientation
+> guide) and the seven walks in § 5.**
 >
 > | Lane | State |
 > |---|---|
@@ -31,16 +31,18 @@
 > | **O** | **DONE** — 101 ×2, `hr-jobarch/run-round4-o.mjs`; migration `AddTechnicianRoleFlag` applied to UAT. **One answer to "is this person a technician?"**: the stored `CanBeAssignedToMaintenance`, which Maintenance's work-order, labour and schedule gates already read. It follows a position's new **Technician role** flag unless HR sets the person *Include* or *Exclude* by hand, and the DbContext re-establishes that on every save. ⚠ The column had **no writer at all**: 0 of UAT's 2,089 staff, an empty door, every assignment refused. The door carries what HR knows (skills with their certification dates, unit, location, trade) and **null, not 0**, for what it does not. Maintenance's dropdowns now read it, and the every-employee fallback and the root endpoint are gone. **Probationers count as available** (the user's call). The plan's defect 21 was wrong, and so was its O2 formula. Lane H's check-set picker never saved, and cleared the set on every edit; fixed. Hand-off: cross-module defect #29 — § 8 |
 > | **Q** | **DONE** 2026-09-24 — 69 ×3, `hr-recruitment/run-round4-q.mjs`; migration `AddCandidateQualificationLevel` applied to UAT. **Education level on the qualification ladder**, the proper fix for R4-5.2 (the user's call). Every candidate qualification carries a **Level**, required for Education at HR's door and the careers profile. An *Education level* criterion compares **ranks**: at or above passes, a tie passes (HND = Bachelor's), below fails, and no level is a **miss** — the four decisions Q-D1..4, all the user's. The catalogue is placed on the ladder by a new scenario 008, 59 of 64 entries. The six live-pipeline criteria are converted, and VAC-000021 still blends to 81 / 67.5 / 66. **Found in passing:** HR's qualification list showed a blank name for every catalogue pick (fixed), and an application HR records by hand takes no snapshot — § 8 |
 > | **P2a** | **DONE** — the recruitment guide rewritten for round 4, from the code, this log and UAT: § 5.8 scoring, a new chapter **8A** for recruitment tests, § 9 interviews, § 10 offers, § 13 talent pool. **Docs, then a data repair.** It records 18 `R4-…` findings, four of them walks not yet done. **Two blocked the demo, both in the data:** the seeded test blend could not show, because every candidate who sat the paper failed the vacancy's mandatory degree (R4-5.1); and no demo offer got a checklist, because UAT held 44 active check templates and the fallback wants one (R4-10.1). **Both repaired 2026-09-24** (the user's call): three first degrees via scenario 052, giving 81 / 67.5 / 66; 43 fixture templates switched off, and the suites that made them now switch theirs off. The repair found two more: the seeded degree criterion cannot recognise a real degree (R4-5.2, now lane Q), and a rebuild leaves the blend unscored (R4-5.3, fixed in the rebuild script). The four live demo offers raised before the tidy now have TDC's checklist, and Rita Amponsah's is *Conditionally Accepted* as the demo story has it — § 8 |
+> | **P2b** | **DONE** 2026-09-24 — the company schedule guide rewritten for round 4, from the code, this log and UAT. **Docs only: nothing fixed, no data changed.** The six rules become eight: C-4 and C-6 fixed; C-1, C-2 and C-5 in part; C-3 unchanged; and two new rules about the demo database. Also § 1, the prep, the event and booking chapters, two new chapters (**10A** *My schedule*, **10B** *Team schedule*), and § 18–21. It records **26 `R4-…` findings**. **Four are in the demo data:** the lane D suites leave 60 live events and 15 rooms on UAT; the company-schedule slices leave no current fiscal year; the seeded second booking has never existed, because `head.dev` holds no permission; and there is no mail server, so no round 4 email is delivered. **Five statements from 2026-09-17 corrected**, none a round 4 change: the Approve walk had no button, the seeded bookings, the fiscal tables (HR's are singular; the plural pair is Finance's), and § 19's SQL and stop command — § 8 |
 >
 > ⚠ **Lane D is split in two.** As specified it is eight slices across two modules, roughly four
 > times lane B. It splits at the seam the plan already implies: the clash check (recruitment) and
 > the organizer + company-schedule defects. That is sequencing, not narrowing — D-2 follows
 > immediately, and the lane is not done until it lands.
 >
-> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a is complete** (the recruitment guide), **and so is Q** (the level-based fix P2a's repair called for). What remains is **P**: P2b, P2c and the walks.
+> **Lane E is complete** (E-a + E-b). **Lane I is complete, with I-b. Lanes L, J, M and N are complete, and so is K** (K-a, K-b1, K-b2). **N-b is complete** (N-b1, the recruitment senders and the offer letter attached; N-b2, the company-schedule reminders). **O is complete** (the technician-role flag; Maintenance's side is a hand-off, defect #29). **P2a and P2b are complete** (the recruitment and company schedule guides), **and so is Q** (the level-based fix P2a's repair called for). What remains is **P**: P2c and the walks.
 >
-> ⚠ **Nothing in round 4 has been browser-walked.** § 5 names four walks a harness cannot replace;
-> all four are still outstanding.
+> ⚠ **Nothing in round 4 has been browser-walked.** § 5 names seven walks a harness cannot replace;
+> all seven are still outstanding. The seventh was added by P2b: lane D-2's log listed its screens
+> as not walked, and § 5 did not.
 >
 > ⚠ **Lane B moved the scoring engine.** `ScoringCandidateView` and `EvaluateCriterion` were private
 > members of `JobApplicationService`; they are now `ShortlistingEvaluator` in
@@ -886,7 +888,7 @@ assertions.
 assertions with zero failures is a regression signal, not a pass.*
 
 **Things a harness cannot prove, so they are walked in the browser** (three planned; the fourth added
-by lane K-b2):
+by lane K-b2, the fifth by N-b2, the sixth by O, and the seventh by P2b):
 
 1. The apportionment panel and the timetable it draws (lane C).
 2. The candidate sitting a test end to end in the careers portal, including refresh mid-test (E4).
@@ -909,6 +911,17 @@ by lane K-b2):
       could not exercise it, because UAT has no work orders.
    6. Re-open a post's edit page and save it without touching anything: its **Pre-employment checks**
       choice must survive (the lane H residue).
+7. **The company schedule's round 4 screens** (lane D-2; added by P2b, because D-2's log named them
+   as not walked and this list did not). The guide's § 10A and § 10B have the details.
+   1. As `hr.head`, **My schedule**: a fortnight of interview panels, leave, the drill and the board
+      meeting; *This week*; and a range over sixty days, refused with its own sentence.
+   2. As `staff`, **My schedule**: their own diary. Then press the sidebar's *Company Schedule*
+      header, and see what the landing says to somebody it refuses (guide R4-3.1).
+   3. **Team schedule** on a small section: red and amber cells, *+N more*, the hover list. Find a
+      person on several days' leave; the guide's R4-10B.2 predicts only the first day is drawn.
+   4. The event page and the bookings register as `hr.head`: **no Delete**. As `admin`: Delete
+      present. Then the event's **Remove participant** as `hr.head`, which the guide's R4-6.6 says is
+      still offered and still 403s.
 
 **Live probes before building, not after:**
 
@@ -3004,6 +3017,95 @@ reply* example, and it expires on 2026-09-25. After the next sweep it reads *Exp
 050 now says so in its summary.
 
 Not looked at in a browser: the offer's *Conditionally Accepted* state on its screen.
+
+### P2b — the company schedule guide, rewritten for round 4 · DONE 2026-09-24 · docs
+
+`docs/HR/areas/company-schedule/HR-COMPANY-SCHEDULE-SYSTEM-GUIDE.md` was rewritten from three sources:
+- the code of the two round 4 commits that touched the module, `cc22ed585` (D-2) and `36858db72`
+  (N-b2), and D-1's commitment sources;
+- this log;
+- `ErpSystemDB_UAT`, measured read-only, with the API up.
+
+It keeps the guide's five-part chapters and its workbook layer. **Nothing was fixed and no data was
+changed.**
+
+| Part | Now covers |
+|---|---|
+| **The rules** | Eight, not six. **C-4** and **C-6** fixed; **C-1**, **C-2** and **C-5** in part; **C-3** unchanged. Two new rules, both about the demo database: nothing is emailed on it, and it must be freshly rebuilt |
+| **§ 1** | Room rules enforced; reminders and the RSVP chase sent; a fifth point, on telling people and the two diaries |
+| **§ 2** | What a rebuild actually leaves; what the reminders will have done by demo day; a thirty-second check that no harness has run since |
+| **§ 5–7** | The Reminders card; the emails; approval switched on in § 5, so that § 6 has a button to press; Edit as the route that skips the reschedule |
+| **§ 8–10** | The room's own rules refusing on create and edit; one seeded booking, not two |
+| **§ 10A, § 10B** *(new)* | *My schedule* and *Team schedule*, in the five-part format |
+| **§ 12–13, § 15–16** | Room codes that cannot repeat; closures read by the clash check and the diaries; the fiscal tables named correctly |
+| **§ 18–21**, appendices | Where the module now shows up elsewhere, the reset, the short path, what round 4 closed, and every `R4-…` finding |
+
+**The findings: 26, marked `R4-…` in each chapter's gap block, and listed in the guide's § 21.**
+
+**Four are in the demo data**, measured on UAT on 2026-09-24. They are what bites a demonstration:
+- **R4-2.1** — the lane D-1 and D-2 suites leave their fixtures live: 60 *R4D …* events still ahead
+  (43 within 30 days), 15 rooms and 32 bookings. The register holds 102 events where the demo has 4.
+- **R4-2.2** — the company-schedule slice suites leave no current fiscal year. They create a fixture
+  year as current and delete it.
+- **R4-2.3** — scenario 110's second booking has never existed. It books as `head.dev`, who holds no
+  company-schedule permission, and swallows the 403.
+- **R4-2.4** — there is no mail server (`EmailSettings` is empty), so none of round 4's emails is
+  delivered, and every screen reads as sent.
+
+The user's rebuild of UAT clears the first two. The guide's § 2.2 says how to tell afterwards that
+no suite has run since.
+
+**Twenty-two are in the code.** The ones worth fixing first:
+- **R4-10B.2** and **R4-10A.1** — the diaries draw a commitment on its first day only. A week's leave
+  reads as one day, and in the team grid leave that began before the range is not drawn at all.
+- **R4-6.2** and **R4-6.3** — the Reminders card promises sends the sweep will not make (the finished
+  retreat says *"Goes 3 days before the event"*), and reads *Sent* for what was only attempted.
+- **R4-3.1** — *My schedule* needs no permission, so the *Company Schedule* group now shows for every
+  employee. Its header opens a landing whose reads answer 403 and whose cards then say *"Nothing
+  scheduled"*. Measured for `staff`, `head.dev` and `md.tdc`.
+- **R4-7.1** — Edit moves an event with no original kept, no reason and no email, so the C-2 repair
+  covers one door of two.
+- **R4-10B.1** — the plan's D5 asked for a head to schedule *for* the unit, with a clash flag at the
+  point of selection. Only the read was built. D-2's log does not say so.
+- **R4-6.6** — eight Admin-only removes are still offered to `hr.head`. The shared table already
+  takes `allowRemove`.
+- **R4-9.1** — the free-room search does not apply two of the three rules the booking enforces.
+- **R4-13.1** — every closure is attributed to everybody, whatever its scope.
+
+**Five statements from 2026-09-17 corrected**, none a round 4 change:
+- Chapter 6's approval step used the board meeting, and **no seeded event shows an Approve button**:
+  the button needs *Requires approval*, and scenario 110 sets it on none.
+- Chapter 8 read two seeded bookings; there is one.
+- The conventions placed the fiscal tables on the main context, and chapters 15–16 named
+  `FiscalYears` / `FiscalPeriods`. **Those are Finance's.** HR's are the singular `FiscalYear` /
+  `FiscalPeriod`.
+- § 19's period-reopen SQL therefore targeted Finance's table.
+- § 19's command to stop the API filtered on `Name='ErpSystem.Api'`, which never matches: process
+  names carry `.exe`, and a `dotnet`-hosted API is `dotnet.exe`. Run read-only against the running
+  API on 2026-09-24, it matched **0** processes. The corrected filter matched the one API
+  (`dotnet.exe`).
+
+**A false alarm, recorded so it is not raised again.** Querying `FiscalYears` for FY 2026 returned
+Finance's two seeded years with twelve months each. That briefly suggested HR's fiscal-year screens
+edit Finance's calendar, and that chapter 16's *close a period* would close one of Finance's months.
+They do not. HR's tables are the singular pair, holding *FY 2026* with no periods, as the guide said.
+The mistake came from trusting the guide's own conventions note.
+
+**Walks.** § 5 gains **walk 7** for D-2's screens: *My schedule*, *Team schedule*, and the hidden
+Delete. D-2's log had listed them as not walked, and § 5 did not. The guide records its own not-walked
+items as **R4-10A.5**, and in the optional beats it marks.
+
+**Also updated:** `docs/HR/README.md`'s row for the guide, which still listed all six rules as they
+stood on 2026-09-17.
+
+**The user's decisions this session:** Josephine Boateng's offer (OFR-000015) is left to expire, and
+UAT will be rebuilt later. So the guide's § 2 describes a **rebuilt** database, and says what the
+harness does to one.
+
+**A lesson from writing it.** The approval step had been wrong since the guide was written, because
+the guide read the button's name and not the one line of JSX that decides whether it renders. The
+stop-the-API command had never been run either. **A step that names a control needs the control's
+condition; a step that names a command needs the command run once.**
 
 ---
 
