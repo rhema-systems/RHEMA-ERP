@@ -12,10 +12,9 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import { leaveYearEndService } from '@/services/hr/leave.service';
 import type { LeaveYearEndResult } from '@/types/hr/leave-request';
-
-const currentYear = new Date().getFullYear();
 
 function ResultPanel({ title, result }: { title: string; result: LeaveYearEndResult }) {
   return (
@@ -47,6 +46,9 @@ function ResultPanel({ title, result }: { title: string; result: LeaveYearEndRes
         {result.totalDaysCarriedOver > 0 && (
           <Badge variant="outline">{result.totalDaysCarriedOver} days carried over</Badge>
         )}
+        {result.totalDaysExpired > 0 && (
+          <Badge variant="outline">{result.totalDaysExpired} carried days expired</Badge>
+        )}
         {result.totalDaysForfeited > 0 && (
           <Badge variant="outline">{result.totalDaysForfeited} days forfeited</Badge>
         )}
@@ -69,10 +71,15 @@ function ResultPanel({ title, result }: { title: string; result: LeaveYearEndRes
 export default function LeaveYearEndPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // The year being closed is the LEAVE year before the one we are in (round 5, C4) — a choice the
+  // user types wins.
+  const { currentYear } = useLeaveYear();
 
-  const [carryFromYear, setCarryFromYear] = useState(String(currentYear - 1));
+  const [chosenCarryFromYear, setCarryFromYear] = useState<string | null>(null);
+  const carryFromYear = chosenCarryFromYear ?? String(currentYear - 1);
   const [carryEmployeeId, setCarryEmployeeId] = useState<string | null>(null);
-  const [forfeitYear, setForfeitYear] = useState(String(currentYear - 1));
+  const [chosenForfeitYear, setForfeitYear] = useState<string | null>(null);
+  const forfeitYear = chosenForfeitYear ?? String(currentYear - 1);
   const [forfeitAsOf, setForfeitAsOf] = useState('');
   const [forfeitEmployeeId, setForfeitEmployeeId] = useState<string | null>(null);
 
@@ -153,7 +160,8 @@ export default function LeaveYearEndPage() {
             </CardTitle>
             <CardDescription>
               Moves unused days from the closing year into the next, capped by each leave
-              type&apos;s carry-over limit.
+              type&apos;s carry-over limit. It runs only once that year has ended; a preview runs any
+              time.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -197,7 +205,9 @@ export default function LeaveYearEndPage() {
               <Flame className="h-4 w-4" /> Forfeiture
             </CardTitle>
             <CardDescription>
-              Removes carried-over or unused days that have passed their expiry window.
+              Expires the carried-over days not taken before their window closed — days taken in
+              time are kept — and, for a leave type with a cut-off, forfeits what is still unused
+              after it.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -252,7 +262,7 @@ export default function LeaveYearEndPage() {
             ? `Unused days from ${carryFromYear} will be carried into ${Number(carryFromYear) + 1}${
                 carryEmployeeId ? ' for the selected employee' : ' for every employee'
               }.`
-            : `Expired days in ${forfeitYear} will be removed${
+            : `Carried-over days not taken before their window closed, and unused days past a cut-off, will be removed from ${forfeitYear}${
                 forfeitEmployeeId ? ' for the selected employee' : ' for every employee'
               }. This cannot be undone automatically.`
         }

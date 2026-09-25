@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F, D, A, N and C done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F, D, A, N, C and G done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -20,7 +20,8 @@
 > | **A** | **DONE** 2026-09-25 — leave kinds (Annual, Maternity, Other) and a form that starts from the kind · `run-round5-a.mjs` 89, green twice (79, then 10 for the L-59 follow-up) · § 8 |
 > | **N** | **DONE** 2026-09-25 — settings that do what they say: the audit's ghosts, misleading settings and bypasses; the demo data; four more defects found · `run-round5-n.mjs` 92, green twice · § 8 |
 > | **C** | **DONE** 2026-09-25 — accrual: a period counts on its last day; the accrual statement; leave owed as at a date; a leave year that does not start in January · `run-round5-c.mjs` 112, green twice · § 8 |
-> | G · H · J · I · K · L | not started, in that order — **G is next** |
+> | **G** | **DONE** 2026-09-25 — the year-end, executed for real and fixed: expiry keeps what was taken in time, the reminder agrees with it, carry-over never moves lapsed days, not before the year ends, one pot per type · `run-round5-g.mjs` 55, green twice · § 8 |
+> | H · J · I · K · L | not started, in that order — **H is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -289,7 +290,7 @@ For each finding, the simplest honest option: make it bind, relabel it truthfull
 - In-service encashment's Finance hand-off (A3).
 - Certified sickness during annual leave (Act s.24): a documented procedure — HR recalls from the first sick day (reason "certified sickness, Act s.24") and raises a sick-leave request; the employee takes the rest of the annual leave later.
 - A joiner's part period (lane C): accrual credits whole periods only, so a window opening mid-month loses the stretch after its last whole period in the year. The explainer's worked example (18 days) states it and the accrual statement names it. Crediting it pro rata is a question for R5-Q1, not a defect.
-- The desk leave screens' year pickers (adjustments, compliance, encashments, plans, register, requests, year-end) still open on the calendar year (lane C4 moved the portal's, the balances page's and every controller default). Invisible on a January leave year; a one-line change each (`useLeaveYear`).
+- The desk leave screens' year pickers (adjustments, compliance, encashments, plans, register, requests) still open on the calendar year (lane C4 moved the portal's, the balances page's and every controller default; lane G the year-end page's). Invisible on a January leave year; a one-line change each (`useLeaveYear`).
 - Recall expenses (s.26): an ordinary claim.
 - A leave allowance (R5-Q3): a payroll element, if TDC pays one.
 - Sick-pay tiers (full pay, then half pay): payroll's.
@@ -869,3 +870,88 @@ true every day. The counts are unchanged (54, 27, 20).
   `ILeaveServices.cs`'s attendance-reconcile summary follows the calendar's remarks, and
   `LeavesController.cs` has two summaries stacked on the tenant-wide recalculation. None is this
   lane's; a scan of every file it touched found no new one.
+
+### G — The year-end, proved · DONE 2026-09-25
+
+**Built.**
+
+- **Expiry keeps what was taken in time (L-42).** Carried days are used first. When the window
+  closes, the carried days covered by leave taken on or before the last usable day stay, and only
+  the rest expire. The run used to zero them all, which charged the days somebody had taken a
+  second time. Leave *booked* for after the deadline does not save them.
+- **One definition of "used by a date": `ILeaveUsageReader`.** It returns, per employee, the days
+  of a leave type taken or booked on or before a date, counted by the walk that charged them;
+  leave straddling the date counts only its days up to it. Three readers use it: the expiry run,
+  reminder sweep 5 and lane C's *leave owed* report, whose own walk it replaces. The walk itself
+  moved out of `LeaveService` into `LeaveChargeableDays`, unchanged, and the charge uses it from
+  there.
+- **Sweep 5 warns about exactly the days the run will remove.** It compared the year's used days
+  with the carried days, so leave booked for June hid the warning while the March days lapsed
+  anyway.
+- **Carry-over:**
+  - it is refused for a year that has not ended, naming the day it can run; a preview is always
+    allowed;
+  - one pot per leave type: a stray second row is examined and named, not carried over the first;
+  - the new year's balance is created at type level.
+- **The forfeiture preview says it is one.** `IsDryRun` was never set.
+- **`LeaveYearEndResult.TotalDaysExpired`**, and the summary sentence is now the first note. The
+  screen shows *carried days expired*, the forfeiture card and its confirmation say what actually
+  happens, and the page opens on last leave year.
+
+**Changed from the plan, and why.**
+
+1. ⚠ **Carry-over also applies the lapse to the year it closes** (guide § 23, L-67). This was not in
+   the plan. If nobody ran expiry that year, the days that lapsed at the end of March would have
+   been carried forward a second time. Carry-over now counts the closing year's carried days only
+   as far as they were still usable, by the expiry's own rule, whether or not the expiry was run.
+2. **"The carry-over target matches `LeaveSubTypeId`" became "one pot per leave type".** The plan
+   predates lane N's decision that a balance is kept per type. So the target is the type's own
+   balance, found as before, and a new one is created for the type rather than copying a
+   sub-type. UAT holds no sub-type balances and no duplicate rows, so no data moves.
+3. **Found and fixed: a forfeiture preview counted days its own expiry was about to remove**
+   (L-68). The real run expired first and then read the balance it had just reduced. The preview
+   reduced nothing, so it would have forfeited the lapsing days too. Both now read the carried
+   days after the lapse.
+4. **Expiry changes the carried figure itself rather than posting an adjustment**, as the plan
+   says. An adjustment would leave a trace, but lane C's report and the reminder both read "carried
+   days still usable" as the row's figure capped by the days used in time. That holds before and
+   after a run only if the run writes the same figure. The run's notes say what lapsed and why.
+5. **A harness actor that can run forfeiture.** It needs the leave admin tier *and* an employee
+   record (the adjustment's `PerformedBy`), which no persona had, so the positive path was never
+   asserted (slice 9). `leave.admin` is a TenantAdmin linked to its own fixture employee, minted
+   on the first run.
+
+**Suite.** `dev-harness/hr-leave/run-round5-g.mjs`: **55 assertions, green twice**. Its first run was
+53/54, and the failure was its own: it read the run's total, which also held a second pot. It now
+reads the ledger rows. Every run is real and scoped to leave.emp, on the suite's own three types,
+with the ledger asserted before and after:
+
+- carry-over refused for this year, and previewed;
+- 2025 → 2026 carried, set not stacked, the cap moved up and down, the source year untouched;
+- both bases, where Earned carries 10 against Granted's 15, the 10 depending on lane C's December;
+- expiry keeping 3 of 5, with sweep 5 warning about the other 2 where the old rule stayed silent;
+- lapsed days not travelling again;
+- one pot per type;
+- a B7 deferral surviving a re-run;
+- forfeiture executed once, with the adjustment's actor the linked admin.
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green:
+
+- **Slices 1–13 are at their recorded counts.** Slice 1 is 72/75, the same three environmental
+  failures. Slices 9 and 12 run the year-end previews tenant-wide and are unchanged (37, 20): a
+  preview is still allowed for a year that has not ended.
+- **The round 5 suites:** `run-round5-e.mjs` 119, `-f` 20, `-d` 74, `-a` 89, `-n` 92.
+- **`run-round5-c.mjs` 112.** This matters here: its *leave owed* figures now come through the
+  shared reader and did not move.
+- **`run-round5-g.mjs` was 55 a third time**, run last.
+- **Cleanup:** the 24 harness types slices 1–12 minted were switched off, measured first. Only
+  TDC's nine are active. leave.emp, lane E's fixtures and the tenant's settings are as found, and
+  leave.emp holds no row in the closed year.
+- **The API log holds nothing from this lane:** 2,790 notification-processing lines, the clean-up
+  failing under them (13), the procurement calendar job, and one defect-#23 payroll save (minting
+  `leave.admin`'s employee).
+
+**Found in passing.**
+
+- `leave.admin` is a TenantAdmin with a known password on UAT, like the `admin` account itself. It
+  is recorded in the harness README.

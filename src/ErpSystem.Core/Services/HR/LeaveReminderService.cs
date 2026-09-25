@@ -36,19 +36,22 @@ public class LeaveReminderService : ILeaveReminderService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LeaveReminderService> _logger;
     private readonly ICompanyHrPolicyProvider _policyProvider;
+    private readonly ILeaveUsageReader _usage;
 
     public LeaveReminderService(
         IUnitOfWork unitOfWork,
         IAppEventBus appEventBus,
         ICurrentUserProvider currentUserProvider,
         ILogger<LeaveReminderService> logger,
-        ICompanyHrPolicyProvider policyProvider)
+        ICompanyHrPolicyProvider policyProvider,
+        ILeaveUsageReader usage)
     {
         _unitOfWork = unitOfWork;
         _appEventBus = appEventBus;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
         _policyProvider = policyProvider;
+        _usage = usage;
     }
 
     private const string TopicEntityType = "LeaveReminder";
@@ -478,32 +481,51 @@ public class LeaveReminderService : ILeaveReminderService
                             && b.LeaveType.CarryOverExpiryMonths != null)
             .Select(b => new
             {
-                b.Id, b.EmployeeId, b.CarriedOverDays, b.UsedDays,
+                b.Id, b.EmployeeId, b.LeaveTypeId, b.CarriedOverDays,
                 LeaveTypeName = b.LeaveType!.Name,
                 ExpiryMonths = b.LeaveType.CarryOverExpiryMonths!.Value,
             })
             .ToListAsync(cancellationToken);
 
-        foreach (var b in carryOver)
+        var leaveYearStart = LeaveYear.StartOf(currentLeaveYear, policy.LeaveYearStartMonth);
+        var leaveYearEnd = LeaveYear.EndOf(currentLeaveYear, policy.LeaveYearStartMonth);
+
+        // "Usable only in the first three months" for ExpiryMonths = 3 means it lapses at the END of
+        // the third month OF THE LEAVE YEAR — which is March only when the leave year starts in
+        // January. `expiry` is that last usable day.
+        var inWindow = carryOver
+            .Select(b => new { b, expiry = leaveYearStart.AddMonths(b.ExpiryMonths).AddDays(-1) })
+            .Select(x => new { x.b, x.expiry, days = x.expiry.DayNumber - today.DayNumber })
+            .Where(x => x.days <= policy.LeaveCarryOverExpiryReminderDays && x.days >= -BacklogHorizonDays)
+            .ToList();
+
+        // ⚠ Round 5, lane G: what is at risk is the carried days NOT covered by leave taken or booked
+        // on or before the last usable day — carried days are used first. It used to compare the
+        // whole year's used days, so leave booked for after the lapse hid the warning while the days
+        // lapsed anyway. The year-end run and the leave owed report read the same reader, so this
+        // warns about exactly the days the run will remove.
+        foreach (var group in inWindow.GroupBy(x => (x.b.LeaveTypeId, x.expiry)))
         {
-            // "Usable only in the first three months" for ExpiryMonths = 3 means it lapses at the
-            // END of the third month OF THE LEAVE YEAR — which is March only when the leave year
-            // starts in January.
-            var expiry = LeaveYear.StartOf(currentLeaveYear, policy.LeaveYearStartMonth)
-                .AddMonths(b.ExpiryMonths).AddDays(-1);
-            var days = expiry.DayNumber - today.DayNumber;
-            if (days > policy.LeaveCarryOverExpiryReminderDays || days < -BacklogHorizonDays) continue;
+            var usage = await _usage.ReadAsync(
+                tenantId, group.Key.LeaveTypeId, leaveYearStart, leaveYearEnd, group.Key.expiry,
+                group.Select(x => x.b.EmployeeId).Distinct().ToList(), cancellationToken);
 
-            // Already used more than the carried amount, so there is nothing left to lose.
-            if (b.UsedDays >= b.CarriedOverDays) continue;
+            foreach (var x in group)
+            {
+                var usedInTime = usage.TryGetValue(x.b.EmployeeId, out var u) ? u.TakenThrough : 0m;
+                var atRisk = x.b.CarriedOverDays - Math.Min(x.b.CarriedOverDays, usedInTime);
 
-            var tier = TierFor(days);
-            results.Add(new Candidate(
-                "CarryOverExpiring", "Carry-over", b.Id, b.EmployeeId, null,
-                $"{b.LeaveTypeName} · {b.CarriedOverDays - b.UsedDays:0.##} carried day(s) lapse on {expiry:d MMM}",
-                expiry.ToDateTime(TimeOnly.MinValue), days, tier,
-                $"CarryOverExpiring:{b.Id}:{expiry:yyyy-MM-dd}:{tier}",
-                "/hr/leave/balances"));
+                // Covered by leave in time, so there is nothing left to lose.
+                if (atRisk <= 0) continue;
+
+                var tier = TierFor(x.days);
+                results.Add(new Candidate(
+                    "CarryOverExpiring", "Carry-over", x.b.Id, x.b.EmployeeId, null,
+                    $"{x.b.LeaveTypeName} · {atRisk:0.##} carried day(s) lapse on {x.expiry:d MMM}",
+                    x.expiry.ToDateTime(TimeOnly.MinValue), x.days, tier,
+                    $"CarryOverExpiring:{x.b.Id}:{x.expiry:yyyy-MM-dd}:{tier}",
+                    "/hr/leave/balances"));
+            }
         }
 
         // Names in one pass rather than one query per candidate.

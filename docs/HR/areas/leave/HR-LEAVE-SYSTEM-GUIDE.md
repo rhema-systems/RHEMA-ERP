@@ -18,8 +18,9 @@ Annual, Maternity or Other) landed after it; chapter 4's new section on the kind
 same evening; chapter 4's kind section, § 4.4.5, chapter 4b and § 23 (the audit's closures, and L-61
 to L-64) describe it. Lane C (accrual: the counting fix, the accrual statement, and the *leave owed*
 report) landed after it; § 1.3, § 1.3b, chapter 4b, chapter 13 and its new § 13b, § 19.1 and § 23
-(L-41 and half of L-48 closed; L-65 and L-66) describe it. The other chapters still describe the
-module before round 5.
+(L-41 and half of L-48 closed; L-65 and L-66) describe it. Lane G (the year-end, run for real and
+fixed) landed the same night; chapter 17 and § 23 (L-42 closed; L-67 and L-68) describe it. The
+other chapters still describe the module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
@@ -3506,10 +3507,17 @@ knowing:
 **Both runs are behind a confirmation dialog** that spells out the scope in words:
 
 > *Unused days from 2025 will be carried into 2026 for every employee.*
-> *Expired days in 2025 will be removed for every employee. This cannot be undone automatically.*
+> *Carried-over days not taken before their window closed, and unused days past a cut-off, will be
+> removed from 2026 for every employee. This cannot be undone automatically.*
 
-**After a run, a results panel:** badges for processed / affected / days, then a scrollable list of
-per-balance notes.
+**After a run, a results panel:** badges for examined / changed / left alone, then the days —
+*carried over*, *carried days expired* *(new, round 5 lane G)*, *forfeited* — and a scrollable list of
+notes, **the first of which is the run's summary in words**.
+
+⚠ *(Round 5, lane G.)* **Carry-over runs only once the year it closes has ended.** Pressed for the
+year we are still in, it refuses and names the day it can run from; **Preview** still runs at any
+time, which is how a run is checked in December. And **the forfeiture preview now says it is one**
+— it never set the flag, so its panel never turned amber.
 
 ⚠ **Read the notes, not the badges.** The first badge says *N processed*, and *processed* means
 **looked at**, not **changed** — a run that examined 900 balances and moved 12 says *900 processed*.
@@ -3564,8 +3572,9 @@ this was a dry run.**
 
 **3 — Do not run forfeiture. Say why.**
 
-> "I'm not going to run the second one. Forfeiture removes days, and on this database it would post
-> a negative adjustment against every balance in the tenant. There is no undo."
+> "I'm not going to run the second one. It removes days, and there is no undo. On TDC's settings it
+> forfeits nothing — that cut-off is switched off — and what it does do is expire the carried-over
+> days nobody took before the end of March. Only those: a carried day somebody did take stays taken."
 
 **4 — The question that always comes, and the honest answer.**
 
@@ -3582,6 +3591,33 @@ this was a dry run.**
 
 **Carry-over is set-not-stacked** and capped at the leave type's `MaxCarryOverDays`. **Forfeiture
 posts a named negative adjustment** and is idempotent.
+
+**Proved by running them, round 5 lane G** (`run-round5-g.mjs`, 55 assertions): carry-over, expiry
+and forfeiture executed for real on a test employee, the ledger read before and after, both bases.
+The rules, as they now stand:
+
+| | |
+|---|---|
+| **Expiry keeps what was taken in time** | Carried days are used first. When the window closes, the carried days covered by annual leave taken on or before the last usable day **stay**; only the rest expire. It used to zero them all, charging the days somebody had taken a second time (§ 23, L-42). Leave **booked** for after the deadline does not save them — carried days must be taken in time |
+| **The warning agrees with the run** | Reminder sweep 5 warns about exactly the carried days the expiry will remove. It used to compare the whole year's used days, so leave booked for June hid the warning while the March deadline passed anyway. The run, the reminder and the *leave owed* report (§ 13b) all read one definition of "used in time" |
+| **Lapsed days never travel again** | Carry-over counts the closing year's own carried days only as far as they were still usable — whether or not anybody ran the expiry that year (§ 23, L-67) |
+| **One pot per leave type** | A stray second balance for the same type and year is examined and named, not carried over the first; the new year's balance is the type's, never a sub-type's |
+| **Not before the year has ended** | A real carry-over for a year still running is refused, naming the day it can run; a preview is always allowed |
+| **The source year is not reduced** | Nothing is written back to the year that was closed. With a leaver's settlement reading only the current year and cashing-in allowed only on leaving, nothing reads the old year's leftover |
+
+**The three settings, on the demo's values** — the answer to *"how does forfeit unused after
+(months) work?"*:
+
+| Setting | Demo | What it does |
+|---|---|---|
+| **Maximum carry-over** | 5 | At most 5 unused days travel into the next leave year |
+| **Carry-over expires after (months)** | 3 | Carried days must be **taken** by the end of the third month of the new leave year — the end of March for TDC — or they lapse when the expiry runs |
+| **Forfeit unused after (months)** | **off** for TDC (decision B7) | After the cut-off, the year's unused days are removed with a named adjustment. A finished year cannot be booked anyway, so this only tidies the ledger; with cashing-in only on leaving, TDC does not need it |
+
+**An approved deferral beyond the cap (B7)** — the public-service rule is that unused leave is lost
+unless deferred with written approval. HR records it as an **adjustment on the new year**, with the
+approval in the remarks (*"Deferred with the approval of the Director of HR, memo 12"*), chapter 14.
+A carry-over re-run sets the carried days and leaves the deferral alone — asserted.
 
 ⚠ **What each run counts as *unused* is now the leave type's choice** — *Carry-over and forfeiture
 count*, chapter 4. On the default, *Granted*, both read the whole year's entitlement, so a mid-year
@@ -3628,7 +3664,7 @@ closure build.
 | **Leave not closed** | leave ended and was never closed — at *Approved* **or *In progress*** | 2 days after the end date |
 | **Request awaiting a decision** | a request has sat undecided since it was raised | 5 days |
 | **Mandatory leave outstanding** | somebody still owes statutory leave | from **month 9** of the leave year *(the calendar month until round 5 lane C4)* |
-| **Carry-over expiring** | carried days are about to lapse | 30 days |
+| **Carry-over expiring** | carried days are about to lapse — counting only those not covered by leave taken or booked before the deadline, the days the expiry run will actually remove *(round 5, lane G)* | 30 days |
 
 ✅ **All five windows are now settings** — chapter 4b, the *Leave — reminder cadence* card. They used
 to be constants in the source code, each with a comment beside it admitting the number was ours and
@@ -4031,7 +4067,8 @@ are scheduled in the round 5 plan; until then, read chapter 4's settings with th
 **Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
 lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60**; lane N
 closed six of the audit's eleven and two in part, and found and closed four more, **L-61 to L-64**;
-lane C closed L-41 and half of L-48, and found and closed two more, **L-65 and L-66**.
+lane C closed L-41 and half of L-48, and found and closed two more, **L-65 and L-66**; lane G closed
+L-42 and found and closed two more, **L-67 and L-68**.
 The round 5 blocks are listed after the settings audit.
 
 ### ✅ Closed
@@ -4108,7 +4145,7 @@ the round 5 plan, whose lane is named in the last column; the plain-terms accoun
 | **L-39** | ch. 4 | *Max days per year* only ever lowers the entitlement. A type with a default of 0 — *Leave of Absence (Unpaid)*, *Occupational Injury Leave* — can never be booked | N2, N4 — **closed** 2026-09-25: the maximum binds on annual leave only; unpaid and injury leave have 90 and 180 days |
 | **L-40** | ch. 4 | An accrual policy cannot be switched off — nothing writes its `IsActive`; the tab's status column has no control behind it | N1 — **closed** 2026-09-25: an *In force* switch; the one-in-force rule follows it |
 | **L-41** | §1.3 | Every accrual frequency falls one period short within the year (monthly 11/12, quarterly 3/4); incremental *annual* accrues nothing all year; *per pay period* is monthly | C1, N2 — **closed** 2026-09-25. N2: incremental *annual* refused anew (*per pay period* was already). C1: a period counts on its last day, so 31 December credits December — 24 of 24, and a stored *annual* row credits its year on the last day |
-| **L-42** | ch. 17 | Carry-over expiry removes carried days already used, charging them a second time; the expiry reminder's skip rule assumes it does not | G |
+| **L-42** | ch. 17 | Carry-over expiry removes carried days already used, charging them a second time; the expiry reminder's skip rule assumes it does not | G — **closed** 2026-09-25: expiry keeps the carried days taken before the deadline and removes only the rest; the reminder warns about exactly those, through the same reader as the run |
 | **L-43** | ch. 4 | Eligibility rules are OR'd under a tab that says "restrict"; the gender qualifier on an organisation rule cannot be set from the tab | N2 — **closed** 2026-09-25: the tab says any rule lets people in, and a unit, level or position rule takes a gender |
 | **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 — **closed** 2026-09-25: an edit checks the sub-type and its cap; creating one honours *Active*; the cap limits the sub-type inside its type's pot |
 | **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 — **closed** 2026-09-25: submit re-runs notice, the reliever requirement, the balance and the cap |
@@ -4185,6 +4222,17 @@ L-41 and L-48's first half. The build record is the round 5 plan's § 8.
 **10** days by 31 December of year two. Before lane C the engine said **8.75** — December was never
 credited inside its own year. The example was right about what should happen, and it is now also
 what does.
+
+### ✅ Round 5 lane G — the year-end, 2026-09-25 — two more found and closed
+
+Proved by `dev-harness/hr-leave/run-round5-g.mjs` (55 assertions, green twice), which executes
+carry-over, expiry and forfeiture for real and also carries L-42. The build record is the round 5
+plan's § 8.
+
+| # | Where | Finding | Closed by |
+|---|---|---|---|
+| **L-67** | ch. 17 | ⚠ **Days that had lapsed could be carried forward again.** Carry-over read the closing year's carried days as the row held them, so if nobody had run the expiry that year, the days that lapsed at the end of March travelled into the next year a second time | Carry-over counts the closing year's carried days only as far as they were still usable, by the expiry's own rule, whether or not the expiry was run |
+| **L-68** | ch. 17 | **A forfeiture preview did not show what the run would do.** The run expires carried days first and then forfeits what is unused; the preview left the balance untouched, so it counted the days its own expiry step was about to remove as unused and forfeitable | Forfeiture reads the carried days after the lapse in both, so the preview forfeits exactly what the run would |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 

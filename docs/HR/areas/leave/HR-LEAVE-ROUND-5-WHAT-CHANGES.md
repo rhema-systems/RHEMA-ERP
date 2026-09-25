@@ -6,9 +6,10 @@
 > [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest) (kinds of leave, with the
 > leave-type form that starts from the kind), [section 15](#15-setting-up-leave-types--simpler-and-honest)
 > (settings that do what they say, and the demo data), the counting fix in
-> [section 4](#4-a-new-employees-first-two-years) and [section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)
-> (the accrual statement and the *leave owed* report) were built and tested on 25 September; nothing
-> else described here is built yet. This is the
+> [section 4](#4-a-new-employees-first-two-years), [section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)
+> (the accrual statement and the *leave owed* report) and [section 12](#12-the-year-end--carry-over-and-deferrals)
+> (the year-end) were built and tested on 25 September; nothing else described here is built yet.
+> This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
 > round 5 is built.
@@ -485,17 +486,25 @@ working correctly".)*
    deferral**, with the approval noted. That is the public-service rule: unused leave is lost unless
    deferred with written approval.
 
-**What is wrong today, and is being fixed**
+**What was wrong, and was fixed on 25 September**
 
-- **Expiry wipes all carried days, even ones already used.** If Ama took 3 of her 5 carried days in
-  February, expiry today removes all 5, so the 3 she took are charged again, to this year's
-  allowance. After the fix, only the 2 unused days expire.
-- **A preview of the year-end run can look like the real thing.** It will say clearly that it was
-  only a preview.
-- **Carry-over can be run for a year that has not ended.** Only a preview will be allowed.
-- **Two sub-kinds of the same leave overwrite each other when carried.** Fixed.
-- **The year-end has never been run for real in testing.** It will be, with the figures checked
-  before and after.
+- **Expiry wiped all carried days, even ones already used.** If Ama took 3 of her 5 carried days in
+  February, expiry removed all 5, so the 3 she took were charged again, to this year's allowance.
+  Now only the 2 she did not take in time expire. Leave she has *booked* for after the end of March
+  does not save them: carried days have to be taken in time.
+- **The warning a month before could stay silent.** It compared everything taken or booked in the
+  whole year with the carried days, so leave booked for June hid the warning while the March
+  deadline passed anyway. It now warns about exactly the days the expiry will remove.
+- **A preview of the forfeiture run looked like the real thing.** It now says clearly that it was
+  only a preview — and counts exactly what the real run would.
+- **Carry-over could be run for a year that had not ended.** Now only a preview is allowed until
+  the year is over; the real run says which day it can run from.
+- **Days that had already lapsed could be carried forward again**, if nobody had run the expiry
+  that year. Carry-over now leaves them behind either way.
+- **Two sub-kinds of the same leave could overwrite each other when carried.** One pot per kind of
+  leave now, carried into one balance.
+- **The year-end had never been run for real in testing.** It has been now: carry-over, expiry
+  and forfeiture, each run on a test employee with the figures checked before and after.
 
 ---
 

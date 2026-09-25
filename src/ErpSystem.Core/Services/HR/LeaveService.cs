@@ -61,6 +61,7 @@ public class LeaveService : ILeaveService
     private readonly IDateTimeProvider _clock;
     private readonly INumberSequenceService _numberSequence;
     private readonly IHrAudienceResolver _audience;
+    private readonly ILeaveUsageReader _usage;
 
     /// <summary>
     /// Sequence key for leave request numbers. Year-bucketed: the printed number is
@@ -101,7 +102,8 @@ public class LeaveService : ILeaveService
             ILeaveEntitlementService entitlementService,
             IDateTimeProvider clock,
             INumberSequenceService numberSequence,
-            IHrAudienceResolver audience)
+            IHrAudienceResolver audience,
+            ILeaveUsageReader usage)
     {
         _leaveRepository = leaveRepository;
         _leaveTypeRepository = leaveTypeRepository;
@@ -130,6 +132,7 @@ public class LeaveService : ILeaveService
         _numberSequence = numberSequence;
         _clock = clock;
         _audience = audience;
+        _usage = usage;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -2503,18 +2506,9 @@ public class LeaveService : ILeaveService
             .GroupBy(b => b.EmployeeId)
             .ToDictionary(g => g.Key, g => g.OrderBy(b => b.LeaveSubTypeId != null).ThenBy(b => b.CreatedAt).First());
 
-        var requests = (await _leaveRepository
-                .GetQueryable()
-                .Where(r => r.TenantId == tenantId
-                         && r.LeaveTypeId == annual.Id
-                         && r.StartDate >= yearStart && r.StartDate <= yearEnd
-                         && (r.Status == LeaveStatus.Approved
-                             || r.Status == LeaveStatus.InProgress
-                             || r.Status == LeaveStatus.Completed
-                             || r.Status == LeaveStatus.Pending))
-                .Select(r => new { r.EmployeeId, r.StartDate, r.EndDate, r.TotalDays, r.Status })
-                .ToListAsync(ct))
-            .ToLookup(r => r.EmployeeId);
+        // Taken, booked and pending leave by the date — from the shared reader (round 5, lane G), so
+        // this report, the year-end expiry run and reminder sweep 5 count exactly the same days.
+        var usage = await _usage.ReadAsync(tenantId, annual.Id, yearStart, yearEnd, date, null, ct);
 
         var snapshots = await _entitlementService.GetSnapshotsAsync(
             people.Select(p => new LeaveAccrualSubject(
@@ -2523,17 +2517,12 @@ public class LeaveService : ILeaveService
                 p.StaffLevelId)).ToList(),
             annual.Id, year, date, ct);
 
-        // The day carried-in days lapse, as the forfeiture run's expiry step reads it.
+        // The day carried-in days lapse, as the forfeiture run's expiry step reads it — and, once it
+        // has passed, the leave taken in time to use them.
         DateOnly? lapse = annual.CarryOverExpiryMonths is int expiryMonths ? yearStart.AddMonths(expiryMonths) : null;
-
-        // Days of one request taken on or before `through`, by the walk that charged it — so a
-        // Friday-to-Tuesday request split at the Sunday counts one day, not three.
-        async Task<decimal> TakenThrough(DateOnly start, DateOnly end, decimal total, DateOnly through)
-        {
-            if (end <= through) return total;
-            if (start > through) return 0m;
-            return Math.Min((await GetChargeableDaysAsync(start, through, annual)).Count, total);
-        }
+        var usedBeforeLapse = lapse is DateOnly lapsed && date >= lapsed
+            ? await _usage.ReadAsync(tenantId, annual.Id, yearStart, yearEnd, lapsed.AddDays(-1), null, ct)
+            : null;
 
         var report = new LeaveOwedReportDto
         {
@@ -2551,24 +2540,17 @@ public class LeaveService : ILeaveService
             var snapshot = snapshots[person.Id];
             balances.TryGetValue(person.Id, out var balance);
 
-            decimal taken = 0m, booked = 0m, awaiting = 0m, takenBeforeLapse = 0m;
-            foreach (var r in requests[person.Id])
-            {
-                if (r.Status == LeaveStatus.Pending)
-                {
-                    awaiting += r.TotalDays;
-                    continue;
-                }
+            var used = usage.TryGetValue(person.Id, out var u) ? u : new LeaveUsage(0m, 0m, 0m);
+            var taken = used.TakenThrough;
+            var booked = used.TakenOrBooked - used.TakenThrough;
+            var awaiting = used.Pending;
 
-                var byDate = await TakenThrough(r.StartDate, r.EndDate, r.TotalDays, date);
-                taken += byDate;
-                booked += r.TotalDays - byDate;
-                if (lapse is DateOnly l && date >= l)
-                    takenBeforeLapse += await TakenThrough(r.StartDate, r.EndDate, r.TotalDays, l.AddDays(-1));
-            }
-
+            // Carried days count in full until the lapse; from it on, only those taken in time
+            // (carried days are used first) — the rule the expiry run applies.
             var carried = balance?.CarriedOverDays ?? 0m;
-            var carriedIn = lapse is DateOnly lapsed && date >= lapsed ? Math.Min(carried, takenBeforeLapse) : carried;
+            var carriedIn = usedBeforeLapse is null
+                ? carried
+                : Math.Min(carried, usedBeforeLapse.TryGetValue(person.Id, out var early) ? early.TakenThrough : 0m);
 
             // The same substitution the create check makes: a type that does not accrue hands over
             // the stored entitlement, an accruing one what has built up by the date.
@@ -3233,18 +3215,9 @@ public class LeaveService : ILeaveService
         var tenantId = tenantIdOverride ?? GetTenantId();
         var holidayDates = await _workingDayCalculator.GetHolidayDatesAsync(tenantId, startDate, endDate);
 
-        for (var currentDate = startDate; currentDate <= endDate; currentDate = currentDate.AddDays(1))
-        {
-            bool isWeekend = currentDate.DayOfWeek == DayOfWeek.Saturday || currentDate.DayOfWeek == DayOfWeek.Sunday;
-            bool isHoliday = holidayDates.Contains(currentDate);
-
-            if (!leaveType.CountWeekendsAsLeave && isWeekend) continue;
-            if (!leaveType.CountHolidaysAsLeave && isHoliday) continue;
-
-            days.Add(currentDate);
-        }
-
-        return days;
+        // The walk itself lives in LeaveChargeableDays (round 5, lane G), so the year-end run, the
+        // reminder sweep and the leave owed report count leave exactly as it was charged here.
+        return LeaveChargeableDays.Between(startDate, endDate, leaveType, holidayDates);
     }
 
     private async Task<decimal> CalculateLeaveDaysAsync(DateOnly startDate, DateOnly endDate, LeaveType leaveType)

@@ -744,6 +744,9 @@ export interface LeaveYearEndResult {
 
   totalDaysCarriedOver: number;
   totalDaysForfeited: number;
+  /** Carried-over days that lapsed, not taken before their expiry (round 5, lane G). */
+  totalDaysExpired: number;
+  /** The first note is the run's summary in words; the rest are per balance. */
   notes: string[];
 }
 
