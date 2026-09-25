@@ -60,6 +60,7 @@ public class LeaveService : ILeaveService
     private readonly ILeaveEntitlementService _entitlementService;
     private readonly IDateTimeProvider _clock;
     private readonly INumberSequenceService _numberSequence;
+    private readonly IHrAudienceResolver _audience;
 
     /// <summary>
     /// Sequence key for leave request numbers. Year-bucketed: the printed number is
@@ -93,7 +94,8 @@ public class LeaveService : ILeaveService
             ILeaveBalanceRecalculationService recalculationService,
             ILeaveEntitlementService entitlementService,
             IDateTimeProvider clock,
-            INumberSequenceService numberSequence)
+            INumberSequenceService numberSequence,
+            IHrAudienceResolver audience)
     {
         _leaveRepository = leaveRepository;
         _leaveTypeRepository = leaveTypeRepository;
@@ -121,6 +123,7 @@ public class LeaveService : ILeaveService
         _entitlementService = entitlementService;
         _numberSequence = numberSequence;
         _clock = clock;
+        _audience = audience;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -1839,8 +1842,8 @@ public class LeaveService : ILeaveService
     }
 
     public async Task<LeaveCalendarDto> GetCalendarAsync(
-        DateOnly from, DateOnly to, LeaveCalendarScope scope, Guid? employeeId,
-        Guid? leaveTypeId, Guid? organizationUnitId, CancellationToken ct = default)
+        DateOnly from, DateOnly to, LeaveCalendarScope scope, Guid? callerEmployeeId,
+        Guid? leaveTypeId, Guid? organizationUnitId, Guid? onlyEmployeeId, CancellationToken ct = default)
     {
         if (to < from)
             throw new InvalidOperationException("The calendar's end date cannot be before its start date.");
@@ -1871,24 +1874,38 @@ public class LeaveService : ILeaveService
         switch (scope)
         {
             case LeaveCalendarScope.Mine:
-                var me = employeeId ?? Guid.Empty;
+                var me = callerEmployeeId ?? Guid.Empty;
                 query = query.Where(r => r.EmployeeId == me);
                 break;
 
             case LeaveCalendarScope.Team:
                 // The caller's own direct reports, plus the caller. A manager planning cover needs
                 // to see their own leave against the team's, not beside it on another screen.
-                var managerId = employeeId ?? Guid.Empty;
+                var managerId = callerEmployeeId ?? Guid.Empty;
                 query = query.Where(r => r.EmployeeId == managerId
                                       || (r.Employee.ManagerId != null && r.Employee.ManagerId == managerId));
                 break;
 
             case LeaveCalendarScope.Organisation:
             default:
-                if (organizationUnitId.HasValue)
-                    query = query.Where(r => r.Employee.OrganizationUnitId == organizationUnitId.Value);
+                // A unit means the unit and everything beneath it (round 5 lane F): a directorate's
+                // calendar is its departments' leave too. The staff directory's rule, from the same
+                // walk. Until lane F nothing passed a unit, so the exact-match version never showed.
+                if (organizationUnitId is Guid unitId)
+                {
+                    var unitIds = (await _audience.UnitSubtreeAsync(unitId, ct)).ToList();
+                    query = query.Where(r => r.Employee.OrganizationUnitId != null
+                                          && unitIds.Contains(r.Employee.OrganizationUnitId.Value));
+                }
                 break;
         }
+
+        // One employee's calendar (round 5 lane F: "search one employee in the HR calendar").
+        // ⚠ Applied AFTER the scope, so it can only take people away from what the caller may
+        // already see: in Team it is one of the caller's reports or nobody, in Mine the caller or
+        // nobody. Only Organisation, the leave read tier, can reach anyone.
+        if (onlyEmployeeId is Guid only)
+            query = query.Where(r => r.EmployeeId == only);
 
         if (leaveTypeId.HasValue)
             query = query.Where(r => r.LeaveTypeId == leaveTypeId.Value);

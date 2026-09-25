@@ -10,8 +10,9 @@ show what the code can do, that is said in the step rather than smoothed over.
 
 **Round 5** ([`HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md`](../../programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md))
 **is being built lane by lane.** Lane E, leave plans, landed 2026-09-25. Chapter 12, § 19.5, the
-reliever note in § 1.5 and § 23 (L-49 to L-54) describe it. The other chapters still describe the
-module before round 5.
+reliever note in § 1.5 and § 23 (L-49 to L-54) describe it. Lane F, the calendar for one employee,
+landed the same day; chapter 9 describes it. The other chapters still describe the module before
+round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
@@ -2403,6 +2404,13 @@ team**, **Mine**. The employee's own version lives at `/me/leave/calendar` and h
 ### 👁 On the page
 
 **Filters card:** **Whose leave** *(Everyone · My team · Mine)* and **Leave type** *(all, or one)*.
+On **Everyone** only *(round 5, lane F)*, two more:
+- **One employee**: a name search. The calendar then shows that person's leave alone, and its
+  title is their name;
+- **Level / Unit**: a unit, and **every unit beneath it**. A directorate's calendar includes its
+  departments.
+
+Both can be combined with the type filter, and with each other.
 
 **The calendar card:**
 
@@ -2465,11 +2473,23 @@ the port, with no calendar to use it.
 
 > "Same data, two shapes. The list is what you read down; the month is what you plan against."
 
+**6 — Back on *Everyone*, type your anchor employee's name into *One employee*.** *(Round 5.)*
+
+> "You asked for this at the last demo: one person's leave on the calendar. Their approved leave,
+> what they've asked for and is waiting, and the holidays underneath. Clear it, choose a
+> directorate under *Unit*, and you get everyone in it and in every department beneath it."
+
 ### ⚙ Behind the page
 
 | Control | Call | Gate |
 |---|---|---|
-| The calendar | `GET /api/Leaves/calendar?from=&to=&scope=&leaveTypeId=&organizationUnitId=` | **per scope** — see below |
+| The calendar | `GET /api/Leaves/calendar?from=&to=&scope=&leaveTypeId=&organizationUnitId=&employeeId=` | **per scope** — see below |
+
+⚠ **`employeeId` narrows; it never widens** *(round 5, lane F)*. It is applied after the scope, so
+in *My team* it is one of the caller's reports or nobody, and in *Mine* the caller or nobody. Only
+*Everyone* (the leave read tier) can reach anyone. **`organizationUnitId`** (Everyone only) is the
+unit and its whole subtree, the staff directory's rule. Before round 5 it matched the exact unit, and
+no screen sent it.
 
 **The scope is authorized three different ways, and that is the whole design:**
 

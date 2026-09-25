@@ -273,7 +273,10 @@ class LeaveService {
     to: string;
     scope: LeaveCalendarScope;
     leaveTypeId?: string;
+    /** Organisation scope only — the unit and every unit beneath it. */
     organizationUnitId?: string;
+    /** One person's leave. Narrows any scope; never widens it (round 5 lane F). */
+    employeeId?: string;
   }): Promise<LeaveCalendarData> {
     return apiService.get<LeaveCalendarData>(`${this.baseUrl}/calendar`, params);
   }

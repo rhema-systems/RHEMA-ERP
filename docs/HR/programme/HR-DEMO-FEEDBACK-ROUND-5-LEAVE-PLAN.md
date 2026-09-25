@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-25): DECIDED, in build — M0 and lane E done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-25): DECIDED, in build — M0 and lanes E and F done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -15,7 +15,8 @@
 > |---|---|
 > | **M0** | **DONE** 2026-09-25 — this file |
 > | **E** | **DONE** 2026-09-25 — plans: relievers, the clash check, the approver's view · `run-round5-e.mjs` 119, green twice · § 8 |
-> | F · D · A · N · C · G · H · J · I · K · L | not started, in that order — **F is next** |
+> | **F** | **DONE** 2026-09-25 — the calendar for one employee, and a unit with everything beneath it · `run-round5-f.mjs` 20, green twice · § 8 |
+> | D · A · N · C · G · H · J · I · K · L | not started, in that order — **D is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -417,3 +418,49 @@ Not run:
   long-serving employee on probation, and 1,795 probation records are live past their end date.
 - **The plan forms offer every active leave type, maternity included.** Narrowing by kind is lane
   A's (A4).
+
+### F — The calendar for one employee · DONE 2026-09-25
+
+**Built.**
+
+- **`GET api/Leaves/calendar` takes `employeeId`**, which shows one person's leave. It is applied
+  **after** the scope, so it narrows and never widens:
+  - in *My team* it is one of the caller's reports or nobody;
+  - in *Mine* it is the caller or nobody;
+  - *Everyone* still needs `HR.Leave.Read`.
+- **`organizationUnitId`** (*Everyone* only) now means the unit **and every unit beneath it**,
+  through `IHrAudienceResolver.UnitSubtreeAsync`, the walk the staff directory uses.
+- **`/hr/leave/calendar`** gains *One employee* (the `EmployeePicker`) and a level-then-unit picker.
+  Both are shown and sent for *Everyone* only. The calendar's title says whose calendar it is, and
+  the empty state reads "No leave this month" for one person.
+
+**Changed from the plan, and why.**
+
+1. **The unit filter includes sub-units** (the plan said to pass the existing filter). The existing
+   filter matched the exact unit, so choosing a directorate would have shown only the people
+   attached to the directorate itself. Nothing had ever sent it, so no screen changes meaning.
+2. **`employeeId` narrows every scope, not only *Everyone*** (the plan scoped it to Organisation).
+   Because it is applied after the scope, it cannot widen what a scope shows, so allowing it
+   everywhere costs nothing, and the suite proves it. The page offers it on *Everyone* only.
+3. **Plans on the calendar were not built** (the plan: "unless cheap"). It was not cheap, for two
+   reasons:
+   - in *My team* they would show a manager plans that the plan gates let them read only while the
+     plan is at their approval step;
+   - a plan with a raised request would appear twice.
+
+   It stays under "Noted, not built".
+
+**Suite.** `dev-harness/hr-leave/run-round5-f.mjs`: **20 assertions, green twice**. It moves two of
+lane E's reliever fixtures into chosen units for the run, and back after. Its key assertion is the
+parent unit: A sits in "Development Department", beneath "Operations Directorate", and the
+directorate's calendar must include A. An exact-match filter would fail it.
+
+**Neighbours:**
+
+| Suite | Result |
+|---|---|
+| hr-leave slice 4 (the calendar's own slice) | 54/54 |
+| `run-round5-e.mjs` | 119/119 |
+| hr-leave slice 1 | 72/75, the same three environmental failures |
+
+The API log shows no calendar errors. The two leave types those runs created were switched off.

@@ -822,6 +822,10 @@ namespace ErpSystem.Api.Controllers.HR
         /// <item><c>Organisation</c> — everybody. The leave READ tier, like every other org-wide
         /// leave surface.</item>
         /// </list>
+        /// <para>Round 5 lane F: <c>employeeId</c> shows one person's leave. It narrows the scope
+        /// and never widens it: in <c>Team</c> it is one of the caller's reports or nobody, so it
+        /// is not a way round the scope's own rule. <c>organizationUnitId</c> (Organisation only)
+        /// takes the unit and every unit beneath it.</para>
         /// </remarks>
         /// <response code="200">The calendar for the range</response>
         /// <response code="400">The range is backwards or longer than 400 days</response>
@@ -836,6 +840,7 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] LeaveCalendarScope scope = LeaveCalendarScope.Mine,
             [FromQuery] Guid? leaveTypeId = null,
             [FromQuery] Guid? organizationUnitId = null,
+            [FromQuery] Guid? employeeId = null,
             CancellationToken ct = default)
         {
             try
@@ -858,7 +863,7 @@ namespace ErpSystem.Api.Controllers.HR
                 }
 
                 return Ok(await _leaveService.GetCalendarAsync(
-                    from, to, scope, subject, leaveTypeId, organizationUnitId, ct));
+                    from, to, scope, subject, leaveTypeId, organizationUnitId, employeeId, ct));
             }
             catch (InvalidOperationException ex)
             {

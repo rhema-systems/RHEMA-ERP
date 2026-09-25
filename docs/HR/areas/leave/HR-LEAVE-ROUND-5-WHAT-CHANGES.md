@@ -1,7 +1,8 @@
 # Staff leave, round 5 — what changes, in plain terms
 
 > **Status: DECIDED on 25 September 2026 — being built.** [Section 6](#6-leave-plans--relievers-the-clash-check-and-the-approvers-view)
-> (leave plans) was built and tested on 25 September; nothing else described here is built yet. This is the
+> (leave plans) and [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person)
+> were built and tested on 25 September; nothing else described here is built yet. This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
 > round 5 is built.
@@ -359,8 +360,16 @@ because those were the extra.
 **Today.** HR's calendar shows *everyone*, *my team* or *me*, filtered by leave type. It cannot pick
 out one employee, and it has no department filter.
 
-**What changes.** An employee picker — *"show me Ama's leave"* — and a department filter. The calendar
-shows leave requests (approved, waiting and under way) and public holidays.
+**What changes** *(built 25 September)*. On the *Everyone* view, two new filters:
+
+- **One employee.** Type a name (*"show me Ama's leave"*) and the calendar shows only theirs:
+  approved, waiting for approval, and under way.
+- **A department** (an organisation unit). The calendar shows everyone in it **and in every unit
+  beneath it**, so a directorate's calendar includes its departments.
+
+The *My team* and *Mine* views work as before. A filter can never show a manager someone outside
+their team. The calendar shows leave requests and public holidays. **Leave plans are not on it**:
+they are intentions, and the Plans page is where they are read.
 
 ---
 

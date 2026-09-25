@@ -144,9 +144,15 @@ public interface ILeaveService
     /// <summary>The mandatory-leave compliance register as a CSV.</summary>
     Task<byte[]> ExportComplianceCsvAsync(int year, CancellationToken ct = default);
 
+    /// <summary>Leave drawn as time. The three scopes are described on <c>LeavesController.GetCalendar</c>.</summary>
+    /// <param name="callerEmployeeId">Who <c>Mine</c> and <c>Team</c> are measured from: the token's
+    /// employee, never a query parameter.</param>
+    /// <param name="organizationUnitId">Organisation scope only: the unit and every unit beneath it.</param>
+    /// <param name="onlyEmployeeId">One employee's calendar (round 5 lane F). It narrows whatever the
+    /// scope shows and can never widen it.</param>
     Task<LeaveCalendarDto> GetCalendarAsync(
-        DateOnly from, DateOnly to, LeaveCalendarScope scope, Guid? employeeId,
-        Guid? leaveTypeId, Guid? organizationUnitId, CancellationToken ct = default);
+        DateOnly from, DateOnly to, LeaveCalendarScope scope, Guid? callerEmployeeId,
+        Guid? leaveTypeId, Guid? organizationUnitId, Guid? onlyEmployeeId, CancellationToken ct = default);
 
     // ─── Leave Adjustments ───────────────────────────────────────────────────
     Task<LeaveAdjustmentDto> AddAdjustmentAsync(CreateLeaveAdjustmentDto dto);
