@@ -379,7 +379,7 @@ export default function CreatePurchaseOrderPage() {
         setSubmitting(true);
         try {
             const newPo = {
-                vendorId: vendorId,
+                businessPartnerId: vendorId,
                 orderNumber: orderSequence.allowManualEntry && orderNumber.trim() ? orderNumber.trim() : undefined,
                 orderDate: new Date(orderDate).toISOString(),
                 paymentTermId: paymentTermId || null,

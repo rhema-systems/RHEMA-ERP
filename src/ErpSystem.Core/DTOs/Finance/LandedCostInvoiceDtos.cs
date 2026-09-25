@@ -13,7 +13,7 @@ public sealed class CreateLandedCostInvoicesDto
 public sealed class LandedCostInvoiceChargeDto
 {
     public Guid CostItemId { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierInvoiceNumber { get; set; } = string.Empty;
     public TaxTreatment? TaxTreatment { get; set; }
     public Guid? TaxGroupId { get; set; }
@@ -28,7 +28,7 @@ public sealed class PostLandedCostDto
 public sealed class LandedCostBillingChargeDto
 {
     public Guid CostItemId { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierInvoiceNumber { get; set; } = string.Empty;
 }
 

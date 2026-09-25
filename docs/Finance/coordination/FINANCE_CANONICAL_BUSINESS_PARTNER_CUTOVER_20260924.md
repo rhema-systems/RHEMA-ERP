@@ -249,3 +249,11 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
 - The API and API-test projects build with zero errors, and the canonical AR architecture,
   controlled-statement and central-export checks pass (3/3). No migration or database reset was
   executed.
+- Finance purchase-order, landed-cost invoice-charge and returned-cheque DTOs now expose
+  `BusinessPartnerId`; the redundant `VendorId`/`SupplierId`/`CustomerId` Finance API aliases are
+  removed. Landed-cost invoice creation uses the canonical partner and its governed effective AP
+  profile without manufacturing a legacy Supplier master.
+- The focused boundary verification passes: 77/77 backend tests across landed-cost invoicing,
+  banking settlement and Finance PO workflow, plus 8/8 frontend landed-cost tests. The API compiles
+  with zero errors; existing repository warnings remain. No migration or database reset was
+  executed in this checkpoint.

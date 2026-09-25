@@ -32,8 +32,7 @@ export interface FinancePurchaseOrder {
     approvalRequired?: boolean;
     tenantId?: string;
     orderNumber?: string;
-    vendorId: string;
-    supplierId?: string;
+    businessPartnerId: string;
     orderDate: string;
     expectedDeliveryDate?: string;
     status: number | string; // 1 = Draft, 2 = Approved, 3 = PartiallyReceived, 4 = Received, 5 = PartiallyInvoiced, 6 = Invoiced, 9 = PendingApproval, 10 = Rejected
@@ -143,8 +142,7 @@ const normalizePurchaseOrder = (po: any): FinancePurchaseOrder => {
         id: po.id,
         tenantId: po.tenantId,
         orderNumber: po.orderNumber,
-        vendorId: po.vendorId || po.supplierId || po.businessPartnerId,
-        supplierId: po.supplierId || po.vendorId || po.businessPartnerId,
+        businessPartnerId: po.businessPartnerId,
         orderDate: po.orderDate,
         expectedDeliveryDate: po.expectedDeliveryDate || po.promisedDate || po.requiredDate,
         status: normalizeStatus(po.status),
@@ -216,7 +214,7 @@ export const financePurchaseOrderService = {
 
     createPurchaseOrder: async (data: Partial<FinancePurchaseOrder>): Promise<FinancePurchaseOrder> => {
         const payload = {
-            vendorId: data.vendorId || data.supplierId,
+            businessPartnerId: data.businessPartnerId,
             orderNumber: data.orderNumber,
             orderDate: data.orderDate,
             expectedDeliveryDate: data.expectedDeliveryDate,

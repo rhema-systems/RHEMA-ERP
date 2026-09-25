@@ -29,6 +29,8 @@ public class LandedCostSupplierInvoiceTests
     private readonly List<VendorInvoice> _invoices = new();
     private readonly List<VendorInvoiceLineItem> _lines = new();
     private readonly List<BusinessPartner> _partners = new();
+    private readonly List<BusinessPartnerRole> _partnerRoles = new();
+    private readonly List<BusinessPartnerApProfileVersion> _apProfiles = new();
     private readonly List<Supplier> _suppliers = new();
     private readonly LandedCost _cost;
     private readonly LandedCostItem _freight;
@@ -62,6 +64,8 @@ public class LandedCostSupplierInvoiceTests
         _credit = new AccountTransaction { TenantId = _tenant, JournalEntryId = _journal.Id, AccountId = _accrual.Id, CreditAmount = 360, FunctionalCurrencyCode = "GHS" };
         Repo(new List<LandedCost> { _cost }); Repo(new List<LandedCostItem> { _freight, _handling });
         _partners.Add(_partner); _suppliers.Add(_supplier); Repo(_partners); Repo(_suppliers);
+        AddTransactionReadyApRole(_partner);
+        Repo(_partnerRoles); Repo(_apProfiles);
         Repo(new List<JournalEntry> { _journal }); Repo(new List<FinancePostingEvent> { _posting });
         Repo(new List<AccountTransaction> { _credit }); Repo(new List<Account> { _accrual, _ap });
         Repo(new List<FinanceSettings> { new() { TenantId = _tenant, BaseCurrency = "GHS", ControlAccountApId = _ap.Id, ControlAccountGRVAccrualId = Guid.NewGuid() } });
@@ -98,10 +102,36 @@ public class LandedCostSupplierInvoiceTests
     {
         InvoiceDate = new DateTime(2026, 9, 9), Charges = new()
         {
-            new() { CostItemId = _freight.Id, SupplierId = _partner.Id, SupplierInvoiceNumber = "BILL-1", TaxTreatment = TaxTreatment.OutOfScope },
-            new() { CostItemId = _handling.Id, SupplierId = _partner.Id, SupplierInvoiceNumber = secondReference, TaxTreatment = TaxTreatment.OutOfScope }
+            new() { CostItemId = _freight.Id, BusinessPartnerId = _partner.Id, SupplierInvoiceNumber = "BILL-1", TaxTreatment = TaxTreatment.OutOfScope },
+            new() { CostItemId = _handling.Id, BusinessPartnerId = _partner.Id, SupplierInvoiceNumber = secondReference, TaxTreatment = TaxTreatment.OutOfScope }
         }
     };
+
+    private void AddTransactionReadyApRole(
+        BusinessPartner partner,
+        BusinessPartnerRoleType roleType = BusinessPartnerRoleType.Supplier)
+    {
+        var role = new BusinessPartnerRole
+        {
+            TenantId = _tenant,
+            BusinessPartnerId = partner.Id,
+            BusinessPartner = partner,
+            RoleType = roleType,
+            Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2020, 1, 1)
+        };
+        _partnerRoles.Add(role);
+        _apProfiles.Add(new BusinessPartnerApProfileVersion
+        {
+            TenantId = _tenant,
+            BusinessPartnerRoleId = role.Id,
+            BusinessPartnerRole = role,
+            VersionNumber = 1,
+            Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020, 1, 1),
+            SubjectToWithholding = false
+        });
+    }
 
     [Fact]
     public async Task GroupsSameSupplierBillIntoOneDraftWithoutApprovingOrPosting()
@@ -138,7 +168,7 @@ public class LandedCostSupplierInvoiceTests
     {
         _partner.PartnerType = "Contractor";
         var created = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
-        Assert.Equal(_supplier.Id, created.BusinessPartnerId);
+        Assert.Equal(_partner.Id, created.BusinessPartnerId);
         Assert.Equal(VendorInvoiceStatus.Draft, created.Status);
         Assert.Null(created.JournalEntryId);
         Assert.Single(_suppliers);
@@ -151,39 +181,20 @@ public class LandedCostSupplierInvoiceTests
     }
 
     [Fact]
-    public async Task StandaloneLandedCost_NewContractorIdentityIsFlushedWithinTransactionBeforeDraftQueries()
+    public async Task StandaloneLandedCost_UsesCanonicalPartnerWithoutCreatingLegacySupplierIdentity()
     {
-        // A real EF repository does not return Added-but-unsaved rows in database queries.
-        // List-backed mocks used elsewhere cannot detect this onboarding boundary.
-        await using var db = new ErpSystem.Data.ApplicationDbContext(
-            new DbContextOptionsBuilder<ErpSystem.Data.ApplicationDbContext>()
-                .UseInMemoryDatabase($"new-lc-contractor-{Guid.NewGuid()}").Options);
-        var identities = new ErpSystem.Data.UnitOfWork(db).Repository<Supplier>();
-        _unit.Setup(value => value.Repository<Supplier>()).Returns(identities);
+        // Finance must not manufacture a parallel Supplier master. The governed Business Partner
+        // and its AP role/profile are the only counterparty identity used by the invoice.
         _suppliers.Clear();
         _partner.PartnerType = "Contractor";
-        var saveBoundaries = new List<bool>();
-        _unit.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(async (CancellationToken token) =>
-            {
-                saveBoundaries.Add(_transaction);
-                var changed = await db.SaveChangesAsync(token);
-                _suppliers.Clear();
-                _suppliers.AddRange(await db.Suppliers.ToListAsync(token));
-                return changed;
-            });
 
         var first = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
-        var canonical = Assert.Single(await db.Suppliers.ToListAsync());
-        Assert.Equal(canonical.Id, first.BusinessPartnerId);
-        Assert.Equal(_partner.PartnerCode, canonical.SupplierCode);
+        Assert.Equal(_partner.Id, first.BusinessPartnerId);
         Assert.Equal(VendorInvoiceStatus.Draft, first.Status);
         var retry = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
         Assert.Equal(first.Id, retry.Id);
-        Assert.Single(await db.Suppliers.ToListAsync());
+        Assert.Empty(_suppliers);
         Assert.Single(_invoices);
-        Assert.NotEmpty(saveBoundaries);
-        Assert.All(saveBoundaries, active => Assert.True(active));
         _unit.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
         _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(),
             It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -253,12 +264,12 @@ public class LandedCostSupplierInvoiceTests
     {
         var partner = new BusinessPartner { TenantId = _tenant, PartnerCode = "HANDLER", PartnerName = "Carrier", PartnerType = "Supplier", IsActive = true, RegistrationStatus = "Approved" };
         var supplier = new Supplier { TenantId = _tenant, SupplierCode = "HANDLER", Name = "Carrier", IsActive = true, Status = "Active" };
-        _partners.Add(partner); _suppliers.Add(supplier);
-        var request = Request(); request.Charges[1].SupplierId = partner.Id;
+        _partners.Add(partner); _suppliers.Add(supplier); AddTransactionReadyApRole(partner);
+        var request = Request(); request.Charges[1].BusinessPartnerId = partner.Id;
         var result = await _service.CreateFromLandedCostAsync(_cost.Id, request, _producer);
         Assert.Equal(2, result.Count); Assert.Equal(2, result.Select(i => i.BusinessPartnerId).Distinct().Count());
-        Assert.Equal(310, result.Single(i => i.BusinessPartnerId == _supplier.Id).TotalAmount);
-        Assert.Equal(50, result.Single(i => i.BusinessPartnerId == supplier.Id).TotalAmount);
+        Assert.Equal(310, result.Single(i => i.BusinessPartnerId == _partner.Id).TotalAmount);
+        Assert.Equal(50, result.Single(i => i.BusinessPartnerId == partner.Id).TotalAmount);
     }
 
     [Theory]
@@ -266,7 +277,7 @@ public class LandedCostSupplierInvoiceTests
     public async Task IneligibleCostSupplierCannotCreateInvoice(string reason)
     {
         if (reason == "inactive") _partner.IsActive = false;
-        if (reason == "blacklisted") _supplier.IsBlacklisted = true;
+        if (reason == "blacklisted") _partner.IsBlacklisted = true;
         if (reason == "foreign") _partner.TenantId = Guid.NewGuid();
         if (reason == "unapproved") _partner.RegistrationStatus = "Draft";
         await Assert.ThrowsAnyAsync<Exception>(() => _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
@@ -333,7 +344,7 @@ public class LandedCostSupplierInvoiceTests
     {
         InvoiceDate = new DateTime(2026, 9, 9),
         Charges = Request().Charges.Select(c => new LandedCostBillingChargeDto
-        { CostItemId = c.CostItemId, SupplierId = c.SupplierId, SupplierInvoiceNumber = c.SupplierInvoiceNumber }).ToList()
+        { CostItemId = c.CostItemId, BusinessPartnerId = c.BusinessPartnerId, SupplierInvoiceNumber = c.SupplierInvoiceNumber }).ToList()
     };
 
     [Fact]
@@ -375,7 +386,7 @@ public class LandedCostSupplierInvoiceTests
     public async Task InvalidBillingNeverPostsInventory(string reason)
     {
         _cost.Status = "Allocated"; var request = PostRequest();
-        if (reason == "supplier") request.Charges[0].SupplierId = Guid.Empty;
+        if (reason == "supplier") request.Charges[0].BusinessPartnerId = Guid.Empty;
         if (reason == "reference") request.Charges[0].SupplierInvoiceNumber = "";
         if (reason == "missing-line") request.Charges.RemoveAt(0);
         if (reason == "foreign") _cost.TenantId = Guid.NewGuid();

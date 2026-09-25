@@ -46,7 +46,7 @@ describe('combined landed-cost Post', () => {
     await screen.findByRole('link', { name: 'INV-1 · Carrier' });
     expect(api.post).toHaveBeenCalledTimes(1);
     const request = api.post.mock.calls[0][1]; expect(request.charges).toHaveLength(2);
-    expect(request.charges[0]).toEqual({ costItemId: 'freight', supplierId: 'carrier', supplierInvoiceNumber: 'CARRIER-1' });
+    expect(request.charges[0]).toEqual({ costItemId: 'freight', businessPartnerId: 'carrier', supplierInvoiceNumber: 'CARRIER-1' });
     expect(changed).toHaveBeenCalledOnce(); expect(screen.getByText(/No invoice approval or financial posting/)).toBeInTheDocument();
   });
   it('requires billing identities but does not require tax before creating a draft', async () => {

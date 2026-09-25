@@ -1069,7 +1069,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 CaseNumber = item.CaseNumber,
                 CustomerPaymentId = item.CustomerPaymentId,
                 PaymentNumber = item.CustomerPayment.PaymentNumber,
-                CustomerId = item.CustomerPayment.BusinessPartnerId,
+                BusinessPartnerId = item.CustomerPayment.BusinessPartnerId,
                 BankDepositBatchId = item.BankDepositBatchId,
                 DepositNumber = item.BankDepositBatch == null ? null : item.BankDepositBatch.DepositNumber,
                 BankAccountId = item.BankAccountId,
@@ -1101,14 +1101,14 @@ public sealed class BankingSettlementService : IBankingSettlementService
             return cases;
         }
 
-        var customerIds = cases.Select(item => item.CustomerId).Distinct().ToArray();
+        var businessPartnerIds = cases.Select(item => item.BusinessPartnerId).Distinct().ToArray();
         var customerNames = await _context.BusinessPartners
             .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && customerIds.Contains(item.Id))
+            .Where(item => item.TenantId == tenantId && businessPartnerIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, item => item.PartnerName, cancellationToken);
         foreach (var item in cases)
         {
-            item.CustomerName = customerNames.GetValueOrDefault(item.CustomerId, "Customer");
+            item.CustomerName = customerNames.GetValueOrDefault(item.BusinessPartnerId, "Customer");
         }
         return cases;
     }
@@ -2633,7 +2633,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             CaseNumber = item.CaseNumber,
             CustomerPaymentId = item.CustomerPaymentId,
             PaymentNumber = item.CustomerPayment.PaymentNumber,
-            CustomerId = item.CustomerPayment.BusinessPartnerId,
+            BusinessPartnerId = item.CustomerPayment.BusinessPartnerId,
             CustomerName = item.CustomerPayment.BusinessPartnerName,
             BankDepositBatchId = item.BankDepositBatchId,
             DepositNumber = item.BankDepositBatch?.DepositNumber,

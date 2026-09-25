@@ -594,6 +594,24 @@ public sealed class LegacyPostingPathLockdownTests
             .And.Contain("customer-statement/{businessPartnerId}");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void AuxiliaryFinanceContracts_ShouldExposeCanonicalBusinessPartnerIdentityOnly()
+    {
+        var root = FindRepositoryRoot();
+        var landedCost = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "LandedCostInvoiceDtos.cs"));
+        var purchaseOrder = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "FinancePurchaseOrderDtos.cs"));
+        var banking = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "BankingSettlementDtos.cs"));
+
+        landedCost.Should().Contain("BusinessPartnerId").And.NotContain("SupplierId");
+        purchaseOrder.Should().Contain("BusinessPartnerId")
+            .And.NotContain("public Guid VendorId")
+            .And.NotContain("public Guid SupplierId");
+        banking[banking.IndexOf("public class ReturnedChequeCaseDto", StringComparison.Ordinal)..]
+            .Should().Contain("BusinessPartnerId").And.NotContain("public Guid CustomerId");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

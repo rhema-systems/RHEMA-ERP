@@ -545,7 +545,7 @@ export interface ReturnedChequeCase {
     caseNumber: string;
     customerPaymentId: string;
     paymentNumber: string;
-    customerId: string;
+    businessPartnerId: string;
     customerName: string;
     bankDepositBatchId?: string;
     depositNumber?: string;

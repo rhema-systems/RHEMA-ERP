@@ -82,6 +82,10 @@ must not be interpreted as a promise that they override Finance settings.
   summaries likewise expose canonical `BusinessPartnerId` fields. Historical reports resolve the
   governed Customer role even when that role is inactive for new business; they do not use the
   legacy `PartnerType` string as accounting identity.
+- Finance purchase-order commands, landed-cost invoice charges and returned-cheque cases expose
+  `BusinessPartnerId` at the Finance API boundary. Procurement-owned source records may retain
+  domain labels such as `SupplierId`, but Finance must not translate those values through or create
+  a parallel Supplier/Customer identity.
 
 ## Withholding contract
 
