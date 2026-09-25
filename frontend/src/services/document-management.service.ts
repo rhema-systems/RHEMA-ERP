@@ -1,5 +1,6 @@
 import { apiService as rawApiService } from './api.service';
 import { compatibleApiService as apiService } from './compatibleApiService';
+import type { ProcedureCaseDetail } from './procedure-case.service';
 
 export interface CentralDocumentWorkspaceItem {
   title: string;
@@ -632,7 +633,7 @@ class DocumentManagementService {
 
   async getRecords(
     module?: string,
-    options?: { documentReference?: string; take?: number }
+    options?: { documentReference?: string; search?: string; take?: number }
   ): Promise<CentralDocumentRecord[]> {
     const response = await apiService.get<ApiResponse<CentralDocumentRecord[]>>(
       '/document-management/records',
@@ -641,10 +642,19 @@ class DocumentManagementService {
         ...(options?.documentReference
           ? { documentReference: options.documentReference }
           : {}),
+        ...(options?.search ? { search: options.search } : {}),
         ...(options?.take ? { take: options.take } : {}),
       }
     );
     return response.data || [];
+  }
+
+  async attachRecordToCase(recordId: string, caseId: string, documentId: string): Promise<ProcedureCaseDetail> {
+    const response = await apiService.post<ApiResponse<ProcedureCaseDetail>>(
+      `/document-management/records/${recordId}/attach-to-case`,
+      { caseId, documentId }
+    );
+    return response.data;
   }
 
   async getRecordByDocumentReference(

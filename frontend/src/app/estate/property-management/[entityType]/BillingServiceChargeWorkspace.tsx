@@ -91,6 +91,12 @@ export function BillingServiceChargeWorkspace() {
   });
   const [activatingAssetId, setActivatingAssetId] = React.useState<string | null>(null);
   const [pendingBillingAsset, setPendingBillingAsset] = React.useState<EstateManagedAsset | null>(null);
+  const [scheduleAsset, setScheduleAsset] = React.useState<EstateManagedAsset | null>(null);
+  const [scheduleAmount, setScheduleAmount] = React.useState('');
+  const [scheduleDate, setScheduleDate] = React.useState('');
+  const [scheduleEnabled, setScheduleEnabled] = React.useState(true);
+  const [savingSchedule, setSavingSchedule] = React.useState(false);
+  const [runningBilling, setRunningBilling] = React.useState(false);
   const [penaltyAsset, setPenaltyAsset] = React.useState<EstateManagedAsset | null>(null);
   const [penaltyMethod, setPenaltyMethod] = React.useState('None');
   const [gracePeriodDays, setGracePeriodDays] = React.useState('0');
@@ -167,6 +173,50 @@ export function BillingServiceChargeWorkspace() {
     }
   };
 
+  const openSchedule = (asset: EstateManagedAsset) => {
+    setScheduleAsset(asset);
+    setScheduleAmount(String(asset.externalMonthlyRent ?? asset.externalListingPrice ?? ''));
+    setScheduleDate(asset.nextRentBillingDate?.slice(0, 10) || '');
+    setScheduleEnabled(asset.autoGenerateRentInvoices);
+  };
+
+  const saveSchedule = async () => {
+    if (!scheduleAsset) return;
+    const amount = Number(scheduleAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || !scheduleDate) {
+      toast.error('Enter a positive monthly rent and the next billing date.');
+      return;
+    }
+    setSavingSchedule(true);
+    try {
+      const result = await estatePropertyManagementService.updateRentSchedule(scheduleAsset.id, {
+        monthlyRent: amount,
+        nextBillingDate: scheduleDate,
+        enabled: scheduleEnabled,
+      });
+      toast.success(result.message);
+      setScheduleAsset(null);
+      await loadAssets(page);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to save the billing schedule.');
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
+  const runDueBilling = async () => {
+    setRunningBilling(true);
+    try {
+      const result = await estatePropertyManagementService.runRecurringBilling();
+      toast.success(`${result.groundRentInvoices} ground rent and ${result.rentInvoices} rent invoice(s) processed${result.failures ? `; ${result.failures} need attention` : ''}.`);
+      await Promise.all([loadAssets(page), loadSupportingData()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to run due billing.');
+    } finally {
+      setRunningBilling(false);
+    }
+  };
+
   const openPenaltyTerms = (asset: EstateManagedAsset) => {
     setPenaltyAsset(asset);
     setPenaltyMethod(asset.rentPenaltyMethod || 'None');
@@ -236,7 +286,13 @@ export function BillingServiceChargeWorkspace() {
                 Billing readiness board for rent, ground rent, service charge, deposits, arrears, and Finance AR handoff references. This screen does not duplicate Finance AR ledgers.
               </CardDescription>
             </div>
-            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void Promise.all([loadAssets(page), loadSupportingData()])}><RefreshCw className="h-4 w-4" /></Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" disabled={runningBilling} onClick={() => void runDueBilling()}>
+                {runningBilling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlayCircle className="mr-2 h-4 w-4" />}
+                Run due billing
+              </Button>
+              <Button type="button" variant="outline" size="icon" title="Refresh billing records" disabled={isLoading} onClick={() => void Promise.all([loadAssets(page), loadSupportingData()])}><RefreshCw className="h-4 w-4" /></Button>
+            </div>
           </div>
           <form className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_auto]" onSubmit={(event) => { event.preventDefault(); setPage(1); setSearch(searchDraft.trim()); }}>
             <div className="relative">
@@ -277,12 +333,12 @@ export function BillingServiceChargeWorkspace() {
                         <TableCell><div className="font-medium">{asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(asset)}</div></TableCell>
                         <TableCell>{occupantName(asset)}</TableCell>
                         <TableCell><Badge variant="secondary">{estateAssetStatusLabels[asset.status]}</Badge></TableCell>
-                        <TableCell>{land ? `Ground rent ${formatEstateMoney(account?.amountPerPeriod ?? asset.groundRentPayable, account?.currencyCode || asset.currency || 'GHS')}` : <div><div>{rentalCharge(asset)}</div><div className="mt-1 text-xs text-muted-foreground">{asset.rentPenaltyMethod && asset.rentPenaltyMethod !== 'None' ? `${asset.rentPenaltyMethod} penalty after ${asset.rentGracePeriodDays} day${asset.rentGracePeriodDays === 1 ? '' : 's'}` : 'No late-payment penalty configured'}</div></div>}</TableCell>
-                        <TableCell>{rentBillingActive ? <Badge variant="secondary">Active</Badge> : ready ? <Badge>Ready</Badge> : <Badge variant="outline">{account?.invoiceHoldReason || 'Needs setup / hold'}</Badge>}</TableCell>
-                        <TableCell>{formatEstateDate(account?.nextDueDate || asset.nextRentBillingDate || asset.rightOfEntryDate || asset.dateOfTenancy)}</TableCell>
+                        <TableCell>{land ? `Ground rent ${formatEstateMoney(account?.amountPerPeriod ?? asset.groundRentPayable, account?.currencyCode || asset.currency || 'GHS')}` : <div><div>{rentalCharge(asset)}</div>{asset.externalGroundRentRequired || account ? <div className="mt-1 text-xs">Ground rent: {account ? formatEstateMoney(account.amountPerPeriod, account.currencyCode) : 'Setup needed'}</div> : null}<div className="mt-1 text-xs text-muted-foreground">{asset.rentPenaltyMethod && asset.rentPenaltyMethod !== 'None' ? `${asset.rentPenaltyMethod} penalty after ${asset.rentGracePeriodDays} day${asset.rentGracePeriodDays === 1 ? '' : 's'}` : 'No late-payment penalty configured'}</div></div>}</TableCell>
+                        <TableCell>{rentBillingActive ? <Badge variant="secondary">{asset.autoGenerateRentInvoices ? 'Active' : 'Paused'}</Badge> : ready ? <Badge>Ready</Badge> : <Badge variant="outline">{account?.invoiceHoldReason || 'Needs setup / hold'}</Badge>}</TableCell>
+                        <TableCell>{!land && account ? <div><div>Rent: {formatEstateDate(asset.nextRentBillingDate)}</div><div className="text-xs text-muted-foreground">Ground: {formatEstateDate(account.nextDueDate)}</div></div> : formatEstateDate(account?.nextDueDate || asset.nextRentBillingDate || asset.rightOfEntryDate || asset.dateOfTenancy)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            {land ? (
+                            {land || asset.externalGroundRentRequired || account ? (
                               <Button asChild size="sm" variant="outline"><Link href={`/estate/property-management/EstatePropertyManagementGroundRent?assetId=${encodeURIComponent(asset.id)}`}>Ground rent</Link></Button>
                             ) : null}
                             {!land && ready && !rentBillingActive ? (
@@ -299,6 +355,11 @@ export function BillingServiceChargeWorkspace() {
                             {rentBillingActive && asset.lastRentInvoiceId ? (
                               <Button asChild size="sm" variant="outline">
                                 <Link href={`/finance/ar/invoices/${encodeURIComponent(asset.lastRentInvoiceId)}`}>{asset.lastRentInvoiceNumber || 'View invoice'}</Link>
+                              </Button>
+                            ) : null}
+                            {rentBillingActive ? (
+                              <Button type="button" size="sm" variant="outline" onClick={() => openSchedule(asset)}>
+                                <Settings2 className="mr-1 h-3.5 w-3.5" /> Schedule
                               </Button>
                             ) : null}
                             {!land ? (
@@ -332,6 +393,35 @@ export function BillingServiceChargeWorkspace() {
           {!isLoading && !loadError && displayedBillableAssets.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No billing records found.</div> : null}
         </CardContent>
       </Card>
+
+      <Dialog open={scheduleAsset !== null} onOpenChange={(open) => !open && setScheduleAsset(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Monthly rent schedule</DialogTitle>
+            <DialogDescription>{scheduleAsset?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="rent-schedule-amount">Monthly rent</Label>
+              <Input id="rent-schedule-amount" type="number" min="0.01" step="0.01" value={scheduleAmount} onChange={(event) => setScheduleAmount(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="rent-schedule-date">Next billing date</Label>
+              <Input id="rent-schedule-date" type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={scheduleEnabled} onChange={(event) => setScheduleEnabled(event.target.checked)} />
+              Generate monthly invoices automatically
+            </label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setScheduleAsset(null)}>Cancel</Button>
+            <Button type="button" disabled={savingSchedule} onClick={() => void saveSchedule()}>
+              {savingSchedule ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmationDialog
         open={pendingBillingAsset !== null}

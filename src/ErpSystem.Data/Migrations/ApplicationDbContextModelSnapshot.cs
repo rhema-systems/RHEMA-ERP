@@ -5582,7 +5582,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("GroundRentIncomeAccountId");
 
                     b.HasIndex("TenantId", "EstateManagedAssetId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Status] <> 'Closed' AND [IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "CustomerBusinessPartnerId", "Status");
 

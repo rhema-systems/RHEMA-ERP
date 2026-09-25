@@ -6,7 +6,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 {
     private static readonly LegalProcedureCatalogItem[] Procedures =
     [
-        new("Legal Department Procedure Manual", "LegalProcedure", "Source: Legal - Procedure Manual", "General legal intake, review, drafting, approval, execution, and record keeping through configured workflows.", "BookOpen", 6, "slate"),
+        new("General Legal Matters", "LegalProcedure", "Legal", "General legal intake, review, drafting, approval, execution, and record keeping.", "BookOpen", 6, "slate"),
         new("Property Agreement Reviews", "LegalPropertyAgreementReview", "Source: Estate / Property Management -> Legal", "Draft rental, lease, and sale agreements received from Property Management for legal vetting, correction, approval, and controlled release.", "FileCheck2", 3, "emerald"),
         new("Legal Opinions / Advisory", "LegalOpinionAdvisory", "Source: Legal - Advisory / Opinion Requests", "Legal opinion requests, issue summaries, research notes, advice memos, confidentiality, approvals, and closure routed through configured workflows.", "MessageSquare", 5, "indigo"),
         new("External Counsel Management", "LegalExternalCounsel", "Source: Legal - External Counsel / Law Firm Oversight", "External counsel instructions, retainers, matter assignment, fees, performance, invoices, and closeout routed through configured workflows.", "Briefcase", 5, "zinc"),
@@ -297,6 +297,8 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             Field("sourceDepartment", "Source department", "select", ["Estate", "Property Management", "Finance", "Managing Director", "External Party", "Court / Registry", "Other"]),
             Field("propertyFileReference", "Property file reference", "text"),
             Field("propertyNumber", "Property / plot / house number", "text"),
+            Field("estateManagedAssetId", "Linked property ID", "text"),
+            Field("customerBusinessPartnerId", "Applicant customer ID", "text"),
             Field("applicantName", "Applicant / lessee / client name", "text"),
             Field("receivedDate", "Received date", "date"),
             Field("assignedLegalOfficer", "Assigned Legal Officer", "text"),

@@ -151,6 +151,7 @@ interface CreateCasePayload {
   receivedDate?: string;
   description?: string;
   fieldValues?: Record<string, string | null>;
+  hasIntakeAttachment?: boolean;
 }
 
 class ProcedureCaseService {

@@ -1926,6 +1926,7 @@ public sealed class DocumentManagementController : ControllerBase
     public async Task<IActionResult> GetRecords(
         [FromQuery] string? module = null,
         [FromQuery] string? documentReference = null,
+        [FromQuery] string? search = null,
         [FromQuery] int take = 100,
         CancellationToken cancellationToken = default)
     {
@@ -1944,6 +1945,12 @@ public sealed class DocumentManagementController : ControllerBase
         {
             var reference = documentReference.Trim();
             query = query.Where(item => item.DocumentReference == reference);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(item => item.DocumentReference.Contains(term) || item.Title.Contains(term));
         }
 
         var records = await LoadViewableRecordsAsync(tenantId, query, take, cancellationToken);
@@ -2058,6 +2065,42 @@ public sealed class DocumentManagementController : ControllerBase
         }).ToList();
 
         return Ok(new { success = true, data = queueItems });
+    }
+
+    [HttpPost("records/{id:guid}/attach-to-case")]
+    public async Task<IActionResult> AttachRecordToCase(
+        Guid id,
+        [FromBody] AttachCentralDocumentToProcedureCaseRequest request,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var record = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (record is null)
+        {
+            return NotFound(new { success = false, message = "DMS document record was not found." });
+        }
+        if (!await CanViewRecordAsync(tenantId, record, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            var procedureCase = await _procedureCaseService.LinkCentralDocumentAsync(request.CaseId, request.DocumentId, id);
+            return procedureCase is null
+                ? NotFound(new { success = false, message = "Case document was not found." })
+                : Ok(new { success = true, data = procedureCase });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
     }
 
     [HttpGet("records/{id:guid}")]

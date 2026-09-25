@@ -1,9 +1,8 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, BarChart3, FileText, Loader2, Settings } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -111,41 +110,16 @@ export default function LegalProcedureWorkspacePage() {
           <ArrowLeft className="h-4 w-4" />
           Back to Legal
         </Button>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-2">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
-                {procedure.title}
-              </h1>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link href={`/administration/workflow?entityType=${encodeURIComponent(procedure.entityType)}`}>
-                <Settings className="mr-2 h-4 w-4" />
-                Workflow setup
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link href={`/document-management?module=Legal&entityType=${encodeURIComponent(procedure.entityType)}`}>
-                <FileText className="mr-2 h-4 w-4" />
-                DMS
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/reports?module=legal">
-                <BarChart3 className="mr-2 h-4 w-4" />
-                Reports
-              </Link>
-            </Button>
-          </div>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
+          {procedure.title}
+        </h1>
       </div>
 
       <ProcedureCaseWorkspace
         module="Legal"
         entityType={procedure.entityType}
         defaultTitle={procedure.title}
+        intakeFields={workspace.intakeFields}
         workspaceType="Legal Matter"
         registerOnly
         caseBasePath={`/legal/${encodeURIComponent(procedure.entityType)}`}

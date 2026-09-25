@@ -2,8 +2,10 @@ using ErpSystem.Api.Services.Notifications;
 using System.Globalization;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -12,6 +14,7 @@ using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace ErpSystem.Api.Controllers.Estate;
 
@@ -26,6 +29,13 @@ public sealed class PropertyManagementArBillingController : ControllerBase
     private readonly INotificationService _notificationService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ApplicationDbContext _db;
+
+    [HttpPost("recurring/run")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Property Officer,Finance Officer")]
+    public async Task<ActionResult<ErpSystem.Api.Services.Estate.EstateRecurringBillingResult>> RunRecurringBilling(
+        [FromServices] ErpSystem.Api.Services.Estate.EstateRecurringBillingService runner,
+        CancellationToken cancellationToken)
+        => Ok(await runner.RunForTenantAsync(GetTenantId(), cancellationToken));
 
     public PropertyManagementArBillingController(
         IInvoiceService invoiceService,
@@ -219,7 +229,16 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         {
             var periodEnd = billingStart.AddMonths(1).AddDays(-1);
             var reference = BuildRentInvoiceReference(asset.AssetCode, billingStart);
-            invoice = await _invoiceService.CreateAsync(
+            var existingInvoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && !item.IsDeleted
+                && item.BusinessPartnerId == asset.CustomerBusinessPartnerId.Value
+                && item.Reference == reference, cancellationToken);
+            if (existingInvoice?.Status == InvoiceStatus.Cancelled)
+                throw new InvalidOperationException("The first rent invoice was cancelled; Finance must resolve it before billing activation.");
+            invoice = existingInvoice is not null
+                ? await _invoiceService.GetByIdAsync(existingInvoice.Id, cancellationToken)
+                    ?? throw new InvalidOperationException("The existing rent invoice could not be loaded.")
+                : await _invoiceService.CreateAsync(
                 new InvoiceCreateDto
                 {
                     CustomerId = asset.CustomerBusinessPartnerId.Value,
@@ -261,9 +280,21 @@ public sealed class PropertyManagementArBillingController : ControllerBase
 
         if (invoice is not null)
         {
+            try
+            {
+                invoice = await _invoiceService.SendInvoiceAsync(invoice.Id, cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                // Keep Finance approval in control when direct release is not allowed.
+            }
+        }
+
+        if (invoice is not null)
+        {
             await NotifyBillingResultAsync(
                 "Rent billing activated",
-                $"Finance AR draft invoice {invoice.InvoiceNumber} was created for {asset.AssetCode}.",
+                $"Finance AR invoice {invoice.InvoiceNumber} was created for {asset.AssetCode}.",
                 "estate.property-management.rent-billing-activated",
                 "Invoice",
                 invoice.Id,
@@ -287,7 +318,46 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             invoice?.InvoiceNumber,
             invoice is null
                 ? $"Rent billing was activated. The first invoice is scheduled for {billingStart:yyyy-MM-dd}."
-                : $"Rent billing was activated and Finance AR draft {invoice.InvoiceNumber} was created."));
+                : $"Rent billing was activated and Finance AR invoice {invoice.InvoiceNumber} was created."));
+    }
+
+    [HttpPut("rent/{assetId:guid}/schedule")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Property Officer")]
+    public async Task<IActionResult> UpdateRentSchedule(
+        Guid assetId,
+        [FromBody] UpdateEstateRentScheduleRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.MonthlyRent <= 0m)
+            throw new InvalidOperationException("Monthly rent must be greater than zero.");
+        if (request.NextBillingDate.Date < DateTime.UtcNow.Date)
+            throw new InvalidOperationException("The next billing date cannot be in the past.");
+
+        var asset = await _db.EstateManagedAssets.FirstOrDefaultAsync(item =>
+            item.Id == assetId && item.TenantId == GetTenantId() && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("The property or unit was not found.");
+        if (asset.AssetType == EstateManagedAssetType.Land
+            || asset.ExternalListingType?.Contains("Lease", StringComparison.OrdinalIgnoreCase) == true
+            || !asset.RentBillingActivatedAt.HasValue)
+            throw new InvalidOperationException("Activate monthly rental billing before adjusting its schedule.");
+        var billingStart = (asset.RightOfEntryDate ?? asset.DateOfTenancy)?.Date;
+        if (billingStart.HasValue && request.NextBillingDate.Date < billingStart.Value)
+            throw new InvalidOperationException("The next billing date cannot precede the tenancy start date.");
+
+        var reference = BuildRentInvoiceReference(asset.AssetCode, request.NextBillingDate.Date);
+        if (await _db.Invoices.AsNoTracking().AnyAsync(item =>
+            item.TenantId == asset.TenantId && !item.IsDeleted && item.Reference == reference
+            && item.BusinessPartnerId == asset.CustomerBusinessPartnerId, cancellationToken))
+            throw new InvalidOperationException("An invoice already exists for that rental month. Select a later billing month.");
+
+        asset.ExternalMonthlyRent = request.MonthlyRent;
+        asset.NextRentBillingDate = request.NextBillingDate.Date;
+        asset.AutoGenerateRentInvoices = request.Enabled;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = User.Identity?.Name ?? "System";
+        asset.LastModifiedById = GetUserId();
+        await _db.SaveChangesAsync(cancellationToken);
+        return Ok(new { message = "Monthly rent schedule updated." });
     }
 
     [HttpPut("rent/{assetId:guid}/penalty-terms")]
@@ -570,6 +640,20 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         }
         if (!string.Equals(FieldValue(fields, "legalConveyanceStatus"), "Completed by Legal", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Legal must complete conveyance and registration before ownership transfer.");
+        var legalCaseIds = await _db.ProcedureCaseFields.AsNoTracking()
+            .Where(field => field.TenantId == GetTenantId()
+                && !field.IsDeleted
+                && field.Key == "sourceProcedureCaseId"
+                && field.Value == sourceCase.Id.ToString())
+            .Select(field => field.ProcedureCaseId)
+            .ToListAsync(cancellationToken);
+        if (!await _db.ProcedureCases.AsNoTracking().AnyAsync(item =>
+                item.TenantId == GetTenantId()
+                && !item.IsDeleted
+                && legalCaseIds.Contains(item.Id)
+                && item.EntityType == "LegalTransfer"
+                && item.Status == "Completed", cancellationToken))
+            throw new InvalidOperationException("The linked Legal conveyance case must be completed before ownership transfer.");
         if (!Guid.TryParse(FieldValue(fields, "sourceReference"), out var customerId))
             throw new InvalidOperationException("The purchaser customer reference is missing.");
 
@@ -584,6 +668,15 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             cancellationToken)
             ?? throw new InvalidOperationException("The property asset linked to the sale was not found.");
 
+        if (asset.Status == EstateManagedAssetStatus.Sold)
+        {
+            if (asset.CustomerBusinessPartnerId != customerId)
+                throw new InvalidOperationException("This property is already sold to another customer.");
+            return Ok(new EstateSaleCompletionResult(
+                asset.Id, asset.AssetCode, customerId, invoice?.Id, invoice?.InvoiceNumber,
+                "Ownership transfer was already completed."));
+        }
+
         var now = DateTime.UtcNow;
         var agreementReference = FieldValue(fields, "finalSignedAgreementReference") ?? FieldValue(fields, "generatedAgreementReference");
         var agreementDate = await ResolveSaleAgreementDateAsync(
@@ -591,6 +684,24 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             sourceCase.Id,
             agreementReference,
             cancellationToken) ?? now;
+        var ownerHistory = string.IsNullOrWhiteSpace(asset.OwnershipHistoryJson)
+            ? new List<ExistingLandOwnerDto>()
+            : JsonSerializer.Deserialize<List<ExistingLandOwnerDto>>(asset.OwnershipHistoryJson) ?? [];
+        foreach (var owner in ownerHistory.Where(item => item.IsCurrentOwner))
+        {
+            owner.IsCurrentOwner = false;
+            owner.OwnershipEndDate = agreementDate.Date;
+        }
+        ownerHistory.Add(new ExistingLandOwnerDto
+        {
+            OwnerName = FieldValue(fields, "customerName") ?? sourceCase.ApplicantName ?? string.Empty,
+            OwnershipType = "Sale purchaser",
+            InterestHeld = "Ownership interest",
+            OwnershipStartDate = agreementDate.Date,
+            OwnershipPercentage = 100m,
+            IsCurrentOwner = true
+        });
+        asset.OwnershipHistoryJson = JsonSerializer.Serialize(ownerHistory);
         asset.Status = EstateManagedAssetStatus.Sold;
         asset.CustomerBusinessPartnerId = customerId;
         asset.LesseeName = FieldValue(fields, "customerName") ?? sourceCase.ApplicantName;
@@ -1695,6 +1806,8 @@ public sealed record UpdateEstateRentPenaltyTermsRequest(
     string PenaltyMethod,
     decimal PenaltyValue,
     decimal? PenaltyCapAmount);
+
+public sealed record UpdateEstateRentScheduleRequest(decimal MonthlyRent, DateTime NextBillingDate, bool Enabled);
 
 public sealed record EstateRentPenaltyTermsResult(
     Guid AssetId,
