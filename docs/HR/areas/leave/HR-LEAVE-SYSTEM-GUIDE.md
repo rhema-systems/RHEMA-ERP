@@ -12,8 +12,10 @@ show what the code can do, that is said in the step rather than smoothed over.
 **is being built lane by lane.** Lane E, leave plans, landed 2026-09-25. Chapter 12, § 19.5, the
 reliever note in § 1.5 and § 23 (L-49 to L-54) describe it. Lane F, the calendar for one employee,
 landed the same day; chapter 9 describes it. Lane D (cancel, recall, coming back) landed that evening;
-chapter 7, § 19.4 and § 23 (L-55 to L-57) describe it. The other chapters still describe the module
-before round 5.
+chapter 7, § 19.4 and § 23 (L-55 to L-57) describe it. Lane A (every leave type has a kind:
+Annual, Maternity or Other) landed after it; chapter 4's new section on the kind, § 7.6, chapters 12,
+15 and 16, and § 23 (L-58 to L-60) describe it. The other chapters still describe the module before
+round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
@@ -1064,6 +1066,49 @@ an edit form.
 **allowances that go into the encashment rate** — which is to say, what a day of encashed leave is
 actually worth. Neither had any control anywhere before.
 
+### 👁 The kind — Annual, Maternity or Other *(round 5, lane A, 2026-09-25)*
+
+**Every leave type now has a kind**, and the create / edit form asks for it first, as three cards,
+each saying what choosing it drives:
+
+| Kind | What it drives |
+|---|---|
+| **Annual leave** | Only annual leave can be **planned** (chapter 12) or **cashed in** while employed (chapter 15). The compliance register (chapter 16) and the September reminder read it, and it is the balance on the portal's home page. ⚠ **Only one active leave type may be Annual** |
+| **Maternity leave** | **No notice rule**, whatever the type's own notice says, because a birth can come early. The approver **confirms or rejects** it and never suggests other dates or moves it (chapter 7). The certificate is the type's medical-evidence setting: TDC's *Maternity Leave* requires it from the first day, with no medical board (§ 23, L-58) |
+| **Other** | Everything else. One number up front, **Days per year (the limit)**, and the request forms read *Limit 5 · 2 used · 1 waiting · 2 left* instead of the balance panel |
+
+The kind replaced the old *Mandatory annual leave* tick, which only ever meant "this is the annual
+leave". **The register** badges the Annual and Maternity types beside their names, and the
+**Overview** tab has a **Kind** row.
+
+**The form then shows what the kind needs, and puts the rest under *Advanced settings*, closed:**
+
+- **Annual:** entitlement (days and max), the service gate and notice, counting, carry-over,
+  encashment, approval and cover. *Advanced:* medical evidence and sub-types.
+- **Maternity:** the length (days and max), counting, medical evidence, a note on the statutory
+  extensions, approval and cover. *Advanced:* notice (ignored for this kind), the service gate,
+  carry-over, encashment and sub-types.
+- **Other:** the limit, notice, counting, medical evidence, approval and cover. *Advanced:* a hard
+  cap, the service gate, carry-over, encashment and sub-types. The hard cap is raised to the limit
+  when it is lower, because *Max days* only ever lowers the allowance (§ 23, L-39).
+
+⚠ **Advanced opens itself when a field inside it fails**, so a refusal is never hidden under a closed
+section.
+
+**The one-Annual rule is kept at both doors.** Saving a second active type as Annual is refused with
+*"'Annual Leave' is already this organisation's annual leave, and there can only be one. Make this a
+different kind, or retire the other first."* So is switching an Annual type back on while another is
+active. A switched-off type may be made Annual, because it takes nobody's place.
+
+⚠ **A save that does not say the kind leaves it alone.** An older screen or script echoing a type
+back without `category` cannot turn Annual Leave into Other. That is the L-13 shape (§ 4.4.4), closed
+before it could happen.
+
+> **Say this:** "The system used to treat annual leave specially only because of how its settings
+> happened to be filled in. Now annual leave is a kind, and there is one of it. Plans, cashing in and
+> the compliance list all ask the same question — is this the annual leave? — and get the same
+> answer."
+
 ### 👁 On the page — the register
 
 **Header.** Title *Leave Types*, subtitle *Kinds of leave, their entitlement and their rules.*
@@ -1348,8 +1393,8 @@ soft delete does not release a unique index"*.
 ⚠ **Corrected 2026-09-25 — not all of these are fully honoured.** A full audit that read each
 consumer, rather than counting references, found: *minimum notice* and *requires a reliever* are
 skipped by save-as-draft-then-submit; *carry-over expiry* also removes carried days already used;
-*forfeit unused after* affects no leave-taking; *mandatory annual leave* only feeds the compliance
-list and one reminder; *allow cash conversion* and the three rate settings bind in service only (the
+*forfeit unused after* affects no leave-taking; *mandatory annual leave* only fed the compliance
+list and one reminder (replaced by the Annual kind, round 5 lane A); *allow cash conversion* and the three rate settings bind in service only (the
 exit settlement ignores them); *max days* only ever lowers the entitlement; *has sub-types* only
 blocks creating one; the gender qualifier cannot be set from the Eligibility tab; and every accrual
 frequency falls one period short within the year — *annual* accrues nothing. Each is in § 23 as
@@ -1358,7 +1403,7 @@ L-38 to L-48. The paragraph below is the 2026-09-18 reading.
 So that this section is not read as a list of everything being broken: **twenty-one settings were
 traced and are fully honoured.** Minimum notice · Requires approval · Requires a reliever · Min
 service to access · Allow carry-over and its cap · Carry-over expiry · Forfeit unused after ·
-Mandatory annual leave · Count weekends · Count holidays · Allow cash conversion · the three
+Mandatory annual leave *(now the Annual kind)* · Count weekends · Count holidays · Allow cash conversion · the three
 encashment rate settings · Default days · Max days *(as a ceiling on everything below it)* · Has
 sub-types · all four eligibility rule types, including the gender qualifier that ANDs onto an
 org-scoped rule · accrual frequency, mode, rate, min-service and pro-rate-on-join · allocation
@@ -1874,6 +1919,14 @@ Worth reading once before you perform chapter 7, because the buttons only make s
 | Approved *or in progress* | **Recall** | unchanged, but **shorter** | **HR or the employee's line manager** *(round 5)*: never the employee, not even an HR user recalling themselves |
 | Approved *or in progress* | **I'm back at work** *(portal, round 5)* | unchanged; the return is waiting to be confirmed | the employee only |
 | Approved *or in progress* | **Confirm return** *(round 5)* | Completed; shorter if early, overstay recorded if late | HR or the line manager, never the employee |
+
+⚠ **Maternity leave has two of those acts fewer** *(round 5, lane A)*. Its dates follow the birth,
+so *Send back with dates* and *Move dates* are refused for it, with *"Maternity leave cannot be sent
+back with other dates: its dates follow the birth. Confirm it, or reject it if the certificate is
+missing or invalid. If the dates are wrong, cancel it and raise it again."* Both buttons are hidden on
+the request page and in the portal. Approve and Reject work as for any other leave, and so does
+everything from *Recall* down. It also skips the minimum-notice rule, and on TDC's type it cannot be
+submitted without the certificate, from the first day.
 
 ⚠ **Two of those re-enter approval, and that is the point.** Answering a suggestion re-submits on
 the settled dates. Moving an approved request **re-opens its approval** — because an approval is an
@@ -2719,6 +2772,14 @@ days are deducted. It is the answer to the question every head of department ask
 is going to be away, and when?* — and, since the closure build, **a plan can now become the actual
 request** rather than dead-ending.
 
+⚠ **Plans are for annual leave only** *(round 5, lane A)*. The plan form offers the one leave type
+whose kind is Annual (chapter 4), and the service refuses a plan, or an edit, of any other kind:
+*"Leave plans are for annual leave, and 'Sick Leave' is not. Other kinds of leave are requested when
+they are needed."* A plan of another kind made before this is left as it was, but cannot be edited
+until it is moved onto annual leave. ⚠ **The request raised from a plan is not held to the plan's
+kind**: its type is pre-filled and stays editable, and *matches the approved plan* compares dates
+only (§ 23, L-59, open).
+
 ### 👁 On the page
 
 **A year selector** above the table.
@@ -3089,6 +3150,12 @@ It is asked **before** the leave type's own *Allow cash conversion* flag on purp
 the route closed should be told the route is closed, not sent off to change a flag that would make no
 difference. **This demo database has it on**; a brand-new one does not.
 
+⚠ **And a sixth, asked second** *(round 5, lane A)*: **only annual leave is cashed in while employed.**
+Sick, casual or compassionate days are not a reserve of money, whatever a flag on their type says, so
+any other kind is refused before the type's own flag is read: *"Only annual leave can be cashed in,
+and 'Casual Leave' is not annual leave."* Round 5 lane L switches in-service encashment off on the
+demo tenant (decision A3); a leaver's settlement is where leave becomes money.
+
 ### 👁 On the page
 
 **Filters:** Year · Status.
@@ -3184,8 +3251,9 @@ policy. The caller cannot assert it.
 
 ### 📖 What it is
 
-Employees who have not taken the leave they are required to take. Driven by the
-`MandatoryAnnualLeave` flag on a leave type.
+Employees who have not taken the leave they are required to take. Driven by the leave type whose
+**kind** is Annual (chapter 4; round 5, lane A). It was a *Mandatory annual leave* tick, which any
+number of types could carry; a company now has one annual leave type, so the register has one answer.
 
 ### 👁 On the page
 
@@ -3212,9 +3280,10 @@ how a list stops being used.
 
 **1 — Arrive on this year.** Rows, mostly **Outstanding**.
 
-> "Only one leave type is flagged as mandatory in our configuration, and it is annual leave.
+> "This list follows annual leave, and the system knows which leave that is: it is the one leave type
+> whose kind is Annual, and there can only be one.
 >
-> That flag is not administrative tidiness. In most of the world an employer is required to ensure
+> The list is not administrative tidiness. In most of the world an employer is required to ensure
 > annual leave is actually taken, and 'the employee didn't ask' is not a defence. It is also good
 > practice for another reason entirely — the person who never takes leave is a fraud risk, because
 > nobody else has ever done their job."
@@ -3819,7 +3888,8 @@ nobody promises a stakeholder a button.
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
 **Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
-lane D closed three more, **L-55 to L-57**. Both blocks are listed after the settings audit.
+lane D closed three more, **L-55 to L-57**; lane A closed one and opened two, **L-58 to L-60**. All
+three blocks are listed after the settings audit.
 
 ### ✅ Closed
 
@@ -3905,9 +3975,10 @@ the round 5 plan, whose lane is named in the last column; the plain-terms accoun
 
 **On the demo database, the same audit found:** *Leave of Absence (Unpaid)* and *Occupational Injury
 Leave* cannot be booked (L-39); Sick Leave's description promises a certificate rule that is switched
-off; Maternity's 30-day notice would refuse a premature birth; and the holiday calendar is the 2019
-list — 4 August as Founders' Day, no 1 July, no Shaqq Day — where the 2025 amendment restored 1 July,
-moved Founders' Day to 21 September and added Shaqq Day. All four are round 5 lane N4.
+off; Maternity's 30-day notice would refuse a premature birth *(closed by lane A: the Maternity kind
+ignores notice)*; and the holiday calendar is the 2019 list — 4 August as Founders' Day, no 1 July,
+no Shaqq Day — where the 2025 amendment restored 1 July, moved Founders' Day to 21 September and
+added Shaqq Day. The other three are round 5 lane N4.
 
 ### ✅ Round 5 lane E — leave plans, 2026-09-25 — six found and closed
 
@@ -3933,6 +4004,17 @@ the round 5 plan's § 8.
 | **L-55** | ch. 7 | ⚠ **A cancelled request could be approved back to life.** Cancelling a pending request left its approval live in the approver's queue. Approve and reject checked no status, and the generic workflow recall applies the status adapter directly, so a stale approval could turn a cancelled request Approved, or Draft. Every request cancelled while pending before 2026-09-25 carries such an approval | Cancelling withdraws the approval; approve and reject refuse anything not Pending, with a sentence; the status adapter never moves a cancelled or closed request |
 | **L-56** | ch. 7, 19.4 | The employee could cancel approved leave, even while on it; the desk could cancel at any stage, with no reason | The employee until approval; HR up to and including the first day, with a reason; after that, Recall |
 | **L-57** | ch. 7 | Nothing recorded that anyone came back: closing was a desk action with no day back, no early return and no overstay. Recall was HR's alone, and the line manager who needs someone back could not even open their request | *I'm back at work* and *Confirm return*; recall and confirmation by the supervisor or head of department; a read arm for them |
+
+### Round 5 lane A — leave kinds, 2026-09-25 — one found and closed, two open
+
+Proved by `dev-harness/hr-leave/run-round5-a.mjs` (79 assertions, green twice). The build record is
+the round 5 plan's § 8.
+
+| # | Where | Finding | Closed by |
+|---|---|---|---|
+| **L-58** | ch. 4, 7 | ⚠ **Switching maternity's certificate on, as planned, would have sent new mothers to a medical board.** The certificate switch also arms the board rule, whose default is 90 days a year, and the statutory extension on top of 84 days makes 98. On the demo database *Maternity Leave* had the certificate off, three days on the employee's word, and a board at 90 | *Maternity Leave* set, through HR's own save, to certificate on, 0 days, **no board**. The seeder sets the same for a fresh build, and the form's Maternity section says so. The suite proves both positions on its own maternity type |
+| **L-59** | ch. 6, 12 | A request raised from a plan is not held to the plan's kind. The new-request page pre-fills the plan's leave type and leaves it editable, and *matches the approved plan* compares dates only, so a sick-leave request on an annual plan's dates would carry the badge | **Open.** A rule to decide: hold the request to the plan's kind, or drop the badge when the kinds differ. Either way the lane E suite's plan-linked requests move onto annual leave, whose twelve-month service gate a fixture must then pass |
+| **L-60** | ch. 19 | The portal home reads balances by **calendar** year, not the leave year: a site the entitlement plan's C1 sweep missed. Invisible on a January tenant | **Open** — round 5 lane J, which reworks the balances view |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 

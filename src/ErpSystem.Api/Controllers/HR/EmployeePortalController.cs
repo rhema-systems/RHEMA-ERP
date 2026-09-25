@@ -237,6 +237,7 @@ public class EmployeePortalController : ControllerBase
             {
                 LeaveTypeId   = b.LeaveTypeId,
                 LeaveTypeName = b.LeaveTypeName,
+                LeaveTypeCategory = b.LeaveTypeCategory,
                 AvailableDays = b.AvailableDays,
                 UsedDays      = b.UsedDays,
                 PendingDays   = b.PendingDays,

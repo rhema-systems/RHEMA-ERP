@@ -26,6 +26,38 @@ export const LEAVE_YEAR_END_BASIS_OPTIONS: { value: LeaveYearEndBasis; label: st
   { value: 'Earned', label: 'What they actually earned' },
 ];
 
+/**
+ * What kind of leave a leave type is (round 5, decision A4). The kind decides which rules apply and
+ * what the leave-type form asks for. At most one ACTIVE type may be Annual.
+ */
+export type LeaveTypeCategory = 'Annual' | 'Maternity' | 'Other';
+
+export const LEAVE_TYPE_CATEGORY_OPTIONS: {
+  value: LeaveTypeCategory;
+  label: string;
+  /** What choosing it drives, said where the choice is made. */
+  drives: string;
+}[] = [
+  {
+    value: 'Annual',
+    label: 'Annual leave',
+    drives:
+      'Earned by service. Only annual leave can be planned or cashed in; the compliance register and the untaken-leave reminder read it, and it is the balance on the portal’s home page. Only one active leave type can be Annual.',
+  },
+  {
+    value: 'Maternity',
+    label: 'Maternity leave',
+    drives:
+      'Statutory (Labour Act s.57). No notice rule applies, because a birth can come early, and an approver confirms or rejects it but never moves its dates. Switch its medical certificate on, from the first day, with no board.',
+  },
+  {
+    value: 'Other',
+    label: 'Other',
+    drives:
+      'Everything else: sick, casual, compassionate, study. Each has a limit per year, shown to staff as “limit · used · left”, and HR can give fewer days by suggesting other dates.',
+  },
+];
+
 export const ENCASHMENT_RATE_BASIS_OPTIONS: { value: EncashmentRateBasis; label: string }[] = [
   { value: 'DerivedFromEmoluments', label: 'Derived from emoluments' },
   { value: 'Manual', label: 'Manual rate' },
@@ -107,7 +139,8 @@ export interface LeaveType {
    * months, and the derived per-period rate would deduct for them a third time.
    */
   proRateFirstYearEntitlement: boolean;
-  mandatoryAnnualLeave: boolean;
+  /** Annual, Maternity or Other (round 5, A4). Replaced mandatoryAnnualLeave. */
+  category: LeaveTypeCategory;
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
   encashmentWorkingDaysPerMonth: number;
@@ -165,7 +198,8 @@ export interface CreateLeaveTypeRequest {
    * months, and the derived per-period rate would deduct for them a third time.
    */
   proRateFirstYearEntitlement: boolean;
-  mandatoryAnnualLeave: boolean;
+  /** Omit to leave the kind unchanged on update; Other on create (round 5, A4). */
+  category?: LeaveTypeCategory | null;
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
   encashmentWorkingDaysPerMonth: number;

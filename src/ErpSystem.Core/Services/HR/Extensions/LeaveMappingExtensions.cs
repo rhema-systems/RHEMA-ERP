@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Enums;
 // ⚠ This file sits in ErpSystem.Application.Extensions, NOT under Services.HR, so LeaveYear
 // needs an explicit using — namespace lookup does not walk into an unrelated tree.
 using ErpSystem.Core.Services.HR;
@@ -37,7 +38,7 @@ namespace ErpSystem.Application.Extensions
             ForfeitUnusedAfterMonths = entity.ForfeitUnusedAfterMonths,
             YearEndBasis = entity.YearEndBasis,
             ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
-            MandatoryAnnualLeave = entity.MandatoryAnnualLeave,
+            Category = entity.Category,
             EncashmentRateBasis = entity.EncashmentRateBasis,
             EncashmentRatePerDay = entity.EncashmentRatePerDay,
             EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
@@ -70,7 +71,7 @@ namespace ErpSystem.Application.Extensions
             ForfeitUnusedAfterMonths = dto.ForfeitUnusedAfterMonths,
             YearEndBasis = dto.YearEndBasis,
             ProRateFirstYearEntitlement = dto.ProRateFirstYearEntitlement,
-            MandatoryAnnualLeave = dto.MandatoryAnnualLeave,
+            Category = dto.Category ?? LeaveTypeCategory.Other,
             EncashmentRateBasis = dto.EncashmentRateBasis,
             EncashmentRatePerDay = dto.EncashmentRatePerDay,
             EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth,
@@ -284,6 +285,8 @@ namespace ErpSystem.Application.Extensions
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             LeaveTypeId = entity.LeaveTypeId,
             LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            // Null when the read did not load the type: unknown, not Other.
+            LeaveTypeCategory = entity.LeaveType?.Category,
             IsPaidLeave = entity.LeaveType?.IsPaid ?? false,
             LeaveSubTypeId = entity.LeaveSubTypeId,
             LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
@@ -349,6 +352,7 @@ namespace ErpSystem.Application.Extensions
             OrganizationUnitName = entity.Employee?.OrganizationUnit?.Name,
             LeaveTypeId = entity.LeaveTypeId,
             LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            LeaveTypeCategory = entity.LeaveType?.Category,
             LeaveSubTypeId = entity.LeaveSubTypeId,
             LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
             Year = entity.Year,

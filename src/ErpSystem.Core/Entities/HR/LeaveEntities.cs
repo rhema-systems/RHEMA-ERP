@@ -114,10 +114,17 @@ public class LeaveType : TenantEntity
     public bool ProRateFirstYearEntitlement { get; set; }
 
     /// <summary>
-    /// Marks the leave type as mandatory-to-take within the year (force leave). Surfaced to HR
-    /// and used by the forfeiture routine.
+    /// What kind of leave this is: Annual, Maternity or Other (round 5, decision A4).
     /// </summary>
-    public bool MandatoryAnnualLeave { get; set; }
+    /// <remarks>
+    /// <para>Replaces <c>MandatoryAnnualLeave</c>, which only ever meant "this is the annual leave"
+    /// (the compliance register and the untaken-leave reminder were its only readers). The kind now
+    /// also drives the plans (annual only), in-service encashment (annual only), and maternity's
+    /// statutory rules (no notice, no moving the dates).</para>
+    ///
+    /// <para>⚠ At most one active Annual per tenant; <c>LeaveTypeService</c> refuses a second.</para>
+    /// </remarks>
+    public LeaveTypeCategory Category { get; set; } = LeaveTypeCategory.Other;
 
     // ===== ENCASHMENT RATE POLICY (Phase 4) =====
 

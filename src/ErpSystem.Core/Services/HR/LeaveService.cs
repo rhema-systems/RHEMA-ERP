@@ -153,6 +153,29 @@ public class LeaveService : ILeaveService
         return entity;
     }
 
+    /// <summary>
+    /// Maternity leave is confirmed or rejected, never moved (round 5, decision A4 / lane A3).
+    /// </summary>
+    /// <remarks>
+    /// Its dates follow the birth, which neither the approver nor the calendar decides. An approver
+    /// who thinks the certificate is missing or wrong rejects it, and the reason says so. Dates that
+    /// turn out wrong (a birth earlier than expected) are a cancel and a fresh request, or an HR
+    /// adjustment; the s.57 extensions for an abnormal or multiple birth are an adjustment too, with
+    /// the certificate attached.
+    /// </remarks>
+    private async Task RefuseMovingMaternityAsync(LeaveRequest request, string what)
+    {
+        var category = await _leaveTypeRepository.GetQueryable()
+            .Where(t => t.Id == request.LeaveTypeId)
+            .Select(t => t.Category)
+            .FirstOrDefaultAsync();
+
+        if (category == LeaveTypeCategory.Maternity)
+            throw new InvalidOperationException(
+                $"Maternity leave cannot be {what}: its dates follow the birth. Confirm it, or reject it if the "
+                + "certificate is missing or invalid. If the dates are wrong, cancel it and raise it again.");
+    }
+
     private async Task<LeaveBalance> GetOwnedLeaveBalanceAsync(Guid id)
     {
         var entity = await _leaveBalanceRepository.GetByIdAsync(id);
@@ -306,8 +329,11 @@ public class LeaveService : ILeaveService
         }
 
         // Minimum-notice rule: the request must be filed at least N days before it starts.
-        // Skipped for drafts so an employee can save a draft any time.
-        if (!dto.SaveAsDraft && leaveType.MinDaysNotice is int minNotice && minNotice > 0)
+        // Skipped for drafts so an employee can save a draft any time, and for MATERNITY whatever the
+        // type says (round 5, lane A3): a birth can come early, and a notice rule would refuse the
+        // leave the law guarantees (Act 651 s.57).
+        if (!dto.SaveAsDraft && leaveType.Category != LeaveTypeCategory.Maternity
+            && leaveType.MinDaysNotice is int minNotice && minNotice > 0)
         {
             var noticeDays = dto.StartDate.DayNumber - _clock.TodayUtc.DayNumber;
             if (noticeDays < minNotice)
@@ -787,6 +813,8 @@ public class LeaveService : ILeaveService
         if (request.Status != LeaveStatus.Pending)
             throw new InvalidOperationException("Only a submitted leave request can be sent back with different dates.");
 
+        await RefuseMovingMaternityAsync(request, "sent back with other dates");
+
         if (dto.SuggestedEndDate < dto.SuggestedStartDate)
             throw new InvalidOperationException("The suggested end date cannot be before the start date.");
 
@@ -931,6 +959,8 @@ public class LeaveService : ILeaveService
 
         if (request.ClosureDate.HasValue)
             throw new InvalidOperationException("This leave has already been closed and cannot be moved.");
+
+        await RefuseMovingMaternityAsync(request, "moved");
 
         if (string.IsNullOrWhiteSpace(dto.Reason))
             throw new InvalidOperationException(
@@ -2054,9 +2084,10 @@ public class LeaveService : ILeaveService
 
     public async Task<IEnumerable<MandatoryLeaveComplianceDto>> GetMandatoryLeaveComplianceAsync(int year)
     {
-        // One pass over the balances for leave types flagged mandatory-to-take. Compliance is
-        // measured against the entitlement the employee is required to use within the year:
-        // taken (UsedDays) ≥ entitled = Compliant; pending covers the gap = Scheduled; else Outstanding.
+        // One pass over the balances of the tenant's ANNUAL leave (round 5, A4: the kind replaced the
+        // MandatoryAnnualLeave flag, which only ever meant this). Compliance is measured against the
+        // entitlement the employee is required to use within the year: taken (UsedDays) ≥ entitled =
+        // Compliant; pending covers the gap = Scheduled; else Outstanding.
         var tenantId = GetTenantId();
         var balances = await _leaveBalanceRepository
             .GetQueryable()
@@ -2064,7 +2095,7 @@ public class LeaveService : ILeaveService
             .Include(lb => lb.Employee).ThenInclude(e => e.OrganizationUnit)
             .Where(lb => lb.TenantId == tenantId
                       && lb.Year == year
-                      && lb.LeaveType.MandatoryAnnualLeave
+                      && lb.LeaveType.Category == LeaveTypeCategory.Annual
                       && lb.LeaveType.IsActive
                       && !lb.Employee.IsDeleted)
             .OrderBy(lb => lb.Employee.LastName)

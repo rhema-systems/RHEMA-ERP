@@ -2,8 +2,10 @@
 
 > **Status: DECIDED on 25 September 2026 — being built.** [Section 6](#6-leave-plans--relievers-the-clash-check-and-the-approvers-view)
 > (leave plans), [section 7](#7-cancelling-recalling-and-coming-back-to-work) (cancelling, recall
-> and coming back) and [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person)
-> were built and tested on 25 September; nothing else described here is built yet. This is the
+> and coming back), [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person)
+> and [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest) (kinds of leave, with the
+> leave-type form that starts from the kind) were built and tested on 25 September; nothing else
+> described here is built yet. This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
 > round 5 is built.
@@ -102,14 +104,17 @@ The old *Mandatory annual leave* tick disappears: the compliance list simply fol
 
 **Maternity** carries two firm rules taken from the law:
 
-1. **The approver confirms it — they cannot suggest other dates or move it.** The dates are the
-   doctor's. The approver can still send it back if the medical certificate is missing or wrong.
+1. **The approver confirms it or rejects it — they cannot suggest other dates or move it.** The
+   dates are the doctor's. If the certificate is not valid, the approver rejects the request and
+   says why; if the dates are wrong, the request is cancelled and raised again.
 2. **No advance-notice rule**, because a baby can come early.
 
-The certificate from the doctor or midwife showing the expected date is attached to the request. An
-**extension** — 2 more weeks for an abnormal or multiple birth, or longer if a doctor certifies
-illness — is added by HR with the certificate. Annual leave is separate and can be taken straight
-after.
+The certificate from the doctor or midwife showing the expected date is attached to the request:
+**it cannot be submitted without one**, however short. An **extension** — 2 more weeks for an
+abnormal or multiple birth, or longer if a doctor certifies illness — is added by HR as extra days,
+and the extension is requested with its own certificate. **Maternity never goes to a medical board**:
+a board is for long sickness, and with one set, the extension would have sent a new mother to it.
+Annual leave is separate and can be taken straight after.
 
 **Other** covers everything else — sick, casual, compassionate, paternity, study, unpaid, injury at
 work. There is one number, **the days a year allowed** (the limit), and HR decides within it. The
@@ -129,6 +134,16 @@ payroll's job, not leave's.
 
 **What you will see.** The leave-type form starts by asking the kind, then shows only what that kind
 needs ([section 15](#15-setting-up-leave-types--simpler-and-honest)).
+
+**Built on 25 September:** the three kinds, with one Annual type; plans and cashing in for annual
+leave only; the compliance list and the September reminder following the Annual kind; the annual
+balance on the portal's home page; maternity's rules, with TDC's Maternity Leave now needing the
+certificate from the first day and no board; and the *limit · used · left* line for the other kinds.
+The rest of Annual's list arrives with its own section: casual leave's extra days
+([section 8](#8-casual-leave-over-its-limit)), the balances page
+([section 10](#10-the-balances-page--annual-leave-first)), the reminders
+([section 11](#11-reminders-that-reach-people)) and the leaver's settlement
+([section 13](#13-cashing-in-leave--only-when-leaving)).
 
 ---
 
@@ -565,7 +580,9 @@ does not need a lot of setup complexity".)*
   - the public holidays updated to the 2025 changes;
   - Unpaid and Occupational Injury leave given limits, so they can actually be booked;
   - sick leave's certificate rule switched on;
-  - maternity's notice rule removed.
+  - maternity's notice rule removed, and its certificate required from the first day with no
+    medical board (both done on 25 September: the Maternity kind ignores notice, and the type was
+    set).
 
 ---
 

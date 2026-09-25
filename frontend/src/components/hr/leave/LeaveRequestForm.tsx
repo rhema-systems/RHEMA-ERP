@@ -253,7 +253,24 @@ export function LeaveRequestForm({
             enforces, which on an accruing type counts only what has accrued so far. Showing only the
             policy figure invited requests the server then refused (closure plan L-14).
           */}
-          {balance && (
+          {/*
+            Round 5, A5: an OTHER kind is a limit, not a balance, and reads as one. The same figures,
+            put the way sick or casual leave is actually thought about.
+          */}
+          {balance && (balance.leaveTypeCategory ?? selectedType?.category) === 'Other' && (
+            <div className="rounded-md border bg-muted/40 p-3 text-sm">
+              <span className="text-muted-foreground">{balance.leaveTypeName}: </span>
+              <span className="font-medium">Limit {balance.entitledDays}</span>
+              <span className="text-muted-foreground">
+                {' · '}
+                {balance.usedDays} used
+                {balance.pendingDays > 0 ? ` · ${balance.pendingDays} waiting` : ''}
+                {' · '}
+              </span>
+              <span className="font-medium">{balance.accruedAvailableDays} left</span>
+            </div>
+          )}
+          {balance && (balance.leaveTypeCategory ?? selectedType?.category) !== 'Other' && (
             <div className="rounded-md border bg-muted/40 p-3 text-sm">
               <span className="text-muted-foreground">Can be taken now for {balance.leaveTypeName}: </span>
               <span className="font-medium">{balance.accruedAvailableDays} days</span>

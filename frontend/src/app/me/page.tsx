@@ -190,9 +190,11 @@ export default function MeLandingPage() {
       home.assetsAwaitingAcknowledgement
     : 0;
 
-  // The most meaningful balance first: the type with the most available days.
+  // The most meaningful balance first: ANNUAL leave (round 5, A4), and only without one the type
+  // with the most days available. "Most available" alone could put sick leave on the tile.
   const topBalance = home?.leaveBalances?.length
-    ? [...home.leaveBalances].sort((a, b) => b.availableDays - a.availableDays)[0]
+    ? home.leaveBalances.find((b) => b.leaveTypeCategory === 'Annual') ??
+      [...home.leaveBalances].sort((a, b) => b.availableDays - a.availableDays)[0]
     : null;
   const leaveTypesCount = home?.leaveBalances?.length ?? 0;
   const openReqs = home?.openAssetRequisitionCount ?? 0;

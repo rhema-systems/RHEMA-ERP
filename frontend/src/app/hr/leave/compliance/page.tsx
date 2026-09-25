@@ -45,8 +45,8 @@ const currentYear = new Date().getFullYear();
 const years = [currentYear, currentYear - 1, currentYear - 2];
 
 /**
- * Mandatory-leave compliance: who still owes statutory leave days this year. Driven by the
- * `mandatoryAnnualLeave` flag on a leave type.
+ * Annual-leave compliance: who still owes statutory leave days this year. Driven by the leave type
+ * whose kind is Annual (round 5, A4; it was a `mandatoryAnnualLeave` flag).
  */
 export default function LeaveCompliancePage() {
   const [year, setYear] = useState(String(currentYear));

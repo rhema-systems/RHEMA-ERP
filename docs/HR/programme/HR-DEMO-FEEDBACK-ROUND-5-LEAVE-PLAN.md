@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F and D done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F, D and A done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -17,7 +17,8 @@
 > | **E** | **DONE** 2026-09-25 — plans: relievers, the clash check, the approver's view · `run-round5-e.mjs` 119, green twice · § 8 |
 > | **F** | **DONE** 2026-09-25 — the calendar for one employee, and a unit with everything beneath it · `run-round5-f.mjs` 20, green twice · § 8 |
 > | **D** | **DONE** 2026-09-25 — cancel, recall by the line manager, coming back to work · `run-round5-d.mjs` 74, green twice · § 8 |
-> | A · N · C · G · H · J · I · K · L | not started, in that order — **A is next** |
+> | **A** | **DONE** 2026-09-25 — leave kinds (Annual, Maternity, Other) and a form that starts from the kind · `run-round5-a.mjs` 79, green twice · § 8 |
+> | N · C · G · H · J · I · K · L | not started, in that order — **N is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -537,3 +538,107 @@ employee created by a slice.
   leave.hr's employee with a 2025-04-01 hire date, which was restored, and the capture now uses
   `ISNULL`.
 - The 31 leave types the neighbour runs created were switched off.
+
+### A — Leave kinds, and a form that starts from the kind · DONE 2026-09-25
+
+**Built.**
+
+- **A1, the kind.** `LeaveTypeCategory { Other = 0, Annual = 1, Maternity = 2 }` on
+  `LeaveType.Category`.
+  - A tenant has at most one **active** Annual type. It is refused at both doors: saving a type as
+    Annual, and switching an Annual type back on. The refusal names the type that already is.
+  - `MandatoryAnnualLeave` is retired. Migration `20260925184521_AddLeaveTypeCategory` adds the
+    kind, makes ONE type per tenant Annual (`ANN` first, then an active flagged type, then the
+    oldest; never a deleted one) and `MAT` Maternity, then drops the flag. It is guarded SQL, proved
+    Up ×2, Down ×2 and Up again on a scratch database over four tenant shapes, and verified on UAT:
+    ANN Annual, MAT Maternity, the three flagged harness types Other.
+  - `category` is optional on save: null means Other on create and **unchanged** on update, so a
+    caller echoing a type without it cannot turn Annual Leave into Other.
+- **A2, annual leave's readers — this lane's share.**
+  - Plans: `LeavePlanService` refuses a plan, or an edit, of any other kind, naming it. Both
+    planners offer the Annual type only. Plans of another kind made earlier are left alone.
+  - In-service encashment: annual leave only, asked after the tenant's switch and before the
+    type's own flag.
+  - The compliance register and reminder sweep 4 read `Category == Annual`.
+  - The portal home's balance tile prefers the Annual balance. `leaveTypeCategory` is on the
+    balance, the request and the portal balance.
+  - Still to come, in their lanes: the balances view (J), the set-off target (H), the reminders (I),
+    the exit settlement (L2).
+- **A3, maternity.**
+  - No notice rule, whatever the type says.
+  - The approver confirms or rejects. The service refuses suggest-changes and reschedule for
+    maternity, saying to cancel and raise it again if the dates are wrong; both request pages hide
+    those actions.
+  - The certificate: TDC's MAT set through the API on UAT to certificate on, 0 self-certification
+    days and no board threshold. The seeder sets the same for a fresh build.
+- **A4, the form starts from the kind.** Kind cards come first, each saying what it drives, then only
+  what the kind needs. The rest sits under *Advanced settings*, which opens itself when a field inside
+  it fails. For Other, the hard cap is raised to the limit when it is lower (L-39).
+- **A5, the limit.** For an Other kind both request forms read *Limit 5 · 2 used · 1 waiting · 2 left*
+  instead of the balance panel.
+
+**Changed from the plan, and why.**
+
+1. ⚠ **Maternity's board threshold is cleared, as well as the certificate switched on.** The plan said
+   "RequiresMedicalCertificate on, SelfCertificationDays 0". But the certificate switch also arms the
+   board rule, 90 days a year by default, and the s.57 extension on top of 84 days makes 98: a new
+   mother would have been sent to a medical board (guide § 23, L-58). The suite proves both positions.
+2. **The one UAT data change of this lane is MAT's evidence settings**, made through HR's own door
+   (`PUT leave-types/{id}` with the whole type echoed). The certificate was off, with 3
+   self-certification days and a board at 90. Exactly those three fields changed.
+3. **The maternity guard runs before the approver checks in suggest-changes**, so a non-approver's
+   refusal says the request is maternity leave. Request ids are GUIDs and the read is tenant-scoped,
+   so it was left.
+4. **A request raised from a plan is not held to the plan's kind** (guide § 23, L-59, open). The
+   new-request page pre-fills the plan's type and leaves it editable, and *matches the approved plan*
+   compares dates only. Holding the kind, or dropping the badge when the kinds differ, is a rule
+   nobody has decided; either would also move the lane E suite's plan-linked requests onto TDC's
+   annual type and its twelve-month service gate. Not built.
+5. **The kind cards say only what is built.** Annual's card names plans, cashing in, the compliance
+   register, the reminder and the portal home. The balances view and the leaver's settlement are
+   added to it in their lanes.
+
+**Suite.** `dev-harness/hr-leave/run-round5-a.mjs`: **79 assertions, green twice.** Its harness types
+are switched on for the run and off after. One of them is made Annual while switched off and put back
+to Other, so the tenant keeps exactly one Annual type, which the suite asserts at the start and the
+end. TDC's ANN is saved once with an unchanged echo, and its row (37 columns, all but the audit stamp)
+is hashed before and after.
+
+**Harnesses adapted to the kind.**
+
+- Slices 6 [6] and 9 [5] planted their fixture balance on a type flagged mandatory. They now plant it
+  on the tenant's own Annual type, for the one fixture employee, and delete it by id.
+- Slice 6 [1]'s switch-ON position now asserts that a non-annual type is refused, two assertions
+  where there were three, so **slice 6 is 32, was 33**. The stored rate basis it also asserted moves
+  to lane L, with in-service encashment itself.
+- `run-round5-e.mjs` and slice 13 make their plans on the tenant's Annual type. Their requests stay on
+  harness types, because annual leave has a twelve-month service gate. Slice 13 now switches its two
+  types off.
+- `hr-finance/run-slice2.mjs` cashes in on a harness type. It makes that type Annual by SQL for § 1
+  only, then puts it back to Other and switched off, and restores the tenant's in-service switch (it
+  used to leave it on). § 1 passed in full. The run was 54/56: the two failures were catalogue counts
+  (11 events, 4 routed), stale since lane 8's later slices grew the catalogue to 26 and 7. They were
+  re-baselined and not re-run, because each run mints three employees and posts journals on UAT.
+- Demo scenario 021 echoes `category` instead of the retired flag.
+- Not run, and now stale on plans: `hr-portal/run-slice4.mjs` (plans and encashment on its own Other
+  type; it also retires tenant workflow definitions, so it is not for UAT) and `hr-finish-lane4`
+  (real TDC staff, not for UAT).
+
+**Neighbours.** All thirteen hr-leave slices are at their recorded counts, except slice 6 at 32
+(above). Slice 1 is 72/75, the same three environmental failures. `run-round5-e.mjs` is 119,
+`run-round5-f.mjs` 20 and `run-round5-d.mjs` 74. The API log shows nothing from this lane: 4,400
+notification-processing lines and the notification clean-up failing under them, three defect-#23
+payroll saves (the employees hr-finance minted), three award refusals logged as 500, and one
+procurement calendar job.
+
+**Found in passing.**
+
+- The portal home reads balances by calendar year, not the leave year (guide § 23, L-60). Lane J.
+- UAT had 36 harness leave types switched on: 24 from this lane's neighbour runs and 12 left from
+  runs on 20 and 23 September, including a `G2 Mandatory` one. All were switched off, leaving TDC's
+  nine.
+- **Doc comments detached from their members.** This lane's one-Annual guard had been inserted between
+  the accrual guard's doc comment and its method; moved. Three older ones are in committed code and
+  were left for a tidy-up: the requisition-enforcement enum's summary in `HREnums.cs`, lane E's
+  `EnrichRelieverClashesAsync` summary in `LeavePlanService.cs`, and `RefuseSelfApproval`'s in
+  `LeaveService.cs`. Each is an XML-doc warning only; the build is unaffected.

@@ -101,7 +101,10 @@ export default function LeaveTypeDetailPage() {
             <InfoRow label="Minimum notice (days)" value={t.minDaysNotice} />
             <InfoRow label="Min service to access (months)" value={t.minServiceMonthsToAccess} />
             <InfoRow label="Paid" value={yn(t.isPaid)} />
-            <InfoRow label="Mandatory annual leave" value={yn(t.mandatoryAnnualLeave)} />
+            <InfoRow
+              label="Kind"
+              value={t.category === 'Annual' ? 'Annual leave' : t.category === 'Maternity' ? 'Maternity leave' : 'Other'}
+            />
             <InfoRow label="Requires excuse duty" value={yn(t.requiresMedicalCertificate)} />
             {t.requiresMedicalCertificate && (
               <>

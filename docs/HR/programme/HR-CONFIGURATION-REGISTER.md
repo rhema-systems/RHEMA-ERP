@@ -31,7 +31,7 @@ the round 5 plan's *What exploration found* (repo copy to come:
 | `LeaveAccrualPolicy.Frequency` | enforced | **Misleading** — every frequency falls one period short within the year (monthly 11/12); incremental `Annual` accrues 0 all year; `PerPayPeriod` behaves as Monthly | C1, N2 |
 | `CarryOverExpiryMonths` | clean | **Misleading** — also wipes carried days already used; sweep 5's skip rule assumes it does not | G |
 | `ForfeitUnusedAfterMonths` | clean | **Misleading** — a closed year cannot be booked, so it affects no leave-taking; it only closes a window for cashing that year's leftover in | N2; off for TDC |
-| `MandatoryAnnualLeave` | clean | Advisory (compliance list + sweep 4). Its doc comment's "used by the forfeiture routine" is false | A: retired into the Annual kind |
+| `MandatoryAnnualLeave` | clean | Advisory (compliance list + sweep 4). Its doc comment's "used by the forfeiture routine" is false | A: **done 2026-09-25** — retired into the Annual kind (`Category`, § 3) and the column dropped |
 | `LeaveTypeEligibility` rules, `Gender` | enforced; "`Gender` ANDs onto an org-scoped rule" | Rules are **OR'd**, under a tab that says "restrict"; the gender qualifier on an organisation rule **cannot be set from the tab** | N2 |
 | `HasSubTypes` | clean | Only blocks creating a sub-type; hides nothing | N2 |
 | `LeaveSubType.MaxDaysAllowed` | enforced | Skipped when a draft is edited; **also replaces the type's whole entitlement** for a request carrying the sub-type | N2, N3 |
@@ -220,7 +220,7 @@ The fixtures they needed:
 | Setting | What the sweep required |
 |---|---|
 | `LeaveClosureGraceDays` | leave whose end date has passed and is still open — made by **recalling** leave that started today, since creating a backdated request is refused |
-| `MandatoryLeaveChaseFromMonth` | a balance on a `MandatoryAnnualLeave` type with days outstanding — **planted directly**, as a year's accrual is not what the assertion is about |
+| `MandatoryLeaveChaseFromMonth` | a balance on the tenant's **Annual** type with days outstanding — **planted directly**, as a year's accrual is not what the assertion is about. Since round 5 lane A it is planted on the tenant's own Annual type for the one fixture employee and removed by id; before, it was a `MandatoryAnnualLeave` type of the slice's own |
 | `LeaveCarryOverExpiryReminderDays` | a balance with carried days on a type with an expiry month — planted, with `CarryOverExpiryMonths = 12` so the lapse date is 31 December and the test works from any day of the year |
 
 ⚠ **One half of the mandatory assertion cannot run in December** — it needs a month the year has not
@@ -477,6 +477,13 @@ and the rules would be decorative.
 ⚠ **The gate is asserted on the auto-approving path too** (`RequiresApproval = false`), which is the
 branch where a miss approves sick leave with nobody asked.
 
+⚠ **On a maternity type, leave the board threshold blank** (round 5, lane A; guide § 23, L-58).
+Switching the certificate on arms the board rule too, and its default is 90 days a year: the
+statutory extension on top of 84 days makes 98, which would send a new mother to a medical board.
+TDC's *Maternity Leave* is certificate on, 0 self-certification days, no board — set through the API
+on UAT on 2026-09-25, and by the seeder for a fresh build. `run-round5-a.mjs` [2b] proves both
+positions on its own maternity type.
+
 ### The year-end basis and first-year pro-rating (entitlement plan B2/B3) — added 2026-09-18
 
 Both on the leave type, and both introduced **because the product was already answering their
@@ -502,6 +509,19 @@ than about accrual existing.
 undo, so a default that silently moved people's carried days on the next run would be worse than the
 inconsistency it corrects — the same reasoning that gave `AllowInServiceEncashment` its conservative
 default.
+
+### The kind — `Category` (round 5, lane A) — added 2026-09-25
+
+Replaces `MandatoryAnnualLeave`, which only ever meant "this is the annual leave". Migration
+`AddLeaveTypeCategory` chose one Annual type per tenant (`ANN` first) and made `MAT` Maternity, then
+dropped the flag.
+
+| Setting | Default | Status | Proof — `run-round5-a.mjs`, both positions |
+|---|---|---|---|
+| `Category` | `Other`. On save, null means Other on create and **unchanged** on update | **Enforced** | [1] a second ACTIVE Annual is refused at both doors (create; switching an Annual type on), a switched-off type may be Annual, and the Annual type's own save is allowed with its row unchanged; [2] Maternity takes leave at 5 days' notice where Other with the same 30 days refuses, and refuses send-back and move where Other accepts both; [3] plans refuse Other and Maternity and accept Annual; [4] in-service encashment refuses Other and Maternity, and Annual passes to the next check; [5] the compliance register holds Annual rows only |
+
+⚠ **Readers still to come**, in their lanes: the balances view (J), the casual-leave set-off (H), the
+reminders (I) and the leaver's settlement (L2).
 
 ### The rest of `LeaveType`
 

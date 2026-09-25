@@ -405,11 +405,14 @@ export default function MyLeavePlannerPage() {
                     <SelectValue placeholder="Choose a leave type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(leaveTypes ?? []).map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
+                    {/* Plans are for annual leave (round 5, A4); the server refuses other kinds. */}
+                    {(leaveTypes ?? [])
+                      .filter((t) => t.category === 'Annual')
+                      .map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>

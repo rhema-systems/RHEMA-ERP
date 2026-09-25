@@ -70,6 +70,8 @@ export default function EditLeaveTypePage() {
       ) : (
         <LeaveTypeForm
           defaultValues={{
+            // The kind (round 5, A4). Seeded like everything else, so a save never resets it.
+            category: leaveType.category ?? 'Other',
             name: leaveType.name,
             code: leaveType.code,
             description: leaveType.description ?? '',
@@ -93,7 +95,6 @@ export default function EditLeaveTypePage() {
             countHolidaysAsLeave: leaveType.countHolidaysAsLeave,
             allowCashConversion: leaveType.allowCashConversion,
             requiresReliever: leaveType.requiresReliever,
-            mandatoryAnnualLeave: leaveType.mandatoryAnnualLeave,
             // ⚠ Seeded from the DETAIL projection. If this were ever fetched from the plain
             // GET it would arrive undefined, the form would show nothing ticked, and saving
             // would clear every link — which is exactly the money-losing shape L-13 was about.

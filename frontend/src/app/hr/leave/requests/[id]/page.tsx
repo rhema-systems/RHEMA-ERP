@@ -234,14 +234,17 @@ export default function LeaveRequestDetailPage() {
   const canConfirmReturn = actions?.canConfirmResumption ?? false;
   const today = new Date().toISOString().slice(0, 10);
 
+  // Maternity leave is confirmed or rejected, never moved: its dates follow the birth (round 5, A4).
+  // The service refuses both date acts for it; the page does not offer them.
+  const isMaternity = r.leaveTypeCategory === 'Maternity';
   // The third decision verb, offered wherever approve and reject are. The service refuses anyone
   // the engine has not assigned, and anyone approving their own leave.
-  const canSuggest = r.status === 'Pending';
+  const canSuggest = r.status === 'Pending' && !isMaternity;
   // The employee's answer. HR can drive it from here too — the endpoint is self-or-leave-write.
   const canRespond = r.status === 'ChangesSuggested';
   // Moving approved dates, and saying it is still going ahead. Neither applies once it is closed.
-  const canReschedule = r.status === 'Approved' && !r.closureDate;
-  const canConfirm = canReschedule && !r.observanceConfirmedDate;
+  const canReschedule = r.status === 'Approved' && !r.closureDate && !isMaternity;
+  const canConfirm = r.status === 'Approved' && !r.closureDate && !r.observanceConfirmedDate;
   // Recall applies to leave that has been granted, including leave already under way — that is the
   // case it mainly exists for. The employer's act: HR, or the employee's supervisor or head of
   // department (round 5, B1) — never the employee.

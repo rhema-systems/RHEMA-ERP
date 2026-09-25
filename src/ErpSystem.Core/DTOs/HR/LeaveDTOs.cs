@@ -33,7 +33,9 @@ public class LeaveTypeDto
 
     /// <summary>⚠ Refused together with an incremental accrual policy — the two deduct for the same months.</summary>
     public bool ProRateFirstYearEntitlement { get; set; }
-    public bool MandatoryAnnualLeave { get; set; }
+
+    /// <summary>Annual, Maternity or Other (round 5, A4). Replaces <c>MandatoryAnnualLeave</c>.</summary>
+    public LeaveTypeCategory Category { get; set; }
     public EncashmentRateBasis EncashmentRateBasis { get; set; }
     public decimal? EncashmentRatePerDay { get; set; }
     public int EncashmentWorkingDaysPerMonth { get; set; }
@@ -79,7 +81,18 @@ public class CreateLeaveTypeDto
 
     /// <summary>⚠ Refused together with an incremental accrual policy — the two deduct for the same months.</summary>
     public bool ProRateFirstYearEntitlement { get; set; }
-    public bool MandatoryAnnualLeave { get; set; }
+
+    /// <summary>
+    /// Annual, Maternity or Other (round 5, A4). ⚠ <b>Null means "not saying"</b>: Other on create,
+    /// and UNCHANGED on update.
+    /// </summary>
+    /// <remarks>
+    /// Nullable on purpose. The update is a whole-object PUT, and callers that read a leave type and
+    /// echo it back (the demo builder among them) predate the kind. A non-nullable field would quietly
+    /// turn the tenant's Annual Leave into Other on their next save: the L-13 shape, where an
+    /// unmentioned field means "clear it".
+    /// </remarks>
+    public LeaveTypeCategory? Category { get; set; }
     public EncashmentRateBasis EncashmentRateBasis { get; set; } = EncashmentRateBasis.DerivedFromEmoluments;
     public decimal? EncashmentRatePerDay { get; set; }
     public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
@@ -252,6 +265,9 @@ public class LeaveBalanceDto
     public string? OrganizationUnitName { get; set; }
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
+
+    /// <summary>The leave type's kind (round 5, A4): Annual shows as a balance, Other as a limit.</summary>
+    public LeaveTypeCategory? LeaveTypeCategory { get; set; }
     public Guid? LeaveSubTypeId { get; set; }
     public string? LeaveSubTypeName { get; set; }
     public int Year { get; set; }
@@ -608,6 +624,9 @@ public class LeaveRequestDto
 
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
+
+    /// <summary>The leave type's kind (round 5, A4). Maternity is confirmed, never moved.</summary>
+    public LeaveTypeCategory? LeaveTypeCategory { get; set; }
     public bool IsPaidLeave { get; set; }
 
     public Guid? LeaveSubTypeId { get; set; }
@@ -761,9 +780,9 @@ public class ApproveLeaveDto
 }
 
 /// <summary>
-/// One row of the mandatory-leave compliance report: for a leave type flagged
-/// <c>MandatoryAnnualLeave</c>, how much of an employee's entitlement they have actually taken
-/// (used), have scheduled (pending), and still owe within the year.
+/// One row of the annual-leave compliance report: for the tenant's Annual leave type (round 5,
+/// A4; it was a <c>MandatoryAnnualLeave</c> flag), how much of an employee's entitlement they have
+/// actually taken (used), have scheduled (pending), and still owe within the year.
 /// </summary>
 public class MandatoryLeaveComplianceDto
 {

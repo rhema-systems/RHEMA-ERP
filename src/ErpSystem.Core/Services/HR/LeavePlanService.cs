@@ -161,6 +161,7 @@ public class LeavePlanService : ILeavePlanService
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
 
+        await RequireAnnualTypeAsync(dto.LeaveTypeId);
         await ValidateRelieversAsync(dto.EmployeeId, dto.RelieverId, dto.SecondRelieverId);
 
         var entity = dto.ToEntity();
@@ -189,6 +190,7 @@ public class LeavePlanService : ILeavePlanService
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
 
+        await RequireAnnualTypeAsync(dto.LeaveTypeId);
         await ValidateRelieversAsync(dto.EmployeeId, dto.RelieverId, dto.SecondRelieverId);
 
         entity.EmployeeId = dto.EmployeeId;
@@ -533,6 +535,31 @@ public class LeavePlanService : ILeavePlanService
 
         _logger.LogInformation("Leave plan {id}: relievers changed", id);
         return await GetByIdAsync(id);
+    }
+
+    /// <summary>
+    /// Plans are for annual leave (round 5, decision A4 / lane A2).
+    /// </summary>
+    /// <remarks>
+    /// A plan is the year's annual leave agreed in advance: "scheduled, then applied for as of
+    /// right". Sick, casual and compassionate leave are requested when they happen, and maternity
+    /// follows the birth. Plans of another kind made before this are left alone; new plans and edits
+    /// are refused.
+    /// </remarks>
+    private async Task RequireAnnualTypeAsync(Guid leaveTypeId)
+    {
+        var tenantId = GetTenantId();
+        var type = await _unitOfWork.Repository<LeaveType>().GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.Id == leaveTypeId)
+            .Select(t => new { t.Name, t.Category })
+            .FirstOrDefaultAsync();
+
+        if (type == null)
+            throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
+        if (type.Category != LeaveTypeCategory.Annual)
+            throw new InvalidOperationException(
+                $"Leave plans are for annual leave, and '{type.Name}' is not. Other kinds of leave are "
+                + "requested when they are needed.");
     }
 
     /// <summary>

@@ -174,7 +174,9 @@ export default function LeaveTypesPage() {
                           {t.requiresApproval && <Badge variant="secondary">Approval</Badge>}
                           {t.allowCarryOver && <Badge variant="secondary">Carry-over</Badge>}
                           {t.allowCashConversion && <Badge variant="secondary">Encashable</Badge>}
-                          {t.mandatoryAnnualLeave && <Badge variant="outline">Mandatory</Badge>}
+                          {/* The kind (round 5, A4) replaced the "Mandatory" flag. */}
+                          {t.category === 'Annual' && <Badge variant="outline">Annual</Badge>}
+                          {t.category === 'Maternity' && <Badge variant="outline">Maternity</Badge>}
                         </div>
                       </TableCell>
                       <TableCell>

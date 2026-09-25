@@ -302,8 +302,11 @@ export default function MyLeaveRequestDetailPage({
   // Your approver sent it back with dates of their own; accept them or counter (closure plan R-3).
   const canRespond = isMine && request.status === 'ChangesSuggested';
   // Move approved leave without cancelling and re-keying it (R-8), and say it is still going (R-7).
-  const canReschedule = isMine && request.status === 'Approved' && !request.closureDate;
-  const canConfirm = canReschedule && !request.observanceConfirmedDate;
+  // Not maternity: its dates follow the birth, so they are confirmed, never moved (round 5, A4).
+  const canReschedule =
+    isMine && request.status === 'Approved' && !request.closureDate && request.leaveTypeCategory !== 'Maternity';
+  const canConfirm =
+    isMine && request.status === 'Approved' && !request.closureDate && !request.observanceConfirmedDate;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">

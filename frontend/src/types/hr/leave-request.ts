@@ -12,6 +12,7 @@
  * rather than implementing their own approval UI.
  */
 import type { PagedResult } from './common';
+import type { LeaveTypeCategory } from './leave';
 
 export type LeaveStatus =
   | 'Draft'
@@ -62,6 +63,8 @@ export interface LeaveRequest {
   employeeName: string;
   leaveTypeId: string;
   leaveTypeName: string;
+  /** The leave type's kind (round 5, A4). */
+  leaveTypeCategory?: LeaveTypeCategory | null;
   isPaidLeave: boolean;
   leaveSubTypeId?: string | null;
   leaveSubTypeName?: string | null;
@@ -252,6 +255,8 @@ export interface LeaveBalance {
   organizationUnitName?: string | null;
   leaveTypeId: string;
   leaveTypeName: string;
+  /** The leave type's kind (round 5, A4). */
+  leaveTypeCategory?: LeaveTypeCategory | null;
   leaveSubTypeId?: string | null;
   leaveSubTypeName?: string | null;
   year: number;

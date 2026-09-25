@@ -1069,6 +1069,37 @@ public enum LeaveYearEndBasis
 }
 
 /// <summary>
+/// What kind of leave a leave type is (round 5, decision A4). The kind decides which rules apply,
+/// and what the leave-type form asks for.
+/// </summary>
+/// <remarks>
+/// <para>Three kinds, because three behave differently under the Labour Act and in practice.
+/// Everything else (sick, casual, compassionate, study) differs only in its settings, so it is
+/// <see cref="Other"/> with its own limit and evidence rules.</para>
+///
+/// <para>⚠ At most one ACTIVE leave type per tenant may be <see cref="Annual"/>: the plans, the
+/// compliance register and the untaken-leave reminder read "the annual leave", and the balances view
+/// and the leaver's settlement will (round 5 lanes J and L2); two would make each of them guess.</para>
+/// </remarks>
+public enum LeaveTypeCategory
+{
+    /// <summary>Everything else: a limit per year, and whatever evidence rules the type sets.</summary>
+    Other = 0,
+
+    /// <summary>
+    /// Annual leave, earned by service (Act 651 s.20). Absorbed <c>MandatoryAnnualLeave</c>, which
+    /// only ever meant this.
+    /// </summary>
+    Annual = 1,
+
+    /// <summary>
+    /// Maternity leave (Act 651 s.57): no notice rule, a certificate, and the dates follow the
+    /// birth, so an approver confirms or rejects and never moves them.
+    /// </summary>
+    Maternity = 2
+}
+
+/// <summary>
 /// How an accrual policy releases the annual entitlement over the leave year.
 /// </summary>
 public enum AccrualMode

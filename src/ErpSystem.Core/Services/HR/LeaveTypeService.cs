@@ -153,7 +153,7 @@ public class LeaveTypeService : ILeaveTypeService
             // missed, so the value read back as its default however it was set.
             YearEndBasis = entity.YearEndBasis,
             ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
-            MandatoryAnnualLeave = entity.MandatoryAnnualLeave,
+            Category = entity.Category,
             EncashmentRateBasis = entity.EncashmentRateBasis,
             EncashmentRatePerDay = entity.EncashmentRatePerDay,
             EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
@@ -184,6 +184,8 @@ public class LeaveTypeService : ILeaveTypeService
 
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
+        if (entity.Category == LeaveTypeCategory.Annual && entity.IsActive)
+            await RefuseSecondActiveAnnualAsync(tenantId, exceptId: null);
         await _leaveTypeRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
@@ -234,11 +236,18 @@ public class LeaveTypeService : ILeaveTypeService
         await RefuseProrationWithIncrementalAccrualAsync(
             id, tenantId, dto.ProRateFirstYearEntitlement);
         entity.ProRateFirstYearEntitlement = dto.ProRateFirstYearEntitlement;
-        entity.MandatoryAnnualLeave = dto.MandatoryAnnualLeave;
+        // ⚠ Null leaves the kind as it is: an older caller echoing the type back without it must
+        // not turn the tenant's Annual Leave into Other (see CreateLeaveTypeDto.Category).
+        if (dto.Category is LeaveTypeCategory category)
+            entity.Category = category;
         entity.EncashmentRateBasis = dto.EncashmentRateBasis;
         entity.EncashmentRatePerDay = dto.EncashmentRatePerDay;
         entity.EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth;
         entity.IsActive = dto.IsActive;
+
+        // Both doors: making a type Annual, and re-activating an Annual one.
+        if (entity.Category == LeaveTypeCategory.Annual && entity.IsActive)
+            await RefuseSecondActiveAnnualAsync(tenantId, exceptId: id);
 
         await _leaveTypeRepository.UpdateAsync(entity);
         await SyncAllowanceLinksAsync(entity.Id, dto.AllowanceComponentIds);
@@ -532,6 +541,32 @@ public class LeaveTypeService : ILeaveTypeService
                 + "Edit the existing policy, or remove it first. "
                 + "(An accrual rate that varies by staff level is not supported yet — a second policy "
                 + "would make the accrued figure depend on which row the database returned first.)");
+    }
+
+    /// <summary>
+    /// ⚠ <b>At most one active Annual leave type per tenant</b> (round 5, decision A4).
+    /// </summary>
+    /// <remarks>
+    /// The plans, in-service encashment, the compliance register and the untaken-leave reminder each
+    /// read "the annual leave", and the balances view and the leaver's settlement will (round 5 lanes
+    /// J and L2). Two would make every one of them guess, and a guess over <c>FirstOrDefault</c> is a
+    /// figure that can differ between two reads: the shape
+    /// <see cref="RefuseSecondActiveAccrualPolicyAsync"/> exists to refuse, mirrored here.
+    /// </remarks>
+    private async Task RefuseSecondActiveAnnualAsync(Guid tenantId, Guid? exceptId)
+    {
+        var existing = await _leaveTypeRepository.GetQueryable()
+            .Where(lt => lt.TenantId == tenantId
+                      && lt.Category == LeaveTypeCategory.Annual
+                      && lt.IsActive
+                      && (exceptId == null || lt.Id != exceptId))
+            .Select(lt => lt.Name)
+            .FirstOrDefaultAsync();
+
+        if (existing != null)
+            throw new InvalidOperationException(
+                $"'{existing}' is already this organisation's annual leave, and there can only be one. "
+                + "Make this a different kind, or retire the other first.");
     }
 
     /// <summary>

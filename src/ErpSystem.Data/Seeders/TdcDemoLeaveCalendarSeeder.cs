@@ -107,7 +107,8 @@ public class TdcDemoLeaveCalendarSeeder
                 // The statutory access rule: annual leave is earned by service.
                 MinServiceMonthsToAccess = 12,
 
-                MandatoryAnnualLeave = true,
+                // The tenant's annual leave (round 5, A4; it was MandatoryAnnualLeave = true).
+                Category = LeaveTypeCategory.Annual,
                 ForfeitUnusedAfterMonths = 15,
                 AllowCashConversion = true
             },
@@ -148,7 +149,19 @@ public class TdcDemoLeaveCalendarSeeder
                 CountWeekendsAsLeave = true,
                 CountHolidaysAsLeave = true,
                 AllowCarryOver = false,
-                MinServiceMonthsToAccess = 0
+                MinServiceMonthsToAccess = 0,
+
+                // Round 5, A4: no notice rule applies (the service ignores MinDaysNotice above for
+                // this kind: a birth can come early), and its dates are confirmed, never moved.
+                Category = LeaveTypeCategory.Maternity,
+
+                // Round 5, lane A3: the certificate is required from the first day, and there is no
+                // medical board. The entity's defaults (3 days on the employee's word, a board at
+                // 90 days) are sickness rules: with the board left at 90, a two-week extension on
+                // top of 84 days would send a new mother to a medical board.
+                RequiresMedicalCertificate = true,
+                SelfCertificationDays = 0,
+                MedicalBoardThresholdDays = null
             },
             new()
             {

@@ -418,11 +418,12 @@ public class LeaveReminderService : ILeaveReminderService
                 $"/hr/leave/requests/{r.Id}"));
         }
 
-        // ── 4. Mandatory leave still outstanding late in the year ─────────────────────────────
+        // ── 4. Annual leave still outstanding late in the year ────────────────────────────────
         //
-        // The compliance register already answers Taken / Scheduled / Outstanding and nobody was
-        // ever told about the Outstanding ones (L-23). Only chased from month 9, so it lands with
-        // a quarter of the year left to act.
+        // Reads the tenant's Annual leave type (round 5, A4: the kind replaced the
+        // MandatoryAnnualLeave flag). The compliance register already answers Taken / Scheduled /
+        // Outstanding and nobody was ever told about the Outstanding ones (L-23). Only chased from
+        // month 9, so it lands with a quarter of the year left to act.
         if (today.Month >= policy.MandatoryLeaveChaseFromMonth)
         {
             var year = LeaveYear.For(today, policy.LeaveYearStartMonth);
@@ -431,7 +432,7 @@ public class LeaveReminderService : ILeaveReminderService
             var mandatory = await _unitOfWork.Repository<LeaveBalance>()
                 .GetQueryable(b => b.TenantId == tenantId && !b.IsDeleted
                                 && b.Year == year
-                                && b.LeaveType!.MandatoryAnnualLeave
+                                && b.LeaveType!.Category == LeaveTypeCategory.Annual
                                 && b.LeaveType.IsActive
                                 && b.UsedDays + b.PendingDays < b.EntitledDays)
                 .Select(b => new

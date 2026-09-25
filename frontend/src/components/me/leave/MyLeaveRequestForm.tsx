@@ -219,7 +219,21 @@ export function MyLeaveRequestForm({
             enforces, which on an accruing type counts only what has accrued so far. Showing only the
             policy figure invited requests the server then refused (closure plan L-14).
           */}
-          {balance && (
+          {/* Round 5, A5: an OTHER kind is a limit, not a balance, and reads as one. */}
+          {balance && (balance.leaveTypeCategory ?? selectedType?.category) === 'Other' && (
+            <div className="rounded-md border bg-muted/40 p-3 text-sm">
+              <span className="text-muted-foreground">{balance.leaveTypeName}: </span>
+              <span className="font-medium">Limit {balance.entitledDays}</span>
+              <span className="text-muted-foreground">
+                {' · '}
+                {balance.usedDays} used
+                {balance.pendingDays > 0 ? ` · ${balance.pendingDays} waiting` : ''}
+                {' · '}
+              </span>
+              <span className="font-medium">{balance.accruedAvailableDays} left</span>
+            </div>
+          )}
+          {balance && (balance.leaveTypeCategory ?? selectedType?.category) !== 'Other' && (
             <div className="rounded-md border bg-muted/40 p-3 text-sm">
               <span className="text-muted-foreground">
                 Your balance for {balance.leaveTypeName}:{' '}

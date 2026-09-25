@@ -1,4 +1,6 @@
-﻿namespace ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.Enums;
+
+namespace ErpSystem.Core.DTOs.HR;
 
 // ============================================================================
 // EMPLOYEE PORTAL DTOs
@@ -164,6 +166,9 @@ public sealed class PortalLeaveBalanceDto
 {
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
+
+    /// <summary>The kind (round 5, A4). The home tile shows the Annual balance first.</summary>
+    public LeaveTypeCategory? LeaveTypeCategory { get; set; }
     public decimal AvailableDays { get; set; }
     public decimal UsedDays { get; set; }
     public decimal PendingDays { get; set; }

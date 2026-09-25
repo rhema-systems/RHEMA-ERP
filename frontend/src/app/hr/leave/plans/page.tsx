@@ -465,7 +465,10 @@ export default function LeavePlansPage() {
               name="leaveTypeId"
               label="Leave type"
               required
-              options={(leaveTypes ?? []).map((t) => ({ value: t.id, label: t.name }))}
+              // Plans are for annual leave (round 5, A4 / lane A2); the server refuses other kinds.
+              options={(leaveTypes ?? [])
+                .filter((t) => t.category === 'Annual')
+                .map((t) => ({ value: t.id, label: t.name }))}
             />
             <PlanSubTypeField form={form} />
             <FieldRow>

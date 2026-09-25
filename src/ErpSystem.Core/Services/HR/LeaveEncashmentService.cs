@@ -123,8 +123,15 @@ public class LeaveEncashmentService : ILeaveEncashmentService
                 "Leave is encashed only when an employee leaves, not while they are still employed. "
                 + "If that is not this organisation's policy, switch on in-service encashment in HR policy settings.");
 
-        // The leave type must permit cash conversion before any encashment can be requested.
+        // Only ANNUAL leave is cashed in while employed (round 5, decision A4 / lane A2). Asked
+        // before the type's own flag, so the refusal names the real reason: sick or casual days are
+        // not a reserve of money whatever a flag on their type says.
         var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        if (leaveType.Category != LeaveTypeCategory.Annual)
+            throw new InvalidOperationException(
+                $"Only annual leave can be cashed in, and '{leaveType.Name}' is not annual leave.");
+
+        // The leave type must permit cash conversion before any encashment can be requested.
         if (!leaveType.AllowCashConversion)
             throw new InvalidOperationException("This leave type does not allow cash conversion (encashment).");
 

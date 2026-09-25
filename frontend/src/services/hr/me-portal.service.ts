@@ -12,6 +12,8 @@ import type { StaffActingAppointment } from '@/types/hr/movement-subtypes';
 export interface PortalLeaveBalance {
   leaveTypeId: string;
   leaveTypeName: string;
+  /** The kind (round 5, A4): the home tile shows the Annual balance first. */
+  leaveTypeCategory?: 'Annual' | 'Maternity' | 'Other' | null;
   availableDays: number;
   usedDays: number;
   pendingDays: number;
