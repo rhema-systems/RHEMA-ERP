@@ -8,6 +8,11 @@ after ALL THREE WAVES of
 module as it now stands, not as it was on any of those mornings. Where the demo database will not
 show what the code can do, that is said in the step rather than smoothed over.
 
+**Round 5** ([`HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md`](../../programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md))
+**is being built lane by lane.** Lane E, leave plans, landed 2026-09-25. Chapter 12, § 19.5, the
+reliever note in § 1.5 and § 23 (L-49 to L-54) describe it. The other chapters still describe the
+module before round 5.
+
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
 > **53 of the demonstration database's 97 annual leave balances carry the wrong entitlement** —
@@ -503,6 +508,15 @@ you which one fired:
 | 6 | **Overlap** with the employee's own live leave | *already has a leave request for this period* |
 | 7 | **Accrued balance** | *Insufficient accrued leave balance. Available: X, Requested: Y* |
 | 8 | **Reliever** — if the type requires one and none could be assigned | *requires a reliever* |
+
+⚠ **A reliever you choose faces three checks of its own**, which this table used to leave out:
+- they are not the employee;
+- they are **at work**, meaning active *or on probation* (*a reliever must be at work*). Until
+  2026-09-25 this was active only, which refused most TDC staff (§ 23, L-54);
+- they are free over the dates: no approved or in-progress leave of their own, and not already
+  covering someone else (*not available during the requested period*).
+
+The roster fill skips anyone who would fail the last two.
 
 **Three checks were added by the closure build**, and they fire before the eight above:
 
@@ -2686,21 +2700,37 @@ request** rather than dead-ending.
 request's number as a link. When it has not, `—`. That column is `LeaveRequest.LeavePlanId`, a
 foreign key that existed since the port and that nothing ever wrote.
 
-**The row menu:**
+**Click a row** *(round 5)* and the plan opens in a **detail window**: its fields read-only, the
+relievers editable, and the same actions as the row menu inside it, each shown only when it can
+succeed for you. `/hr/leave/plans?planId=…` opens the same window, which is where the line manager's
+approvals-inbox link lands.
+
+**The row menu** *(round 5, lane E)*:
 
 | Action | Shown when |
 |---|---|
-| **Raise the leave request** | **Approved**, and no live request raised from it yet — **new** |
+| **View details** | always, and the same as clicking the row |
+| **Edit** | **Draft only**. A submitted plan's dates change through *Suggest* |
+| **Raise the leave request** | **Approved**, and no live request raised from it yet |
 | **Submit for approval** | Draft |
-| **Approve** | Submitted or ChangesSuggested |
-| **Reject…** | Submitted or ChangesSuggested — required reason |
+| **Approve** | **Submitted** only. While the plan waits for the employee's answer there is nothing to approve, and the server now says so rather than returning a bare 403 |
+| **Reject…** | Submitted, with a required reason |
 | **Suggest different dates…** | Submitted |
 | **Accept suggested dates** | ChangesSuggested, and a suggestion exists |
-| **Decline suggestion** | ChangesSuggested |
-| **Cancel plan** *(red)* | anything not already Cancelled or Rejected |
+| **Propose other dates…** | ChangesSuggested. This replaces *Decline suggestion*, which always failed; it asks for the employee's own dates and resubmits |
+| **Plan another period** | any live plan. It opens a new plan for the same employee, because spreading leave across the year means several plans |
+| **Cancel plan…** *(red)* | **until approval**: the employee's own plan, or any plan with leave write. **After approval**: leave write only, when no live request has been raised from it, **with a required reason** |
 
 **The add / edit dialog:** Employee · Leave type · **Sub-type** · Start · End · Reliever · Second
 reliever · Notes.
+
+⚠ **The reliever boxes offer the employee's own reliever roster first** *(round 5)*, as chips in
+priority order, and fall back to a search of all staff. **Leave both empty and the server fills
+them from the roster when you save**, passing over anyone who is away over those dates. A reliever
+must be **at work: active or on probation**. The employee themselves, the same person twice, and
+anyone suspended, on leave or gone are refused, and the refusal says which. Before round 5 only
+*Active* staff could be chosen, which on the demo database ruled out 2,191 of 2,399 people, because
+every hire starts on probation.
 
 ⚠ **The Sub-type field is new.** The payload always carried `leaveSubTypeId` and the dialog never
 offered it, so a plan could not say which variant of leave it was for. It appears only when the
@@ -2710,13 +2740,19 @@ chosen type has sub-types.
 a January plan raised while you were looking at December was filed under the wrong year and then
 shown by neither.
 
-**The live clash check** sits under each reliever picker and is still the best control on the
-screen. As soon as a reliever and both dates are set it asks the server:
+**The live clash check** sits under each reliever picker. As soon as a reliever and both dates are
+set it asks the server:
 
 - *Checking the reliever's diary…*
 - ✅ *Reliever: nothing in their diary over these dates.*
 - ⚠ *Reliever: 2 clashes over these dates*, with a bulleted list, and beneath it: **You can still
   save the plan — this is a warning, not a rule.**
+- ⛔ *Couldn't check their diary* *(round 5)*: the check failed, and it says so.
+
+⚠ **Until round 5 this control never worked** (L-49). It sent its question wrapped in a
+`params` object, so the server was asked about nobody and refused. The panel read that failure as
+*free*, and every reliever looked available. Anything this guide said about the amber panel before
+2026-09-25 was describing the design, not the screen.
 
 ### ▶ Walk it
 
@@ -2739,7 +2775,12 @@ The amber clash panel appears.
 > leave is about to be cancelled, or that two people can cover between them. It knows something I
 > should see, and it shows me, and then it gets out of the way."
 
-**4 — Save. Submit it. Approve it twice** *(two stages, as everywhere)*.
+**4 — Save. Submit it. Approve it twice** *(two stages, as everywhere)*. Do it from the **detail
+window**: click the row, then Approve inside it.
+
+> "This is what the line manager sees when they follow the link in their approvals inbox: the plan,
+> read-only, with the relievers they can still change. The dates are the employee's. If they don't
+> work, *Suggest different dates* sends the plan back to the employee."
 
 **5 — Open the row menu on the now-Approved plan. Press *Raise the leave request*.**
 
@@ -2760,10 +2801,13 @@ with a blue panel saying it came from a plan.
 | Control | Call | Gate |
 |---|---|---|
 | The list | `GET /api/hr/leave-plans?year=` | `HR.Leave.Read` |
-| Create / edit | `POST` · `PUT /api/hr/leave-plans/{id}` | self-or-`HR.Leave.Write` |
-| Submit / Approve / Reject | `PATCH …/submit` · `/approve` · `/reject` | the engine's assignee |
+| One plan (the detail window) | `GET /api/hr/leave-plans/{id}` | the owner, `HR.Leave.Read`, **or the person the engine is asking to decide it**, for as long as it is at their step *(round 5)* |
+| Create / edit | `POST` · `PUT /api/hr/leave-plans/{id}` | self-or-`HR.Leave.Write`. On `PUT` the **new** employee id is checked too, so an owner cannot move a draft onto someone else *(round 5)* |
+| Submit / Approve / Reject | `PATCH …/submit` · `/approve` · `/reject` | the engine's assignee. Approve and reject refuse anything but Submitted |
 | Suggest / Respond | `PATCH …/suggest-changes` · `/respond-suggestion` | assignee / self |
-| Clash check | `GET /api/hr/leave-plans/reliever-clashes` | `HR.Leave.Read` |
+| Relievers | `PATCH …/relievers` *(round 5)* | the current assignee or `HR.Leave.Write`, for Submitted, ChangesSuggested and Approved plans. Only the relievers change |
+| Cancel | `PATCH …/cancel` | self-or-`HR.Leave.Write`. The owner until approval; after approval, the leave write tier with a reason and no live request. It records the date and reason and **withdraws the approval** *(round 5)* |
+| Clash check | `GET /api/hr/leave-plans/reliever-clashes` | any internal user, **not** `HR.Leave.Read`: an employee planning their own leave needs the answer too. *(Corrected 2026-09-25; this table used to say `HR.Leave.Read`.)* |
 
 **`PlannedBy` is stamped from the token** — it is an `Employees` foreign key, and both screens used
 to send the login's user id, which is never an employee id.
@@ -3573,6 +3617,11 @@ Her plans for the year, with **Submit**, **Respond** when a manager has suggeste
 — and, on an approved plan, **Raise the request** *(new)*, which is chapter 12's journey from her
 side.
 
+*(Round 5, lane E.)* Her plan form now has **reliever boxes**, offering **her own roster only**
+(no search of all staff). Left empty, they are filled from the roster when she saves. **Plan another
+period** starts a new plan, because spreading leave across the year means several plans. **Cancel**
+is hers only until the plan is approved; after that it is HR's, with a reason.
+
 ### 19.6 `/me/leave/encashments` — her own encashments
 
 Read, and request. Approving and paying are the desk's.
@@ -3732,6 +3781,8 @@ nobody promises a stakeholder a button.
 
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
+**Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
+they are listed after the settings audit.
 
 ### ✅ Closed
 
@@ -3820,6 +3871,20 @@ Leave* cannot be booked (L-39); Sick Leave's description promises a certificate 
 off; Maternity's 30-day notice would refuse a premature birth; and the holiday calendar is the 2019
 list — 4 August as Founders' Day, no 1 July, no Shaqq Day — where the 2025 amendment restored 1 July,
 moved Founders' Day to 21 September and added Shaqq Day. All four are round 5 lane N4.
+
+### ✅ Round 5 lane E — leave plans, 2026-09-25 — six found and closed
+
+Proved by `dev-harness/hr-leave/run-round5-e.mjs` (119 assertions, green twice). The build record
+is the round 5 plan's § 8.
+
+| # | Where | Finding | Closed by |
+|---|---|---|---|
+| **L-49** | ch. 12 | The reliever clash check never asked about the reliever. Its query went out wrapped in a `params` object, the server refused, and the panel read the failure as *free* | E1: the query is sent directly, and a failed check says *couldn't check* |
+| **L-50** | ch. 12 | The line manager, who gives a plan its first approval, could not open it. The approvals-inbox link was refused | E4: the detail window, `?planId=`, and a read arm for the current assignee |
+| **L-51** | ch. 12 | While a plan waited for the employee's answer, *Approve* and *Reject* were offered and both were refused with a bare 403. *Decline suggestion* always failed | E4: offered on Submitted only, and refused with a sentence; *Propose other dates* |
+| **L-52** | ch. 12 | *Cancel* appeared at every status, asked for no reason, recorded nothing, and left the plan in the approver's queue | E5: the owner until approval, HR after with a reason; date and reason stored; the approval withdrawn |
+| **L-53** | ch. 12, 19.5 | Plans never took relievers from the employee's roster. The portal planner had no reliever boxes, and editing a plan showed its saved relievers as empty | E2 |
+| **L-54** | ch. 6, 12 | A reliever had to be *Active*, and every hire starts on probation, so on the demo database 2,191 of 2,399 staff could not be chosen. Meanwhile a request's roster fill assigned suspended staff without checking | *At work* is Active or on probation (TDC's ruling of 2026-09-23), one rule for plans and requests |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 

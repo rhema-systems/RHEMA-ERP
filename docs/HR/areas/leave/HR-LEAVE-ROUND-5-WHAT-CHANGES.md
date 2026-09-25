@@ -1,6 +1,7 @@
 # Staff leave, round 5 — what changes, in plain terms
 
-> **Status: DECIDED on 25 September 2026 — nothing described here is built yet.** This is the
+> **Status: DECIDED on 25 September 2026 — being built.** [Section 6](#6-leave-plans--relievers-the-clash-check-and-the-approvers-view)
+> (leave plans) was built and tested on 25 September; nothing else described here is built yet. This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
 > round 5 is built.
@@ -247,13 +248,20 @@ right".)*
 
 - **Relievers come from the employee's own reliever list**, in priority order; if it is empty, the
   approver or HR can search for anybody. A plan saved with no reliever has both slots filled from the
-  list automatically. The system refuses a reliever who is the employee themselves or who has left.
+  list automatically, passing over anyone who is away over those dates.
+- **Who can be a reliever.** Anyone who is at work, **including staff still on probation**:
+  probation is about the employment contract, not about being at work. That is TDC's own ruling from
+  September 2026, first made for the Maintenance technicians. The system refuses the employee
+  themselves, the same person in both slots, and anyone suspended, on leave or gone, and it says
+  which. The same rule applies on leave requests. Before this, only fully confirmed staff could be
+  chosen, which ruled out most TDC staff because every new hire starts on probation.
 - **The clash check works.** If it cannot get an answer it says *"couldn't check"*, never *"free"*. A
   clash is still a warning, not a block.
 - **A proper detail window**: the plan's details read-only, the relievers editable, and the buttons
   inside — **Approve · Reject · Suggest other dates · Cancel** — each shown only when it will work.
   The approver can change **only the relievers**; if the dates need to change, *Suggest other dates*
-  sends it back to the employee.
+  sends it back to the employee. HR can still change the relievers after approval. Cover
+  arrangements change, but the agreed dates do not.
 - **The line manager opens the plan straight from their approvals inbox.**
 - **Cancel follows clear rules**: the employee can cancel their own plan until it is approved; HR can
   also cancel an approved plan, with a reason, provided no leave request has been raised from it.
@@ -261,7 +269,9 @@ right".)*
 - **Decline works** — it asks for your own dates.
 - **Spreading leave across the year** already works: several plans in one year — say 5 days in April,
   10 in August and 9 in December — as long as they do not overlap. A new **Add another period**
-  button makes it obvious. Only annual leave can be planned.
+  button makes it obvious. Only annual leave can be planned. *(This arrives with the leave kinds in
+  [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest); until then the plan form still
+  offers every leave type.)*
 - **From an approved plan**, *Raise the leave request* (already there) fills in the dates and
   relievers. The request still goes through both approvals — the law and practice give you a *right*
   to your leave, not leave without approval — but approvers now see **"matches the approved plan"**,

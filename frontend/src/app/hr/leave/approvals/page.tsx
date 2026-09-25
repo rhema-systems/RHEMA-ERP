@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { leaveService } from '@/services/hr/leave.service';
+import { MatchesApprovedPlanBadge } from '@/components/hr/leave/MatchesApprovedPlanBadge';
 
 /**
  * Leave requests awaiting a given manager's decision.
@@ -220,7 +221,12 @@ export default function LeaveApprovalsPage() {
                             aria-label={`Select ${r.requestNumber}`}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{r.requestNumber}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {r.requestNumber}
+                            <MatchesApprovedPlanBadge show={r.matchesApprovedPlan} />
+                          </div>
+                        </TableCell>
                         <TableCell>{r.employeeName}</TableCell>
                         <TableCell>{r.leaveTypeName}</TableCell>
                         <TableCell>{r.startDate?.slice(0, 10)}</TableCell>

@@ -471,6 +471,18 @@ public class LeavePlan : TenantEntity
     public DateTime? ApprovedDate { get; set; }
     public string? RejectionReason { get; set; }
 
+    /// <summary>When the plan was cancelled. Who did it is <c>UpdatedBy</c>.</summary>
+    /// <remarks>
+    /// Round 5 lane E5. Cancelling used to take no reason and leave no trace beyond the status, so an
+    /// HR cancel of an APPROVED plan — the one cancel that takes back something agreed — could not
+    /// say why. Mirrors <see cref="LeaveRequest.CancellationDate"/>.
+    /// </remarks>
+    public DateTime? CancellationDate { get; set; }
+
+    /// <summary>Why the plan was cancelled. Required when HR cancels an approved plan.</summary>
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
     [ForeignKey(nameof(EmployeeId))]
     public virtual Employee Employee { get; set; } = null!;
 

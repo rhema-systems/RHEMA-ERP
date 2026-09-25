@@ -1290,7 +1290,42 @@ public class LeaveService : ILeaveService
                 .FirstOrDefaultAsync();
         }
 
+        await MarkApprovedPlanMatchesAsync(new List<LeaveRequestDto> { dto }, tenantId);
+
         return dto;
+    }
+
+    /// <summary>
+    /// Sets <see cref="LeaveRequestDto.MatchesApprovedPlan"/> for each request raised from a plan —
+    /// one query for the whole list (round 5, decision B4).
+    /// </summary>
+    /// <remarks>
+    /// "Matches" means the plan is Approved and the request asks for exactly its dates. A plan whose
+    /// suggested dates were accepted already carries them as its own dates, so no separate check is
+    /// needed for that route. Any change of dates and the badge goes — that is the point of it.
+    /// </remarks>
+    private async Task MarkApprovedPlanMatchesAsync(List<LeaveRequestDto> requests, Guid tenantId)
+    {
+        var planIds = requests.Where(r => r.LeavePlanId.HasValue)
+            .Select(r => r.LeavePlanId!.Value).Distinct().ToList();
+        if (planIds.Count == 0) return;
+
+        var plans = await _leavePlanRepository.GetQueryable()
+            .Where(pl => pl.TenantId == tenantId
+                      && planIds.Contains(pl.Id)
+                      && pl.Status == LeavePlanStatus.Approved)
+            .Select(pl => new { pl.Id, pl.StartDate, pl.EndDate })
+            .ToListAsync();
+
+        var byId = plans.ToDictionary(p => p.Id);
+        foreach (var request in requests)
+        {
+            request.MatchesApprovedPlan =
+                request.LeavePlanId is Guid planId
+                && byId.TryGetValue(planId, out var plan)
+                && plan.StartDate == request.StartDate
+                && plan.EndDate == request.EndDate;
+        }
     }
 
     public async Task<LeaveRequestDto?> GetLeaveRequestByNumberAsync(string requestNumber)
@@ -1421,9 +1456,12 @@ public class LeaveService : ILeaveService
         var size = Math.Clamp(pageSize, 1, 100);
         var page = Math.Max(pageNumber, 1);
 
+        var items = mine.Skip((page - 1) * size).Take(size).ToList().ToDtoList();
+        await MarkApprovedPlanMatchesAsync(items, tenantId);
+
         return new PagedResult<LeaveRequestDto>
         {
-            Items = mine.Skip((page - 1) * size).Take(size).ToList().ToDtoList(),
+            Items = items,
             TotalCount = mine.Count,
             Page = page,
             PageSize = size,
@@ -2360,9 +2398,9 @@ public class LeaveService : ILeaveService
 
         var reliever = await GetOwnedEmployeeAsync(relieverId);
 
-        if (reliever.StaffStatus != StaffStatus.Active)
+        if (!CanCover(reliever.IsActive, reliever.StaffStatus))
         {
-            throw new InvalidOperationException("Reliever must be an active employee.");
+            throw new InvalidOperationException(NotAtWorkMessage(reliever.StaffStatus));
         }
 
         var hasConflict = await RelieverHasConflictAsync(relieverId, startDate, endDate);
@@ -2371,6 +2409,33 @@ public class LeaveService : ILeaveService
         {
             throw new InvalidOperationException("Selected reliever is not available during the requested period.");
         }
+    }
+
+    /// <summary>
+    /// Whether an employee can cover for a colleague on leave: employed and at work, which is
+    /// Active or on probation. Plans and requests both ask this.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was Active only, and every hire starts on probation (the hire path puts them there with a
+    /// live probation record) — so on UAT a reliever pick refused 2,191 of TDC's 2,399 staff, while
+    /// the roster fill below assigned the same people without asking. Probation is a contract status,
+    /// not an availability: TDC's call of 2026-09-23 (round 4 lane O), made for the Maintenance
+    /// technician pool, which had the identical defect. Suspended, inactive, on-leave and departed
+    /// staff stay out.
+    /// </remarks>
+    internal static bool CanCover(bool isActive, StaffStatus status)
+        => isActive && status is StaffStatus.Active or StaffStatus.Probation;
+
+    /// <summary>The refusal for a reliever who is not at work, naming what they are instead.</summary>
+    internal static string NotAtWorkMessage(StaffStatus status)
+    {
+        var what = status switch
+        {
+            StaffStatus.OnLeave => "on leave",
+            StaffStatus.Active or StaffStatus.Probation => "no longer on the active staff list",
+            _ => status.ToString().ToLowerInvariant(),
+        };
+        return $"A reliever must be at work — active or on probation. This person is {what}.";
     }
 
     /// <summary>
@@ -2399,7 +2464,12 @@ public class LeaveService : ILeaveService
         var tenantId = GetTenantId();
         var predefined = await _employeeRelieverRepository
             .GetQueryable()
-            .Where(r => r.TenantId == tenantId && r.EmployeeId == dto.EmployeeId && r.IsActive)
+            .Where(r => r.TenantId == tenantId && r.EmployeeId == dto.EmployeeId && r.IsActive
+                     // CanCover, spelled out so EF can translate it. ⚠ A filled slot is never
+                     // validated afterwards, so without this a suspended reliever went straight on.
+                     && r.RelieverEmployee.IsActive
+                     && (r.RelieverEmployee.StaffStatus == StaffStatus.Active
+                         || r.RelieverEmployee.StaffStatus == StaffStatus.Probation))
             .OrderBy(r => r.Priority)
             .ToListAsync();
 

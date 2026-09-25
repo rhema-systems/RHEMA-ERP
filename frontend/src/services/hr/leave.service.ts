@@ -21,6 +21,7 @@ import type {
   CreateLeavePlanRequest,
   SuggestLeavePlanChangesRequest,
   RespondToLeaveSuggestionRequest,
+  UpdateLeavePlanRelieversRequest,
   SuggestLeaveRequestChanges,
   RecallLeaveRequest,
   RescheduleLeaveRequest,
@@ -419,6 +420,10 @@ class LeavePlanService {
   /**
    * Is this reliever free over these dates? Same answer the register carries per row as
    * `relieverClashes`, asked before the plan exists. (Finish-plan lane 4.)
+   *
+   * ⚠ Round 5 lane E1: this used to wrap the query in `{ params: {...} }`. `apiService.get` takes the
+   * query object itself, so the request went out as `?params=[object Object]`, the API answered 400
+   * "A reliever is required", and the form showed every reliever as free.
    */
   getRelieverClashes(
     relieverId: string,
@@ -427,12 +432,10 @@ class LeavePlanService {
     excludePlanId?: string | null,
   ): Promise<LeaveRelieverClash[]> {
     return apiService.get<LeaveRelieverClash[]>(`${this.baseUrl}/reliever-clashes`, {
-      params: {
-        relieverId,
-        startDate,
-        endDate,
-        ...(excludePlanId ? { excludePlanId } : {}),
-      },
+      relieverId,
+      startDate,
+      endDate,
+      ...(excludePlanId ? { excludePlanId } : {}),
     });
   }
 
@@ -477,8 +480,20 @@ class LeavePlanService {
     return apiService.patch<LeavePlan>(`${this.baseUrl}/${id}/respond-suggestion`, data);
   }
 
-  cancel(id: string): Promise<void> {
-    return apiService.patch<void>(`${this.baseUrl}/${id}/cancel`);
+  /**
+   * The approver's one edit to a plan — its relievers (round 5 lane E3). Both slots are replaced:
+   * send the one being kept as well as the one being changed.
+   */
+  updateRelievers(id: string, data: UpdateLeavePlanRelieversRequest): Promise<LeavePlan> {
+    return apiService.patch<LeavePlan>(`${this.baseUrl}/${id}/relievers`, data);
+  }
+
+  /**
+   * Cancel a plan. The employee may cancel their own until it is approved; HR may also cancel an
+   * approved plan, and must then give a reason (round 5 lane E5).
+   */
+  cancel(id: string, reason?: string | null): Promise<void> {
+    return apiService.patch<void>(`${this.baseUrl}/${id}/cancel`, { reason: reason?.trim() || null });
   }
 }
 

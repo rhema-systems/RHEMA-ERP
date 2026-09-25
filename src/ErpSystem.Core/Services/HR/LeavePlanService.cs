@@ -1,5 +1,6 @@
 using ErpSystem.Application.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -147,6 +148,7 @@ public class LeavePlanService : ILeavePlanService
         var dto = entity.ToDto();
         await EnrichRelieverClashesAsync(new List<LeavePlanDto> { dto });
         await EnrichRaisedRequestsAsync(new List<LeavePlanDto> { dto });
+        dto.RelieverRoster = await LoadRelieverRosterAsync(entity.EmployeeId);
         return dto;
     }
 
@@ -159,12 +161,15 @@ public class LeavePlanService : ILeavePlanService
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
 
+        await ValidateRelieversAsync(dto.EmployeeId, dto.RelieverId, dto.SecondRelieverId);
+
         var entity = dto.ToEntity();
         entity.TenantId = GetTenantId();
         entity.PlannedBy = RequireActingEmployeeId();
         // ⚠ The mapper leaves Year at 0 on purpose — it cannot read the tenant's leave year. Set
         // here and on the update path, so both agree (entitlement plan C1).
         entity.Year = LeaveYear.For(dto.StartDate, await _leaveYear.StartMonthAsync());
+        await FillRelieversFromRosterAsync(entity);
         await _leavePlanRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Leave plan created for employee {employeeId}", dto.EmployeeId);
@@ -183,6 +188,8 @@ public class LeavePlanService : ILeavePlanService
         var hasConflict = await HasConflictingPlanAsync(dto.EmployeeId, dto.StartDate, dto.EndDate, id);
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
+
+        await ValidateRelieversAsync(dto.EmployeeId, dto.RelieverId, dto.SecondRelieverId);
 
         entity.EmployeeId = dto.EmployeeId;
         entity.OrganizationLevelId = dto.OrganizationLevelId;
@@ -249,9 +256,30 @@ public class LeavePlanService : ILeavePlanService
                 $"You cannot approve your own {what}. It has to be approved by someone else.");
     }
 
+    /// <summary>
+    /// Refuses a decision on a plan that is not waiting for one (round 5 lane E4).
+    /// </summary>
+    /// <remarks>
+    /// Approve and reject had no status check of their own and relied on the engine to refuse. Two
+    /// ways that failed: a plan sent back with suggested dates is waiting for the EMPLOYEE, and its
+    /// approval was cancelled, so the screen offered Approve/Reject that came back as a bare 403;
+    /// and on a tenant with no published definition the fallback path would have approved a
+    /// cancelled or rejected plan outright. A plan awaiting a decision is Submitted — the two-stage
+    /// definition keeps it there until the last stage rules.
+    /// </remarks>
+    private static void EnsureAwaitingDecision(LeavePlan plan, string verb, string pastTense)
+    {
+        if (plan.Status == LeavePlanStatus.Submitted) return;
+
+        throw new InvalidOperationException(plan.Status == LeavePlanStatus.ChangesSuggested
+            ? $"This plan is waiting for the employee to answer the suggested dates, so there is nothing to {verb} yet."
+            : $"Only a submitted leave plan can be {pastTense}. This one is {plan.Status}.");
+    }
+
     public async Task<LeavePlanDto> ApproveLeavePlanAsync(Guid id)
     {
         var entity = await GetOwnedLeavePlanAsync(id);
+        EnsureAwaitingDecision(entity, "approve", "approved");
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -276,6 +304,7 @@ public class LeavePlanService : ILeavePlanService
     public async Task<LeavePlanDto> RejectLeavePlanAsync(Guid id, string reason)
     {
         var entity = await GetOwnedLeavePlanAsync(id);
+        EnsureAwaitingDecision(entity, "reject", "rejected");
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -409,15 +438,202 @@ public class LeavePlanService : ILeavePlanService
         return (await GetWithIncludes(id))!.ToDto();
     }
 
-    public async Task CancelLeavePlanAsync(Guid id)
+    /// <remarks>
+    /// <para>Round 5 lane E5 — the stakeholders asked what the approver's Cancel did, and the honest
+    /// answer was "anything, for anyone with the write tier, with no reason, and the approver's queue
+    /// never heard". Now:</para>
+    /// <list type="bullet">
+    ///   <item>the employee may cancel their own plan until it is approved;</item>
+    ///   <item>the desk may also cancel an APPROVED plan — the one cancel that takes back something
+    ///   agreed — provided no leave request has been raised from it, and must say why;</item>
+    ///   <item>a rejected or cancelled plan has nothing left to cancel.</item>
+    /// </list>
+    /// <para>⚠ <b>Every check runs before the approval is withdrawn.</b> A refusal after the
+    /// workflow cancel would leave a plan nobody can approve — the order-of-operations defect the
+    /// leave closure harness found in <c>SuggestChangesAsync</c>.</para>
+    /// </remarks>
+    public async Task CancelLeavePlanAsync(Guid id, string? reason, bool actingAsDesk)
     {
         var entity = await GetOwnedLeavePlanAsync(id);
-        if (entity.Status == LeavePlanStatus.Cancelled)
-            throw new InvalidOperationException("Leave plan is already cancelled.");
+        var trimmedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+
+        switch (entity.Status)
+        {
+            case LeavePlanStatus.Cancelled:
+                throw new InvalidOperationException("Leave plan is already cancelled.");
+
+            case LeavePlanStatus.Rejected:
+                throw new InvalidOperationException("This plan was rejected, so there is nothing to cancel.");
+
+            case LeavePlanStatus.Approved:
+                if (!actingAsDesk)
+                    throw new InvalidOperationException(
+                        "An approved plan can only be cancelled by HR. Ask HR to cancel it, or raise the leave " +
+                        "request with the dates you now want.");
+                if (trimmedReason == null)
+                    throw new InvalidOperationException(
+                        "Say why this approved plan is being cancelled — it takes back something that was agreed.");
+
+                var tenantId = GetTenantId();
+                var raised = await _leaveRequestRepository.GetQueryable()
+                    .AnyAsync(r => r.TenantId == tenantId
+                                && r.LeavePlanId == id
+                                && r.Status != LeaveStatus.Cancelled
+                                && r.Status != LeaveStatus.Rejected);
+                if (raised)
+                    throw new InvalidOperationException(
+                        "A leave request has already been raised from this plan. Cancel or change the request instead.");
+                break;
+        }
+
+        // A plan out for approval has a live workflow instance. Withdraw it, or the approver's queue
+        // goes on offering a plan that no longer exists — which is what cancelling used to do.
+        // A missing instance is not an error (an unseeded tenant, or a plan submitted before its
+        // definition existed): there is simply nothing to withdraw, and approve/reject now refuse a
+        // cancelled plan on their own (EnsureAwaitingDecision), so a stray instance cannot revive it.
+        if (entity.Status == LeavePlanStatus.Submitted)
+        {
+            var withdrawn = await _workflowIntegrationService.CancelWorkflowAsync(
+                EntityType, id, trimmedReason ?? "Leave plan cancelled");
+            if (!withdrawn.Success)
+                _logger.LogWarning(
+                    "Leave plan {id} cancelled; its approval could not be withdrawn: {message}",
+                    id, withdrawn.Message);
+        }
 
         entity.Status = LeavePlanStatus.Cancelled;
+        entity.CancellationDate = DateTime.UtcNow;
+        entity.CancellationReason = trimmedReason;
+        entity.WorkflowInstanceId = null;
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation("Leave plan {id} cancelled ({by})", id, actingAsDesk ? "desk" : "owner");
+    }
+
+    public async Task<LeavePlanDto> UpdateRelieversAsync(Guid id, UpdateLeavePlanRelieversDto dto)
+    {
+        var entity = await GetOwnedLeavePlanAsync(id);
+
+        if (entity.Status is not (LeavePlanStatus.Submitted
+                                  or LeavePlanStatus.ChangesSuggested
+                                  or LeavePlanStatus.Approved))
+        {
+            throw new InvalidOperationException(entity.Status == LeavePlanStatus.Draft
+                ? "This plan is still a draft — edit the plan itself instead."
+                : $"The relievers of a {entity.Status.ToString().ToLowerInvariant()} plan can no longer be changed.");
+        }
+
+        await ValidateRelieversAsync(entity.EmployeeId, dto.RelieverId, dto.SecondRelieverId);
+
+        entity.RelieverId = dto.RelieverId;
+        entity.SecondRelieverId = dto.SecondRelieverId;
+        await _leavePlanRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation("Leave plan {id}: relievers changed", id);
+        return await GetByIdAsync(id);
+    }
+
+    /// <summary>
+    /// Refuses a reliever who is the employee themselves, is not this tenant's employee, or is not
+    /// at work (round 5 lanes E2/E3) — the refusals a leave request already makes.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Availability is deliberately NOT a refusal here. A plan's reliever clash check is
+    /// advisory — plans move, and the planner may know that a colleague's leave is about to change —
+    /// so it warns rather than blocks. A request, which fixes real dates, keeps its hard clash
+    /// check.</para>
+    ///
+    /// <para>"At work" is Active or on probation (<see cref="LeaveService.CanCover"/>). It was Active
+    /// only, and every hire starts on probation: on UAT that refused 2,191 of TDC's 2,399 staff.</para>
+    /// </remarks>
+    private async Task ValidateRelieversAsync(Guid employeeId, Guid? relieverId, Guid? secondRelieverId)
+    {
+        if (relieverId.HasValue && relieverId == secondRelieverId)
+            throw new InvalidOperationException("The same person cannot be both reliever and second reliever.");
+
+        var tenantId = GetTenantId();
+        foreach (var candidate in new[] { relieverId, secondRelieverId })
+        {
+            if (candidate is not Guid rid) continue;
+
+            if (rid == employeeId)
+                throw new InvalidOperationException("An employee cannot be their own reliever.");
+
+            var reliever = await _unitOfWork.Repository<Employee>().GetQueryable()
+                .Where(e => e.TenantId == tenantId && e.Id == rid && !e.IsDeleted)
+                .Select(e => new { e.IsActive, e.StaffStatus })
+                .FirstOrDefaultAsync();
+
+            if (reliever == null)
+                throw new InvalidOperationException("The chosen reliever is not one of this company's employees.");
+            if (!LeaveService.CanCover(reliever.IsActive, reliever.StaffStatus))
+                throw new InvalidOperationException(LeaveService.NotAtWorkMessage(reliever.StaffStatus));
+        }
+    }
+
+    /// <summary>
+    /// Fills empty reliever slots from the employee's reliever roster, by priority (round 5 lane E2).
+    /// </summary>
+    /// <remarks>
+    /// <para>Leave REQUESTS have filled their relievers from the roster since the port
+    /// (<c>LeaveService.AutoFillRelieversAsync</c>); plans never did, so every plan's relievers were
+    /// typed by hand and the stakeholders asked why the profile's relievers were not offered.</para>
+    ///
+    /// <para>A roster entry who is not free over the dates is skipped rather than assigned, judged by
+    /// the same clash check the planner is shown, so the form and the fill cannot disagree. ⚠ That is
+    /// why this is not a helper shared with the request path, which judges availability by live
+    /// requests only. Explicit picks are never overridden.</para>
+    /// </remarks>
+    private async Task FillRelieversFromRosterAsync(LeavePlan entity)
+    {
+        if (entity.RelieverId.HasValue && entity.SecondRelieverId.HasValue) return;
+
+        foreach (var candidate in (await LoadRelieverRosterAsync(entity.EmployeeId)).Select(r => r.EmployeeId))
+        {
+            if (candidate == entity.EmployeeId
+                || candidate == entity.RelieverId
+                || candidate == entity.SecondRelieverId)
+                continue;
+
+            var clashes = await GetRelieverClashesAsync(candidate, entity.StartDate, entity.EndDate);
+            if (clashes.Count > 0) continue;
+
+            if (!entity.RelieverId.HasValue) entity.RelieverId = candidate;
+            else entity.SecondRelieverId = candidate;
+
+            if (entity.RelieverId.HasValue && entity.SecondRelieverId.HasValue) break;
+        }
+    }
+
+    /// <summary>The employee's active reliever roster — staff at work only — by priority.</summary>
+    private async Task<List<LeavePlanRosterRelieverDto>> LoadRelieverRosterAsync(Guid employeeId)
+    {
+        var tenantId = GetTenantId();
+        var rows = await _unitOfWork.Repository<EmployeeReliever>().GetQueryable()
+            .Include(r => r.RelieverEmployee).ThenInclude(e => e.Position)
+            .Where(r => r.TenantId == tenantId
+                     && r.EmployeeId == employeeId
+                     && r.IsActive
+                     && !r.IsDeleted
+                     && !r.RelieverEmployee.IsDeleted
+                     // LeaveService.CanCover, spelled out so EF can translate it.
+                     && r.RelieverEmployee.IsActive
+                     && (r.RelieverEmployee.StaffStatus == StaffStatus.Active
+                         || r.RelieverEmployee.StaffStatus == StaffStatus.Probation))
+            .OrderBy(r => r.Priority)
+            .AsNoTracking()
+            .ToListAsync();
+
+        // FullName is computed in C#, so the names are read after the rows are loaded.
+        return rows.Select(r => new LeavePlanRosterRelieverDto
+        {
+            EmployeeId = r.RelieverEmployeeId,
+            Name = r.RelieverEmployee.FullName,
+            PositionName = r.RelieverEmployee.Position?.Title,
+            Priority = r.Priority,
+        }).ToList();
     }
 
     private Guid GetCurrentUserId()

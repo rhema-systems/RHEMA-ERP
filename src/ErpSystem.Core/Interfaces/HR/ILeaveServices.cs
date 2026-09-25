@@ -234,7 +234,20 @@ public interface ILeavePlanService
     Task<LeavePlanDto> RejectLeavePlanAsync(Guid id, string reason);
     Task<LeavePlanDto> SuggestChangesAsync(Guid id, SuggestLeavePlanChangesDto dto);
     Task<LeavePlanDto> RespondToSuggestionAsync(Guid id, RespondToLeaveSuggestionDto dto);
-    Task CancelLeavePlanAsync(Guid id);
+
+    /// <summary>
+    /// Cancels a plan (round 5 lane E5). <paramref name="actingAsDesk"/> is true when the caller
+    /// holds the leave write tier: the desk may also cancel an APPROVED plan no request has been
+    /// raised from, and must say why. The employee may cancel their own plan until it is approved.
+    /// A live approval is withdrawn either way.
+    /// </summary>
+    Task CancelLeavePlanAsync(Guid id, string? reason, bool actingAsDesk);
+
+    /// <summary>
+    /// The approver's one edit to a plan: its relievers (round 5 lane E3). Allowed while the plan
+    /// is Submitted, ChangesSuggested or Approved; the caller's authority is the controller's check.
+    /// </summary>
+    Task<LeavePlanDto> UpdateRelieversAsync(Guid id, UpdateLeavePlanRelieversDto dto);
 
     /// <summary>
     /// Why <paramref name="relieverId"/> may not be free between the two dates: their own leave

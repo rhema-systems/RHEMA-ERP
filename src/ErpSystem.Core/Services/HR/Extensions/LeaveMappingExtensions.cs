@@ -229,7 +229,9 @@ namespace ErpSystem.Application.Extensions
             WorkflowInstanceId = entity.WorkflowInstanceId,
             ApprovedById = entity.ApprovedById,
             ApprovedDate = entity.ApprovedDate,
-            RejectionReason = entity.RejectionReason
+            RejectionReason = entity.RejectionReason,
+            CancellationDate = entity.CancellationDate,
+            CancellationReason = entity.CancellationReason
         };
 
         public static LeavePlan ToEntity(this CreateLeavePlanDto dto) => new LeavePlan

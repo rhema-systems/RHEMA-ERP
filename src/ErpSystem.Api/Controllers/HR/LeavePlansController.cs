@@ -26,6 +26,7 @@ public class LeavePlansController : ControllerBase
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IAuthorizationService _authorization;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly ILogger<LeavePlansController> _logger;
 
     public LeavePlansController(
@@ -33,13 +34,35 @@ public class LeavePlansController : ControllerBase
         ApplicationDbContext db,
         ICurrentUserService currentUserService,
         IAuthorizationService authorization,
+        IWorkflowIntegrationService workflowIntegrationService,
         ILogger<LeavePlansController> logger)
     {
         _service = service;
         _db = db;
         _currentUserService = currentUserService;
         _authorization = authorization;
+        _workflowIntegrationService = workflowIntegrationService;
         _logger = logger;
+    }
+
+    private async Task<bool> HoldsPolicyAsync(string policy)
+        => (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
+
+    /// <summary>
+    /// Whether the workflow engine is currently asking the caller to decide this plan.
+    /// </summary>
+    /// <remarks>
+    /// Round 5 lane E4 — the same third arm <c>LeavesController.CanReadRequestAsync</c> gives a leave
+    /// request. The plan definition's first stage is the line manager, whose role holds no HR
+    /// permission, so the approvals inbox linked them to a plan they could not open. This opens one
+    /// plan, to the one person being asked, for as long as it is at their step; granting the role
+    /// <c>HR.Leave.Read</c> would open every plan to every manager for good.
+    /// </remarks>
+    private async Task<bool> IsCurrentApproverAsync(Guid planId)
+    {
+        if (!Guid.TryParse(_currentUserService.UserId, out var userId) || userId == Guid.Empty)
+            return false;
+        return await _workflowIntegrationService.CanUserApproveAsync("LeavePlan", planId, userId);
     }
 
     /// <summary>Self-or-permission, as on LeavesController — see the remarks there.</summary>
@@ -118,7 +141,9 @@ public class LeavePlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LeavePlanDto>> GetById(Guid id)
     {
-        if (!await CanActOnPlanAsync(id, HrPermissions.LeaveReadPolicy))
+        // The plan's owner, the leave read tier, or whoever the engine is asking to decide it.
+        if (!await CanActOnPlanAsync(id, HrPermissions.LeaveReadPolicy)
+            && !await IsCurrentApproverAsync(id))
             return Forbid();
 
         try { return Ok(await _service.GetByIdAsync(id)); }
@@ -155,6 +180,11 @@ public class LeavePlansController : ControllerBase
     public async Task<ActionResult<LeavePlanDto>> Update(Guid id, [FromBody] CreateLeavePlanDto dto)
     {
         if (!await CanActOnPlanAsync(id, HrPermissions.LeaveWritePolicy))
+            return Forbid();
+
+        // Round 5 lane E3: the check above is on the plan as it stands. Without this one an
+        // employee could move their own draft onto somebody else by changing the employee id.
+        if (!await CanActForEmployeeAsync(dto.EmployeeId, HrPermissions.LeaveWritePolicy))
             return Forbid();
 
         try { return Ok(await _service.UpdateLeavePlanAsync(id, dto)); }
@@ -237,18 +267,49 @@ public class LeavePlansController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    /// <summary>
+    /// The approver's one edit to a submitted plan: who covers (round 5 lane E3).
+    /// </summary>
+    /// <remarks>
+    /// The stakeholders' point: whoever opens a submitted plan should be able to set its relievers,
+    /// and nothing else — the dates go back to the employee through suggest-changes. Open to the
+    /// leave write tier and to the person the engine is currently asking to decide the plan.
+    /// </remarks>
+    [HttpPatch("{id:guid}/relievers")]
+    [ProducesResponseType(typeof(LeavePlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<LeavePlanDto>> UpdateRelievers(Guid id, [FromBody] UpdateLeavePlanRelieversDto dto)
+    {
+        if (!await HoldsPolicyAsync(HrPermissions.LeaveWritePolicy) && !await IsCurrentApproverAsync(id))
+            return Forbid();
+
+        try { return Ok(await _service.UpdateRelieversAsync(id, dto)); }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    /// <summary>Cancel a plan — the owner until it is approved; HR also after, with a reason.</summary>
+    /// <remarks>
+    /// ⚠ An empty body is allowed: the owner cancelling their own draft need give no reason, and the
+    /// shared <c>apiService</c> drops a missing body rather than sending <c>{}</c>.
+    /// </remarks>
     [HttpPatch("{id:guid}/cancel")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Cancel(Guid id)
+    public async Task<IActionResult> Cancel(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] CancelLeavePlanDto? dto)
     {
         if (!await CanActOnPlanAsync(id, HrPermissions.LeaveWritePolicy))
             return Forbid();
 
         try
         {
-            await _service.CancelLeavePlanAsync(id);
+            var actingAsDesk = await HoldsPolicyAsync(HrPermissions.LeaveWritePolicy);
+            await _service.CancelLeavePlanAsync(id, dto?.Reason, actingAsDesk);
             return NoContent();
         }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }

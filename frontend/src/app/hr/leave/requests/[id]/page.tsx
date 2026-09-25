@@ -31,6 +31,7 @@ import {
 } from '@/components/hr/leave/LeaveDateChangeDialogs';
 import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import { MedicalBoardLinkPanel } from '@/components/hr/leave/MedicalBoardLinkPanel';
+import { MatchesApprovedPlanBadge } from '@/components/hr/leave/MatchesApprovedPlanBadge';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -239,6 +240,7 @@ export default function LeaveRequestDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={r.status} />
+            <MatchesApprovedPlanBadge show={r.matchesApprovedPlan} />
             {isDraft && (
               <Button
                 variant="outline"

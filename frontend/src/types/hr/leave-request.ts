@@ -82,6 +82,11 @@ export interface LeaveRequest {
   leavePlanId?: string | null;
   /** The plan this came from, named rather than shown as a Guid. Single-request read only. */
   leavePlanReference?: string | null;
+  /**
+   * Raised from an APPROVED plan and asking for exactly its dates (round 5, decision B4). Set on the
+   * single-request read and on the approvals queue; the approver sees the dates were already agreed.
+   */
+  matchesApprovedPlan?: boolean;
 
   /**
    * Attendance days recorded as OnLeave against this request. Single-request read only. It should
@@ -383,12 +388,35 @@ export interface LeavePlan {
    */
   raisedLeaveRequestId?: string | null;
   raisedLeaveRequestNumber?: string | null;
+  /** When and why the plan was cancelled (round 5 lane E5). */
+  cancellationDate?: string | null;
+  cancellationReason?: string | null;
+  /**
+   * The employee's own reliever roster, by priority — filled on the single-plan read only, so
+   * whoever opens the plan (the approver included) can pick relievers from it. (Round 5 lane E2/E3.)
+   */
+  relieverRoster?: LeavePlanRosterReliever[];
   /**
    * Why the named reliever(s) may not be free over the plan's dates — their own plans, their own
    * live leave requests, or another plan in the window that already names them. Empty when clear.
    * Advisory: the plan can still be saved and approved. (Finish-plan lane 4.)
    */
   relieverClashes: LeaveRelieverClash[];
+}
+
+/** One entry of an employee's reliever roster, as a plan offers it. */
+export interface LeavePlanRosterReliever {
+  employeeId: string;
+  name: string;
+  positionName?: string | null;
+  /** 1 = primary, 2 = backup, and so on. */
+  priority: number;
+}
+
+/** The approver's one edit to a plan: both reliever slots, replaced together. */
+export interface UpdateLeavePlanRelieversRequest {
+  relieverId: string | null;
+  secondRelieverId: string | null;
 }
 
 /** One reason a reliever is not free over a leave plan's dates. Shape probed from GET /hr/leave-plans. */

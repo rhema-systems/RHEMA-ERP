@@ -423,6 +423,20 @@ public class LeavePlanDto
     public Guid? RaisedLeaveRequestId { get; set; }
     public string? RaisedLeaveRequestNumber { get; set; }
 
+    public DateTime? CancellationDate { get; set; }
+    public string? CancellationReason { get; set; }
+
+    /// <summary>
+    /// The employee's own reliever roster (active entries, by priority), so whoever opens the plan
+    /// can pick relievers from it. Filled on the single-plan read only.
+    /// </summary>
+    /// <remarks>
+    /// Round 5 lane E2/E3. The roster's own endpoint is self-or-HR, so the line manager deciding the
+    /// plan could not read it. Carrying it here opens exactly one employee's roster, to whoever may
+    /// open that plan — the same reach as the plan itself.
+    /// </remarks>
+    public List<LeavePlanRosterRelieverDto> RelieverRoster { get; set; } = new();
+
     /// <summary>
     /// Why the named reliever(s) may not actually be available over this plan's dates. Empty when
     /// nothing overlaps, or when no reliever is named. Advisory — a plan with clashes can still be
@@ -435,6 +449,32 @@ public class LeavePlanDto
     /// reliever — so a reliever who is away, or already covering for somebody else, shows up.
     /// </remarks>
     public List<LeaveRelieverClashDto> RelieverClashes { get; set; } = new();
+}
+
+/// <summary>One entry of an employee's reliever roster, as a plan offers it.</summary>
+public class LeavePlanRosterRelieverDto
+{
+    public Guid EmployeeId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? PositionName { get; set; }
+    /// <summary>1 = primary, 2 = backup, and so on.</summary>
+    public int Priority { get; set; }
+}
+
+/// <summary>
+/// The approver's one edit to a submitted plan: who covers (round 5 lane E3). Both slots are
+/// replaced — send the one to keep as well as the one to change; null empties a slot.
+/// </summary>
+public class UpdateLeavePlanRelieversDto
+{
+    public Guid? RelieverId { get; set; }
+    public Guid? SecondRelieverId { get; set; }
+}
+
+/// <summary>Cancelling a plan. The reason is required when HR cancels an approved one.</summary>
+public class CancelLeavePlanDto
+{
+    public string? Reason { get; set; }
 }
 
 /// <summary>One reason a reliever is not free over a leave plan's dates.</summary>
@@ -592,6 +632,13 @@ public class LeaveRequestDto
 
     /// <summary>The number of the plan this request was raised from, when it came from one.</summary>
     public string? LeavePlanReference { get; set; }
+
+    /// <summary>
+    /// True when the request was raised from an APPROVED plan and asks for exactly the plan's dates
+    /// (round 5, decision B4). Annual leave that was scheduled is applied for "as of right": it still
+    /// goes through both approvals, but the approver can see at a glance that the dates were agreed.
+    /// </summary>
+    public bool MatchesApprovedPlan { get; set; }
 
     /// <summary>
     /// Who finally approved the request and when, and why it was refused if it was.

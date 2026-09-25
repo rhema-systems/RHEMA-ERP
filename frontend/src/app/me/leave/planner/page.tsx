@@ -39,7 +39,9 @@ import { ArrowLeft, Ban, CalendarPlus, Loader2, Pencil, Send } from 'lucide-reac
 import { useAuth } from '@/hooks/use-auth';
 import { leavePlanService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
+import { employeeRelieverService } from '@/services/hr/employee-reliever.service';
 import { LEAVE_PLAN_STATUS_BADGE } from '@/components/me/leave/leave-status';
+import { RelieverChooser, toRosterRelievers } from '@/components/hr/leave/LeavePlanRelievers';
 import type { LeavePlan } from '@/types/hr/leave-request';
 
 const fmtDate = (d: string) =>
@@ -51,6 +53,13 @@ interface PlanFormState {
   startDate: string;
   endDate: string;
   notes: string;
+  // Round 5 lane E4: the planner had no relievers at all, and because the update is a full
+  // replace, an employee editing their draft wiped any reliever HR had set. Both slots now travel
+  // with every save.
+  relieverId: string | null;
+  relieverLabel: string | null;
+  secondRelieverId: string | null;
+  secondRelieverLabel: string | null;
 }
 
 const emptyPlanForm: PlanFormState = {
@@ -59,6 +68,10 @@ const emptyPlanForm: PlanFormState = {
   startDate: '',
   endDate: '',
   notes: '',
+  relieverId: null,
+  relieverLabel: null,
+  secondRelieverId: null,
+  secondRelieverLabel: null,
 };
 
 export default function MyLeavePlannerPage() {
@@ -85,6 +98,15 @@ export default function MyLeavePlannerPage() {
     queryFn: () => leaveTypeService.getAll(true),
   });
 
+  // My own reliever list — the only people I choose from here, the same rule as the request form.
+  // With an empty list the approver or HR names somebody when they review the plan.
+  const { data: myRelievers, isLoading: relieversLoading } = useQuery({
+    queryKey: ['me', 'employee-relievers', 'active'],
+    queryFn: () => employeeRelieverService.getMine(true),
+    enabled: !!employeeId,
+  });
+  const roster = toRosterRelievers(myRelievers);
+
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ['me', 'leave-plans', employeeId] });
 
@@ -96,8 +118,11 @@ export default function MyLeavePlannerPage() {
         startDate: f.startDate,
         endDate: f.endDate,
         notes: f.notes || null,
+        relieverId: f.relieverId,
+        secondRelieverId: f.secondRelieverId,
         // plannedBy and year are both stamped server-side: the actor from the token (finish-plan
-        // lane 4), the year from the start date (closure plan L-17).
+        // lane 4), the year from the start date (closure plan L-17). Relievers left empty are
+        // filled from my reliever list by the server (round 5 lane E2).
       };
       return f.id ? leavePlanService.update(f.id, payload) : leavePlanService.create(payload);
     },
@@ -250,6 +275,10 @@ export default function MyLeavePlannerPage() {
                             startDate: p.startDate,
                             endDate: p.endDate,
                             notes: p.notes ?? '',
+                            relieverId: p.relieverId ?? null,
+                            relieverLabel: p.relieverName ?? null,
+                            secondRelieverId: p.secondRelieverId ?? null,
+                            secondRelieverLabel: p.secondRelieverName ?? null,
                           })
                         }
                       >
@@ -307,6 +336,30 @@ export default function MyLeavePlannerPage() {
                       Respond
                     </Button>
                   )}
+                  {/*
+                    Spreading annual leave across the year is several plans (round 5 lane E6): a new
+                    plan for the same leave type and relievers, with the dates left to fill in.
+                  */}
+                  {p.status !== 'Cancelled' && p.status !== 'Rejected' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      title="Plan another period"
+                      onClick={() =>
+                        setForm({
+                          ...emptyPlanForm,
+                          leaveTypeId: p.leaveTypeId,
+                          relieverId: p.relieverId ?? null,
+                          relieverLabel: p.relieverName ?? null,
+                          secondRelieverId: p.secondRelieverId ?? null,
+                          secondRelieverLabel: p.secondRelieverName ?? null,
+                        })
+                      }
+                    >
+                      <CalendarPlus className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {/* Until it is approved; after that, cancelling is HR's (round 5 lane E5). */}
                   {['Draft', 'Submitted', 'ChangesSuggested'].includes(p.status) && (
                     <Button
                       variant="ghost"
@@ -378,6 +431,34 @@ export default function MyLeavePlannerPage() {
                   />
                 </div>
               </div>
+              <RelieverChooser
+                label="Reliever"
+                value={form.relieverId}
+                valueLabel={form.relieverLabel}
+                onChange={(id, label) => setForm({ ...form, relieverId: id, relieverLabel: label })}
+                roster={roster}
+                rosterLoading={relieversLoading}
+                excludeIds={[form.secondRelieverId]}
+                startDate={form.startDate}
+                endDate={form.endDate}
+                excludePlanId={form.id ?? undefined}
+                allowSearch={false}
+              />
+              <RelieverChooser
+                label="Second reliever"
+                value={form.secondRelieverId}
+                valueLabel={form.secondRelieverLabel}
+                onChange={(id, label) =>
+                  setForm({ ...form, secondRelieverId: id, secondRelieverLabel: label })
+                }
+                roster={roster}
+                rosterLoading={relieversLoading}
+                excludeIds={[form.relieverId]}
+                startDate={form.startDate}
+                endDate={form.endDate}
+                excludePlanId={form.id ?? undefined}
+                allowSearch={false}
+              />
               <div className="space-y-2">
                 <Label>Notes</Label>
                 <Textarea
