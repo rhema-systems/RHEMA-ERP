@@ -382,7 +382,7 @@ export interface AgingReport {
         overdueCustomers: number;
     };
     customers: Array<{
-        customerId: string;
+        businessPartnerId: string;
         customerCode: string;
         customerName: string;
         current: number;
@@ -417,7 +417,7 @@ export interface CustomerDetailedLedgerReport {
 }
 
 export interface CustomerDetailedLedgerAccount {
-    customerId: string;
+    businessPartnerId: string;
     customerCode: string;
     customerName: string;
     currencyCode: string;

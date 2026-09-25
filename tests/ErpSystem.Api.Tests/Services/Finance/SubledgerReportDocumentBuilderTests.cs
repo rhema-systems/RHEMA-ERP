@@ -95,7 +95,7 @@ public sealed class SubledgerReportDocumentBuilderTests
                 {
                     new CustomerDetailedLedgerAccountDto
                     {
-                        CustomerId = customerId,
+                        BusinessPartnerId = customerId,
                         CustomerCode = "CUS-USD",
                         CustomerName = "Atlantic Development Partners Ltd",
                         CurrencyCode = "USD",
@@ -121,7 +121,7 @@ public sealed class SubledgerReportDocumentBuilderTests
         var result = await builder.RenderAsync(Request(DocumentTypes.FinanceArCustomerStatement,
             ("fromDate", "2025-01-01"),
             ("toDate", "2025-01-31"),
-            ("customerIds", customerId.ToString()),
+            ("businessPartnerIds", customerId.ToString()),
             ("showCustomerCurrency", "true")));
 
         AssertPdf(result, "customer-statement-cus-usd-2025-01-01-2025-01-31.pdf",

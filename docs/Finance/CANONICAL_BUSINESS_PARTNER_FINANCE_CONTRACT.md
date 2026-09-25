@@ -78,6 +78,10 @@ must not be interpreted as a promise that they override Finance settings.
 - AP aging, unapplied settlements, supplier statements, detailed ledgers, WHT summaries and
   match-exception reports expose canonical `BusinessPartnerId` fields. “Supplier” remains a UI and
   accounting-role label only; report filters and grouping never fall back to a Supplier master ID.
+- AR aging, unapplied receipts, customer statements, detailed ledgers, collections and sales
+  summaries likewise expose canonical `BusinessPartnerId` fields. Historical reports resolve the
+  governed Customer role even when that role is inactive for new business; they do not use the
+  legacy `PartnerType` string as accounting identity.
 
 ## Withholding contract
 

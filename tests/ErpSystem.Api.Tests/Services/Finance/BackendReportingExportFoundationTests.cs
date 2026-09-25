@@ -385,7 +385,7 @@ public sealed class BackendReportingExportFoundationTests
                 {
                     new CustomerDetailedLedgerAccountDto
                     {
-                        CustomerId = customerId,
+                        BusinessPartnerId = customerId,
                         CustomerCode = "CUST-001",
                         CustomerName = "Customer A",
                         CurrencyCode = "GHS",
@@ -430,7 +430,7 @@ public sealed class BackendReportingExportFoundationTests
             ReportType = "customer-statement",
             PeriodStart = PeriodStart,
             PeriodEnd = AsOfDate,
-            CustomerIds = new List<Guid> { customerId },
+            BusinessPartnerIds = new List<Guid> { customerId },
             ShowCustomerCurrency = true
         });
 

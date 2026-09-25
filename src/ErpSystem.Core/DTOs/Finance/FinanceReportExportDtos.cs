@@ -56,9 +56,7 @@ public sealed class FinanceReportExportRequestDto
     public List<Guid> GlAccountIds { get; set; } = new();
     public Guid? BusinessPartnerId { get; set; }
     public BusinessPartnerRoleType? BusinessPartnerRole { get; set; }
-    public Guid? CustomerId { get; set; }
     public List<Guid> BusinessPartnerIds { get; set; } = new();
-    public List<Guid> CustomerIds { get; set; } = new();
     public bool ShowSupplierCurrency { get; set; }
     public bool ShowCustomerCurrency { get; set; }
     public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();

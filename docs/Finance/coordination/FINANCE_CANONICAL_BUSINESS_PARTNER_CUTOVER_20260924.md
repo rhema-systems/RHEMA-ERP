@@ -241,3 +241,11 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
 - The API and API-test projects build with zero errors. The AP canonical-report architecture test,
   five supplier-statement/export tests and the focused frontend query-contract test pass (7/7
   total). No migration or database reset was executed.
+- AR reporting now uses canonical `BusinessPartnerId(s)` throughout aging, unapplied receipts,
+  statements, detailed ledgers, collections and sales summaries. The central export request and
+  controlled document renderer share the same identifier contract. Statement/ledger eligibility
+  is derived from governed Customer roles, not the legacy `PartnerType` string; inactive roles
+  remain reportable for historical audit.
+- The API and API-test projects build with zero errors, and the canonical AR architecture,
+  controlled-statement and central-export checks pass (3/3). No migration or database reset was
+  executed.

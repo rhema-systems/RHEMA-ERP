@@ -571,6 +571,29 @@ public sealed class LegacyPostingPathLockdownTests
             .And.NotContain("supplier-detailed-ledger?supplierIds");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void ArReporting_ShouldUseCanonicalBusinessPartnerIdentityAndGovernedCustomerRoles()
+    {
+        var root = FindRepositoryRoot();
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "AR", "ReportDtos.cs"));
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "ArReportsService.cs"));
+        var controller = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "ArControllersConsolidated.cs"));
+
+        dto.Should().Contain("public Guid BusinessPartnerId")
+            .And.NotContain("public Guid CustomerId")
+            .And.NotContain("public Guid? CustomerId");
+        service.Should().Contain("Repository<BusinessPartnerRole>()")
+            .And.Contain("BusinessPartnerRoleType.Customer")
+            .And.Contain("customer.BusinessPartnerId")
+            .And.NotContain("PartnerType == \"Customer\"")
+            .And.NotContain("customer.CustomerId")
+            .And.NotContain("query.CustomerId");
+        controller.Should().Contain("businessPartnerIds")
+            .And.Contain("customer-statement/{businessPartnerId}");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

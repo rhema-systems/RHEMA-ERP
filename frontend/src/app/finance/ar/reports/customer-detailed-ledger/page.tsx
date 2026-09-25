@@ -64,7 +64,7 @@ export default function CustomerDetailedLedgerPage() {
                 const report = await arService.getCustomerDetailedLedger({
                     fromDate: params.fromDate,
                     toDate: params.toDate,
-                    customerIds: params.partnerIds,
+                    businessPartnerIds: params.partnerIds,
                     showCustomerCurrency: params.showPartnerCurrency,
                 });
 
@@ -78,7 +78,7 @@ export default function CustomerDetailedLedgerPage() {
                     totalClosingBalance: report.totalClosingBalance,
                     warnings: report.warnings ?? [],
                     accounts: report.customers.map((customer) => ({
-                        id: customer.customerId,
+                        id: customer.businessPartnerId,
                         code: customer.customerCode,
                         name: customer.customerName,
                         currencyCode: customer.currencyCode,
@@ -93,13 +93,13 @@ export default function CustomerDetailedLedgerPage() {
             downloadPdf={(params) => arService.downloadCustomerStatementPdf({
                 fromDate: params.fromDate,
                 toDate: params.toDate,
-                customerIds: params.partnerIds,
+                businessPartnerIds: params.partnerIds,
                 showCustomerCurrency: params.showPartnerCurrency,
             })}
             printPdf={(params) => arService.printCustomerStatement({
                 fromDate: params.fromDate,
                 toDate: params.toDate,
-                customerIds: params.partnerIds,
+                businessPartnerIds: params.partnerIds,
                 showCustomerCurrency: params.showPartnerCurrency,
             })}
         />
