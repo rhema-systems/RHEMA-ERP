@@ -308,3 +308,14 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   environment variables or API user secrets. Multiple differently aged local databases contain
   `UAT` in their names, so none is inferred as the authorized target. An exact server/database
   connection must be supplied before the destructive UAT reset can proceed.
+- The owner subsequently confirmed `.\EXPRESS22 / RHEMAERP_BOOKV2_UAT_20260922` as the exact UAT
+  target. Before replacement, the existing UAT database and canonical source were each preserved
+  with independent COPY_ONLY/CHECKSUM backups, `RESTORE VERIFYONLY` passed, and SHA-256 hashes were
+  recorded in the external evidence directory
+  `RHEMAERP_CANONICAL_BP_UAT_20260925_6f2fd5b4_20260925_093417`.
+- The confirmed UAT database was then replaced from the verified canonical source backup, returned
+  to multi-user mode, and passed `DBCC CHECKDB ... PHYSICAL_ONLY`. Two UAT seed passes completed
+  successfully. Final source/UAT reconciliation matches all 16 migration IDs, three accounting
+  books, six canonical demo partners/roles, three AP profiles, three AR profiles, two WHT defaults,
+  zero legacy Supplier rows and zero Finance journals. The pre-replacement UAT backup is retained
+  for recovery; no backup artifact was deleted.
