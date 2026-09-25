@@ -578,6 +578,9 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             .Include(bp => bp.BankAccounts)
             .Include(bp => bp.Documents)
             .Include(bp => bp.Financials)
+            // Canonical role rows coexist with the legacy PartnerType projection while Procurement
+            // consumers migrate. Finance profile screens must receive the real multi-role state.
+            .Include(bp => bp.Roles)
             .Include(bp => bp.ApprovedBy)
             .FirstOrDefaultAsync();
     }

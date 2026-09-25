@@ -71,10 +71,12 @@ import {
 } from '@/components/procurement/BusinessPartnerPostingFields';
 
 type PartnerType = 'Supplier' | 'Contractor' | 'Customer' | 'Both' | '';
+type CanonicalPartnerRole = 'Supplier' | 'Contractor' | 'Customer';
 
 interface FormData {
   // Common fields
   partnerType: PartnerType;
+  roleTypes: CanonicalPartnerRole[];
   partnerName: string;
   tradingName: string;
   registrationNumber: string;
@@ -112,6 +114,7 @@ interface FormData {
 
 const initialFormData: FormData = {
   partnerType: '',
+  roleTypes: [],
   partnerName: '',
   tradingName: '',
   registrationNumber: '',
@@ -164,13 +167,20 @@ const partnerTypeOptions = [
     icon: Users,
     description: 'Customers/Debtors for sales transactions',
   },
-  {
-    value: 'Both',
-    label: 'Supplier & Contractor',
-    icon: Building2,
-    description: 'Partners who are both suppliers and contractors',
-  },
 ];
+
+// Procurement still exposes a legacy single PartnerType string to older consumers. New screens
+// select canonical role rows and send this compatibility projection alongside them until those
+// remaining Procurement queries have migrated to BusinessPartnerRole.
+const projectLegacyPartnerType = (
+  roles: CanonicalPartnerRole[]
+): PartnerType => {
+  if (roles.includes('Supplier') && roles.includes('Contractor')) return 'Both';
+  if (roles.includes('Supplier')) return 'Supplier';
+  if (roles.includes('Contractor')) return 'Contractor';
+  if (roles.includes('Customer')) return 'Customer';
+  return '';
+};
 
 const customerTypeOptions = [
   { value: 'Retail', label: 'Retail' },
@@ -272,8 +282,8 @@ export default function NewBusinessPartnerPage() {
 
   const handleSubmit = async () => {
     // Validation
-    if (!formData.partnerType) {
-      toast.error('Please select a partner type');
+    if (formData.roleTypes.length === 0) {
+      toast.error('Select at least one Business Partner role');
       return;
     }
     if (!formData.partnerName.trim()) {
@@ -286,6 +296,7 @@ export default function NewBusinessPartnerPage() {
 
       const createData: CreateBusinessPartnerDto = {
         partnerType: formData.partnerType,
+        roleTypes: formData.roleTypes,
         partnerName: formData.partnerName,
         tradingName: formData.tradingName || undefined,
         registrationNumber: formData.registrationNumber || undefined,
@@ -313,7 +324,7 @@ export default function NewBusinessPartnerPage() {
       };
 
       // Add customer-specific fields if partner type is Customer
-      if (formData.partnerType === 'Customer') {
+      if (formData.roleTypes.includes('Customer')) {
         createData.customerType = formData.customerType || undefined;
         createData.defaultDiscount = formData.defaultDiscount
           ? parseFloat(formData.defaultDiscount)
@@ -334,8 +345,10 @@ export default function NewBusinessPartnerPage() {
       }
 
       const result = await businessPartnerService.createPartner(createData);
-      toast.success('Business partner created successfully');
-      router.push(`/procurement/business-partners/${result.id}`);
+      toast.success('Business partner created. Prepare its governed Finance profiles next.');
+      router.push(
+        `/procurement/business-partners/${result.id}/edit?tab=finance-profiles`
+      );
     } catch (error: any) {
       console.error('Error creating business partner:', error);
       toast.error(error.message || 'Failed to create business partner');
@@ -344,7 +357,7 @@ export default function NewBusinessPartnerPage() {
     }
   };
 
-  const isCustomer = formData.partnerType === 'Customer';
+  const isCustomer = formData.roleTypes.includes('Customer');
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
@@ -367,7 +380,7 @@ export default function NewBusinessPartnerPage() {
         </div>
         <Button
           onClick={handleSubmit}
-          disabled={saving || !formData.partnerType}
+          disabled={saving || formData.roleTypes.length === 0}
         >
           {saving ? (
             <>
@@ -386,13 +399,18 @@ export default function NewBusinessPartnerPage() {
       {/* Partner Type Selection */}
       <Card>
         <CardHeader>
-          <CardTitle>Select Partner Type</CardTitle>
+          <CardTitle>Select Partner Roles</CardTitle>
+          <CardDescription>
+            Select every role this organization performs. One canonical identity can be a supplier,
+            contractor and customer at the same time.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {partnerTypeOptions.map((option) => {
               const Icon = option.icon;
-              const isSelected = formData.partnerType === option.value;
+              const role = option.value as CanonicalPartnerRole;
+              const isSelected = formData.roleTypes.includes(role);
               return (
                 <button
                   key={option.value}
@@ -400,10 +418,16 @@ export default function NewBusinessPartnerPage() {
                   aria-pressed={isSelected}
                   disabled={saving}
                   onClick={() =>
-                    handleInputChange(
-                      'partnerType',
-                      option.value as PartnerType
-                    )
+                    setFormData((previous) => {
+                      const roleTypes = previous.roleTypes.includes(role)
+                        ? previous.roleTypes.filter((item) => item !== role)
+                        : [...previous.roleTypes, role];
+                      return {
+                        ...previous,
+                        roleTypes,
+                        partnerType: projectLegacyPartnerType(roleTypes),
+                      };
+                    })
                   }
                   className={`
                     cursor-pointer rounded-lg border-2 p-3 transition-all
@@ -438,7 +462,7 @@ export default function NewBusinessPartnerPage() {
 
       {/* Form Tabs */}
       <PartnerCatalogueNotice unavailable={catalogues.unavailable} />
-      {formData.partnerType && (
+      {formData.roleTypes.length > 0 && (
         <Card>
           <CardContent className="pt-6">
             <Tabs value={activeTab} onValueChange={setActiveTab}>

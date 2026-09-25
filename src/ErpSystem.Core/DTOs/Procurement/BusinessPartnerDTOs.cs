@@ -18,6 +18,11 @@ public class BusinessPartnerDto
     public string PartnerCode { get; set; } = string.Empty;
     public string PartnerName { get; set; } = string.Empty;
     public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both, Customer
+    /// <summary>
+    /// Canonical independently-active roles. PartnerType remains only as a compatibility projection
+    /// for Procurement features that have not yet moved from the historical single-value contract.
+    /// </summary>
+    public List<string> RoleTypes { get; set; } = new();
     public string? TradingName { get; set; }
     public string? RegistrationNumber { get; set; }
     public string? TaxNumber { get; set; }
@@ -207,6 +212,12 @@ public class CreateBusinessPartnerDto
     [Required]
     [MaxLength(20)]
     public string PartnerType { get; set; } = "Supplier"; // Supplier, Contractor, Both, Customer
+
+    /// <summary>
+    /// Canonical multi-role selection. Older clients may omit it and continue to send PartnerType;
+    /// the service expands that legacy value into role rows during creation.
+    /// </summary>
+    public List<string> RoleTypes { get; set; } = new();
 
     [MaxLength(200)]
     public string? TradingName { get; set; }
