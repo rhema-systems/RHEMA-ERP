@@ -23,11 +23,11 @@ public class CollectionController : ControllerBase
     public async Task<IActionResult> GetActivities(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null, [FromQuery] string? status = null,
-        [FromQuery] string? activityType = null, [FromQuery] Guid? customerId = null,
+        [FromQuery] string? activityType = null, [FromQuery] Guid? businessPartnerId = null,
         [FromQuery] Guid? assignedToId = null,
         [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
     {
-        var result = await _collectionService.GetActivitiesAsync(page, pageSize, search, status, activityType, customerId, assignedToId, startDate, endDate);
+        var result = await _collectionService.GetActivitiesAsync(page, pageSize, search, status, activityType, businessPartnerId, assignedToId, startDate, endDate);
         return Ok(result);
     }
 
@@ -65,10 +65,10 @@ public class CollectionController : ControllerBase
     public async Task<IActionResult> GetPlans(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null, [FromQuery] string? status = null,
-        [FromQuery] Guid? customerId = null,
+        [FromQuery] Guid? businessPartnerId = null,
         [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
     {
-        var result = await _collectionService.GetPlansAsync(page, pageSize, search, status, customerId, startDate, endDate);
+        var result = await _collectionService.GetPlansAsync(page, pageSize, search, status, businessPartnerId, startDate, endDate);
         return Ok(result);
     }
 
@@ -98,9 +98,9 @@ public class CollectionController : ControllerBase
         => Ok(await _collectionService.RecordInstallmentPaymentAsync(planId, installmentId, dto));
 
     [HttpGet("installments/overdue")]
-    public async Task<IActionResult> GetOverdueInstallments([FromQuery] Guid? customerId = null)
+    public async Task<IActionResult> GetOverdueInstallments([FromQuery] Guid? businessPartnerId = null)
     {
-        var installments = await _collectionService.GetOverdueInstallmentsAsync(customerId);
+        var installments = await _collectionService.GetOverdueInstallmentsAsync(businessPartnerId);
         return Ok(installments);
     }
 }

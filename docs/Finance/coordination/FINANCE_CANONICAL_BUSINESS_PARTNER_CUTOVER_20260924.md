@@ -264,3 +264,19 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   legacy `PartnerType` string, while inactive roles remain visible for historical account review.
 - The generic Finance invoice-search contract now exposes `BusinessPartnerId`; its former
   `CustomerId` label has been removed. No migration or database reset was executed in this checkpoint.
+- Finance AR collection work items, collection activities and payment plans now use canonical
+  `BusinessPartnerId` end to end. The Finance follow-up queue resolves the tenant Business Partner
+  directly, and the Sales collection service/API/frontend contracts no longer expose the retired
+  Sales `CustomerId` identity.
+- Ownership was checked before this collection change. Git blame attributes the collection entity
+  file entirely to Akwasi Adu-Kyeremeh and the affected Finance collection services/frontend
+  overwhelmingly to Akwasi Adu-Kyeremeh; the isolated Michael Marmah line in the frontend service
+  is unrelated to the identity conversion.
+- Migration `CanonicalCollectionBusinessPartnerIdentity` has been generated but not applied. It
+  refuses to run while either `CollectionActivities` or `PaymentPlans` contains data, preventing
+  legacy Customer GUIDs from being silently reinterpreted as Business Partner GUIDs before the
+  verified Finance reset.
+- Data and API builds pass with zero errors. The focused backend collection suite passes 9/9 and
+  EF reports no pending model changes. The focused frontend collection suite completes all 6
+  assertions successfully; its Windows worker process reports a post-test termination timeout.
+  Database state remains unchanged pending the guarded reset gate.

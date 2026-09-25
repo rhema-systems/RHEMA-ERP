@@ -186,7 +186,7 @@ public class FinanceDataSeeder
                 ReferenceNumber = demoReference[..Math.Min(50, demoReference.Length)],
                 CollectionContext = CollectionActivityValues.FinanceArContext,
                 IsPrimaryTask = true,
-                CustomerId = exposure.CounterpartyId,
+                BusinessPartnerId = exposure.CounterpartyId,
                 InvoiceId = exposure.SourceDocumentId,
                 Subject = $"Follow up overdue invoice {exposure.SourceDocumentNumber}",
                 ActivityType = CollectionActivityValues.FollowUpTaskType,

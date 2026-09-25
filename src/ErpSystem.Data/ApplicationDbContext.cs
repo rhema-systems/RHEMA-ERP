@@ -2101,9 +2101,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0 AND [IsPrimaryTask] = 1 AND [InvoiceId] IS NOT NULL");
             entity.HasIndex(e => new { e.TenantId, e.CollectionContext, e.CollectionStatus, e.FollowUpDate });
-            entity.HasOne(e => e.Customer)
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.CustomerId)
+                .HasForeignKey(e => e.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Invoice)
                 .WithMany()
@@ -2131,9 +2131,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("PaymentPlans");
             entity.Ignore(e => e.RemainingBalance);
-            entity.HasOne(e => e.Customer)
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
-                .HasForeignKey(e => e.CustomerId)
+                .HasForeignKey(e => e.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.ApprovedBy)
                 .WithMany()
