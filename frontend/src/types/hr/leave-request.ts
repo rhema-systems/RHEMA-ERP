@@ -142,7 +142,41 @@ export interface LeaveRequest {
   closureNotes?: string | null;
   cancellationDate?: string | null;
   cancellationReason?: string | null;
+
+  // Coming back (round 5, B3): the employee reports the day, their manager or HR confirms it.
+  resumptionDate?: string | null;
+  resumptionReportedDate?: string | null;
+  resumptionReportedById?: string | null;
+  resumptionReportedByName?: string | null;
+  closureConfirmedById?: string | null;
+  closureConfirmedByName?: string | null;
+  /** Working days away after they were due back. Recorded at confirmation; previewed before it. */
+  overstayDays?: number | null;
+  /** The first working day after the leave. Single read only. */
+  expectedReturnDate?: string | null;
+  resumptionTiming?: 'Early' | 'OnTime' | 'Late' | null;
+  /** What the viewer may do, decided by the server. Single read only. */
+  viewerActions?: LeaveRequestViewerActions | null;
+
   createdAt: string;
+}
+
+/**
+ * The actions a request's screen may offer this viewer (round 5, lane D). Server-decided: two of
+ * the rules turn on who the viewer is to the employee, and on today's date against the first day.
+ */
+export interface LeaveRequestViewerActions {
+  canCancel: boolean;
+  /** Cancelling approved leave takes back something granted, so it must say why. */
+  cancelNeedsReason: boolean;
+  canRecall: boolean;
+  canReportResumption: boolean;
+  canConfirmResumption: boolean;
+}
+
+/** "I'm back at work" — the day defaults to today on the server. */
+export interface ReportResumptionRequest {
+  resumedOn?: string | null;
 }
 
 /** An approver sending a request back with dates of their own. */
@@ -200,8 +234,11 @@ export interface RejectLeaveRequest {
   rejectionReason: string;
 }
 
+/** Confirming the return, which is what closes the leave (round 5, B3). */
 export interface CloseLeaveRequest {
   closureNotes?: string | null;
+  /** The first day back, when the confirmer knows better than the report, or nobody reported it. */
+  resumptionDate?: string | null;
 }
 
 export type LeaveRequestPagedResult = PagedResult<LeaveRequest>;

@@ -664,6 +664,31 @@ public class LeaveRequest : TenantEntity
     [MaxLength(500)]
     public string? CancellationReason { get; set; }
 
+    // ── Coming back: the employee reports it, their manager or HR confirms it (round 5, B3) ──
+    // Closing used to be a desk action with no idea when anybody was actually back. Now the
+    // employee says "I'm back" and the confirmation closes the leave: an early return is cut short
+    // (the unused days come back) and a late one records the working days overstayed. Nothing is
+    // charged for an overstay; HR and payroll decide what it means.
+    //
+    // ⚠ Bare Guids on the two actor columns, like every other actor column on this entity.
+
+    /// <summary>The first day the employee was back at work: as they reported it, or as the confirmer set it.</summary>
+    public DateOnly? ResumptionDate { get; set; }
+
+    /// <summary>When the employee reported being back. Null when nobody reported it.</summary>
+    public DateTime? ResumptionReportedDate { get; set; }
+
+    public Guid? ResumptionReportedById { get; set; }
+
+    /// <summary>Who confirmed the return, which is what closes the leave.</summary>
+    public Guid? ClosureConfirmedById { get; set; }
+
+    /// <summary>
+    /// Working days away after the employee was due back, recorded when the return is confirmed.
+    /// Null for a return confirmed on time or early.
+    /// </summary>
+    public int? OverstayDays { get; set; }
+
     [ForeignKey(nameof(EmployeeId))]
     public virtual Employee Employee { get; set; } = null!;
 

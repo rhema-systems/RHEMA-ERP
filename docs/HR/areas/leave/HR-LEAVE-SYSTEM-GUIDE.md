@@ -11,8 +11,9 @@ show what the code can do, that is said in the step rather than smoothed over.
 **Round 5** ([`HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md`](../../programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md))
 **is being built lane by lane.** Lane E, leave plans, landed 2026-09-25. Chapter 12, § 19.5, the
 reliever note in § 1.5 and § 23 (L-49 to L-54) describe it. Lane F, the calendar for one employee,
-landed the same day; chapter 9 describes it. The other chapters still describe the module before
-round 5.
+landed the same day; chapter 9 describes it. Lane D (cancel, recall, coming back) landed that evening;
+chapter 7, § 19.4 and § 23 (L-55 to L-57) describe it. The other chapters still describe the module
+before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
@@ -1794,15 +1795,20 @@ approved request, and records that leave is still going ahead.
 | **🗓 Move dates** | **Approved**, not closed | reschedule — **new** |
 | **✅ Still going ahead** | **Approved**, not yet confirmed | records the answer — **new** |
 | **Recall** *(workflow)* | there is a live instance and you raised it | withdraws it to Draft |
-| **📞 Recall** *(from leave — new)* | **Approved** or **In progress**, not closed, and you hold `HR.Leave.Write` | calls the employee back and gives the remaining days back |
-| **✓✓ Close** | **Approved** or **In progress** | marks the leave taken and complete |
+| **📞 Recall** *(from leave — new)* | **Approved** or **In progress**, not closed, and you hold `HR.Leave.Write` **or are the employee's line manager** *(round 5)*: their supervisor, or the head of their unit or of any unit above it | calls the employee back and gives the remaining days back |
+| **✓✓ Confirm return** *(was Close, round 5)* | **Approved** or **In progress**, the return reported or the leave ended, and you are HR or the line manager | closes the leave on the day the employee was back: early cuts it short and returns the days, late records the working days overstayed |
 
 ⚠ **Two different things are called Recall, and you should know which is which before a room asks.**
 The workflow one **withdraws a request you raised** from an approval it has not yet cleared, back to
 Draft. The leave one **calls a person back from leave already granted**. They never appear together
 — the first needs a live approval instance, the second needs an approval that has finished — but the
 word is the same and the second is the one this chapter walks.
-| **⊘ Cancel** *(red)* | Draft, Pending, Changes suggested or Approved | withdraws it and releases the days |
+| **⊘ Cancel** *(red)* | Draft, Pending or Changes suggested (the employee or HR); **Approved or In progress up to and including the first day, HR only, with a reason** *(round 5)* | withdraws it, releases the days, and takes a pending request out of its approver's queue |
+
+*(Round 5, lane D.)* **Which of Cancel, Recall and Confirm return appear is decided by the server**
+for the person looking (`viewerActions` on the read). Two of the rules turn on facts this page cannot
+know: who you are to the employee, and today's date against the first day. The endpoints enforce the
+same rules on their own.
 
 **Two panels above the tabs, each appearing only when it applies:**
 
@@ -1846,6 +1852,7 @@ saw.
 | **Leave** | Leave type · Sub-type · Paid · Start · End · Total days · Requested on · **From a plan** *(now the plan's own reference, not just Yes/No)* · **Still going ahead** · **Attendance days marked** |
 | **Employee & cover** | Employee *(name and staff number)* · Reliever · Second reliever |
 | **Reason & notes** | Reason · Handover notes · Reliever notes |
+| **Back at work** *(granted leave; round 5)* | Due back *(the first working day after the leave)* · Back on *(and who reported it)* · Timing *(early, on time, or late with the working days overstayed)* · Confirmed by |
 | **Outcome** *(cancelled or closed only)* | Cancelled on · Cancellation reason · Closed on · Closure notes |
 
 ⚠ **"Attendance days marked: N of M"** is the attendance join made visible. When N equals M every
@@ -1864,7 +1871,9 @@ Worth reading once before you perform chapter 7, because the buttons only make s
 | Pending | **Send back with dates** | Changes suggested | same |
 | Changes suggested | **Answer** — accept or counter | Pending, from the top | the employee *(or HR on their behalf)* |
 | Approved | **Move dates** | Pending, from the top | HR, or the employee for their own |
-| Approved *or in progress* | **Recall** | unchanged, but **shorter** | **HR only** — never the employee, not even an HR user recalling themselves |
+| Approved *or in progress* | **Recall** | unchanged, but **shorter** | **HR or the employee's line manager** *(round 5)*: never the employee, not even an HR user recalling themselves |
+| Approved *or in progress* | **I'm back at work** *(portal, round 5)* | unchanged; the return is waiting to be confirmed | the employee only |
+| Approved *or in progress* | **Confirm return** *(round 5)* | Completed; shorter if early, overstay recorded if late | HR or the line manager, never the employee |
 
 ⚠ **Two of those re-enter approval, and that is the point.** Answering a suggestion re-submits on
 the settled dates. Moving an approved request **re-opens its approval** — because an approval is an
@@ -1878,10 +1887,11 @@ understanding before you perform it:
 |---|---|---|
 | The fact recorded | the leave **moved** | the leave was **interrupted** |
 | The approval | **re-opens** — nobody has authorised the new dates | **stands** — it was validly granted, and the employer is taking part of it back |
-| Who may | self or HR | **HR only** |
+| Who may | self or HR | **HR, or the line manager** *(round 5)* |
 | The days | all released, re-charged on the new dates | days up to the recall stay taken; the rest come back |
 
-> **Why it is HR-only, and it is worth saying:** an employee may ask to move their own leave. An
+> **Why it is never the employee, and it is worth saying** *(HR, or since round 5 the employee's
+> line manager, who needs them back)*: an employee may ask to move their own leave. An
 > employee may **not** call themselves back from leave and hand themselves the days. The service
 > refuses the subject of the request a second time, so the rule holds even for an HR officer
 > recalling themselves.
@@ -3584,11 +3594,17 @@ Everything chapter 7 has, narrowed to what an employee may do:
 
 | She can | She cannot |
 |---|---|
-| Edit a draft · Submit · Cancel · Attach a document | Approve · Reject · Send back · Close |
+| Edit a draft · Submit · Attach a document | Approve · Reject · Send back |
+| **Cancel, until it is approved** *(round 5)* | **Cancel approved leave**: that is HR's, with a reason, up to the first day |
 | **Answer suggested dates** | |
 | **Move the dates of approved leave** | |
 | **Confirm it is still going ahead** | |
 | **See that she was recalled, and why** *(new)* | **Recall herself** — the panel is read-only here |
+| **I'm back at work** *(round 5)*: the first day back, which her line manager or HR confirms | **Confirm her own return**: confirming is what closes the leave |
+
+*(Round 5.)* Once she has reported back, the Details card reads *"You reported … · waiting for your
+manager or HR to confirm"*. Once confirmed, it shows the day and who confirmed it. **Due back** (the
+first working day after the leave) is shown on granted leave.
 
 **The orange *Recalled from leave* panel is on her screen too**, with the reason and the name of
 whoever recorded it.
@@ -3803,7 +3819,7 @@ nobody promises a stakeholder a button.
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
 **Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
-they are listed after the settings audit.
+lane D closed three more, **L-55 to L-57**. Both blocks are listed after the settings audit.
 
 ### ✅ Closed
 
@@ -3906,6 +3922,17 @@ is the round 5 plan's § 8.
 | **L-52** | ch. 12 | *Cancel* appeared at every status, asked for no reason, recorded nothing, and left the plan in the approver's queue | E5: the owner until approval, HR after with a reason; date and reason stored; the approval withdrawn |
 | **L-53** | ch. 12, 19.5 | Plans never took relievers from the employee's roster. The portal planner had no reliever boxes, and editing a plan showed its saved relievers as empty | E2 |
 | **L-54** | ch. 6, 12 | A reliever had to be *Active*, and on the demo database 2,191 of 2,399 staff are on probation (about 1,800 of them hired years ago; HR finish plan Lane 11), so they could not be chosen. Meanwhile a request's roster fill assigned suspended staff without checking | *At work* is Active or on probation (TDC's ruling of 2026-09-23), one rule for plans and requests |
+
+### ✅ Round 5 lane D — cancel, recall, coming back, 2026-09-25 — three found and closed
+
+Proved by `dev-harness/hr-leave/run-round5-d.mjs` (74 assertions, green twice). The build record is
+the round 5 plan's § 8.
+
+| # | Where | Finding | Closed by |
+|---|---|---|---|
+| **L-55** | ch. 7 | ⚠ **A cancelled request could be approved back to life.** Cancelling a pending request left its approval live in the approver's queue. Approve and reject checked no status, and the generic workflow recall applies the status adapter directly, so a stale approval could turn a cancelled request Approved, or Draft. Every request cancelled while pending before 2026-09-25 carries such an approval | Cancelling withdraws the approval; approve and reject refuse anything not Pending, with a sentence; the status adapter never moves a cancelled or closed request |
+| **L-56** | ch. 7, 19.4 | The employee could cancel approved leave, even while on it; the desk could cancel at any stage, with no reason | The employee until approval; HR up to and including the first day, with a reason; after that, Recall |
+| **L-57** | ch. 7 | Nothing recorded that anyone came back: closing was a desk action with no day back, no early return and no overstay. Recall was HR's alone, and the line manager who needs someone back could not even open their request | *I'm back at work* and *Confirm return*; recall and confirmation by the supervisor or head of department; a read arm for them |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 

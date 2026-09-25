@@ -328,6 +328,11 @@ namespace ErpSystem.Application.Extensions
             ClosureNotes = entity.ClosureNotes,
             CancellationDate = entity.CancellationDate,
             CancellationReason = entity.CancellationReason,
+            ResumptionDate = entity.ResumptionDate,
+            ResumptionReportedDate = entity.ResumptionReportedDate,
+            ResumptionReportedById = entity.ResumptionReportedById,
+            ClosureConfirmedById = entity.ClosureConfirmedById,
+            OverstayDays = entity.OverstayDays,
             CreatedAt = entity.CreatedAt
         };
 

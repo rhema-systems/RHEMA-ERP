@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-25): DECIDED, in build — M0 and lanes E and F done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F and D done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -16,7 +16,8 @@
 > | **M0** | **DONE** 2026-09-25 — this file |
 > | **E** | **DONE** 2026-09-25 — plans: relievers, the clash check, the approver's view · `run-round5-e.mjs` 119, green twice · § 8 |
 > | **F** | **DONE** 2026-09-25 — the calendar for one employee, and a unit with everything beneath it · `run-round5-f.mjs` 20, green twice · § 8 |
-> | D · A · N · C · G · H · J · I · K · L | not started, in that order — **D is next** |
+> | **D** | **DONE** 2026-09-25 — cancel, recall by the line manager, coming back to work · `run-round5-d.mjs` 74, green twice · § 8 |
+> | A · N · C · G · H · J · I · K · L | not started, in that order — **A is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -464,3 +465,75 @@ directorate's calendar must include A. An exact-match filter would fail it.
 | hr-leave slice 1 | 72/75, the same three environmental failures |
 
 The API log shows no calendar errors. The two leave types those runs created were switched off.
+
+### D — Cancel, recall, coming back to work · DONE 2026-09-25
+
+**Built.**
+
+- **D1, cancel.** The employee cancels a Draft, Pending or ChangesSuggested request. HR also cancels
+  Approved or InProgress leave up to and including its first day, with a reason. After the first
+  day it is refused, naming Recall; closed, rejected and cancelled leave is refused, naming why.
+  Cancelling a Pending request withdraws its workflow instance. The portal offers Cancel only before
+  approval.
+- **D2, recall by the line manager.** The recall gate is the leave write tier **or the employee's
+  line authority**. The reason prompt names the urgent necessity of Labour Act s.25. The service
+  still refuses the employee.
+- **D3, coming back.**
+  - Migration `20260925174049_AddLeaveResumption` adds five nullable columns, in guarded SQL,
+    proved Up ×2 and Down ×2 on a scratch database and verified on UAT.
+  - `PUT {id}/report-resumption`, "I'm back at work", is for the employee only.
+  - Close becomes the confirmation, by the desk or the line authority and never the employee:
+    - **early** is accepted only on the employee's own report, and cuts the leave short through
+      the recall truncation, recorded with reason "Early resumption approved";
+    - **late** records `OverstayDays`: working days from the expected return day up to the day
+      before the return, counting Monday to Friday less holidays. Nothing is charged.
+  - The read carries `ExpectedReturnDate` and `ResumptionTiming`.
+  - `GET resumptions-to-confirm` is the line manager's queue, shown on the Approvals page.
+- **`viewerActions` on the single read**: the server decides which of Cancel, Recall, Report and
+  Confirm to offer, because two rules turn on who the viewer is and on today's date.
+
+**Changed from the plan, and why.**
+
+1. **"The line manager (HOD)" is the supervisor OR the head of the employee's unit or any unit
+   above.** B1 treats the two as one; TDC's definitions (finish plan lane 7) separate them
+   (`Employees.ManagerId`, `OrganizationUnits.HeadEmployeeId`). So both count, walked upwards as
+   discipline resolves head-of-department authority (FR-HR-080). `LeaveService.IsLineAuthorityAsync`
+   holds the rule; if B1 meant the supervisor only, the change is one line.
+2. **The line authority can read their people's requests** (a fourth read arm). This is not in the
+   plan, but recall and confirmation are unusable without it. It is narrower than giving the Manager
+   role `HR.Leave.Read`.
+3. **A "Returns to confirm" queue for the line manager.** Also not in the plan: without it the
+   manager has no way to find a reported return, because the reminders cannot reach them yet.
+4. **Sweep 2 is not re-routed.** Leave reminders still reach the HR role only, and per-person
+   delivery is lane I's job. **Moved to lane I.**
+5. **An early return needs the employee's report.** This refines B3 ("early return only with the
+   HOD's approval"): an early date nobody reported is the employer calling someone back, which is a
+   recall.
+6. **Five columns, not four.** `ResumptionDate` (the day back) is its own fact, separate from when it
+   was reported.
+7. ⚠ **Found and fixed: a cancelled request could be approved back to life** (guide § 23, L-55).
+   - Approve and reject checked no status.
+   - Every request cancelled while Pending before this lane still holds a live approval.
+   - The generic workflow recall applies the status adapter directly.
+
+   Now approve and reject refuse anything not Pending (`EnsureRequestAwaitingDecision`), and the
+   adapter never moves a Cancelled or Completed request. Lane E gave plans the first half.
+
+**Suite.** `dev-harness/hr-leave/run-round5-d.mjs`: **74 assertions, green twice**. It raises leave in
+the future, approves it through both stages, then moves it in SQL to stand for time passing. Its
+first run failed 73/74, because it raised requests in the next leave year and then moved them back;
+the header records that trap.
+
+**Neighbours.** All thirteen hr-leave slices are at their recorded counts. Slice 1 is 72/75, the same
+three environmental failures. `run-round5-e.mjs` is 119 and `run-round5-f.mjs` is 20. The API log
+shows nothing from this lane, only the known noise and one defect-#23 payroll save failure from an
+employee created by a slice.
+
+**Found in passing (harness).**
+
+- `reset.mjs` now retires leave the API refuses to cancel, because cancel refuses leave after its
+  first day.
+- Slice 11 stored a NULL hire date as the text `'NULL'` and crashed restoring it on UAT. That left
+  leave.hr's employee with a 2025-04-01 hire date, which was restored, and the capture now uses
+  `ISNULL`.
+- The 31 leave types the neighbour runs created were switched off.

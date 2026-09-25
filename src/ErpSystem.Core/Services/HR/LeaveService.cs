@@ -68,6 +68,12 @@ public class LeaveService : ILeaveService
     /// </summary>
     private const string LeaveRequestSequenceKey = "LEAVE-REQ";
 
+    /// <summary>
+    /// The recall reason a confirmed early return writes (round 5, B3). The truncation is a recall's,
+    /// and this is how the record, and the timing on the read, tell the two apart.
+    /// </summary>
+    private const string EarlyResumptionReason = "Early resumption approved";
+
     public LeaveService(
             ILeaveRepository leaveRepository,
             IGenericRepository<LeaveType> leaveTypeRepository,
@@ -710,6 +716,26 @@ public class LeaveService : ILeaveService
                 $"You cannot approve your own {what}. It has to be approved by someone else.");
     }
 
+    /// <summary>
+    /// Refuses a decision on a request that is not waiting for one (round 5, lane D).
+    /// </summary>
+    /// <remarks>
+    /// Approve and reject had no status check and relied on the engine. That failed two ways. A
+    /// request sent back with suggested dates is waiting for the EMPLOYEE, and its instance was
+    /// cancelled, so the engine refused with a bare 403. And a Pending request cancelled before lane
+    /// D kept its live instance, so an approver could approve a cancelled request back to life. The
+    /// status adapter now refuses too; this says why, before the engine is touched. Lane E did the
+    /// same for plans.
+    /// </remarks>
+    private static void EnsureRequestAwaitingDecision(LeaveRequest request, string verb, string pastTense)
+    {
+        if (request.Status == LeaveStatus.Pending) return;
+
+        throw new InvalidOperationException(request.Status == LeaveStatus.ChangesSuggested
+            ? $"This request is waiting for the employee to answer the suggested dates, so there is nothing to {verb} yet."
+            : $"Only a submitted leave request can be {pastTense}. This one is {request.Status}.");
+    }
+
     public async Task<LeaveRequestDto> ApproveLeaveAsync(Guid id, ApproveLeaveDto dto)
     {
         var tenantId = GetTenantId();
@@ -719,6 +745,8 @@ public class LeaveService : ILeaveService
             .Include(lr => lr.LeaveType)
             .FirstOrDefaultAsync(lr => lr.Id == id && lr.TenantId == tenantId)
             ?? throw new ArgumentException($"Leave request with ID '{id}' not found.");
+
+        EnsureRequestAwaitingDecision(request, "approve", "approved");
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -1029,37 +1057,13 @@ public class LeaveService : ILeaveService
                 $"This leave already ends on {request.EndDate:dd MMM yyyy}, so a recall from {dto.EffectiveDate:dd MMM yyyy} "
                 + "would give nothing back. Close the leave instead.");
 
-        var leaveType = await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
-
-        // The day before they are due back is the last day of leave.
-        var newEndDate = dto.EffectiveDate.AddDays(-1);
         var daysBefore = request.TotalDays;
-        var daysAfter = await CalculateLeaveDaysAsync(request.StartDate, newEndDate, leaveType);
-
-        if (daysAfter >= daysBefore)
+        if (!await TryCurtailAsync(request, dto.EffectiveDate, dto.Reason.Trim()))
             throw new InvalidOperationException(
                 "That recall date does not shorten the leave - every chargeable day falls before it. "
                 + "Check the date against the leave type's weekend and holiday rules.");
-
-        // Only the FIRST recall records what the request used to end on. A leave curtailed twice
-        // should still show the end date that was approved, not the end date of the previous recall
-        // - the same rule OriginalEndDate follows for reschedules, and the reason these are separate
-        // columns: a request can be rescheduled and later recalled, and both facts have to survive.
-        request.PreRecallEndDate ??= request.EndDate;
-
-        request.EndDate = newEndDate;
-        request.TotalDays = daysAfter;
-        request.RecallEffectiveDate = dto.EffectiveDate;
-        request.RecalledDate = _clock.UtcNow;
-        request.RecalledById = _currentUserService.EmployeeId;
-        request.RecallReason = dto.Reason.Trim();
-
-        // Cumulative, so a second recall does not overwrite what the first gave back.
-        request.DaysRestored = (request.DaysRestored ?? 0m) + (daysBefore - daysAfter);
-
-        // A "yes, still going" was given against dates that no longer exist.
-        request.ObservanceConfirmedDate = null;
-        request.ObservanceConfirmedById = null;
+        var newEndDate = request.EndDate;
+        var daysAfter = request.TotalDays;
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
@@ -1079,6 +1083,49 @@ public class LeaveService : ILeaveService
             request.RequestNumber, dto.EffectiveDate, newEndDate, daysBefore - daysAfter);
 
         return await GetLeaveRequestByIdAsync(id);
+    }
+
+    /// <summary>
+    /// Cuts approved leave short so the employee is back on <paramref name="backOn"/>: days before
+    /// it stand as taken, and days from it are returned. False, changing nothing, when no chargeable
+    /// day falls on or after it.
+    /// </summary>
+    /// <remarks>
+    /// Shared by recall (the employer's act) and a confirmed early return (round 5, B3). It is the
+    /// same truncation, recorded in the same columns, with its own reason. It changes the entity
+    /// only: the caller saves, re-derives the balance, and reconciles attendance.
+    /// </remarks>
+    private async Task<bool> TryCurtailAsync(LeaveRequest request, DateOnly backOn, string reason)
+    {
+        var leaveType = await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
+
+        // The day before they are back is the last day of leave.
+        var newEndDate = backOn.AddDays(-1);
+        var daysBefore = request.TotalDays;
+        var daysAfter = await CalculateLeaveDaysAsync(request.StartDate, newEndDate, leaveType);
+
+        if (daysAfter >= daysBefore) return false;
+
+        // Only the FIRST curtailment records what the request used to end on. A leave curtailed
+        // twice should still show the end date that was approved, not the end date of the previous
+        // recall - the same rule OriginalEndDate follows for reschedules, and the reason these are
+        // separate columns: a request can be rescheduled and later recalled, and both facts survive.
+        request.PreRecallEndDate ??= request.EndDate;
+
+        request.EndDate = newEndDate;
+        request.TotalDays = daysAfter;
+        request.RecallEffectiveDate = backOn;
+        request.RecalledDate = _clock.UtcNow;
+        request.RecalledById = _currentUserService.EmployeeId;
+        request.RecallReason = reason;
+
+        // Cumulative, so a second curtailment does not overwrite what the first gave back.
+        request.DaysRestored = (request.DaysRestored ?? 0m) + (daysBefore - daysAfter);
+
+        // A "yes, still going" was given against dates that no longer exist.
+        request.ObservanceConfirmedDate = null;
+        request.ObservanceConfirmedById = null;
+        return true;
     }
 
     /// <inheritdoc />
@@ -1205,6 +1252,7 @@ public class LeaveService : ILeaveService
     public async Task<LeaveRequestDto> RejectLeaveAsync(Guid id, RejectLeaveDto dto)
     {
         var request = await GetOwnedLeaveRequestAsync(id);
+        EnsureRequestAwaitingDecision(request, "reject", "rejected");
 
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
@@ -1261,7 +1309,11 @@ public class LeaveService : ILeaveService
 
         // These actor columns are bare Guids with no navigation (see the entity's note on shadow
         // FKs), so their names are resolved here rather than Include()d.
-        var actorIds = new[] { request.RescheduledById, request.ObservanceConfirmedById, request.RecalledById }
+        var actorIds = new[]
+            {
+                request.RescheduledById, request.ObservanceConfirmedById, request.RecalledById,
+                request.ResumptionReportedById, request.ClosureConfirmedById,
+            }
             .Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
 
         if (actorIds.Count > 0)
@@ -1281,6 +1333,32 @@ public class LeaveService : ILeaveService
             dto.RescheduledByName = NameOf(request.RescheduledById);
             dto.ObservanceConfirmedByName = NameOf(request.ObservanceConfirmedById);
             dto.RecalledByName = NameOf(request.RecalledById);
+            dto.ResumptionReportedByName = NameOf(request.ResumptionReportedById);
+            dto.ClosureConfirmedByName = NameOf(request.ClosureConfirmedById);
+        }
+
+        // When the employee is due back, and how the reported (or confirmed) day stands against it
+        // (round 5, B3). Granted leave only: nobody is due back from leave nobody granted.
+        if (CountsAsTaken(request.Status))
+        {
+            var endForTiming = request.PreRecallEndDate is DateOnly approvedEnd
+                               && request.RecallReason == EarlyResumptionReason
+                ? approvedEnd   // an early return is judged against the leave as it was approved
+                : request.EndDate;
+
+            if (request.ResumptionDate is DateOnly back)
+            {
+                var (expected, timing, overstay) = await ClassifyResumptionAsync(endForTiming, back, tenantId);
+                dto.ExpectedReturnDate = expected;
+                dto.ResumptionTiming = timing;
+                // Before confirmation this previews what confirming would record.
+                dto.OverstayDays ??= overstay > 0 ? overstay : null;
+            }
+            else
+            {
+                dto.ExpectedReturnDate = DateOnly.FromDateTime(await _workingDayCalculator.AddWorkingDaysAsync(
+                    tenantId, request.EndDate.ToDateTime(TimeOnly.MinValue), 1));
+            }
         }
 
         // The plan it came from, named rather than shown as a Guid.
@@ -2108,22 +2186,78 @@ public class LeaveService : ILeaveService
         return dto;
     }
 
-    public async Task<bool> CancelLeaveRequestAsync(Guid id, string cancellationReason)
+    /// <remarks>
+    /// <para>Round 5, lane D1 (R5-D3 and decision B2). Cancelling used to accept anything not yet
+    /// cancelled or closed, from the employee or the desk alike, with no reason, and left a pending
+    /// request in its approver's queue. The rules now:</para>
+    /// <list type="bullet">
+    ///   <item>the employee: Draft, Pending or ChangesSuggested — before anything is granted;</item>
+    ///   <item>the desk (the leave write tier), also <b>Approved or InProgress up to and including
+    ///   the first day</b> — whatever the nightly sweep has already done to the status — and it must
+    ///   say why;</item>
+    ///   <item>after the first day nobody cancels: the days taken are taken, and the answer is a
+    ///   recall, which returns the rest;</item>
+    ///   <item>closed, rejected or cancelled leave has nothing left to cancel.</item>
+    /// </list>
+    /// <para>⚠ Every check runs before the approval is withdrawn: a refusal after the workflow cancel
+    /// would leave a request nobody can approve.</para>
+    /// </remarks>
+    public async Task<bool> CancelLeaveRequestAsync(Guid id, string? cancellationReason, bool actingAsDesk)
     {
         var request = await GetOwnedLeaveRequestAsync(id);
+        var reason = string.IsNullOrWhiteSpace(cancellationReason) ? null : cancellationReason.Trim();
+        var isSubject = _currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == request.EmployeeId;
 
-        if (request.Status == LeaveStatus.Cancelled || request.Status == LeaveStatus.Completed)
+        switch (request.Status)
         {
-            throw new InvalidOperationException($"Cannot cancel leave request with status '{request.Status}'.");
+            case LeaveStatus.Cancelled:
+                throw new InvalidOperationException("This leave request is already cancelled.");
+
+            case LeaveStatus.Rejected:
+                throw new InvalidOperationException("This leave request was rejected, so there is nothing to cancel.");
+
+            case LeaveStatus.Completed:
+                throw new InvalidOperationException(
+                    "This leave has been taken and closed, so it can no longer be cancelled.");
+
+            case LeaveStatus.Approved:
+            case LeaveStatus.InProgress:
+                // The employee's own approved leave is not theirs to take back, even when they sit on
+                // the desk — the same rule recall follows.
+                if (!actingAsDesk || isSubject)
+                    throw new InvalidOperationException(
+                        "Approved leave can only be cancelled by HR. Ask HR to cancel it, or ask for it to be moved.");
+                if (request.StartDate < _clock.TodayUtc)
+                    throw new InvalidOperationException(
+                        $"This leave began on {request.StartDate:dd MMM yyyy}. It can be cancelled only up to and "
+                        + "including its first day. Recall the employee instead: the days not yet taken are returned.");
+                if (reason == null)
+                    throw new InvalidOperationException(
+                        "Say why this approved leave is being cancelled. It takes back something that was granted.");
+                break;
         }
 
         var employeeId   = request.EmployeeId;
         var leaveTypeId  = request.LeaveTypeId;
         var year         = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
 
+        // A request out for approval holds a live workflow instance. Withdraw it, or the approver's
+        // queue goes on offering leave that no longer exists. A missing instance is not an error: a
+        // request can be Pending on a tenant with no published definition.
+        if (request.Status == LeaveStatus.Pending)
+        {
+            var withdrawn = await _workflowIntegrationService.CancelWorkflowAsync(
+                EntityType, id, reason ?? "Leave request cancelled");
+            if (!withdrawn.Success)
+                _logger.LogWarning(
+                    "Leave request {number} cancelled; its approval could not be withdrawn: {message}",
+                    request.RequestNumber, withdrawn.Message);
+            request.WorkflowInstanceId = null;
+        }
+
         request.Status = LeaveStatus.Cancelled;
         request.CancellationDate = _clock.UtcNow;
-        request.CancellationReason = cancellationReason;
+        request.CancellationReason = reason;
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
@@ -2141,32 +2275,268 @@ public class LeaveService : ILeaveService
         return true;
     }
 
+    /// <remarks>
+    /// <para><b>Closing is confirming the return</b> (round 5, lane D3 and decision B3). The
+    /// employee reports the day they were back; their line authority or the desk confirms it, and
+    /// that closes the leave. The day is judged against the first working day after the leave:</para>
+    /// <list type="bullet">
+    ///   <item><b>early</b>, on or before the end date: allowed only on the employee's own report,
+    ///   and confirming it cuts the leave short exactly as a recall does, so the unused days come
+    ///   back. An early date nobody reported is the employer calling someone back, which is Recall;</item>
+    ///   <item><b>on time</b>: closed;</item>
+    ///   <item><b>late</b>: closed, with the working days overstayed recorded. Nothing is charged:
+    ///   HR and payroll decide what an absence without leave means.</item>
+    /// </list>
+    /// <para>⚠ InProgress closes too. Leave that has started is exactly the leave that reaches its
+    /// end date, and reminder sweep 2 chases those; leaving it out would deadlock the reminder
+    /// against the action it points at.</para>
+    /// </remarks>
     public async Task<LeaveRequestDto> CloseLeaveRequestAsync(Guid id, CloseLeaveDto dto)
     {
         var request = await GetOwnedLeaveRequestAsync(id);
 
-        // ⚠ InProgress closes too, and leaving it out would have been a deadlock. Leave that has
-        // started is precisely the leave that reaches its end date and needs closing — and reminder
-        // sweep 2 chases exactly those requests. Without this, the sweep would chase a request for
-        // ever while the action it points at refused it.
         if (request.Status != LeaveStatus.Approved && request.Status != LeaveStatus.InProgress)
+            throw new InvalidOperationException("Only approved leave can be closed.");
+
+        if (request.ClosureDate.HasValue)
+            throw new InvalidOperationException("This leave has already been closed.");
+
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == request.EmployeeId)
+            throw new InvalidOperationException(
+                "You cannot confirm your own return from leave. Your manager or HR confirms it.");
+
+        var today = _clock.TodayUtc;
+        var resumedOn = dto.ResumptionDate ?? request.ResumptionDate;
+
+        if (resumedOn is DateOnly day && day > today)
+            throw new InvalidOperationException("A return can only be confirmed for a day that has come.");
+
+        var curtailed = false;
+        var daysBefore = request.TotalDays;
+
+        if (resumedOn is not DateOnly back)
         {
-            throw new InvalidOperationException("Only approved leave requests can be closed.");
+            // Nobody has said when they were back: the leave is closed as over, once it is.
+            if (request.EndDate > today)
+                throw new InvalidOperationException(
+                    "This leave has not ended yet. An employee back early reports it and you confirm it; "
+                    + "to call someone back, recall them.");
+        }
+        else if (back <= request.EndDate)
+        {
+            if (request.ResumptionReportedDate == null)
+                throw new InvalidOperationException(
+                    "An early return is confirmed on the employee's own report of it. To call someone back "
+                    + "before their leave ends, recall them.");
+
+            if (back <= request.StartDate)
+                throw new InvalidOperationException(
+                    "A return on or before the first day of the leave means none of it was taken. Cancel "
+                    + "the request instead.");
+
+            // A day back that shortens nothing (a weekend before the end, say) closes as on time.
+            curtailed = await TryCurtailAsync(request, back, EarlyResumptionReason);
+        }
+        else
+        {
+            var (_, _, overstay) = await ClassifyResumptionAsync(request.EndDate, back, GetTenantId());
+            request.OverstayDays = overstay > 0 ? overstay : null;
         }
 
-        if (request.EndDate > _clock.TodayUtc)
-        {
-            throw new InvalidOperationException("Cannot close leave request before end date.");
-        }
-
+        request.ResumptionDate = resumedOn;
         request.Status = LeaveStatus.Completed;
         request.ClosureDate = _clock.UtcNow;
-        request.ClosureNotes = dto.ClosureNotes;
+        request.ClosureNotes = string.IsNullOrWhiteSpace(dto.ClosureNotes) ? null : dto.ClosureNotes.Trim();
+        request.ClosureConfirmedById = _currentUserService.EmployeeId;
+
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            await _leaveRepository.UpdateAsync(request);
+            await _unitOfWork.SaveChangesAsync(ct);
+            // Completed counts as taken like Approved and InProgress, so closing moves nothing - unless
+            // an early return gave days back, and then the balance has to be re-derived.
+            if (curtailed)
+                await _recalculationService.RecalculateAsync(
+                    request.EmployeeId, request.LeaveTypeId,
+                    LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
+        });
+
+        // The days after an early return come off the attendance register (the posting prunes).
+        if (curtailed)
+            await ReconcileAttendanceAsync(request.Id);
+
+        _logger.LogInformation(
+            "Leave request {number} closed: back {back}{early}{late}",
+            request.RequestNumber, resumedOn?.ToString("yyyy-MM-dd") ?? "(not stated)",
+            curtailed ? $", {daysBefore - request.TotalDays} day(s) returned" : string.Empty,
+            request.OverstayDays is int o ? $", {o} working day(s) overstayed" : string.Empty);
+
+        return await GetLeaveRequestByIdAsync(id);
+    }
+
+    public async Task<LeaveRequestDto> ReportResumptionAsync(Guid id, ReportResumptionDto dto)
+    {
+        var request = await GetOwnedLeaveRequestAsync(id);
+
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty || me != request.EmployeeId)
+            throw new InvalidOperationException(
+                "Only the employee on leave reports that they are back. Their manager or HR confirms it.");
+
+        if (request.Status != LeaveStatus.Approved && request.Status != LeaveStatus.InProgress)
+            throw new InvalidOperationException("Only approved leave can be reported as over.");
+
+        if (request.ClosureDate.HasValue)
+            throw new InvalidOperationException("This leave has already been closed.");
+
+        var today = _clock.TodayUtc;
+        var resumedOn = dto.ResumedOn ?? today;
+
+        if (resumedOn > today)
+            throw new InvalidOperationException("Report your return on the day you are back, not before.");
+
+        if (resumedOn <= request.StartDate)
+            throw new InvalidOperationException(
+                "A return on or before the first day of the leave means none of it was taken. Ask HR to "
+                + "cancel the request instead.");
+
+        // Re-reporting before the confirmation corrects the day; the confirmer sees the latest.
+        request.ResumptionDate = resumedOn;
+        request.ResumptionReportedDate = _clock.UtcNow;
+        request.ResumptionReportedById = me;
 
         await _leaveRepository.UpdateAsync(request);
         await _unitOfWork.SaveChangesAsync();
 
+        _logger.LogInformation("Leave request {number}: the employee reported being back on {day}",
+            request.RequestNumber, resumedOn);
         return await GetLeaveRequestByIdAsync(id);
+    }
+
+    /// <summary>
+    /// When the employee is due back, and how <paramref name="resumedOn"/> stands against it.
+    /// </summary>
+    /// <remarks>
+    /// Due back is the first working day after the leave: Monday to Friday, less the tenant's
+    /// holidays. The company working week, not the leave type's counting rules, decides it. Overstay
+    /// counts the working days from that day up to the day before the return.
+    /// </remarks>
+    private async Task<(DateOnly Expected, string Timing, int OverstayDays)> ClassifyResumptionAsync(
+        DateOnly endDate, DateOnly resumedOn, Guid tenantId)
+    {
+        var expected = DateOnly.FromDateTime(await _workingDayCalculator.AddWorkingDaysAsync(
+            tenantId, endDate.ToDateTime(TimeOnly.MinValue), 1));
+
+        if (resumedOn <= endDate) return (expected, "Early", 0);
+        if (resumedOn <= expected) return (expected, "OnTime", 0);
+
+        var overstay = await _workingDayCalculator.CountWorkingDaysAsync(
+            tenantId,
+            expected.AddDays(-1).ToDateTime(TimeOnly.MinValue),
+            resumedOn.AddDays(-1).ToDateTime(TimeOnly.MinValue));
+        return (expected, "Late", overstay);
+    }
+
+    /// <remarks>
+    /// TDC's definitions (finish plan lane 7): a supervisor is <c>Employees.ManagerId</c>, and a head
+    /// of department is <c>OrganizationUnits.HeadEmployeeId</c>. Decision B1 says "the line manager
+    /// (HOD)", so both count, and the head of any unit ABOVE the employee's counts as well: a
+    /// directorate head covers the departments beneath them, as in discipline (FR-HR-080). Nobody
+    /// is their own line authority.
+    /// </remarks>
+    public async Task<bool> IsLineAuthorityAsync(
+        Guid subjectEmployeeId, Guid actorEmployeeId, CancellationToken ct = default)
+    {
+        if (actorEmployeeId == Guid.Empty || actorEmployeeId == subjectEmployeeId) return false;
+
+        var tenantId = GetTenantId();
+        var subject = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.Id == subjectEmployeeId)
+            .Select(e => new { e.ManagerId, e.OrganizationUnitId })
+            .FirstOrDefaultAsync(ct);
+
+        if (subject == null) return false;
+        if (subject.ManagerId == actorEmployeeId) return true;
+        if (subject.OrganizationUnitId is not Guid unitId) return false;
+
+        // The unit and every unit above it, cycle-guarded by the resolver.
+        var chain = (await _audience.UnitAncestryAsync(tenantId, unitId, ct)).ToList();
+        return await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+            .AnyAsync(u => u.TenantId == tenantId
+                        && chain.Contains(u.Id)
+                        && u.HeadEmployeeId == actorEmployeeId, ct);
+    }
+
+    public async Task<LeaveRequestViewerActionsDto> GetViewerActionsAsync(
+        LeaveRequestDto request, bool actingAsDesk, CancellationToken ct = default)
+    {
+        var me = _currentUserService.EmployeeId ?? Guid.Empty;
+        var isSubject = me != Guid.Empty && me == request.EmployeeId;
+        var line = !isSubject && await IsLineAuthorityAsync(request.EmployeeId, me, ct);
+        var today = _clock.TodayUtc;
+        var granted = request.Status is LeaveStatus.Approved or LeaveStatus.InProgress;
+        var open = request.ClosureDate == null;
+
+        return new LeaveRequestViewerActionsDto
+        {
+            // The same rules as CancelLeaveRequestAsync: before anything is granted, the employee or
+            // the desk; after, the desk alone, up to and including the first day.
+            CanCancel = request.Status is LeaveStatus.Draft or LeaveStatus.Pending or LeaveStatus.ChangesSuggested
+                ? isSubject || actingAsDesk
+                : granted && actingAsDesk && !isSubject && request.StartDate >= today,
+            CancelNeedsReason = granted,
+            CanRecall = granted && open && !isSubject && (actingAsDesk || line),
+            // Reporting a return needs a day back after the first day of leave.
+            CanReportResumption = granted && open && isSubject && request.StartDate < today,
+            CanConfirmResumption = granted && open && !isSubject && (actingAsDesk || line)
+                                   && (request.ResumptionReportedDate != null || request.EndDate <= today),
+        };
+    }
+
+    /// <remarks>
+    /// The people the caller is line authority for, computed forwards: those they supervise, and
+    /// everyone in a unit they head or beneath it. The same rule as <see cref="IsLineAuthorityAsync"/>
+    /// in the other direction, so the list and the button agree. HR works the whole register.
+    /// </remarks>
+    public async Task<IReadOnlyList<LeaveRequestDto>> GetResumptionsToConfirmAsync(
+        Guid actorEmployeeId, CancellationToken ct = default)
+    {
+        if (actorEmployeeId == Guid.Empty) return [];
+
+        var tenantId = GetTenantId();
+        var headed = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+            .Where(u => u.TenantId == tenantId && u.HeadEmployeeId == actorEmployeeId)
+            .Select(u => u.Id)
+            .ToListAsync(ct);
+
+        var unitIds = new HashSet<Guid>();
+        foreach (var unit in headed)
+            unitIds.UnionWith(await _audience.UnitSubtreeAsync(unit, ct));
+        var units = unitIds.ToList();
+
+        var rows = await _leaveRepository.GetQueryable()
+            .Include(r => r.Employee)
+            .Include(r => r.LeaveType)
+            .Where(r => r.TenantId == tenantId
+                     && r.ResumptionReportedDate != null
+                     && r.ClosureDate == null
+                     && (r.Status == LeaveStatus.Approved || r.Status == LeaveStatus.InProgress)
+                     && r.EmployeeId != actorEmployeeId
+                     && (r.Employee.ManagerId == actorEmployeeId
+                         || (r.Employee.OrganizationUnitId != null
+                             && units.Contains(r.Employee.OrganizationUnitId.Value))))
+            .OrderBy(r => r.ResumptionReportedDate)
+            .ToListAsync(ct);
+
+        var dtos = rows.ToDtoList();
+        foreach (var (dto, row) in dtos.Zip(rows))
+        {
+            if (row.ResumptionDate is not DateOnly back) continue;
+            var (expected, timing, overstay) = await ClassifyResumptionAsync(row.EndDate, back, tenantId);
+            dto.ExpectedReturnDate = expected;
+            dto.ResumptionTiming = timing;
+            dto.OverstayDays = overstay > 0 ? overstay : null;
+        }
+        return dtos;
     }
 
     #endregion Leave CRUD operations

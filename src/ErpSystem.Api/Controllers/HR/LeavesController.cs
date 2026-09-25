@@ -119,11 +119,36 @@ namespace ErpSystem.Api.Controllers.HR
             if (await CanActOnRequestAsync(leaveRequestId, HrPermissions.LeaveReadPolicy))
                 return true;
 
+            // Round 5, lane D: the employee's supervisor or head of department may now recall them
+            // and confirm their return, so they must be able to open the leave they act on. The same
+            // line authority the Team calendar already reads down, for their own people only.
+            if (await IsLineAuthorityForRequestAsync(leaveRequestId))
+                return true;
+
             if (!Guid.TryParse(_currentUserService.UserId, out var userId) || userId == Guid.Empty)
                 return false;
 
             return await _workflowIntegrationService.CanUserApproveAsync(
                 "LeaveRequest", leaveRequestId, userId);
+        }
+
+        /// <summary>
+        /// Whether the caller is the request's employee's supervisor or head of department (round 5,
+        /// B1/B3). The rule lives in <c>ILeaveService.IsLineAuthorityAsync</c>.
+        /// </summary>
+        private async Task<bool> IsLineAuthorityForRequestAsync(Guid leaveRequestId)
+        {
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty ||
+                _currentUserService.TenantId is not Guid tenantId)
+                return false;
+
+            var subject = await _db.Set<Core.Entities.HR.StaffLeave.LeaveRequest>()
+                .AsNoTracking()
+                .Where(r => r.Id == leaveRequestId && r.TenantId == tenantId)
+                .Select(r => (Guid?)r.EmployeeId)
+                .FirstOrDefaultAsync();
+
+            return subject is Guid employeeId && await _leaveService.IsLineAuthorityAsync(employeeId, me);
         }
 
         /// <summary>
@@ -215,6 +240,10 @@ namespace ErpSystem.Api.Controllers.HR
             try
             {
                 var application = await _leaveService.GetLeaveRequestByIdAsync(id);
+                // Round 5, lane D: what this viewer may do, decided here because two of the rules turn
+                // on who they are to the employee and on today's date.
+                application.ViewerActions = await _leaveService.GetViewerActionsAsync(
+                    application, await HoldsLeavePolicyAsync(HrPermissions.LeaveWritePolicy));
                 return Ok(application);
             }
             catch (ArgumentException ex)
@@ -1024,15 +1053,18 @@ namespace ErpSystem.Api.Controllers.HR
         /// <para>⚠ <c>effectiveDate</c> is <b>the first day the employee is back at work</b>, not
         /// the last day of their leave.</para>
         ///
-        /// <para>⚠ <b>Gated on the write policy outright, not self-or-HR</b>, unlike reschedule
-        /// beside it. A recall is the employer's act: an employee may ask to move their own leave,
-        /// but may not call themselves back and hand themselves the days. The service refuses the
-        /// subject a second time, so this holds even for an HR user recalling themselves.</para>
+        /// <para>⚠ <b>The employer's act, never self-or-HR</b>, unlike reschedule beside it: an
+        /// employee may ask to move their own leave, but may not call themselves back and hand
+        /// themselves the days. The service refuses the subject a second time, so this holds even for
+        /// an HR user recalling themselves.</para>
+        ///
+        /// <para>Round 5, decision B1: the employer is the leave write tier <b>or the employee's line
+        /// authority</b>, their supervisor or the head of their department. Recall is for urgent
+        /// necessity (Labour Act s.25), and the manager who needs them back is who knows it.</para>
         /// </remarks>
         /// <response code="200">The truncated request</response>
         /// <response code="400">Not approved, already closed, no reason, or a date that gives nothing back</response>
         [HttpPut("{id}/recall")]
-        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -1040,6 +1072,10 @@ namespace ErpSystem.Api.Controllers.HR
         public async Task<ActionResult<LeaveRequestDto>> Recall(
             Guid id, [FromBody] RecallLeaveRequestDto dto)
         {
+            if (!await HoldsLeavePolicyAsync(HrPermissions.LeaveWritePolicy)
+                && !await IsLineAuthorityForRequestAsync(id))
+                return Forbid();
+
             try
             {
                 return Ok(await _leaveService.RecallAsync(id, dto));
@@ -1167,15 +1203,19 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> CancelLeave(Guid id, [FromBody] string cancellationReason)
+        public async Task<IActionResult> CancelLeave(
+            Guid id,
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] string? cancellationReason)
         {
-            // W3: the request's owner, or the HR desk.
+            // W3: the request's owner, or the HR desk. What each may cancel is the service's rule
+            // (round 5, lane D1): the owner until approval, the desk up to the first day, with a reason.
             if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
                 return Forbid();
 
             try
             {
-                await _leaveService.CancelLeaveRequestAsync(id, cancellationReason);
+                var actingAsDesk = await HoldsLeavePolicyAsync(HrPermissions.LeaveWritePolicy);
+                await _leaveService.CancelLeaveRequestAsync(id, cancellationReason, actingAsDesk);
                 return Ok(new { message = "Leave application cancelled successfully" });
             }
             catch (ArgumentException ex)
@@ -1194,24 +1234,32 @@ namespace ErpSystem.Api.Controllers.HR
         }
 
         /// <summary>
-        /// Close a completed leave application
+        /// Confirm the employee's return, which closes the leave
         /// </summary>
-        /// <param name="id">Leave application ID</param>
-        /// <param name="dto">Closure details</param>
-        /// <returns>Updated leave application</returns>
+        /// <remarks>
+        /// Round 5, decision B3. The leave write tier or the employee's line authority (supervisor or
+        /// head of department) confirms. An early return, on the employee's own report, cuts the leave
+        /// short; a late one records the working days overstayed. The service refuses the employee
+        /// confirming their own return.
+        /// </remarks>
         /// <response code="200">Leave closed successfully</response>
         /// <response code="400">Invalid request or business rule violation</response>
         /// <response code="404">Leave application not found</response>
         [HttpPut("{id}/close")]
-        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<LeaveRequestDto>> CloseLeave(Guid id, [FromBody] CloseLeaveDto dto)
+        public async Task<ActionResult<LeaveRequestDto>> CloseLeave(
+            Guid id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] CloseLeaveDto? dto)
         {
+            if (!await HoldsLeavePolicyAsync(HrPermissions.LeaveWritePolicy)
+                && !await IsLineAuthorityForRequestAsync(id))
+                return Forbid();
+
             try
             {
-                var application = await _leaveService.CloseLeaveRequestAsync(id, dto);
+                var application = await _leaveService.CloseLeaveRequestAsync(id, dto ?? new CloseLeaveDto());
                 return Ok(application);
             }
             catch (ArgumentException ex)
@@ -1227,6 +1275,59 @@ namespace ErpSystem.Api.Controllers.HR
                 _logger.LogError(ex, "Error closing leave request {LeaveRequestId}", id);
                 return StatusCode(500, "An error occurred while closing the leave request");
             }
+        }
+
+        /// <summary>
+        /// "I'm back at work": the employee reports the day they returned
+        /// </summary>
+        /// <remarks>
+        /// Round 5, decision B3. The employee's own act, and only theirs; their line authority or HR
+        /// confirms it (<c>close</c>). An empty body reports today.
+        /// </remarks>
+        [HttpPut("{id}/report-resumption")]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveRequestDto>> ReportResumption(
+            Guid id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ReportResumptionDto? dto)
+        {
+            // Owner only: CanActOnRequestAsync with a policy nobody is meant to pass on their own.
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty ||
+                _currentUserService.TenantId is not Guid tenantId ||
+                !await _db.Set<Core.Entities.HR.StaffLeave.LeaveRequest>().AsNoTracking()
+                    .AnyAsync(r => r.Id == id && r.TenantId == tenantId && r.EmployeeId == me))
+                return Forbid();
+
+            try
+            {
+                return Ok(await _leaveService.ReportResumptionAsync(id, dto ?? new ReportResumptionDto()));
+            }
+            catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reporting the return from leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while reporting the return from leave");
+            }
+        }
+
+        /// <summary>
+        /// Returns from leave waiting for the caller to confirm, as their line authority
+        /// </summary>
+        /// <remarks>
+        /// Round 5, decision B3: the people the caller supervises or heads a department over, whose
+        /// return has been reported and not yet confirmed. HR works the register instead.
+        /// </remarks>
+        [HttpGet("resumptions-to-confirm")]
+        [ProducesResponseType(typeof(IReadOnlyList<LeaveRequestDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<IReadOnlyList<LeaveRequestDto>>> GetResumptionsToConfirm(
+            CancellationToken ct = default)
+        {
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty)
+                return Ok(Array.Empty<LeaveRequestDto>());
+
+            return Ok(await _leaveService.GetResumptionsToConfirmAsync(me, ct));
         }
         /// <summary>
         /// Recalculate leave balance(s) from source data (admin operation).

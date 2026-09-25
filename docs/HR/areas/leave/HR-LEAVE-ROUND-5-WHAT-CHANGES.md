@@ -1,7 +1,8 @@
 # Staff leave, round 5 — what changes, in plain terms
 
 > **Status: DECIDED on 25 September 2026 — being built.** [Section 6](#6-leave-plans--relievers-the-clash-check-and-the-approvers-view)
-> (leave plans) and [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person)
+> (leave plans), [section 7](#7-cancelling-recalling-and-coming-back-to-work) (cancelling, recall
+> and coming back) and [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person)
 > were built and tested on 25 September; nothing else described here is built yet. This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
@@ -291,7 +292,7 @@ the company or superior that recalls you", "once approved you shouldn't be able 
 even while on it. Recall is HR's action only. Closing leave is HR's action after the end date, and
 nobody records that the person actually came back.
 
-**What changes — who can do what, at each stage**
+**What changes — who can do what, at each stage** *(built 25 September)*
 
 | Stage of the leave | Employee | HR | What else can happen |
 |---|---|---|---|
@@ -300,24 +301,35 @@ nobody records that the person actually came back.
 | **Under way** (from the second day) | Cannot cancel | Cannot cancel | **Recall** |
 | **Finished** | — | — | Nothing |
 
-**Recall.** The employee's **head of department** (for their own staff) or **HR** can recall somebody,
-and must give the reason — the law allows it only *"in cases of urgent necessity"*. The days not taken
-go back to the employee's balance automatically, to be taken later. Reasonable costs the recall causes
-(transport back, for example) are claimed in the ordinary way.
+Cancelling a request that is waiting for approval also takes it out of the approver's queue, and a
+cancelled request can no longer be approved by mistake.
+
+**Recall.** The employee's **line manager** or **HR** can recall somebody, and must give the reason:
+the law allows it only *"in cases of urgent necessity"*. "Line manager" means the employee's
+supervisor, or the head of their department or of any department above it, following TDC's own
+definitions of supervisor and head of department. The days not taken go back to the employee's
+balance automatically, to be taken later. Reasonable costs the recall causes (transport back, for
+example) are claimed in the ordinary way. A line manager can now open their own people's leave
+requests, so the recall button is where they need it.
 
 **Coming back — a two-step close**
 
-1. **Employee:** *"I'm back at work"* on the portal, on the day they return.
-2. **Head of department or HR:** *"Confirm resumption"*. The leave becomes *Completed*, recording the
-   date and who confirmed it. Heads of department get this power for the first time.
+1. **Employee:** *"I'm back at work"* on the portal, giving the first day back (today, unless they
+   forgot to press it on the day).
+2. **Line manager or HR:** *"Confirm return"*. The leave becomes *Completed*, recording the day back
+   and who confirmed it. Line managers get this power for the first time. They find their people's
+   returns under **Returns to confirm** on the Leave Approvals page.
 
-- **Coming back early** needs the head of department's approval. When they confirm it, the unused
-  days go back to the balance — exactly as a recall would.
+- **Due back** is the first working day after the leave, and the request shows it.
+- **Coming back early** is confirmed only on the employee's own report. An early date nobody
+  reported is the employer calling someone back, which is a recall. When it is confirmed, the unused
+  days go back to the balance, exactly as a recall would.
 - **Coming back late** is recorded: the confirmation shows *"overstayed 3 working days"*. Nothing is
   charged automatically; HR and payroll decide what follows. In public-service practice, pay is
   forfeited for the unauthorised days and disciplinary action may follow.
-- **Reminders** chase whoever should confirm once the employee reports back, and HR if nobody reports
-  anything.
+- **Reminders** that chase whoever should confirm come with the reminders work in
+  [section 11](#11-reminders-that-reach-people). Until then the overdue-closure reminder goes to HR,
+  as it does today.
 
 **Falling sick during annual leave.** The law says certified sickness during annual leave does not
 count as annual leave. HR's procedure: recall the employee from the first sick day, with the reason

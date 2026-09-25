@@ -60,6 +60,13 @@ export default function LeaveApprovalsPage() {
     queryFn: () => leaveService.getMyApprovals(page, 20),
   });
 
+  // Round 5, B3: returns the employee has reported and the caller confirms, as their supervisor or
+  // head of department. Shown only when there is something to confirm.
+  const { data: returns } = useQuery({
+    queryKey: ['hr', 'leave-requests', 'resumptions-to-confirm'],
+    queryFn: () => leaveService.getResumptionsToConfirm(),
+  });
+
   const rows = data?.items ?? [];
   const selectedRows = rows.filter((r) => selected.has(r.id));
   const allOnPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
@@ -146,6 +153,56 @@ export default function LeaveApprovalsPage() {
           decide them together.
         </p>
       </div>
+
+      {returns && returns.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Returns to confirm</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              These people have reported being back at work. Confirming closes their leave; an early
+              return gives back the days they did not take.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Request</TableHead>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Leave type</TableHead>
+                    <TableHead>Leave ended</TableHead>
+                    <TableHead>Back on</TableHead>
+                    <TableHead>Timing</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {returns.map((r) => (
+                    <TableRow
+                      key={r.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => router.push(`/hr/leave/requests/${r.id}`)}
+                    >
+                      <TableCell className="font-medium">{r.requestNumber}</TableCell>
+                      <TableCell>{r.employeeName}</TableCell>
+                      <TableCell>{r.leaveTypeName}</TableCell>
+                      <TableCell>{r.endDate?.slice(0, 10)}</TableCell>
+                      <TableCell>{r.resumptionDate?.slice(0, 10)}</TableCell>
+                      <TableCell>
+                        {r.resumptionTiming === 'Early'
+                          ? 'Early'
+                          : r.resumptionTiming === 'Late'
+                            ? `Late · ${r.overstayDays ?? 0} working day(s)`
+                            : 'On time'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">

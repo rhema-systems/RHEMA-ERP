@@ -73,8 +73,39 @@ public interface ILeaveService
     Task<IEnumerable<LeaveBalanceDto>> GetAllLeaveBalancesAsync(int year, Guid? employeeId, Guid? leaveTypeId);
     Task<LeaveBalanceDetailDto?> GetLeaveBalanceDetailAsync(Guid balanceId);
     Task<IEnumerable<MandatoryLeaveComplianceDto>> GetMandatoryLeaveComplianceAsync(int year);
-    Task<bool> CancelLeaveRequestAsync(Guid id, string cancellationReason);
+    /// <summary>
+    /// Cancel a request (round 5, R5-D3 + B2): the employee until it is approved; the desk also
+    /// approved or started leave up to and including its first day, with a reason.
+    /// </summary>
+    /// <param name="actingAsDesk">The caller holds the leave write tier.</param>
+    Task<bool> CancelLeaveRequestAsync(Guid id, string? cancellationReason, bool actingAsDesk);
+
+    /// <summary>
+    /// Confirm the employee's return, which closes the leave (round 5, B3): an early return cuts the
+    /// leave short, a late one records the working days overstayed.
+    /// </summary>
     Task<LeaveRequestDto> CloseLeaveRequestAsync(Guid id, CloseLeaveDto dto);
+
+    /// <summary>"I'm back at work": the employee's own report, waiting for confirmation (round 5, B3).</summary>
+    Task<LeaveRequestDto> ReportResumptionAsync(Guid id, ReportResumptionDto dto);
+
+    /// <summary>
+    /// Whether <paramref name="actorEmployeeId"/> manages <paramref name="subjectEmployeeId"/>: their
+    /// supervisor, or the head of their unit or of any unit above it (TDC's definitions, finish plan
+    /// lane 7). The authority that may recall them and confirm their return (round 5, B1/B3).
+    /// </summary>
+    Task<bool> IsLineAuthorityAsync(Guid subjectEmployeeId, Guid actorEmployeeId, CancellationToken ct = default);
+
+    /// <summary>Returns the caller has been asked to confirm, as their line authority (round 5, B3).</summary>
+    Task<IReadOnlyList<LeaveRequestDto>> GetResumptionsToConfirmAsync(Guid actorEmployeeId, CancellationToken ct = default);
+
+    /// <summary>
+    /// What the caller may do with this request, so a screen offers only what would succeed (round 5,
+    /// lane D). The endpoints enforce the same rules on their own.
+    /// </summary>
+    /// <param name="actingAsDesk">The caller holds the leave write tier.</param>
+    Task<LeaveRequestViewerActionsDto> GetViewerActionsAsync(
+        LeaveRequestDto request, bool actingAsDesk, CancellationToken ct = default);
 
     /// <summary>
     /// Leave drawn as time rather than rows, for a date range and an audience.

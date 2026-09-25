@@ -705,7 +705,52 @@ public class LeaveRequestDto
     public DateTime? CancellationDate { get; set; }
     public string? CancellationReason { get; set; }
 
+    // Coming back (round 5, B3): what the employee reported, who confirmed it, and how it stood.
+    public DateOnly? ResumptionDate { get; set; }
+    public DateTime? ResumptionReportedDate { get; set; }
+    public Guid? ResumptionReportedById { get; set; }
+    public string? ResumptionReportedByName { get; set; }
+    public Guid? ClosureConfirmedById { get; set; }
+    public string? ClosureConfirmedByName { get; set; }
+    public int? OverstayDays { get; set; }
+
+    /// <summary>The first working day after the leave, when the employee is due back. Single read only.</summary>
+    public DateOnly? ExpectedReturnDate { get; set; }
+
+    /// <summary><c>Early</c>, <c>OnTime</c> or <c>Late</c> against <see cref="ExpectedReturnDate"/>; null with no resumption date.</summary>
+    public string? ResumptionTiming { get; set; }
+
+    /// <summary>What the caller may do with this request. Single read only, decided by the server.</summary>
+    public LeaveRequestViewerActionsDto? ViewerActions { get; set; }
+
     public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// The actions a request's screen may offer the person looking at it (round 5, lane D).
+/// </summary>
+/// <remarks>
+/// Decided on the server because two of the rules turn on facts the screen cannot know: whether
+/// the viewer is the employee's supervisor or head of department, and today's date against the
+/// leave's first day. The endpoints enforce the same rules; this only stops a button being offered
+/// that would be refused.
+/// </remarks>
+public class LeaveRequestViewerActionsDto
+{
+    public bool CanCancel { get; set; }
+
+    /// <summary>Cancelling approved leave takes back something granted, so it must say why.</summary>
+    public bool CancelNeedsReason { get; set; }
+
+    public bool CanRecall { get; set; }
+    public bool CanReportResumption { get; set; }
+    public bool CanConfirmResumption { get; set; }
+}
+
+/// <summary>"I'm back at work" (round 5, B3). The day defaults to today.</summary>
+public class ReportResumptionDto
+{
+    public DateOnly? ResumedOn { get; set; }
 }
 
 public class ApproveLeaveDto
@@ -756,9 +801,18 @@ public class CancelLeaveDto
     public string CancellationReason { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Confirming the return, which is what closes the leave (round 5, B3).
+/// </summary>
 public class CloseLeaveDto
 {
     public string? ClosureNotes { get; set; }
+
+    /// <summary>
+    /// The first day back, when the confirmer knows better than the report, or there was no report.
+    /// Omitted, the employee's reported day stands; with no report either, the return is on time.
+    /// </summary>
+    public DateOnly? ResumptionDate { get; set; }
 }
 
 // ─── Leave Request Attachment ─────────────────────────────────────────────────

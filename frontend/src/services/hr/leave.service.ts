@@ -24,6 +24,7 @@ import type {
   UpdateLeavePlanRelieversRequest,
   SuggestLeaveRequestChanges,
   RecallLeaveRequest,
+  ReportResumptionRequest,
   RescheduleLeaveRequest,
   LeaveCalendarScope,
   LeaveCalendarData,
@@ -299,8 +300,19 @@ class LeaveService {
     return apiService.put<void>(`${this.baseUrl}/${id}/cancel`, cancellationReason);
   }
 
+  /** Confirming the employee's return, which closes the leave (round 5, B3). */
   close(id: string, data: CloseLeaveRequest): Promise<LeaveRequest> {
     return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/close`, data);
+  }
+
+  /** "I'm back at work" — the employee's own report; the day defaults to today (round 5, B3). */
+  reportResumption(id: string, data: ReportResumptionRequest): Promise<LeaveRequest> {
+    return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/report-resumption`, data);
+  }
+
+  /** Returns waiting for the caller to confirm, as the employee's supervisor or head of department. */
+  getResumptionsToConfirm(): Promise<LeaveRequest[]> {
+    return apiService.get<LeaveRequest[]>(`${this.baseUrl}/resumptions-to-confirm`);
   }
 
   // ── Balances ──────────────────────────────────────────────────────────────────
