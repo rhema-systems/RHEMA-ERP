@@ -19,30 +19,32 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class BusinessPartnerPostingDefaultsTests
 {
     [Fact]
-    public void WithholdingMigrationUsesTheMappedInvoiceAndTaxTablesAndPreservesLegacyRows()
+    public void CurrentModelMapsSupplierWithholdingDefaultsWithoutReintroducingLegacyIdentity()
     {
-        // Use production relational conventions for table attributes. InMemory
-        // does not apply them and incorrectly reports the CLR name "Tax".
-        // Model inspection below never opens this connection or executes SQL.
+        // The disposable-development baseline intentionally replaced the old one-off
+        // BusinessPartnerWithholdingTaxDefault migration. Assert the durable relational
+        // contract instead of instantiating a migration class that no longer belongs to
+        // the active migration chain.
         using var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer("Server=(localdb)\\MSSQLLocalDB;Database=NeverConnected;Integrated Security=True").Options);
         context.Database.GetDbConnection().State.Should().Be(System.Data.ConnectionState.Closed);
-        var builder = new Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        var migration = new ErpSystem.Data.Migrations.BusinessPartnerWithholdingTaxDefault();
-        migration.GetType().GetMethod("Up", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .Invoke(migration, [builder]);
-        var invoiceTable = context.Model.FindEntityType(typeof(VendorInvoice))!.GetTableName();
-        builder.Operations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation>()
-            .Where(operation => operation.Name != "DefaultWithholdingTaxId").Should().OnlyContain(operation => operation.Table == invoiceTable);
-        builder.Operations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddForeignKeyOperation>()
-            .Single().PrincipalTable.Should().Be(context.Model.FindEntityType(typeof(Tax))!.GetTableName());
-        builder.Operations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation>()
-            .Single(operation => operation.Name == "WithholdingDecisionPending").DefaultValue.Should().Be(false);
-        builder.Operations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation>()
-            .Single(operation => operation.Name == "ApplySupplierWithholdingDefaults").IsNullable.Should().BeTrue();
-        context.Model.FindEntityType(typeof(VendorInvoice))!.FindProperty(nameof(VendorInvoice.WithholdingTaxRate))!
+
+        var invoice = context.Model.FindEntityType(typeof(VendorInvoice))!;
+        invoice.GetTableName().Should().Be(nameof(VendorInvoice));
+        invoice.FindProperty(nameof(VendorInvoice.WithholdingDecisionPending))!
+            .GetDefaultValue().Should().Be(false);
+        invoice.FindProperty(nameof(VendorInvoice.ApplySupplierWithholdingDefaults))!
+            .IsNullable.Should().BeTrue();
+        invoice.FindProperty(nameof(VendorInvoice.WithholdingTaxRate))!
             .GetColumnType().Should().Be("decimal(18,4)");
-        builder.Operations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>().Should().BeEmpty();
+        invoice.FindProperty(nameof(VendorInvoice.BusinessPartnerId)).Should().NotBeNull();
+        invoice.FindProperty("SupplierId").Should().BeNull("AP identity is canonical BusinessPartnerId only");
+
+        var partner = context.Model.FindEntityType(typeof(BusinessPartner))!;
+        var defaultTaxProperty = partner.FindProperty(nameof(BusinessPartner.DefaultWithholdingTaxId))!;
+        defaultTaxProperty.IsNullable.Should().BeTrue();
+        partner.GetForeignKeys().Single(foreignKey => foreignKey.Properties.Contains(defaultTaxProperty))
+            .PrincipalEntityType.ClrType.Should().Be(typeof(Tax));
         context.Database.GetDbConnection().State.Should().Be(System.Data.ConnectionState.Closed);
     }
 

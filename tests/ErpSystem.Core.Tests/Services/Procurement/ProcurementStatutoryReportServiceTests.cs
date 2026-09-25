@@ -161,7 +161,8 @@ public sealed class ProcurementStatutoryReportServiceTests
         fixture.Context.VendorInvoices.Add(new VendorInvoice
         {
             TenantId = fixture.TenantId, PurchaseOrderId = purchaseOrderId,
-            InvoiceNumber = "INV-ARCH", SupplierId = partnerId, SupplierName = "Architecture Supplier",
+            InvoiceNumber = "INV-ARCH", BusinessPartnerId = partnerId, BusinessPartnerCode = "SUP-ARCH",
+            SupplierName = "Architecture Supplier",
             InvoiceDate = new DateTime(2026, 2, 1), CurrencyCode = "GHS",
             SubTotal = 600m, TotalAmount = 600m, PaidAmount = 400m, Status = VendorInvoiceStatus.PartiallyPaid
         });
@@ -272,14 +273,16 @@ public sealed class ProcurementStatutoryReportServiceTests
         fixture.Context.VendorInvoices.Add(new VendorInvoice
         {
             Id = invoiceId, TenantId = fixture.TenantId, PurchaseOrderId = orderId,
-            InvoiceNumber = "INV-E2E", SupplierId = partnerId, SupplierName = "End-to-End Supplier",
+            InvoiceNumber = "INV-E2E", BusinessPartnerId = partnerId, BusinessPartnerCode = "SUP-E2E",
+            SupplierName = "End-to-End Supplier",
             InvoiceDate = new DateTime(2026, 3, 6), CurrencyCode = "GHS", TotalAmount = 950m,
             Status = VendorInvoiceStatus.PartiallyPaid, MatchingType = InvoiceMatchingType.ThreeWay,
             MatchingStatus = InvoiceMatchingStatus.ThreeWayMatched
         });
         fixture.Context.Set<VendorPayment>().Add(new VendorPayment
         {
-            Id = paymentId, TenantId = fixture.TenantId, PaymentNumber = "PAY-E2E", SupplierId = partnerId,
+            Id = paymentId, TenantId = fixture.TenantId, PaymentNumber = "PAY-E2E",
+            BusinessPartnerId = partnerId, BusinessPartnerCode = "SUP-E2E", BusinessPartnerName = "End-to-End Supplier",
             PaymentDate = new DateTime(2026, 3, 8), TotalAmount = 600m, AllocatedAmount = 600m,
             CurrencyCode = "GHS", Status = VendorPaymentStatus.Processed
         });
@@ -291,7 +294,8 @@ public sealed class ProcurementStatutoryReportServiceTests
         });
         fixture.Context.Set<VendorPayment>().Add(new VendorPayment
         {
-            Id = draftPaymentId, TenantId = fixture.TenantId, PaymentNumber = "PAY-E2E-DRAFT", SupplierId = partnerId,
+            Id = draftPaymentId, TenantId = fixture.TenantId, PaymentNumber = "PAY-E2E-DRAFT",
+            BusinessPartnerId = partnerId, BusinessPartnerCode = "SUP-E2E", BusinessPartnerName = "End-to-End Supplier",
             PaymentDate = new DateTime(2026, 3, 9), TotalAmount = 100m, AllocatedAmount = 100m,
             CurrencyCode = "GHS", Status = VendorPaymentStatus.Draft
         });
