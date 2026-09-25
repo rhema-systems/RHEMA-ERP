@@ -170,19 +170,6 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="400">Validation failure (e.g., duplicate code, missing required fields)</response>
         /// <response code="401">Caller is not authenticated</response>
         /// <response code="500">Internal server error during creation</response>
-        [HttpPost]
-        public async Task<ActionResult<CustomerDto>> Create([FromBody] CustomerCreateDto dto)
-        {
-            try
-            {
-                var customer = await _customerService.CreateAsync(dto);
-                return CreatedAtAction(nameof(GetById), new { id = customer.Id }, customer);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { error = ex.Message });
-            }
-        }
 
         /// <summary>
         /// Updates an existing AR customer master record with revised information.
@@ -213,22 +200,6 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Caller is not authenticated</response>
         /// <response code="404">No customer exists with the specified ID</response>
         /// <response code="500">Internal server error during update</response>
-        [HttpPut("{id}")]
-        public async Task<ActionResult<CustomerDto>> Update(Guid id, [FromBody] CustomerUpdateDto dto)
-        {
-            if (id != dto.Id)
-                return BadRequest("ID mismatch");
-
-            try
-            {
-                var customer = await _customerService.UpdateAsync(dto);
-                return Ok(customer);
-            }
-            catch (KeyNotFoundException ex)
-            {
-                return NotFound(new { error = ex.Message });
-            }
-        }
 
         /// <summary>
         /// Soft-deletes an AR customer record, marking it as inactive while preserving historical data.
@@ -258,23 +229,6 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Caller is not authenticated</response>
         /// <response code="404">No customer exists with the specified ID</response>
         /// <response code="500">Internal server error during deletion</response>
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> Delete(Guid id)
-        {
-            try
-            {
-                await _customerService.DeleteAsync(id);
-                return NoContent();
-            }
-            catch (KeyNotFoundException ex)
-            {
-                return NotFound(new { error = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { error = ex.Message });
-            }
-        }
 
         /// <summary>
         /// Retrieves the current outstanding balance and receivable aging breakdown for a specific customer.

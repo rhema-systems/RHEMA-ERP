@@ -257,3 +257,10 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   banking settlement and Finance PO workflow, plus 8/8 frontend landed-cost tests. The API compiles
   with zero errors; existing repository warnings remain. No migration or database reset was
   executed in this checkpoint.
+- Finance AR customer pages are now read-only views of the canonical Business Partner register.
+  New/edit actions route to Procurement's Business Partner master, and the legacy Finance customer
+  create/update/delete endpoints have been removed so Finance cannot establish a competing identity.
+  Customer register queries derive eligibility from the governed Customer role rather than the
+  legacy `PartnerType` string, while inactive roles remain visible for historical account review.
+- The generic Finance invoice-search contract now exposes `BusinessPartnerId`; its former
+  `CustomerId` label has been removed. No migration or database reset was executed in this checkpoint.

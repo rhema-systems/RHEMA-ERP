@@ -612,6 +612,33 @@ public sealed class LegacyPostingPathLockdownTests
             .Should().Contain("BusinessPartnerId").And.NotContain("public Guid CustomerId");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void ArCustomerRegister_ShouldBeAReadOnlyCanonicalBusinessPartnerView()
+    {
+        var root = FindRepositoryRoot();
+        var controller = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "CustomerController.cs"));
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "CustomerService.cs"));
+        var searchDtos = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "FinanceSearchDtos.cs"));
+        var listPage = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "ar", "customers", "page.tsx"));
+
+        controller.Should().NotContain("[HttpPost]")
+            .And.NotContain("[HttpPut(")
+            .And.NotContain("[HttpDelete(");
+        service.Should().Contain("p.Roles.Any")
+            .And.Contain("BusinessPartnerRoleType.Customer")
+            .And.NotContain("PartnerType == \"Customer\"")
+            .And.NotContain("Task<CustomerDto> CreateAsync")
+            .And.NotContain("Task<CustomerDto> UpdateAsync")
+            .And.NotContain("Task DeleteAsync");
+        searchDtos.Should().Contain("public Guid? BusinessPartnerId")
+            .And.NotContain("public Guid? CustomerId");
+        listPage.Should().Contain("/procurement/business-partners/new")
+            .And.Contain("/procurement/business-partners/${customer.id}/edit")
+            .And.NotContain("/finance/ar/customers/new");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
