@@ -627,3 +627,81 @@ document. That is the difference between a control and a filing cabinet.
 Recorded in `docs/HR/areas/leave/HR-LEAVE-CLOSURE-PLAN.md` § 3.3b as **R-15**.
 
 ---
+
+## Staff leave after the September demo — five questions *(raised 2026-09-25)*
+
+These come from the stakeholders' notes on the leave demo (*HR Demo Changes 180926*) and from
+checking the module against the **Labour Act 2003 (Act 651)** and the Public Services Commission's
+*Human Resource Management Policy Framework and Manual* (2015). What is being changed, in plain
+terms, is in `docs/HR/areas/leave/HR-LEAVE-ROUND-5-WHAT-CHANGES.md`.
+
+**None of these blocks the work.** Each has a default the system runs on until TDC answers.
+
+### R5-Q1 · May we have TDC's conditions of service or collective agreement?
+
+Most of the numbers in the leave module are TDC's to set, and they live in that document, not in the
+Act. As TDC Ghana Limited, TDC is bound by the Act's minimums — 15 working days of annual leave a
+year, 12 weeks' maternity leave — but not by the public-service manual, so we cannot simply adopt its
+figures. We need:
+
+- annual leave days by grade (the public service uses 21 / 28 / 36 working days; the demo uses
+  15 / 21 / 30);
+- **when a new employee may first take annual leave, and whether their first months earn any** — the
+  stakeholders said 12 months; the public service gives pro-rata leave after 6 months, earned from
+  the first day;
+- carry-over: how many days, for how long, and who approves a deferral;
+- casual and compassionate leave days (the public service gives up to 10 working days of each);
+- sick pay (the public service: up to a year on full pay, then a year on half pay) and when a medical
+  board must sit;
+- maternity leave, if TDC gives more than the statutory 12 weeks.
+
+**Meanwhile:** the demo figures; a new employee waits 12 months before taking annual leave and earns
+none before then.
+
+### R5-Q2 · Leave cashed in while employed, and the daily rate — L-D8 and L-D7
+
+Still open from 17 September (above). The Act says *"Any agreement to relinquish the entitlement to
+annual leave or to forgo such leave is void"* (s.31); the public service pays for unused leave only at
+the end of service; and FR-HR-046 says leave is encashed *"only on exit"*.
+
+**Meanwhile:** cashing in while employed is switched off. Unused annual leave is paid only in a
+leaver's settlement, where HR states the days and Finance confirms the amount. **Please confirm this,
+and name the daily rate used to value a day of leave** (L-D7 — two formulas about 38% apart are in
+the system today).
+
+### R5-Q3 · Is a leave allowance paid?
+
+Some Ghanaian public bodies pay a leave allowance when staff proceed on annual leave (the Local
+Government Service: one month's basic salary) or advance salary (GES: two months, recovered over
+twelve). If TDC pays either, it is a payroll element triggered by approved annual leave, and nothing
+in the system triggers it today.
+
+**Meanwhile:** none.
+
+### R5-Q4 · Who keeps the holiday calendar up to date?
+
+This extends item 3 above. The Public Holidays and Commemorative Days (Amendment) Act 2025 restored
+1 July (Republic Day), moved Founders' Day back to 21 September (4 August is no longer a holiday),
+added Shaqq Day (the day after Eid al-Fitr), and lets the President move a midweek holiday to a
+Friday or a Monday. Leave days are counted around public holidays, so a stale calendar charges people
+the wrong number of days.
+
+**Meanwhile:** HR maintains the calendar; the demo list is being updated to the 2025 changes.
+
+### R5-Q5 · How does TDC's medical board work?
+
+The stakeholders asked for boards beyond excuse duty, boards that review several employees, and
+boards that decide the extent of a disability and recommend compensation. In the public service a
+board is three medical officers — nominated by the employer, SSNIT and the union — and declares an
+officer fit or unfit for duty. The degree of incapacity and the compensation for an **injury at work**
+come from the Workmen's Compensation Law 1987 (PNDCL 187). We need to know:
+
+- who sits on TDC's board, and who convenes it;
+- when a board is required;
+- whether one sitting reviews several employees;
+- how TDC handles injury-at-work cases and their compensation.
+
+**Meanwhile:** boards gain a purpose, physicians as members, documents, and a clear cancel/dissolve.
+Several employees per board, and the disability and compensation fields, wait for this answer.
+
+---

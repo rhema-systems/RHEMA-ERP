@@ -12,6 +12,39 @@ four statuses**, which is why there are now five. The per-module settings for at
 appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
 expected to cost.
 
+### ⚠ Corrected 2026-09-25 — every leave-type setting audited (round 5)
+
+The 2026-09-18 surveys counted **references**. This audit read what each consumer actually **does**,
+and it found settings this register had marked Enforced or clean that are not. **§ 3.2's "zero
+ghosts" is wrong.** Until the round 5 lanes land, this table overrides the rows below it. Evidence:
+the round 5 plan's *What exploration found* (repo copy to come:
+`docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md`); plain terms:
+`docs/HR/areas/leave/HR-LEAVE-ROUND-5-WHAT-CHANGES.md` § 15.
+
+| Setting | This register said | Actually | Round 5 fix |
+|---|---|---|---|
+| `LeaveType.IsPaid` | clean (§ 3.2) | **Ghost** in HR — display only; what unpaid leave deducts is payroll's (L-D6) | N1: relabel |
+| `EncashmentWorkingDaysPerMonth` (tenant) | Enforced (§ 1) | **Unreachable** — the leave type's own divisor always wins, and the form's minimum is 1 (default 22). Slice 6 proved it only by POSTing a type divisor of 0, which no form can send | N1: remove |
+| `LeaveAccrualPolicy.IsActive` | enforced (§ 3.2b) | **Unreachable** — no DTO field, mapping or update writes it; always true | N1: wire the switch |
+| `LeaveAccrualPolicy.ProRateOnJoin` | Unreachable (§ 0, § 3.2b) | **Enforced** — fixed by entitlement plan B1; both positions work | — |
+| `MaxDaysPerYear` | clean | **Misleading** — only ever lowers the entitlement. Default 0 with Max 90 means the type can never be booked (UNPAID and INJ on the demo) | N2, N4 |
+| `LeaveAccrualPolicy.Frequency` | enforced | **Misleading** — every frequency falls one period short within the year (monthly 11/12); incremental `Annual` accrues 0 all year; `PerPayPeriod` behaves as Monthly | C1, N2 |
+| `CarryOverExpiryMonths` | clean | **Misleading** — also wipes carried days already used; sweep 5's skip rule assumes it does not | G |
+| `ForfeitUnusedAfterMonths` | clean | **Misleading** — a closed year cannot be booked, so it affects no leave-taking; it only closes a window for cashing that year's leftover in | N2; off for TDC |
+| `MandatoryAnnualLeave` | clean | Advisory (compliance list + sweep 4). Its doc comment's "used by the forfeiture routine" is false | A: retired into the Annual kind |
+| `LeaveTypeEligibility` rules, `Gender` | enforced; "`Gender` ANDs onto an org-scoped rule" | Rules are **OR'd**, under a tab that says "restrict"; the gender qualifier on an organisation rule **cannot be set from the tab** | N2 |
+| `HasSubTypes` | clean | Only blocks creating a sub-type; hides nothing | N2 |
+| `LeaveSubType.MaxDaysAllowed` | enforced | Skipped when a draft is edited; **also replaces the type's whole entitlement** for a request carrying the sub-type | N2, N3 |
+| `LeaveSubType.IsActive` | "refused by the service" | Create ignores it; editing a draft validates no sub-type | N3 |
+| `LeaveCategoryAllocation.LeaveSubTypeId` | enforced | Almost never applies — balances resolve at type level | N2 |
+| `LeaveAccrualPolicy.ProRateOnExit` | enforced | Binds in the engine only; no payout reads it | L2 |
+| `MinDaysNotice`, `RequiresReliever` | clean | **Bypassable** — skipped for drafts and never re-checked at submit | N3 |
+| `MedicalBoardThresholdDays` | Enforced (§ 3) | **Bypassable** — Pending requests are not counted; reschedule, suggested dates and the counter-proposal skip the gate | N3 |
+| `ProRateFirstYearEntitlement` | Enforced (§ 3) | Correct only for a January leave year (counts calendar months to December) | C4 |
+| `LeaveYearStartMonth` | Enforced (§ 1.5) | Two readers ignore it: first-year pro-rating and sweep 4's month | C4 |
+| The five reminder windows | Enforced (§ 2) | The windows bind, but every reminder goes to the **HR role only**, in-app — the entity comments naming the employee, manager or approver are false; sweep 4 compares the calendar month | I |
+| `AllowCashConversion` and the four encashment-rate settings | Enforced | Enforced **in service only**. The exit settlement ignores all of them — it sums every type and year (`SeparationService.cs:2234-2249`) — so with `AllowInServiceEncashment` off (the default) none can fire | L2 |
+
 ---
 
 ## 0. Why this exists, and why it is not the open-questions document
@@ -92,7 +125,7 @@ the survivors rather than counting them.
 | Setting | Default | Status | Enforced where | Proof |
 |---|---|---|---|---|
 | `AllowInServiceEncashment` | **`false`** | **Enforced** | `LeaveEncashmentService.RequestEncashmentAsync` — asked **before** the leave type, so the refusal names the real reason | slice 6 [1] — refused off, accepted on, same request |
-| `EncashmentWorkingDaysPerMonth` | `22` | **Enforced** | `EmolumentService.GetEncashmentDailyRateAsync` | slice 6 [2] — 6,600 ÷ 22 vs ÷ 30, exact figures |
+| `EncashmentWorkingDaysPerMonth` | `22` | **Unreachable** *(corrected 2026-09-25 — see the top)* | `EmolumentService.GetEncashmentDailyRateAsync` — only when the leave type's own divisor is 0, which the form cannot send | slice 6 [2] — 6,600 ÷ 22 vs ÷ 30, exact figures, **via an API-only type divisor of 0** |
 
 **⚠ `AllowInServiceEncashment` settles a requirements conflict, not a preference.** FR-HR-046 says
 leave is encashed *"only on exit, no other route"*, and the module ships an in-service path with
@@ -511,6 +544,9 @@ enforced, is validated against it, and does nothing — so the pair reads as one
 
 ## 3.2 `LeaveType` — SURVEYED, and the guide's claim is now stale
 
+⚠ **Superseded 2026-09-25** — see the correction at the top: one ghost (`IsPaid`) and about ten
+settings that do something other than their label says. The paragraph below is the 2026-09-18 reading.
+
 **26 settings, zero ghosts.** Every one has a real consumer. ⚠ **That covers the leave type itself
 and not its child tables** — those are § 3.2b, added later, and one of them holds this register's
 first **Unreachable** entry.
@@ -545,7 +581,7 @@ done
 
 | Table | Settings | Result |
 |---|---|---|
-| `LeaveAccrualPolicy` | 9 | **8 enforced, 1 Unreachable** — `ProRateOnJoin`. `Frequency`, `Mode`, `AccrualRate`, `MinServiceMonths`, `ProRateOnExit` and `IsActive` all bind in `LeaveEntitlementService` |
+| `LeaveAccrualPolicy` | 9 | **8 enforced, 1 Unreachable** — `ProRateOnJoin`. `Frequency`, `Mode`, `AccrualRate`, `MinServiceMonths`, `ProRateOnExit` and `IsActive` all bind in `LeaveEntitlementService`. ⚠ **2026-09-25:** `ProRateOnJoin` has since been fixed; **`IsActive` is the Unreachable one** (nothing can set it false); incremental `Annual` frequency accrues 0; `ProRateOnExit` feeds no payout — see the top |
 | `LeaveSubType` | 10 | **enforced.** `MaxDaysAllowed` is the annual cap (`LeaveService`), `IsActive` filters the pickers **and** is refused by the service |
 | `LeaveCategoryAllocation` | 9 | **enforced.** `AllocationDays` with `EffectiveFrom`/`EffectiveTo` is step 2 of the entitlement engine's precedence |
 | `LeaveTypeEligibility` | 10 | **enforced.** `EligibilityType` drives the four-arm switch in `LeaveTypeService.MatchesRule`, and `Gender` ANDs onto an org-scoped rule |

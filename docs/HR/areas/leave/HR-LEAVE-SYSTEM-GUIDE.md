@@ -1095,8 +1095,8 @@ button, and a row menu with **Edit** and **Remove**:
 |---|---|---|
 | **Sub-types** | named variants | **Max days** — now an *annual* cap, enforced per request |
 | **Allocations** | days per staff level | **Effective from / to** — this is how a policy change is dated rather than overwritten |
-| **Eligibility** | who may take it | the **gender qualifier**, which ANDs onto an org-scoped rule |
-| **Accrual** | how entitlement builds | **Frequency**, **Mode**, the two pro-rate switches, and **Rate** — where **0 means *derive it from each employee's entitlement***. ⚠ **One active policy per leave type**, enforced — see below |
+| **Eligibility** | who may take it | ⚠ *(corrected 2026-09-25)* **any** rule that matches admits the employee — rules are OR'd, so each rule added *widens* eligibility. The gender qualifier that would AND onto an org-scoped rule cannot be set from this tab (§ 23, L-43) |
+| **Accrual** | how entitlement builds | **Frequency**, **Mode**, the two pro-rate switches, and **Rate** — where **0 means *derive it from each employee's entitlement***. ⚠ **One active policy per leave type**, enforced — see below. ⚠ *(2026-09-25)* a policy cannot be switched off, only deleted (L-40) |
 
 ⚠ **Remove is `HR.Leave.Admin` on all four tabs and is hidden from `hr.head`.** Add and Edit are
 `HR.Leave.Write` and are available. So an HR officer can add and correct configuration but cannot
@@ -1202,6 +1202,11 @@ value, marked *(retired — accrues monthly)*, and stays editable.
 > twenty-one for the year; it arrives monthly. In March you have accrued about five. The system
 > will let you *plan* leave you haven't accrued — but it will not let you *book* it."
 
+⚠ *(2026-09-25)* **True in the code, not on the demo database.** Scenario 020's opening-balance
+adjustments (+21 annual) sit on top of the entitlement, so a demo employee *can* book leave nobody
+has accrued. Tell it as the go-live migration story (§ 2.3), or pick an anchor employee without the
+adjustment before saying the sentence above.
+
 **4 — Click Allocations and point at the effective dates.**
 
 > "When the policy changes, you don't overwrite the old number. You end one row and start another.
@@ -1249,10 +1254,10 @@ of leave is worth in cash. §4.4.6 lists those, and chapter 4b is the screen the
 
 | Setting | What it does now |
 |---|---|
-| **Sub-type → Max days** | enforced as an **annual cap per employee per sub-type**, checked when a request is raised and when its dates move. ⚠ It is *not* a separate balance — see §1.7 |
-| **Sub-type → Active** | retired sub-types are filtered out of the request forms' picker **and refused by the service**, so the API door is shut too |
+| **Sub-type → Max days** | enforced as an **annual cap per employee per sub-type**, checked when a request is raised and when its dates move. ⚠ It is *not* a separate balance — see §1.7. ⚠ *(2026-09-25)* **skipped when a draft is edited**, and for a request carrying the sub-type it **replaces the type's whole entitlement** in the booking check (L-44) |
+| **Sub-type → Active** | retired sub-types are filtered out of the request forms' picker **and refused by the service**, so the API door is shut too. ⚠ *(2026-09-25)* not on every door: creating a sub-type ignores it, and editing a draft validates no sub-type at all (L-44) |
 | **Leave type → Active** | the **service** now refuses a retired type, not just the picker. Moving a draft onto a retired type is refused as well |
-| **Accrual → Pro-rate on exit** | a leaver stops accruing on their last day. ⚠ Incremental accrual only — see §1.3 |
+| **Accrual → Pro-rate on exit** | a leaver stops accruing on their last day. ⚠ Incremental accrual only — see §1.3. ⚠ *(2026-09-25)* **no payout reads it** — the leaver's settlement uses the stored whole-year figure (L-46) |
 | **Accrual → Pro-rate on join** *(2026-09-18)* | ⚠ **It was read on every accrual calculation and could not change the answer**, because its condition could never be true. ON is what always happened; **OFF is new** and accrues on the company's leave year instead. §1.3 |
 | **Leave type → Carry-over and forfeiture count** *(2026-09-18)* | both year-end runs read it. *Granted* is the behaviour that predates it; *Earned* substitutes accrued-to-date through the same definition the create check uses |
 | **Leave type → Pro-rate the first year** *(2026-09-18)* | scales a joiner's first-year entitlement, and is **refused** alongside incremental accrual rather than ignored |
@@ -1323,6 +1328,16 @@ save and nothing ever reached the re-add path. This is the third time this codeb
 soft delete does not release a unique index"*.
 
 ### 4.4.5 What is not a ghost — checked and working
+
+⚠ **Corrected 2026-09-25 — not all of these are fully honoured.** A full audit that read each
+consumer, rather than counting references, found: *minimum notice* and *requires a reliever* are
+skipped by save-as-draft-then-submit; *carry-over expiry* also removes carried days already used;
+*forfeit unused after* affects no leave-taking; *mandatory annual leave* only feeds the compliance
+list and one reminder; *allow cash conversion* and the three rate settings bind in service only (the
+exit settlement ignores them); *max days* only ever lowers the entitlement; *has sub-types* only
+blocks creating one; the gender qualifier cannot be set from the Eligibility tab; and every accrual
+frequency falls one period short within the year — *annual* accrues nothing. Each is in § 23 as
+L-38 to L-48. The paragraph below is the 2026-09-18 reading.
 
 So that this section is not read as a list of everything being broken: **twenty-one settings were
 traced and are fully honoured.** Minimum notice · Requires approval · Requires a reliever · Min
@@ -1396,6 +1411,9 @@ Three of its cards belong to leave, and they are the reason this chapter exists.
 This one comes first because the other leave settings are measured from it. A leave year is
 **named after the calendar year it starts in** — with an April start, March 2028 belongs to leave
 year 2027 — and entitlement, carry-over expiry and the forfeiture cut-off all count from this month.
+⚠ *(2026-09-25)* Two readers do not yet follow it: first-year pro-rating counts calendar months to
+December, and the untaken-leave reminder compares the calendar month (L-48). Neither shows on a
+January leave year, which is TDC's.
 
 > ⚠ **Set it during setup. It cannot be changed later**, and the screen says so in amber. Once the
 > company holds any leave, the save is refused and names what already exists — *"…already holds 42
@@ -3712,6 +3730,9 @@ findings index nobody can audit.
 are closed at the API with **no screen control**, and they are listed separately below so that
 nobody promises a stakeholder a button.
 
+⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
+are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
+
 ### ✅ Closed
 
 | # | Where | Finding | Closed by |
@@ -3772,6 +3793,33 @@ nobody promises a stakeholder a button.
 | # | Where | Finding | Severity |
 |---|---|---|---|
 | **L-30** | §4.4.2 | `LeaveType.IsPaid` produces no deduction. ⚠ **Payroll's, not HR's.** HR records the absence, the days and the fact that the type is unpaid; what that is worth is payroll's arithmetic, and it is handed off in writing | medium *(not ours)* |
+
+### ⬜ Round 5 — a settings audit, 2026-09-25 — eleven open
+
+**Why these were missed.** The 2026-09-18 surveys counted *references* — a setting read by a service
+was called honoured. This audit read what each consumer **does**. Every finding below is scheduled in
+the round 5 plan, whose lane is named in the last column; the plain-terms account is
+`HR-LEAVE-ROUND-5-WHAT-CHANGES.md` § 15.
+
+| # | Where | Finding | Round 5 lane |
+|---|---|---|---|
+| **L-38** | ch. 4b | The tenant *encashment working days per month* can never apply — each leave type's own divisor (form minimum 1, default 22) always wins | N1 |
+| **L-39** | ch. 4 | *Max days per year* only ever lowers the entitlement. A type with a default of 0 — *Leave of Absence (Unpaid)*, *Occupational Injury Leave* — can never be booked | N2, N4 |
+| **L-40** | ch. 4 | An accrual policy cannot be switched off — nothing writes its `IsActive`; the tab's status column has no control behind it | N1 |
+| **L-41** | §1.3 | Every accrual frequency falls one period short within the year (monthly 11/12, quarterly 3/4); incremental *annual* accrues nothing all year; *per pay period* is monthly | C1, N2 |
+| **L-42** | ch. 17 | Carry-over expiry removes carried days already used, charging them a second time; the expiry reminder's skip rule assumes it does not | G |
+| **L-43** | ch. 4 | Eligibility rules are OR'd under a tab that says "restrict"; the gender qualifier on an organisation rule cannot be set from the tab | N2 |
+| **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 |
+| **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 |
+| **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 |
+| **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 |
+| **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I |
+
+**On the demo database, the same audit found:** *Leave of Absence (Unpaid)* and *Occupational Injury
+Leave* cannot be booked (L-39); Sick Leave's description promises a certificate rule that is switched
+off; Maternity's 30-day notice would refuse a premature birth; and the holiday calendar is the 2019
+list — 4 August as Founders' Day, no 1 July, no Shaqq Day — where the 2025 amendment restored 1 July,
+moved Founders' Day to 21 September and added Shaqq Day. All four are round 5 lane N4.
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 
@@ -3952,7 +4000,7 @@ module enforces one of them. That second one is a question of fact, not of polic
 | [`HR-ATTENDANCE-TIME-SYSTEM-GUIDE.md`](../attendance/HR-ATTENDANCE-TIME-SYSTEM-GUIDE.md) | the other end of chapter 20's join. ⚠ **Its chapters predate the leave→attendance write** |
 | [`HR-REPORTS-CATALOGUE.md`](../../catalogues/HR-REPORTS-CATALOGUE.md) § 3.3 | the leave reports, three of which are now delivered |
 | [`../HANDOFF-PAYROLL-LEAVE.md`](../../integration/handoffs/HANDOFF-PAYROLL-LEAVE.md) | the three settings HR stores and only payroll can honour |
-| [`../HR-OPEN-QUESTIONS-FOR-TDC.md`](../../programme/HR-OPEN-QUESTIONS-FOR-TDC.md) | ⚠ **its framing is superseded for leave.** L-D7 through L-D10 became configuration with defaults; nothing in this module waits on TDC |
+| [`../HR-OPEN-QUESTIONS-FOR-TDC.md`](../../programme/HR-OPEN-QUESTIONS-FOR-TDC.md) | ⚠ **its framing is superseded for leave.** L-D7 through L-D10 became configuration with defaults; nothing in this module waits on TDC. **Since 2026-09-25 its § Round 5 holds five leave questions** (conditions of service, cashing in while employed, a leave allowance, the holiday calendar, the medical board) — each with a default the system runs on, none blocking |
 | [`../HR-FINANCE-INTEGRATION-BACKLOG.md`](../../integration/HR-FINANCE-INTEGRATION-BACKLOG.md) § Area 2 | the encashment money event, and why nothing is posted yet |
 | [`../HR-CLOSURE-LEDGER.md`](../../programme/HR-CLOSURE-LEDGER.md) | every decision behind the closure build, with its reasoning |
 
