@@ -280,3 +280,17 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   EF reports no pending model changes. The focused frontend collection suite completes all 6
   assertions successfully; its Windows worker process reports a post-test termination timeout.
   Database state remains unchanged pending the guarded reset gate.
+- The guarded local development reset completed with a verified backup, all 16 migrations, two
+  deterministic seed passes, DBCC success and a valid external evidence package. Its post-reset
+  readiness inspection correctly stopped promotion because the Finance demonstration seeder had
+  recreated three legacy Supplier rows and no governed Business Partner roles/profiles.
+- Finance demonstration counterparties now seed only canonical Business Partners: three active
+  Supplier roles with approved AP profiles, three active Customer roles with approved AR profiles,
+  and two approved category-specific AP WHT defaults. No Finance seeder path writes to the retired
+  Supplier master. The corrected seed completes twice with stable counts (6 partners, 6 roles,
+  3 AP profiles, 3 AR profiles and 2 WHT defaults), proving idempotency.
+- Data and API builds pass with zero errors. The focused canonical-seed architecture regression
+  passes. The broader prerequisite-seeder class retains one unrelated pre-existing failure because
+  its exchange-rate assertion expects 12.5 while the current seed stores 0.08 under the active
+  convention. A clean guarded reset must be rerun from the corrected commit before rehearsal so
+  the three legacy Supplier rows created by the superseded seed are absent from the final baseline.

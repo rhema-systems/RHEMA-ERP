@@ -2157,43 +2157,99 @@ public class FinanceDataSeeder
 
         foreach (var definition in supplierDefinitions)
         {
-            if (await _context.Suppliers.IgnoreQueryFilters().AnyAsync(supplier =>
-                    supplier.TenantId == tenantId && supplier.SupplierCode == definition.Code))
+            var partner = await _context.BusinessPartners.IgnoreQueryFilters().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.PartnerCode == definition.Code);
+            if (partner == null)
             {
-                continue;
+                partner = new BusinessPartner
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PartnerCode = definition.Code,
+                    PartnerName = definition.Name,
+                    LegalName = definition.Name,
+                    PartnerType = "Supplier",
+                    RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved",
+                    IsActive = true,
+                    TaxIdentificationNumber = definition.TaxId,
+                    PrimaryContactName = "Finance Contact",
+                    PrimaryContactTitle = "Accounts Officer",
+                    PrimaryEmail = $"accounts.{definition.Code.ToLowerInvariant()}@example.test",
+                    PrimaryPhone = "+233 30 000 0000",
+                    PhysicalAddress = "Tema Development Area",
+                    PhysicalCity = "Tema",
+                    PhysicalCountry = definition.Currency == "GHS" ? "Ghana" : "United States",
+                    Currency = definition.Currency,
+                    PaymentTermId = net30?.Id,
+                    PaymentTerms = "Net 30",
+                    SubjectToWithholdingDeduction = definition.Withholding,
+                    Notes = definition.Notes,
+                    CreatedAt = baseDate,
+                    CreatedBy = "System (Finance Demo)"
+                };
+                _context.BusinessPartners.Add(partner);
             }
 
-            _context.Suppliers.Add(new Supplier
+            var role = await _context.BusinessPartnerRoles.IgnoreQueryFilters().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.BusinessPartnerId == partner.Id &&
+                item.RoleType == BusinessPartnerRoleType.Supplier);
+            if (role == null)
             {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                SupplierCode = definition.Code,
-                Name = definition.Name,
-                Description = "Fictional TDC Finance UAT supplier.",
-                SupplierType = "Vendor",
-                Address = "Tema Development Area",
-                City = "Tema",
-                Country = definition.Currency == "GHS" ? "Ghana" : "United States",
-                Phone = "+233 30 000 0000",
-                Email = $"{definition.Code.ToLowerInvariant()}@example.test",
-                PrimaryContactName = "Finance Contact",
-                PrimaryContactTitle = "Accounts Officer",
-                PrimaryContactEmail = $"accounts.{definition.Code.ToLowerInvariant()}@example.test",
-                TaxId = definition.TaxId,
-                IsWithholdingTaxApplicable = definition.Withholding,
-                TaxTreatment = TaxTreatment.Standard,
-                PaymentTerms = "Net 30",
-                PaymentTermId = net30?.Id,
-                IsActive = true,
-                IsPreferred = definition.Code == "TDC-DEMO-SUP-001",
-                Status = "Active",
-                Rating = 4,
-                DefaultApAccountId = accounts.TryGetValue("000-2000-0000", out var apAccount) ? apAccount.Id : null,
-                DefaultExpenseAccountId = accounts.TryGetValue(definition.Expense, out var expenseAccount) ? expenseAccount.Id : null,
-                Notes = definition.Notes,
-                CreatedAt = baseDate,
-                CreatedBy = "System (Finance Demo)"
-            });
+                role = new BusinessPartnerRole
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = partner.Id,
+                    RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+                    ActiveFromUtc = baseDate, CreatedAt = baseDate, CreatedBy = "System (Finance Demo)"
+                };
+                _context.BusinessPartnerRoles.Add(role);
+            }
+
+            var profile = await _context.BusinessPartnerApProfileVersions.IgnoreQueryFilters().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.BusinessPartnerRoleId == role.Id && item.VersionNumber == 1);
+            if (profile == null)
+            {
+                profile = new BusinessPartnerApProfileVersion
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+                    VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+                    EffectiveFrom = baseDate, ApReferenceNumber = definition.Code,
+                    PaymentTermId = net30?.Id,
+                    DefaultExpenseAccountId = accounts.TryGetValue(definition.Expense, out var expenseAccount)
+                        ? expenseAccount.Id : null,
+                    SubjectToWithholding = definition.Withholding,
+                    ApprovedAtUtc = baseDate, DecisionReason = "Approved Finance demonstration profile.",
+                    CreatedAt = baseDate, CreatedBy = "System (Finance Demo)"
+                };
+                _context.BusinessPartnerApProfileVersions.Add(profile);
+                // Persist the profile before its default WHT line. The profile points back to the
+                // selected line, so inserting both ends in one EF batch forms a dependency cycle.
+                await _context.SaveChangesAsync();
+            }
+
+            if (definition.Withholding)
+            {
+                var taxCode = definition.Code == "TDC-DEMO-SUP-002" ? "WHT-GOODS" : "WHT-SERV";
+                var tax = await _context.Taxes.FirstAsync(item =>
+                    item.TenantId == tenantId && item.Code == taxCode && item.IsActive && !item.IsDeleted);
+                var whtDefault = await _context.BusinessPartnerApWhtDefaults.IgnoreQueryFilters().FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId && item.ApProfileVersionId == profile.Id && item.WithholdingTaxId == tax.Id);
+                if (whtDefault == null)
+                {
+                    whtDefault = new BusinessPartnerApWhtDefault
+                    {
+                        Id = Guid.NewGuid(), TenantId = tenantId, ApProfileVersionId = profile.Id,
+                        CategoryCode = taxCode == "WHT-GOODS" ? "GOODS" : "SERVICES",
+                        CategoryName = taxCode == "WHT-GOODS" ? "Goods" : "Services",
+                        WithholdingTaxId = tax.Id, IsDefaultForAp = true, IsActive = true,
+                        CreatedAt = baseDate, CreatedBy = "System (Finance Demo)"
+                    };
+                    _context.BusinessPartnerApWhtDefaults.Add(whtDefault);
+                    await _context.SaveChangesAsync();
+                }
+                profile.DefaultWithholdingLineId = whtDefault.Id;
+                partner.DefaultWithholdingTaxId = tax.Id;
+            }
         }
 
         var customerDefinitions = new[]
@@ -2205,45 +2261,73 @@ public class FinanceDataSeeder
 
         foreach (var definition in customerDefinitions)
         {
-            if (await _context.BusinessPartners.IgnoreQueryFilters().AnyAsync(partner =>
-                    partner.TenantId == tenantId && partner.PartnerCode == definition.Code))
+            var partner = await _context.BusinessPartners.IgnoreQueryFilters().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.PartnerCode == definition.Code);
+            if (partner == null)
             {
-                continue;
+                partner = new BusinessPartner
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PartnerCode = definition.Code,
+                    CustomerAccountNumber = definition.Code,
+                    PartnerName = definition.Name,
+                    LegalName = definition.Name,
+                    PartnerType = "Customer",
+                    CustomerType = "Corporate",
+                    RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved",
+                    IsActive = true,
+                    IsVatWithholdingAgent = definition.VatWithholdingAgent,
+                    TaxTreatment = TaxTreatment.Standard,
+                    TaxIdentificationNumber = definition.TaxId,
+                    PrimaryContactName = "Finance Contact",
+                    PrimaryContactTitle = "Accounts Officer",
+                    PrimaryEmail = $"accounts.{definition.Code.ToLowerInvariant()}@example.test",
+                    PrimaryPhone = "+233 30 000 0000",
+                    PhysicalAddress = "Tema Development Area",
+                    PhysicalCity = "Tema",
+                    PhysicalCountry = definition.Currency == "GHS" ? "Ghana" : "United Kingdom",
+                    Currency = definition.Currency,
+                    CreditLimit = definition.CreditLimit,
+                    OutstandingBalance = 0m,
+                    PaymentTermId = net30?.Id,
+                    PaymentTerms = "Net 30",
+                    Notes = "Fictional TDC Finance UAT customer. No opening exposure is seeded.",
+                    CreatedAt = baseDate,
+                    CreatedBy = "System (Finance Demo)"
+                };
+                _context.BusinessPartners.Add(partner);
             }
 
-            _context.BusinessPartners.Add(new BusinessPartner
+            var role = await _context.BusinessPartnerRoles.IgnoreQueryFilters().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.BusinessPartnerId == partner.Id &&
+                item.RoleType == BusinessPartnerRoleType.Customer);
+            if (role == null)
             {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                PartnerCode = definition.Code,
-                CustomerAccountNumber = definition.Code,
-                PartnerName = definition.Name,
-                LegalName = definition.Name,
-                PartnerType = "Customer",
-                CustomerType = "Corporate",
-                RegistrationStatus = "Approved",
-                ApprovalStatus = "Approved",
-                IsActive = true,
-                IsVatWithholdingAgent = definition.VatWithholdingAgent,
-                TaxTreatment = TaxTreatment.Standard,
-                TaxIdentificationNumber = definition.TaxId,
-                PrimaryContactName = "Finance Contact",
-                PrimaryContactTitle = "Accounts Officer",
-                PrimaryEmail = $"accounts.{definition.Code.ToLowerInvariant()}@example.test",
-                PrimaryPhone = "+233 30 000 0000",
-                PhysicalAddress = "Tema Development Area",
-                PhysicalCity = "Tema",
-                PhysicalCountry = definition.Currency == "GHS" ? "Ghana" : "United Kingdom",
-                Currency = definition.Currency,
-                CreditLimit = definition.CreditLimit,
-                OutstandingBalance = 0m,
-                PaymentTermId = net30?.Id,
-                PaymentTerms = "Net 30",
-                DefaultArAccountId = accounts.TryGetValue("000-1100-0000", out var arAccount) ? arAccount.Id : null,
-                Notes = "Fictional TDC Finance UAT customer. No opening exposure is seeded.",
-                CreatedAt = baseDate,
-                CreatedBy = "System (Finance Demo)"
-            });
+                role = new BusinessPartnerRole
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = partner.Id,
+                    RoleType = BusinessPartnerRoleType.Customer, Status = BusinessPartnerRoleStatus.Active,
+                    ActiveFromUtc = baseDate, CreatedAt = baseDate, CreatedBy = "System (Finance Demo)"
+                };
+                _context.BusinessPartnerRoles.Add(role);
+            }
+
+            if (!await _context.BusinessPartnerArProfileVersions.IgnoreQueryFilters().AnyAsync(item =>
+                    item.TenantId == tenantId && item.BusinessPartnerRoleId == role.Id && item.VersionNumber == 1))
+            {
+                _context.BusinessPartnerArProfileVersions.Add(new BusinessPartnerArProfileVersion
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+                    VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+                    EffectiveFrom = baseDate, ArReferenceNumber = definition.Code,
+                    PaymentTermId = net30?.Id, CreditLimit = definition.CreditLimit,
+                    IsWithholdingAgent = definition.VatWithholdingAgent,
+                    ApprovedAtUtc = baseDate, DecisionReason = "Approved Finance demonstration profile.",
+                    CreatedAt = baseDate, CreatedBy = "System (Finance Demo)"
+                });
+            }
         }
     }
 
