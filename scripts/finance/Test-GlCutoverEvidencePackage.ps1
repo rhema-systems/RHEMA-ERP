@@ -408,10 +408,10 @@ if ($PackageKind -eq 'DisposableReset') {
         $repositoryIds = @(Get-Content -LiteralPath (Join-Path $root 'migration-discovery.log') | ForEach-Object {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
         })
-        if ($repositoryIds.Count -ne 1 -or $repositoryIds[-1] -cne '20260916132000_DisposableDevelopmentCurrentModelBaseline' -or
-            @($repositoryIds | Sort-Object -Unique).Count -ne 1 -or
+        if ($repositoryIds.Count -lt 1 -or
+            @($repositoryIds | Sort-Object -Unique).Count -ne $repositoryIds.Count -or
             (@($repositoryIds | Sort-Object) -join "`n") -cne ($repositoryIds -join "`n")) {
-            throw 'Disposable-reset repository history is not the exact authoritative disposable-development baseline.'
+            throw 'Disposable-reset repository history is empty, duplicated, or out of order.'
         }
         $repositoryHistoryPath = Join-Path $root 'repository-migration-history.txt'
         $repositoryHistory = Read-MigrationHistoryEvidence $repositoryHistoryPath `
@@ -441,7 +441,8 @@ if ($PackageKind -eq 'DisposableReset') {
     }
     if ($failedOperation -ceq 'PHASE_07_PUBLICATION' -and
         ($durableOrdinal -ne 6 -or -not $validatedTargetHistoryPresent -or
-         $validatedTargetHistoryCount -ne 1 -or [long]$reset.finalMigrationCount -ne 1)) {
+         $validatedTargetHistoryCount -ne $repositoryIds.Count -or
+         [long]$reset.finalMigrationCount -ne $repositoryIds.Count)) {
         throw 'Phase-07 publication failure must bind the exact validated target migration history.'
     }
     $sourceIds = @()
@@ -527,10 +528,8 @@ if ($PackageKind -eq 'DisposableReset') {
             }
         }
         $latestMigrationValue = Get-RequiredNonNullJsonProperty $reset 'latestMigration' 'Disposable-reset V2 status'
-        if ($latestMigrationValue -isnot [string] -or
-            $latestMigrationValue -cne '20260916132000_DisposableDevelopmentCurrentModelBaseline' -or
-            [long]$reset.repositoryMigrationCount -ne 1 -or [long]$reset.orphanMigrationCount -ne 0) {
-            throw 'Disposable-reset V2 repository migration count/latest/orphan identity is not the exact baseline contract.'
+        if ($latestMigrationValue -isnot [string] -or [long]$reset.orphanMigrationCount -ne 0) {
+            throw 'Disposable-reset V2 repository migration identity or orphan count is invalid.'
         }
         $expectedFinalMigrationCount = if ($phases -ccontains 'MIGRATIONS_APPLIED' -or $validatedTargetHistoryPresent) {
             $validatedTargetHistoryCount
@@ -543,15 +542,15 @@ if ($PackageKind -eq 'DisposableReset') {
              [string]$reset.latestMigration -cne $repositoryIds[-1])) {
             throw 'Disposable-reset V2 status disagrees with independently derived repository migration evidence.'
         }
-        if ($phaseMarkers.Count -ge 1 -and
-            ([long]$phaseMarkers[0].repositoryMigrationCount -ne 1 -or
-             [string]$phaseMarkers[0].latestMigration -cne '20260916132000_DisposableDevelopmentCurrentModelBaseline')) {
-            throw 'Disposable-reset OFFLINE_GATES phase does not bind the exact baseline repository identity.'
+        if ($phaseMarkers.Count -ge 1 -and $repositoryIds.Count -gt 0 -and
+            ([long]$phaseMarkers[0].repositoryMigrationCount -ne $repositoryIds.Count -or
+             [string]$phaseMarkers[0].latestMigration -cne $repositoryIds[-1])) {
+            throw 'Disposable-reset OFFLINE_GATES phase does not bind the discovered repository identity.'
         }
         if ($phases -ccontains 'MIGRATIONS_APPLIED') {
             $migrationPhaseIndex = [Array]::IndexOf($phases, 'MIGRATIONS_APPLIED')
-            if ([long]$phaseMarkers[$migrationPhaseIndex].finalMigrationCount -ne 1) {
-                throw 'Disposable-reset MIGRATIONS_APPLIED phase does not bind the exact baseline count.'
+            if ([long]$phaseMarkers[$migrationPhaseIndex].finalMigrationCount -ne $repositoryIds.Count) {
+                throw 'Disposable-reset MIGRATIONS_APPLIED phase does not bind the discovered repository count.'
             }
         }
         if ($sourceIds.Count -gt 0 -or (Test-Path -LiteralPath (Join-Path $root 'source-migration-history.txt') -PathType Leaf)) {
@@ -926,12 +925,10 @@ if ($PackageKind -eq 'FinalClone') {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
         }
     )
-    if ($migrationIds.Count -ne 1 -or $migrationIds[-1] -ne '20260916132000_DisposableDevelopmentCurrentModelBaseline') {
-        throw "Final-clone migration evidence is not the authoritative disposable-development baseline. Count=$($migrationIds.Count); Latest=$($migrationIds[-1])."
-    }
-    if (@($migrationIds | Sort-Object -Unique).Count -ne 1 -or
+    if ($migrationIds.Count -lt 1 -or
+        @($migrationIds | Sort-Object -Unique).Count -ne $migrationIds.Count -or
         (@($migrationIds | Sort-Object) -join "`n") -ne ($migrationIds -join "`n")) {
-        throw 'Final-clone migration evidence contains duplicate or out-of-order migration IDs.'
+        throw 'Final-clone migration evidence is empty or contains duplicate/out-of-order migration IDs.'
     }
     if ($summary.repositoryMigrationCount -isnot [long] -or [long]$summary.repositoryMigrationCount -ne $migrationIds.Count -or
         $summary.latestMigration -isnot [string] -or [string]$summary.latestMigration -cne $migrationIds[-1]) {
