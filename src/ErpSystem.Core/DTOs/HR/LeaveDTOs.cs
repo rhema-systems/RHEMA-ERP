@@ -253,6 +253,13 @@ public class CreateLeaveAccrualPolicyDto
     public int? MinServiceMonths { get; set; }
     public bool ProRateOnJoin { get; set; }
     public bool ProRateOnExit { get; set; }
+
+    /// <summary>
+    /// Whether the policy is in force (round 5, lane N1). It existed on the entity with nothing to
+    /// write it, so a policy could only be deleted. <c>null</c> means active on create and
+    /// unchanged on update, so an older caller cannot switch a policy off by leaving it out.
+    /// </summary>
+    public bool? IsActive { get; set; }
 }
 
 // ─── Leave Balance ────────────────────────────────────────────────────────────

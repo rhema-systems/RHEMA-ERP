@@ -25,6 +25,7 @@ const schema = z.object({
   minServiceMonths: z.string().optional().or(z.literal('')),
   proRateOnJoin: z.boolean(),
   proRateOnExit: z.boolean(),
+  isActive: z.boolean(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -36,6 +37,7 @@ const empty: FormValues = {
   minServiceMonths: '',
   proRateOnJoin: true,
   proRateOnExit: true,
+  isActive: true,
 };
 
 const toPayload = (leaveTypeId: string, v: FormValues) => ({
@@ -46,6 +48,7 @@ const toPayload = (leaveTypeId: string, v: FormValues) => ({
   minServiceMonths: v.minServiceMonths ? Number(v.minServiceMonths) : null,
   proRateOnJoin: v.proRateOnJoin,
   proRateOnExit: v.proRateOnExit,
+  isActive: v.isActive,
 });
 
 const label = (opts: { value: string; label: string }[], v: string) =>
@@ -111,6 +114,7 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
         minServiceMonths: p.minServiceMonths != null ? String(p.minServiceMonths) : '',
         proRateOnJoin: p.proRateOnJoin,
         proRateOnExit: p.proRateOnExit,
+        isActive: p.isActive,
       })}
       renderFields={(form) => (
         <>
@@ -126,11 +130,17 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
               name="frequency"
               label="Frequency"
               required
-              options={
-                form.watch('frequency') === 'PerPayPeriod'
-                  ? ACCRUAL_FREQUENCY_DISPLAY
-                  : ACCRUAL_FREQUENCY_OPTIONS
-              }
+              options={(form.watch('frequency') === 'PerPayPeriod'
+                ? ACCRUAL_FREQUENCY_DISPLAY
+                : ACCRUAL_FREQUENCY_OPTIONS
+              ).filter(
+                // Round 5, lane N2: incremental Annual credits the whole year on its last day, so
+                // it is not offered — kept only for the row already set to it, like PerPayPeriod.
+                (o) =>
+                  o.value !== 'Annual' ||
+                  form.watch('mode') !== 'AccrueIncrementally' ||
+                  form.watch('frequency') === 'Annual',
+              )}
             />
             <SelectField
               form={form}
@@ -185,9 +195,16 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
               form={form}
               name="proRateOnExit"
               label="Pro-rate on exit"
-              description="Part-period entitlement in the year of leaving."
+              description="A leaver stops accruing on their last day. A leaver's settlement does not read this figure yet."
             />
           </FieldRow>
+          {/* Round 5, lane N1: the switch existed on the policy with nothing to set it. */}
+          <SwitchField
+            form={form}
+            name="isActive"
+            label="In force"
+            description="Off: the policy is kept, nothing accrues under it, and another can be switched on. A leave type can have one policy in force."
+          />
         </>
       )}
     />

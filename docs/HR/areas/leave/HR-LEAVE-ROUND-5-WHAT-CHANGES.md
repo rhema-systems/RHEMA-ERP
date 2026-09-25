@@ -3,9 +3,10 @@
 > **Status: DECIDED on 25 September 2026 — being built.** [Section 6](#6-leave-plans--relievers-the-clash-check-and-the-approvers-view)
 > (leave plans), [section 7](#7-cancelling-recalling-and-coming-back-to-work) (cancelling, recall
 > and coming back), [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person)
-> and [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest) (kinds of leave, with the
-> leave-type form that starts from the kind) were built and tested on 25 September; nothing else
-> described here is built yet. This is the
+> [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest) (kinds of leave, with the
+> leave-type form that starts from the kind) and [section 15](#15-setting-up-leave-types--simpler-and-honest)
+> (settings that do what they say, and the demo data) were built and tested on 25 September; nothing
+> else described here is built yet. This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
 > round 5 is built.
@@ -573,14 +574,28 @@ does not need a lot of setup complexity".)*
 - **Settings that did nothing are removed or made to work**: the company-wide "working days per month"
   (each leave type's own figure always won); the build-up choices that could never work (*per pay
   period* and *annual*); the *has sub-types* tick. An accrual rule can now be switched off.
+- **The maximum days a year applies to annual leave only**, as the most a staff-level allocation may
+  give. On every other kind the days a year are the limit, and the maximum only ever lowered it — that
+  is why unpaid and injury leave could never be booked.
+- **A sub-type counts inside its leave type.** "Malaria" under Sick Leave draws on the sick-leave days;
+  its own cap limits it within them. Before, a sub-type's cap replaced the leave type's days, and a
+  staff level's allocation stopped applying the moment a sub-type was chosen.
 - **Labels tell the truth.** For example, the eligibility tab will say *"anyone matching **any** rule
   may take this leave"* — because adding a rule widens who qualifies, it does not narrow it.
 - **No more dodging.** Submitting re-checks the notice, the reliever, the sub-type limit and the
-  balance, however the request was started.
-- **Demo data corrected**:
-  - the public holidays updated to the 2025 changes;
-  - Unpaid and Occupational Injury leave given limits, so they can actually be booked;
-  - sick leave's certificate rule switched on;
+  balance, however the request was started. A medical board counts leave that is still waiting for a
+  decision, and a request whose dates are moved and get longer needs the certificate the longer leave
+  needs.
+- **Two faults found on the way, both fixed.** Submitting a saved draft did not update the balance, so
+  its days still showed as free — and the next request was checked against that. And editing a
+  holiday on the calendar wiped its description, its observed day and its pay rate.
+- **Demo data corrected** (done on 25 September):
+  - the public holidays updated to the 2025 changes: Republic Day on 1 July, Founders' Day moved to
+    21 September, 4 August no longer a holiday, and Shaqq Day, the day after Eid al-Fitr;
+  - Unpaid and Occupational Injury leave given limits (90 and 180 days a year), so they can actually
+    be booked;
+  - sick leave's certificate rule switched on (after three days on the employee's word);
+  - annual leave forfeits nothing (decision B7);
   - maternity's notice rule removed, and its certificate required from the first day with no
     medical board (both done on 25 September: the Maternity kind ignores notice, and the type was
     set).

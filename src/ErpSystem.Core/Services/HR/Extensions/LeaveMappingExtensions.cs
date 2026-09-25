@@ -59,7 +59,8 @@ namespace ErpSystem.Application.Extensions
             MinDaysNotice = dto.MinDaysNotice,
             RequiresApproval = dto.RequiresApproval,
             CalendarColor = dto.CalendarColor,
-            HasSubTypes = dto.HasSubTypes,
+            // Derived from the sub-types (lane N2); a new type has none yet.
+            HasSubTypes = false,
             AllowCarryOver = dto.AllowCarryOver,
             MaxCarryOverDays = dto.MaxCarryOverDays,
             CountWeekendsAsLeave = dto.CountWeekendsAsLeave,
@@ -101,7 +102,10 @@ namespace ErpSystem.Application.Extensions
             LeaveTypeId = dto.LeaveTypeId,
             SubTypeName = dto.SubTypeName,
             Description = dto.Description,
-            MaxDaysAllowed = dto.MaxDaysAllowed
+            MaxDaysAllowed = dto.MaxDaysAllowed,
+            // Round 5, lane N (guide L-44): it was not mapped, so a sub-type created switched off
+            // came out active and was offered to every request.
+            IsActive = dto.IsActive
         };
 
         public static List<LeaveSubTypeDto> ToDtoList(this IEnumerable<LeaveSubType> entities)
@@ -126,7 +130,10 @@ namespace ErpSystem.Application.Extensions
         public static LeaveCategoryAllocation ToEntity(this CreateLeaveCategoryAllocationDto dto) => new LeaveCategoryAllocation
         {
             LeaveTypeId = dto.LeaveTypeId,
-            LeaveSubTypeId = dto.LeaveSubTypeId,
+            // ⚠ Always the whole type (round 5, lane N2): a balance is kept per type, so an
+            // allocation to one sub-type matched almost nothing. The field stays on the DTO for
+            // older callers and is ignored.
+            LeaveSubTypeId = null,
             StaffLevelId = dto.StaffLevelId,
             AllocationDays = dto.AllocationDays,
             EffectiveFrom = dto.EffectiveFrom,
@@ -190,7 +197,8 @@ namespace ErpSystem.Application.Extensions
             AccrualRate = dto.AccrualRate,
             MinServiceMonths = dto.MinServiceMonths,
             ProRateOnJoin = dto.ProRateOnJoin,
-            ProRateOnExit = dto.ProRateOnExit
+            ProRateOnExit = dto.ProRateOnExit,
+            IsActive = dto.IsActive ?? true
         };
 
         public static List<LeaveAccrualPolicyDto> ToDtoList(this IEnumerable<LeaveAccrualPolicy> entities)

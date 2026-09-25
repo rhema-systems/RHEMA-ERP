@@ -97,7 +97,10 @@ export default function LeaveTypeDetailPage() {
         <TabsContent value="overview" className="space-y-4 pt-4">
           <InfoCard title="Entitlement">
             <InfoRow label="Default days / year" value={t.defaultDaysPerYear} />
-            <InfoRow label="Max days / year" value={t.maxDaysPerYear} />
+            {/* Round 5, lane N2: only annual leave's maximum binds, as the highest allocation allowed. */}
+            {t.category === 'Annual' && (
+              <InfoRow label="Highest allocation allowed" value={t.maxDaysPerYear} />
+            )}
             <InfoRow label="Minimum notice (days)" value={t.minDaysNotice} />
             <InfoRow label="Min service to access (months)" value={t.minServiceMonthsToAccess} />
             <InfoRow label="Paid" value={yn(t.isPaid)} />

@@ -238,7 +238,10 @@ export default function PolicySettingsPage() {
   // deliberately not merged — but a client should meet that gap here, on a settings screen,
   // rather than in a payout somebody has already queried.
   const SAMPLE_MONTHLY = 6000;
-  const encashDivisor = Number(form.watch('encashmentWorkingDaysPerMonth') ?? 0);
+  // Round 5, lane N1: each leave type carries its own working-days figure (22 unless it says
+  // otherwise), and the tenant one it would fall back to can never apply — the type's form has a
+  // minimum of 1. So the comparison shows the default a type starts with.
+  const encashDivisor = 22;
   const settleDivisor = Number(form.watch('settlementDaysPerYear') ?? 0);
   const encashDaily = encashDivisor > 0 ? SAMPLE_MONTHLY / encashDivisor : null;
   const settleDaily = settleDivisor > 0 ? (SAMPLE_MONTHLY * 12) / settleDivisor : null;
@@ -691,16 +694,10 @@ export default function PolicySettingsPage() {
 
             {/* The two daily-rate bases, shown together on purpose. */}
             <div className="rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
-              <NumberField
-                form={form}
-                name="encashmentWorkingDaysPerMonth"
-                label="Encashment — working days per month"
-                required
-              />
-              <p className="mt-2 text-sm">
-                <strong>This one moves money.</strong> A day of encashed leave is worth monthly
-                basic plus linked allowances divided by this number. A leave type may set its own
-                figure; this is what every type without one falls back to.
+              <p className="text-sm">
+                <strong>What a day of encashed leave is worth</strong> is set on each leave type:
+                monthly basic plus linked allowances, divided by that type&apos;s working days per
+                month — 22 unless the type says otherwise.
               </p>
 
               <div className="mt-3 rounded border bg-background/60 p-3 text-sm">

@@ -318,4 +318,6 @@ export interface LeaveAccrualPolicyRequest {
   minServiceMonths?: number | null;
   proRateOnJoin: boolean;
   proRateOnExit: boolean;
+  /** Round 5, lane N1. Omitted: in force on create, unchanged on update. */
+  isActive?: boolean;
 }

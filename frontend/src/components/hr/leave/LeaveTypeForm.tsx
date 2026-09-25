@@ -84,11 +84,11 @@ export const leaveTypeSchema = z
     encashmentWorkingDaysPerMonth: z.coerce.number().int().min(1, 'Must be at least 1'),
     isActive: z.boolean(),
   })
-  // ⚠ Not for Other: its one number is the limit, and the cap waits under Advanced — a check that
-  // failed on a field nobody can see would block the save with no visible reason. The payload
-  // raises the cap to the limit instead (leaveTypeFormToRequest).
-  .refine((v) => v.category === 'Other' || v.maxDaysPerYear >= v.defaultDaysPerYear, {
-    message: 'Max days cannot be below the default',
+  // ⚠ Annual only (round 5, lane N2): the highest allocation allowed is an annual-leave setting
+  // and is not shown for any other kind, where the days per year are the limit. A check on a field
+  // nobody can see would block the save with no visible reason (leaveTypeFormToRequest).
+  .refine((v) => v.category !== 'Annual' || v.maxDaysPerYear >= v.defaultDaysPerYear, {
+    message: 'The highest allocation cannot be below the days per year',
     path: ['maxDaysPerYear'],
   })
   // A manual encashment basis is meaningless without the rate it refers to.
@@ -134,18 +134,16 @@ export const emptyLeaveType: LeaveTypeFormValues = {
 
 /** The fields each kind leaves under "Advanced settings" — used to open it when one of them fails. */
 const ADVANCED_FIELDS: Record<LeaveTypeCategory, (keyof LeaveTypeFormValues)[]> = {
-  Annual: ['requiresMedicalCertificate', 'selfCertificationDays', 'medicalBoardThresholdDays', 'hasSubTypes'],
+  Annual: ['requiresMedicalCertificate', 'selfCertificationDays', 'medicalBoardThresholdDays'],
   Maternity: [
     'minDaysNotice', 'minServiceMonthsToAccess', 'allowCarryOver', 'maxCarryOverDays',
     'carryOverExpiryMonths', 'forfeitUnusedAfterMonths', 'yearEndBasis', 'proRateFirstYearEntitlement',
     'allowCashConversion', 'encashmentRateBasis', 'encashmentRatePerDay', 'encashmentWorkingDaysPerMonth',
-    'hasSubTypes',
   ],
   Other: [
-    'maxDaysPerYear', 'minServiceMonthsToAccess', 'allowCarryOver', 'maxCarryOverDays',
+    'minServiceMonthsToAccess', 'allowCarryOver', 'maxCarryOverDays',
     'carryOverExpiryMonths', 'forfeitUnusedAfterMonths', 'yearEndBasis', 'proRateFirstYearEntitlement',
     'allowCashConversion', 'encashmentRateBasis', 'encashmentRatePerDay', 'encashmentWorkingDaysPerMonth',
-    'hasSubTypes',
   ],
 };
 
@@ -225,13 +223,13 @@ export function LeaveTypeForm({
   const serviceGate = (
     <NumberField form={form} name="minServiceMonthsToAccess" label="Service before it can be taken (months)" />
   );
+  // Round 5, lane N2: hasSubTypes is no longer a switch. The type has sub-types when one of
+  // them is active, which the server works out; the switch only ever blocked creating one.
   const subTypes = (
-    <SwitchField
-      form={form}
-      name="hasSubTypes"
-      label="Has sub-types"
-      description="Variants of this leave with their own names and caps, managed on the Sub-types tab."
-    />
+    <p className="text-sm text-muted-foreground">
+      <strong>Sub-types</strong> — named variants with their own caps, each counted inside this
+      type&apos;s days — are added on the Sub-types tab once the type is saved.
+    </p>
   );
 
   const medical = (
@@ -285,7 +283,12 @@ export function LeaveTypeForm({
           <NumberField form={form} name="carryOverExpiryMonths" label="Carry-over expires after (months)" />
         </FieldRow>
       )}
-      <NumberField form={form} name="forfeitUnusedAfterMonths" label="Forfeit unused after (months)" />
+      <NumberField
+        form={form}
+        name="forfeitUnusedAfterMonths"
+        label="Forfeit unused after (months)"
+        description="Months from the start of a leave year after which the year-end run removes that year's unused days. It does not stop anyone taking leave — a year that has ended cannot be booked — it removes the leftover a leaver's settlement or cashing in would count. Blank keeps them."
+      />
 
       {/*
         ⚠ Entitlement plan B2. This governs BOTH year-end runs, which is why it sits here
@@ -429,7 +432,13 @@ export function LeaveTypeForm({
           </SectionHeading>
           <FieldRow>
             <NumberField form={form} name="defaultDaysPerYear" label="Days per year" required />
-            <NumberField form={form} name="maxDaysPerYear" label="Max days per year" required />
+            <NumberField
+              form={form}
+              name="maxDaysPerYear"
+              label="Highest allocation allowed"
+              required
+              description="The most a staff-level allocation may grant; a higher one is cut to this."
+            />
           </FieldRow>
           <FieldRow>
             {serviceGate}
@@ -453,7 +462,6 @@ export function LeaveTypeForm({
           </SectionHeading>
           <FieldRow>
             <NumberField form={form} name="defaultDaysPerYear" label="Days" required />
-            <NumberField form={form} name="maxDaysPerYear" label="Max days" required />
           </FieldRow>
           {counting}
           <p className="text-xs text-muted-foreground">
@@ -512,13 +520,7 @@ export function LeaveTypeForm({
       </>
     ) : (
       <>
-        <FieldRow>
-          <NumberField form={form} name="maxDaysPerYear" label="Hard cap (days per year)" />
-          {serviceGate}
-        </FieldRow>
-        <p className="text-xs text-muted-foreground">
-          The cap never lowers the limit above it; it is raised to the limit when it is lower.
-        </p>
+        {serviceGate}
         {carryOver}
         {encashment}
         {subTypes}
@@ -574,7 +576,7 @@ export function LeaveTypeForm({
                 form={form}
                 name="isPaid"
                 label="Paid leave"
-                description="Unpaid leave still consumes entitlement."
+                description="A label for people reading the rulebook: what unpaid leave deducts from pay is payroll's to decide. Unpaid leave still consumes entitlement."
               />
             </FieldRow>
           </section>
@@ -624,9 +626,10 @@ export function leaveTypeFormToRequest(v: LeaveTypeFormValues) {
     description: v.description || null,
     isPaid: v.isPaid,
     defaultDaysPerYear: v.defaultDaysPerYear,
-    // Other shows one number, the limit; its cap is raised to meet it rather than left below it.
+    // Only annual leave's maximum binds (the server ignores it for other kinds, lane N2). The others
+    // keep a stored value no lower than their days, so nothing reading the column is misled.
     maxDaysPerYear:
-      v.category === 'Other' ? Math.max(v.maxDaysPerYear, v.defaultDaysPerYear) : v.maxDaysPerYear,
+      v.category === 'Annual' ? v.maxDaysPerYear : Math.max(v.maxDaysPerYear, v.defaultDaysPerYear),
     minDaysNotice: num(v.minDaysNotice),
     requiresApproval: v.requiresApproval,
     calendarColor: v.calendarColor || null,

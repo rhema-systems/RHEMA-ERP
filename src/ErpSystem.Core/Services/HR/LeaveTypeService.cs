@@ -218,7 +218,7 @@ public class LeaveTypeService : ILeaveTypeService
         entity.MinDaysNotice = dto.MinDaysNotice;
         entity.RequiresApproval = dto.RequiresApproval;
         entity.CalendarColor = dto.CalendarColor;
-        entity.HasSubTypes = dto.HasSubTypes;
+        // HasSubTypes is derived from the sub-types themselves (lane N2), not written by a save.
         entity.AllowCarryOver = dto.AllowCarryOver;
         entity.MaxCarryOverDays = dto.MaxCarryOverDays;
         entity.CountWeekendsAsLeave = dto.CountWeekendsAsLeave;
@@ -350,17 +350,38 @@ public class LeaveTypeService : ILeaveTypeService
         return items.ToDtoList();
     }
 
+    /// <summary>
+    /// <c>HasSubTypes</c> is derived: a type has sub-types when it has an active one (round 5, lane
+    /// N2).
+    /// </summary>
+    /// <remarks>
+    /// It was a checkbox whose only effect was to refuse creating a sub-type while it was off, so
+    /// it said nothing true about the type. Set here after every sub-type change; a type save no
+    /// longer writes it.
+    /// </remarks>
+    private async Task SyncHasSubTypesAsync(Guid leaveTypeId)
+    {
+        var tenantId = GetTenantId();
+        var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
+        var hasActive = await _leaveSubTypeRepository.GetQueryable()
+            .AnyAsync(st => st.TenantId == tenantId && st.LeaveTypeId == leaveTypeId && st.IsActive);
+        if (leaveType.HasSubTypes == hasActive) return;
+
+        leaveType.HasSubTypes = hasActive;
+        await _leaveTypeRepository.UpdateAsync(leaveType);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
     public async Task<LeaveSubTypeDto> CreateSubTypeAsync(CreateLeaveSubTypeDto dto)
     {
-        var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
-        if (!leaveType.HasSubTypes)
-            throw new InvalidOperationException("This leave type is not configured to have sub-types.");
+        await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
 
         var tenantId = GetTenantId();
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         await _leaveSubTypeRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        await SyncHasSubTypesAsync(entity.LeaveTypeId);
         return (await _leaveSubTypeRepository.GetQueryable()
             .Include(st => st.LeaveType)
             .FirstOrDefaultAsync(st => st.TenantId == tenantId && st.Id == entity.Id))!.ToDto();
@@ -378,6 +399,7 @@ public class LeaveTypeService : ILeaveTypeService
 
         await _leaveSubTypeRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        await SyncHasSubTypesAsync(entity.LeaveTypeId);
         return (await _leaveSubTypeRepository.GetQueryable()
             .Include(st => st.LeaveType)
             .FirstOrDefaultAsync(st => st.TenantId == tenantId && st.Id == id))!.ToDto();
@@ -389,6 +411,7 @@ public class LeaveTypeService : ILeaveTypeService
 
         await _leaveSubTypeRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        await SyncHasSubTypesAsync(entity.LeaveTypeId);
     }
 
     // ─── Category Allocations ────────────────────────────────────────────────
@@ -431,7 +454,8 @@ public class LeaveTypeService : ILeaveTypeService
         var tenantId = entity.TenantId;
 
         entity.LeaveTypeId = dto.LeaveTypeId;
-        entity.LeaveSubTypeId = dto.LeaveSubTypeId;
+        // Always the whole type (round 5, lane N2) — see the mapper.
+        entity.LeaveSubTypeId = null;
         entity.StaffLevelId = dto.StaffLevelId;
         entity.AllocationDays = dto.AllocationDays;
         entity.EffectiveFrom = dto.EffectiveFrom;
@@ -635,15 +659,39 @@ public class LeaveTypeService : ILeaveTypeService
                 + "other: pro-rating for leave that is granted, accrual for leave that is earned.");
     }
 
+    /// <summary>
+    /// ⚠ <b>Incremental <c>Annual</c> accrual is retired</b> (round 5, lane N2), the way
+    /// <c>PerPayPeriod</c> was.
+    /// </summary>
+    /// <remarks>
+    /// One period a year, credited when the period completes, is the whole year's leave on its last
+    /// day: none of it can be taken during the year it is for. A full grant on eligibility is what
+    /// "once a year" means for leave that is taken as it goes. Rows already carrying it stay
+    /// editable; choosing it anew is refused.
+    /// </remarks>
+    private static void RefuseIncrementalAnnual(AccrualFrequency frequency, AccrualMode mode)
+    {
+        if (frequency == AccrualFrequency.Annual && mode == AccrualMode.AccrueIncrementally)
+            throw new InvalidOperationException(
+                "Accruing once a year, incrementally, credits the whole year's leave on its last day, "
+                + "so none of it could be taken during the year. Choose Monthly, or a full grant on "
+                + "eligibility if the year's leave should be available at once.");
+    }
+
     public async Task<LeaveAccrualPolicyDto> CreateAccrualPolicyAsync(CreateLeaveAccrualPolicyDto dto)
     {
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = GetTenantId();
         RefusePerPayPeriod(dto.Frequency);
-        await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId);
+        RefuseIncrementalAnnual(dto.Frequency, dto.Mode);
+        // A policy saved switched off takes nobody's place (lane N1), so only an active one meets
+        // the one-active-policy rule.
+        if (dto.IsActive ?? true)
+            await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId);
         var owner = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        // A switched-off policy accrues nothing, so its mode clashes with nothing.
         await RefuseProrationWithIncrementalAccrualAsync(
-            dto.LeaveTypeId, tenantId, owner.ProRateFirstYearEntitlement, dto.Mode);
+            dto.LeaveTypeId, tenantId, owner.ProRateFirstYearEntitlement, (dto.IsActive ?? true) ? dto.Mode : null);
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         await _accrualPolicyRepository.AddAsync(entity);
@@ -663,14 +711,22 @@ public class LeaveTypeService : ILeaveTypeService
         // or retiring the option would strand the policies that have it — which is the opposite of
         // what "the enum value stays" is for.
         if (dto.Frequency != entity.Frequency) RefusePerPayPeriod(dto.Frequency);
+        // The same courtesy for incremental Annual: refused only when the edit makes it so.
+        if (dto.Frequency != entity.Frequency || dto.Mode != entity.Mode)
+            RefuseIncrementalAnnual(dto.Frequency, dto.Mode);
+
+        // Null leaves the switch as it is (lane N1).
+        var willBeActive = dto.IsActive ?? entity.IsActive;
 
         // ⚠ The payload carries a leave type, so an edit can MOVE a policy onto a type that already
-        // has one. Same rule as create, excluding this row from its own check.
-        await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId, id);
+        // has one. Same rule as create, excluding this row from its own check. Switching a policy
+        // ON is the other way to reach two, so the rule follows the switch, not the create.
+        if (willBeActive)
+            await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId, id);
 
         var target = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         await RefuseProrationWithIncrementalAccrualAsync(
-            dto.LeaveTypeId, tenantId, target.ProRateFirstYearEntitlement, dto.Mode, id);
+            dto.LeaveTypeId, tenantId, target.ProRateFirstYearEntitlement, willBeActive ? dto.Mode : null, id);
 
         entity.LeaveTypeId = dto.LeaveTypeId;
         entity.Frequency = dto.Frequency;
@@ -679,6 +735,7 @@ public class LeaveTypeService : ILeaveTypeService
         entity.MinServiceMonths = dto.MinServiceMonths;
         entity.ProRateOnJoin = dto.ProRateOnJoin;
         entity.ProRateOnExit = dto.ProRateOnExit;
+        entity.IsActive = willBeActive;
 
         await _accrualPolicyRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();

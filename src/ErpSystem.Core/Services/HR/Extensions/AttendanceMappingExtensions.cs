@@ -1942,6 +1942,10 @@ public static class AttendanceMappingExtensions
             ObservanceType = entity.ObservanceType,
             AttractsHolidayPay = entity.AttractsHolidayPay,
             IsActive = entity.IsActive,
+            Description = entity.Description,
+            SubstitutionDate = entity.SubstitutionDate,
+            HolidayPayMultiplier = entity.HolidayPayMultiplier,
+            IsRecurringAnnually = entity.IsRecurringAnnually,
         };
     }
 

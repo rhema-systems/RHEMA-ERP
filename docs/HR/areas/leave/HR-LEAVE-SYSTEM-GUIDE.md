@@ -14,8 +14,9 @@ reliever note in § 1.5 and § 23 (L-49 to L-54) describe it. Lane F, the calend
 landed the same day; chapter 9 describes it. Lane D (cancel, recall, coming back) landed that evening;
 chapter 7, § 19.4 and § 23 (L-55 to L-57) describe it. Lane A (every leave type has a kind:
 Annual, Maternity or Other) landed after it; chapter 4's new section on the kind, § 7.6, chapters 12,
-15 and 16, and § 23 (L-58 to L-60) describe it. The other chapters still describe the module before
-round 5.
+15 and 16, and § 23 (L-58 to L-60) describe it. Lane N (settings that do what they say) landed the
+same evening; chapter 4's kind section, § 4.4.5, chapter 4b and § 23 (the audit's closures, and L-61
+to L-64) describe it. The other chapters still describe the module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
@@ -304,7 +305,7 @@ Each one carries four child collections, all maintained on the tabs in chapter 4
 | Child | Table | What it decides |
 |---|---|---|
 | **Sub-types** | `LeaveSubTypes` | named variants of one type — *Sick → certified / uncertified* — each with its own optional annual cap |
-| **Allocations** | `LeaveCategoryAllocations` | how many days a **staff level** gets, **effective-dated**, optionally scoped to one sub-type |
+| **Allocations** | `LeaveCategoryAllocations` | how many days a **staff level** gets, **effective-dated**, for the whole type |
 | **Eligibility rules** | `LeaveTypeEligibilities` | who may take it at all — by gender, organisation level, organisation unit or position |
 | **Accrual policies** | `LeaveAccrualPolicies` | whether the entitlement arrives all at once or builds up through the year |
 
@@ -497,7 +498,7 @@ screen and the server both telling the truth about different questions.
 Both come from one server-side definition (`LeaveService.EnforcedAvailableDays`), which the create
 check also calls — so the number on the screen and the number in the refusal cannot drift apart.
 
-### 1.5 The checks a new request faces — eight at create, three before them, two at submit
+### 1.5 The checks a new request faces — eight at create, three before them, and again at submit
 
 In order, in `LeaveService.CreateLeaveRequestAsync`. Each has its own message, so a refusal tells
 you which one fired:
@@ -534,12 +535,20 @@ The roster fill skips anyone who would fail the last two.
 > be defeated by splitting one request into two, and *"caps days for this subtype"* plainly means
 > the year.
 
-**And two more fire at *submit*, not at create** — the medical evidence rules, which are new and
-which are **off until a leave type switches them on** (rule 4):
+**At *submit*, the checks a draft skipped run again** *(round 5 lane N, § 23 L-45)* — minimum notice
+(for a draft, measured from the day it is submitted; never for maternity), the reliever requirement,
+the balance, counting the employee's other pending requests, and the sub-type cap. A draft holds no
+days, so the balance it passed when it was saved may since have been spent. Before this, saving a
+draft and then submitting it skipped all four.
+
+**And two more fire at submit, not at create** — the medical evidence rules, which are **off until a
+leave type switches them on** (rule 4). They run again whenever a request's dates move and it gets
+longer — rescheduled, sent back with other dates, or countered — and the board counts the year's
+Pending requests as well as the approved ones *(lane N, § 23 L-47)*:
 
 | Check | Fires when | Refusal |
 |---|---|---|
-| **Excuse duty** | the absence is longer than the type's **self-certification days** and no document of kind *Excuse duty* is attached | *This is 5 day(s) of Sick Leave, and anything longer than 3 day(s) needs excuse duty — a medical certificate — attached before it can be submitted.* |
+| **Excuse duty** | the absence is longer than the type's **self-certification days** and no document of kind *Excuse duty* is attached | *This is 5 day(s) of Sick Leave, and anything longer than 3 day(s) needs excuse duty — a medical certificate — attached before it can be submitted.* — or *moved to those dates*, for a move |
 | **Medical board** | **cumulative days of this leave type in the year** pass the type's board threshold, and neither a concluded board is linked nor a board recommendation attached | *This would take Sick Leave to 12 day(s) in 2026, past the 10-day point at which a medical board must sit. Link a concluded medical board, or attach its recommendation, before submitting.* |
 
 > ⚠ **The board rule counts the year, not the request**, for the same reason the sub-type cap does:
@@ -1083,14 +1092,24 @@ leave". **The register** badges the Annual and Maternity types beside their name
 
 **The form then shows what the kind needs, and puts the rest under *Advanced settings*, closed:**
 
-- **Annual:** entitlement (days and max), the service gate and notice, counting, carry-over,
-  encashment, approval and cover. *Advanced:* medical evidence and sub-types.
-- **Maternity:** the length (days and max), counting, medical evidence, a note on the statutory
-  extensions, approval and cover. *Advanced:* notice (ignored for this kind), the service gate,
-  carry-over, encashment and sub-types.
-- **Other:** the limit, notice, counting, medical evidence, approval and cover. *Advanced:* a hard
-  cap, the service gate, carry-over, encashment and sub-types. The hard cap is raised to the limit
-  when it is lower, because *Max days* only ever lowers the allowance (§ 23, L-39).
+- **Annual:** the days per year and the **highest allocation allowed**, the service gate and notice,
+  counting, carry-over, encashment, approval and cover. *Advanced:* medical evidence and a note on
+  sub-types.
+- **Maternity:** the days, counting, medical evidence, a note on the statutory extensions, approval
+  and cover. *Advanced:* notice (ignored for this kind), the service gate, carry-over, encashment and
+  a note on sub-types.
+- **Other:** the limit, notice, counting, medical evidence, approval and cover. *Advanced:* the
+  service gate, carry-over, encashment and a note on sub-types.
+
+*(Lane N, the same evening.)* The maximum is shown on annual leave only, because it binds on annual
+leave only: it is the most a staff-level allocation may grant, and a higher allocation is cut to it.
+On every other kind the days per year are the limit — the maximum used to lower that limit, which is
+why unpaid and injury leave, at 0 days with a maximum of 90 and 180, could never be booked (§ 23,
+L-39). *Has sub-types* is no longer a switch: a type has sub-types when one of them is active, and
+they are added on the Sub-types tab. *Paid leave* says what it is — a label for people reading the
+rulebook; what unpaid leave deducts is payroll's. *Forfeit unused after* says what it does: it
+clears a year's leftover days that a settlement or a cash-in would count, and never stops anyone
+taking leave.
 
 ⚠ **Advanced opens itself when a field inside it fails**, so a refusal is never hidden under a closed
 section.
@@ -1154,10 +1173,10 @@ button, and a row menu with **Edit** and **Remove**:
 
 | Tab | Rows are | The field that matters most |
 |---|---|---|
-| **Sub-types** | named variants | **Max days** — now an *annual* cap, enforced per request |
-| **Allocations** | days per staff level | **Effective from / to** — this is how a policy change is dated rather than overwritten |
-| **Eligibility** | who may take it | ⚠ *(corrected 2026-09-25)* **any** rule that matches admits the employee — rules are OR'd, so each rule added *widens* eligibility. The gender qualifier that would AND onto an org-scoped rule cannot be set from this tab (§ 23, L-43) |
-| **Accrual** | how entitlement builds | **Frequency**, **Mode**, the two pro-rate switches, and **Rate** — where **0 means *derive it from each employee's entitlement***. ⚠ **One active policy per leave type**, enforced — see below. ⚠ *(2026-09-25)* a policy cannot be switched off, only deleted (L-40) |
+| **Sub-types** | named variants | **Max days** — an *annual* cap, enforced per request, **inside** the type's days: a sub-type never has more than its type *(lane N; it used to replace the type's entitlement)*. A sub-type saved switched off stays off |
+| **Allocations** | days per staff level | **Effective from / to** — this is how a policy change is dated rather than overwritten. Always for the whole type *(lane N: the sub-type picker is gone — an allocation to one sub-type matched almost nothing)* |
+| **Eligibility** | who may take it | ⚠ **Any** rule that matches admits the employee — rules are OR'd, so each rule added *widens* eligibility, and the tab now says so. A unit, level or position rule may carry **And only this gender**, which narrows that rule alone *(lane N, § 23 L-43)* |
+| **Accrual** | how entitlement builds | **Frequency**, **Mode**, the two pro-rate switches, and **Rate** — where **0 means *derive it from each employee's entitlement***. ⚠ **One policy in force per leave type**, enforced — see below. An **In force** switch turns a policy off without deleting it, and the rule follows the switch *(lane N, § 23 L-40)*. *Once a year* is not offered with incremental accrual: it would credit the year on its last day |
 
 ⚠ **Remove is `HR.Leave.Admin` on all four tabs and is hidden from `hr.head`.** Add and Edit are
 `HR.Leave.Write` and are available. So an HR officer can add and correct configuration but cannot
@@ -1497,7 +1516,7 @@ coupling them is invisible until somebody wants a July leave year on a January f
 | Control | Default | What it does |
 |---|---|---|
 | **Allow leave to be encashed while still employed** | **off for a new tenant**, **on for this one** | off, the in-service encashment path refuses outright, naming the setting. On, the leave type's own *Allow cash conversion* decides which leave may use it |
-| **Encashment — working days per month** | **22** | the divisor for every leave type that has not set its own |
+| ~~**Encashment — working days per month**~~ | — | **Gone from the page** *(round 5 lane N, § 23 L-38)*. It could never apply: every leave type carries its own figure, 22 unless the type says otherwise, and the type's form will not take less than 1. The value is still stored and saved unchanged; the example below uses a type's 22 |
 
 **…and inside that card, the worked example** — the whole point of it, updating as you type:
 
@@ -1548,17 +1567,14 @@ value is in force on the next reminder run, the next payout and the next confirm
 > screens in different modules, so **no client could see the gap until it turned up in somebody's
 > payout**. Now you meet it here, before anybody is paid."
 
-**3 — Change *working days per month* from 22 to 30. Do not save.** The example recomputes:
-`200.00`, and the gap sentence shrinks to `1%`.
+**3 — Say where the divisor lives now.** *(Round 5 lane N: this step used to change a company-wide
+field on this page, which never reached a payout — § 23, L-38.)*
 
-> "And at thirty days a month the two agree almost exactly. If that is your policy, this is where
-> you say so — one field, no release, and every future payout follows it."
+> "A day of encashed leave is worth the monthly pay divided by the leave type's working days — set
+> on the leave type, 22 unless it says otherwise. At thirty days a month the two bases would agree
+> almost exactly, and that is a choice made on the leave type, where it actually takes effect."
 
-**4 — Set it back to 22. Still do not save.**
-
-⚠ **CAREFUL — if you do save, that is a real change to a real setting** and it affects every
-encashment computed afterwards. It does **not** rewrite anything already paid: each payout stores
-the sentence that produced it, which chapter 15 shows. Chapter 21 item 12 puts it back.
+**4 — (Removed with the field it changed.)**
 
 **5 — Point at the in-service switch and tell the truth about it.**
 
@@ -3892,8 +3908,9 @@ nobody promises a stakeholder a button.
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
 **Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
-lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60**. All
-three blocks are listed after the settings audit.
+lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60**; lane N
+closed six of the audit's eleven and two in part, and found and closed four more, **L-61 to L-64**.
+The round 5 blocks are listed after the settings audit.
 
 ### ✅ Closed
 
@@ -3956,7 +3973,7 @@ three blocks are listed after the settings audit.
 |---|---|---|---|
 | **L-30** | §4.4.2 | `LeaveType.IsPaid` produces no deduction. ⚠ **Payroll's, not HR's.** HR records the absence, the days and the fact that the type is unpaid; what that is worth is payroll's arithmetic, and it is handed off in writing | medium *(not ours)* |
 
-### ⬜ Round 5 — a settings audit, 2026-09-25 — eleven open
+### Round 5 — a settings audit, 2026-09-25 — eleven found; lane N closed six, two in part; three wait on their lanes
 
 **Why these were missed.** The 2026-09-18 surveys counted *references* — a setting read by a service
 was called honoured. This audit read what each consumer **does**. Every finding below is scheduled in
@@ -3965,16 +3982,16 @@ the round 5 plan, whose lane is named in the last column; the plain-terms accoun
 
 | # | Where | Finding | Round 5 lane |
 |---|---|---|---|
-| **L-38** | ch. 4b | The tenant *encashment working days per month* can never apply — each leave type's own divisor (form minimum 1, default 22) always wins | N1 |
-| **L-39** | ch. 4 | *Max days per year* only ever lowers the entitlement. A type with a default of 0 — *Leave of Absence (Unpaid)*, *Occupational Injury Leave* — can never be booked | N2, N4 |
-| **L-40** | ch. 4 | An accrual policy cannot be switched off — nothing writes its `IsActive`; the tab's status column has no control behind it | N1 |
-| **L-41** | §1.3 | Every accrual frequency falls one period short within the year (monthly 11/12, quarterly 3/4); incremental *annual* accrues nothing all year; *per pay period* is monthly | C1, N2 |
+| **L-38** | ch. 4b | The tenant *encashment working days per month* can never apply — each leave type's own divisor (form minimum 1, default 22) always wins | N1 — **closed** 2026-09-25: off the policy page; the column stays |
+| **L-39** | ch. 4 | *Max days per year* only ever lowers the entitlement. A type with a default of 0 — *Leave of Absence (Unpaid)*, *Occupational Injury Leave* — can never be booked | N2, N4 — **closed** 2026-09-25: the maximum binds on annual leave only; unpaid and injury leave have 90 and 180 days |
+| **L-40** | ch. 4 | An accrual policy cannot be switched off — nothing writes its `IsActive`; the tab's status column has no control behind it | N1 — **closed** 2026-09-25: an *In force* switch; the one-in-force rule follows it |
+| **L-41** | §1.3 | Every accrual frequency falls one period short within the year (monthly 11/12, quarterly 3/4); incremental *annual* accrues nothing all year; *per pay period* is monthly | C1, N2 — N2's part **closed** 2026-09-25 (incremental *annual* refused anew; *per pay period* was already); the off-by-one is lane C |
 | **L-42** | ch. 17 | Carry-over expiry removes carried days already used, charging them a second time; the expiry reminder's skip rule assumes it does not | G |
-| **L-43** | ch. 4 | Eligibility rules are OR'd under a tab that says "restrict"; the gender qualifier on an organisation rule cannot be set from the tab | N2 |
-| **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 |
-| **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 |
+| **L-43** | ch. 4 | Eligibility rules are OR'd under a tab that says "restrict"; the gender qualifier on an organisation rule cannot be set from the tab | N2 — **closed** 2026-09-25: the tab says any rule lets people in, and a unit, level or position rule takes a gender |
+| **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 — **closed** 2026-09-25: an edit checks the sub-type and its cap; creating one honours *Active*; the cap limits the sub-type inside its type's pot |
+| **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 — **closed** 2026-09-25: submit re-runs notice, the reliever requirement, the balance and the cap |
 | **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 |
-| **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 |
+| **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — N3's part **closed** 2026-09-25 (Pending counts; a lengthening move re-runs the gate); the board's purpose and date are lane K |
 | **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I |
 
 **On the demo database, the same audit found:** *Leave of Absence (Unpaid)* and *Occupational Injury
@@ -4019,6 +4036,18 @@ the round 5 plan's § 8.
 | **L-58** | ch. 4, 7 | ⚠ **Switching maternity's certificate on, as planned, would have sent new mothers to a medical board.** The certificate switch also arms the board rule, whose default is 90 days a year, and the statutory extension on top of 84 days makes 98. On the demo database *Maternity Leave* had the certificate off, three days on the employee's word, and a board at 90 | *Maternity Leave* set, through HR's own save, to certificate on, 0 days, **no board**. The seeder sets the same for a fresh build, and the form's Maternity section says so. The suite proves both positions on its own maternity type |
 | **L-59** | ch. 6, 12 | A request raised from a plan was not held to the plan's kind. The new-request page pre-filled the plan's leave type and left it editable, a draft's edit could change it, and *matches the approved plan* compared dates only, so a sick-leave request on an annual plan's dates would use the plan up and carry the badge | A request raised from a plan is the plan's leave: refused otherwise when raised and when a draft is edited; the form locks the type; the badge compares the type too (the user's decision, 2026-09-25) |
 | **L-60** | ch. 19 | The portal home reads balances by **calendar** year, not the leave year: a site the entitlement plan's C1 sweep missed. Invisible on a January tenant | **Open** — round 5 lane J, which reworks the balances view |
+
+### Round 5 lane N — settings that do what they say, 2026-09-25 — four more found and closed
+
+Proved by `dev-harness/hr-leave/run-round5-n.mjs`, which also carries the audit's closures above. The
+build record is the round 5 plan's § 8.
+
+| # | Where | Finding | Closed by |
+|---|---|---|---|
+| **L-61** | ch. 5, 6 | ⚠ **Submitting a draft never recalculated the balance.** A draft holds no days and a Pending request does, so a submitted draft's days went on showing as free: the balances screen understated pending leave, and the next request was checked against that figure and let through. Only the approval-workflow route missed it; auto-approval and every other step recalculated. Found by the lane's own suite | Submit recalculates, in the same transaction. No UAT balance was stale when measured |
+| **L-62** | ch. 4b, 20 | ⚠ **The holiday calendar's edit dialog blanked what it does not show.** It is filled from the list rows, which lacked the description, the observed date of a weekend holiday, the pay multiplier and the *recurs every year* flag, so any edit — a rename — wrote them back empty. Found renaming 21 September on UAT, whose multiplier it wiped (restored to 2.0) | The list rows carry all four, and the dialog keeps them |
+| **L-63** | ch. 8 | Editing a draft gave back days the draft never held — so 10 days with 5 left could be stretched to 15 — and dropped any change to the second reliever | The balance is measured as it stands; the second reliever is checked and saved |
+| **L-64** | ch. 7 | Answering a suggestion was measured against the days the request held before it was sent back, which were released when it was | Only days a request holds (Pending, Approved, in progress) come back to it |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 

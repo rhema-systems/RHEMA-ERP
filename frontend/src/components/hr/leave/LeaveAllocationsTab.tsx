@@ -41,19 +41,17 @@ const toPayload = (leaveTypeId: string, v: FormValues) => ({
   effectiveTo: v.effectiveTo || null,
 });
 
-/** How many days each staff level gets, optionally per sub-type and time-bounded. */
+/**
+ * How many days each staff level gets, time-bounded. For the whole leave type: a balance is kept
+ * per type, so an allocation to one sub-type matched almost nothing and the server no longer keeps
+ * one (round 5, lane N2).
+ */
 export function LeaveAllocationsTab({ leaveTypeId }: { leaveTypeId: string }) {
   const { canAdminister } = useLeavePermissions();
 
   const { data: staffLevels } = useQuery({
     queryKey: ['hr', 'staff-levels', 'active'],
     queryFn: () => staffLevelService.getActive(),
-  });
-
-  const { data: subTypes } = useQuery({
-    queryKey: ['hr', 'leave-types', leaveTypeId, 'sub-types', 'active'],
-    queryFn: () => leaveTypeService.getSubTypes(leaveTypeId, true),
-    enabled: !!leaveTypeId,
   });
 
   return (
@@ -75,7 +73,6 @@ export function LeaveAllocationsTab({ leaveTypeId }: { leaveTypeId: string }) {
       remove={(_id, allocationId) => leaveTypeService.removeAllocation(allocationId)}
       columns={[
         { header: 'Staff level', cell: (a) => a.staffLevelName || '—' },
-        { header: 'Sub-type', cell: (a) => a.leaveSubTypeName || 'All' },
         { header: 'Days', cell: (a) => a.allocationDays },
         { header: 'From', cell: (a) => a.effectiveFrom?.slice(0, 10) || '—' },
         { header: 'To', cell: (a) => a.effectiveTo?.slice(0, 10) || 'Open-ended' },
@@ -97,14 +94,6 @@ export function LeaveAllocationsTab({ leaveTypeId }: { leaveTypeId: string }) {
             label="Staff level"
             required
             options={(staffLevels ?? []).map((s) => ({ value: s.id, label: s.name }))}
-          />
-          <SelectField
-            form={form}
-            name="leaveSubTypeId"
-            label="Sub-type"
-            options={(subTypes ?? []).map((s) => ({ value: s.id, label: s.subTypeName }))}
-            allowEmpty
-            emptyLabel="All sub-types"
           />
           <NumberField form={form} name="allocationDays" label="Allocation days" required />
           <FieldRow>

@@ -105,7 +105,6 @@ export default function LeaveTypesPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Code</TableHead>
                   <TableHead className="text-right">Default days</TableHead>
-                  <TableHead className="text-right">Max days</TableHead>
                   <TableHead>Rules</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead />
@@ -167,7 +166,6 @@ export default function LeaveTypesPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">{t.code}</TableCell>
                       <TableCell className="text-right">{t.defaultDaysPerYear}</TableCell>
-                      <TableCell className="text-right">{t.maxDaysPerYear}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {!t.isPaid && <Badge variant="outline">Unpaid</Badge>}

@@ -23,23 +23,23 @@ the round 5 plan's *What exploration found* (repo copy to come:
 
 | Setting | This register said | Actually | Round 5 fix |
 |---|---|---|---|
-| `LeaveType.IsPaid` | clean (§ 3.2) | **Ghost** in HR — display only; what unpaid leave deducts is payroll's (L-D6) | N1: relabel |
-| `EncashmentWorkingDaysPerMonth` (tenant) | Enforced (§ 1) | **Unreachable** — the leave type's own divisor always wins, and the form's minimum is 1 (default 22). Slice 6 proved it only by POSTing a type divisor of 0, which no form can send | N1: remove |
-| `LeaveAccrualPolicy.IsActive` | enforced (§ 3.2b) | **Unreachable** — no DTO field, mapping or update writes it; always true | N1: wire the switch |
+| `LeaveType.IsPaid` | clean (§ 3.2) | **Ghost** in HR — display only; what unpaid leave deducts is payroll's (L-D6) | N1: **done** — relabelled as a label for readers; payroll decides the deduction |
+| `EncashmentWorkingDaysPerMonth` (tenant) | Enforced (§ 1) | **Unreachable** — the leave type's own divisor always wins, and the form's minimum is 1 (default 22). Slice 6 proved it only by POSTing a type divisor of 0, which no form can send | N1: **done** — off the policy page; the column stays |
+| `LeaveAccrualPolicy.IsActive` | enforced (§ 3.2b) | **Unreachable** — no DTO field, mapping or update writes it; always true | N1: **done** — the *In force* switch; the one-in-force rule follows it |
 | `LeaveAccrualPolicy.ProRateOnJoin` | Unreachable (§ 0, § 3.2b) | **Enforced** — fixed by entitlement plan B1; both positions work | — |
-| `MaxDaysPerYear` | clean | **Misleading** — only ever lowers the entitlement. Default 0 with Max 90 means the type can never be booked (UNPAID and INJ on the demo) | N2, N4 |
-| `LeaveAccrualPolicy.Frequency` | enforced | **Misleading** — every frequency falls one period short within the year (monthly 11/12); incremental `Annual` accrues 0 all year; `PerPayPeriod` behaves as Monthly | C1, N2 |
+| `MaxDaysPerYear` | clean | **Misleading** — only ever lowers the entitlement. Default 0 with Max 90 means the type can never be booked (UNPAID and INJ on the demo) | N2, N4: **done** — binds on annual leave only, as the highest allocation allowed; UNPAID 90 and INJ 180 |
+| `LeaveAccrualPolicy.Frequency` | enforced | **Misleading** — every frequency falls one period short within the year (monthly 11/12); incremental `Annual` accrues 0 all year; `PerPayPeriod` behaves as Monthly | N2: **done** for incremental *Annual* (refused anew; *PerPayPeriod* already was). The off-by-one is C1 |
 | `CarryOverExpiryMonths` | clean | **Misleading** — also wipes carried days already used; sweep 5's skip rule assumes it does not | G |
-| `ForfeitUnusedAfterMonths` | clean | **Misleading** — a closed year cannot be booked, so it affects no leave-taking; it only closes a window for cashing that year's leftover in | N2; off for TDC |
+| `ForfeitUnusedAfterMonths` | clean | **Misleading** — a closed year cannot be booked, so it affects no leave-taking; it only closes a window for cashing that year's leftover in | N2: **done** — help text says what it does; off for TDC (B7), UAT and seeder |
 | `MandatoryAnnualLeave` | clean | Advisory (compliance list + sweep 4). Its doc comment's "used by the forfeiture routine" is false | A: **done 2026-09-25** — retired into the Annual kind (`Category`, § 3) and the column dropped |
-| `LeaveTypeEligibility` rules, `Gender` | enforced; "`Gender` ANDs onto an org-scoped rule" | Rules are **OR'd**, under a tab that says "restrict"; the gender qualifier on an organisation rule **cannot be set from the tab** | N2 |
-| `HasSubTypes` | clean | Only blocks creating a sub-type; hides nothing | N2 |
-| `LeaveSubType.MaxDaysAllowed` | enforced | Skipped when a draft is edited; **also replaces the type's whole entitlement** for a request carrying the sub-type | N2, N3 |
-| `LeaveSubType.IsActive` | "refused by the service" | Create ignores it; editing a draft validates no sub-type | N3 |
-| `LeaveCategoryAllocation.LeaveSubTypeId` | enforced | Almost never applies — balances resolve at type level | N2 |
+| `LeaveTypeEligibility` rules, `Gender` | enforced; "`Gender` ANDs onto an org-scoped rule" | Rules are **OR'd**, under a tab that says "restrict"; the gender qualifier on an organisation rule **cannot be set from the tab** | N2: **done** — the tab says rules are OR'd, and a unit, level or position rule takes a gender |
+| `HasSubTypes` | clean | Only blocks creating a sub-type; hides nothing | N2: **done** — derived from active sub-types; the checkbox is gone |
+| `LeaveSubType.MaxDaysAllowed` | enforced | Skipped when a draft is edited; **also replaces the type's whole entitlement** for a request carrying the sub-type | N2, N3: **done** — limits the sub-type inside its type's pot; a draft edit checks it |
+| `LeaveSubType.IsActive` | "refused by the service" | Create ignores it; editing a draft validates no sub-type | N3: **done** — create honours it; a draft edit checks it |
+| `LeaveCategoryAllocation.LeaveSubTypeId` | enforced | Almost never applies — balances resolve at type level | N2: **done** — always the whole type; the picker is gone |
 | `LeaveAccrualPolicy.ProRateOnExit` | enforced | Binds in the engine only; no payout reads it | L2 |
-| `MinDaysNotice`, `RequiresReliever` | clean | **Bypassable** — skipped for drafts and never re-checked at submit | N3 |
-| `MedicalBoardThresholdDays` | Enforced (§ 3) | **Bypassable** — Pending requests are not counted; reschedule, suggested dates and the counter-proposal skip the gate | N3 |
+| `MinDaysNotice`, `RequiresReliever` | clean | **Bypassable** — skipped for drafts and never re-checked at submit | N3: **done** — submit re-runs both |
+| `MedicalBoardThresholdDays` | Enforced (§ 3) | **Bypassable** — Pending requests are not counted; reschedule, suggested dates and the counter-proposal skip the gate | N3: **done** — Pending counts; a lengthening move re-runs the gate |
 | `ProRateFirstYearEntitlement` | Enforced (§ 3) | Correct only for a January leave year (counts calendar months to December) | C4 |
 | `LeaveYearStartMonth` | Enforced (§ 1.5) | Two readers ignore it: first-year pro-rating and sweep 4's month | C4 |
 | The five reminder windows | Enforced (§ 2) | The windows bind, but every reminder goes to the **HR role only**, in-app — the entity comments naming the employee, manager or approver are false; sweep 4 compares the calendar month | I |

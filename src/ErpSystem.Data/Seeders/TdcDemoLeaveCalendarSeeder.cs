@@ -109,7 +109,10 @@ public class TdcDemoLeaveCalendarSeeder
 
                 // The tenant's annual leave (round 5, A4; it was MandatoryAnnualLeave = true).
                 Category = LeaveTypeCategory.Annual,
-                ForfeitUnusedAfterMonths = 15,
+
+                // Round 5, decision B7: no forfeiture for TDC. Unexpired carried days and approved
+                // deferrals are the whole year-end story; nothing is taken back after the event.
+                ForfeitUnusedAfterMonths = null,
                 AllowCashConversion = true
             },
             new()
@@ -129,7 +132,13 @@ public class TdcDemoLeaveCalendarSeeder
                 AllowCarryOver = false,
 
                 // Available from the first day. Nobody schedules illness around a service threshold.
-                MinServiceMonthsToAccess = 0
+                MinServiceMonthsToAccess = 0,
+
+                // Round 5, lane N4: the description always promised this and the rule was off. Three
+                // days on the employee's word, then excuse duty. The board threshold stays at the
+                // entity's 90 days until TDC answers R5-Q1.
+                RequiresMedicalCertificate = true,
+                SelfCertificationDays = 3
             },
             new()
             {
@@ -140,7 +149,9 @@ public class TdcDemoLeaveCalendarSeeder
                 IsPaid = true,
                 DefaultDaysPerYear = 84,
                 MaxDaysPerYear = 98,
-                MinDaysNotice = 30,
+                // Round 5, lane N4: no notice. The Maternity kind ignores notice anyway (lane A3);
+                // 0 makes the rulebook say what the service does.
+                MinDaysNotice = 0,
                 RequiresApproval = true,
                 CalendarColor = "#AD1457",
 
@@ -151,8 +162,8 @@ public class TdcDemoLeaveCalendarSeeder
                 AllowCarryOver = false,
                 MinServiceMonthsToAccess = 0,
 
-                // Round 5, A4: no notice rule applies (the service ignores MinDaysNotice above for
-                // this kind: a birth can come early), and its dates are confirmed, never moved.
+                // Round 5, A4: the Maternity kind takes no notice rule, whatever the type says (a birth
+                // can come early), and its dates are confirmed, never moved.
                 Category = LeaveTypeCategory.Maternity,
 
                 // Round 5, lane A3: the certificate is required from the first day, and there is no
@@ -234,7 +245,9 @@ public class TdcDemoLeaveCalendarSeeder
                 Code = "UNPAID",
                 Description = "Approved absence without pay, where no paid entitlement applies.",
                 IsPaid = false,
-                DefaultDaysPerYear = 0,
+                // Round 5, lane N4: the limit is the days per year. With 0 here and 90 as a maximum
+                // this type could never be booked — the maximum only ever lowered the allowance.
+                DefaultDaysPerYear = 90,
                 MaxDaysPerYear = 90,
                 MinDaysNotice = 30,
                 RequiresApproval = true,
@@ -251,7 +264,8 @@ public class TdcDemoLeaveCalendarSeeder
                 Description = "Paid absence arising from an injury sustained at work. Raised from, "
                             + "and evidenced by, the SHE incident record.",
                 IsPaid = true,
-                DefaultDaysPerYear = 0,
+                // Round 5, lane N4: as for unpaid leave — 0 days a year could never be booked.
+                DefaultDaysPerYear = 180,
                 MaxDaysPerYear = 180,
                 MinDaysNotice = 0,
                 RequiresApproval = true,
@@ -301,7 +315,7 @@ public class TdcDemoLeaveCalendarSeeder
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 CalendarName = CalendarName,
-                Description = "Public holidays gazetted under the Public Holidays Act, 2001 (Act 601).",
+                Description = "Public holidays gazetted under the Public Holidays Act, 2001 (Act 601), as amended in 2025.",
                 CountryId = ghana?.Id,
                 IsDefault = true,
                 IsActive = true,
@@ -374,8 +388,15 @@ public class TdcDemoLeaveCalendarSeeder
     }
 
     /// <summary>
-    /// The gazetted public holidays for one year, under the Public Holidays Act, 2001 (Act 601).
+    /// The gazetted public holidays for one year, under the Public Holidays Act, 2001 (Act 601), as
+    /// amended by the Public Holidays and Commemorative Days (Amendment) Act, 2025.
     /// </summary>
+    /// <remarks>
+    /// Round 5, lane N4: the 2025 amendment restored 1 July (Republic Day), moved Founders' Day to
+    /// 21 September — which had been Kwame Nkrumah Memorial Day — dropped 4 August, and added Shaqq
+    /// Day. It also lets the President move a midweek holiday, which no seeder can know: who keeps
+    /// the calendar current is TDC's question R5-Q4.
+    /// </remarks>
     private static IEnumerable<(string Name, DateOnly Date, string Description)> GhanaHolidays(int year)
     {
         var easter = EasterSunday(year);
@@ -390,12 +411,14 @@ public class TdcDemoLeaveCalendarSeeder
         yield return ("May Day", new DateOnly(year, 5, 1), "Workers' Day.");
         yield return ("Eid al-Fitr", EidAlFitrEstimate(year),
             "ESTIMATE — the date depends on the lunar observation and is gazetted shortly beforehand.");
+        yield return ("Shaqq Day", EidAlFitrEstimate(year).AddDays(1),
+            "ESTIMATE — the day after Eid al-Fitr, whose date depends on the lunar observation. Added by the 2025 amendment.");
         yield return ("Eid al-Adha", EidAlAdhaEstimate(year),
             "ESTIMATE — the date depends on the lunar observation and is gazetted shortly beforehand.");
-        yield return ("Founders' Day", new DateOnly(year, 8, 4),
-            "Commemorates the founding of the movement for independence.");
-        yield return ("Kwame Nkrumah Memorial Day", new DateOnly(year, 9, 21),
-            "Birthday of Ghana's first President.");
+        yield return ("Republic Day", new DateOnly(year, 7, 1),
+            "Ghana became a republic on 1 July 1960. Restored as a public holiday by the 2025 amendment.");
+        yield return ("Founders' Day", new DateOnly(year, 9, 21),
+            "Birthday of Kwame Nkrumah, Ghana's first President. Founders' Day since the 2025 amendment, which dropped 4 August.");
         yield return ("Farmers' Day", FirstFridayOfDecember(year),
             "National Farmers' Day, the first Friday in December.");
         yield return ("Christmas Day", new DateOnly(year, 12, 25), "Statutory public holiday.");

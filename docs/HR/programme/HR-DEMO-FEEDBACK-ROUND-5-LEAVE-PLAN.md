@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F, D and A done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F, D, A and N done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -18,7 +18,8 @@
 > | **F** | **DONE** 2026-09-25 — the calendar for one employee, and a unit with everything beneath it · `run-round5-f.mjs` 20, green twice · § 8 |
 > | **D** | **DONE** 2026-09-25 — cancel, recall by the line manager, coming back to work · `run-round5-d.mjs` 74, green twice · § 8 |
 > | **A** | **DONE** 2026-09-25 — leave kinds (Annual, Maternity, Other) and a form that starts from the kind · `run-round5-a.mjs` 89, green twice (79, then 10 for the L-59 follow-up) · § 8 |
-> | N · C · G · H · J · I · K · L | not started, in that order — **N is next** |
+> | **N** | **DONE** 2026-09-25 — settings that do what they say: the audit's ghosts, misleading settings and bypasses; the demo data; four more defects found · `run-round5-n.mjs` 92, green twice · § 8 |
+> | C · G · H · J · I · K · L | not started, in that order — **C is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -656,3 +657,79 @@ procurement job; the 24 harness types the slices made were switched off.
   were left for a tidy-up: the requisition-enforcement enum's summary in `HREnums.cs`, lane E's
   `EnrichRelieverClashesAsync` summary in `LeavePlanService.cs`, and `RefuseSelfApproval`'s in
   `LeaveService.cs`. Each is an XML-doc warning only; the build is unaffected.
+
+### N — Settings that do what they say · DONE 2026-09-25
+
+**Built.**
+
+- **N1, the ghosts.**
+  - An accrual policy can be switched off. `CreateLeaveAccrualPolicyDto.IsActive` is null for
+    active on create and unchanged on update, and the one-in-force rule follows the switch: a second
+    policy may be saved off, and switched on once the first is off. The tab has an *In force* switch.
+  - The tenant's *encashment working days per month* is off the policy page, because each leave
+    type's own figure always ruled. The column stays; the page's comparison uses a type's 22.
+  - *Paid leave* says it is a label: what unpaid leave deducts is payroll's (L-D6).
+- **N2, the misleading.**
+  - Incremental *Annual* accrual is refused anew, as *PerPayPeriod* was; rows carrying it stay
+    editable.
+  - The maximum days binds on annual leave only (`ApplyCeiling`), as the **highest allocation
+    allowed**, and is hidden for other kinds, where the days per year are the limit. That alone
+    makes unpaid and injury leave bookable.
+  - A sub-type counts inside its type's pot. `ResolveAnnualEntitlementAsync` no longer lets a
+    sub-type's cap replace the entitlement, and it reads staff-level allocations for the whole type:
+    before, an allocation missed every request that carried a sub-type. Allocations are stored for
+    the whole type, and the tab's sub-type picker is gone.
+  - *Has sub-types* is derived from active sub-types (`SyncHasSubTypesAsync`); the checkbox and its
+    refusal are gone. Creating a sub-type honours *Active*.
+  - The eligibility tab says rules are OR'd, and a unit, level or position rule can carry a gender,
+    which narrows that rule alone.
+  - *Forfeit unused after* says what it does. Not here: *pro-rate on exit* binds when L2 reads it
+    (its help now says no payout reads it yet), and the reminder comments when lane I routes them.
+- **N3, the bypasses.**
+  - Submit re-runs the create checks (`EnsureStillSubmittableAsync`): notice for a draft (never
+    maternity), the reliever requirement, the balance counting the employee's other pending
+    requests, and the sub-type cap.
+  - A draft's edit checks its sub-type and cap, measures the balance as it stands, and saves the
+    second reliever.
+  - The medical board counts Pending requests. A move that lengthens a request — reschedule,
+    suggested dates, the counter-proposal — re-runs the evidence gate. Answering a suggestion is
+    measured against the days the request holds, which is none while it waits.
+- **N4, demo data.**
+  - Seeder: the 2025 holidays; UNPAID 90 and INJ 180 days a year; SICK's certificate after 3 days
+    (the board threshold waits on R5-Q1); MAT notice 0; ANN forfeiture off (B7).
+  - UAT, through the app's own doors: the same five type settings (exactly those fields changed),
+    and the 2026 and 2027 holidays — 4 August removed, 21 September renamed Founders' Day, Republic
+    Day and Shaqq Day added, Shaqq Day observed the Monday after in both years.
+
+**Changed from the plan, and why.**
+
+1. ⚠ **Found and fixed: submitting a draft never recalculated the balance** (guide § 23, L-61).
+   A submitted draft's days went on showing as free, so the balances page understated pending leave
+   and the next request was checked against the stale figure. Only the workflow route missed it.
+   Found by this lane's suite on its first run (87/91). No UAT balance was stale when measured.
+2. ⚠ **Found and fixed: the holiday screen blanked what its edit dialog does not show** (L-62). The
+   list rows it fills the dialog from lacked the description, the observed date, the pay multiplier
+   and the recurring flag, so any edit wrote them back empty. Renaming 21 September on UAT did exactly
+   that to both years' pay multiplier; restored to 2.0. The rows carry all four now.
+3. **Also found and fixed:** a draft's edit gave back days it never held and dropped the second
+   reliever (L-63); answering a suggestion was measured the same way (L-64); creating a sub-type
+   ignored *Active* (part of L-44).
+4. **The tenant divisor is off the page, not out of the database** — N1 asked for the page.
+5. **UAT data through the API, not a SQL script.** The changes are audited; the demo's HR head is
+   recorded against the holiday changes, and admin removed the two 4 August rows, which needs
+   HR.Attendance.Admin.
+6. **A vacuous pass caught.** On its first run the suite's retired-sub-type check passed on the cap
+   refusal, because the sub-type was named "R5N Retired" and the create bug had made it active. The
+   sub-type is renamed, the check asserts the exact sentence, and the create fix has its own check.
+
+**Suite.** `dev-harness/hr-leave/run-round5-n.mjs`: **92 assertions, green twice**, every rule in
+both positions on harness types of its own that count calendar days.
+
+**Neighbours.** All thirteen hr-leave slices are at their recorded counts (slice 1 72/75, slice 6 32),
+and slices 3, 7, 10 and 11, which read the rules this lane changed, among them.
+`run-round5-e.mjs` 119, `run-round5-f.mjs` 20, `run-round5-d.mjs` 74, `run-round5-a.mjs` 89.
+
+**Found in passing.**
+
+- Chapter 21 item 12 of the guide resets the tenant divisor this lane took off the page; it still
+  works (the value is stored) but no longer matters.

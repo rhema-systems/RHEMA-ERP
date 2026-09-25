@@ -20,7 +20,6 @@ public class LeaveEntitlementService : ILeaveEntitlementService
 {
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IGenericRepository<LeaveType> _leaveTypeRepository;
-    private readonly IGenericRepository<LeaveSubType> _leaveSubTypeRepository;
     private readonly IGenericRepository<LeaveCategoryAllocation> _allocationRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IDateTimeProvider _clock;
@@ -30,7 +29,6 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     public LeaveEntitlementService(
         IGenericRepository<Employee> employeeRepository,
         IGenericRepository<LeaveType> leaveTypeRepository,
-        IGenericRepository<LeaveSubType> leaveSubTypeRepository,
         IGenericRepository<LeaveCategoryAllocation> allocationRepository,
         ICurrentUserProvider currentUserProvider,
         IDateTimeProvider clock,
@@ -39,7 +37,6 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     {
         _employeeRepository = employeeRepository;
         _leaveTypeRepository = leaveTypeRepository;
-        _leaveSubTypeRepository = leaveSubTypeRepository;
         _allocationRepository = allocationRepository;
         _currentUserProvider = currentUserProvider;
         _clock = clock;
@@ -88,15 +85,15 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             .Select(e => e.DateEmployed)
             .FirstOrDefaultAsync(ct);
 
-        // 1) Sub-type cap takes precedence when set.
-        if (leaveSubTypeId.HasValue)
-        {
-            var subType = await _leaveSubTypeRepository.GetByIdAsync(leaveSubTypeId.Value);
-            if (subType?.TenantId == tenantId && subType.MaxDaysAllowed is int cap)
-                return ApplyFirstYearProration(leaveType, ApplyCeiling(leaveType, cap), hiredOn, year, startMonth);
-        }
+        // ⚠ The SUB-TYPE is deliberately not read (round 5, lane N2). A balance is kept per type, so
+        // every sub-type draws on the type's one pot, and a sub-type's cap limits that sub-type
+        // INSIDE the pot — enforced per request by LeaveService.EnsureSubTypeCapAsync. It used to
+        // replace the whole entitlement here, so a request carrying a sub-type was measured against
+        // the cap instead of the pot; and allocations were matched on the request's sub-type, so a
+        // staff-level allocation missed every request that carried one and fell to the default.
+        _ = leaveSubTypeId;
 
-        // 2) Effective-dated allocation for the employee's staff level.
+        // 1) Effective-dated allocation for the employee's staff level, for the whole type.
         var staffLevelId = await GetEmployeeStaffLevelIdAsync(employeeId, tenantId, ct);
         if (staffLevelId.HasValue)
         {
@@ -108,7 +105,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
                 .Where(a => a.TenantId == tenantId
                          && a.LeaveTypeId == leaveTypeId
                          && a.StaffLevelId == staffLevelId.Value
-                         && a.LeaveSubTypeId == leaveSubTypeId
+                         && a.LeaveSubTypeId == null
                          && a.EffectiveFrom <= yearEnd
                          && (a.EffectiveTo == null || a.EffectiveTo >= yearStart))
                 .OrderByDescending(a => a.EffectiveFrom)
@@ -119,7 +116,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
                     leaveType, ApplyCeiling(leaveType, allocation.AllocationDays), hiredOn, year, startMonth);
         }
 
-        // 3) Fall back to the leave type default.
+        // 2) Fall back to the leave type default.
         return ApplyFirstYearProration(
             leaveType, ApplyCeiling(leaveType, leaveType.DefaultDaysPerYear), hiredOn, year, startMonth);
     }
@@ -157,11 +154,19 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     }
 
     /// <summary>
-    /// Clamps a resolved entitlement to the leave type's absolute annual ceiling
+    /// Clamps a resolved entitlement to the annual leave type's highest allocation allowed
     /// (<see cref="LeaveType.MaxDaysPerYear"/>) when one is configured (&gt; 0).
     /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Annual leave only</b> (round 5, lane N2). For every other kind the days per year ARE the
+    /// limit, and a ceiling only ever lowered it: a type with a default of 0 and a maximum of 90 —
+    /// the demo's unpaid and injury leave — could never be booked at all. On annual leave it is
+    /// what its label now says, the highest a staff-level allocation may grant.
+    /// </remarks>
     private static decimal ApplyCeiling(LeaveType leaveType, decimal value)
-        => leaveType.MaxDaysPerYear > 0 ? Math.Min(value, leaveType.MaxDaysPerYear) : value;
+        => leaveType.Category == LeaveTypeCategory.Annual && leaveType.MaxDaysPerYear > 0
+            ? Math.Min(value, leaveType.MaxDaysPerYear)
+            : value;
 
     public async Task<decimal> GetAccruedAsOfAsync(
         Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, int year, DateOnly? asOf = null, CancellationToken ct = default)
