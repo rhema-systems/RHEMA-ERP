@@ -35,8 +35,8 @@ $supersededMigrations = @(
     '20260312013725_AddProjectResourceRoutingRequirements'
 )
 $approvedNamePattern = '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$'
-$authoritativeMigrationCount = 1
-$authoritativeLatestMigration = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
+$authoritativeMigrationCount = 16
+$authoritativeLatestMigration = '20260925051637_CanonicalCollectionBusinessPartnerIdentity'
 $disposableMigrationCommandTimeoutSeconds = 600
 $migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
 $sqlcmdMaxVariableWidth = 8000
