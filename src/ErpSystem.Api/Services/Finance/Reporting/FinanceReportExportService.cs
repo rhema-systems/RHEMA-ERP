@@ -469,7 +469,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
         FinanceReportExportRequestDto request,
         CancellationToken cancellationToken)
     {
-        var report = await _apReportsService.GetDetailedAgingReportAsync(request.AsOfDate, request.SupplierId, cancellationToken);
+        var report = await _apReportsService.GetDetailedAgingReportAsync(request.AsOfDate, request.BusinessPartnerId, cancellationToken);
         if (!report.UsesSettlementReadModel)
         {
             throw new InvalidOperationException("AP aging export requires the AP settlement read model. Legacy operational-field aging is not allowed for production export.");
@@ -694,11 +694,11 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
     {
         var startDate = request.PeriodStart ?? DateTime.UtcNow.Date;
         var endDate = request.PeriodEnd ?? request.AsOfDate ?? DateTime.UtcNow.Date;
-        var supplierIds = ResolveReportIds(request.SupplierIds, request.SupplierId);
+        var businessPartnerIds = ResolveReportIds(request.BusinessPartnerIds, request.BusinessPartnerId);
         var report = await _apReportsService.GetSupplierDetailedLedgerAsync(
             startDate,
             endDate,
-            supplierIds,
+            businessPartnerIds,
             request.ShowSupplierCurrency,
             cancellationToken);
 

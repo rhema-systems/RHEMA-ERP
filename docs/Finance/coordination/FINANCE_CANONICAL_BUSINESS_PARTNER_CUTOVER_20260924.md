@@ -232,3 +232,12 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   The Ghana tax-report fixture remains blocked before report execution by its pre-existing missing
   `JournalEntry.AccountingBookId` setup (7/7 fixture tests fail at seed/save); no failure reaches the
   changed filter path. No migration or database reset was executed.
+- AP reporting now uses canonical Business Partner identifiers throughout aging, unapplied
+  settlements, statements, detailed ledgers, WHT summaries and match-exception reports. The
+  previous detailed-ledger `BusinessPartnerId ?? SupplierId` grouping fallback is removed, and the
+  unapplied-settlement name lookup no longer queries the legacy Supplier table. Report controller,
+  central CSV export, controlled PDF/XLSX parameters and frontend clients use
+  `businessPartnerId(s)` consistently.
+- The API and API-test projects build with zero errors. The AP canonical-report architecture test,
+  five supplier-statement/export tests and the focused frontend query-contract test pass (7/7
+  total). No migration or database reset was executed.

@@ -547,6 +547,30 @@ public sealed class LegacyPostingPathLockdownTests
             .And.NotContain("docInfo.SupplierId");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void ApReporting_ShouldUseCanonicalBusinessPartnerIdentityWithoutSupplierFallbacks()
+    {
+        var root = FindRepositoryRoot();
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "AccountsPayableDtos.cs"));
+        var reportDtos = dto[dto.IndexOf("#region AP Reports", StringComparison.Ordinal)..];
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApReportsService.cs"));
+        var controller = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "ApControllersConsolidated.cs"));
+
+        reportDtos.Should().Contain("public Guid BusinessPartnerId")
+            .And.NotContain("public Guid SupplierId")
+            .And.NotContain("public Guid? SupplierId");
+        service.Should().Contain("Repository<BusinessPartner>()")
+            .And.Contain("selection.BusinessPartnerId")
+            .And.NotContain("Repository<Supplier>()")
+            .And.NotContain("BusinessPartnerId ??")
+            .And.NotContain("selection.SupplierId");
+        controller.Should().Contain("businessPartnerIds")
+            .And.Contain("businessPartnerId")
+            .And.NotContain("supplier-detailed-ledger?supplierIds");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

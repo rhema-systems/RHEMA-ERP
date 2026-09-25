@@ -75,6 +75,9 @@ must not be interpreted as a promise that they override Finance settings.
 - Tax-report filters follow the same contract. Source documents and payments expose one canonical
   `BusinessPartnerId`; `BusinessPartnerRole` distinguishes Supplier, Contractor and Customer use.
   Tax reporting never validates or resolves a legacy Finance Supplier/Customer master.
+- AP aging, unapplied settlements, supplier statements, detailed ledgers, WHT summaries and
+  match-exception reports expose canonical `BusinessPartnerId` fields. “Supplier” remains a UI and
+  accounting-role label only; report filters and grouping never fall back to a Supplier master ID.
 
 ## Withholding contract
 

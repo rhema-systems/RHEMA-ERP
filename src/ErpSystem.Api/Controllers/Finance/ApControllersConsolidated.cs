@@ -1061,8 +1061,8 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <summary>Generates a summary AP aging report showing outstanding balances by aging bucket.</summary>
         [HttpGet("aging")]
         public async Task<ActionResult<ApAgingReportDto>> GetAgingReport(
-            [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? supplierId = null)
-            => Ok(await _reportsService.GetAgingReportAsync(asOfDate, supplierId));
+            [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetAgingReportAsync(asOfDate, businessPartnerId));
 
         /// <summary>Rebuilds the AP settlement read model from posted AP source documents and posting events.</summary>
         [HttpPost("settlements/rebuild")]
@@ -1130,14 +1130,14 @@ namespace ErpSystem.Api.Controllers.Finance
         [Authorize(Policy = FinancePermissions.ViewFinance)]
         public async Task<ActionResult<SubledgerUnappliedSettlementReportDto>> GetUnappliedSettlements(
             [FromQuery] DateTime? asOfDate = null,
-            [FromQuery] Guid? supplierId = null)
-            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, supplierId));
+            [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, businessPartnerId));
 
         /// <summary>Generates a detailed AP aging report with per-supplier, per-invoice breakdown.</summary>
         [HttpGet("aging/detailed")]
         public async Task<ActionResult<ApAgingReportDto>> GetDetailedAgingReport(
-            [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? supplierId = null)
-            => Ok(await _reportsService.GetDetailedAgingReportAsync(asOfDate, supplierId));
+            [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetDetailedAgingReportAsync(asOfDate, businessPartnerId));
 
         /// <summary>Generates a cash requirement forecast showing amounts due by period.</summary>
         [HttpGet("cash-forecast")]
@@ -1147,9 +1147,9 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <summary>Generates a supplier statement with opening balance, transactions, and closing balance.</summary>
         [HttpGet("supplier-statement")]
         public async Task<ActionResult<SupplierStatementDto>> GetSupplierStatement(
-            [FromQuery] Guid supplierId, [FromQuery] DateTime fromDate, [FromQuery] DateTime toDate)
+            [FromQuery] Guid businessPartnerId, [FromQuery] DateTime fromDate, [FromQuery] DateTime toDate)
         {
-            try { return Ok(await _reportsService.GetSupplierStatementAsync(supplierId, fromDate, toDate)); }
+            try { return Ok(await _reportsService.GetSupplierStatementAsync(businessPartnerId, fromDate, toDate)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -1158,12 +1158,12 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<SupplierDetailedLedgerReportDto>> GetSupplierDetailedLedger(
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate,
-            [FromQuery] List<Guid>? supplierIds = null,
+            [FromQuery] List<Guid>? businessPartnerIds = null,
             [FromQuery] bool showSupplierCurrency = false)
         {
             try
             {
-                return Ok(await _reportsService.GetSupplierDetailedLedgerAsync(fromDate, toDate, supplierIds, showSupplierCurrency));
+                return Ok(await _reportsService.GetSupplierDetailedLedgerAsync(fromDate, toDate, businessPartnerIds, showSupplierCurrency));
             }
             catch (Exception ex)
             {
@@ -1189,8 +1189,8 @@ namespace ErpSystem.Api.Controllers.Finance
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate,
             [FromQuery] VendorInvoiceMatchExceptionStatus? status = null,
-            [FromQuery] Guid? supplierId = null)
-            => Ok(await _reportsService.GetThreeWayMatchExceptionsAsync(fromDate, toDate, status, supplierId));
+            [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetThreeWayMatchExceptionsAsync(fromDate, toDate, status, businessPartnerId));
 
         /// <summary>Exports the AP-006 register without creating or allocating any payment.</summary>
         [HttpGet("three-way-match-exceptions/export")]
@@ -1199,11 +1199,11 @@ namespace ErpSystem.Api.Controllers.Finance
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate,
             [FromQuery] VendorInvoiceMatchExceptionStatus? status = null,
-            [FromQuery] Guid? supplierId = null,
+            [FromQuery] Guid? businessPartnerId = null,
             [FromQuery] string format = "Csv")
         {
             var content = await _reportsService.ExportThreeWayMatchExceptionsAsync(
-                fromDate, toDate, status, supplierId, format);
+                fromDate, toDate, status, businessPartnerId, format);
             return File(content, "text/csv; charset=utf-8", $"ap-match-exceptions-{DateTime.UtcNow:yyyyMMddHHmmss}.csv");
         }
     }

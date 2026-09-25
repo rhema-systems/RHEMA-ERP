@@ -961,7 +961,7 @@ export interface ApAgingReport {
 }
 
 export interface SupplierAgingDetail {
-    supplierId: string;
+    businessPartnerId: string;
     supplierName: string;
     supplierCode?: string;
     totalOutstanding: number;
@@ -1006,8 +1006,7 @@ export interface SupplierDetailedLedgerReport {
 }
 
 export interface SupplierDetailedLedgerAccount {
-    supplierId: string;
-    businessPartnerId?: string;
+    businessPartnerId: string;
     supplierCode: string;
     supplierName: string;
     currencyCode: string;

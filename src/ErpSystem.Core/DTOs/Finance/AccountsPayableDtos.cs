@@ -506,7 +506,7 @@ public sealed class VendorInvoiceMatchExceptionReportDto
     public DateTime FromDate { get; set; }
     public DateTime ToDate { get; set; }
     public VendorInvoiceMatchExceptionStatus? Status { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public int TotalCount { get; set; }
     public int ApprovedCount { get; set; }
     public int ExpiredCount { get; set; }
@@ -1099,7 +1099,7 @@ public class ApAgingReportDto
 
 public class SupplierAgingDetailDto
 {
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? SupplierCode { get; set; }
     public decimal TotalOutstanding { get; set; }
@@ -1159,7 +1159,7 @@ public class CashRequirementPeriodDto
 
 public class SupplierStatementDto
 {
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? SupplierCode { get; set; }
     public DateTime FromDate { get; set; }
@@ -1208,8 +1208,7 @@ public class SupplierDetailedLedgerReportDto
 
 public class SupplierDetailedLedgerAccountDto
 {
-    public Guid SupplierId { get; set; }
-    public Guid? BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierCode { get; set; } = string.Empty;
     public string SupplierName { get; set; } = string.Empty;
     public string CurrencyCode { get; set; } = "GHS";
@@ -1248,7 +1247,7 @@ public class WithholdingTaxSummaryDto
 
 public class WithholdingTaxBySupplierDto
 {
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? TaxId { get; set; }
     public decimal TotalInvoiceAmount { get; set; }

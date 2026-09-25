@@ -440,9 +440,9 @@ class AccountsPayableService {
         return apiService.get<CashRequirementForecast>(`${this.baseUrl}/reports/cash-forecast?${params.toString()}`);
     }
 
-    public async getSupplierStatement(supplierId: string, fromDate: string, toDate: string): Promise<any> {
+    public async getSupplierStatement(businessPartnerId: string, fromDate: string, toDate: string): Promise<any> {
         const params = new URLSearchParams();
-        params.append('supplierId', supplierId);
+        params.append('businessPartnerId', businessPartnerId);
         params.append('FromDate', fromDate);
         params.append('ToDate', toDate);
         return apiService.get<any>(`${this.baseUrl}/reports/supplier-statement?${params.toString()}`);
@@ -451,13 +451,13 @@ class AccountsPayableService {
     public async getSupplierDetailedLedger(query: {
         fromDate: string;
         toDate: string;
-        supplierIds?: string[];
+        businessPartnerIds?: string[];
         showSupplierCurrency?: boolean;
     }): Promise<SupplierDetailedLedgerReport> {
         const params = new URLSearchParams();
         params.append('fromDate', query.fromDate);
         params.append('toDate', query.toDate);
-        query.supplierIds?.forEach((supplierId) => params.append('supplierIds', supplierId));
+        query.businessPartnerIds?.forEach((businessPartnerId) => params.append('businessPartnerIds', businessPartnerId));
         if (query.showSupplierCurrency !== undefined) {
             params.append('showSupplierCurrency', query.showSupplierCurrency.toString());
         }
@@ -468,7 +468,7 @@ class AccountsPayableService {
     public async downloadSupplierStatementCsv(query: {
         fromDate: string;
         toDate: string;
-        supplierIds?: string[];
+        businessPartnerIds?: string[];
         showSupplierCurrency?: boolean;
     }): Promise<Blob> {
         return apiService.postBlob('/finance/report-exports/export', {
@@ -476,7 +476,7 @@ class AccountsPayableService {
             format: 'Csv',
             periodStart: query.fromDate,
             periodEnd: query.toDate,
-            supplierIds: query.supplierIds ?? [],
+            businessPartnerIds: query.businessPartnerIds ?? [],
             showSupplierCurrency: query.showSupplierCurrency === true,
         });
     }
@@ -489,7 +489,7 @@ class AccountsPayableService {
     public async downloadSupplierStatementDocument(query: {
         fromDate: string;
         toDate: string;
-        supplierIds?: string[];
+        businessPartnerIds?: string[];
         showSupplierCurrency?: boolean;
         format: 'pdf' | 'xlsx';
     }): Promise<void> {
@@ -498,7 +498,7 @@ class AccountsPayableService {
             {
                 fromDate: query.fromDate,
                 toDate: query.toDate,
-                supplierIds: query.supplierIds ?? [],
+                businessPartnerIds: query.businessPartnerIds ?? [],
                 showSupplierCurrency: query.showSupplierCurrency === true,
             },
             { format: query.format }
@@ -508,7 +508,7 @@ class AccountsPayableService {
     public async printSupplierStatementDocument(query: {
         fromDate: string;
         toDate: string;
-        supplierIds?: string[];
+        businessPartnerIds?: string[];
         showSupplierCurrency?: boolean;
     }): Promise<void> {
         await documentOutputService.printReportDocument(
@@ -516,7 +516,7 @@ class AccountsPayableService {
             {
                 fromDate: query.fromDate,
                 toDate: query.toDate,
-                supplierIds: query.supplierIds ?? [],
+                businessPartnerIds: query.businessPartnerIds ?? [],
                 showSupplierCurrency: query.showSupplierCurrency === true,
             },
             { format: 'pdf' }
