@@ -2729,8 +2729,9 @@ priority order, and fall back to a search of all staff. **Leave both empty and t
 them from the roster when you save**, passing over anyone who is away over those dates. A reliever
 must be **at work: active or on probation**. The employee themselves, the same person twice, and
 anyone suspended, on leave or gone are refused, and the refusal says which. Before round 5 only
-*Active* staff could be chosen, which on the demo database ruled out 2,191 of 2,399 people, because
-every hire starts on probation.
+*Active* staff could be chosen, which on the demo database ruled out 2,191 of 2,399 people. ⚠ About
+1,800 of those "probationers" were hired years ago: the employee import has no confirmation date, so
+they were put on probation when entered. That is HR finish plan Lane 11, a separate fix.
 
 ⚠ **The Sub-type field is new.** The payload always carried `leaveSubTypeId` and the dialog never
 offered it, so a plan could not say which variant of leave it was for. It appears only when the
@@ -3884,7 +3885,7 @@ is the round 5 plan's § 8.
 | **L-51** | ch. 12 | While a plan waited for the employee's answer, *Approve* and *Reject* were offered and both were refused with a bare 403. *Decline suggestion* always failed | E4: offered on Submitted only, and refused with a sentence; *Propose other dates* |
 | **L-52** | ch. 12 | *Cancel* appeared at every status, asked for no reason, recorded nothing, and left the plan in the approver's queue | E5: the owner until approval, HR after with a reason; date and reason stored; the approval withdrawn |
 | **L-53** | ch. 12, 19.5 | Plans never took relievers from the employee's roster. The portal planner had no reliever boxes, and editing a plan showed its saved relievers as empty | E2 |
-| **L-54** | ch. 6, 12 | A reliever had to be *Active*, and every hire starts on probation, so on the demo database 2,191 of 2,399 staff could not be chosen. Meanwhile a request's roster fill assigned suspended staff without checking | *At work* is Active or on probation (TDC's ruling of 2026-09-23), one rule for plans and requests |
+| **L-54** | ch. 6, 12 | A reliever had to be *Active*, and on the demo database 2,191 of 2,399 staff are on probation (about 1,800 of them hired years ago; HR finish plan Lane 11), so they could not be chosen. Meanwhile a request's roster fill assigned suspended staff without checking | *At work* is Active or on probation (TDC's ruling of 2026-09-23), one rule for plans and requests |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 

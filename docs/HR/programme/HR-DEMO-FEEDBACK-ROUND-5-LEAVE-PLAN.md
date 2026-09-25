@@ -355,7 +355,7 @@ landed the same day in commit `1000f7516`.
 5. **The reject dialog requires a reason.** The server still accepts a blank one and stores
    "Rejected", so the API contract is unchanged.
 6. **⚠ "At work" means Active OR on probation, for requests as well as plans.** This was not in the
-   plan. On UAT, 2,191 of 2,399 employees are on probation (every hire starts there) and only 177 are
+   plan. On UAT, 2,191 of 2,399 employees are on probation (imported long-serving staff included; see HR finish plan Lane 11) and only 177 are
    Active. So the "active" rule that E2/E3 copied from the request path refused 91% of TDC's staff as
    relievers, and the roster came back almost empty. TDC ruled on 2026-09-23 (round 4 lane O, the
    Maintenance technician pool) that probation is a contract status, not an availability.
@@ -404,13 +404,16 @@ Not run:
   "Ledger Cash" and others), so every leave-type picker in the demo offers them. They were left by
   earlier runs and have not been touched. The five that this lane's neighbour runs created were
   switched off.
-- **Four other "Active only" filters share the probation problem**, and are left for a sweep outside
-  this plan:
-  - `EmployeeService.GetActiveEmployeeCountAsync`: a headcount of 177 on UAT;
-  - SHE's PPE-compliance KPI, measured over 7% of staff;
-  - the appraisal HR-reviewer pick, which skips HR staff on probation;
-  - the organogram's badge, which puts "Probation" on 91% of boxes.
-- **The request's last-resort reliever (the line manager) is not checked for being at work.** It is
-  an edge case, logged here rather than changed.
+- **Probation elsewhere is now HR finish plan Lane 11**, a fix separate from round 5, at the user's
+  request (2026-09-25). *Corrected the same day:* this entry first listed four "Active only"
+  filters. Checked properly, two of them are not defects:
+  - the active-employee count is a deliberate split of the HR home's headcount;
+  - the organogram badge labels a status and leaves nobody out.
+
+  The two real ones are SHE's PPE-compliance KPI and the appraisal HR-reviewer pick, and the
+  request's last-resort reliever (the line manager, never checked for being at work) joined them.
+  **The real cause is data:** about 1,800 of the 2,191 "probationers" were hired years ago. The
+  employee import has no confirmation-date column, so the hire path put every imported
+  long-serving employee on probation, and 1,795 probation records are live past their end date.
 - **The plan forms offer every active leave type, maternity included.** Narrowing by kind is lane
   A's (A4).

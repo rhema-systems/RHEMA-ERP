@@ -254,7 +254,8 @@ right".)*
   September 2026, first made for the Maintenance technicians. The system refuses the employee
   themselves, the same person in both slots, and anyone suspended, on leave or gone, and it says
   which. The same rule applies on leave requests. Before this, only fully confirmed staff could be
-  chosen, which ruled out most TDC staff because every new hire starts on probation.
+  chosen, which ruled out most TDC staff: the system shows most of them as still on probation,
+  including people hired years ago. That second problem is being fixed separately.
 - **The clash check works.** If it cannot get an answer it says *"couldn't check"*, never *"free"*. A
   clash is still a warning, not a block.
 - **A proper detail window**: the plan's details read-only, the relievers editable, and the buttons

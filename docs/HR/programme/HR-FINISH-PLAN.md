@@ -31,6 +31,7 @@ sweep closed; coverage queue 3 real endpoints from empty.
 | **8** | HR ↔ Finance GL posting sweep | 7 prerequisites + the adapters | 5+ slices | lane 2, Finance owner, Payroll owner |
 | **9** | Hand-offs — real, but not HR's to fix | 3 | file and acknowledge | other owners |
 | **10** | Reminders that reach people — eleven HR sweeps log and tell nobody | 11 sweeps | 2–3 slices | — (unblocked; the delivery path exists since round 4 lane K-a) |
+| **11** | Probation is not absence — ~1,800 long-serving staff imported onto probation; two code sites that shut probationers out | 5 | 1 slice + a data repair | — (decided 2026-09-25: derive the confirmation date; TDC names the exceptions) |
 
 **Buildable by this team: roughly 9–10 slices.** Unblocked today: **3b, 3a-ii, lane 6** (and lane 4). Lanes 0, 1, 7, 2a, 3a, 3c, 5a, 5b and 3d’s schema-free rows are done.
 
@@ -39,6 +40,12 @@ sweep closed; coverage queue 3 real endpoints from empty.
 **Where to start next (as of 2026-09-01, end of the section-E stretch).** Done: lanes 0, 1, 7, lane
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
+
+▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
+demo database are on probation, because the employee import has no confirmation date. Two code sites
+also shut probationers out. The user asked for it as a fix separate from round 5, **not to be
+forgotten**. Its one decision was taken on 2026-09-25 (derive the confirmation date), so it is ready
+to build; see § Lane 11.
 
 ▶ **Demo feedback round 2 (2026-09-08) has its own plan:** `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md`
 § 5 — six lanes A–F. **Lane A DONE 2026-09-09** (88 assertions ×2; lane 3a and 3c re-run green).
@@ -1428,6 +1435,73 @@ probation's confirming authority.
 
 ⚠ **The plan that found this said to file it in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.** That
 document is for other teams' modules; these sweeps are HR's own, so the debt is recorded here.
+
+---
+
+## Lane 11 — Probation is not absence · 1 slice + a data repair · one decision owed · added 2026-09-25
+
+**Found building round 5, lane E, and recorded at the user's request, as a fix separate from
+round 5.** TDC ruled on 2026-09-23 (round 4, lane O) that **probation is a contract status, not an
+availability**: someone on probation is at work. Lane E applied that ruling to leave relievers on
+plans and requests (`LeaveService.CanCover`). This lane covers the rest.
+
+**The root is data, not code.** Measured on `ErpSystemDB_UAT`, where the demo is shown, on
+2026-09-25:
+
+- 2,191 of 2,399 employees are on Probation, and 177 are Active.
+- Of those 2,191, **1,454 were hired 5+ years ago**, 339 were hired 1–5 years ago, and 271 have no
+  hire date. Only 129 were hired in the last 12 months.
+- **1,795 probation records are live with their end date already passed**, so the probation module
+  shows about 1,800 overdue confirmations.
+- Only 94 employees carry a confirmation date.
+
+The mechanism is a gap between the hire path and the import:
+- The hire path opens a probation for every Permanent hire without a `ConfirmationDate`
+  (`EmployeeService.OpenInitialContractAsync`). It deliberately skips "anybody arriving already
+  confirmed".
+- The employee import has **no confirmation-date column** (`EmployeeImportWorkbookReader` sets
+  `StaffStatus.Active` and nothing more).
+
+So every imported long-serving employee arrived unconfirmed and was put on probation from their hire
+date.
+
+**What to build:**
+
+1. **The import.** Add a *Confirmation date* column to the template and the reader. When it is
+   blank, apply the decision below to staff whose probation term ended before they were entered.
+2. **The data repair**, on UAT and on any tenant imported the same way. Confirm the long-serving
+   staff: `StaffStatus` Active, `ConfirmationDate` set, and their probation record closed as
+   Completed. Measure the reach in SQL first, as a dry-run count.
+3. **`SheKpiComputationService.ComputePpeComplianceAsync`** measures PPE compliance over Active staff
+   only. New hires, the people most likely to lack PPE, are outside the KPI. Use *at work*: Active
+   or Probation, and `IsActive`.
+4. **`PerformanceAppraisalService.AssignHRReviewerAsync`**: both the configured default HR reviewer
+   and the fallback pool must be Active. An HR officer on probation is never assigned, and an HR
+   department that is all on probation yields no reviewer at all.
+5. **The leave request's last-resort reliever** (`LeaveService.SuggestRelieverAsync`, the line
+   manager) is never checked for being at work. Use `LeaveService.CanCover`.
+
+**Checked and NOT defects**, so nobody "fixes" them:
+- `EmployeeService.GetActiveEmployeeCountAsync` counts `StaffStatus == Active` on purpose. The HR
+  home splits the headcount into Active, On probation and Terminated from the by-status grouping,
+  and no screen calls `stats/active`.
+- The organogram's badge labels a non-Active status and leaves nobody out.
+- `EmployeeBenefitEnrollmentService` withholding a benefit during probation is a per-policy setting
+  (`AvailableDuringProbation`). It is correct, but it bites the ~1,800 wrongly-on-probation staff
+  until item 2 lands.
+
+**✅ Decided 2026-09-25 (the user): derive and mark.** This covers staff with no confirmation date
+whose probation term ended before they were entered:
+- their `ConfirmationDate` is **hire date plus their probation term**, recorded as *derived* so it
+  can be told apart from a date someone supplied;
+- their probation record is closed as Completed, and they become Active;
+- TDC is asked to name the exceptions (people genuinely still on probation, or with an extended
+  probation), which are then corrected by hand. The question is in `HR-OPEN-QUESTIONS-FOR-TDC.md`,
+  § *Staff confirmed years ago but shown as on probation*.
+
+That is what an import carrying the date would have produced. The same rule applies at import time
+when the new column is blank. Staff with **no hire date** (271 on UAT) cannot be derived and stay as
+they are until TDC supplies the date.
 
 ---
 

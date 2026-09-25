@@ -705,3 +705,25 @@ come from the Workmen's Compensation Law 1987 (PNDCL 187). We need to know:
 Several employees per board, and the disability and compensation fields, wait for this answer.
 
 ---
+
+## Staff confirmed years ago but shown as on probation *(raised 2026-09-25)*
+
+The staff list TDC supplied has no confirmation dates. So the system put every imported permanent
+employee on probation from their hire date, including **1,454 people hired more than five years
+ago**. It now shows about 1,800 overdue probation reviews that nobody needs to do.
+
+**What we are doing (decided 2026-09-25):** each such person's confirmation date will be their
+**hire date plus their probation term**, marked in the system as *derived* rather than supplied.
+They then show as confirmed staff.
+
+**We need from TDC:**
+
+- **the exceptions:** anyone who is genuinely still on probation, or whose probation was extended.
+  Their derived date will be corrected by hand;
+- **hire dates for 271 staff who have none.** Without a hire date no confirmation date can be
+  derived, so they stay on probation in the system. We will send the list;
+- for any future import, **confirmation dates as a column**, where TDC holds them.
+
+**Meanwhile:** until the correction runs, the system shows most TDC staff as on probation.
+
+---
