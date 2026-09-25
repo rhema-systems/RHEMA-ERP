@@ -16,7 +16,10 @@ chapter 7, § 19.4 and § 23 (L-55 to L-57) describe it. Lane A (every leave typ
 Annual, Maternity or Other) landed after it; chapter 4's new section on the kind, § 7.6, chapters 12,
 15 and 16, and § 23 (L-58 to L-60) describe it. Lane N (settings that do what they say) landed the
 same evening; chapter 4's kind section, § 4.4.5, chapter 4b and § 23 (the audit's closures, and L-61
-to L-64) describe it. The other chapters still describe the module before round 5.
+to L-64) describe it. Lane C (accrual: the counting fix, the accrual statement, and the *leave owed*
+report) landed after it; § 1.3, § 1.3b, chapter 4b, chapter 13 and its new § 13b, § 19.1 and § 23
+(L-41 and half of L-48 closed; L-65 and L-66) describe it. The other chapters still describe the
+module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
@@ -85,6 +88,7 @@ entry of their own.
 | 4 | Approvals | `/hr/leave/approvals` | 11 |
 | 5 | Plans | `/hr/leave/plans` | 12 |
 | 6 | Balances | `/hr/leave/balances` | 13 |
+| — | *(from Balances)* **Leave owed** *(round 5)* | `/hr/leave/balances/owed` | **13b** |
 | 7 | Adjustments | `/hr/leave/adjustments` | 14 |
 | 8 | Encashments | `/hr/leave/encashments` | 15 |
 | 9 | Compliance | `/hr/leave/compliance` | 16 |
@@ -92,9 +96,9 @@ entry of their own.
 | — | *(API only, no screen)* Reminder engine | `api/hr/leave/reminders` | 18 |
 | — | *(portal)* seven screens | `/me/leave/…` | 19 |
 
-**Twenty-eight screens**, five of which carry sub-tabs, two of which are batch runs that change
-people's balances, and one — the reminder engine — which has no screen at all and is documented
-because it runs every night whether anybody looks at it or not.
+**Twenty-nine screens** *(the twenty-ninth, Leave owed, from round 5)*, five of which carry sub-tabs,
+two of which are batch runs that change people's balances, and one — the reminder engine — which has
+no screen at all and is documented because it runs every night whether anybody looks at it or not.
 
 ---
 
@@ -365,6 +369,32 @@ build, the other until 2026-09-18:
 > "full grant" that is then reduced is not a full grant. If TDC wants a leaver's full grant scaled
 > down, that is a different setting and it has not been built. Recorded in the closure ledger.
 
+**A period counts on its last day** *(round 5, lane C1, 2026-09-25)*. January's two days arrive on
+31 January, not on 1 February, and **December is credited on 31 December** — so a year of monthly
+accrual reaches its whole entitlement inside the year: 24 of 24 days on 31 December. Until this
+lane every frequency fell one period short inside its own year, because a period was credited only
+once the day after it had arrived, and the year stops on 31 December: monthly reached 22 of 24,
+quarterly three quarters, half-yearly one half, and incremental *once a year* nothing at all (§ 23,
+L-41). A leaver whose last day ends a month now keeps that month. On any day that is not the last
+day of a period, nothing moved.
+
+⚠ **A rate that does not divide is rounded once, on the total.** Ten days a year is 0.8333… a
+month; the figure after five months is 10 × 5 ÷ 12 = **4.17**, and after twelve it is exactly
+**10**. Twelve periods of a rate times twelve would have come to 9.9999…, and refused a ten-day
+request on the last day of the year (§ 23, L-65).
+
+**Whole periods only.** A window that opens mid-month — a joiner qualifying on the 12th — runs from
+the 12th to the 11th, and the stretch after the last whole period that ends inside the year is not
+credited. That was already the rule; the accrual statement now says so on the line where it happens.
+
+**The accrual statement** *(lane C2)* is how anybody sees the working: the rule, the entitlement and
+where it came from (the staff-level allocation, or the leave type's own days), the rate, one line per
+completed period with a running total, and the date it is worked out to. It opens from a balance on
+chapter 13 and from *How it builds up* on the employee's own *My Leave* (§ 19.1), and any date can be
+chosen — which is the answer to *"can HR run a utility that accrues leave up to a date?"*: nothing
+needs running, because accrual is worked out whenever it is asked for. Every *Accrued* figure now
+says **as at** which date — today, the year end, or a leaver's last day.
+
 ### 1.3b Somebody who just joined — the whole journey
 
 **This is the question the room asks most often, and the one this book could not answer until
@@ -390,7 +420,7 @@ Junior grade, hired **1 May**, on the demo configuration:
 | **Day one** | cannot request it. Refused on service until 1 May next year, and **accrues nothing** | **all 12 days**, immediately — full grant, no service bar | **the full entitlement**, immediately |
 | **Month 6** | still nothing | unchanged | unchanged |
 | **1 May, year two** | the gate opens and accrual starts | | |
-| **31 December, year two** | **10 days accrued** of 15 — eight completed months at 1.25 | | |
+| **31 December, year two** | **10 days accrued** of 15 — eight completed months at 1.25 ⚠ *true since round 5 lane C; before it the engine said 8.75, because December was never credited inside its own year* | | |
 
 ⚠ **Where 1.25 comes from is worth one sentence, because it is the least obvious useful thing in
 the module.** The annual leave policy carries an accrual rate of **0** — which does *not* mean
@@ -1416,8 +1446,9 @@ skipped by save-as-draft-then-submit; *carry-over expiry* also removes carried d
 list and one reminder (replaced by the Annual kind, round 5 lane A); *allow cash conversion* and the three rate settings bind in service only (the
 exit settlement ignores them); *max days* only ever lowers the entitlement; *has sub-types* only
 blocks creating one; the gender qualifier cannot be set from the Eligibility tab; and every accrual
-frequency falls one period short within the year — *annual* accrues nothing. Each is in § 23 as
-L-38 to L-48. The paragraph below is the 2026-09-18 reading.
+frequency falls one period short within the year — *annual* accrues nothing *(closed by round 5
+lane C: a period counts on its last day, § 1.3)*. Each is in § 23 as L-38 to L-48. The paragraph
+below is the 2026-09-18 reading.
 
 So that this section is not read as a list of everything being broken: **twenty-one settings were
 traced and are fully honoured.** Minimum notice · Requires approval · Requires a reliever · Min
@@ -1491,9 +1522,11 @@ Three of its cards belong to leave, and they are the reason this chapter exists.
 This one comes first because the other leave settings are measured from it. A leave year is
 **named after the calendar year it starts in** — with an April start, March 2028 belongs to leave
 year 2027 — and entitlement, carry-over expiry and the forfeiture cut-off all count from this month.
-⚠ *(2026-09-25)* Two readers do not yet follow it: first-year pro-rating counts calendar months to
-December, and the untaken-leave reminder compares the calendar month (L-48). Neither shows on a
-January leave year, which is TDC's.
+*(Round 5, lane C4, 2026-09-25.)* The two readers that did not follow it now do: first-year
+pro-rating counts the months of the **leave** year (an April-start joiner hired in February is
+present for two months, not eleven), and the untaken-leave reminder's month is the month **of the
+leave year** (§ 23, L-48, first half). A screen or a call that names no year now gets the leave year
+we are in, not the calendar year. None of it shows on a January leave year, which is TDC's.
 
 > ⚠ **Set it during setup. It cannot be changed later**, and the screen says so in amber. Once the
 > company holds any leave, the save is refused and names what already exists — *"…already holds 42
@@ -1537,7 +1570,7 @@ The same day of leave is worth 38% more under one basis than the other.
 | Grace before chasing unclosed leave | 2 |
 | Chase an undecided request after this many days | 5 |
 | Warn this many days before carry-over expires | 30 |
-| Start chasing outstanding mandatory leave from month | 9 |
+| Start chasing outstanding annual leave from month *(of the leave year — lane C4)* | 9 |
 
 **Footer:** one **Save** for the whole record. There is no draft and no approval step — a saved
 value is in force on the next reminder run, the next payout and the next confirmation date.
@@ -2944,12 +2977,12 @@ the arithmetic of the last two.
 
 ### 👁 On the page
 
-**Header.** Four buttons: **⬇ Export CSV** · **↻ Recalculate** · **↻ Recalculate everybody**
-*(admin)* · **🔧 Repair entitlements** *(admin)*.
+**Header.** Five buttons: **👛 Leave owed** *(new, § 13b)* · **⬇ Export CSV** · **↻ Recalculate** ·
+**↻ Recalculate everybody** *(admin)* · **🔧 Repair entitlements** *(admin)*.
 
 ⚠ **The last two are hidden from anyone without the Admin tier**, which `hr.head` does not hold.
-That is rule 3, and it means an HR officer sees two buttons on this screen and an administrator sees
-four.
+That is rule 3, and it means an HR officer sees three buttons on this screen and an administrator
+sees five.
 
 **Filters:** Year · Employee · Leave type.
 
@@ -2959,7 +2992,7 @@ four.
 |---|---|
 | Employee *(with unit underneath)* · Leave type *(and sub-type)* | |
 | **Entitled** | what the policy grants for the year |
-| **Accrued** | what has actually accrued to date |
+| **Accrued** | what has actually accrued — the header says **as at** which date *(round 5, lane C2)*, and a row worked out to another date says its own (a leaver's stops at their last day) |
 | Carried over · Adjustments · Used · Pending · Encashed | the working |
 | **Available** | the policy figure |
 | **Can take now** | **the figure the create check enforces** |
@@ -2967,6 +3000,11 @@ four.
 ⚠ **Two columns here are new or fixed.** *Accrued* used to repeat *Entitled* — the org-wide read
 never computed accrual, so the one screen that showed the column showed the wrong number. And *Can
 take now* did not exist at all, which is why §1.4 was the module's most confusing feature.
+
+**Click any row** *(round 5, lane C2)* and the balance opens: the nine figures, **how it built up**
+— the accrual statement, § 1.3, with a date box to work it out to any day — and the requests,
+adjustments and cashed-in days behind the rest. The server had a balance-detail read for months with
+nothing on screen to reach it (§ 23, L-66).
 
 **Recalculate** with no employee chosen refuses: *Choose an employee — Recalculation runs for one
 employee at a time.*
@@ -3066,9 +3104,14 @@ quietly correcting them. Re-running carry-over is a decision of its own.
 | Recalculate | `POST /api/Leaves/balances/recalculate` | `HR.Leave.Write` |
 | Recalculate everybody | `POST /api/Leaves/balances/recalculate-all?year=&leaveTypeId=` | **`HR.Leave.Admin`** |
 | Repair entitlements | `POST /api/Leaves/balances/repair-entitlements?year=&leaveTypeId=&employeeId=&dryRun=` | **`HR.Leave.Admin`** |
+| A row, opened | `GET /api/Leaves/balances/{id}` | `HR.Leave.Read` |
+| How it built up | `GET /api/Leaves/balances/{id}/accrual-statement?asOf=` | the employee **or** `HR.Leave.Read` |
+| The year it opens on | `GET /api/Leaves/leave-year` | any member of staff |
 
 **Accrual is computed live on every read**, never stored. **Both availability figures come from one
-server-side definition**, which the create check also calls.
+server-side definition**, which the create check also calls — and since round 5 lane C the accrual
+statement, the *leave owed* report and every balance read work out accrual through **one** method,
+so a statement's lines always add up to the figure beside it.
 
 ### ⚠ Known gaps
 
@@ -3078,6 +3121,78 @@ column now has a way to be corrected.
 ⚠ **But read §2.3b before you demonstrate this screen.** The demonstration database's Entitled
 figures were loaded before that correction existed, and this is the chapter that asks you to read
 them aloud.
+
+---
+
+## 13b. `/hr/leave/balances/owed` — leave owed as at a date *(round 5, lane C6)*
+
+### 📍 Where you are
+
+**Balances → 👛 Leave owed** · `/hr/leave/balances/owed` · as **hr.head** · **3 minutes**
+
+### 📖 What it is
+
+Finance's question from the demo: *what does the organisation owe in annual leave that has been
+earned and not taken, at a date* — the year end, for its books. This answers it **in days**, per
+employee; Finance puts the money on them.
+
+### 👁 On the page
+
+**As at** a date — today by default, with **End of this leave year** and **End of last leave year**
+beside it — and **⬇ Export CSV**. Then the totals, a note on how each figure is worked out, and one
+row per employee with a search box.
+
+| Column | |
+|---|---|
+| Entitled | the whole year's annual leave |
+| **Built up** | accrued to the date. Somebody in their qualifying months has built up nothing |
+| Carried in | from last year, while still usable: in full until the carry-over expiry (the end of March on TDC's settings); after it, only the carried days **taken** before it |
+| Adjust. | HR's adjustments to the year — opening balances, approved deferrals, forfeiture |
+| Taken | approved leave **on or before** the date. Leave that runs past it counts only its days up to it, by the same walk that charged it |
+| Cashed in | days paid out instead of taken |
+| **Owed** | **built up + carried in + adjustments − taken − cashed in** |
+| Booked · Awaiting | approved leave after the date, and leave awaiting approval — **both still owed**, shown so HR can see what is already spoken for |
+
+**Who is on it:** everybody on the books at the date — hired on or before it, and either still
+serving (suspended staff included) or gone only since. Somebody who left before the date was paid
+through their settlement.
+
+⚠ **On the demo database, do not quote the total as a provision.** As at 31 December 2026 it reads
+about **47,300 days** across 2,376 employees, and 2,037 of them are the opening-balance adjustments
+of chapter 13's step 3 — +21 entries loaded on top of entitlements that already grant the days.
+Show one row's arithmetic instead; that is the point of the screen.
+
+### ▶ Walk it
+
+**1 — Press *End of this leave year*.**
+
+> "This is what we will owe in annual leave on the last day of the year, if nobody takes another day
+> — days only. Every row is somebody on the books that day. Finance puts a rate on each and that is
+> the provision."
+
+**2 — Point at one row's *Owed* and *Booked*.**
+
+> "She has built up her year, taken some, and booked two weeks in November. Those two weeks are
+> still owed on 30 September — she has not had them — so they are in *Owed*, and *Booked* shows they
+> are spoken for."
+
+**3 — Export CSV**, and open it: one line per employee, the date on every line.
+
+### ⚙ Behind the page
+
+| Control | Call | Gate |
+|---|---|---|
+| The report | `GET /api/Leaves/balances/owed?asOf=` | `HR.Leave.Read` |
+| Export | `GET /api/Leaves/balances/owed/export?asOf=` | `HR.Leave.Read` |
+
+It reads the tenant's one **Annual** leave type (chapter 4) and computes everybody's accrual in one
+pass — about a third of a second for 2,376 employees on the demo database. Nothing is written: an
+employee with no balance row is worked out live and no row is minted for them.
+
+⚠ **Owed is not *can take now*.** The round 5 plan's formula also subtracted pending and approved
+leave, which is *can take now* — what is free to book. Leave approved for November has not been had
+on 30 September, so it is owed; the report shows it beside *Owed* instead of inside it. And the
+report adds HR's adjustments, which the plan's formula left out.
 
 ---
 
@@ -3512,7 +3627,7 @@ closure build.
 | **Leave starting soon** | approved leave is about to start and **nobody has confirmed it is still going** | 7 days |
 | **Leave not closed** | leave ended and was never closed — at *Approved* **or *In progress*** | 2 days after the end date |
 | **Request awaiting a decision** | a request has sat undecided since it was raised | 5 days |
-| **Mandatory leave outstanding** | somebody still owes statutory leave | from **month 9** |
+| **Mandatory leave outstanding** | somebody still owes statutory leave | from **month 9** of the leave year *(the calendar month until round 5 lane C4)* |
 | **Carry-over expiring** | carried days are about to lapse | 30 days |
 
 ✅ **All five windows are now settings** — chapter 4b, the *Leave — reminder cadence* card. They used
@@ -3626,7 +3741,13 @@ employee picker anywhere in this chapter**, and that is the point.
 ### 19.1 `/me/leave` — My Leave
 
 Balance cards per leave type, a history list, and four buttons: **Calendar** *(new)* · **Planner** ·
-**Encashments** · **New request**.
+**Encashments** · **New request**. The year opens on the leave year we are in *(round 5, lane C4)*.
+
+A card for leave that builds up says **built up 12.25 as at 25 Sep 2026**, and **How it builds up**
+opens her own accrual statement *(round 5, lane C2, § 1.3)*: her entitlement and where it comes from,
+the rate, one line per month with a running total, and a date box — *"what will I have by
+December?"* is one click. The same arithmetic a request is checked against, so the answer cannot
+disagree with the refusal.
 
 > "This is the same data, from the same tables, through the same endpoints. What is different is
 > everything about how it is asked for — the employee never chooses an employee, because the only
@@ -3909,7 +4030,8 @@ nobody promises a stakeholder a button.
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
 **Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
 lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60**; lane N
-closed six of the audit's eleven and two in part, and found and closed four more, **L-61 to L-64**.
+closed six of the audit's eleven and two in part, and found and closed four more, **L-61 to L-64**;
+lane C closed L-41 and half of L-48, and found and closed two more, **L-65 and L-66**.
 The round 5 blocks are listed after the settings audit.
 
 ### ✅ Closed
@@ -3985,14 +4107,14 @@ the round 5 plan, whose lane is named in the last column; the plain-terms accoun
 | **L-38** | ch. 4b | The tenant *encashment working days per month* can never apply — each leave type's own divisor (form minimum 1, default 22) always wins | N1 — **closed** 2026-09-25: off the policy page; the column stays |
 | **L-39** | ch. 4 | *Max days per year* only ever lowers the entitlement. A type with a default of 0 — *Leave of Absence (Unpaid)*, *Occupational Injury Leave* — can never be booked | N2, N4 — **closed** 2026-09-25: the maximum binds on annual leave only; unpaid and injury leave have 90 and 180 days |
 | **L-40** | ch. 4 | An accrual policy cannot be switched off — nothing writes its `IsActive`; the tab's status column has no control behind it | N1 — **closed** 2026-09-25: an *In force* switch; the one-in-force rule follows it |
-| **L-41** | §1.3 | Every accrual frequency falls one period short within the year (monthly 11/12, quarterly 3/4); incremental *annual* accrues nothing all year; *per pay period* is monthly | C1, N2 — N2's part **closed** 2026-09-25 (incremental *annual* refused anew; *per pay period* was already); the off-by-one is lane C |
+| **L-41** | §1.3 | Every accrual frequency falls one period short within the year (monthly 11/12, quarterly 3/4); incremental *annual* accrues nothing all year; *per pay period* is monthly | C1, N2 — **closed** 2026-09-25. N2: incremental *annual* refused anew (*per pay period* was already). C1: a period counts on its last day, so 31 December credits December — 24 of 24, and a stored *annual* row credits its year on the last day |
 | **L-42** | ch. 17 | Carry-over expiry removes carried days already used, charging them a second time; the expiry reminder's skip rule assumes it does not | G |
 | **L-43** | ch. 4 | Eligibility rules are OR'd under a tab that says "restrict"; the gender qualifier on an organisation rule cannot be set from the tab | N2 — **closed** 2026-09-25: the tab says any rule lets people in, and a unit, level or position rule takes a gender |
 | **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 — **closed** 2026-09-25: an edit checks the sub-type and its cap; creating one honours *Active*; the cap limits the sub-type inside its type's pot |
 | **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 — **closed** 2026-09-25: submit re-runs notice, the reliever requirement, the balance and the cap |
 | **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 |
 | **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — N3's part **closed** 2026-09-25 (Pending counts; a lengthening move re-runs the gate); the board's purpose and date are lane K |
-| **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I |
+| **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I — C4's part **closed** 2026-09-25: pro-rating counts months of the leave year, the reminder's month is the month of the leave year, and a call naming no year gets the current leave year. The reminders' recipients are lane I |
 
 **On the demo database, the same audit found:** *Leave of Absence (Unpaid)* and *Occupational Injury
 Leave* cannot be booked (L-39); Sick Leave's description promises a certificate rule that is switched
@@ -4048,6 +4170,21 @@ build record is the round 5 plan's § 8.
 | **L-62** | ch. 4b, 20 | ⚠ **The holiday calendar's edit dialog blanked what it does not show.** It is filled from the list rows, which lacked the description, the observed date of a weekend holiday, the pay multiplier and the *recurs every year* flag, so any edit — a rename — wrote them back empty. Found renaming 21 September on UAT, whose multiplier it wiped (restored to 2.0) | The list rows carry all four, and the dialog keeps them |
 | **L-63** | ch. 8 | Editing a draft gave back days the draft never held — so 10 days with 5 left could be stretched to 15 — and dropped any change to the second reliever | The balance is measured as it stands; the second reliever is checked and saved |
 | **L-64** | ch. 7 | Answering a suggestion was measured against the days the request held before it was sent back, which were released when it was | Only days a request holds (Pending, Approved, in progress) come back to it |
+
+### ✅ Round 5 lane C — accrual, 2026-09-25 — two more found and closed
+
+Proved by `dev-harness/hr-leave/run-round5-c.mjs` (112 assertions, green twice), which also carries
+L-41 and L-48's first half. The build record is the round 5 plan's § 8.
+
+| # | Where | Finding | Closed by |
+|---|---|---|---|
+| **L-65** | §1.3, ch. 13 | ⚠ **A derived rate that does not divide would have refused a full year's leave on its last day.** Accrual was the periods times *entitlement ÷ periods*, in full decimal precision: 10 days a year is 0.8333… a month, so the moment C1 credited December, twelve periods came to 9.9999…, and a ten-day request on 31 December would have been refused against it. Screens showed the long decimals too. Latent until C1, because a twelfth period never arrived inside its year | The total is *entitlement × periods ÷ periods a year*, rounded once to the hundredth — exactly 10 after twelve months, 4.17 after five — and each statement line is the difference of two totals, so the lines add up |
+| **L-66** | ch. 13 | The balance detail — requests, adjustments and cashed-in days behind a balance — had an endpoint and no screen: nothing in the frontend called it | A row on the balances screen opens it, with the accrual statement |
+
+⚠ **This book's own worked example was wrong.** § 1.3b says a Junior qualifying on 1 May has
+**10** days by 31 December of year two. Before lane C the engine said **8.75** — December was never
+credited inside its own year. The example was right about what should happen, and it is now also
+what does.
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 
@@ -4171,6 +4308,7 @@ module enforces one of them. That second one is a question of fact, not of polic
 | 13 | `/hr/leave/approvals` | hr.head | 11 |
 | 14 | `/hr/leave/plans` | hr.head | 12 |
 | 15 | `/hr/leave/balances` | hr.head | 13 |
+| 15b | `/hr/leave/balances/owed` *(round 5)* | hr.head | 13b |
 | 16 | `/hr/leave/adjustments` | hr.head | 14 |
 | 17 | `/hr/leave/encashments` | hr.head | 15 |
 | 18 | `/hr/leave/compliance` | hr.head | 16 |

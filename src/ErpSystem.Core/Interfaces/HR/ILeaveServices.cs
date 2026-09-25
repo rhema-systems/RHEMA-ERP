@@ -72,6 +72,22 @@ public interface ILeaveService
     Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(Guid employeeId, int year);
     Task<IEnumerable<LeaveBalanceDto>> GetAllLeaveBalancesAsync(int year, Guid? employeeId, Guid? leaveTypeId);
     Task<LeaveBalanceDetailDto?> GetLeaveBalanceDetailAsync(Guid balanceId);
+
+    /// <summary>
+    /// How a balance's accrual is worked out as at <paramref name="asOf"/> (today when null): the
+    /// accrual statement (round 5, lane C2). <c>null</c> when the balance is not this tenant's.
+    /// </summary>
+    Task<LeaveAccrualStatementDto?> GetAccrualStatementAsync(Guid balanceId, DateOnly? asOf, CancellationToken ct = default);
+
+    /// <summary>
+    /// Annual leave built up and not yet taken, for every employee on the books at
+    /// <paramref name="asOf"/> (today when null) — the "leave owed as at a date" report (round 5,
+    /// lane C6, decision A7). Days only.
+    /// </summary>
+    Task<LeaveOwedReportDto> GetLeaveOwedAsync(DateOnly? asOf, CancellationToken ct = default);
+
+    /// <summary>The same report as a CSV, one row per employee.</summary>
+    Task<byte[]> ExportLeaveOwedCsvAsync(DateOnly? asOf, CancellationToken ct = default);
     Task<IEnumerable<MandatoryLeaveComplianceDto>> GetMandatoryLeaveComplianceAsync(int year);
     /// <summary>
     /// Cancel a request (round 5, R5-D3 + B2): the employee until it is approved; the desk also

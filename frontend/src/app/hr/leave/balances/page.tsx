@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Loader2, RefreshCw, Scale, Wrench } from 'lucide-react';
+import { Download, Loader2, RefreshCw, Scale, Wallet, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,6 +30,9 @@ import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
+import { LeaveBalanceDetailDialog } from '@/components/hr/leave/LeaveBalanceDetailDialog';
+import { fmtDay } from '@/components/hr/leave/AccrualStatementPanel';
 import type { LeaveEntitlementRepairResult } from '@/types/hr/leave-request';
 
 /** Saves a blob the browser already has, rather than navigating to a URL that carries no token. */
@@ -44,15 +48,19 @@ function saveBlob(blob: Blob, filename: string) {
 }
 
 const ALL = '__all__';
-const currentYear = new Date().getFullYear();
-const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
 
 export default function LeaveBalancesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Round 5, C4: opens on the leave year we are in, which is not the calendar year from January to
+  // the start month of a leave year that does not start in January. A choice the user makes wins.
+  const { currentYear } = useLeaveYear();
+  const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [leaveTypeId, setLeaveTypeId] = useState<string>(ALL);
-  const [year, setYear] = useState<string>(String(currentYear));
+  const [chosenYear, setChosenYear] = useState<string | null>(null);
+  const year = chosenYear ?? String(currentYear);
+  const [openBalanceId, setOpenBalanceId] = useState<string | null>(null);
   const [recalculating, setRecalculating] = useState(false);
   const [recalculatingAll, setRecalculatingAll] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
@@ -240,13 +248,26 @@ export default function LeaveBalancesPage() {
 
   const rows = data ?? [];
 
+  // Round 5, C2: "Accrued" says as at when. The server says, per row — a leaver's figure stops at
+  // their last day — so the header carries the date the rows share and a row that differs says its own.
+  const asOfDates = [...new Set(rows.map((b) => b.accruedAsOf).filter(Boolean))] as string[];
+  const sharedAsOf = asOfDates.length === 1 ? asOfDates[0] : null;
+
   return (
     <div className="space-y-6 p-6">
+      <LeaveBalanceDetailDialog balanceId={openBalanceId} onClose={() => setOpenBalanceId(null)} />
       <PageHeader
         title="Leave Balances"
         description="Entitlement, accrual, usage and what remains."
         actions={
           <>
+          {/* Round 5, C6: annual leave built up and not yet taken, as at a date, for Finance. */}
+          <Button variant="outline" asChild>
+            <Link href="/hr/leave/balances/owed">
+              <Wallet className="mr-2 h-4 w-4" />
+              Leave owed
+            </Link>
+          </Button>
           <Button variant="outline" onClick={exportCsv} disabled={exporting}>
             {exporting ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -395,7 +416,7 @@ export default function LeaveBalancesPage() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Year</label>
-              <Select value={year} onValueChange={setYear}>
+              <Select value={year} onValueChange={setChosenYear}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -424,7 +445,12 @@ export default function LeaveBalancesPage() {
                   <TableHead>Employee</TableHead>
                   <TableHead>Leave type</TableHead>
                   <TableHead className="text-right">Entitled</TableHead>
-                  <TableHead className="text-right">Accrued</TableHead>
+                  <TableHead className="text-right">
+                    Accrued
+                    {sharedAsOf && (
+                      <span className="block text-xs font-normal">as at {fmtDay(sharedAsOf)}</span>
+                    )}
+                  </TableHead>
                   <TableHead className="text-right">Carried over</TableHead>
                   <TableHead className="text-right">Adjustments</TableHead>
                   <TableHead className="text-right">Used</TableHead>
@@ -457,7 +483,12 @@ export default function LeaveBalancesPage() {
                   </TableRow>
                 ) : (
                   rows.map((b) => (
-                    <TableRow key={b.id}>
+                    <TableRow
+                      key={b.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setOpenBalanceId(b.id)}
+                      title="Open the balance and how it built up"
+                    >
                       <TableCell className="font-medium">
                         {b.employeeName}
                         {b.organizationUnitName && (
@@ -471,7 +502,14 @@ export default function LeaveBalancesPage() {
                         {b.leaveSubTypeName ? ` · ${b.leaveSubTypeName}` : ''}
                       </TableCell>
                       <TableCell className="text-right">{b.entitledDays}</TableCell>
-                      <TableCell className="text-right">{b.accruedToDateDays}</TableCell>
+                      <TableCell className="text-right">
+                        {b.accruedToDateDays}
+                        {b.accruedAsOf && b.accruedAsOf !== sharedAsOf && (
+                          <span className="block text-xs text-muted-foreground">
+                            to {fmtDay(b.accruedAsOf)}
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">{b.carriedOverDays}</TableCell>
                       <TableCell className="text-right">{b.adjustmentDays}</TableCell>
                       <TableCell className="text-right">{b.usedDays}</TableCell>

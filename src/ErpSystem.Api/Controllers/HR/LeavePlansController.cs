@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -27,6 +28,7 @@ public class LeavePlansController : ControllerBase
     private readonly ICurrentUserService _currentUserService;
     private readonly IAuthorizationService _authorization;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeavePlansController> _logger;
 
     public LeavePlansController(
@@ -35,6 +37,7 @@ public class LeavePlansController : ControllerBase
         ICurrentUserService currentUserService,
         IAuthorizationService authorization,
         IWorkflowIntegrationService workflowIntegrationService,
+        ILeaveYearContext leaveYear,
         ILogger<LeavePlansController> logger)
     {
         _service = service;
@@ -42,6 +45,7 @@ public class LeavePlansController : ControllerBase
         _currentUserService = currentUserService;
         _authorization = authorization;
         _workflowIntegrationService = workflowIntegrationService;
+        _leaveYear = leaveYear;
         _logger = logger;
     }
 
@@ -96,7 +100,7 @@ public class LeavePlansController : ControllerBase
         if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
             return Forbid();
 
-        if (year == 0) year = DateTime.Today.Year;
+        if (year == 0) year = await _leaveYear.CurrentYearAsync();
         return Ok(await _service.GetByEmployeeAndYearAsync(employeeId, year));
     }
 
@@ -105,7 +109,7 @@ public class LeavePlansController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<LeavePlanDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<LeavePlanDto>>> GetByYear([FromQuery] int year = 0)
     {
-        if (year == 0) year = DateTime.Today.Year;
+        if (year == 0) year = await _leaveYear.CurrentYearAsync();
         return Ok(await _service.GetByYearAsync(year));
     }
 

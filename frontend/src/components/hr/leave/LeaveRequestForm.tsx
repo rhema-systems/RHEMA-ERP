@@ -21,6 +21,7 @@ import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { leaveService } from '@/services/hr/leave.service';
 import { employeeRelieverService } from '@/services/hr/employee-reliever.service';
 import { DateField, FieldRow, SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
+import { fmtDay } from './AccrualStatementPanel';
 
 export const leaveRequestSchema = z
   .object({
@@ -287,7 +288,8 @@ export function LeaveRequestForm({
                 <p className="mt-1 text-xs text-muted-foreground">
                   {balance.availableDays} days for the full year — this leave type accrues, so{' '}
                   {Math.round((balance.availableDays - balance.accruedAvailableDays) * 100) / 100}{' '}
-                  of them have not accrued yet.
+                  of them have not accrued yet
+                  {balance.accruedAsOf ? ` (as at ${fmtDay(balance.accruedAsOf)})` : ''}.
                 </p>
               )}
             </div>

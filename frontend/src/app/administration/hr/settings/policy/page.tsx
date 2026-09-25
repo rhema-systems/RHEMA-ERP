@@ -829,13 +829,15 @@ export default function PolicySettingsPage() {
             <NumberField
               form={form}
               name="mandatoryLeaveChaseFromMonth"
-              label="Start chasing outstanding mandatory leave from month"
+              label="Start chasing outstanding annual leave from month of the leave year"
               required
             />
             <p className="text-sm text-muted-foreground">
-              Month 9 is September — late enough that the chase is not noise, early enough that
-              there is still a quarter of the year in which to take the leave. Chasing from January
-              says nothing; chasing in December is too late to act on.
+              Counted from the month the leave year starts: month 9 is September when the leave year
+              starts in January, December when it starts in April. Late enough that the chase is not
+              noise, early enough that there is still a quarter of the year in which to take the
+              leave. Chasing from the first month says nothing; chasing in the last is too late to
+              act on.
             </p>
           </CardContent>
         </Card>

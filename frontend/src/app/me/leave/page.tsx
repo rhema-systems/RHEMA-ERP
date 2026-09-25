@@ -17,6 +17,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -34,6 +41,9 @@ import { useAuth } from '@/hooks/use-auth';
 import { leaveService } from '@/services/hr/leave.service';
 import { LEAVE_STATUS_BADGE } from '@/components/me/leave/leave-status';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { AccrualStatementPanel, fmtDay } from '@/components/hr/leave/AccrualStatementPanel';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
+import type { LeaveBalance } from '@/types/hr/leave-request';
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -41,8 +51,13 @@ const fmtDate = (d: string) =>
 export default function MyLeavePage() {
   const { user } = useAuth();
   const employeeId = user?.employeeId ?? '';
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
+  // Round 5, C4: opens on the leave year we are in (not the calendar year, for a leave year that
+  // starts later than January); a year the employee picks wins.
+  const { currentYear } = useLeaveYear();
+  const [chosenYear, setChosenYear] = useState<number | null>(null);
+  const year = chosenYear ?? currentYear;
+  // Round 5, C2: the balance whose accrual statement is open.
+  const [statementFor, setStatementFor] = useState<LeaveBalance | null>(null);
 
   const { data: balances, isLoading: balancesLoading } = useQuery({
     queryKey: ['me', 'leave-balances', employeeId, year],
@@ -60,6 +75,21 @@ export default function MyLeavePage() {
 
   return (
     <div className="space-y-8">
+      <Dialog open={!!statementFor} onOpenChange={(open) => !open && setStatementFor(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[680px]">
+          <DialogHeader>
+            <DialogTitle>
+              {statementFor?.leaveTypeName} {statementFor?.year}
+            </DialogTitle>
+            <DialogDescription>
+              Worked out from your entitlement and service — the same figures a request is checked
+              against.
+            </DialogDescription>
+          </DialogHeader>
+          {statementFor && <AccrualStatementPanel balanceId={statementFor.id} audience="self" />}
+        </DialogContent>
+      </Dialog>
+
       <PageHeader
         title="My Leave"
         description="Your balances and requests. Approvals travel through the configured workflow."
@@ -96,7 +126,7 @@ export default function MyLeavePage() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Balances
           </h2>
-          <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+          <Select value={String(year)} onValueChange={(v) => setChosenYear(Number(v))}>
             <SelectTrigger className="w-28">
               <SelectValue />
             </SelectTrigger>
@@ -136,6 +166,25 @@ export default function MyLeavePage() {
                     {b.carriedOverDays ? ` · carried over ${b.carriedOverDays}` : ''}
                     {b.encashedDays ? ` · encashed ${b.encashedDays}` : ''}
                   </div>
+                  {/*
+                    Round 5, C2: leave that builds up says how much, and as at when — and shows its
+                    working. Answering "why only 12.25?" used to take a call to HR.
+                  */}
+                  {b.accruedAsOf && (
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="text-muted-foreground">
+                        built up {b.accruedToDateDays} as at {fmtDay(b.accruedAsOf)}
+                      </span>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="h-auto p-0 text-xs"
+                        onClick={() => setStatementFor(b)}
+                      >
+                        How it builds up
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}

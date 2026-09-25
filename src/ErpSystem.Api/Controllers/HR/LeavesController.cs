@@ -5,6 +5,7 @@ using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.DocumentManagement;
@@ -32,6 +33,7 @@ namespace ErpSystem.Api.Controllers.HR
         private readonly ICurrentUserService _currentUserService;
         private readonly IWorkflowIntegrationService _workflowIntegrationService;
         private readonly IAuthorizationService _authorization;
+        private readonly ILeaveYearContext _leaveYear;
         private readonly ILogger<LeavesController> _logger;
 
         public LeavesController(
@@ -44,6 +46,7 @@ namespace ErpSystem.Api.Controllers.HR
             ICurrentUserService currentUserService,
             IWorkflowIntegrationService workflowIntegrationService,
             IAuthorizationService authorization,
+            ILeaveYearContext leaveYear,
             ILogger<LeavesController> logger)
         {
             _leaveService = leaveService;
@@ -55,6 +58,7 @@ namespace ErpSystem.Api.Controllers.HR
             _currentUserService = currentUserService;
             _workflowIntegrationService = workflowIntegrationService;
             _authorization = authorization;
+            _leaveYear = leaveYear;
             _logger = logger;
         }
 
@@ -90,6 +94,23 @@ namespace ErpSystem.Api.Controllers.HR
                 if (mine) return true;
             }
             return await HoldsLeavePolicyAsync(policy);
+        }
+
+        /// <summary>
+        /// Self-or-read-tier resolved through the balance's owner (round 5, lane C2): the employee reads
+        /// their own balance's accrual statement, the leave read tier anybody's.
+        /// </summary>
+        private async Task<bool> CanReadBalanceAsync(Guid balanceId)
+        {
+            if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty &&
+                _currentUserService.TenantId is Guid tenantId)
+            {
+                var mine = await _db.Set<Core.Entities.HR.StaffLeave.LeaveBalance>()
+                    .AsNoTracking()
+                    .AnyAsync(b => b.Id == balanceId && b.TenantId == tenantId && b.EmployeeId == me);
+                if (mine) return true;
+            }
+            return await HoldsLeavePolicyAsync(HrPermissions.LeaveReadPolicy);
         }
 
         /// <summary>
@@ -308,7 +329,7 @@ namespace ErpSystem.Api.Controllers.HR
 
             if (year == 0)
             {
-                year = DateTime.Today.Year;
+                year = await _leaveYear.CurrentYearAsync();
             }
 
             var result = await _leaveService.GetEmployeeLeaveHistoryAsync(employeeId, year, pageNumber, pageSize, status);
@@ -333,7 +354,7 @@ namespace ErpSystem.Api.Controllers.HR
             if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
                 return Forbid();
 
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var balances = await _leaveService.GetEmployeeLeaveBalancesAsync(employeeId, year);
             return Ok(balances);
         }
@@ -349,7 +370,7 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] Guid? employeeId = null,
             [FromQuery] Guid? leaveTypeId = null)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var balances = await _leaveService.GetAllLeaveBalancesAsync(year, employeeId, leaveTypeId);
             return Ok(balances);
         }
@@ -364,7 +385,7 @@ namespace ErpSystem.Api.Controllers.HR
         public async Task<ActionResult<IEnumerable<MandatoryLeaveComplianceDto>>> GetMandatoryCompliance(
             [FromQuery] int year = 0)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var rows = await _leaveService.GetMandatoryLeaveComplianceAsync(year);
             return Ok(rows);
         }
@@ -382,6 +403,108 @@ namespace ErpSystem.Api.Controllers.HR
             if (detail == null)
                 return NotFound(new { message = "Leave balance not found." });
             return Ok(detail);
+        }
+
+        /// <summary>
+        /// How a balance's accrual is worked out as at a date: the accrual statement (round 5, lane C2)
+        /// </summary>
+        /// <remarks>
+        /// <para>The rule, the entitlement and where it came from, the rate, and one line per completed
+        /// period with a running total. <c>asOf</c> defaults to today; a later date shows what will
+        /// have built up by then, and a date past the year end stops at the year end. This is the
+        /// answer to "a utility that accrues leave up to a date": accrual is worked out whenever it
+        /// is asked for, so there is nothing to run — only something to show.</para>
+        ///
+        /// <para>Self-or-read-tier, like the employee's balances read: the employee sees their own
+        /// statement on the portal, HR anybody's.</para>
+        /// </remarks>
+        /// <response code="200">The statement</response>
+        /// <response code="403">Not the caller's balance, and no leave read tier</response>
+        /// <response code="404">No such balance</response>
+        [HttpGet("balances/{id:guid}/accrual-statement")]
+        [ProducesResponseType(typeof(LeaveAccrualStatementDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveAccrualStatementDto>> GetAccrualStatement(
+            Guid id, [FromQuery] DateOnly? asOf = null, CancellationToken ct = default)
+        {
+            if (!await CanReadBalanceAsync(id))
+                return Forbid();
+
+            var statement = await _leaveService.GetAccrualStatementAsync(id, asOf, ct);
+            if (statement == null)
+                return NotFound(new { message = "Leave balance not found." });
+            return Ok(statement);
+        }
+
+        /// <summary>
+        /// Annual leave owed as at a date, per employee: the "leave owed" report (round 5, lane C6)
+        /// </summary>
+        /// <remarks>
+        /// Days only — built up and not yet taken, for every employee on the books at the date. Finance
+        /// puts the money on them. <c>asOf</c> defaults to today. The rules are on
+        /// <c>LeaveService.GetLeaveOwedAsync</c>.
+        /// </remarks>
+        /// <response code="200">The report</response>
+        /// <response code="400">The tenant has no annual leave type</response>
+        [HttpGet("balances/owed")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        [ProducesResponseType(typeof(LeaveOwedReportDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<LeaveOwedReportDto>> GetLeaveOwed(
+            [FromQuery] DateOnly? asOf = null, CancellationToken ct = default)
+        {
+            try
+            {
+                return Ok(await _leaveService.GetLeaveOwedAsync(asOf, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>The "leave owed" report as a CSV, one row per employee.</summary>
+        [HttpGet("balances/owed/export")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> ExportLeaveOwed(
+            [FromQuery] DateOnly? asOf = null, CancellationToken ct = default)
+        {
+            try
+            {
+                var csv = await _leaveService.ExportLeaveOwedCsvAsync(asOf, ct);
+                var date = asOf ?? DateOnly.FromDateTime(DateTime.UtcNow);
+                return File(csv, "text/csv", $"leave-owed-{date:yyyy-MM-dd}.csv");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// The tenant's current leave year (round 5, lane C4)
+        /// </summary>
+        /// <remarks>
+        /// So a screen can open on the leave year we are in rather than on the calendar year. The two
+        /// differ from the start of the calendar year to the month the leave year starts, whenever it
+        /// does not start in January.
+        /// </remarks>
+        [HttpGet("leave-year")]
+        [ProducesResponseType(typeof(LeaveYearInfoDto), StatusCodes.Status200OK)]
+        public async Task<ActionResult<LeaveYearInfoDto>> GetLeaveYear(CancellationToken ct = default)
+        {
+            var startMonth = await _leaveYear.StartMonthAsync(ct);
+            var year = await _leaveYear.CurrentYearAsync(ct);
+            return Ok(new LeaveYearInfoDto
+            {
+                StartMonth = startMonth,
+                CurrentYear = year,
+                StartDate = Core.Services.HR.LeaveYear.StartOf(year, startMonth),
+                EndDate = Core.Services.HR.LeaveYear.EndOf(year, startMonth),
+            });
         }
 
         /// <summary>
@@ -454,7 +577,7 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] Guid? leaveTypeId = null,
             [FromQuery] string? search = null)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var adjustments = await _leaveService.GetAllAdjustmentsAsync(year, employeeId, leaveTypeId, search);
             return Ok(adjustments);
         }
@@ -817,7 +940,7 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] Guid? leaveTypeId,
             CancellationToken ct = default)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var csv = await _leaveService.ExportBalancesCsvAsync(year, employeeId, leaveTypeId, ct);
             return File(csv, "text/csv", $"leave-balances-{year}.csv");
         }
@@ -828,7 +951,7 @@ namespace ErpSystem.Api.Controllers.HR
         public async Task<IActionResult> ExportCompliance(
             [FromQuery] int year, CancellationToken ct = default)
         {
-            if (year == 0) year = DateTime.Today.Year;
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
             var csv = await _leaveService.ExportComplianceCsvAsync(year, ct);
             return File(csv, "text/csv", $"leave-compliance-{year}.csv");
         }

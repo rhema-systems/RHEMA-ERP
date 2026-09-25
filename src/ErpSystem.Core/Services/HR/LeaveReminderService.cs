@@ -424,7 +424,12 @@ public class LeaveReminderService : ILeaveReminderService
         // MandatoryAnnualLeave flag). The compliance register already answers Taken / Scheduled /
         // Outstanding and nobody was ever told about the Outstanding ones (L-23). Only chased from
         // month 9, so it lands with a quarter of the year left to act.
-        if (today.Month >= policy.MandatoryLeaveChaseFromMonth)
+        //
+        // ⚠ Month 9 OF THE LEAVE YEAR (round 5, lane C4). This compared the calendar month, which is
+        // the same thing only for a January start: an April tenant was chased from September (their
+        // month 6) and never from January to March — the last quarter of their year, when the chase
+        // matters most.
+        if (LeaveYear.MonthOf(today, policy.LeaveYearStartMonth) >= policy.MandatoryLeaveChaseFromMonth)
         {
             var year = LeaveYear.For(today, policy.LeaveYearStartMonth);
             var yearEnd = LeaveYear.EndOf(year, policy.LeaveYearStartMonth);

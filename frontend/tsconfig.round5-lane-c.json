@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave.ts",
+    "src/types/hr/leave-request.ts",
+    "src/services/hr/leave.service.ts",
+    "src/components/hr/leave/use-leave-year.ts",
+    "src/components/hr/leave/AccrualStatementPanel.tsx",
+    "src/components/hr/leave/LeaveBalanceDetailDialog.tsx",
+    "src/components/hr/leave/LeaveRequestForm.tsx",
+    "src/components/me/leave/MyLeaveRequestForm.tsx",
+    "src/app/hr/leave/balances/**/*.tsx",
+    "src/app/me/leave/page.tsx",
+    "src/app/me/leave/planner/page.tsx",
+    "src/app/administration/hr/settings/policy/page.tsx"
+  ]
+}

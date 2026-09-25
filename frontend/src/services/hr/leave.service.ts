@@ -37,6 +37,9 @@ import type {
   LeaveYearEndResult,
   LeaveBulkRecalculationResult,
   LeaveEntitlementRepairResult,
+  LeaveAccrualStatement,
+  LeaveOwedReport,
+  LeaveYearInfo,
 } from '@/types/hr/leave-request';
 
 /**
@@ -337,6 +340,31 @@ class LeaveService {
 
   getBalanceDetail(id: string): Promise<LeaveBalanceDetail> {
     return apiService.get<LeaveBalanceDetail>(`${this.baseUrl}/balances/${id}`);
+  }
+
+  /**
+   * How a balance's accrual is worked out as at a date (round 5, lane C2). Self-or-HR: the portal
+   * reads the employee's own, the desk anybody's. `asOf` defaults to today on the server.
+   */
+  getAccrualStatement(balanceId: string, asOf?: string): Promise<LeaveAccrualStatement> {
+    return apiService.get<LeaveAccrualStatement>(
+      `${this.baseUrl}/balances/${balanceId}/accrual-statement`,
+      { asOf },
+    );
+  }
+
+  /** Annual leave built up and not yet taken, per employee, as at a date (round 5, lane C6). */
+  getLeaveOwed(asOf?: string): Promise<LeaveOwedReport> {
+    return apiService.get<LeaveOwedReport>(`${this.baseUrl}/balances/owed`, { asOf });
+  }
+
+  exportLeaveOwed(asOf?: string): Promise<Blob> {
+    return apiService.downloadBlob(`${this.baseUrl}/balances/owed/export`, { asOf });
+  }
+
+  /** The tenant's current leave year, so a screen can open on it (round 5, lane C4). */
+  getLeaveYear(): Promise<LeaveYearInfo> {
+    return apiService.get<LeaveYearInfo>(`${this.baseUrl}/leave-year`);
   }
 
   recalculateBalance(data: RecalculateLeaveBalanceRequest): Promise<void> {

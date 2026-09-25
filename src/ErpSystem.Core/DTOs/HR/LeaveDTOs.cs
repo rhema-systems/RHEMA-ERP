@@ -280,6 +280,12 @@ public class LeaveBalanceDto
     public int Year { get; set; }
     public decimal EntitledDays { get; set; }
     public decimal AccruedToDateDays { get; set; }
+
+    /// <summary>
+    /// The date <see cref="AccruedToDateDays"/> is worked out to (round 5, lane C2) — today, the year
+    /// end, or a leaver's last day. <c>null</c> for a leave type that does not accrue.
+    /// </summary>
+    public DateOnly? AccruedAsOf { get; set; }
     public decimal UsedDays { get; set; }
     public decimal PendingDays { get; set; }
     public decimal CarriedOverDays { get; set; }
@@ -375,6 +381,8 @@ public class LeaveBalanceDetailDto
     public int     Year                 { get; set; }
     public decimal EntitledDays         { get; set; }
     public decimal AccruedToDateDays    { get; set; }
+    /// <summary>The date <see cref="AccruedToDateDays"/> is worked out to (round 5, lane C2).</summary>
+    public DateOnly? AccruedAsOf        { get; set; }
     public decimal UsedDays             { get; set; }
     public decimal PendingDays          { get; set; }
     public decimal CarriedOverDays      { get; set; }
@@ -395,6 +403,189 @@ public class LeaveBalanceDetailDto
     public List<LeaveRequestDto>    Requests    { get; set; } = new();
     public List<LeaveEncashmentDto> Encashments { get; set; } = new();
     public List<LeaveAdjustmentDto> Adjustments { get; set; } = new();
+}
+
+// ─── Accrual statement (round 5, lane C2) ────────────────────────────────────
+
+/// <summary>
+/// How one balance's accrual is worked out as at a date: the rule, the entitlement and where it came
+/// from, the rate, and one line per completed period with a running total.
+/// </summary>
+/// <remarks>
+/// The answer to "HR might run a utility that accrues the leave days up to a date": nothing needs
+/// running, because accrual is worked out whenever it is asked for — this shows the working, for
+/// any date. Every figure comes from the same method the create check and the balance screens use.
+/// </remarks>
+public class LeaveAccrualStatementDto
+{
+    public Guid BalanceId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public Guid LeaveTypeId { get; set; }
+    public string LeaveTypeName { get; set; } = string.Empty;
+    public LeaveTypeCategory? LeaveTypeCategory { get; set; }
+    public int Year { get; set; }
+    public DateOnly YearStart { get; set; }
+    public DateOnly YearEnd { get; set; }
+
+    /// <summary>The date asked for (today when none was given).</summary>
+    public DateOnly RequestedAsOf { get; set; }
+
+    /// <summary>The date it is worked out to: earlier than asked at the year end or a leaver's last day.</summary>
+    public DateOnly AsOf { get; set; }
+    public LeaveAccrualAsOfLimit AsOfLimit { get; set; }
+    public LeaveAccrualState State { get; set; }
+
+    // The entitlement — the cap, and for a derived rate its source.
+    public decimal AnnualEntitledDays { get; set; }
+    public LeaveEntitlementSource EntitlementSource { get; set; }
+    public decimal EntitlementBaseDays { get; set; }
+    public string? StaffLevelName { get; set; }
+    public DateOnly? AllocationEffectiveFrom { get; set; }
+    public decimal? CeilingDays { get; set; }
+    public int? FirstYearMonthsPresent { get; set; }
+
+    /// <summary>
+    /// The entitlement stored on the balance row. Accrual follows the rulebook, so when the two differ
+    /// the statement says so (Repair entitlements brings the row into line).
+    /// </summary>
+    public decimal StoredEntitledDays { get; set; }
+
+    // The policy.
+    public bool HasPolicy { get; set; }
+    public AccrualFrequency? Frequency { get; set; }
+    public AccrualMode? Mode { get; set; }
+    public int? MinServiceMonths { get; set; }
+    public bool ProRateOnJoin { get; set; }
+    public bool ProRateOnExit { get; set; }
+
+    // The working.
+    public DateOnly? HiredOn { get; set; }
+    public DateOnly? LeftOn { get; set; }
+    public DateOnly? EligibleFrom { get; set; }
+    public DateOnly? WindowStart { get; set; }
+    public int PeriodsPerYear { get; set; }
+    public decimal RatePerPeriod { get; set; }
+    public bool RateIsDerived { get; set; }
+    public List<LeaveAccrualStatementLineDto> Periods { get; set; } = new();
+    public DateOnly? NextPeriodStart { get; set; }
+    public DateOnly? NextPeriodEnd { get; set; }
+    public bool TailNotCredited { get; set; }
+
+    /// <summary>The days accrued as at <see cref="AsOf"/>: the last line's running total.</summary>
+    public decimal AccruedDays { get; set; }
+    public bool CapReached { get; set; }
+}
+
+/// <summary>One completed accrual period.</summary>
+public class LeaveAccrualStatementLineDto
+{
+    public DateOnly Start { get; set; }
+    public DateOnly End { get; set; }
+    public decimal Days { get; set; }
+    public decimal RunningTotal { get; set; }
+    public bool Capped { get; set; }
+}
+
+// ─── Leave owed as at a date (round 5, lane C6 — decision A7) ────────────────
+
+/// <summary>
+/// Annual leave built up and not yet taken, per employee on the books, as at a chosen date. Days
+/// only: Finance puts the money on them.
+/// </summary>
+public class LeaveOwedReportDto
+{
+    /// <summary>The date the report is worked out to.</summary>
+    public DateOnly AsOf { get; set; }
+
+    /// <summary>The leave year the date falls in, and its bounds.</summary>
+    public int Year { get; set; }
+    public DateOnly YearStart { get; set; }
+    public DateOnly YearEnd { get; set; }
+
+    /// <summary>The tenant's annual leave type — the one leave the report is about.</summary>
+    public Guid LeaveTypeId { get; set; }
+    public string LeaveTypeName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When carried-in days stop being usable this year (the leave type's carry-over expiry), if they
+    /// ever do. On and after it, only carried days taken before it count.
+    /// </summary>
+    public DateOnly? CarryOverExpiresOn { get; set; }
+
+    public List<LeaveOwedRowDto> Rows { get; set; } = new();
+    public LeaveOwedTotalsDto Totals { get; set; } = new();
+}
+
+/// <summary>One employee's annual leave as at the report date.</summary>
+/// <remarks>
+/// <c>Owed = BuiltUp + CarriedIn + Adjustments − Taken − CashedIn</c>. Leave that is approved but not
+/// yet taken, and leave awaiting approval, is still owed: the person has not had it. The two are
+/// shown beside it so HR can see what is already spoken for.
+/// </remarks>
+public class LeaveOwedRowDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? StaffNumber { get; set; }
+    public string? OrganizationUnitName { get; set; }
+    public DateOnly? HiredOn { get; set; }
+
+    /// <summary>The last day of service of somebody who has left since the report date.</summary>
+    public DateOnly? LeftOn { get; set; }
+
+    /// <summary>The whole year's entitlement.</summary>
+    public decimal EntitledDays { get; set; }
+
+    /// <summary>Built up (accrued) to the report date — or the whole entitlement if the type does not accrue.</summary>
+    public decimal BuiltUpDays { get; set; }
+
+    /// <summary>Carried in from last year and still usable at the report date.</summary>
+    public decimal CarriedInDays { get; set; }
+
+    /// <summary>HR's adjustments to the year (opening balances, approved deferrals, forfeiture).</summary>
+    public decimal AdjustmentDays { get; set; }
+
+    /// <summary>Days of approved leave on or before the report date.</summary>
+    public decimal TakenDays { get; set; }
+
+    /// <summary>Days paid out instead of taken.</summary>
+    public decimal CashedInDays { get; set; }
+
+    public decimal OwedDays { get; set; }
+
+    /// <summary>Approved leave after the report date — owed, and already spoken for.</summary>
+    public decimal BookedDays { get; set; }
+
+    /// <summary>Leave awaiting approval — owed, and asked for.</summary>
+    public decimal AwaitingApprovalDays { get; set; }
+}
+
+/// <summary>The report's column totals.</summary>
+public class LeaveOwedTotalsDto
+{
+    public int Employees { get; set; }
+    public decimal EntitledDays { get; set; }
+    public decimal BuiltUpDays { get; set; }
+    public decimal CarriedInDays { get; set; }
+    public decimal AdjustmentDays { get; set; }
+    public decimal TakenDays { get; set; }
+    public decimal CashedInDays { get; set; }
+    public decimal OwedDays { get; set; }
+    public decimal BookedDays { get; set; }
+    public decimal AwaitingApprovalDays { get; set; }
+}
+
+/// <summary>
+/// The tenant's current leave year (round 5, lane C4), so screens can default to it rather than to
+/// the calendar year.
+/// </summary>
+public class LeaveYearInfoDto
+{
+    public int StartMonth { get; set; }
+    public int CurrentYear { get; set; }
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
 }
 
 // ─── Leave Plan ───────────────────────────────────────────────────────────────

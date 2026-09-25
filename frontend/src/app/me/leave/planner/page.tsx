@@ -42,6 +42,7 @@ import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { employeeRelieverService } from '@/services/hr/employee-reliever.service';
 import { LEAVE_PLAN_STATUS_BADGE } from '@/components/me/leave/leave-status';
 import { RelieverChooser, toRosterRelievers } from '@/components/hr/leave/LeavePlanRelievers';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import type { LeavePlan } from '@/types/hr/leave-request';
 
 const fmtDate = (d: string) =>
@@ -79,8 +80,10 @@ export default function MyLeavePlannerPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const employeeId = user?.employeeId ?? '';
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
+  // Round 5, C4: plans belong to a leave year, so the planner opens on the one we are in.
+  const { currentYear } = useLeaveYear();
+  const [chosenYear, setChosenYear] = useState<number | null>(null);
+  const year = chosenYear ?? currentYear;
   const [form, setForm] = useState<PlanFormState | null>(null);
   const [respondingTo, setRespondingTo] = useState<LeavePlan | null>(null);
   const [counterStart, setCounterStart] = useState('');
@@ -215,7 +218,7 @@ export default function MyLeavePlannerPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+            <Select value={String(year)} onValueChange={(v) => setChosenYear(Number(v))}>
               <SelectTrigger className="w-28">
                 <SelectValue />
               </SelectTrigger>

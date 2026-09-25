@@ -1,3 +1,4 @@
+using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR.Services;
 
 namespace ErpSystem.Core.Services.HR;
@@ -6,9 +7,14 @@ namespace ErpSystem.Core.Services.HR;
 public sealed class LeaveYearContext : ILeaveYearContext
 {
     private readonly ICompanyHrPolicyProvider _policyProvider;
+    private readonly IDateTimeProvider _clock;
     private int? _startMonth;
 
-    public LeaveYearContext(ICompanyHrPolicyProvider policyProvider) => _policyProvider = policyProvider;
+    public LeaveYearContext(ICompanyHrPolicyProvider policyProvider, IDateTimeProvider clock)
+    {
+        _policyProvider = policyProvider;
+        _clock = clock;
+    }
 
     /// <inheritdoc />
     public async Task<int> StartMonthAsync(CancellationToken cancellationToken = default)
@@ -23,4 +29,8 @@ public sealed class LeaveYearContext : ILeaveYearContext
         // door so the stored value is never propagated.
         return _startMonth is >= 1 and <= 12 ? _startMonth.Value : LeaveYear.CalendarStartMonth;
     }
+
+    /// <inheritdoc />
+    public async Task<int> CurrentYearAsync(CancellationToken cancellationToken = default)
+        => LeaveYear.For(_clock.TodayUtc, await StartMonthAsync(cancellationToken));
 }

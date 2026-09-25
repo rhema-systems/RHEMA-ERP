@@ -12,7 +12,7 @@
  * rather than implementing their own approval UI.
  */
 import type { PagedResult } from './common';
-import type { LeaveTypeCategory } from './leave';
+import type { AccrualFrequency, AccrualMode, LeaveTypeCategory } from './leave';
 
 export type LeaveStatus =
   | 'Draft'
@@ -262,6 +262,11 @@ export interface LeaveBalance {
   year: number;
   entitledDays: number;
   accruedToDateDays: number;
+  /**
+   * The date `accruedToDateDays` is worked out to (round 5, lane C2): today, the year end, or a
+   * leaver's last day. Null for a leave type that does not accrue.
+   */
+  accruedAsOf?: string | null;
   usedDays: number;
   pendingDays: number;
   carriedOverDays: number;
@@ -278,6 +283,125 @@ export interface LeaveBalanceDetail extends LeaveBalance {
   requests: LeaveRequest[];
   encashments: LeaveEncashment[];
   adjustments: LeaveAdjustment[];
+}
+
+// ── Accrual statement (round 5, lane C2) ────────────────────────────────────────
+
+export type LeaveAccrualState = 'NoPolicy' | 'YearNotStarted' | 'NotYetEligible' | 'FullGrant' | 'Accruing';
+export type LeaveAccrualAsOfLimit = 'None' | 'YearEnd' | 'LastDayOfService';
+export type LeaveEntitlementSource = 'LeaveTypeDefault' | 'StaffLevelAllocation';
+
+export interface LeaveAccrualStatementLine {
+  start: string;
+  end: string;
+  /** The days this period added — less than the rate when the cap stopped it. */
+  days: number;
+  runningTotal: number;
+  capped: boolean;
+}
+
+/** How one balance's accrual is worked out as at a date, from the same arithmetic the create check uses. */
+export interface LeaveAccrualStatement {
+  balanceId: string;
+  employeeId: string;
+  employeeName: string;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  leaveTypeCategory?: LeaveTypeCategory | null;
+  year: number;
+  yearStart: string;
+  yearEnd: string;
+  requestedAsOf: string;
+  /** The date it is worked out to — earlier than asked at the year end or a leaver's last day. */
+  asOf: string;
+  asOfLimit: LeaveAccrualAsOfLimit;
+  state: LeaveAccrualState;
+  annualEntitledDays: number;
+  entitlementSource: LeaveEntitlementSource;
+  entitlementBaseDays: number;
+  staffLevelName?: string | null;
+  allocationEffectiveFrom?: string | null;
+  ceilingDays?: number | null;
+  firstYearMonthsPresent?: number | null;
+  /** The entitlement stored on the balance row; accrual follows the rulebook when they differ. */
+  storedEntitledDays: number;
+  hasPolicy: boolean;
+  frequency?: AccrualFrequency | null;
+  mode?: AccrualMode | null;
+  minServiceMonths?: number | null;
+  proRateOnJoin: boolean;
+  proRateOnExit: boolean;
+  hiredOn?: string | null;
+  leftOn?: string | null;
+  eligibleFrom?: string | null;
+  windowStart?: string | null;
+  periodsPerYear: number;
+  ratePerPeriod: number;
+  rateIsDerived: boolean;
+  periods: LeaveAccrualStatementLine[];
+  nextPeriodStart?: string | null;
+  nextPeriodEnd?: string | null;
+  /** The next period runs past the year end, so its days inside the year are never credited. */
+  tailNotCredited: boolean;
+  accruedDays: number;
+  capReached: boolean;
+}
+
+// ── Leave owed as at a date (round 5, lane C6) ──────────────────────────────────
+
+/** One employee's annual leave as at the report date. Owed = built up + carried in + adjustments − taken − cashed in. */
+export interface LeaveOwedRow {
+  employeeId: string;
+  employeeName: string;
+  staffNumber?: string | null;
+  organizationUnitName?: string | null;
+  hiredOn?: string | null;
+  leftOn?: string | null;
+  entitledDays: number;
+  builtUpDays: number;
+  carriedInDays: number;
+  adjustmentDays: number;
+  takenDays: number;
+  cashedInDays: number;
+  owedDays: number;
+  /** Approved leave after the date — owed, and already spoken for. */
+  bookedDays: number;
+  /** Leave awaiting approval — owed, and asked for. */
+  awaitingApprovalDays: number;
+}
+
+export interface LeaveOwedTotals {
+  employees: number;
+  entitledDays: number;
+  builtUpDays: number;
+  carriedInDays: number;
+  adjustmentDays: number;
+  takenDays: number;
+  cashedInDays: number;
+  owedDays: number;
+  bookedDays: number;
+  awaitingApprovalDays: number;
+}
+
+export interface LeaveOwedReport {
+  asOf: string;
+  year: number;
+  yearStart: string;
+  yearEnd: string;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  /** The last day carried-in days are usable this year, if they lapse at all. */
+  carryOverExpiresOn?: string | null;
+  rows: LeaveOwedRow[];
+  totals: LeaveOwedTotals;
+}
+
+/** The tenant's current leave year (round 5, lane C4). */
+export interface LeaveYearInfo {
+  startMonth: number;
+  currentYear: number;
+  startDate: string;
+  endDate: string;
 }
 
 export interface RecalculateLeaveBalanceRequest {

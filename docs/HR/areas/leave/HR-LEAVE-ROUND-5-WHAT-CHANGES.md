@@ -4,8 +4,10 @@
 > (leave plans), [section 7](#7-cancelling-recalling-and-coming-back-to-work) (cancelling, recall
 > and coming back), [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person)
 > [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest) (kinds of leave, with the
-> leave-type form that starts from the kind) and [section 15](#15-setting-up-leave-types--simpler-and-honest)
-> (settings that do what they say, and the demo data) were built and tested on 25 September; nothing
+> leave-type form that starts from the kind), [section 15](#15-setting-up-leave-types--simpler-and-honest)
+> (settings that do what they say, and the demo data), the counting fix in
+> [section 4](#4-a-new-employees-first-two-years) and [section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)
+> (the accrual statement and the *leave owed* report) were built and tested on 25 September; nothing
 > else described here is built yet. This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
@@ -203,9 +205,12 @@ is set up now, and it stays.**
 | 31 Dec 2027 | **18 days** built up in 2027 — the nine months since qualifying. Up to 5 unused days carry into 2028. |
 | From 1 Jan 2028 | The full **24 days** a year, built up at 2 a month through the calendar year. |
 
-**A counting fix.** Today, monthly build-up reaches only 11 of the year's 12 months by the last day
-of the year — 22 of 24 days — because the twelfth month is not counted until the day after the year
-ends. After the fix, all 24 are there on 31 December.
+**A counting fix — built on 25 September.** Monthly build-up used to reach only 11 of the year's 12
+months by the last day of the year — 22 of 24 days — because a month was counted only on the day
+after it ended, and the twelfth month's "day after" is in the next year. Now a month counts **on its
+last day**: January's 2 days arrive on 31 January, and all 24 are there on 31 December. Quarterly and
+half-yearly build-up are fixed the same way, and somebody whose last day at work ends a month keeps
+that month.
 
 **Taking leave early.** You can take days as soon as they have built up — which is what "circumstances
 can force you to take part of your leave though it is not due" needs.
@@ -226,16 +231,25 @@ question about setting money aside for leave owed.)*
 works out what each person has built up whenever a screen asks, so the figure is always up to date.
 What it does not do is show its working.
 
-**What changes**
+**What changes** *(built 25 September)*
 
-- **An accrual statement** on each balance — on HR's balance screen and on the employee's *My Leave*.
-  It shows the rule (*24 days a year, built up monthly*), the rate and where it comes from (*your
-  grade's 24 days ÷ 12*), one line per completed month with a running total, and the date it is
-  worked out to. Wherever *Accrued* appears, it says **"as at"** a date.
-- **A "leave owed as at a date" report** for Finance: for every active employee, the annual leave
-  days built up and not yet taken on a chosen date — 31 December, say. It gives **days only**;
-  Finance puts the money on them. Because TDC's leave year and financial year are the same, the
-  year-end figure is straightforward.
+- **An accrual statement** on each balance. On HR's *Balances* page, click a row. On the employee's
+  *My Leave*, press **How it builds up** on the card.
+  - It shows the rule (*24 days a year, built up monthly*), the rate and where it comes from (*the
+    Senior Staff allocation, 24 ÷ 12*), one line per completed month with a running total, and the
+    date it is worked out to.
+  - Any date can be chosen — *"what will I have by December?"* is one click.
+  - Wherever *Accrued* appears, it says **"as at"** a date.
+- **A "leave owed as at a date" report** for Finance, at *Balances → Leave owed*. For everybody on
+  the books on a chosen date (31 December, say), it gives the annual leave days built up and not
+  yet taken, with a CSV. It gives **days only**; Finance puts the money on them.
+  - **Owed** = built up + carried in from last year (while still usable) + HR's adjustments − days
+    taken − days paid out.
+  - Leave that is approved but has not started yet is still owed: the person has not had it. It is
+    shown beside *Owed* as **Booked**, and leave waiting for approval likewise, so HR can see what
+    is already spoken for.
+  - Because TDC's leave year and financial year are the same, the year-end figure is
+    straightforward.
 
 ---
 
@@ -506,7 +520,9 @@ to pay cash or the encashment".)*
   - this year's days built up to the leaving date, plus carried days not yet expired, minus days
     already taken or booked;
   - **nothing** for somebody dismissed without notice, as the law says;
-  - the existing 56-day cap stays.
+  - the existing 56-day cap stays — and becomes a setting on the HR Policy Settings page, 56 by
+    default, instead of a number fixed in the program (decided 25 September). With this year's
+    days plus at most five carried, the cap will rarely be reached.
 - **HR decides the days, Finance the money** — which is what the stakeholders asked for. HR's figure
   on the settlement is marked **estimated**, and Finance confirms or corrects it before the settlement
   is paid.

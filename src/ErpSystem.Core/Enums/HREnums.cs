@@ -1118,6 +1118,57 @@ public enum AccrualMode
     FullGrantOnEligibility = 1
 }
 
+/// <summary>
+/// Where an employee's accrual stands for a leave year (round 5, lane C2): the one fact that decides
+/// how the rest of an accrual statement reads.
+/// </summary>
+public enum LeaveAccrualState
+{
+    /// <summary>
+    /// No accrual policy is in force, so the whole entitlement is there from the start of the year.
+    /// </summary>
+    NoPolicy = 0,
+
+    /// <summary>The date worked out to is before the leave year starts, or the employee left before it.</summary>
+    YearNotStarted = 1,
+
+    /// <summary>The employee has not yet served the policy's minimum months.</summary>
+    NotYetEligible = 2,
+
+    /// <summary>The policy grants the whole entitlement once the employee is eligible.</summary>
+    FullGrant = 3,
+
+    /// <summary>The entitlement builds up period by period.</summary>
+    Accruing = 4
+}
+
+/// <summary>
+/// Why an accrual is worked out to an earlier date than the one asked for.
+/// </summary>
+public enum LeaveAccrualAsOfLimit
+{
+    /// <summary>Worked out to the date asked for.</summary>
+    None = 0,
+
+    /// <summary>The date asked for is after the leave year ends, and accrual stops at the year end.</summary>
+    YearEnd = 1,
+
+    /// <summary>The employee has left, and the policy stops accrual on their last day (pro-rate on exit).</summary>
+    LastDayOfService = 2
+}
+
+/// <summary>
+/// Where a resolved annual entitlement came from.
+/// </summary>
+public enum LeaveEntitlementSource
+{
+    /// <summary>The leave type's own days per year.</summary>
+    LeaveTypeDefault = 0,
+
+    /// <summary>The allocation for the employee's staff level.</summary>
+    StaffLevelAllocation = 1
+}
+
 #endregion Staff Leave
 
 #region Performance Appraisal

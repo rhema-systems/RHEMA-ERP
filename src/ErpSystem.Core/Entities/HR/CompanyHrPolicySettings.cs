@@ -479,11 +479,14 @@ public class CompanyHrPolicySettings : TenantEntity
     public int LeaveUndecidedChaseDays { get; set; } = 5;
 
     /// <summary>
-    /// Month of the year from which outstanding mandatory leave starts being chased (9 = September).
+    /// Month of the LEAVE year from which outstanding annual leave starts being chased (9 = the ninth
+    /// month: September when the leave year starts in January).
     /// </summary>
     /// <remarks>
     /// Late enough that the chase is not noise, early enough that there is still time to take the
-    /// leave. Chasing in January says nothing; chasing in December is too late to act on.
+    /// leave. Chasing in the first month says nothing; chasing in the last is too late to act on.
+    /// ⚠ Counted from <see cref="LeaveYearStartMonth"/> since round 5, lane C4 — it was compared with
+    /// the calendar month, which agrees only for a January start.
     /// </remarks>
     [Range(1, 12)]
     public int MandatoryLeaveChaseFromMonth { get; set; } = 9;

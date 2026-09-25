@@ -68,4 +68,21 @@ public static class LeaveYear
     /// </remarks>
     public static DateOnly EndOf(int year, int startMonth)
         => StartOf(year, startMonth).AddYears(1).AddDays(-1);
+
+    /// <summary>
+    /// Which month of its leave year <paramref name="date"/> falls in, 1 to 12: the leave year's own
+    /// count, not the calendar's.
+    /// </summary>
+    /// <remarks>
+    /// Round 5, lane C4. Under an April start, 15 February is month 11 — the eleventh month of the
+    /// leave year that began the April before. A calendar month compared with a setting that means
+    /// "month N of the year" is right only while the year starts in January: reminder sweep 4 did
+    /// exactly that, so it would have chased an April tenant's staff from September (their month 6)
+    /// and never from January to March, the last quarter of their year.
+    /// </remarks>
+    public static int MonthOf(DateOnly date, int startMonth)
+    {
+        var start = startMonth <= 1 || startMonth > 12 ? 1 : startMonth;
+        return (date.Month - start + 12) % 12 + 1;
+    }
 }

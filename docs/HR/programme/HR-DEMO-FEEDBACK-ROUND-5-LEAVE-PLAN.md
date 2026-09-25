@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F, D, A and N done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F, D, A, N and C done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -19,7 +19,8 @@
 > | **D** | **DONE** 2026-09-25 — cancel, recall by the line manager, coming back to work · `run-round5-d.mjs` 74, green twice · § 8 |
 > | **A** | **DONE** 2026-09-25 — leave kinds (Annual, Maternity, Other) and a form that starts from the kind · `run-round5-a.mjs` 89, green twice (79, then 10 for the L-59 follow-up) · § 8 |
 > | **N** | **DONE** 2026-09-25 — settings that do what they say: the audit's ghosts, misleading settings and bypasses; the demo data; four more defects found · `run-round5-n.mjs` 92, green twice · § 8 |
-> | C · G · H · J · I · K · L | not started, in that order — **C is next** |
+> | **C** | **DONE** 2026-09-25 — accrual: a period counts on its last day; the accrual statement; leave owed as at a date; a leave year that does not start in January · `run-round5-c.mjs` 112, green twice · § 8 |
+> | G · H · J · I · K · L | not started, in that order — **G is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -264,7 +265,13 @@ For each finding, the simplest honest option: make it bind, relabel it truthfull
 ### Lane L — Encashment on exit only (A3, B5)
 
 - **L1** In-service encashment off on the demo tenant (the tenant seed in `ApplicationDbContext.HR.cs` and a UAT data change); the portal encashment screen hidden when it is off; FR-HR-046 honoured; TDC's L-D8 answer recorded when it comes.
-- **L2 The leaver's settlement** (`SeparationService.AddLeaveEncashmentLineAsync`, `:2227-2272`): Annual kind only; the days = the current leave year's accrued-to-exit (so `ProRateOnExit` binds) + unexpired carried − used − pending − encashed; no line when the separation reason is `SummaryDismissal` (Act s.30(3); `HREnums.cs:3611`); the FR-HR-152 56-day cap stays. The amount is marked **indicative**, and Finance confirms or corrects it at the settlement's Finance step — check what that step can already edit before building anything; a hand-off note to Finance.
+- **L2 The leaver's settlement** (`SeparationService.AddLeaveEncashmentLineAsync`, `:2227-2272`): Annual kind only; the days = the current leave year's accrued-to-exit (so `ProRateOnExit` binds) + unexpired carried − used − pending − encashed; no line when the separation reason is `SummaryDismissal` (Act s.30(3); `HREnums.cs:3611`); the FR-HR-152 56-day cap stays, as a setting (L2b). The amount is marked **indicative**, and Finance confirms or corrects it at the settlement's Finance step — check what that step can already edit before building anything; a hand-off note to Finance.
+- **L2b The 56-day cap becomes a setting** (the user's decision, 2026-09-25). It is a constant today (`SeparationService.cs:2232`, `encashmentCapDays = 56m`), visible on no screen and changeable only by a release.
+  - A company setting on `CompanyHrPolicySettings`, working name `SettlementLeaveDaysCap` (`int?`), **default 56**: FR-HR-152 is TDC's own requirement, so nothing needs asking. Empty means no cap, so the setting always does something.
+  - On the HR Policy Settings page beside the settlement's daily-rate basis (`SettlementDaysPerYear`), because both govern the leaver's leave line. The settlement reads it in place of the constant.
+  - Migration `AddSettlementLeaveDaysCap`: the user scaffolds it; it is rewritten as guarded SQL with the real default, 56, for every existing tenant row, never the scaffold's 0.
+  - Proved in both positions: a fixture leaver owed more days than a low cap is paid the cap; with the cap raised they are paid in full. A row in `HR-CONFIGURATION-REGISTER.md`.
+  - ⚠ After L2 the cap rarely binds for TDC: this year's share (at most the 30-day top allocation) plus at most 5 carried days is 35. The point is that the cap is visible and changeable, not a change in what anybody is paid.
 - **L3 Defensive, small — it matters only if a client switches in-service on:** encashment holds its days from approval (Approved counts against availability); the guard reads *can take now*; the portal sends the leave-year label; encashment draws only on the current leave year.
 - Not built — A3's fallback if a client enables in-service encashment: days above the statutory 15 only, once those are taken, posted in two steps like awards (recognise at hand-off, settle when paid).
 
@@ -281,6 +288,8 @@ For each finding, the simplest honest option: make it bind, relabel it truthfull
 - The anniversary leave year (A1) — only if TDC's conditions require it; the design notes stay in `HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md` § 2.3.
 - In-service encashment's Finance hand-off (A3).
 - Certified sickness during annual leave (Act s.24): a documented procedure — HR recalls from the first sick day (reason "certified sickness, Act s.24") and raises a sick-leave request; the employee takes the rest of the annual leave later.
+- A joiner's part period (lane C): accrual credits whole periods only, so a window opening mid-month loses the stretch after its last whole period in the year. The explainer's worked example (18 days) states it and the accrual statement names it. Crediting it pro rata is a question for R5-Q1, not a defect.
+- The desk leave screens' year pickers (adjustments, compliance, encashments, plans, register, requests, year-end) still open on the calendar year (lane C4 moved the portal's, the balances page's and every controller default). Invisible on a January leave year; a one-line change each (`useLeaveYear`).
 - Recall expenses (s.26): an ordinary claim.
 - A leave allowance (R5-Q3): a payroll element, if TDC pays one.
 - Sick-pay tiers (full pay, then half pay): payroll's.
@@ -733,3 +742,130 @@ and slices 3, 7, 10 and 11, which read the rules this lane changed, among them.
 
 - Chapter 21 item 12 of the guide resets the tenant divisor this lane took off the page; it still
   works (the value is stored) but no longer matters.
+
+### C — Accrual: the counting fix, the statement, leave owed as at a date · DONE 2026-09-25
+
+**Built.**
+
+- **C1, a period counts on its last day.** `LeaveEntitlementService` lays the periods out from the
+  window's start (each measured from the start, never chained, so a window opening on the 31st does
+  not drift) and credits every period whose last day has come.
+  - 31 December credits December: monthly reaches 24 of 24 days inside the year, quarterly four
+    quarters, half-yearly two halves. A stored incremental *Annual* row credits its year on the
+    last day; before, it credited nothing, ever.
+  - A leaver whose last day ends a month keeps that month.
+  - Nothing moves on a day that is not a period's last day. No stored figure changed: accrual is
+    worked out on read, and UAT holds 2026 balances only.
+- **One working, every reader.** The arithmetic is now two pure methods (`ResolveEntitlement`,
+  `WorkOut`) over facts loaded once: the type's rules for the year, and the employee's hire date,
+  last day and staff level (`LeaveAccrualSubject`). The single-employee reads, a new batch read
+  (`GetSnapshotsAsync`) and the statement all call them. A snapshot took about ten queries and now
+  takes four. The report reads 2,376 employees in about 0.3 s.
+- **C2, the accrual statement.** `GET api/Leaves/balances/{id}/accrual-statement?asOf=`, open to the
+  employee and the leave read tier. It returns the rule, the entitlement and its source (the
+  staff-level allocation named by grade, or the type's days; the ceiling and first-year scaling when
+  they apply), the rate (derived or fixed), one line per completed period with a running total, the
+  period under way, and the date it is worked out to and why (the year end, or a leaver's last day).
+  - Every balance read now carries `accruedAsOf`, from the same working.
+  - Screens: a row on `/hr/leave/balances` opens a new balance detail (the nine figures, the
+    statement with a date box, requests, adjustments, cashed-in days). *My Leave* says *built up N
+    as at <date>* and opens the employee's own statement. The *Accrued* column says as at when, and
+    both request forms add the date to *not accrued yet*.
+- **C4, a leave year that does not start in January.**
+  - `LeaveYear.MonthOf` gives the month of the leave year.
+  - First-year pro-rating counts leave-year months: an April-start joiner hired in February gets
+    2/12, not 11/12.
+  - Reminder sweep 4 compares the month of the leave year. The setting's label and help on the
+    policy page say so.
+  - `ILeaveYearContext.CurrentYearAsync` replaces `DateTime.Today.Year` in eleven controller
+    defaults across three controllers.
+  - `GET api/Leaves/leave-year` and a `useLeaveYear` hook open *My Leave*, the planner and the
+    balances page on the current leave year.
+- **C6, leave owed as at a date.** `GET api/Leaves/balances/owed?asOf=` and `/export`, with a screen
+  at `/hr/leave/balances/owed` reached from Balances. It covers TDC's annual leave, per employee, in
+  days. Owed = built up + carried in (unexpired) + adjustments − taken − cashed in; booked and
+  awaiting approval are shown beside it.
+
+**Changed from the plan, and why.**
+
+1. ⚠ **Owed is *built up and not yet taken*, not the plan's formula.** The plan subtracted pending
+   and every approved day, which is *can take now*, the days free to book. Leave approved for
+   November has not been had on 30 September, so it is owed, and the explainer had already promised
+   Finance "built up and not yet taken". Both are shown beside *Owed* (Booked, Awaiting). **For the
+   user to confirm.** If the plan's figure was meant, it is the row's Owed − Booked − Awaiting, one
+   line to change.
+2. **Adjustments are in owed.** The plan's formula left them out, but opening balances, B7's
+   approved deferrals and forfeiture are all adjustments.
+3. **"Unexpired carried" is defined:** in full until the carry-over expiry. From the expiry on, only
+   the carried days *taken* before it count, because carried days are used first; the rest lapsed.
+   ⚠ Lane G's expiry run should agree: today it zeroes carried days even when used (L-42), so a
+   report dated after a run of it would under-count those.
+4. **"Every active employee" is everybody on the books at the date:** hired on or before it, and
+   either still serving (`HrServingEmployees`, suspended included) or gone only since (last day on
+   or after the date). A leaver from before the date was paid through their settlement.
+   Adjustments and cashed-in days are labels on the year and count whatever their date. *Taken* is
+   dated, and leave straddling the date counts only its chargeable days up to it.
+5. **The statement is per balance**, the plan's route, so an employee with no balance row has none
+   until lane J lists everybody. The report works such employees out live and mints nothing.
+6. **There was no snapshot endpoint** to put the plan's as-of parameter on. The statement's `asOf`
+   is the vehicle, and the report's.
+7. **The balance detail had no screen** (guide § 23, L-66). It had an endpoint and nothing that
+   called it. Built as the "balance detail" the plan put the statement panel on.
+8. ⚠ **Found and fixed while designing C1: a derived rate that does not divide** (L-65). Accrual
+   was the periods × (entitlement ÷ periods) at full precision. Once December was credited, twelve
+   periods of 10/12 came to 9.9999…, and a ten-day request would have been refused on 31 December.
+   The total is now entitlement × periods ÷ 12, rounded once: exactly 10, and 4.17 after five
+   months.
+9. **C4's portal defaults cover *My Leave* and the planner.** `/me/leave/encashments` is lane L's
+   (it rewrites that screen, including L3's leave-year label). The desk pages' year pickers are
+   under *Noted, not built*.
+
+**Suite.** `dev-harness/hr-leave/run-round5-c.mjs`: **112 assertions, green twice**. Its first run was
+111/112, and the failure was its own. It asserted that 31 December, asked of its own year, is a
+year-end clamp; it is simply the date asked. The product was right.
+
+- Every C1 figure is asserted on both days of its boundary: the day before a period ends and the
+  day it ends.
+- C6 raises five real annual-leave requests for leave.emp on TDC's ANN (one moved into March by
+  SQL, in the same leave year) and plants 5 carried and 1 cashed-in day. It asserts owed exactly as
+  at five dates, including both days of the carry-over lapse.
+- C4 moves the tenant's leave year and chase month by SQL for seconds, restored in a `finally` and
+  on exit, as slice 13 does.
+- Shared rows it touches (leave.emp's hire date; lane E's B, C and X) are captured with `ISNULL`
+  and asserted restored.
+
+**Re-baselined, as the plan said C1 would:** slices 11 and 12 derived completed months as this month
+minus the start month, one short on a month's last day; slice 4's *accrued ≠ entitled* and *can take
+now < available* are false on 31 December once December counts. All three are exact figures now,
+true every day. The counts are unchanged (54, 27, 20).
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green:
+
+- **Slices 1–13 are at their recorded counts.** Slice 1 is 72/75, with the same three
+  environmental failures (UAT has no superseded single-stage definitions). Slices 4, 11 and 12 are
+  re-baselined, at 54, 27 and 20.
+- **The round 5 suites:** `run-round5-e.mjs` 119, `-f` 20, `-d` 74, `-a` 89, `-n` 92.
+- **`run-round5-c.mjs` was 112 a third time**, run last, after the eighteen others on the same
+  database.
+- **Cleanup:** the 24 harness types that slices 1–12 minted were switched off, measured first.
+  Only TDC's nine are active. leave.emp, lane E's fixtures and the tenant's settings are as found.
+- **Not run:** hr-medical, hr-portal, hr-separation and hr-finance. None calls anything this lane
+  changed except the year a call gets when it names none, and on UAT's January leave year that is
+  the calendar year, as before.
+
+**Found in passing.**
+
+- ⚠ **The guide's own worked example was wrong** (§ 1.3b): a Junior qualifying on 1 May has "10 days
+  by 31 December of year two". The engine said 8.75 until this lane. It is now what happens.
+- On UAT the owed report as at 31 December 2026 reads **47,289.75 days** across 2,376 employees,
+  including 2,037 days of opening-balance adjustments: scenario 020's +21 go-live entries on top of
+  entitlements that already give the days. It is a demo figure and not a realistic provision, and
+  the guide's § 13b says so.
+- The API log holds nothing from this lane, over the whole run: 8,200 notification-processing lines,
+  the notification clean-up failing under them (15, every one checked), and the procurement calendar
+  job. No line mentions leave, accrual or entitlement.
+- **Three more detached doc comments in committed code**, beside lane A's three, for the same
+  tidy-up: `CountsAsTaken`'s summary in `LeaveService.cs` follows another member's remarks,
+  `ILeaveServices.cs`'s attendance-reconcile summary follows the calendar's remarks, and
+  `LeavesController.cs` has two summaries stacked on the tenant-wide recalculation. None is this
+  lane's; a scan of every file it touched found no new one.

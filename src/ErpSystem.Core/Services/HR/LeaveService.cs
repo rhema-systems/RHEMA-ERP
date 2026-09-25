@@ -1792,6 +1792,7 @@ public class LeaveService : ILeaveService
             balance.EmployeeId, balance.LeaveTypeId, balance.LeaveSubTypeId, balance.Year);
 
         dto.AccruedToDateDays = snapshot.AccruedToDateDays;
+        dto.AccruedAsOf = snapshot.AccruedAsOf;
         dto.AccruedAvailableDays = EnforcedAvailableDays(
             snapshot, balance.EntitledDays, balance.CarriedOverDays, balance.AdjustmentDays,
             balance.UsedDays, balance.PendingDays, balance.EncashedDays);
@@ -2324,6 +2325,7 @@ public class LeaveService : ILeaveService
             Year                 = balance.Year,
             EntitledDays         = balance.EntitledDays,
             AccruedToDateDays    = snapshot.AccruedToDateDays,
+            AccruedAsOf          = snapshot.AccruedAsOf,
             UsedDays             = balance.UsedDays,
             PendingDays          = balance.PendingDays,
             CarriedOverDays      = balance.CarriedOverDays,
@@ -2341,6 +2343,321 @@ public class LeaveService : ILeaveService
         };
 
         return dto;
+    }
+
+    public async Task<LeaveAccrualStatementDto?> GetAccrualStatementAsync(
+        Guid balanceId, DateOnly? asOf, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var balance = await _leaveBalanceRepository
+            .GetQueryable()
+            .Include(lb => lb.LeaveType)
+            .Include(lb => lb.Employee)
+            .FirstOrDefaultAsync(lb => lb.Id == balanceId && lb.TenantId == tenantId, ct);
+
+        if (balance == null) return null;
+
+        // ⚠ The engine's own working, mapped and nothing more: a statement that re-derived any figure
+        // here would be a second account of the same arithmetic, and the first edit to either would
+        // make the statement disagree with the balance it explains.
+        var w = await _entitlementService.GetAccrualWorkingAsync(
+            balance.EmployeeId, balance.LeaveTypeId, balance.Year, asOf, ct);
+
+        return new LeaveAccrualStatementDto
+        {
+            BalanceId               = balance.Id,
+            EmployeeId              = balance.EmployeeId,
+            EmployeeName            = balance.Employee?.FullName ?? string.Empty,
+            LeaveTypeId             = balance.LeaveTypeId,
+            LeaveTypeName           = balance.LeaveType?.Name ?? string.Empty,
+            LeaveTypeCategory       = balance.LeaveType?.Category,
+            Year                    = w.Year,
+            YearStart               = w.YearStart,
+            YearEnd                 = w.YearEnd,
+            RequestedAsOf           = w.RequestedAsOf,
+            AsOf                    = w.AsOf,
+            AsOfLimit               = w.AsOfLimit,
+            State                   = w.State,
+            AnnualEntitledDays      = w.AnnualEntitledDays,
+            EntitlementSource       = w.EntitlementSource,
+            EntitlementBaseDays     = w.EntitlementBaseDays,
+            StaffLevelName          = w.StaffLevelName,
+            AllocationEffectiveFrom = w.AllocationEffectiveFrom,
+            CeilingDays             = w.CeilingDays,
+            FirstYearMonthsPresent  = w.FirstYearMonthsPresent,
+            StoredEntitledDays      = balance.EntitledDays,
+            HasPolicy               = w.HasPolicy,
+            Frequency               = w.Frequency,
+            Mode                    = w.Mode,
+            MinServiceMonths        = w.MinServiceMonths,
+            ProRateOnJoin           = w.ProRateOnJoin,
+            ProRateOnExit           = w.ProRateOnExit,
+            HiredOn                 = w.HiredOn,
+            LeftOn                  = w.LeftOn,
+            EligibleFrom            = w.EligibleFrom,
+            WindowStart             = w.WindowStart,
+            PeriodsPerYear          = w.PeriodsPerYear,
+            RatePerPeriod           = w.RatePerPeriod,
+            RateIsDerived           = w.RateIsDerived,
+            Periods                 = w.Periods.Select(p => new LeaveAccrualStatementLineDto
+            {
+                Start = p.Start, End = p.End, Days = p.Days, RunningTotal = p.RunningTotal, Capped = p.Capped,
+            }).ToList(),
+            NextPeriodStart         = w.NextPeriodStart,
+            NextPeriodEnd           = w.NextPeriodEnd,
+            TailNotCredited         = w.TailNotCredited,
+            AccruedDays             = w.AccruedDays,
+            CapReached              = w.CapReached,
+        };
+    }
+
+    /// <remarks>
+    /// <para><b>Round 5, lane C6 (decision A7).</b> Finance asked what the organisation owes in
+    /// untaken leave at a date — the year end, for its books. Days only; Finance puts the money on
+    /// them.</para>
+    ///
+    /// <para>⚠ <b>Owed means built up and not yet taken</b>, as the round 5 explainer promised:
+    /// <c>built up + carried in + adjustments − taken − cashed in</c>. The plan's formula also
+    /// subtracted pending and every approved day, which is <i>can take now</i> — a different figure:
+    /// leave that is approved for November, or waiting for approval, has not been had on 30
+    /// September, so it is still owed. Both are shown beside it.</para>
+    ///
+    /// <para><b>Who:</b> everybody on the books at the date — hired on or before it, and either
+    /// still serving or gone only since (their last day on or after it). A leaver from before the
+    /// date was paid through their settlement.</para>
+    ///
+    /// <para><b>Taken</b> is leave on or before the date: a request wholly before it counts as it was
+    /// charged, and one that straddles it counts its chargeable days up to it, by the same walk that
+    /// charged it.</para>
+    ///
+    /// <para><b>Carried in</b> counts in full until the carry-over expiry. From the expiry on, only the
+    /// carried days taken before it count (carried days are used first) — the rest lapsed.</para>
+    ///
+    /// <para><b>Adjustments and cashed-in days</b> are entries against the year, and count whatever
+    /// their date.</para>
+    /// </remarks>
+    public async Task<LeaveOwedReportDto> GetLeaveOwedAsync(DateOnly? asOf, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var date = asOf ?? _clock.TodayUtc;
+        var startMonth = await _leaveYear.StartMonthAsync(ct);
+        var year = LeaveYear.For(date, startMonth);
+        var yearStart = LeaveYear.StartOf(year, startMonth);
+        var yearEnd = LeaveYear.EndOf(year, startMonth);
+
+        // The tenant's annual leave: at most one type is Annual and active (round 5, A1).
+        var annual = await _leaveTypeRepository
+            .GetQueryable()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.IsActive && t.Category == LeaveTypeCategory.Annual, ct)
+            ?? throw new InvalidOperationException(
+                "No leave type is set up as annual leave, so there is no annual leave to report. " +
+                "Set the kind of the annual leave type to Annual.");
+
+        // ── Who: on the books at the date. Two reads rather than one OR, so "still serving" stays the
+        //    module's one definition (HrServingEmployees) instead of a copy of it inlined here.
+        var day = date.ToDateTime(TimeOnly.MinValue);
+        var serving = await _employeeRepository
+            .GetQueryable()
+            .Where(HrServingEmployees.Predicate)
+            .Where(e => e.TenantId == tenantId
+                     && (e.DateEmployed == null || e.DateEmployed <= date)
+                     && (e.TerminationDate == null || e.TerminationDate >= day))
+            .Select(e => new
+            {
+                e.Id, e.FirstName, e.MiddleName, e.LastName, e.EmployeeNumber,
+                UnitName = e.OrganizationUnit != null ? e.OrganizationUnit.Name : null,
+                e.DateEmployed, e.TerminationDate,
+                StaffLevelId = e.Position != null ? e.Position.StaffLevelId : null,
+            })
+            .ToListAsync(ct);
+        var leftSince = await _employeeRepository
+            .GetQueryable()
+            .Where(e => e.TenantId == tenantId
+                     && (e.DateEmployed == null || e.DateEmployed <= date)
+                     && e.TerminationDate != null && e.TerminationDate >= day)
+            .Select(e => new
+            {
+                e.Id, e.FirstName, e.MiddleName, e.LastName, e.EmployeeNumber,
+                UnitName = e.OrganizationUnit != null ? e.OrganizationUnit.Name : null,
+                e.DateEmployed, e.TerminationDate,
+                StaffLevelId = e.Position != null ? e.Position.StaffLevelId : null,
+            })
+            .ToListAsync(ct);
+        var people = serving.Concat(leftSince)
+            .GroupBy(p => p.Id).Select(g => g.First())
+            .OrderBy(p => p.LastName).ThenBy(p => p.FirstName)
+            .ToList();
+
+        // ── The year's figures, one read each.
+        var balances = (await _leaveBalanceRepository
+                .GetQueryable()
+                .Where(b => b.TenantId == tenantId && b.LeaveTypeId == annual.Id && b.Year == year)
+                .Select(b => new
+                {
+                    b.EmployeeId, b.LeaveSubTypeId, b.CreatedAt,
+                    b.EntitledDays, b.CarriedOverDays, b.AdjustmentDays, b.EncashedDays,
+                })
+                .ToListAsync(ct))
+            // One row per employee and type is the rule (RecalculateAsync keys on it). Should a stray
+            // second one exist, its counters are the same totals, so summing would double them.
+            .GroupBy(b => b.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(b => b.LeaveSubTypeId != null).ThenBy(b => b.CreatedAt).First());
+
+        var requests = (await _leaveRepository
+                .GetQueryable()
+                .Where(r => r.TenantId == tenantId
+                         && r.LeaveTypeId == annual.Id
+                         && r.StartDate >= yearStart && r.StartDate <= yearEnd
+                         && (r.Status == LeaveStatus.Approved
+                             || r.Status == LeaveStatus.InProgress
+                             || r.Status == LeaveStatus.Completed
+                             || r.Status == LeaveStatus.Pending))
+                .Select(r => new { r.EmployeeId, r.StartDate, r.EndDate, r.TotalDays, r.Status })
+                .ToListAsync(ct))
+            .ToLookup(r => r.EmployeeId);
+
+        var snapshots = await _entitlementService.GetSnapshotsAsync(
+            people.Select(p => new LeaveAccrualSubject(
+                p.Id, p.DateEmployed,
+                p.TerminationDate is DateTime left ? DateOnly.FromDateTime(left) : null,
+                p.StaffLevelId)).ToList(),
+            annual.Id, year, date, ct);
+
+        // The day carried-in days lapse, as the forfeiture run's expiry step reads it.
+        DateOnly? lapse = annual.CarryOverExpiryMonths is int expiryMonths ? yearStart.AddMonths(expiryMonths) : null;
+
+        // Days of one request taken on or before `through`, by the walk that charged it — so a
+        // Friday-to-Tuesday request split at the Sunday counts one day, not three.
+        async Task<decimal> TakenThrough(DateOnly start, DateOnly end, decimal total, DateOnly through)
+        {
+            if (end <= through) return total;
+            if (start > through) return 0m;
+            return Math.Min((await GetChargeableDaysAsync(start, through, annual)).Count, total);
+        }
+
+        var report = new LeaveOwedReportDto
+        {
+            AsOf = date,
+            Year = year,
+            YearStart = yearStart,
+            YearEnd = yearEnd,
+            LeaveTypeId = annual.Id,
+            LeaveTypeName = annual.Name,
+            CarryOverExpiresOn = lapse?.AddDays(-1),
+        };
+
+        foreach (var person in people)
+        {
+            var snapshot = snapshots[person.Id];
+            balances.TryGetValue(person.Id, out var balance);
+
+            decimal taken = 0m, booked = 0m, awaiting = 0m, takenBeforeLapse = 0m;
+            foreach (var r in requests[person.Id])
+            {
+                if (r.Status == LeaveStatus.Pending)
+                {
+                    awaiting += r.TotalDays;
+                    continue;
+                }
+
+                var byDate = await TakenThrough(r.StartDate, r.EndDate, r.TotalDays, date);
+                taken += byDate;
+                booked += r.TotalDays - byDate;
+                if (lapse is DateOnly l && date >= l)
+                    takenBeforeLapse += await TakenThrough(r.StartDate, r.EndDate, r.TotalDays, l.AddDays(-1));
+            }
+
+            var carried = balance?.CarriedOverDays ?? 0m;
+            var carriedIn = lapse is DateOnly lapsed && date >= lapsed ? Math.Min(carried, takenBeforeLapse) : carried;
+
+            // The same substitution the create check makes: a type that does not accrue hands over
+            // the stored entitlement, an accruing one what has built up by the date.
+            var entitled = balance?.EntitledDays ?? snapshot.AnnualEntitledDays;
+            var adjustments = balance?.AdjustmentDays ?? 0m;
+            var cashedIn = balance?.EncashedDays ?? 0m;
+
+            report.Rows.Add(new LeaveOwedRowDto
+            {
+                EmployeeId = person.Id,
+                EmployeeName = string.IsNullOrEmpty(person.MiddleName)
+                    ? $"{person.FirstName} {person.LastName}"
+                    : $"{person.FirstName} {person.MiddleName} {person.LastName}",
+                StaffNumber = person.EmployeeNumber,
+                OrganizationUnitName = person.UnitName,
+                HiredOn = person.DateEmployed,
+                LeftOn = person.TerminationDate is DateTime gone ? DateOnly.FromDateTime(gone) : null,
+                EntitledDays = entitled,
+                BuiltUpDays = snapshot.HasAccrualPolicy ? snapshot.AccruedToDateDays : entitled,
+                CarriedInDays = carriedIn,
+                AdjustmentDays = adjustments,
+                TakenDays = taken,
+                CashedInDays = cashedIn,
+                OwedDays = snapshot.AvailableFrom(entitled, carriedIn, adjustments, taken, 0m, cashedIn),
+                BookedDays = booked,
+                AwaitingApprovalDays = awaiting,
+            });
+        }
+
+        report.Totals = new LeaveOwedTotalsDto
+        {
+            Employees = report.Rows.Count,
+            EntitledDays = report.Rows.Sum(r => r.EntitledDays),
+            BuiltUpDays = report.Rows.Sum(r => r.BuiltUpDays),
+            CarriedInDays = report.Rows.Sum(r => r.CarriedInDays),
+            AdjustmentDays = report.Rows.Sum(r => r.AdjustmentDays),
+            TakenDays = report.Rows.Sum(r => r.TakenDays),
+            CashedInDays = report.Rows.Sum(r => r.CashedInDays),
+            OwedDays = report.Rows.Sum(r => r.OwedDays),
+            BookedDays = report.Rows.Sum(r => r.BookedDays),
+            AwaitingApprovalDays = report.Rows.Sum(r => r.AwaitingApprovalDays),
+        };
+
+        return report;
+    }
+
+    public async Task<byte[]> ExportLeaveOwedCsvAsync(DateOnly? asOf, CancellationToken ct = default)
+    {
+        // The screen's own read, so the file and the screen cannot disagree.
+        var report = await GetLeaveOwedAsync(asOf, ct);
+
+        // ⚠ Numbers are written bare, not through CsvCell: its guard against spreadsheet formulas
+        // prefixes a leading minus with a quote, which would turn a negative adjustment or a negative
+        // balance into text that a spreadsheet cannot add up. A number cannot carry a formula.
+        static string Days(decimal value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        static string Date(DateOnly? value) => CsvCell(value?.ToString("yyyy-MM-dd"));
+
+        var csv = new StringBuilder();
+        csv.AppendLine(string.Join(",", new[]
+        {
+            "As at", "Leave year", "Employee", "Staff number", "Organisation unit", "Hired", "Left",
+            "Entitlement", "Built up", "Carried in (unexpired)", "Adjustments", "Taken", "Cashed in",
+            "Owed", "Approved, not yet taken", "Awaiting approval",
+        }.Select(CsvCell)));
+
+        foreach (var r in report.Rows)
+        {
+            csv.AppendLine(string.Join(",", new[]
+            {
+                Date(report.AsOf),
+                report.Year.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                CsvCell(r.EmployeeName),
+                CsvCell(r.StaffNumber),
+                CsvCell(r.OrganizationUnitName),
+                Date(r.HiredOn),
+                Date(r.LeftOn),
+                Days(r.EntitledDays),
+                Days(r.BuiltUpDays),
+                Days(r.CarriedInDays),
+                Days(r.AdjustmentDays),
+                Days(r.TakenDays),
+                Days(r.CashedInDays),
+                Days(r.OwedDays),
+                Days(r.BookedDays),
+                Days(r.AwaitingApprovalDays),
+            }));
+        }
+
+        return Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
     }
 
     /// <remarks>

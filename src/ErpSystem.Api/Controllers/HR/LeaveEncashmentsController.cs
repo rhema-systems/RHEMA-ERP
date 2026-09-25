@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -25,6 +26,7 @@ public class LeaveEncashmentsController : ControllerBase
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IAuthorizationService _authorization;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeaveEncashmentsController> _logger;
 
     public LeaveEncashmentsController(
@@ -32,12 +34,14 @@ public class LeaveEncashmentsController : ControllerBase
         ApplicationDbContext db,
         ICurrentUserService currentUserService,
         IAuthorizationService authorization,
+        ILeaveYearContext leaveYear,
         ILogger<LeaveEncashmentsController> logger)
     {
         _service = service;
         _db = db;
         _currentUserService = currentUserService;
         _authorization = authorization;
+        _leaveYear = leaveYear;
         _logger = logger;
     }
 
@@ -74,7 +78,7 @@ public class LeaveEncashmentsController : ControllerBase
         [FromQuery] DateTime? to          = null,
         [FromQuery] string?   search      = null)
     {
-        if (year == 0) year = DateTime.Today.Year;
+        if (year == 0) year = await _leaveYear.CurrentYearAsync();
         return Ok(await _service.GetAllEncashmentsAsync(year, employeeId, leaveTypeId, from, to, search));
     }
 
@@ -99,7 +103,7 @@ public class LeaveEncashmentsController : ControllerBase
         if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
             return Forbid();
 
-        if (year == 0) year = DateTime.Today.Year;
+        if (year == 0) year = await _leaveYear.CurrentYearAsync();
         return Ok(await _service.GetEmployeeEncashmentsAsync(employeeId, year));
     }
 
