@@ -111,8 +111,8 @@ export interface TaxCalculationRequest {
     baseAmount: number;
     taxGroupId?: string | null;
     manualTaxIds?: string[] | null;
-    customerId?: string | null;
-    supplierId?: string | null;
+    businessPartnerId?: string | null;
+    businessPartnerRole?: 'Supplier' | 'Contractor' | 'Customer' | null;
     documentId?: string | null;
     documentType?: string | null; // Invoice, Order, etc.
 }

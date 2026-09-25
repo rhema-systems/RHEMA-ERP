@@ -523,6 +523,30 @@ public sealed class LegacyPostingPathLockdownTests
             .And.NotContain("request.SupplierId");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void TaxReporting_ShouldUseOneCanonicalCounterpartyFilterAndNoLegacySupplierLookup()
+    {
+        var root = FindRepositoryRoot();
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "TaxReportDtos.cs"));
+        var request = dto[dto.IndexOf("public sealed class TaxReportRequestDto", StringComparison.Ordinal)..dto.IndexOf("public sealed class GhanaTaxSnapshotReportDto", StringComparison.Ordinal)];
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "Taxation", "TaxReportingService.cs"));
+
+        request.Should().Contain("public Guid? BusinessPartnerId")
+            .And.Contain("public BusinessPartnerRoleType? BusinessPartnerRole")
+            .And.NotContain("CustomerId")
+            .And.NotContain("SupplierId");
+        service.Should().Contain("request.BusinessPartnerId")
+            .And.Contain("request.BusinessPartnerRole")
+            .And.Contain("docInfo.BusinessPartnerId")
+            .And.NotContain("_context.Set<Supplier>()")
+            .And.NotContain("request.CustomerId")
+            .And.NotContain("request.SupplierId")
+            .And.NotContain("docInfo.CustomerId")
+            .And.NotContain("docInfo.SupplierId");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -226,3 +226,9 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
 - Tax-calculation commands now use one canonical `BusinessPartnerId` plus an explicit
   `BusinessPartnerRole`; AP, AR and debit-note producers no longer send separate supplier/customer
   identity fields into the Finance tax engine.
+- Tax-report requests now use the same canonical `BusinessPartnerId` plus explicit role contract.
+  AP and AR source-document projections carry one counterparty ID, and the report validator no
+  longer queries the legacy Supplier table. The API build and focused architecture regression pass.
+  The Ghana tax-report fixture remains blocked before report execution by its pre-existing missing
+  `JournalEntry.AccountingBookId` setup (7/7 fixture tests fail at seed/save); no failure reaches the
+  changed filter path. No migration or database reset was executed.

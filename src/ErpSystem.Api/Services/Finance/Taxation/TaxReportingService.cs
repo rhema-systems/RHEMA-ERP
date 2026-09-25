@@ -123,7 +123,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 && l.VendorInvoice.InvoiceDate.Date <= toDate)
             .ToListAsync(cancellationToken);
 
-        foreach (var line in apLines.Where(l => SourceFiltersMatch(request, VendorInvoiceDocumentType, l.VendorInvoice.InvoiceNumber, null, l.VendorInvoice.BusinessPartnerId)))
+        foreach (var line in apLines.Where(l => SourceFiltersMatch(request, VendorInvoiceDocumentType, l.VendorInvoice.InvoiceNumber, l.VendorInvoice.BusinessPartnerId, BusinessPartnerRoleType.Supplier)))
         {
             var isPosted = line.VendorInvoice.JournalEntryId.HasValue && postedJournalSet.Contains(line.VendorInvoice.JournalEntryId.Value);
             if (!isPosted)
@@ -165,7 +165,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 && l.Invoice.InvoiceDate.Date <= toDate)
             .ToListAsync(cancellationToken);
 
-        foreach (var line in arLines.Where(l => SourceFiltersMatch(request, CustomerInvoiceDocumentType, l.Invoice.InvoiceNumber, l.Invoice.BusinessPartnerId, null)))
+        foreach (var line in arLines.Where(l => SourceFiltersMatch(request, CustomerInvoiceDocumentType, l.Invoice.InvoiceNumber, l.Invoice.BusinessPartnerId, BusinessPartnerRoleType.Customer)))
         {
             var isPosted = line.Invoice.JournalEntryId.HasValue && postedJournalSet.Contains(line.Invoice.JournalEntryId.Value);
             if (!isPosted)
@@ -506,7 +506,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 continue;
             }
 
-            if (!SourceFiltersMatch(request, documentType, docInfo.DocumentNumber, docInfo.CustomerId, docInfo.SupplierId))
+            if (!SourceFiltersMatch(request, documentType, docInfo.DocumentNumber, docInfo.BusinessPartnerId, docInfo.BusinessPartnerRole))
             {
                 continue;
             }
@@ -537,7 +537,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 SourceDocumentId = calc.DocumentId,
                 SourceDocumentNumber = docInfo.DocumentNumber,
                 SourceDocumentDate = docInfo.DocumentDate,
-                CounterpartyId = isOutputTax ? docInfo.CustomerId : docInfo.SupplierId,
+                CounterpartyId = docInfo.BusinessPartnerId,
                 CounterpartyName = docInfo.CounterpartyName,
                 TaxId = calc.TaxId,
                 TaxCode = calc.Tax.Code,
@@ -606,7 +606,7 @@ public sealed class TaxReportingService : ITaxReportingService
         var lines = new List<GhanaTaxWithholdingLineDto>();
         var diagnostics = new List<TaxReportDiagnosticDto>();
 
-        foreach (var payment in payments.Where(p => SourceFiltersMatch(request, VendorPaymentDocumentType, p.PaymentNumber, null, p.BusinessPartnerId)))
+        foreach (var payment in payments.Where(p => SourceFiltersMatch(request, VendorPaymentDocumentType, p.PaymentNumber, p.BusinessPartnerId, BusinessPartnerRoleType.Supplier)))
         {
             if (!payment.JournalEntryId.HasValue || !postedJournals.Contains(payment.JournalEntryId.Value))
             {
@@ -709,7 +709,7 @@ public sealed class TaxReportingService : ITaxReportingService
         var lines = new List<GhanaTaxWithholdingLineDto>();
         var diagnostics = new List<TaxReportDiagnosticDto>();
 
-        foreach (var payment in payments.Where(p => SourceFiltersMatch(request, CustomerPaymentDocumentType, p.PaymentNumber, p.BusinessPartnerId, null)))
+        foreach (var payment in payments.Where(p => SourceFiltersMatch(request, CustomerPaymentDocumentType, p.PaymentNumber, p.BusinessPartnerId, BusinessPartnerRoleType.Customer)))
         {
             if (!payment.JournalEntryId.HasValue || !postedJournals.Contains(payment.JournalEntryId.Value))
             {
@@ -829,14 +829,25 @@ public sealed class TaxReportingService : ITaxReportingService
             throw new InvalidOperationException("Tax account filter was not found for this tenant.");
         }
 
-        if (request.SupplierId.HasValue && !await _context.Set<Supplier>().AnyAsync(s => s.TenantId == TenantId && s.Id == request.SupplierId.Value && !s.IsDeleted, cancellationToken))
+        if (request.BusinessPartnerId.HasValue && !await _context.Set<BusinessPartner>().AnyAsync(
+                partner => partner.TenantId == TenantId
+                    && partner.Id == request.BusinessPartnerId.Value
+                    && !partner.IsDeleted,
+                cancellationToken))
         {
-            throw new InvalidOperationException("Supplier filter was not found for this tenant.");
+            throw new InvalidOperationException("Business Partner filter was not found for this tenant.");
         }
 
-        if (request.CustomerId.HasValue && !await _context.Set<BusinessPartner>().AnyAsync(c => c.TenantId == TenantId && c.Id == request.CustomerId.Value && !c.IsDeleted, cancellationToken))
+        if (request.BusinessPartnerId.HasValue
+            && request.BusinessPartnerRole.HasValue
+            && !await _context.Set<BusinessPartnerRole>().AnyAsync(
+                role => role.TenantId == TenantId
+                    && role.BusinessPartnerId == request.BusinessPartnerId.Value
+                    && role.RoleType == request.BusinessPartnerRole.Value
+                    && !role.IsDeleted,
+                cancellationToken))
         {
-            throw new InvalidOperationException("Customer filter was not found for this tenant.");
+            throw new InvalidOperationException($"Business Partner does not have the requested {request.BusinessPartnerRole.Value} role for this tenant.");
         }
     }
 
@@ -862,8 +873,8 @@ public sealed class TaxReportingService : ITaxReportingService
             d => new SourceDocumentInfo(
                 d.InvoiceNumber,
                 d.InvoiceDate.Date,
-                null,
                 d.BusinessPartnerId,
+                BusinessPartnerRoleType.Supplier,
                 d.SupplierName,
                 d.JournalEntryId,
                 d.JournalEntryId.HasValue && postedJournalIds.Contains(d.JournalEntryId.Value)));
@@ -892,7 +903,7 @@ public sealed class TaxReportingService : ITaxReportingService
                 d.InvoiceNumber,
                 d.InvoiceDate.Date,
                 d.BusinessPartnerId,
-                null,
+                BusinessPartnerRoleType.Customer,
                 d.CustomerName,
                 d.JournalEntryId,
                 d.JournalEntryId.HasValue && postedJournalIds.Contains(d.JournalEntryId.Value)));
@@ -1065,8 +1076,8 @@ public sealed class TaxReportingService : ITaxReportingService
         TaxReportRequestDto request,
         string documentType,
         string documentNumber,
-        Guid? customerId,
-        Guid? supplierId)
+        Guid? businessPartnerId,
+        BusinessPartnerRoleType businessPartnerRole)
     {
         if (!string.IsNullOrWhiteSpace(request.SourceDocumentType) &&
             !string.Equals(request.SourceDocumentType, documentType, StringComparison.OrdinalIgnoreCase))
@@ -1080,12 +1091,12 @@ public sealed class TaxReportingService : ITaxReportingService
             return false;
         }
 
-        if (request.CustomerId.HasValue && customerId != request.CustomerId.Value)
+        if (request.BusinessPartnerId.HasValue && businessPartnerId != request.BusinessPartnerId.Value)
         {
             return false;
         }
 
-        if (request.SupplierId.HasValue && supplierId != request.SupplierId.Value)
+        if (request.BusinessPartnerRole.HasValue && businessPartnerRole != request.BusinessPartnerRole.Value)
         {
             return false;
         }
@@ -1184,8 +1195,8 @@ public sealed class TaxReportingService : ITaxReportingService
     private sealed record SourceDocumentInfo(
         string DocumentNumber,
         DateTime DocumentDate,
-        Guid? CustomerId,
-        Guid? SupplierId,
+        Guid? BusinessPartnerId,
+        BusinessPartnerRoleType BusinessPartnerRole,
         string? CounterpartyName,
         Guid? JournalEntryId,
         bool IsJournalPosted);

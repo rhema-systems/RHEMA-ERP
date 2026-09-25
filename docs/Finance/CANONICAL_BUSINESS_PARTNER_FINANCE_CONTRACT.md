@@ -72,6 +72,9 @@ must not be interpreted as a promise that they override Finance settings.
 - Tax-calculation requests carry one `BusinessPartnerId` and an explicit `BusinessPartnerRole`.
   Threshold and customer-type rules no longer infer identity from mutually exclusive legacy
   `SupplierId`/`CustomerId` fields.
+- Tax-report filters follow the same contract. Source documents and payments expose one canonical
+  `BusinessPartnerId`; `BusinessPartnerRole` distinguishes Supplier, Contractor and Customer use.
+  Tax reporting never validates or resolves a legacy Finance Supplier/Customer master.
 
 ## Withholding contract
 

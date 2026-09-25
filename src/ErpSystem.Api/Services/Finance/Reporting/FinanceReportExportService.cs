@@ -1298,8 +1298,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             FromDate = request.PeriodStart,
             ToDate = request.PeriodEnd ?? request.AsOfDate,
             TaxAccountId = request.AccountIds.Count == 1 ? request.AccountIds[0] : (Guid?)null,
-            CustomerId = request.CustomerId,
-            SupplierId = request.SupplierId
+            BusinessPartnerId = request.BusinessPartnerId,
+            BusinessPartnerRole = request.BusinessPartnerRole
         };
     }
 

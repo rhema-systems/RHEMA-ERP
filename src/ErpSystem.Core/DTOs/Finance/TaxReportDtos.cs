@@ -1,4 +1,5 @@
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.Procurement;
 
 namespace ErpSystem.Core.DTOs.Finance;
 
@@ -9,8 +10,8 @@ public sealed class TaxReportRequestDto
     public Guid? TaxId { get; set; }
     public Guid? TaxGroupId { get; set; }
     public Guid? TaxAccountId { get; set; }
-    public Guid? CustomerId { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
+    public BusinessPartnerRoleType? BusinessPartnerRole { get; set; }
     public string? SourceDocumentType { get; set; }
     public string? SourceDocumentNumber { get; set; }
     public string? CertificateStatus { get; set; }

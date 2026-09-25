@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ErpSystem.Core.Entities.Procurement;
 
 namespace ErpSystem.Core.DTOs.Finance;
 
@@ -53,6 +54,8 @@ public sealed class FinanceReportExportRequestDto
     public List<Guid> AccountIds { get; set; } = new();
     public List<Guid> BankAccountIds { get; set; } = new();
     public List<Guid> GlAccountIds { get; set; } = new();
+    public Guid? BusinessPartnerId { get; set; }
+    public BusinessPartnerRoleType? BusinessPartnerRole { get; set; }
     public Guid? SupplierId { get; set; }
     public Guid? CustomerId { get; set; }
     public List<Guid> SupplierIds { get; set; } = new();
