@@ -294,3 +294,17 @@ readiness/deletion manifest and pass its environment gate. Unknown targets must 
   its exchange-rate assertion expects 12.5 while the current seed stores 0.08 under the active
   convention. A clean guarded reset must be rerun from the corrected commit before rehearsal so
   the three legacy Supplier rows created by the superseded seed are absent from the final baseline.
+- Corrected commit `6f2fd5b4` passed the complete guarded local reset. The sanitized, hash-valid
+  evidence is external to the repository at
+  `RHEMAERP_CANONICAL_BP_RESET_20260925_6f2fd5b4`. Direct post-reset verification reports all 16
+  migrations, three accounting books, six canonical demo partners/roles, three AP profiles, three
+  AR profiles, two WHT defaults, zero legacy Supplier rows and zero Finance journals.
+- The named rehearsal target `RHEMAERP_GL_REHEARSAL_FINAL_20260911` was dropped only after its
+  rehearsal-prefix assertion, recreated from a COPY_ONLY backup of the verified source, migrated,
+  seeded twice, integrity-checked and fingerprint-verified. The final clone rehearsal passed with
+  hash-valid external evidence at `RHEMAERP_CANONICAL_BP_REHEARSAL_20260925_6f2fd5b4`; direct clone
+  counts match the source and retain zero legacy Supplier rows.
+- UAT execution is gated because no UAT connection is configured in process, user or machine
+  environment variables or API user secrets. Multiple differently aged local databases contain
+  `UAT` in their names, so none is inferred as the authorized target. An exact server/database
+  connection must be supplied before the destructive UAT reset can proceed.
