@@ -297,9 +297,9 @@ public class LeaveService : ILeaveService
         // A request raised FROM a plan carries its id. The join has existed since the port and
         // nothing ever wrote it, so an approved plan dead-ended and the employee re-keyed their own
         // dates (closure plan L-9 / R-1). Now that a screen writes it, it needs guarding: the plan
-        // must be this employee's, approved, and not already spent.
+        // must be this employee's, approved, not already spent, and the same leave.
         if (dto.LeavePlanId is Guid planId)
-            await ValidateLeavePlanLinkAsync(planId, dto.EmployeeId);
+            await ValidateLeavePlanLinkAsync(planId, dto.EmployeeId, dto.LeaveTypeId);
 
         // Check that the employee is eligible for this leave type (gender / org / position rules)
         var isEligible = await _leaveTypeService.IsEmployeeEligibleAsync(dto.LeaveTypeId, dto.EmployeeId);
@@ -448,6 +448,11 @@ public class LeaveService : ILeaveService
         LeaveType leaveType;
         if (typeChanged)
         {
+            // A draft raised from a plan keeps its link through an edit, so the edit is the second
+            // door to the rule the create path holds (guide L-59).
+            if (request.LeavePlanId is Guid linkedPlanId)
+                await RequirePlansLeaveTypeAsync(linkedPlanId, dto.LeaveTypeId);
+
             leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
 
             // Moving a draft ONTO a retired type is the same refusal as raising one against it
@@ -1411,9 +1416,11 @@ public class LeaveService : ILeaveService
     /// one query for the whole list (round 5, decision B4).
     /// </summary>
     /// <remarks>
-    /// "Matches" means the plan is Approved and the request asks for exactly its dates. A plan whose
-    /// suggested dates were accepted already carries them as its own dates, so no separate check is
-    /// needed for that route. Any change of dates and the badge goes — that is the point of it.
+    /// "Matches" means the plan is Approved and the request asks for exactly its dates, as the same
+    /// leave. A plan whose suggested dates were accepted already carries them as its own dates, so no
+    /// separate check is needed for that route. Any change of dates and the badge goes — that is the
+    /// point of it. The leave type is compared too, although the create path and the draft edit
+    /// already refuse a different one (L-59): a link made before that rule must not claim a match.
     /// </remarks>
     private async Task MarkApprovedPlanMatchesAsync(List<LeaveRequestDto> requests, Guid tenantId)
     {
@@ -1425,7 +1432,7 @@ public class LeaveService : ILeaveService
             .Where(pl => pl.TenantId == tenantId
                       && planIds.Contains(pl.Id)
                       && pl.Status == LeavePlanStatus.Approved)
-            .Select(pl => new { pl.Id, pl.StartDate, pl.EndDate })
+            .Select(pl => new { pl.Id, pl.LeaveTypeId, pl.StartDate, pl.EndDate })
             .ToListAsync();
 
         var byId = plans.ToDictionary(p => p.Id);
@@ -1434,6 +1441,7 @@ public class LeaveService : ILeaveService
             request.MatchesApprovedPlan =
                 request.LeavePlanId is Guid planId
                 && byId.TryGetValue(planId, out var plan)
+                && plan.LeaveTypeId == request.LeaveTypeId
                 && plan.StartDate == request.StartDate
                 && plan.EndDate == request.EndDate;
         }
@@ -3003,7 +3011,7 @@ public class LeaveService : ILeaveService
     /// which leave type the eventual request draws on can legitimately differ, and the eight create
     /// checks already police the type on its own merits.
     /// </remarks>
-    private async Task ValidateLeavePlanLinkAsync(Guid planId, Guid employeeId)
+    private async Task ValidateLeavePlanLinkAsync(Guid planId, Guid employeeId, Guid leaveTypeId)
     {
         var tenantId = GetTenantId();
 
@@ -3030,6 +3038,34 @@ public class LeaveService : ILeaveService
         if (alreadyRaised)
             throw new InvalidOperationException(
                 "A leave request has already been raised from this plan. Cancel that request first if the dates have changed.");
+
+        await RequirePlansLeaveTypeAsync(planId, leaveTypeId);
+    }
+
+    /// <summary>
+    /// A request raised from a plan is that plan's leave (round 5, lane A follow-up; guide L-59).
+    /// </summary>
+    /// <remarks>
+    /// The link says "this request IS the agreed plan". It uses the plan up: no second request can
+    /// be raised from it, and HR cannot cancel it while this one is live. It is also what shows the
+    /// approver "matches the approved plan" (decision B4). A request for other leave would use up
+    /// the annual plan and carry that badge to an approver who relies on it, so other leave is raised
+    /// without the plan. Dates may still differ; the badge then goes, as designed.
+    /// </remarks>
+    private async Task RequirePlansLeaveTypeAsync(Guid planId, Guid leaveTypeId)
+    {
+        var tenantId = GetTenantId();
+        var plan = await _leavePlanRepository
+            .GetQueryable()
+            .Where(p => p.Id == planId && p.TenantId == tenantId)
+            .Select(p => new { p.LeaveTypeId, TypeName = p.LeaveType.Name })
+            .FirstOrDefaultAsync();
+
+        if (plan is null || plan.LeaveTypeId == leaveTypeId) return;
+
+        throw new InvalidOperationException(
+            $"This request is raised from an approved plan for {plan.TypeName}, so it must be "
+            + $"{plan.TypeName}. For other leave, raise the request without the plan.");
     }
 
     private static bool IsDuplicateRequestNumber(DbUpdateException ex)

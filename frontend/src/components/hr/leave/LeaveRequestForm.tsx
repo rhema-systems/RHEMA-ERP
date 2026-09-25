@@ -214,7 +214,8 @@ export function LeaveRequestForm({
         {form.watch('leavePlanId') && (
           <div className="mx-6 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
             Raised from an approved leave plan. The dates and relievers are the ones planned — change
-            them here if they have moved, and the request will still be linked to the plan.
+            them here if they have moved, and the request will still be linked to the plan. For any
+            other kind of leave, raise a request without the plan.
           </div>
         )}
 
@@ -237,6 +238,9 @@ export function LeaveRequestForm({
               label="Leave type"
               required
               options={(leaveTypes ?? []).map((t) => ({ value: t.id, label: t.name }))}
+              // A request raised from a plan is that plan's leave; the server refuses any other.
+              disabled={!!form.watch('leavePlanId')}
+              description={form.watch('leavePlanId') ? 'The leave the plan is for.' : undefined}
             />
             <SelectField
               form={form}

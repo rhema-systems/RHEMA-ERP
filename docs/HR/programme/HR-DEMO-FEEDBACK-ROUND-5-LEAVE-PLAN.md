@@ -17,7 +17,7 @@
 > | **E** | **DONE** 2026-09-25 — plans: relievers, the clash check, the approver's view · `run-round5-e.mjs` 119, green twice · § 8 |
 > | **F** | **DONE** 2026-09-25 — the calendar for one employee, and a unit with everything beneath it · `run-round5-f.mjs` 20, green twice · § 8 |
 > | **D** | **DONE** 2026-09-25 — cancel, recall by the line manager, coming back to work · `run-round5-d.mjs` 74, green twice · § 8 |
-> | **A** | **DONE** 2026-09-25 — leave kinds (Annual, Maternity, Other) and a form that starts from the kind · `run-round5-a.mjs` 79, green twice · § 8 |
+> | **A** | **DONE** 2026-09-25 — leave kinds (Annual, Maternity, Other) and a form that starts from the kind · `run-round5-a.mjs` 89, green twice (79, then 10 for the L-59 follow-up) · § 8 |
 > | N · C · G · H · J · I · K · L | not started, in that order — **N is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
@@ -589,16 +589,22 @@ employee created by a slice.
 3. **The maternity guard runs before the approver checks in suggest-changes**, so a non-approver's
    refusal says the request is maternity leave. Request ids are GUIDs and the read is tenant-scoped,
    so it was left.
-4. **A request raised from a plan is not held to the plan's kind** (guide § 23, L-59, open). The
-   new-request page pre-fills the plan's type and leaves it editable, and *matches the approved plan*
-   compares dates only. Holding the kind, or dropping the badge when the kinds differ, is a rule
-   nobody has decided; either would also move the lane E suite's plan-linked requests onto TDC's
-   annual type and its twelve-month service gate. Not built.
+4. **A request raised from a plan is the plan's leave** (guide § 23, L-59). Found here: the
+   new-request page pre-filled the plan's type and left it editable, a draft's edit could change it,
+   and *matches the approved plan* compared dates only, so a sick-leave request could use up an annual
+   plan and carry the badge. **The user decided the same evening** to hold the request to the plan's
+   leave, and it followed as its own commit: the service refuses another type when the request is
+   raised and when a draft of it is edited (`RequirePlansLeaveTypeAsync`); both request forms lock the
+   type, on the edit pages too; the badge compares the type as well, so a link made before the rule
+   claims no match. The shared `SelectField` gained an optional `disabled`, which no other caller
+   passes.
 5. **The kind cards say only what is built.** Annual's card names plans, cashing in, the compliance
    register, the reminder and the portal home. The balances view and the leaver's settlement are
    added to it in their lanes.
 
-**Suite.** `dev-harness/hr-leave/run-round5-a.mjs`: **79 assertions, green twice.** Its harness types
+**Suite.** `dev-harness/hr-leave/run-round5-a.mjs`: **89 assertions, green twice** — 79 for the lane,
+then 10 for the L-59 follow-up ([3b]: both doors, and the badge in both positions, one of them a link
+planted in SQL as it would have been made before the rule). Its harness types
 are switched on for the run and off after. One of them is made Annual while switched off and put back
 to Other, so the tenant keeps exactly one Annual type, which the suite asserts at the start and the
 end. TDC's ANN is saved once with an unchanged echo, and its row (37 columns, all but the audit stamp)
@@ -613,7 +619,10 @@ is hashed before and after.
   to lane L, with in-service encashment itself.
 - `run-round5-e.mjs` and slice 13 make their plans on the tenant's Annual type. Their requests stay on
   harness types, because annual leave has a twelve-month service gate. Slice 13 now switches its two
-  types off.
+  types off. Since the L-59 follow-up, lane E [8]'s two requests raised from a plan are annual leave
+  (the fixture has no hire date, so the gate lets it through, and it accrues from 1 January); the
+  annual balance the engine opens for them is deleted after the run, as is lane A [3b]'s, so the
+  fixture never shows in the demo's compliance register. Lane E: 119, green twice.
 - `hr-finance/run-slice2.mjs` cashes in on a harness type. It makes that type Annual by SQL for § 1
   only, then puts it back to Other and switched off, and restores the tenant's in-service switch (it
   used to leave it on). § 1 passed in full. The run was 54/56: the two failures were catalogue counts
@@ -630,6 +639,11 @@ is hashed before and after.
 notification-processing lines and the notification clean-up failing under them, three defect-#23
 payroll saves (the employees hr-finance minted), three award refusals logged as 500, and one
 procurement calendar job.
+
+After the L-59 follow-up, the same neighbours again: slices 1–13 at their counts (slice 1 72/75, slice 6
+32), `run-round5-f.mjs` 20, `run-round5-d.mjs` 74, and `run-round5-e.mjs` 119 twice with its [8]
+requests on annual leave. The API log held only the notification noise, its clean-up and the
+procurement job; the 24 harness types the slices made were switched off.
 
 **Found in passing.**
 

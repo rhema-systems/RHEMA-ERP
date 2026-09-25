@@ -1697,7 +1697,9 @@ has no employee picker.
 
 **A blue panel, when you arrived from a plan.** *Raised from an approved leave plan. The dates and
 relievers are the ones planned — change them here if they have moved, and the request will still be
-linked to the plan.* Chapter 12 is where that journey starts.
+linked to the plan. For any other kind of leave, raise a request without the plan.* The **Leave type** is
+locked to the plan's, reading *The leave the plan is for* (§ 23, L-59), on this form and when the
+draft is edited. Chapter 12 is where that journey starts.
 
 **Fields:** Employee picker · Leave type · **Sub-type** · Start date · End date · Reason *(required,
 1000 characters)* · Reliever · Second reliever · Reliever notes · Handover notes.
@@ -2776,9 +2778,11 @@ request** rather than dead-ending.
 whose kind is Annual (chapter 4), and the service refuses a plan, or an edit, of any other kind:
 *"Leave plans are for annual leave, and 'Sick Leave' is not. Other kinds of leave are requested when
 they are needed."* A plan of another kind made before this is left as it was, but cannot be edited
-until it is moved onto annual leave. ⚠ **The request raised from a plan is not held to the plan's
-kind**: its type is pre-filled and stays editable, and *matches the approved plan* compares dates
-only (§ 23, L-59, open).
+until it is moved onto annual leave. ⚠ **A request raised from a plan is the plan's leave** (§ 23,
+L-59): the form locks its type, and the service refuses another when the request is raised and when
+a draft of it is edited — *"This request is raised from an approved plan for Annual Leave, so it
+must be Annual Leave. For other leave, raise the request without the plan."* *Matches the approved
+plan* compares the type as well as the dates.
 
 ### 👁 On the page
 
@@ -3888,7 +3892,7 @@ nobody promises a stakeholder a button.
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
 **Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
-lane D closed three more, **L-55 to L-57**; lane A closed one and opened two, **L-58 to L-60**. All
+lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60**. All
 three blocks are listed after the settings audit.
 
 ### ✅ Closed
@@ -4005,15 +4009,15 @@ the round 5 plan's § 8.
 | **L-56** | ch. 7, 19.4 | The employee could cancel approved leave, even while on it; the desk could cancel at any stage, with no reason | The employee until approval; HR up to and including the first day, with a reason; after that, Recall |
 | **L-57** | ch. 7 | Nothing recorded that anyone came back: closing was a desk action with no day back, no early return and no overstay. Recall was HR's alone, and the line manager who needs someone back could not even open their request | *I'm back at work* and *Confirm return*; recall and confirmation by the supervisor or head of department; a read arm for them |
 
-### Round 5 lane A — leave kinds, 2026-09-25 — one found and closed, two open
+### Round 5 lane A — leave kinds, 2026-09-25 — two closed, one open
 
-Proved by `dev-harness/hr-leave/run-round5-a.mjs` (79 assertions, green twice). The build record is
+Proved by `dev-harness/hr-leave/run-round5-a.mjs` (89 assertions, green twice). The build record is
 the round 5 plan's § 8.
 
 | # | Where | Finding | Closed by |
 |---|---|---|---|
 | **L-58** | ch. 4, 7 | ⚠ **Switching maternity's certificate on, as planned, would have sent new mothers to a medical board.** The certificate switch also arms the board rule, whose default is 90 days a year, and the statutory extension on top of 84 days makes 98. On the demo database *Maternity Leave* had the certificate off, three days on the employee's word, and a board at 90 | *Maternity Leave* set, through HR's own save, to certificate on, 0 days, **no board**. The seeder sets the same for a fresh build, and the form's Maternity section says so. The suite proves both positions on its own maternity type |
-| **L-59** | ch. 6, 12 | A request raised from a plan is not held to the plan's kind. The new-request page pre-fills the plan's leave type and leaves it editable, and *matches the approved plan* compares dates only, so a sick-leave request on an annual plan's dates would carry the badge | **Open.** A rule to decide: hold the request to the plan's kind, or drop the badge when the kinds differ. Either way the lane E suite's plan-linked requests move onto annual leave, whose twelve-month service gate a fixture must then pass |
+| **L-59** | ch. 6, 12 | A request raised from a plan was not held to the plan's kind. The new-request page pre-filled the plan's leave type and left it editable, a draft's edit could change it, and *matches the approved plan* compared dates only, so a sick-leave request on an annual plan's dates would use the plan up and carry the badge | A request raised from a plan is the plan's leave: refused otherwise when raised and when a draft is edited; the form locks the type; the badge compares the type too (the user's decision, 2026-09-25) |
 | **L-60** | ch. 19 | The portal home reads balances by **calendar** year, not the leave year: a site the entitlement plan's C1 sweep missed. Invisible on a January tenant | **Open** — round 5 lane J, which reworks the balances view |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18

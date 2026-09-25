@@ -80,6 +80,8 @@ export default function EditLeaveRequestPage() {
             secondRelieverEmployeeId: r.secondRelieverEmployeeId ?? '',
             relieverNotes: r.relieverNotes ?? '',
             handoverNotes: r.handoverNotes ?? '',
+            // Shows the plan banner and holds the leave type to the plan's (guide L-59).
+            leavePlanId: r.leavePlanId ?? '',
           }}
           onSubmit={handleSubmit}
           submitting={submitting}

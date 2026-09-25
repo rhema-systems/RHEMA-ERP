@@ -287,13 +287,14 @@ right".)*
 - **Decline works** — it asks for your own dates.
 - **Spreading leave across the year** already works: several plans in one year — say 5 days in April,
   10 in August and 9 in December — as long as they do not overlap. A new **Add another period**
-  button makes it obvious. Only annual leave can be planned. *(This arrives with the leave kinds in
-  [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest); until then the plan form still
-  offers every leave type.)*
+  button makes it obvious. Only annual leave can be planned (built with the leave kinds,
+  [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest)).
 - **From an approved plan**, *Raise the leave request* (already there) fills in the dates and
   relievers. The request still goes through both approvals — the law and practice give you a *right*
   to your leave, not leave without approval — but approvers now see **"matches the approved plan"**,
-  so the approval is quick.
+  so the approval is quick. The request is for the plan's leave — annual leave — and its type cannot
+  be changed: sick or casual leave is started as a new request, so it cannot use up the plan or carry
+  the badge.
 
 ---
 
