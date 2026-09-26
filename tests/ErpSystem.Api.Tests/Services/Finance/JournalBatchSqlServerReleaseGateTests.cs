@@ -817,6 +817,10 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             var creditAccountId = Guid.NewGuid();
             var bookId = Guid.NewGuid();
             var parallelBookId = Guid.NewGuid();
+            var primaryLiabilityClassificationId = Guid.NewGuid();
+            var primaryAssetClassificationId = Guid.NewGuid();
+            var parallelLiabilityClassificationId = Guid.NewGuid();
+            var parallelAssetClassificationId = Guid.NewGuid();
 
             await using var context = CreateContext();
             context.Tenants.Add(new Tenant
@@ -924,29 +928,67 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                     CurrencyCode = "GHS",
                     AllowDirectPosting = true
                 });
+            context.AccountClassifications.AddRange(
+                new AccountClassification
+                {
+                    Id = primaryLiabilityClassificationId, TenantId = tenantId,
+                    AccountingBookId = bookId, Code = "LIABILITY", Name = "Liabilities",
+                    CoreAccountType = AccountType.Liability, IsPostingClassification = true,
+                    Status = AccountClassificationStatus.Active
+                },
+                new AccountClassification
+                {
+                    Id = primaryAssetClassificationId, TenantId = tenantId,
+                    AccountingBookId = bookId, Code = "ASSET", Name = "Assets",
+                    CoreAccountType = AccountType.Asset, IsPostingClassification = true,
+                    Status = AccountClassificationStatus.Active
+                });
             context.AccountAccountingBooks.AddRange(
                 new AccountAccountingBook
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, AccountId = debitAccountId,
-                    AccountingBookId = bookId, IsEnabled = true
+                    AccountingBookId = bookId,
+                    AccountClassificationId = primaryLiabilityClassificationId,
+                    IsEnabled = true
                 },
                 new AccountAccountingBook
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, AccountId = creditAccountId,
-                    AccountingBookId = bookId, IsEnabled = true
+                    AccountingBookId = bookId,
+                    AccountClassificationId = primaryAssetClassificationId,
+                    IsEnabled = true
                 });
             if (includeParallelBook)
             {
+                context.AccountClassifications.AddRange(
+                    new AccountClassification
+                    {
+                        Id = parallelLiabilityClassificationId, TenantId = tenantId,
+                        AccountingBookId = parallelBookId, Code = "LIABILITY", Name = "Liabilities",
+                        CoreAccountType = AccountType.Liability, IsPostingClassification = true,
+                        Status = AccountClassificationStatus.Active
+                    },
+                    new AccountClassification
+                    {
+                        Id = parallelAssetClassificationId, TenantId = tenantId,
+                        AccountingBookId = parallelBookId, Code = "ASSET", Name = "Assets",
+                        CoreAccountType = AccountType.Asset, IsPostingClassification = true,
+                        Status = AccountClassificationStatus.Active
+                    });
                 context.AccountAccountingBooks.AddRange(
                     new AccountAccountingBook
                     {
                         Id = Guid.NewGuid(), TenantId = tenantId, AccountId = debitAccountId,
-                        AccountingBookId = parallelBookId, IsEnabled = true
+                        AccountingBookId = parallelBookId,
+                        AccountClassificationId = parallelLiabilityClassificationId,
+                        IsEnabled = true
                     },
                     new AccountAccountingBook
                     {
                         Id = Guid.NewGuid(), TenantId = tenantId, AccountId = creditAccountId,
-                        AccountingBookId = parallelBookId, IsEnabled = true
+                        AccountingBookId = parallelBookId,
+                        AccountClassificationId = parallelAssetClassificationId,
+                        IsEnabled = true
                     });
             }
             await context.SaveChangesAsync();

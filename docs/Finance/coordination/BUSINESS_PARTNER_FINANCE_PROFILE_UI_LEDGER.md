@@ -103,3 +103,11 @@
 - Independent review initially identified the replication-cutoff and obsolete-error-code implications; both findings were incorporated before commit.
 - Database state: unchanged; this is a test-fixture correction only.
 - Pending verification: focused review and another complete hosted Finance integration gate.
+
+### SQL Server concurrency follow-up
+
+- Run `36242217888` passed every build and consumer stage, then exposed a race-dependent fixture gap in the dry-reconciliation concurrency contract: when the Primary posting won the race, reconciliation correctly rejected the posted evidence because the seeded account/book mappings had no active posting classifications. When preview won locally, that invalid after-post path was not exercised.
+- Correction: seed active, posting-eligible Asset and Liability classifications for every governed account/book mapping used by the SQL release fixture. This makes both legal serialization orders valid and preserves the contract's requirement for a zero-drift snapshot wholly before or wholly after posting.
+- Database state: unchanged; this remains a test-fixture correction only.
+- Verification: fixture-only test assembly build passed with 0 errors; the focused SQL concurrency contract passed against local `EXPRESS22`; independent review approved both serialization orders with no blockers.
+- Pending verification: complete hosted gate.
