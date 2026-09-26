@@ -2242,6 +2242,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_AcceptedSupplyPurchaseOrder",
                     "[AcceptedSupplyKind] IS NULL OR [AcceptedSupplyKind] = 3 OR [PurchaseOrderId] IS NOT NULL");
+                table.HasCheckConstraint(
+                    "CK_VendorInvoice_WhtScopeCoherent",
+                    "([WithholdingTaxId] IS NULL AND [WithholdingContractReference] IS NULL AND [WithholdingSupplyCategory] IS NULL) OR ([WithholdingTaxId] IS NOT NULL AND LEN([WithholdingContractReference]) BETWEEN 1 AND 100 AND [WithholdingSupplyCategory] BETWEEN 0 AND 2)");
             });
             entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
@@ -2299,6 +2302,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.MatchingControlEventId });
             entity.HasIndex(e => new { e.TenantId, e.MatchExceptionControlEventId });
             entity.HasIndex(e => new { e.TenantId, e.ExchangeRateId });
+            entity.HasIndex(e => new
+            {
+                e.TenantId,
+                e.BusinessPartnerId,
+                e.WithholdingTaxId,
+                e.WithholdingContractReference,
+                e.WithholdingSupplyCategory
+            }).HasDatabaseName("IX_VendorInvoice_WhtStatutoryScope");
             entity.HasIndex(e => new
                 {
                     e.TenantId,
@@ -12786,6 +12797,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_TDC0504ApMatchTolerances",
                     "[ApInvoicePriceTolerancePercent] BETWEEN 0 AND 100 AND [ApInvoiceQuantityTolerancePercent] BETWEEN 0 AND 100");
+                table.HasCheckConstraint(
+                    "CK_FinanceSettings_WhtStatutoryYearStart",
+                    "[WhtStatutoryYearStartMonth] BETWEEN 1 AND 12 AND [WhtStatutoryYearStartDay] BETWEEN 1 AND DAY(EOMONTH(DATEFROMPARTS(2001, [WhtStatutoryYearStartMonth], 1)))");
                 if (isSqlServer)
                     table.HasCheckConstraint(
                         "CK_FinanceSettings_BaseCurrencyCanonical_C3",
@@ -12799,6 +12813,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             // SQL default matches the TDC control default even for maintenance/import inserts
             // that do not instantiate the C# entity property initializer.
             entity.Property(s => s.RequireDepreciationBeforePeriodClose).HasDefaultValue(true);
+            entity.Property(s => s.WhtStatutoryYearStartMonth).HasDefaultValue(1);
+            entity.Property(s => s.WhtStatutoryYearStartDay).HasDefaultValue(1);
             entity.HasOne(s => s.UnrealizedFxGainAccount)
                 .WithMany()
                 .HasForeignKey(s => s.UnrealizedFxGainAccountId)

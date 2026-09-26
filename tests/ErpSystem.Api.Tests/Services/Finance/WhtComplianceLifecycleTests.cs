@@ -67,6 +67,8 @@ public sealed class WhtComplianceLifecycleTests
             CurrencyCode = "GHS",
             ExchangeRate = 1m,
             WithholdingTaxId = fixture.Tax.Id,
+            WithholdingContractReference = "CONTRACT-001",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services,
             // Deliberately hostile compatibility values prove that server configuration wins.
             WithholdingTaxRate = 99m,
             WithholdingTaxAccountId = Guid.NewGuid(),
@@ -100,21 +102,7 @@ public sealed class WhtComplianceLifecycleTests
 
         // Below-threshold payments carry the tax/base snapshot even though no amount was withheld.
         // That is what lets the server enforce the annual supplier aggregate on later payments.
-        db.Set<VendorPayment>().Add(new VendorPayment
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            PaymentNumber = "VP-WHT-PRIOR",
-            BusinessPartnerId = fixture.Partner.Id,
-            PaymentDate = new DateTime(2026, 3, 5),
-            TotalAmount = 1_500m,
-            AllocatedAmount = 1_500m,
-            CurrencyCode = "GHS",
-            ExchangeRate = 1m,
-            WithholdingTaxId = fixture.Tax.Id,
-            WithholdingTaxBaseAmount = 1_500m,
-            Status = VendorPaymentStatus.Processed
-        });
+        SeedPostedWhtPayment(db, fixture, "VP-WHT-PRIOR", new DateTime(2026, 3, 5), 1_500m, 0m);
         await db.SaveChangesAsync();
 
         var service = CreateService(db, tenantId);
@@ -123,21 +111,27 @@ public sealed class WhtComplianceLifecycleTests
             TaxId = fixture.Tax.Id,
             BusinessPartnerId = fixture.Partner.Id,
             PaymentDate = new DateTime(2026, 5, 1),
-            TaxableBase = 400m
+            TaxableBase = 400m,
+            ContractReference = "CONTRACT-001",
+            SupplyCategory = WhtSupplyCategory.Services
         });
         var crossing = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = fixture.Tax.Id,
             BusinessPartnerId = fixture.Partner.Id,
             PaymentDate = new DateTime(2026, 5, 1),
-            TaxableBase = 600m
+            TaxableBase = 600m,
+            ContractReference = "CONTRACT-001",
+            SupplyCategory = WhtSupplyCategory.Services
         });
         var newYear = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
             TaxId = fixture.Tax.Id,
             BusinessPartnerId = fixture.Partner.Id,
             PaymentDate = new DateTime(2027, 1, 10),
-            TaxableBase = 1_000m
+            TaxableBase = 1_000m,
+            ContractReference = "CONTRACT-001",
+            SupplyCategory = WhtSupplyCategory.Services
         });
 
         below.ThresholdApplied.Should().BeFalse();
@@ -148,6 +142,75 @@ public sealed class WhtComplianceLifecycleTests
         crossing.WithholdingAmount.Should().Be(45m, "7.5% applies to the full GHS 600 crossing payment");
         newYear.CumulativeBefore.Should().Be(0m, "payment-date calendar years are separate statutory aggregates");
         newYear.ThresholdApplied.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-WHT")]
+    [Trait("Category", "Tax")]
+    public async Task Calculation_ShouldExcludeDraftsAndUnrelatedContractScopes()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+
+        SeedPostedWhtPayment(db, fixture, "VP-WHT-IN-SCOPE", new DateTime(2026, 3, 5), 500m, 0m);
+        SeedPostedWhtPayment(
+            db,
+            fixture,
+            "VP-WHT-OTHER-CONTRACT",
+            new DateTime(2026, 3, 6),
+            5_000m,
+            375m,
+            "CONTRACT-OTHER",
+            WhtSupplyCategory.Services);
+        SeedUnpostedWhtPayment(db, fixture, "VP-WHT-DRAFT", new DateTime(2026, 3, 7), 10_000m);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id,
+            BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 5, 1),
+            TaxableBase = 1_000m,
+            ContractReference = "contract-001",
+            SupplyCategory = WhtSupplyCategory.Services
+        });
+
+        result.CumulativeBefore.Should().Be(500m);
+        result.CumulativeAfter.Should().Be(1_500m);
+        result.ThresholdApplied.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-WHT")]
+    [Trait("Category", "Tax")]
+    public async Task Calculation_ShouldUseTenantConfiguredStatutoryYearBoundary()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        await db.SaveChangesAsync();
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.WhtStatutoryYearStartMonth = 7;
+        settings.WhtStatutoryYearStartDay = 1;
+        SeedPostedWhtPayment(db, fixture, "VP-WHT-JUNE", new DateTime(2026, 6, 30), 1_500m, 0m);
+        SeedPostedWhtPayment(db, fixture, "VP-WHT-JULY", new DateTime(2026, 7, 1), 400m, 0m);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id,
+            BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 7, 2),
+            TaxableBase = 1_000m,
+            ContractReference = "CONTRACT-001",
+            SupplyCategory = WhtSupplyCategory.Services
+        });
+
+        result.StatutoryPeriodStart.Should().Be(new DateTime(2026, 7, 1));
+        result.StatutoryPeriodEnd.Should().Be(new DateTime(2027, 6, 30));
+        result.CumulativeBefore.Should().Be(400m, "the June payment belongs to the prior statutory year");
+        result.ThresholdApplied.Should().BeFalse();
     }
 
     [Fact]
@@ -350,6 +413,11 @@ public sealed class WhtComplianceLifecycleTests
         });
         db.AccountingBooks.Add(book);
         db.Taxes.Add(tax);
+        db.FinanceSettings.Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrency = "GHS",
+            WhtStatutoryYearStartMonth = 1, WhtStatutoryYearStartDay = 1
+        });
         return new WhtFixture(tenantId, partner, role, profile, tax, book);
     }
 
@@ -357,7 +425,11 @@ public sealed class WhtComplianceLifecycleTests
         ApplicationDbContext db,
         WhtFixture fixture,
         string paymentNumber,
-        DateTime paymentDate)
+        DateTime paymentDate,
+        decimal taxableBase = 1_000m,
+        decimal withholdingAmount = 75m,
+        string contractReference = "CONTRACT-001",
+        WhtSupplyCategory supplyCategory = WhtSupplyCategory.Services)
     {
         var journal = new JournalEntry
         {
@@ -373,6 +445,20 @@ public sealed class WhtComplianceLifecycleTests
             AccountingBookId = fixture.Book.Id,
             BookClassification = fixture.Book.Code
         };
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            InvoiceNumber = $"INV-{paymentNumber}", BusinessPartnerId = fixture.Partner.Id,
+            BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id,
+            SupplierName = fixture.Partner.PartnerName, InvoiceDate = paymentDate,
+            CurrencyCode = "GHS", ExchangeRate = 1m, SubTotal = taxableBase,
+            TotalAmount = taxableBase, BaseCurrencyAmount = taxableBase,
+            Status = VendorInvoiceStatus.Approved, ApprovalStatus = "Approved",
+            WithholdingTaxId = fixture.Tax.Id,
+            WithholdingContractReference = contractReference,
+            WithholdingSupplyCategory = supplyCategory
+        };
         var payment = new VendorPayment
         {
             Id = Guid.NewGuid(),
@@ -386,22 +472,86 @@ public sealed class WhtComplianceLifecycleTests
             BusinessPartnerLegalName = fixture.Partner.LegalName,
             BusinessPartnerTaxIdentificationNumber = fixture.Partner.TaxIdentificationNumber,
             PaymentDate = paymentDate,
-            TotalAmount = 925m,
-            AllocatedAmount = 925m,
+            TotalAmount = taxableBase - withholdingAmount,
+            AllocatedAmount = taxableBase - withholdingAmount,
             CurrencyCode = "GHS",
             ExchangeRate = 1m,
             WithholdingTaxId = fixture.Tax.Id,
             WithholdingTaxRate = 7.5m,
-            WithholdingTaxBaseAmount = 1_000m,
-            WithholdingTaxAmount = 75m,
+            WithholdingTaxBaseAmount = taxableBase,
+            WithholdingTaxAmount = withholdingAmount,
             WithholdingTaxThresholdAmount = 2_000m,
             WithholdingTaxThresholdApplied = true,
             Status = VendorPaymentStatus.Processed,
             JournalEntryId = journal.Id
         };
         journal.SourceDocumentId = payment.Id;
+        var allocation = new VendorPaymentAllocation
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            VendorPaymentId = payment.Id, VendorPayment = payment,
+            VendorInvoiceId = invoice.Id, VendorInvoice = invoice,
+            AllocatedAmount = taxableBase - withholdingAmount,
+            PaymentCurrencyAmount = taxableBase - withholdingAmount,
+            SettlementFunctionalAmount = taxableBase,
+            WithholdingTaxAmount = withholdingAmount,
+            WithholdingTaxFunctionalAmount = withholdingAmount,
+            AllocationDate = paymentDate
+        };
         db.JournalEntries.Add(journal);
+        db.VendorInvoices.Add(invoice);
         db.Set<VendorPayment>().Add(payment);
+        db.Set<VendorPaymentAllocation>().Add(allocation);
+        return payment;
+    }
+
+    private static VendorPayment SeedUnpostedWhtPayment(
+        ApplicationDbContext db,
+        WhtFixture fixture,
+        string paymentNumber,
+        DateTime paymentDate,
+        decimal taxableBase)
+    {
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            InvoiceNumber = $"INV-{paymentNumber}", BusinessPartnerId = fixture.Partner.Id,
+            BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id,
+            SupplierName = fixture.Partner.PartnerName, InvoiceDate = paymentDate,
+            CurrencyCode = "GHS", ExchangeRate = 1m, SubTotal = taxableBase,
+            TotalAmount = taxableBase, BaseCurrencyAmount = taxableBase,
+            Status = VendorInvoiceStatus.Approved, ApprovalStatus = "Approved",
+            WithholdingTaxId = fixture.Tax.Id,
+            WithholdingContractReference = "CONTRACT-001",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services
+        };
+        var payment = new VendorPayment
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            PaymentNumber = paymentNumber,
+            BusinessPartnerId = fixture.Partner.Id,
+            BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id,
+            BusinessPartnerCode = fixture.Partner.PartnerCode,
+            BusinessPartnerName = fixture.Partner.PartnerName,
+            PaymentDate = paymentDate, TotalAmount = taxableBase,
+            AllocatedAmount = taxableBase, CurrencyCode = "GHS", ExchangeRate = 1m,
+            WithholdingTaxId = fixture.Tax.Id,
+            WithholdingTaxRate = 7.5m,
+            WithholdingTaxBaseAmount = taxableBase,
+            Status = VendorPaymentStatus.Draft
+        };
+        db.VendorInvoices.Add(invoice);
+        db.Set<VendorPayment>().Add(payment);
+        db.Set<VendorPaymentAllocation>().Add(new VendorPaymentAllocation
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            VendorPaymentId = payment.Id, VendorPayment = payment,
+            VendorInvoiceId = invoice.Id, VendorInvoice = invoice,
+            AllocatedAmount = taxableBase, PaymentCurrencyAmount = taxableBase,
+            SettlementFunctionalAmount = taxableBase, AllocationDate = paymentDate
+        });
         return payment;
     }
 

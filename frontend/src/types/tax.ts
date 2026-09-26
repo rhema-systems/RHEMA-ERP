@@ -254,6 +254,8 @@ export interface WhtCalculationRequest {
     taxableBase: number;
     excludeVendorPaymentId?: string;
     vendorInvoiceIds?: string[];
+    contractReference: string;
+    supplyCategory: 'Goods' | 'Works' | 'Services' | 0 | 1 | 2;
 }
 
 export interface WhtCalculationResult {
@@ -270,6 +272,10 @@ export interface WhtCalculationResult {
     withholdingAmount: number;
     taxPayableAccountId?: string | null;
     calculationNote: string;
+    contractReference: string;
+    supplyCategory: 'Goods' | 'Works' | 'Services' | 0 | 1 | 2;
+    statutoryPeriodStart: string;
+    statutoryPeriodEnd: string;
 }
 
 export interface WhtRemittanceLiability {

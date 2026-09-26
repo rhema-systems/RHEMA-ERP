@@ -64,6 +64,8 @@ public class VendorInvoiceDto
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
     public DateTime? WithholdingCertificateDate { get; set; }
+    public string? WithholdingContractReference { get; set; }
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
 
     // Matching
     public InvoiceMatchingType MatchingType { get; set; }
@@ -149,6 +151,9 @@ public class VendorInvoiceCreateDto
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
     public DateTime? WithholdingCertificateDate { get; set; }
+    [MaxLength(100)]
+    public string? WithholdingContractReference { get; set; }
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
 
     // Matching
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
@@ -208,6 +213,9 @@ public class VendorInvoiceUpdateDto
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
     public DateTime? WithholdingCertificateDate { get; set; }
+    [MaxLength(100)]
+    public string? WithholdingContractReference { get; set; }
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
 
     public InvoiceMatchingType MatchingType { get; set; }
 
@@ -875,8 +883,7 @@ public class VendorPaymentAllocationCreateDto
     [Required]
     public Guid VendorInvoiceId { get; set; }
 
-    [Required]
-    [Range(0.01, double.MaxValue)]
+    [Range(0, double.MaxValue)]
     public decimal AllocatedAmount { get; set; }
 
     /// <summary>
@@ -884,6 +891,7 @@ public class VendorPaymentAllocationCreateDto
     /// the invoice-currency reduction. Same-currency callers may omit this value; cross-currency
     /// callers must state both native amounts so Finance never invents a commercial conversion.
     /// </summary>
+    [Range(0, double.MaxValue)]
     public decimal? PaymentCurrencyAmount { get; set; }
 
     /// <summary>
@@ -893,7 +901,9 @@ public class VendorPaymentAllocationCreateDto
     /// </summary>
     public Guid? InvoiceSettlementExchangeRateId { get; set; }
 
+    [Range(0, double.MaxValue)]
     public decimal DiscountAmount { get; set; }
+    [Range(0, double.MaxValue)]
     public decimal WithholdingTaxAmount { get; set; }
     public string? Notes { get; set; }
 }
@@ -932,6 +942,8 @@ public class OutstandingVendorInvoiceDto
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
     public bool IsDiscountAvailable { get; set; }
     public decimal? DiscountAmount { get; set; }
+    public string? WithholdingContractReference { get; set; }
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
     public VendorPaymentInvoiceReadinessDto? PaymentReadiness { get; set; }
 }
 

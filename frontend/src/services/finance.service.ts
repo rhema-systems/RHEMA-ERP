@@ -66,6 +66,8 @@ export interface FinanceSettings {
   coaType: 'Standard' | 'Segmented';
   coaConfigurationLocked: boolean;
   baseCurrency: string;
+  whtStatutoryYearStartMonth?: number;
+  whtStatutoryYearStartDay?: number;
   retainedEarningsAccountId?: string;
   unrealizedGainLossAccountId?: string;
   unrealizedFxGainAccountId?: string;

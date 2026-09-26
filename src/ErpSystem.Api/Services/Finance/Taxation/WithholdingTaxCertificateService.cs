@@ -189,6 +189,13 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             throw new InvalidOperationException("WHT taxable base cannot be negative.");
         }
 
+        var contractReference = dto.ContractReference?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(contractReference) || !dto.SupplyCategory.HasValue)
+        {
+            throw new InvalidOperationException(
+                "WHT calculation requires the supplier contract/reference and Goods, Works, or Services category.");
+        }
+
         var supplierExists = await _context.Set<BusinessPartner>().AsNoTracking().AnyAsync(supplier =>
             supplier.TenantId == TenantId && !supplier.IsDeleted && supplier.Id == dto.BusinessPartnerId,
             cancellationToken);
@@ -215,29 +222,56 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 invoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
             if (invoices.Count != invoiceIds.Count)
                 throw new InvalidOperationException("A selected WHT invoice does not belong to this supplier and tenant.");
+            if (invoices.Any(invoice =>
+                    !string.Equals(invoice.WithholdingContractReference, contractReference, StringComparison.OrdinalIgnoreCase)
+                    || invoice.WithholdingSupplyCategory != dto.SupplyCategory))
+                throw new InvalidOperationException("Selected WHT invoices must share the requested contract/reference and supply category.");
             var decision = ApInvoiceWithholdingPolicy.Resolve(invoices, dto.TaxId);
             if (decision != null) effectiveRate = decision.Rate;
         }
-        var fiscalYearStart = new DateTime(paymentDate.Year, 1, 1);
+
+        var settings = await _context.Set<FinanceSettings>().AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
+        var statutoryMonth = settings?.WhtStatutoryYearStartMonth ?? 1;
+        var statutoryDay = settings?.WhtStatutoryYearStartDay ?? 1;
+        var boundaryThisYear = new DateTime(paymentDate.Year, statutoryMonth, statutoryDay);
+        var fiscalYearStart = paymentDate >= boundaryThisYear
+            ? boundaryThisYear
+            : boundaryThisYear.AddYears(-1);
         var fiscalYearEnd = fiscalYearStart.AddYears(1);
 
-        // Payments below the threshold still carry TaxId/BaseAmount and therefore contribute to
-        // the annual supplier aggregate. Cancelled/reversed/failed records are excluded because
-        // they no longer represent an eligible statutory payment.
-        var cumulativeQuery = _context.Set<VendorPayment>().AsNoTracking().Where(payment =>
-            payment.TenantId == TenantId && !payment.IsDeleted
-            && payment.BusinessPartnerId == dto.BusinessPartnerId && payment.WithholdingTaxId == dto.TaxId
-            && payment.PaymentDate >= fiscalYearStart && payment.PaymentDate < fiscalYearEnd
-            && payment.Status != VendorPaymentStatus.Voided
-            && payment.Status != VendorPaymentStatus.Reversed
-            && payment.Status != VendorPaymentStatus.Failed);
+        // Only posted allocation evidence contributes. Draft/authorized payments are reservations,
+        // not statutory payments, and abandoned drafts must never move the threshold. The invoice
+        // owns the contract/category scope, preventing unrelated engagements with one supplier
+        // from being combined.
+        var cumulativeQuery = _context.Set<VendorPaymentAllocation>().AsNoTracking().Where(allocation =>
+            allocation.TenantId == TenantId && !allocation.IsDeleted && !allocation.IsReversal
+            && allocation.VendorPayment.TenantId == TenantId && !allocation.VendorPayment.IsDeleted
+            && allocation.VendorPayment.BusinessPartnerId == dto.BusinessPartnerId
+            && allocation.VendorPayment.WithholdingTaxId == dto.TaxId
+            && allocation.VendorPayment.JournalEntryId.HasValue
+            && _context.Set<JournalEntry>().Any(journal =>
+                journal.TenantId == TenantId && !journal.IsDeleted
+                && journal.Id == allocation.VendorPayment.JournalEntryId.Value
+                && journal.PostingStatus == PostedStatus)
+            && allocation.VendorPayment.PaymentDate >= fiscalYearStart
+            && allocation.VendorPayment.PaymentDate < fiscalYearEnd
+            && allocation.VendorPayment.Status != VendorPaymentStatus.Voided
+            && allocation.VendorPayment.Status != VendorPaymentStatus.Reversed
+            && allocation.VendorPayment.Status != VendorPaymentStatus.Failed
+            && allocation.VendorInvoice.WithholdingContractReference == contractReference
+            && allocation.VendorInvoice.WithholdingSupplyCategory == dto.SupplyCategory
+            && !_context.Set<VendorPaymentAllocation>().Any(reversal =>
+                reversal.TenantId == TenantId && !reversal.IsDeleted && reversal.IsReversal
+                && reversal.OriginalAllocationId == allocation.Id));
         if (dto.ExcludeVendorPaymentId.HasValue)
         {
-            cumulativeQuery = cumulativeQuery.Where(payment => payment.Id != dto.ExcludeVendorPaymentId.Value);
+            cumulativeQuery = cumulativeQuery.Where(allocation =>
+                allocation.VendorPaymentId != dto.ExcludeVendorPaymentId.Value);
         }
 
         var cumulativeBefore = RoundMoney(await cumulativeQuery.SumAsync(
-            payment => payment.WithholdingTaxBaseAmount,
+            allocation => allocation.SettlementFunctionalAmount,
             cancellationToken));
         var taxableBase = RoundMoney(dto.TaxableBase);
         var cumulativeAfter = RoundMoney(cumulativeBefore + taxableBase);
@@ -252,8 +286,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var note = !threshold.HasValue
             ? $"{tax.Code} has no minimum threshold; {effectiveRate:N4}% applies to the full taxable base."
             : thresholdApplied
-                ? $"Annual supplier aggregate {cumulativeAfter:N2} meets/exceeds the configured {threshold.Value:N2} threshold; {effectiveRate:N4}% applies to the full current payment base."
-                : $"Annual supplier aggregate {cumulativeAfter:N2} remains below the configured {threshold.Value:N2} threshold; no WHT is deducted."
+                ? $"Statutory aggregate for {contractReference}/{dto.SupplyCategory} is {cumulativeAfter:N2} and meets/exceeds the configured {threshold.Value:N2} threshold; {effectiveRate:N4}% applies to the full current payment base."
+                : $"Statutory aggregate for {contractReference}/{dto.SupplyCategory} is {cumulativeAfter:N2} and remains below the configured {threshold.Value:N2} threshold; no WHT is deducted."
 ;
 
         return new WhtCalculationResultDto
@@ -270,7 +304,11 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             ThresholdApplied = thresholdApplied,
             WithholdingAmount = withholdingAmount,
             TaxPayableAccountId = tax.TaxPayableAccountId,
-            CalculationNote = note
+            CalculationNote = note,
+            ContractReference = contractReference,
+            SupplyCategory = dto.SupplyCategory.Value,
+            StatutoryPeriodStart = fiscalYearStart,
+            StatutoryPeriodEnd = fiscalYearEnd.AddDays(-1)
         };
     }
 

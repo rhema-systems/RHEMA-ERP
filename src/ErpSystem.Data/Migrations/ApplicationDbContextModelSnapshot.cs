@@ -17219,6 +17219,16 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
+                    b.Property<int>("WhtStatutoryYearStartDay")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<int>("WhtStatutoryYearStartMonth")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<decimal>("CashTillVarianceApprovalThreshold")
                         .HasColumnType("decimal(18,4)");
 
@@ -17504,6 +17514,8 @@ namespace ErpSystem.Data.Migrations
                             t.HasCheckConstraint("CK_FinanceSettings_BaseCurrencyCanonical_C3", "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
 
                             t.HasCheckConstraint("CK_FinanceSettings_TDC0504ApMatchTolerances", "[ApInvoicePriceTolerancePercent] BETWEEN 0 AND 100 AND [ApInvoiceQuantityTolerancePercent] BETWEEN 0 AND 100");
+
+                            t.HasCheckConstraint("CK_FinanceSettings_WhtStatutoryYearStart", "[WhtStatutoryYearStartMonth] BETWEEN 1 AND 12 AND [WhtStatutoryYearStartDay] BETWEEN 1 AND DAY(EOMONTH(DATEFROMPARTS(2001, [WhtStatutoryYearStartMonth], 1)))");
                         });
                 });
 
@@ -29338,6 +29350,13 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
+                    b.Property<string>("WithholdingContractReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("WithholdingSupplyCategory")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("WithholdingTaxAccountId")
                         .HasColumnType("uniqueidentifier");
 
@@ -29387,6 +29406,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "BusinessPartnerId", "InvoiceDate");
 
+                    b.HasIndex(new[] { "TenantId", "BusinessPartnerId", "WithholdingTaxId", "WithholdingContractReference", "WithholdingSupplyCategory" }, "IX_VendorInvoice_WhtStatutoryScope");
+
                     b.HasIndex(new[] { "TenantId", "AcceptedSupplyKind", "AcceptedSupplySourceId" }, "UX_VendorInvoice_AcceptedCertificate")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0 AND [AcceptedSupplyKind] IN (2, 3) AND [AcceptedSupplySourceId] IS NOT NULL");
@@ -29404,6 +29425,8 @@ namespace ErpSystem.Data.Migrations
                             t.HasCheckConstraint("CK_VendorInvoice_AcceptedSupplyPurchaseOrder", "[AcceptedSupplyKind] IS NULL OR [AcceptedSupplyKind] = 3 OR [PurchaseOrderId] IS NOT NULL");
 
                             t.HasCheckConstraint("CK_VendorInvoice_TDC0504MatchingTolerances", "[MatchingPriceTolerancePercent] BETWEEN 0 AND 100 AND [MatchingQuantityTolerancePercent] BETWEEN 0 AND 100");
+
+                            t.HasCheckConstraint("CK_VendorInvoice_WhtScopeCoherent", "([WithholdingTaxId] IS NULL AND [WithholdingContractReference] IS NULL AND [WithholdingSupplyCategory] IS NULL) OR ([WithholdingTaxId] IS NOT NULL AND LEN([WithholdingContractReference]) BETWEEN 1 AND 100 AND [WithholdingSupplyCategory] BETWEEN 0 AND 2)");
 
                             t.HasCheckConstraint("CK_VendorInvoice_TDC0504SnapshotHash", "[MatchingSnapshotHash] IS NULL OR LEN([MatchingSnapshotHash]) = 64");
                         });

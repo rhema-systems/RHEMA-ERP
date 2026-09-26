@@ -43,3 +43,22 @@
   - no files overlap this test-only repair;
   - its changes are intentionally not staged, committed, copied or integrated here because the primary worktree also contains unrelated user/developer state;
   - final integration remains deferred until both clean commit ranges can be replayed against updated master and verified together.
+
+## Combined latest-master integration
+
+- Integration base: `origin/master` at `31dab7f32`; merged by `d781969f2` before the AP/WHT replay.
+- AP/WHT source commit: `f868dd1b3`; replayed onto the Finance branch with conflicts resolved against the canonical Business Partner contracts.
+- Resolution guarantees:
+  - forward AP invoices and payments retain `BusinessPartnerId`; no legacy `SupplierId` bridge was restored;
+  - Finance AP/AR control accounts remain authoritative;
+  - invoice-owned WHT decisions survive payment posting, while older payment-configured transactions remain supported;
+  - statutory thresholds aggregate only posted allocation evidence within contract/category scope;
+  - the agreed exchange-rate direction is retained in cross-currency payment and supplier-advance evidence;
+  - latest-master Estate and Quantity Survey fixtures were updated to canonical partner identity rather than compatibility aliases.
+- Verification after integration:
+  - Data project build: passed with 0 errors;
+  - isolated API build: passed with 0 errors;
+  - complete API test-project compilation: passed with 0 errors;
+  - focused AP/WHT/subledger regression set: 129 passed, 0 failed;
+  - full frontend TypeScript gate remains red on the latest-master baseline across HR, Inventory, Procurement, Civil Engineering and stale generated Next routes; Finance-owned diagnostics found during integration were corrected and verified separately.
+- Operational note: a running local API held the normal Debug API output, so verification used isolated output directories and did not interrupt the user's server.

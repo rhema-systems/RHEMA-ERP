@@ -117,6 +117,8 @@ export interface FiscalYear {
   fiscalYearType: string;
   numberOfPeriods: number;
   baseCurrency: string;
+  whtStatutoryYearStartMonth?: number;
+  whtStatutoryYearStartDay?: number;
   status: string;
   isClosed: boolean;
   isLocked: boolean;
@@ -1365,6 +1367,8 @@ export interface FinanceSettings {
   coaType: 'Standard' | 'Segmented';
   coaConfigurationLocked: boolean;
   baseCurrency: string;
+  whtStatutoryYearStartMonth?: number;
+  whtStatutoryYearStartDay?: number;
   accountSeparator?: string;
   retainedEarningsAccountId?: string;
   unrealizedGainLossAccountId?: string;
@@ -1418,6 +1422,8 @@ export interface FinanceSettings {
 export interface UpdateFinanceSettingsDto {
   coaType?: 'Standard' | 'Segmented';
   baseCurrency?: string;
+  whtStatutoryYearStartMonth?: number;
+  whtStatutoryYearStartDay?: number;
   accountSeparator?: string;
   retainedEarningsAccountId?: string;
   unrealizedGainLossAccountId?: string;

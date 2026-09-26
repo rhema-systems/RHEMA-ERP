@@ -241,6 +241,15 @@ public class VendorInvoice : TenantEntity
 
     public DateTime? WithholdingCertificateDate { get; set; }
 
+    /// <summary>
+    /// Stable contract/reference used with the supply category to scope statutory WHT
+    /// threshold accumulation. Required whenever a WHT tax is selected.
+    /// </summary>
+    [MaxLength(100)]
+    public string? WithholdingContractReference { get; set; }
+
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
+
     // ── Matching ────────────────────────────────────────────────────────
 
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;

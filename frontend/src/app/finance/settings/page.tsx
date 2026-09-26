@@ -99,6 +99,8 @@ export default function FinanceSettingsPage() {
     const [formData, setFormData] = useState<UpdateFinanceSettingsDto>({
         coaType: 'Segmented', // Default to Segmented as enforced by backend
         baseCurrency: 'GHS',
+        whtStatutoryYearStartMonth: 1,
+        whtStatutoryYearStartDay: 1,
         retainedEarningsAccountId: undefined,
         unrealizedGainLossAccountId: undefined,
         unrealizedFxGainAccountId: undefined,
@@ -161,6 +163,8 @@ export default function FinanceSettingsPage() {
             setFormData({
                 coaType: data.coaType,
                 baseCurrency: data.baseCurrency,
+                whtStatutoryYearStartMonth: data.whtStatutoryYearStartMonth ?? 1,
+                whtStatutoryYearStartDay: data.whtStatutoryYearStartDay ?? 1,
                 retainedEarningsAccountId: data.retainedEarningsAccountId,
                 unrealizedGainLossAccountId: data.unrealizedGainLossAccountId,
                 unrealizedFxGainAccountId: data.unrealizedFxGainAccountId,
@@ -428,6 +432,44 @@ export default function FinanceSettingsPage() {
                     </div>
                 </CardContent>
             </Card >
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Withholding Tax Statutory Year</CardTitle>
+                    <CardDescription>
+                        Sets the annual boundary used for supplier contract/category threshold accumulation.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="whtYearStartMonth">Start month</Label>
+                            <Input
+                                id="whtYearStartMonth"
+                                type="number"
+                                min={1}
+                                max={12}
+                                value={formData.whtStatutoryYearStartMonth ?? 1}
+                                onChange={event => setFormData({ ...formData, whtStatutoryYearStartMonth: Number(event.target.value) })}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="whtYearStartDay">Start day</Label>
+                            <Input
+                                id="whtYearStartDay"
+                                type="number"
+                                min={1}
+                                max={31}
+                                value={formData.whtStatutoryYearStartDay ?? 1}
+                                onChange={event => setFormData({ ...formData, whtStatutoryYearStartDay: Number(event.target.value) })}
+                            />
+                        </div>
+                    </div>
+                    <p className="mt-3 text-sm text-muted-foreground">
+                        January 1 is the default. Finance validates that the selected month/day is a real calendar date.
+                    </p>
+                </CardContent>
+            </Card>
 
             <Card>
                 <CardHeader>

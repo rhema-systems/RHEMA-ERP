@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Finance;
 
@@ -89,6 +90,8 @@ public sealed class WhtCalculationRequestDto
     public Guid? ExcludeVendorPaymentId { get; set; }
     // The server resolves the persisted transaction decision/rate; clients cannot supply a free-form payment override.
     public List<Guid> VendorInvoiceIds { get; set; } = new();
+    public string? ContractReference { get; set; }
+    public WhtSupplyCategory? SupplyCategory { get; set; }
 }
 
 public sealed class WhtCalculationResultDto
@@ -106,6 +109,10 @@ public sealed class WhtCalculationResultDto
     public decimal WithholdingAmount { get; set; }
     public Guid? TaxPayableAccountId { get; set; }
     public string CalculationNote { get; set; } = string.Empty;
+    public string ContractReference { get; set; } = string.Empty;
+    public WhtSupplyCategory SupplyCategory { get; set; }
+    public DateTime StatutoryPeriodStart { get; set; }
+    public DateTime StatutoryPeriodEnd { get; set; }
 }
 
 public sealed class WhtRemittanceQueryDto

@@ -345,6 +345,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.IsOpeningBalance,
                 cancellationToken,
                 dto.WithholdingTaxRateOverride);
+            var whtScope = ResolveInvoiceWhtScope(
+                invoiceWht.TaxId,
+                dto.WithholdingContractReference,
+                dto.WithholdingSupplyCategory,
+                dto.IsOpeningBalance);
             var governedExchangeRate = dto.IsOpeningBalance || dto.ExchangeRateId.HasValue
                 ? await ResolveOpeningInvoiceExchangeRateAsync(
                     dto.CurrencyCode,
@@ -386,6 +391,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 WithholdingDecisionPending = withholdingDecisionPending,
                 WithholdingTaxId = invoiceWht.TaxId,
                 WithholdingTaxAccountId = invoiceWht.TaxPayableAccountId,
+                WithholdingContractReference = whtScope.ContractReference,
+                WithholdingSupplyCategory = whtScope.SupplyCategory,
                 WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
                 WithholdingCertificateDate = dto.WithholdingCertificateDate,
                 MatchingType = ProcurementInvoiceThreeWayMatchRules.IsRequired(dto.PurchaseOrderId, dto.IsOpeningBalance)
@@ -559,6 +566,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.IsOpeningBalance,
                 cancellationToken,
                 dto.WithholdingTaxRateOverride);
+            var whtScope = ResolveInvoiceWhtScope(
+                invoiceWht.TaxId,
+                dto.WithholdingContractReference,
+                dto.WithholdingSupplyCategory,
+                dto.IsOpeningBalance);
             var governedExchangeRate = dto.IsOpeningBalance || dto.ExchangeRateId.HasValue
                 ? await ResolveOpeningInvoiceExchangeRateAsync(
                     dto.CurrencyCode,
@@ -589,6 +601,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.WithholdingDecisionPending = withholdingDecisionPending;
             invoice.WithholdingTaxId = invoiceWht.TaxId;
             invoice.WithholdingTaxAccountId = invoiceWht.TaxPayableAccountId;
+            invoice.WithholdingContractReference = whtScope.ContractReference;
+            invoice.WithholdingSupplyCategory = whtScope.SupplyCategory;
             invoice.WithholdingCertificateNumber = dto.WithholdingCertificateNumber;
             invoice.WithholdingCertificateDate = dto.WithholdingCertificateDate;
             invoice.MatchingType = ProcurementInvoiceThreeWayMatchRules.IsRequired(dto.PurchaseOrderId, dto.IsOpeningBalance)
@@ -4298,6 +4312,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 WithholdingTaxAccountId = invoice.WithholdingTaxAccountId,
                 WithholdingCertificateNumber = invoice.WithholdingCertificateNumber,
                 WithholdingCertificateDate = invoice.WithholdingCertificateDate,
+                WithholdingContractReference = invoice.WithholdingContractReference,
+                WithholdingSupplyCategory = invoice.WithholdingSupplyCategory,
                 MatchingType = invoice.MatchingType,
                 MatchingStatus = invoice.MatchingStatus,
                 MatchingNotes = invoice.MatchingNotes,
@@ -4470,6 +4486,26 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .OrderByDescending(history => history.EffectiveFrom)
                     .Select(history => (decimal?)history.Rate).FirstOrDefaultAsync(cancellationToken);
 
+        private static InvoiceWhtScope ResolveInvoiceWhtScope(
+            Guid? taxId,
+            string? contractReference,
+            WhtSupplyCategory? supplyCategory,
+            bool isOpeningBalance)
+        {
+            if (isOpeningBalance || !taxId.HasValue)
+                return new InvoiceWhtScope(null, null);
+
+            var normalizedContract = contractReference?.Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(normalizedContract))
+                throw new InvalidOperationException(
+                    "A contract/reference is required when an AP invoice is subject to WHT.");
+            if (!supplyCategory.HasValue || !Enum.IsDefined(supplyCategory.Value))
+                throw new InvalidOperationException(
+                    "A Goods, Works, or Services category is required when an AP invoice is subject to WHT.");
+
+            return new InvoiceWhtScope(normalizedContract, supplyCategory);
+        }
+
         private sealed record OpeningInvoiceExchangeRateSnapshot(
             Guid? ExchangeRateId,
             decimal Rate,
@@ -4478,6 +4514,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             string Source);
 
         private sealed record InvoiceWhtResolution(Guid? TaxId, decimal Rate, Guid? TaxPayableAccountId);
+
+        private sealed record InvoiceWhtScope(
+            string? ContractReference,
+            WhtSupplyCategory? SupplyCategory);
 
         private sealed record TaxPostingBuildResult(
             List<FinancePostingLineDto> Lines,

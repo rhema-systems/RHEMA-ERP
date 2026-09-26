@@ -453,8 +453,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             // rate first and compare the configured calculation with the functional allocation
             // total. The allocation still retains the invoice-native amount for aging.
             var allocationWhtFunctionalAmount = 0m;
-            var allocationSettlementFunctionalBase = 0m;
             var withholdingInvoices = new List<VendorInvoice>();
+            var pendingWhtScopes = new List<PendingWhtScope>();
             if (dto.Allocations?.Any() == true)
             {
                 foreach (var requestedAllocation in dto.Allocations)
@@ -469,6 +469,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     if (invoice.BusinessPartnerId != supplier.Id)
                         throw new InvalidOperationException("A selected invoice does not belong to this payment supplier.");
                     withholdingInvoices.Add(invoice);
+                    if (dto.WithholdingTaxId.HasValue && invoice.WithholdingTaxId != dto.WithholdingTaxId)
+                        throw new InvalidOperationException(
+                            $"Invoice '{invoice.InvoiceNumber}' does not use the selected AP WHT configuration.");
 
                     var invoiceCurrency = NormalizeCurrency(invoice.CurrencyCode, baseCurrencyCode);
                     var invoiceRate = await ResolveApprovedSettlementRateAsync(
@@ -483,17 +486,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                         cancellationToken);
                     allocationWhtFunctionalAmount += RoundMoney(
                         Math.Max(requestedAllocation.WithholdingTaxAmount, 0m) * invoiceRate.Rate);
-                    allocationSettlementFunctionalBase += RoundMoney((
-                        Math.Max(requestedAllocation.AllocatedAmount, 0m) +
-                        Math.Max(requestedAllocation.DiscountAmount, 0m) +
-                        Math.Max(requestedAllocation.WithholdingTaxAmount, 0m)) * invoiceRate.Rate);
+                    pendingWhtScopes.Add(new PendingWhtScope(
+                        invoice.Id,
+                        invoice.WithholdingContractReference,
+                        invoice.WithholdingSupplyCategory,
+                        RoundMoney((Math.Max(requestedAllocation.AllocatedAmount, 0m) +
+                            Math.Max(requestedAllocation.DiscountAmount, 0m) +
+                            Math.Max(requestedAllocation.WithholdingTaxAmount, 0m)) * invoiceRate.Rate),
+                        RoundMoney(Math.Max(requestedAllocation.WithholdingTaxAmount, 0m) * invoiceRate.Rate)));
                 }
             }
             allocationWhtFunctionalAmount = RoundMoney(allocationWhtFunctionalAmount);
             var invoiceWithholding = ApInvoiceWithholdingPolicy.Resolve(withholdingInvoices, dto.WithholdingTaxId);
             if (invoiceWithholding != null)
                 dto.WithholdingTaxId = invoiceWithholding.TaxId;
-            allocationSettlementFunctionalBase = RoundMoney(allocationSettlementFunctionalBase);
             var requestedWhtAmount = allocationWhtFunctionalAmount;
             // The header value is retained for API compatibility and functional-currency
             // reporting, but allocation rows are now the authoritative source. Reject a stale
@@ -518,17 +524,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                     throw new InvalidOperationException("WHT compliance service is not configured.");
                 }
 
-                var taxableBase = RoundMoney(dto.WithholdingTaxBaseAmount is > 0m
-                    ? dto.WithholdingTaxBaseAmount.Value
-                    : allocationSettlementFunctionalBase);
-                whtCalculation = await _withholdingTaxService.CalculateApWithholdingAsync(new WhtCalculationRequestDto
-                {
-                    TaxId = dto.WithholdingTaxId.Value,
-                    BusinessPartnerId = supplier.Id,
-                    PaymentDate = dto.PaymentDate,
-                    TaxableBase = taxableBase,
-                    VendorInvoiceIds = withholdingInvoices.Select(invoice => invoice.Id).Distinct().ToList()
-                }, cancellationToken);
+                var calculations = await CalculateWhtByScopeAsync(
+                    dto.WithholdingTaxId.Value,
+                    supplier.Id,
+                    dto.PaymentDate,
+                    pendingWhtScopes,
+                    excludeVendorPaymentId: null,
+                    cancellationToken);
+                whtCalculation = RollUpWhtCalculations(calculations);
 
                 if (Math.Abs(RoundMoney(requestedWhtAmount - whtCalculation.WithholdingAmount)) > 0.01m)
                 {
@@ -1784,6 +1787,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     0m);
                 var requestedDiscountAmount = Math.Max(alloc.DiscountAmount, 0m);
                 var requestedWithholdingAmount = Math.Max(alloc.WithholdingTaxAmount, 0m);
+                if (payment.WithholdingTaxId.HasValue && invoice.WithholdingTaxId != payment.WithholdingTaxId)
+                {
+                    throw new InvalidOperationException(
+                        $"Invoice '{invoice.InvoiceNumber}' does not use the selected AP WHT configuration.");
+                }
                 if (requestedWithholdingAmount > 0m && !payment.WithholdingTaxId.HasValue)
                 {
                     throw new InvalidOperationException(
@@ -3366,6 +3374,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         ? RoundMoney(unreservedBalance *
                                      i.EarlyPaymentDiscountPercentage / 100m)
                         : 0m,
+                    WithholdingContractReference = i.WithholdingContractReference,
+                    WithholdingSupplyCategory = i.WithholdingSupplyCategory,
                     PaymentReadiness = await EvaluateInvoicePaymentReadinessAsync(
                         i.Id,
                         cancellationToken,
@@ -6312,20 +6322,19 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (_withholdingTaxService == null)
                 throw new InvalidOperationException("WHT compliance service is not configured.");
 
-            var taxableBase = RoundMoney(allocations.Sum(item => item.SettlementFunctionalAmount));
-            var calculation = await _withholdingTaxService.CalculateApWithholdingAsync(
-                new WhtCalculationRequestDto
-                {
-                    TaxId = payment.WithholdingTaxId.Value,
-                    BusinessPartnerId = payment.BusinessPartnerId,
-                    PaymentDate = payment.PaymentDate,
-                    TaxableBase = taxableBase,
-                    // Allocation edits and posting revalidate an already persisted payment.
-                    // Its current base is added by the calculator, not counted twice as history.
-                    ExcludeVendorPaymentId = payment.Id,
-                    VendorInvoiceIds = invoiceIds
-                },
+            var calculations = await CalculateWhtByScopeAsync(
+                payment.WithholdingTaxId.Value,
+                payment.BusinessPartnerId,
+                payment.PaymentDate,
+                allocations.Select(item => new PendingWhtScope(
+                    item.VendorInvoiceId,
+                    item.VendorInvoice?.WithholdingContractReference,
+                    item.VendorInvoice?.WithholdingSupplyCategory,
+                    item.SettlementFunctionalAmount,
+                    item.WithholdingTaxFunctionalAmount)),
+                payment.Id,
                 cancellationToken);
+            var calculation = RollUpWhtCalculations(calculations);
             if (Math.Abs(RoundMoney(functionalWht - calculation.WithholdingAmount)) > 0.01m)
             {
                 throw new InvalidOperationException(
@@ -6339,6 +6348,82 @@ namespace ErpSystem.Api.Services.Finance.AP
             payment.WithholdingTaxThresholdApplied = calculation.ThresholdApplied;
             payment.WithholdingTaxCalculationNote = calculation.CalculationNote;
             payment.WithholdingTaxAccountId = calculation.TaxPayableAccountId;
+        }
+
+        private async Task<IReadOnlyList<WhtCalculationResultDto>> CalculateWhtByScopeAsync(
+            Guid taxId,
+            Guid businessPartnerId,
+            DateTime paymentDate,
+            IEnumerable<PendingWhtScope> rows,
+            Guid? excludeVendorPaymentId,
+            CancellationToken cancellationToken)
+        {
+            if (_withholdingTaxService == null)
+                throw new InvalidOperationException("WHT compliance service is not configured.");
+
+            var groups = rows.GroupBy(row => new
+            {
+                ContractReference = row.ContractReference?.Trim().ToUpperInvariant(),
+                row.SupplyCategory
+            }).ToList();
+            if (groups.Any(group => string.IsNullOrWhiteSpace(group.Key.ContractReference) || !group.Key.SupplyCategory.HasValue))
+                throw new InvalidOperationException(
+                    "Every invoice in a WHT payment requires a contract/reference and Goods, Works, or Services category.");
+
+            var results = new List<WhtCalculationResultDto>();
+            foreach (var group in groups)
+            {
+                var calculation = await _withholdingTaxService.CalculateApWithholdingAsync(
+                    new WhtCalculationRequestDto
+                    {
+                        TaxId = taxId,
+                        BusinessPartnerId = businessPartnerId,
+                        PaymentDate = paymentDate,
+                        TaxableBase = RoundMoney(group.Sum(item => item.TaxableBase)),
+                        ExcludeVendorPaymentId = excludeVendorPaymentId,
+                        VendorInvoiceIds = group.Select(item => item.VendorInvoiceId).Distinct().ToList(),
+                        ContractReference = group.Key.ContractReference,
+                        SupplyCategory = group.Key.SupplyCategory
+                    },
+                    cancellationToken);
+                var supplied = RoundMoney(group.Sum(item => item.WithholdingAmount));
+                if (Math.Abs(RoundMoney(supplied - calculation.WithholdingAmount)) > 0.01m)
+                {
+                    throw new InvalidOperationException(
+                        $"WHT allocations for {calculation.ContractReference}/{calculation.SupplyCategory} total {supplied:N2}, but configured tax {calculation.TaxCode} requires {calculation.WithholdingAmount:N2}.");
+                }
+                results.Add(calculation);
+            }
+
+            return results;
+        }
+
+        private static WhtCalculationResultDto RollUpWhtCalculations(
+            IReadOnlyCollection<WhtCalculationResultDto> calculations)
+        {
+            if (calculations.Count == 0)
+                throw new InvalidOperationException("A WHT payment requires at least one statutory scope.");
+            var first = calculations.First();
+            return new WhtCalculationResultDto
+            {
+                TaxId = first.TaxId,
+                TaxCode = first.TaxCode,
+                TaxName = first.TaxName,
+                TaxRate = first.TaxRate,
+                TaxableBase = RoundMoney(calculations.Sum(item => item.TaxableBase)),
+                CumulativeBefore = RoundMoney(calculations.Sum(item => item.CumulativeBefore)),
+                CumulativeAfter = RoundMoney(calculations.Sum(item => item.CumulativeAfter)),
+                ThresholdAmount = first.ThresholdAmount,
+                RemainingBeforeThreshold = RoundMoney(calculations.Sum(item => item.RemainingBeforeThreshold)),
+                ThresholdApplied = calculations.Any(item => item.ThresholdApplied),
+                WithholdingAmount = RoundMoney(calculations.Sum(item => item.WithholdingAmount)),
+                TaxPayableAccountId = first.TaxPayableAccountId,
+                CalculationNote = string.Join(" | ", calculations.Select(item => item.CalculationNote)),
+                ContractReference = calculations.Count == 1 ? first.ContractReference : "MULTIPLE",
+                SupplyCategory = first.SupplyCategory,
+                StatutoryPeriodStart = calculations.Min(item => item.StatutoryPeriodStart),
+                StatutoryPeriodEnd = calculations.Max(item => item.StatutoryPeriodEnd)
+            };
         }
 
         private sealed record CanonicalPaymentPartner(
@@ -6711,6 +6796,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             VendorPaymentAllocation Allocation,
             VendorInvoice Invoice,
             FinancePostingResultDto? ApplicationReversal);
+
+        private sealed record PendingWhtScope(
+            Guid VendorInvoiceId,
+            string? ContractReference,
+            WhtSupplyCategory? SupplyCategory,
+            decimal TaxableBase,
+            decimal WithholdingAmount);
 
         private PaymentBatchDto MapBatchToDto(PaymentBatch batch)
         {

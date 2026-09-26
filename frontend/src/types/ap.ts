@@ -94,6 +94,8 @@ export interface VendorInvoice {
     withholdingTaxAccountId?: string;
     withholdingCertificateNumber?: string;
     withholdingCertificateDate?: string;
+    withholdingContractReference?: string;
+    withholdingSupplyCategory?: WhtSupplyCategory;
     matchingType: InvoiceMatchingType;
     matchingStatus: InvoiceMatchingStatus;
     matchingNotes?: string;
@@ -347,6 +349,8 @@ export interface VendorInvoiceCreateRequest {
     withholdingTaxAccountId?: string | null;
     withholdingCertificateNumber?: string;
     withholdingCertificateDate?: string;
+    withholdingContractReference?: string;
+    withholdingSupplyCategory?: WhtSupplyCategory;
     matchingType?: InvoiceMatchingType;
     expenseAccountId?: string;
     apAccountId?: string;
@@ -1176,8 +1180,12 @@ export interface OutstandingVendorInvoice {
     earlyPaymentDiscountDueDate?: string;
     isDiscountAvailable: boolean;
     discountAmount?: number;
+    withholdingContractReference?: string;
+    withholdingSupplyCategory?: WhtSupplyCategory;
     paymentReadiness?: VendorPaymentInvoiceReadiness;
 }
+
+export type WhtSupplyCategory = 'Goods' | 'Works' | 'Services' | 0 | 1 | 2;
 
 export interface VendorPaymentInvoiceReadiness {
     vendorInvoiceId: string;

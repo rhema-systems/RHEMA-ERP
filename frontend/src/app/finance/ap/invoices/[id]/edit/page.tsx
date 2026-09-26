@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useParams } from 'next/navigation';
-import { VendorInvoiceFormPage } from '../../create/page';
+import { VendorInvoiceFormPage } from '@/components/finance/ap/VendorInvoiceFormPage';
 
 export default function EditVendorInvoicePage() {
     const params = useParams<{ id: string }>();
