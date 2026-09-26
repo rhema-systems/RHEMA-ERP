@@ -654,6 +654,30 @@ SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
 
+function Invoke-CanonicalMigrationPreflight {
+    # Filled by New-RhemaVpsPreflightHelper before the helper is hashed/uploaded.
+    # No migration SQL is executed here: these probes only read data/catalogs.
+    $encoded = '__RHEMA_CANONICAL_PREFLIGHT_BUNDLE__'
+    if ($encoded.StartsWith('__RHEMA_')) { throw 'Run the supported Deploy-RhemaVps.ps1 entry point to package the reviewed preflight probes.' }
+    $bundle = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json
+    Assert-True ($bundle.schemaVersion -eq 1) 'Invalid canonical preflight bundle.'
+    $blockers = @()
+    foreach ($probe in $bundle.probes) {
+        $rows = @(Invoke-DatabaseTable ([string]$probe.sql))
+        foreach ($row in $rows) {
+            if ([long]$row.AffectedRows -gt 0) {
+                $blockers += $row
+                Write-Output "MIGRATION_GUARD|$($row.CheckName)|$($row.AffectedRows)"
+            }
+        }
+        foreach ($id in $probe.ids) { Write-Output "GUARD_COVERAGE|$id" }
+    }
+    Assert-True ($blockers.Count -eq 0) (
+        'Pending current-baseline migrations cannot safely apply. Blockers: ' +
+        (($blockers | ForEach-Object { "$($_.CheckName)=$($_.AffectedRows)" }) -join '; ') +
+        '. No data was changed. Keep the current application running; review a data-preserving cutover or a separately authorized fresh database. Do not delete rows or stamp migration history.')
+}
+
 function Get-DatabaseControlSummary {
     return Invoke-DatabaseTable @"
 SELECT
@@ -966,6 +990,9 @@ function Invoke-Preflight {
     }
     Assert-True ($guards.Count -eq 0) `
         'One or more guarded pre-baseline migrations would halt. Resolve and archive the reported data before deployment.'
+
+    # Skipping archived predecessor guards must never skip current-baseline guards.
+    Invoke-CanonicalMigrationPreflight
 
     $summary = @(Get-DatabaseControlSummary)[0]
     Write-Output "MIGRATION_COUNT|$($summary.MigrationCount)"

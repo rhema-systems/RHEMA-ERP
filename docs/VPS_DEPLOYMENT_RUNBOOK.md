@@ -75,6 +75,47 @@ opens an interactive credential prompt during a deployment.
 
 The remainder of this document is the detailed recovery and manual procedure.
 
+### September 2026 canonical Finance preflight
+
+The 59-migration release adds read-only preflight probes for the 20 guarded
+post-baseline migrations. `CanonicalMigrationPreflight.json` binds each reviewed
+migration to its normalized source SHA-256. The deployment command embeds the
+three SQL probes in its content-addressed remote helper, so local-VPS and SSH
+deployment use the same checked bundle without loose mutable SQL sidecars.
+Changing a covered migration requires reviewing and updating its probe/hash.
+
+These checks run even when the disposable current-model baseline is already
+applied. That baseline bypasses only archived predecessor guards. The Finance
+cutover still rejects retained accounting books and transaction rows according
+to each migration's own `Up` conditions. Trigger-only and `Down`-only guards are
+distinguished from upgrade-time blockers; existing trigger definitions and C4
+authority schema are checked without altering them.
+
+If preflight reports `FinanceCanonical...AccountingBooks`, `VendorInvoice`,
+`Invoices` or another retained-data count, leave the existing services running.
+The release is not a data-preserving conversion of those rows. Review a
+data-preserving cutover or provision a separately authorized fresh database;
+never remove rows or stamp migration history to bypass the check. A successful
+local fresh-database rehearsal does not authorize resetting the VPS database.
+
+When copying commands into an interactive PowerShell prompt, enclose the whole
+sequence in `& { ... }` or run a saved `.ps1`. A `throw` typed at the prompt stops
+that statement, but later pasted statements can still run. The deployment
+command itself repeats preflight before any build/backup/apply stage.
+
+Regression checks (no deployment):
+
+```powershell
+powershell.exe -NoProfile -File scripts\vps\Test-CanonicalMigrationPreflight.ps1
+powershell.exe -NoProfile -File scripts\vps\Test-CurrentBaselineMigrationGuardRouting.ps1
+powershell.exe -NoProfile -File scripts\vps\Test-RhemaVpsReleasePrerequisites.ps1
+```
+
+The first test optionally accepts `-SqlServer`, `-CanonicalDatabase` and
+`-LegacyDatabase` for read-only SQL verification using integrated authentication.
+The canonical fixture must already have the full migration chain; the legacy
+fixture must contain Finance data which the pending canonical migrations reject.
+
 ## One-Time SSH Setup and the Port 22 Conflict
 
 Do not move or stop the existing service on port `22`. On this VPS, IPv4 port `22` belongs to Rebex Tiny SFTP Server:

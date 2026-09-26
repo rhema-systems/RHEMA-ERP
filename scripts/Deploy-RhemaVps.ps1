@@ -30,6 +30,7 @@ $env:GCM_INTERACTIVE = 'Never'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepositoryRoot = Split-Path -Parent $ScriptRoot
 $RemoteHelperLocalPath = Join-Path $ScriptRoot 'vps\Invoke-RhemaVpsRemote.ps1'
+. (Join-Path $ScriptRoot 'vps\New-RhemaVpsPreflightHelper.ps1')
 $BrowserSmokePath = Join-Path $ScriptRoot 'vps\Test-RhemaVpsBrowserSmoke.mjs'
 $ReleaseRoot = Join-Path $RepositoryRoot 'artifacts\vps-releases'
 $RemotePackagesRoot = 'C:\RhemaERP\packages'
@@ -947,6 +948,10 @@ try {
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     $releaseManifest = $null
     $migrationState = $null
+    # Embed reviewed read-only probes so the content-addressed remote helper is
+    # self-contained. CRLF-normalized source hashes invalidate stale reviews.
+    $RemoteHelperLocalPath = New-RhemaVpsPreflightHelper -RepositoryRoot $RepositoryRoot `
+        -OutputPath (Join-Path $releaseDirectory 'Invoke-RhemaVpsRemote.ps1')
     $remoteHelperHash = (Get-FileHash $RemoteHelperLocalPath -Algorithm SHA256).Hash
     $remoteHelperName = "Invoke-RhemaVpsRemote-$($remoteHelperHash.Substring(0,12)).ps1"
     $remoteHelperPath = Join-Path $RemotePackagesRoot $remoteHelperName
