@@ -246,6 +246,10 @@ public partial class ApplicationDbContext
     public DbSet<MedicalBoardCase> MedicalBoardCases { get; set; } = null!;
     /// <summary>Who was present at a sitting — the panel for whatever was decided there (lane K-II-a).</summary>
     public DbSet<MedicalBoardSittingAttendance> MedicalBoardSittingAttendances { get; set; } = null!;
+    /// <summary>The injuries assessed on a case (round 5, lane K-II-b).</summary>
+    public DbSet<MedicalBoardCaseInjury> MedicalBoardCaseInjuries { get; set; } = null!;
+    /// <summary>A tenant's compensation schedule — PNDCL 187's First and Third Schedules by default (K-II-b).</summary>
+    public DbSet<IncapacityScheduleItem> IncapacityScheduleItems { get; set; } = null!;
     public DbSet<MedicalAppointment> MedicalAppointments { get; set; } = null!;
     public DbSet<NHISClaim> NHISClaims { get; set; } = null!;
     public DbSet<NHISClaimDocument> NHISClaimDocuments { get; set; } = null!;
@@ -4385,6 +4389,12 @@ private void ConfigureHREntities(ModelBuilder builder)
                 SettlementLeaveDaysCap         = 56,
                 // Round 5, lane K-II-a: deciding members present at a board's deciding sitting.
                 MedicalBoardQuorum             = 1,
+                // Round 5, lane K-II-b: PNDCL 187 s.5 and s.7(2)(c). ⚠ Both named — the first is
+                // nullable, and left out it would seed "not worked out" instead of 96.
+                PermanentTotalIncapacityMonths = 96,
+                TemporaryIncapacityMaxMonths   = 24,
+                // s.36's ceiling: deliberately empty — the Act's figure predates redenomination (R5-Q5).
+                CompensationEarningsCeiling    = (decimal?)null,
                 AttendanceRateIncludesApprovedLeave = true,
                 // Residue plan G2. Same rule as the block above: every property must appear here or
                 // the DbContext will not build at design time.
@@ -7225,6 +7235,33 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.Attendance)
                 .HasForeignKey(x => x.SittingId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- MedicalBoardCaseInjury (round 5, lane K-II-b) ----
+        // Cascades from its case. The schedule row is RESTRICT: rows are deactivated, never deleted,
+        // and the percentage is copied onto the injury anyway (see the entity).
+        builder.Entity<MedicalBoardCaseInjury>(entity =>
+        {
+            entity.HasIndex(x => x.CaseId);
+            entity.HasOne(x => x.Case)
+                .WithMany(x => x.Injuries)
+                .HasForeignKey(x => x.CaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.ScheduleItem)
+                .WithMany()
+                .HasForeignKey(x => x.ScheduleItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- IncapacityScheduleItem (round 5, lane K-II-b) ----
+        // One row per injury per schedule per tenant, among live rows — the load-defaults action
+        // matches on it, so it must not be able to hold two.
+        builder.Entity<IncapacityScheduleItem>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Kind, x.Injury })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_IncapacityScheduleItems_Tenant_Kind_Injury");
         });
 
         builder.Entity<MedicalClaimPreAuthorization>(entity =>

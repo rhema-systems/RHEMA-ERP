@@ -34,6 +34,7 @@ import {
   caseDraftComplete,
   type MedicalBoardCaseDraft,
 } from '@/components/hr/medical/MedicalBoardCaseFields';
+import { MedicalBoardCaseIncapacity } from '@/components/hr/medical/MedicalBoardCaseIncapacity';
 import { medicalBoardService } from '@/services/hr/medical-board.service';
 import { medicalFacilityService } from '@/services/hr/medical-reference.service';
 import {
@@ -496,6 +497,16 @@ export default function MedicalBoardDetailPage() {
                   </span>{' '}
                   <span className="whitespace-pre-wrap">{c.withdrawalReason ?? '—'}</span>
                 </div>
+              )}
+
+              {/* Lane K-II-b: the injury, its incapacity and compensation (PNDCL 187). */}
+              {(c.status !== 'Withdrawn' || !!c.incapacityKind) && (
+                <MedicalBoardCaseIncapacity
+                  boardId={board.id}
+                  boardCase={c}
+                  editable={board.status !== 'Cancelled' && c.status !== 'Withdrawn'}
+                  onChanged={refresh}
+                />
               )}
             </div>
           ))}

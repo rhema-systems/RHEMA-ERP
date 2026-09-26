@@ -15,6 +15,10 @@ import type {
   AddMedicalBoardMemberRequest,
   RecordMedicalBoardSittingRequest,
   ConcludeMedicalBoardCaseRequest,
+  AssessIncapacityRequest,
+  RecordCompensationRequest,
+  IncapacityScheduleItem,
+  SaveIncapacityScheduleItemRequest,
 } from '@/types/hr/medical-board';
 
 export interface MedicalBoardListParams {
@@ -108,6 +112,43 @@ class MedicalBoardService {
       `${this.baseUrl}/${boardId}/sittings/${sittingId}/attendance`,
       { memberIds },
     );
+  }
+
+  // ── Incapacity and compensation (lane K-II-b; PNDCL 187) ──────────────────
+
+  /** The whole assessment, replacing the last. ⚠ Refused once the labour officer's amount is recorded. */
+  assessIncapacity(boardId: string, caseId: string, data: AssessIncapacityRequest): Promise<MedicalBoard> {
+    return apiService.put<MedicalBoard>(`${this.baseUrl}/${boardId}/cases/${caseId}/incapacity`, data);
+  }
+
+  /** The labour officer's notice (s.35) and any agreement (s.15) — the whole record. */
+  recordCompensation(boardId: string, caseId: string, data: RecordCompensationRequest): Promise<MedicalBoard> {
+    return apiService.put<MedicalBoard>(`${this.baseUrl}/${boardId}/cases/${caseId}/compensation`, data);
+  }
+
+  /** ⚠ `null` is dropped by `apiService.put`; the endpoint reads no body as "clear". */
+  linkSafetyIncident(boardId: string, caseId: string, incidentId: string | null): Promise<MedicalBoard> {
+    return apiService.put<MedicalBoard>(`${this.baseUrl}/${boardId}/cases/${caseId}/safety-incident`, incidentId);
+  }
+
+  getSchedule(includeInactive = false): Promise<IncapacityScheduleItem[]> {
+    return apiService.get<IncapacityScheduleItem[]>(
+      `${this.baseUrl}/incapacity-schedule?includeInactive=${includeInactive}`,
+    );
+  }
+
+  /** Medical admin: adds only PNDCL 187's rows not already there. */
+  loadDefaultSchedule(): Promise<IncapacityScheduleItem[]> {
+    return apiService.post<IncapacityScheduleItem[]>(`${this.baseUrl}/incapacity-schedule/load-defaults`, {});
+  }
+
+  addScheduleItem(data: SaveIncapacityScheduleItemRequest): Promise<IncapacityScheduleItem> {
+    return apiService.post<IncapacityScheduleItem>(`${this.baseUrl}/incapacity-schedule`, data);
+  }
+
+  /** ⚠ Assessments already recorded keep the percentage they used. */
+  updateScheduleItem(itemId: string, data: SaveIncapacityScheduleItemRequest): Promise<IncapacityScheduleItem> {
+    return apiService.put<IncapacityScheduleItem>(`${this.baseUrl}/incapacity-schedule/${itemId}`, data);
   }
 
   /**

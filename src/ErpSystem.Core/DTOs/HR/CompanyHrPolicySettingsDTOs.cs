@@ -116,6 +116,15 @@ public class CompanyHrPolicySettingsDto : BaseDto
     /// <summary>Deciding members present at a medical board's deciding sitting (lane K-II-a).</summary>
     public int MedicalBoardQuorum { get; set; }
 
+    /// <summary>PNDCL 187 s.5 — months' earnings for permanent total incapacity; null = not worked out (K-II-b).</summary>
+    public int? PermanentTotalIncapacityMonths { get; set; }
+
+    /// <summary>PNDCL 187 s.7(2)(c) — the longest temporary incapacity is paid for, in months (K-II-b).</summary>
+    public int TemporaryIncapacityMaxMonths { get; set; }
+
+    /// <summary>PNDCL 187 s.36 — the most of a year's earnings compensation is worked on; null = unknown (K-II-b).</summary>
+    public decimal? CompensationEarningsCeiling { get; set; }
+
     public bool AttendanceRateIncludesApprovedLeave { get; set; }
 
     // Leave encashment and the reminder cadence (residue plan G2).
@@ -245,6 +254,20 @@ public class UpdateCompanyHrPolicySettingsDto
     /// (round 5, lane K-II-a). Default 1.
     /// </summary>
     [Range(1, 20)] public int MedicalBoardQuorum { get; set; } = 1;
+
+    /// <summary>
+    /// PNDCL 187 s.5 (round 5, lane K-II-b). ⚠ Default 96, so a save that omits it keeps 96 — only an
+    /// explicit empty stops the figure being worked out, the convention <c>SettlementLeaveDaysCap</c> set.
+    /// </summary>
+    [Range(1, 600)] public int? PermanentTotalIncapacityMonths { get; set; } = 96;
+
+    /// <summary>PNDCL 187 s.7(2)(c). Default 24.</summary>
+    [Range(1, 120)] public int TemporaryIncapacityMaxMonths { get; set; } = 24;
+
+    /// <summary>
+    /// PNDCL 187 s.36. ⚠ No default: a save that omits it CLEARS it — the page always sends it.
+    /// </summary>
+    [Range(0.01, 1_000_000_000)] public decimal? CompensationEarningsCeiling { get; set; }
 
     public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
 

@@ -93,6 +93,10 @@ const schema = z
     // Round 5, lane L2b: empty means no cap, so '' is a real answer here.
     settlementLeaveDaysCap: z.union([z.coerce.number().int().min(1).max(366), z.literal('')]).optional(),
     medicalBoardQuorum: z.coerce.number().int().min(1).max(20),
+    // Round 5, lane K-II-b (PNDCL 187). Empty is a real answer for the months and the ceiling.
+    permanentTotalIncapacityMonths: z.union([z.coerce.number().int().min(1).max(600), z.literal('')]).optional(),
+    temporaryIncapacityMaxMonths: z.coerce.number().int().min(1).max(120),
+    compensationEarningsCeiling: z.union([z.coerce.number().positive(), z.literal('')]).optional(),
     attendanceRateIncludesApprovedLeave: z.boolean(),
 
     allowInServiceEncashment: z.boolean(),
@@ -217,6 +221,9 @@ export default function PolicySettingsPage() {
       settlementDaysPerYear: data.settlementDaysPerYear,
       settlementLeaveDaysCap: data.settlementLeaveDaysCap ?? '',
       medicalBoardQuorum: data.medicalBoardQuorum ?? 1,
+      permanentTotalIncapacityMonths: data.permanentTotalIncapacityMonths ?? '',
+      temporaryIncapacityMaxMonths: data.temporaryIncapacityMaxMonths ?? 24,
+      compensationEarningsCeiling: data.compensationEarningsCeiling ?? '',
       attendanceRateIncludesApprovedLeave: data.attendanceRateIncludesApprovedLeave,
       allowInServiceEncashment: data.allowInServiceEncashment,
       encashmentWorkingDaysPerMonth: data.encashmentWorkingDaysPerMonth,
@@ -321,6 +328,11 @@ export default function PolicySettingsPage() {
         settlementLeaveDaysCap: orNullNumber(v.settlementLeaveDaysCap),
         // ⚠ Sent every time: a save that leaves it out resets it to 1.
         medicalBoardQuorum: Number(v.medicalBoardQuorum),
+        // ⚠ Both sent every time, as null when emptied: the months keep 96 on a save that omits
+        // them, and the ceiling would be cleared by one.
+        permanentTotalIncapacityMonths: orNullNumber(v.permanentTotalIncapacityMonths),
+        temporaryIncapacityMaxMonths: Number(v.temporaryIncapacityMaxMonths),
+        compensationEarningsCeiling: orNullNumber(v.compensationEarningsCeiling),
         attendanceRateIncludesApprovedLeave: v.attendanceRateIncludesApprovedLeave,
         allowInServiceEncashment: v.allowInServiceEncashment,
         encashmentWorkingDaysPerMonth: Number(v.encashmentWorkingDaysPerMonth),
@@ -720,6 +732,36 @@ export default function PolicySettingsPage() {
               deciding. A case cannot be decided at a sitting with fewer deciding members than this.
               The default, <strong>1</strong>, is the least a finding can rest on; set it to your
               organisation&apos;s rule for how many doctors must sit.
+            </p>
+
+            {/* Round 5, lane K-II-b: the Workmen's Compensation Act's figures, as defaults. */}
+            <div className="grid gap-4 pt-2 sm:grid-cols-3">
+              <NumberField
+                form={form}
+                name="permanentTotalIncapacityMonths"
+                label="Months' earnings — permanent total incapacity"
+              />
+              <NumberField
+                form={form}
+                name="temporaryIncapacityMaxMonths"
+                label="Longest temporary incapacity (months)"
+                required
+              />
+              <NumberField
+                form={form}
+                name="compensationEarningsCeiling"
+                label="Earnings ceiling — a year"
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              The Workmen&apos;s Compensation Act pays <strong>96</strong> months&apos; earnings for permanent
+              total incapacity (s.5) and a partial incapacity its percentage of that; temporary incapacity
+              is paid through payroll for at most <strong>24</strong> months (s.7). Leave the months empty
+              and no figure is worked out. The Act computes compensation on at most a set amount of a
+              year&apos;s earnings (s.36) — its 25,000 cedis predates redenomination and no revision was
+              found, so <strong>this is empty until your organisation or counsel names the ceiling in
+              force</strong>; every figure says whether a ceiling applied. The figure a board case shows
+              is indicative: the labour officer notifies the amount due, and it is paid to the Court.
             </p>
           </CardContent>
         </Card>

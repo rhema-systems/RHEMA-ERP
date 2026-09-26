@@ -71,6 +71,9 @@ public static class CompanyHrPolicyMappingExtensions
             SettlementDaysPerYear                 = entity.SettlementDaysPerYear,
             SettlementLeaveDaysCap                = entity.SettlementLeaveDaysCap,
             MedicalBoardQuorum                    = entity.MedicalBoardQuorum,
+            PermanentTotalIncapacityMonths        = entity.PermanentTotalIncapacityMonths,
+            TemporaryIncapacityMaxMonths          = entity.TemporaryIncapacityMaxMonths,
+            CompensationEarningsCeiling           = entity.CompensationEarningsCeiling,
             AttendanceRateIncludesApprovedLeave   = entity.AttendanceRateIncludesApprovedLeave,
             AllowInServiceEncashment              = entity.AllowInServiceEncashment,
             EncashmentWorkingDaysPerMonth         = entity.EncashmentWorkingDaysPerMonth,
@@ -146,6 +149,9 @@ public static class CompanyHrPolicyMappingExtensions
         entity.SettlementDaysPerYear               = dto.SettlementDaysPerYear;
         entity.SettlementLeaveDaysCap              = dto.SettlementLeaveDaysCap;
         entity.MedicalBoardQuorum                  = dto.MedicalBoardQuorum;
+        entity.PermanentTotalIncapacityMonths      = dto.PermanentTotalIncapacityMonths;
+        entity.TemporaryIncapacityMaxMonths        = dto.TemporaryIncapacityMaxMonths;
+        entity.CompensationEarningsCeiling         = dto.CompensationEarningsCeiling;
         entity.AttendanceRateIncludesApprovedLeave = dto.AttendanceRateIncludesApprovedLeave;
         entity.AllowInServiceEncashment           = dto.AllowInServiceEncashment;
         entity.EncashmentWorkingDaysPerMonth      = dto.EncashmentWorkingDaysPerMonth;

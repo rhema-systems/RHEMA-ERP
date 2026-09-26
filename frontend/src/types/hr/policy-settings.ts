@@ -95,6 +95,18 @@ export interface CompanyHrPolicySettings {
    * resets a save that omits it to 1.
    */
   medicalBoardQuorum: number;
+  /**
+   * PNDCL 187 s.5 — months' earnings for permanent total incapacity (lane K-II-b). `null` = no figure
+   * worked out. ⚠ Send it on every save: the server keeps 96 for a save that omits it.
+   */
+  permanentTotalIncapacityMonths: number | null;
+  /** PNDCL 187 s.7(2)(c) — the longest temporary incapacity is paid for, in months. Default 24. */
+  temporaryIncapacityMaxMonths: number;
+  /**
+   * PNDCL 187 s.36 — the most of a year's earnings compensation is worked on. No default: the Act's
+   * figure predates redenomination. ⚠ A save that omits it CLEARS it.
+   */
+  compensationEarningsCeiling: number | null;
   attendanceRateIncludesApprovedLeave: boolean;
 
   /**

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Gavel, Loader2, Plus } from 'lucide-react';
+import { Gavel, Loader2, Plus, Scale } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -134,9 +134,15 @@ export default function MedicalBoardsPage() {
         description="Panels that hear employees' cases — an absence, an injury at work, fitness for duty or retirement — and decide each one"
         backHref="/hr/medical"
         actions={
-          <Button onClick={() => setOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Request a board
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Lane K-II-b: the injuries incapacity is assessed against (PNDCL 187's schedules). */}
+            <Button variant="outline" onClick={() => router.push('/hr/medical/boards/incapacity-schedule')}>
+              <Scale className="mr-2 h-4 w-4" /> Compensation schedule
+            </Button>
+            <Button onClick={() => setOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Request a board
+            </Button>
+          </div>
         }
       />
 

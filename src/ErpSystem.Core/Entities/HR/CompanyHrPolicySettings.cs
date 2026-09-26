@@ -423,6 +423,32 @@ public class CompanyHrPolicySettings : TenantEntity
     public int MedicalBoardQuorum { get; set; } = 1;
 
     /// <summary>
+    /// Months' earnings paid for permanent total incapacity — PNDCL 187 s.5, <b>96</b> (round 5, lane
+    /// K-II-b). A partial incapacity is its percentage of this.
+    /// </summary>
+    /// <remarks>Empty means no indicative figure is worked out: the case says so instead.</remarks>
+    [Range(1, 600)]
+    public int? PermanentTotalIncapacityMonths { get; set; } = 96;
+
+    /// <summary>
+    /// The longest temporary incapacity is paid for — PNDCL 187 s.7(2)(c), <b>24</b> months (six more
+    /// where the chief labour officer directs). Shown on a temporary case beside the date it runs to.
+    /// </summary>
+    [Range(1, 120)]
+    public int TemporaryIncapacityMaxMonths { get; set; } = 24;
+
+    /// <summary>
+    /// The most of a year's earnings compensation is calculated on — PNDCL 187 s.36.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>No default, on purpose.</b> The Act's 25,000 cedis predates the 2007 redenomination (GH₵2.50)
+    /// and no revising legislative instrument was found (R5-Q5). Empty means the figure is worked out
+    /// without a ceiling and says so; a number here caps the monthly earnings at a twelfth of it.
+    /// </remarks>
+    [Range(0.01, 1_000_000_000)]
+    public decimal? CompensationEarningsCeiling { get; set; }
+
+    /// <summary>
     /// Whether approved leave counts as an expected working day in the attendance rate.
     /// </summary>
     /// <remarks>

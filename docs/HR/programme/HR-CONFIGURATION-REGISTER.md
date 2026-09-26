@@ -516,6 +516,18 @@ A tenant setting, on the HR policy page (*Medical boards → Quorum — deciding
 officers; how many must be present to decide is each organisation's own rule — R5-Q5 asks TDC for
 theirs.
 
+### Compensation — PNDCL 187's figures (round 5, lane K-II-b) — added 2026-09-26
+
+Three tenant settings beside the quorum, and one per-tenant table. Every figure is the Act's
+(`docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md`), as a default.
+
+| Setting | Default | Status | Enforced where | Proof — `run-round5-k2b.mjs`, both positions |
+|---|---|---|---|---|
+| `PermanentTotalIncapacityMonths` (s.5) | **`96`**; empty = no figure worked out. A save that omits it keeps 96. Migration `AddIncapacityAssessment` wrote 96 on every existing tenant row, in the step that adds the column | **Enforced** | `MedicalBoardService.IndicativeFigureAsync` — percentage × this × monthly earnings | [3]: 96 → GHS 544,320.00, 60 → GHS 340,200.00, empty → *not worked out*, in exact words; a change after an assessment moves nothing |
+| `TemporaryIncapacityMaxMonths` (s.7(2)(c)) | **`24`** | **Enforced** (read) | the temporary working's sentence, and the case's *paid until* date from the incident | [2] the sentence names 24; [5] incident + 24 months |
+| `CompensationEarningsCeiling` (s.36) | **empty — no default in force** (the Act's 25,000 cedis predates redenomination; R5-Q5). A save that omits it CLEARS it, so the page always sends it | **Enforced** | caps the monthly earnings at a twelfth of it; the working says capped, within, or none | [3]: 36,000 caps GHS 6,000 at GHS 3,000 → GHS 272,160.00; 120,000 does not bite; empty says none is set |
+| `IncapacityScheduleItem` rows (per tenant) | **empty until loaded** — *Load the Act's schedules* adds the 54 rows (48 Third, 6 First Schedule; 22 arm or hand) a tenant lacks | **Enforced** | the assessment rates injuries from them; a row's percentage is copied onto the injury | [1]: 54 loaded by admin only, a second load adds nothing; [2] a row edited 12 → 50 leaves the assessed injury at 12; a retired row refused |
+
 ### The year-end basis and first-year pro-rating (entitlement plan B2/B3) — added 2026-09-18
 
 Both on the leave type, and both introduced **because the product was already answering their

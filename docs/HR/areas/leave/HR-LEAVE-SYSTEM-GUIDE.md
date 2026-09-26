@@ -2645,6 +2645,9 @@ injury absence. The typed paper recommendation is still accepted as before.
 | Point a leave request at a board | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write` — **the Medical board panel**, chapter 7 |
 | Name the board a medical retirement rests on | `PUT /api/hr/separations/{id}/medical-board` (an empty body unlinks) | `HR.Policy.SeparationWrite` — **the separation page's Medical board panel** |
 | The quorum | `PUT /api/hr/policy-settings` (`medicalBoardQuorum`, 1–20; a save that omits it resets it to 1) | the HR policy page |
+| Record a case's incapacity assessment (the whole set) · the labour officer's notice and any agreement · link the SHE incident | `PUT …/{id}/cases/{caseId}/incapacity` · `PUT …/{id}/cases/{caseId}/compensation` · `PUT …/{id}/cases/{caseId}/safety-incident` (an empty body unlinks) | `HR.Medical.Write` — **the case's *Incapacity and compensation* block** |
+| The compensation schedule | `GET …/incapacity-schedule` (Read) · `POST …/incapacity-schedule/load-defaults`, `POST …/incapacity-schedule`, `PUT …/incapacity-schedule/{rowId}` | **`HR.Medical.Admin`** to change it — `/hr/medical/boards/incapacity-schedule` |
+| The compensation settings | `PUT /api/hr/policy-settings` (`permanentTotalIncapacityMonths` — 96, empty = no figure; `temporaryIncapacityMaxMonths` — 24; `compensationEarningsCeiling` — empty) | the HR policy page |
 
 ⚠ **"Gated on `HR.Medical.*`" does not mean HR is shut out.** The HR role is granted
 `ViewMedicalRecords` and `MaintainMedicalRecords` deliberately, because HR **administers** this
@@ -2695,6 +2698,65 @@ clinical findings, which stay on the Medical page. **Submission then accepts the
 place of the medical report** (*"A medical retirement needs the medical report that supports it, or a
 medical board's finding recommending it."*). Changing the route out away from medical retirement
 drops the board.
+
+### ⚖ Incapacity and compensation — the Workmen's Compensation Act (lane K-II-b, 2026-09-26)
+
+**Every case carries an *Incapacity and compensation* block** on the board page. It records what the
+attending medical officer assessed (s.2(3)) and works out an **indicative** figure under the Workmen's
+Compensation Act 1987 (PNDCL 187), read against its primary text
+(`docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md`).
+
+**The compensation schedule** — `/hr/medical/boards/incapacity-schedule`, from **Compensation
+schedule** on the register. A Medical **administrator** presses **Load the Act's schedules** once: 48
+Third Schedule injuries (incapacity, s.6) and 6 First Schedule disfigurements (s.8, *up to* their
+percentage), each with its source; a second press adds nothing. Rows can be added, changed and retired
+(never deleted) — **an injury already assessed keeps the percentage it had**. HR can read it; only an
+administrator changes it, because the statute's rates are configuration, not casework.
+
+**Record the assessment** (per case) asks for:
+
+| Field | What it means |
+|---|---|
+| **Incapacity found** | *No incapacity* · *Temporary total* · *Temporary partial* · *Permanent* — partial or total follows from the percentage: 100 % or more is permanent total (s.38) |
+| **Assessed by** *(required)* · **Assessed on** | the attending medical officer — the Act rests the compensation on their assessment (s.2(3)); never a future date |
+| **Compensation** | *Payable*, or not payable — drink or drugs (s.2(5)), deliberately self-inflicted (s.2(7)), a false representation (s.2(8)) |
+| **Injuries** *(for a permanent incapacity, at least one)* | a Third Schedule row — with **partial loss of use** (half) and, on an arm or hand, **the side the employee does not favour** (90 %); a disfigurement — a figure up to its row; or **not on the schedule** — the panel's own percentage for lost earning capacity (s.6(1)(b)). The dialog adds them up as you go, never above 100 % (s.6(2)) |
+
+It is **the whole assessment** — saving replaces the last. Each refusal names its rule, e.g. *"The
+Schedule sets "Loss of foot" at 40%. Record a different figure as the panel's own assessment instead."*
+
+**The indicative figure** — percentage × **96** months' earnings (s.5) × monthly earnings, worked out
+when the assessment is saved **and kept as worked out**; the working is shown in full, e.g.:
+
+> *94.5% of 96 months' earnings (ss.5–6) at GHS 6,000.00 a month = GHS 544,320.00. Earnings: GHS
+> 6,000.00 a month (contract …) — the current basic pay; the Act uses the rate over the previous
+> twelve months (s.9). No earnings ceiling is set (s.36). Indicative only: the labour officer notifies
+> the amount due (s.35); it is paid to the Court (s.11(3)) and nothing may be set off against it
+> (s.27).*
+
+- ⚠ **Earnings are the current basic pay** — payroll's, else the employee record's, else the contract's —
+  because payroll does not yet expose the twelve months the Act asks for. The working says so.
+- ⚠ **Never money HR pays, never a settlement line.** It is paid to the Court, and nothing may be set
+  off against it. A medical retirement's separation names the board; it does not carry the money.
+- **Temporary incapacity** works out no lump sum: it is paid periodically through payroll, for at most
+  **24** months (s.7), shown as a date when the incident is linked.
+- **Settings** (HR policy page, *Medical boards*): the months (96; empty = no figure), the longest
+  temporary incapacity (24), and **the earnings ceiling (s.36), empty** — the Act's 25,000 cedis
+  predates redenomination and no revision was found (R5-Q5). Set, it caps the month at a twelfth of it,
+  and the working says whether it bit.
+
+**The labour officer's notice** records the amount notified and when — due three months on (s.35) —
+and any written agreement, **never below the Act's amount** (s.15: the notified amount, else the
+indicative one). ⚠ **Once a notice is recorded, the assessment is fixed**; clearing the notice frees it.
+
+**An injury-on-duty case links its SHE incident** — **Link the safety incident** lists the incidents
+in Safety that name the employee among the people involved (the server refuses any other). The case
+then shows the incident and **the date six months on, by which notice of the accident and the claim
+are due (s.12)** — shown, not enforced.
+
+**Not built:** the statutory claim filing with the Labour Department, death compensation (s.3), the
+Court's review of payments (s.17), periodical payment schedules (payroll's), and the twelve months'
+earnings (s.9) until payroll exposes them.
 
 ---
 

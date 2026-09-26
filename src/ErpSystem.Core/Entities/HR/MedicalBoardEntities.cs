@@ -181,6 +181,65 @@ public class MedicalBoardCase : TenantEntity
     [MaxLength(1000)]
     public string? WithdrawalReason { get; set; }
 
+    // ── The injury, its incapacity and compensation (round 5, lane K-II-b; PNDCL 187) ────────
+
+    /// <summary>
+    /// The SHE incident where the injury was reported, for a case about an injury on duty. A bare
+    /// <c>Guid</c> across the SHE↔Medical boundary — referenced, never navigated or written.
+    /// </summary>
+    public Guid? SafetyIncidentId { get; set; }
+
+    /// <summary>Null until assessed. ⚠ Permanent partial/total is derived from the percentage (s.38).</summary>
+    public IncapacityKind? IncapacityKind { get; set; }
+
+    /// <summary>The injuries' percentages summed, capped at 100 (s.6(2)). Null unless permanent.</summary>
+    /// <remarks>
+    /// ⚠ No column type is declared on these decimals: <c>ApplicationDbContext.ConfigureDecimalPrecision</c>
+    /// sets every decimal to <c>decimal(18,4)</c> (18,2 when the name holds Cost, Price, Amount, Total or
+    /// Salary) and overrides any attribute or <c>HasPrecision</c>. The service rounds money to 2 places.
+    /// </remarks>
+    public decimal? IncapacityPercentage { get; set; }
+
+    public DateOnly? IncapacityAssessedOn { get; set; }
+
+    /// <summary>The attending medical officer whose assessment the figure rests on (s.2(3)).</summary>
+    [MaxLength(200)]
+    public string? IncapacityAssessedBy { get; set; }
+
+    [MaxLength(2000)]
+    public string? IncapacityNotes { get; set; }
+
+    /// <summary>Set when the Act excludes compensation (s.2(5), (7), (8)).</summary>
+    public CompensationNotPayableReason? CompensationNotPayableReason { get; set; }
+
+    /// <summary>
+    /// The indicative figure, worked out when the assessment is recorded and kept as worked out — later
+    /// pay or setting changes do not move it. ⚠ Indicative: the labour officer notifies the amount due
+    /// (s.35), it is paid to the Court (s.11(3)), and nothing may be set off against it (s.27).
+    /// </summary>
+    public decimal? IndicativeCompensation { get; set; }
+
+    [MaxLength(1000)]
+    public string? IndicativeCompensationBasis { get; set; }
+
+    [MaxLength(3)]
+    public string? CompensationCurrency { get; set; }
+
+    /// <summary>What the chief labour officer notified (s.35). Once recorded, the assessment is fixed.</summary>
+    public decimal? NotifiedCompensation { get; set; }
+
+    public DateOnly? CompensationNotifiedOn { get; set; }
+
+    /// <summary>Payable within three months of the notification (s.35).</summary>
+    public DateOnly? CompensationDueOn { get; set; }
+
+    /// <summary>An agreement in writing (s.15) — never below the Act's amount.</summary>
+    public decimal? AgreedCompensation { get; set; }
+
+    public DateOnly? CompensationAgreedOn { get; set; }
+
+    public virtual ICollection<MedicalBoardCaseInjury> Injuries { get; set; } = new List<MedicalBoardCaseInjury>();
+
     /// <summary>
     /// Whether a case asked this question rules on an ABSENCE — the only kind a leave type's board
     /// threshold can rest on (round 5, lane K6).
@@ -194,6 +253,73 @@ public class MedicalBoardCase : TenantEntity
         purpose is MedicalBoardPurpose.ExtendedSickLeave
                 or MedicalBoardPurpose.InjuryOnDuty
                 or MedicalBoardPurpose.Other;
+}
+
+/// <summary>
+/// One assessed injury on a case (round 5, lane K-II-b): a schedule row, or the panel's own
+/// assessment of lost earning capacity for an injury the Schedule does not name (s.6(1)(b)).
+/// </summary>
+/// <remarks>
+/// ⚠ <b>The row's percentage is copied, not referenced.</b> An administrator may later edit the schedule;
+/// a finding already made must not move with it. <see cref="ScheduleItemId"/> says which row it came from.
+/// </remarks>
+public class MedicalBoardCaseInjury : TenantEntity
+{
+    public Guid CaseId { get; set; }
+
+    [ForeignKey(nameof(CaseId))]
+    public virtual MedicalBoardCase Case { get; set; } = null!;
+
+    /// <summary>The schedule row, or null for the panel's own assessment.</summary>
+    public Guid? ScheduleItemId { get; set; }
+    public virtual IncapacityScheduleItem? ScheduleItem { get; set; }
+
+    /// <summary>The injury as named — the row's words, or the panel's.</summary>
+    [MaxLength(300)]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>The row's percentage when assessed, or the panel's assessed percentage.</summary>
+    public decimal BasePercentage { get; set; }
+
+    public LossOfUse LossOfUse { get; set; } = LossOfUse.Total;
+
+    /// <summary>An arm or hand on the side the employee does not favour: ninety percent (Third Schedule note).</summary>
+    public bool NonDominantSide { get; set; }
+
+    /// <summary>After loss of use and dominance: what this injury adds to the case.</summary>
+    public decimal Percentage { get; set; }
+
+    public int SortOrder { get; set; }
+}
+
+/// <summary>
+/// A row of a compensation schedule, per tenant (round 5, lane K-II-b) — loaded from PNDCL 187's First
+/// and Third Schedules (<c>docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md</c>) and editable,
+/// so a client under another schedule names its own rows and their source.
+/// </summary>
+public class IncapacityScheduleItem : TenantEntity
+{
+    public IncapacityScheduleKind Kind { get; set; } = IncapacityScheduleKind.Incapacity;
+
+    [MaxLength(300)]
+    public string Injury { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The percentage of permanent total incapacity. ⚠ For a disfigurement row it is the MOST that may be
+    /// assessed (s.8: a practitioner determines the amount up to it).
+    /// </summary>
+    public decimal Percentage { get; set; }
+
+    /// <summary>Where the row comes from, e.g. <c>PNDCL 187, Third Schedule</c>.</summary>
+    [MaxLength(200)]
+    public string Source { get; set; } = string.Empty;
+
+    /// <summary>An arm or hand: the non-dominant side is rated at ninety percent (Third Schedule note).</summary>
+    public bool AppliesToArmOrHand { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public int SortOrder { get; set; }
 }
 
 /// <summary>Somebody appointed to a medical board.</summary>

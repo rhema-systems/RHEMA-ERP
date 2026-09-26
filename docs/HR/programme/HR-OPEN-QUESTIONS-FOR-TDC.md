@@ -724,8 +724,9 @@ HR pays out or nets it against a leaver's settlement.)*
 
 **Meanwhile:** boards have a purpose, physicians as members, documents, and a clear cancel/dissolve;
 and they hear **cases** — several employees per board, each decided at a sitting whose attendance is
-recorded, on default 1 above (all built 2026-09-26). Incapacity and compensation are built next, on
-defaults 2–5.
+recorded, on default 1 above; and incapacity and an indicative compensation, on defaults 2–5 — the
+Act's schedules loaded as the starting schedule, 96 months, and **no earnings ceiling until TDC names
+one** (all built 2026-09-26).
 
 ---
 

@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Medical;
+using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
@@ -26,6 +27,11 @@ public class MedicalBoardService : IMedicalBoardService
     private readonly IGenericRepository<HealthcareFacility> _facilities;
     private readonly IGenericRepository<EmployeeHealthProfile> _profiles;
     private readonly IGenericRepository<EmployeeMedicalExam> _exams;
+    private readonly IGenericRepository<MedicalBoardCaseInjury> _injuries;
+    private readonly IGenericRepository<IncapacityScheduleItem> _schedule;
+    private readonly IGenericRepository<SafetyIncident> _incidents;
+    private readonly IGenericRepository<EmployeeContractDetail> _contracts;
+    private readonly IPayrollMembershipService _payroll;
     private readonly ICompanyHrPolicyProvider _policy;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
@@ -44,6 +50,11 @@ public class MedicalBoardService : IMedicalBoardService
         IGenericRepository<HealthcareFacility> facilities,
         IGenericRepository<EmployeeHealthProfile> profiles,
         IGenericRepository<EmployeeMedicalExam> exams,
+        IGenericRepository<MedicalBoardCaseInjury> injuries,
+        IGenericRepository<IncapacityScheduleItem> schedule,
+        IGenericRepository<SafetyIncident> incidents,
+        IGenericRepository<EmployeeContractDetail> contracts,
+        IPayrollMembershipService payroll,
         ICompanyHrPolicyProvider policy,
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
@@ -61,6 +72,11 @@ public class MedicalBoardService : IMedicalBoardService
         _facilities = facilities;
         _profiles = profiles;
         _exams = exams;
+        _injuries = injuries;
+        _schedule = schedule;
+        _incidents = incidents;
+        _contracts = contracts;
+        _payroll = payroll;
         _policy = policy;
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
@@ -87,6 +103,7 @@ public class MedicalBoardService : IMedicalBoardService
         .Include(b => b.Facility)
         .Include(b => b.Cases).ThenInclude(c => c.Employee)
         .Include(b => b.Cases).ThenInclude(c => c.BasedOnExam)
+        .Include(b => b.Cases).ThenInclude(c => c.Injuries).ThenInclude(i => i.ScheduleItem)
         .Include(b => b.Members).ThenInclude(m => m.Physician)
         .Include(b => b.Members).ThenInclude(m => m.Employee)
         .Include(b => b.Sittings).ThenInclude(s => s.Attendance)
@@ -154,6 +171,7 @@ public class MedicalBoardService : IMedicalBoardService
         var everyMember = await EveryMemberAsync(rows.Select(b => b.Id).ToList(), tenantId, ct);
         var dtos = rows.Select(b => ToDto(b, everyMember)).ToList();
         await FillActorNamesAsync(dtos, tenantId, ct);
+        await FillCaseContextAsync(dtos, tenantId, ct);
 
         return new PagedResult<MedicalBoardDto>
         {
@@ -172,6 +190,7 @@ public class MedicalBoardService : IMedicalBoardService
 
         var dto = ToDto(board, await EveryMemberAsync(new[] { board.Id }, tenantId, ct));
         await FillActorNamesAsync(new[] { dto }, tenantId, ct);
+        await FillCaseContextAsync(new[] { dto }, tenantId, ct);
         return dto;
     }
 
@@ -767,6 +786,531 @@ public class MedicalBoardService : IMedicalBoardService
         return (await GetBoardAsync(boardId, ct))!;
     }
 
+    // ── Incapacity and compensation (round 5, lane K-II-b; PNDCL 187) ────────────────────────
+
+    /// <summary>The checks every write about a case's injury shares.</summary>
+    private static MedicalBoardCase RequireAssessableCase(MedicalBoard board, Guid caseId)
+    {
+        if (board.Status == MedicalBoardStatus.Cancelled)
+            throw new InvalidOperationException(board.ConvenedOn is null
+                ? "This request for a board was cancelled, so its cases cannot be assessed."
+                : "This board was dissolved, so its cases cannot be assessed.");
+
+        var @case = RequireCase(board, caseId);
+        if (@case.Status == MedicalBoardCaseStatus.Withdrawn)
+            throw new InvalidOperationException("This case was withdrawn, so there is nothing to assess.");
+        return @case;
+    }
+
+    /// <remarks>
+    /// <para>⚠ <b>The whole assessment, every time</b> — its injuries are replaced, not merged, and the
+    /// indicative figure is worked out afresh and KEPT as worked out: pay or settings changing later do
+    /// not move a figure somebody may already have read.</para>
+    ///
+    /// <para>Allowed on a listed or decided case: the attending medical officer's assessment (s.2(3))
+    /// is its own act, and it may come before or after the board's finding. It is fixed once the labour
+    /// officer's amount is recorded against it.</para>
+    /// </remarks>
+    public async Task<MedicalBoardDto> AssessIncapacityAsync(
+        Guid boardId, Guid caseId, AssessIncapacityDto dto, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var board = await RequireBoardAsync(boardId, ct);
+        var @case = RequireAssessableCase(board, caseId);
+
+        if (@case.NotifiedCompensation is not null)
+            throw new InvalidOperationException(
+                "The labour officer has notified an amount on this assessment, so it is fixed. Clear the "
+                + "notification first if it was recorded in error.");
+
+        if (dto.Kind is not IncapacityKind kind || !Enum.IsDefined(kind))
+            throw new InvalidOperationException(
+                "Say what incapacity the assessment found: none, temporary total, temporary partial, or permanent.");
+
+        if (string.IsNullOrWhiteSpace(dto.AssessedBy))
+            throw new InvalidOperationException(
+                "Name the medical officer whose assessment this is — the Act rests the compensation on it (s.2(3)).");
+
+        var assessedOn = dto.AssessedOn ?? _clock.TodayUtc;
+        if (assessedOn > _clock.TodayUtc)
+            throw new InvalidOperationException("An assessment cannot be dated in the future.");
+
+        if (dto.NotPayableReason is CompensationNotPayableReason reason && !Enum.IsDefined(reason))
+            throw new InvalidOperationException(
+                "Say why no compensation is payable: drink or drugs, a deliberate self-injury, or a false representation (s.2).");
+
+        var asked = dto.Injuries ?? new List<AssessedInjuryDto>();
+        var permanent = kind is IncapacityKind.PermanentPartial or IncapacityKind.PermanentTotal;
+
+        if (kind == IncapacityKind.None && asked.Count > 0)
+            throw new InvalidOperationException("An assessment of no incapacity lists no injuries.");
+        if (permanent && asked.Count == 0)
+            throw new InvalidOperationException(
+                "A permanent incapacity is assessed injury by injury: add at least one, from the schedule or "
+                + "as the panel's own assessment.");
+
+        var rowIds = asked.Where(a => a.ScheduleItemId is not null).Select(a => a.ScheduleItemId!.Value).Distinct().ToList();
+        var rows = await _schedule.GetQueryable()
+            .AsNoTracking()
+            .Where(r => r.TenantId == tenantId && rowIds.Contains(r.Id))
+            .ToDictionaryAsync(r => r.Id, ct);
+
+        var injuries = new List<MedicalBoardCaseInjury>();
+        var order = 0;
+        foreach (var a in asked)
+            injuries.Add(BuildInjury(a, rows, tenantId, @case.Id, order++));
+
+        // s.6(2): several injuries are aggregated, never above permanent total; s.38: 100 % is total.
+        decimal? percentage = permanent ? Math.Min(100m, injuries.Sum(i => i.Percentage)) : null;
+        if (permanent)
+            kind = percentage >= 100m ? IncapacityKind.PermanentTotal : IncapacityKind.PermanentPartial;
+
+        // Replace the set through the repository — never through the navigation (EF write traps).
+        var previous = await _injuries.GetQueryable()
+            .Where(i => i.CaseId == @case.Id && i.TenantId == tenantId)
+            .ToListAsync(ct);
+        foreach (var old in previous)
+            await _injuries.DeleteAsync(old);
+        foreach (var injury in injuries)
+            await _injuries.AddAsync(injury);
+
+        @case.IncapacityKind = kind;
+        @case.IncapacityPercentage = percentage;
+        @case.IncapacityAssessedOn = assessedOn;
+        @case.IncapacityAssessedBy = dto.AssessedBy.Trim();
+        @case.IncapacityNotes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+        @case.CompensationNotPayableReason = dto.NotPayableReason;
+
+        var settings = await _policy.GetAsync(ct);
+        var (amount, basis, currency) = await IndicativeFigureAsync(@case, kind, percentage, settings, ct);
+        @case.IndicativeCompensation = amount;
+        @case.IndicativeCompensationBasis = FitBasis(basis);
+        @case.CompensationCurrency = currency;
+
+        // An agreement made against an earlier figure is no longer an agreement about this one.
+        @case.AgreedCompensation = null;
+        @case.CompensationAgreedOn = null;
+
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "Medical board {number}: incapacity assessed on the case of employee {employee} — {kind}{pct}",
+            board.BoardNumber, @case.EmployeeId, kind, percentage is decimal p ? $" {p:0.##}%" : string.Empty);
+
+        return (await GetBoardAsync(boardId, ct))!;
+    }
+
+    /// <summary>One asked injury, checked against the Schedule's own rules and rated.</summary>
+    private static MedicalBoardCaseInjury BuildInjury(
+        AssessedInjuryDto a, IReadOnlyDictionary<Guid, IncapacityScheduleItem> rows, Guid tenantId, Guid caseId, int order)
+    {
+        var lossOfUse = a.LossOfUse ?? LossOfUse.Total;
+        if (!Enum.IsDefined(lossOfUse))
+            throw new InvalidOperationException("Say whether the member was lost, or partly lost the use of.");
+
+        string description;
+        decimal basePercentage;
+
+        if (a.ScheduleItemId is Guid rowId)
+        {
+            if (!rows.TryGetValue(rowId, out var row))
+                throw new ArgumentException($"Schedule row '{rowId}' not found.");
+            if (!row.IsActive)
+                throw new InvalidOperationException($"\"{row.Injury}\" is no longer in use on the schedule.");
+
+            description = row.Injury;
+
+            if (row.Kind == IncapacityScheduleKind.Disfigurement)
+            {
+                // s.8: a practitioner determines the amount UP TO the row's percentage.
+                if (lossOfUse != LossOfUse.Total || a.NonDominantSide)
+                    throw new InvalidOperationException(
+                        "Loss of use and the side favoured apply to the Third Schedule's members, not to a disfigurement.");
+                basePercentage = a.Percentage ?? row.Percentage;
+                if (basePercentage <= 0m || basePercentage > row.Percentage)
+                    throw new InvalidOperationException(
+                        $"A disfigurement is assessed at up to {row.Percentage:0.##}% (\"{row.Injury}\", s.8); "
+                        + $"{basePercentage:0.##}% is outside that.");
+            }
+            else
+            {
+                if (a.Percentage is decimal given && given != row.Percentage)
+                    throw new InvalidOperationException(
+                        $"The Schedule sets \"{row.Injury}\" at {row.Percentage:0.##}%. Record a different figure as the "
+                        + "panel's own assessment instead.");
+                if (a.NonDominantSide && !row.AppliesToArmOrHand)
+                    throw new InvalidOperationException(
+                        $"The side the employee favours only changes an arm or hand injury, and \"{row.Injury}\" is not one.");
+                basePercentage = row.Percentage;
+            }
+        }
+        else
+        {
+            // s.6(1)(b): an injury the Schedule does not name — the panel's own figure, already whole.
+            if (string.IsNullOrWhiteSpace(a.Description))
+                throw new InvalidOperationException(
+                    "Describe the injury the panel assessed itself — it is not on the schedule (s.6(1)(b)).");
+            if (a.Percentage is not decimal own || own <= 0m || own > 100m)
+                throw new InvalidOperationException(
+                    "Give the panel's own percentage for the injury: more than 0 and at most 100.");
+            if (lossOfUse != LossOfUse.Total || a.NonDominantSide)
+                throw new InvalidOperationException(
+                    "The panel's own assessment is its figure already; loss of use and the side favoured apply to schedule rows.");
+            description = a.Description.Trim();
+            basePercentage = own;
+        }
+
+        // The Third Schedule's notes: partial loss of use is half; the non-dominant arm or hand, ninety percent.
+        var rated = basePercentage
+                    * (lossOfUse == LossOfUse.Partial ? 0.5m : 1m)
+                    * (a.NonDominantSide ? 0.9m : 1m);
+
+        return new MedicalBoardCaseInjury
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            CaseId = caseId,
+            ScheduleItemId = a.ScheduleItemId,
+            Description = description.Length <= 300 ? description : description[..300],
+            BasePercentage = basePercentage,
+            LossOfUse = lossOfUse,
+            NonDominantSide = a.NonDominantSide,
+            Percentage = Math.Round(rated, 2, MidpointRounding.AwayFromZero),
+            SortOrder = order
+        };
+    }
+
+    /// <summary>
+    /// The indicative figure and the sentence that explains it.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Earnings are the CURRENT monthly basic pay</b> — payroll's, or else the contract's, the
+    /// same source the leaver's settlement uses. The Act asks for the rate over the previous twelve months
+    /// (s.9), which payroll does not yet make readable, so the basis says so and the labour officer's
+    /// notified amount governs.</para>
+    ///
+    /// <para>⚠ Temporary incapacity is paid periodically through payroll (s.7): no lump sum here.</para>
+    /// </remarks>
+    private async Task<(decimal? Amount, string Basis, string? Currency)> IndicativeFigureAsync(
+        MedicalBoardCase @case, IncapacityKind kind, decimal? percentage, CompanyHrPolicySettings settings, CancellationToken ct)
+    {
+        const string Indicative =
+            " Indicative only: the labour officer notifies the amount due (s.35); it is paid to the Court "
+            + "(s.11(3)) and nothing may be set off against it (s.27).";
+        var currency = string.IsNullOrWhiteSpace(settings.DefaultCurrencyCode) ? "GHS" : settings.DefaultCurrencyCode;
+
+        if (@case.CompensationNotPayableReason is CompensationNotPayableReason reason)
+            return (null, $"No compensation is payable: {NotPayableWords(reason)}.", null);
+
+        switch (kind)
+        {
+            case IncapacityKind.None:
+                return (null, "No incapacity was found, so no compensation arises.", null);
+
+            case IncapacityKind.TemporaryTotal:
+            case IncapacityKind.TemporaryPartial:
+                return (null,
+                    "Temporary incapacity is paid periodically through payroll — the difference between earnings "
+                    + $"at the accident and after it — for at most {settings.TemporaryIncapacityMaxMonths} months "
+                    + "(s.7), six more where the chief labour officer directs. No lump sum is worked out here.",
+                    null);
+        }
+
+        if (settings.PermanentTotalIncapacityMonths is not int months)
+            return (null,
+                "Not worked out: the months' earnings for permanent total incapacity (s.5) are not set on the HR "
+                + "policy page.", null);
+
+        var (monthly, source) = await MonthlyEarningsAsync(@case.EmployeeId, @case.TenantId, ct);
+        if (monthly is not decimal pay)
+            return (null, $"Not worked out: {source}", null);
+
+        var ceilingNote = " No earnings ceiling is set (s.36).";
+        var used = pay;
+        if (settings.CompensationEarningsCeiling is decimal ceiling)
+        {
+            var monthlyCap = Math.Round(ceiling / 12m, 2, MidpointRounding.AwayFromZero);
+            if (pay > monthlyCap)
+            {
+                used = monthlyCap;
+                ceilingNote = $" Capped at a twelfth of the {currency} {ceiling:N2} a year ceiling (s.36): "
+                              + $"{currency} {monthlyCap:N2}.";
+            }
+            else
+            {
+                ceilingNote = $" Within the {currency} {ceiling:N2} a year ceiling (s.36).";
+            }
+        }
+
+        var pct = percentage ?? 0m;
+        var amount = Math.Round(pct / 100m * months * used, 2, MidpointRounding.AwayFromZero);
+
+        return (amount,
+            $"{pct:0.##}% of {months} months' earnings (ss.5–6) at {currency} {used:N2} a month = "
+            + $"{currency} {amount:N2}. Earnings: {currency} {pay:N2} a month ({SourcePhrase(source)}) — the "
+            + "current basic pay; the Act uses the rate over the previous twelve months (s.9)." + ceilingNote + Indicative,
+            currency);
+    }
+
+    /// <summary>
+    /// A pay source's sentence as a phrase inside the working: no closing full stop, and a lower-case
+    /// first letter unless it starts an acronym ("The flat figure…" → "the flat figure…").
+    /// </summary>
+    private static string SourcePhrase(string source)
+    {
+        var s = source.Trim().TrimEnd('.');
+        return s.Length > 1 && char.IsUpper(s[0]) && char.IsLower(s[1])
+            ? char.ToLowerInvariant(s[0]) + s[1..]
+            : s;
+    }
+
+    /// <summary>Payroll's monthly basic pay, or else the newest contract salary — the settlement's source.</summary>
+    private async Task<(decimal? Monthly, string Source)> MonthlyEarningsAsync(Guid employeeId, Guid tenantId, CancellationToken ct)
+    {
+        var (monthly, source) = await _payroll.ResolveMonthlyBasicPayAsync(employeeId, ct);
+        if (monthly is > 0m) return (monthly, source);
+
+        var contract = await _contracts.GetQueryable()
+            .AsNoTracking()
+            .Where(c => c.TenantId == tenantId && c.EmployeeId == employeeId && c.Salary > 0)
+            .OrderByDescending(c => c.IsCurrent)
+            .ThenByDescending(c => c.EffectiveDate)
+            .Select(c => new { c.Salary, c.ContractNumber })
+            .FirstOrDefaultAsync(ct);
+
+        return contract is null
+            ? ((decimal?)null, $"no salary is on record for this employee ({SourcePhrase(source)}).")
+            : ((decimal?)contract.Salary, $"contract {contract.ContractNumber}");
+    }
+
+    private static string NotPayableWords(CompensationNotPayableReason reason) => reason switch
+    {
+        CompensationNotPayableReason.DrinkOrDrugs => "the injury was attributable to drink or drugs (s.2(5))",
+        CompensationNotPayableReason.DeliberateSelfInjury => "the injury was deliberately self-inflicted (s.2(7))",
+        CompensationNotPayableReason.FalseRepresentation => "a false representation was made about a previous injury (s.2(8))",
+        _ => "the Act excludes it (s.2)"
+    };
+
+    /// <summary>The basis column holds 1,000 characters; the working must never fail the write.</summary>
+    private static string FitBasis(string basis) => basis.Length <= 1000 ? basis : basis[..999] + "…";
+
+    public async Task<MedicalBoardDto> RecordCompensationAsync(
+        Guid boardId, Guid caseId, RecordCompensationDto dto, CancellationToken ct = default)
+    {
+        var board = await RequireBoardAsync(boardId, ct);
+        var @case = RequireAssessableCase(board, caseId);
+
+        if (@case.IncapacityKind is null or IncapacityKind.None)
+            throw new InvalidOperationException(
+                "Record the incapacity assessment first — the amount is for the incapacity assessed.");
+        if (@case.CompensationNotPayableReason is CompensationNotPayableReason reason)
+            throw new InvalidOperationException(
+                $"This case records that no compensation is payable: {NotPayableWords(reason)}.");
+
+        if (dto.NotifiedCompensation is decimal notified)
+        {
+            if (notified < 0m)
+                throw new InvalidOperationException("A notified amount cannot be negative.");
+            if (dto.NotifiedOn is null)
+                throw new InvalidOperationException("Say when the labour officer notified the amount.");
+        }
+        else if (dto.NotifiedOn is not null || dto.DueOn is not null)
+        {
+            throw new InvalidOperationException("A notification date needs the amount notified.");
+        }
+
+        if (dto.NotifiedOn is DateOnly on && on > _clock.TodayUtc)
+            throw new InvalidOperationException("A notification cannot be dated in the future.");
+
+        if (dto.AgreedCompensation is decimal agreed)
+        {
+            if (dto.AgreedOn is null)
+                throw new InvalidOperationException("Say when the agreement was made.");
+
+            // s.15: an agreement is never below what the Act provides.
+            var floor = dto.NotifiedCompensation ?? @case.IndicativeCompensation;
+            if (floor is decimal least && agreed < least)
+                throw new InvalidOperationException(
+                    $"An agreement cannot be for less than the Act's amount (s.15): "
+                    + $"{@case.CompensationCurrency ?? "GHS"} {least:N2}.");
+        }
+        else if (dto.AgreedOn is not null)
+        {
+            throw new InvalidOperationException("An agreement date needs the amount agreed.");
+        }
+
+        @case.NotifiedCompensation = dto.NotifiedCompensation;
+        @case.CompensationNotifiedOn = dto.NotifiedOn;
+        // s.35: payable within three months of the notification.
+        @case.CompensationDueOn = dto.NotifiedCompensation is null ? null : dto.DueOn ?? dto.NotifiedOn!.Value.AddMonths(3);
+        @case.AgreedCompensation = dto.AgreedCompensation;
+        @case.CompensationAgreedOn = dto.AgreedOn;
+        @case.CompensationCurrency ??= (await _policy.GetAsync(ct)).DefaultCurrencyCode;
+
+        await _unitOfWork.SaveChangesAsync(ct);
+        return (await GetBoardAsync(boardId, ct))!;
+    }
+
+    public async Task<MedicalBoardDto> LinkSafetyIncidentAsync(
+        Guid boardId, Guid caseId, Guid? incidentId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var board = await RequireBoardAsync(boardId, ct);
+        var @case = RequireAssessableCase(board, caseId);
+
+        if (incidentId is Guid id)
+        {
+            if (@case.Purpose != MedicalBoardPurpose.InjuryOnDuty)
+                throw new InvalidOperationException("Only a case about an injury on duty rests on a safety incident.");
+
+            var incident = await _incidents.GetQueryable()
+                .AsNoTracking()
+                .Where(i => i.Id == id && i.TenantId == tenantId)
+                .Select(i => new { i.IncidentNumber, NamesEmployee = i.InvolvedPersons.Any(p => !p.IsDeleted && p.EmployeeId == @case.EmployeeId) })
+                .FirstOrDefaultAsync(ct)
+                ?? throw new ArgumentException($"Safety incident '{id}' not found.");
+
+            if (!incident.NamesEmployee)
+                throw new InvalidOperationException(
+                    $"Incident {incident.IncidentNumber} does not name this employee among the people involved. "
+                    + "Add them to the incident in Safety first, or choose their own incident.");
+        }
+
+        @case.SafetyIncidentId = incidentId;
+        await _unitOfWork.SaveChangesAsync(ct);
+        return (await GetBoardAsync(boardId, ct))!;
+    }
+
+    // ── The compensation schedule ────────────────────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<IncapacityScheduleItemDto>> GetScheduleAsync(bool includeInactive, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        return await _schedule.GetQueryable()
+            .AsNoTracking()
+            .Where(r => r.TenantId == tenantId && (includeInactive || r.IsActive))
+            .OrderBy(r => r.Kind).ThenBy(r => r.SortOrder).ThenBy(r => r.Injury)
+            .Select(r => ToDto(r))
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<IncapacityScheduleItemDto>> LoadDefaultScheduleAsync(CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var have = (await _schedule.GetQueryable()
+                .Where(r => r.TenantId == tenantId)
+                .Select(r => new { r.Kind, r.Injury })
+                .ToListAsync(ct))
+            .Select(r => (r.Kind, r.Injury.ToLowerInvariant()))
+            .ToHashSet();
+
+        var order = 0;
+        var added = 0;
+        foreach (var (kind, injury, percentage, armOrHand) in IncapacityScheduleDefaults.Rows)
+        {
+            order += 10;
+            if (have.Contains((kind, injury.ToLowerInvariant()))) continue;
+            await _schedule.AddAsync(new IncapacityScheduleItem
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Kind = kind,
+                Injury = injury,
+                Percentage = percentage,
+                Source = IncapacityScheduleDefaults.SourceFor(kind),
+                AppliesToArmOrHand = armOrHand,
+                IsActive = true,
+                SortOrder = order
+            });
+            added++;
+        }
+
+        if (added > 0) await _unitOfWork.SaveChangesAsync(ct);
+        _logger.LogInformation("Compensation schedule: {added} of PNDCL 187's rows added for tenant {tenant}", added, tenantId);
+
+        return await GetScheduleAsync(includeInactive: true, ct);
+    }
+
+    public async Task<IncapacityScheduleItemDto> AddScheduleItemAsync(SaveIncapacityScheduleItemDto dto, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var (kind, injury, percentage, source) = ValidateScheduleRow(dto);
+
+        if (await _schedule.GetQueryable().AnyAsync(r => r.TenantId == tenantId && r.Kind == kind && r.Injury == injury, ct))
+            throw new InvalidOperationException("That injury is already on this schedule.");
+
+        var row = new IncapacityScheduleItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Kind = kind,
+            Injury = injury,
+            Percentage = percentage,
+            Source = source,
+            AppliesToArmOrHand = kind == IncapacityScheduleKind.Incapacity && dto.AppliesToArmOrHand,
+            IsActive = dto.IsActive,
+            SortOrder = dto.SortOrder
+        };
+        await _schedule.AddAsync(row);
+        await _unitOfWork.SaveChangesAsync(ct);
+        return ToDto(row);
+    }
+
+    /// <remarks>
+    /// ⚠ Assessments already recorded keep the percentage they used — an edit here changes only what the
+    /// next assessment reads.
+    /// </remarks>
+    public async Task<IncapacityScheduleItemDto> UpdateScheduleItemAsync(
+        Guid itemId, SaveIncapacityScheduleItemDto dto, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var row = await _schedule.GetQueryable().FirstOrDefaultAsync(r => r.Id == itemId && r.TenantId == tenantId, ct)
+                  ?? throw new ArgumentException($"Schedule row '{itemId}' not found.");
+        var (kind, injury, percentage, source) = ValidateScheduleRow(dto);
+
+        if (await _schedule.GetQueryable().AnyAsync(
+                r => r.TenantId == tenantId && r.Id != itemId && r.Kind == kind && r.Injury == injury, ct))
+            throw new InvalidOperationException("That injury is already on this schedule.");
+
+        row.Kind = kind;
+        row.Injury = injury;
+        row.Percentage = percentage;
+        row.Source = source;
+        row.AppliesToArmOrHand = kind == IncapacityScheduleKind.Incapacity && dto.AppliesToArmOrHand;
+        row.IsActive = dto.IsActive;
+        row.SortOrder = dto.SortOrder;
+
+        await _unitOfWork.SaveChangesAsync(ct);
+        return ToDto(row);
+    }
+
+    private static (IncapacityScheduleKind Kind, string Injury, decimal Percentage, string Source) ValidateScheduleRow(
+        SaveIncapacityScheduleItemDto dto)
+    {
+        if (dto.Kind is not IncapacityScheduleKind kind || !Enum.IsDefined(kind))
+            throw new InvalidOperationException("Say which schedule the row belongs to: disfigurement or incapacity.");
+        if (string.IsNullOrWhiteSpace(dto.Injury))
+            throw new InvalidOperationException("Name the injury.");
+        if (dto.Percentage is not decimal pct || pct <= 0m || pct > 100m)
+            throw new InvalidOperationException("Give the row's percentage: more than 0 and at most 100.");
+        if (string.IsNullOrWhiteSpace(dto.Source))
+            throw new InvalidOperationException(
+                "Say where the row comes from — a statute, a policy, an insurer's table. A rate with no source cannot be checked.");
+        return (kind, dto.Injury.Trim(), pct, dto.Source.Trim());
+    }
+
+    private static IncapacityScheduleItemDto ToDto(IncapacityScheduleItem r) => new()
+    {
+        Id = r.Id,
+        Kind = r.Kind,
+        Injury = r.Injury,
+        Percentage = r.Percentage,
+        Source = r.Source,
+        AppliesToArmOrHand = r.AppliesToArmOrHand,
+        IsActive = r.IsActive,
+        SortOrder = r.SortOrder
+    };
+
     // ── Documents (round 5, lane K4) ─────────────────────────────────────────────────────────
 
     /// <summary>The board alone — a document write needs no members or sittings.</summary>
@@ -935,6 +1479,54 @@ public class MedicalBoardService : IMedicalBoardService
         }
     }
 
+    /// <summary>
+    /// Adds what a case reads from elsewhere (round 5, lane K-II-b): its SHE incident's number and date,
+    /// the six-month notice date that follows (s.12), and how long a temporary incapacity is paid for.
+    /// </summary>
+    /// <remarks>
+    /// The incident is read by reference across the SHE↔Medical boundary — one query for every case on
+    /// the page, never a navigation. An incident since deleted simply reads as not found.
+    /// </remarks>
+    private async Task FillCaseContextAsync(IEnumerable<MedicalBoardDto> dtos, Guid tenantId, CancellationToken ct)
+    {
+        var cases = dtos.SelectMany(d => d.Cases).ToList();
+        if (cases.Count == 0) return;
+
+        var incidentIds = cases.Where(c => c.SafetyIncidentId is not null)
+            .Select(c => c.SafetyIncidentId!.Value).Distinct().ToList();
+        var incidents = new Dictionary<Guid, (string Number, DateTime Date)>();
+        if (incidentIds.Count > 0)
+        {
+            var rows = await _incidents.GetQueryable()
+                .AsNoTracking()
+                .Where(i => i.TenantId == tenantId && incidentIds.Contains(i.Id))
+                .Select(i => new { i.Id, i.IncidentNumber, i.IncidentDate })
+                .ToListAsync(ct);
+            foreach (var r in rows) incidents[r.Id] = (r.IncidentNumber, r.IncidentDate);
+        }
+
+        static bool Temporary(MedicalBoardCaseDto c) =>
+            c.IncapacityKind is IncapacityKind.TemporaryTotal or IncapacityKind.TemporaryPartial;
+
+        int? maxMonths = cases.Any(Temporary) ? (await _policy.GetAsync(ct)).TemporaryIncapacityMaxMonths : null;
+
+        foreach (var c in cases)
+        {
+            if (c.SafetyIncidentId is Guid id && incidents.TryGetValue(id, out var incident))
+            {
+                c.SafetyIncidentNumber = incident.Number;
+                c.SafetyIncidentDate = DateOnly.FromDateTime(incident.Date);
+                c.ClaimNoticeDueBy = c.SafetyIncidentDate.Value.AddMonths(6);
+            }
+
+            if (Temporary(c) && maxMonths is int months)
+            {
+                c.TemporaryIncapacityMaxMonths = months;
+                if (c.SafetyIncidentDate is DateOnly from) c.TemporaryPaymentsEndBy = from.AddMonths(months);
+            }
+        }
+    }
+
     // ── Mapping ──────────────────────────────────────────────────────────────────────────────
 
     private static string MemberName(MedicalBoardMember m) =>
@@ -1013,7 +1605,40 @@ public class MedicalBoardService : IMedicalBoardService
                         ConcludedById = c.ConcludedById,
                         WithdrawnOn = c.WithdrawnOn,
                         WithdrawnById = c.WithdrawnById,
-                        WithdrawalReason = c.WithdrawalReason
+                        WithdrawalReason = c.WithdrawalReason,
+                        SafetyIncidentId = c.SafetyIncidentId,
+                        IncapacityKind = c.IncapacityKind,
+                        IncapacityPercentage = c.IncapacityPercentage,
+                        IncapacityAssessedOn = c.IncapacityAssessedOn,
+                        IncapacityAssessedBy = c.IncapacityAssessedBy,
+                        IncapacityNotes = c.IncapacityNotes,
+                        CompensationNotPayableReason = c.CompensationNotPayableReason,
+                        // ⚠ Filtered: a replaced assessment's rows are soft-deleted and can be fixed up
+                        // into this tracked collection (the EF soft-delete fixup trap).
+                        Injuries = (c.Injuries ?? new List<MedicalBoardCaseInjury>())
+                            .Where(i => !i.IsDeleted)
+                            .OrderBy(i => i.SortOrder)
+                            .Select(i => new MedicalBoardCaseInjuryDto
+                            {
+                                Id = i.Id,
+                                ScheduleItemId = i.ScheduleItemId,
+                                ScheduleKind = i.ScheduleItem?.Kind,
+                                Description = i.Description,
+                                BasePercentage = i.BasePercentage,
+                                LossOfUse = i.LossOfUse,
+                                NonDominantSide = i.NonDominantSide,
+                                Percentage = i.Percentage
+                            })
+                            .ToList(),
+                        IndicativeCompensation = c.IndicativeCompensation,
+                        IndicativeCompensationBasis = c.IndicativeCompensationBasis,
+                        CompensationCurrency = c.CompensationCurrency,
+                        NotifiedCompensation = c.NotifiedCompensation,
+                        CompensationNotifiedOn = c.CompensationNotifiedOn,
+                        CompensationDueOn = c.CompensationDueOn,
+                        AgreedCompensation = c.AgreedCompensation,
+                        CompensationAgreedOn = c.CompensationAgreedOn,
+                        AssessmentFixed = c.NotifiedCompensation is not null
                     };
                 })
                 .ToList(),

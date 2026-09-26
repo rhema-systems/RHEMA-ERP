@@ -187,6 +187,141 @@ export interface MedicalBoardCase {
   withdrawnById?: string | null;
   withdrawnByName?: string | null;
   withdrawalReason?: string | null;
+
+  // ── The injury, its incapacity and compensation (lane K-II-b; PNDCL 187) ──
+  safetyIncidentId?: string | null;
+  safetyIncidentNumber?: string | null;
+  /** DateOnly */
+  safetyIncidentDate?: string | null;
+  /** Notice of the accident and the claim within six months (s.12). Shown, not enforced. */
+  claimNoticeDueBy?: string | null;
+
+  incapacityKind?: IncapacityKind | null;
+  incapacityPercentage?: number | null;
+  incapacityAssessedOn?: string | null;
+  incapacityAssessedBy?: string | null;
+  incapacityNotes?: string | null;
+  compensationNotPayableReason?: CompensationNotPayableReason | null;
+  injuries: MedicalBoardCaseInjury[];
+
+  /** ⚠ Indicative: notified by the labour officer (s.35), paid to the Court (s.11(3)), never set off (s.27). */
+  indicativeCompensation?: number | null;
+  indicativeCompensationBasis?: string | null;
+  compensationCurrency?: string | null;
+  notifiedCompensation?: number | null;
+  compensationNotifiedOn?: string | null;
+  compensationDueOn?: string | null;
+  agreedCompensation?: number | null;
+  compensationAgreedOn?: string | null;
+  /** Once the labour officer's amount is recorded, the assessment is fixed. */
+  assessmentFixed: boolean;
+  temporaryIncapacityMaxMonths?: number | null;
+  temporaryPaymentsEndBy?: string | null;
+}
+
+/** The incapacity assessed (PNDCL 187). Permanent partial/total follows from the percentage (s.38). */
+export type IncapacityKind = 'None' | 'TemporaryTotal' | 'TemporaryPartial' | 'PermanentPartial' | 'PermanentTotal';
+
+export const INCAPACITY_KIND_LABEL: Record<IncapacityKind, string> = {
+  None: 'No incapacity',
+  TemporaryTotal: 'Temporary total',
+  TemporaryPartial: 'Temporary partial',
+  PermanentPartial: 'Permanent partial',
+  PermanentTotal: 'Permanent total',
+};
+
+export type IncapacityScheduleKind = 'Disfigurement' | 'Incapacity';
+
+export const INCAPACITY_SCHEDULE_KIND_LABEL: Record<IncapacityScheduleKind, string> = {
+  Disfigurement: 'Disfigurement (First Schedule)',
+  Incapacity: 'Incapacity (Third Schedule)',
+};
+
+export type LossOfUse = 'Total' | 'Partial';
+
+export const LOSS_OF_USE_LABEL: Record<LossOfUse, string> = {
+  Total: 'Lost, or total loss of use',
+  Partial: 'Partial loss of use (50 %)',
+};
+
+export type CompensationNotPayableReason = 'DrinkOrDrugs' | 'DeliberateSelfInjury' | 'FalseRepresentation';
+
+export const NOT_PAYABLE_LABEL: Record<CompensationNotPayableReason, string> = {
+  DrinkOrDrugs: 'Drink or drugs (s.2(5))',
+  DeliberateSelfInjury: 'Deliberately self-inflicted (s.2(7))',
+  FalseRepresentation: 'False representation (s.2(8))',
+};
+
+export interface MedicalBoardCaseInjury {
+  id: string;
+  /** Null for the panel's own assessment (s.6(1)(b)). */
+  scheduleItemId?: string | null;
+  scheduleKind?: IncapacityScheduleKind | null;
+  description: string;
+  /** The row's percentage when assessed — kept, so a later schedule edit moves nothing. */
+  basePercentage: number;
+  lossOfUse: LossOfUse;
+  nonDominantSide: boolean;
+  percentage: number;
+}
+
+/** A row of the tenant's compensation schedule. */
+export interface IncapacityScheduleItem {
+  id: string;
+  kind: IncapacityScheduleKind;
+  injury: string;
+  /** For a disfigurement row, the MOST that may be assessed (s.8). */
+  percentage: number;
+  source: string;
+  /** The non-dominant arm or hand is rated at 90 %. */
+  appliesToArmOrHand: boolean;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export interface SaveIncapacityScheduleItemRequest {
+  kind: IncapacityScheduleKind;
+  injury: string;
+  percentage: number;
+  source: string;
+  appliesToArmOrHand: boolean;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+/**
+ * The whole assessment — ⚠ the injuries are the complete set; one left out is removed.
+ * Send `PermanentPartial` for any permanent incapacity: the server settles partial or total (s.38).
+ */
+export interface AssessIncapacityRequest {
+  kind: IncapacityKind;
+  injuries: AssessedInjury[];
+  assessedOn?: string | null;
+  assessedBy: string;
+  notes?: string | null;
+  notPayableReason?: CompensationNotPayableReason | null;
+}
+
+/**
+ * A schedule row (`scheduleItemId`), or the panel's own figure (`description` + `percentage`).
+ * A Third Schedule row takes loss of use and — on an arm or hand — the non-dominant side; a
+ * disfigurement row takes a percentage up to the row's.
+ */
+export interface AssessedInjury {
+  scheduleItemId?: string | null;
+  description?: string | null;
+  percentage?: number | null;
+  lossOfUse?: LossOfUse | null;
+  nonDominantSide: boolean;
+}
+
+/** The whole record: the labour officer's notice (s.35) and any agreement (s.15). */
+export interface RecordCompensationRequest {
+  notifiedCompensation?: number | null;
+  notifiedOn?: string | null;
+  dueOn?: string | null;
+  agreedCompensation?: number | null;
+  agreedOn?: string | null;
 }
 
 export interface MedicalBoard {

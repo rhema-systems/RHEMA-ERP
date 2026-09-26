@@ -683,15 +683,29 @@ that any organisation can change. TDC is asked only to confirm the defaults.
   recorded as present at old sittings, so those findings say *decided before attendance was kept*
   rather than naming a panel nobody wrote down.
 
-**Step two b — incapacity and compensation — planned** ⏳
+**Step two b — incapacity and compensation — built (2026-09-26)**
 
-- **The extent of disability, as a percentage, and an indicative compensation** — mainly for injuries
-  at work, under the Workmen's Compensation Law 1987: 96 months' earnings for total permanent
-  incapacity, and the law's schedule of injuries sets the percentage for a partial one — checked
-  against the law's own text on 2026-09-26 and written up in `HR-WORKMENS-COMPENSATION-SCHEDULES.md`.
-  The figure is **indicative**: the Labour Department notifies the amount due, and it is paid through
-  the Court, never set against anything the employee owes.
-- **An injury case links to the safety incident** where the injury was reported.
+- **The extent of disability, as a percentage.** Each case can record the attending medical officer's
+  assessment: no incapacity, temporary, or permanent — and for a permanent one, the injuries, each
+  from the law's schedule (the Workmen's Compensation Law 1987, checked against its own text) or the
+  board's own figure for an injury the schedule does not name. The law's rules are applied: a partly
+  lost use counts half, the hand or arm the person does not favour counts 90 %, several injuries add up
+  but never above 100 %, and 100 % is total incapacity.
+- **An indicative compensation**: the percentage of 96 months' earnings, worked out from the person's
+  current pay and shown with its working. It is **indicative** — the Labour Department notifies the
+  amount due, it is paid through the Court, and it is never set against anything the employee owes or
+  put on a leaver's settlement. The amount notified, and any agreement (never below the law's), are
+  recorded when they arrive; once notified, the assessment is fixed.
+- **The schedule is the law's, and editable.** A medical administrator loads the law's schedules with
+  one button and can add, change or retire rows — an organisation under another schedule names its own.
+  Changing a row never changes an assessment already made.
+- **Settings, with the law's figures as defaults**: 96 months, at most 24 months of temporary
+  incapacity, and the yearly earnings ceiling — **left empty** until TDC or counsel names the ceiling in
+  force, because the law's figure (25,000 cedis) predates the 2007 redenomination (R5-Q5).
+- **An injury case links to the safety incident** where the injury was reported, and shows the date by
+  which notice and the claim are due (six months).
+- **Not built:** filing the claim with the Labour Department, death compensation, the Court's review
+  of payments, and the twelve months of earnings the law asks for (payroll does not yet provide them).
 
 ---
 

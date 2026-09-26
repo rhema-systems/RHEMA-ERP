@@ -79,6 +79,37 @@ public interface IMedicalBoardService
     /// </summary>
     Task<MedicalBoardDto> CancelAsync(Guid boardId, string reason, CancellationToken ct = default);
 
+    // ── Incapacity and compensation (round 5, lane K-II-b; PNDCL 187) ────────────────────────
+
+    /// <summary>
+    /// Records the incapacity assessment of a case, replacing the last, and works out the indicative
+    /// figure. ⚠ Refused on a withdrawn case, a stopped board, and once the labour officer's amount is
+    /// recorded against the assessment.
+    /// </summary>
+    Task<MedicalBoardDto> AssessIncapacityAsync(Guid boardId, Guid caseId, AssessIncapacityDto dto, CancellationToken ct = default);
+
+    /// <summary>Records the labour officer's notified amount (s.35) and any agreement (s.15).</summary>
+    Task<MedicalBoardDto> RecordCompensationAsync(Guid boardId, Guid caseId, RecordCompensationDto dto, CancellationToken ct = default);
+
+    /// <summary>
+    /// Names the SHE incident an injury-on-duty case rests on, or clears it with null. ⚠ The incident
+    /// must name the employee among the people involved.
+    /// </summary>
+    Task<MedicalBoardDto> LinkSafetyIncidentAsync(Guid boardId, Guid caseId, Guid? incidentId, CancellationToken ct = default);
+
+    /// <summary>The tenant's compensation schedule.</summary>
+    Task<IReadOnlyList<IncapacityScheduleItemDto>> GetScheduleAsync(bool includeInactive, CancellationToken ct = default);
+
+    /// <summary>
+    /// Adds PNDCL 187's First and Third Schedule rows the tenant does not already have (matched on
+    /// schedule and injury). ⚠ Edited rows are left alone, so a second load changes nothing.
+    /// </summary>
+    Task<IReadOnlyList<IncapacityScheduleItemDto>> LoadDefaultScheduleAsync(CancellationToken ct = default);
+
+    Task<IncapacityScheduleItemDto> AddScheduleItemAsync(SaveIncapacityScheduleItemDto dto, CancellationToken ct = default);
+
+    Task<IncapacityScheduleItemDto> UpdateScheduleItemAsync(Guid itemId, SaveIncapacityScheduleItemDto dto, CancellationToken ct = default);
+
     // ── Documents (round 5, lane K4) ─────────────────────────────────────────────────────────
 
     Task<IReadOnlyList<MedicalBoardDocumentDto>> GetDocumentsAsync(Guid boardId, CancellationToken ct = default);

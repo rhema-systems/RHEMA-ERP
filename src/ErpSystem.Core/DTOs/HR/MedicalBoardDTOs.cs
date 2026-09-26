@@ -114,6 +114,157 @@ public class MedicalBoardCaseDto
     public Guid? WithdrawnById { get; set; }
     public string? WithdrawnByName { get; set; }
     public string? WithdrawalReason { get; set; }
+
+    // ── The injury, its incapacity and compensation (round 5, lane K-II-b) ──────────────────
+
+    /// <summary>The SHE incident, for a case about an injury on duty — read by reference.</summary>
+    public Guid? SafetyIncidentId { get; set; }
+    public string? SafetyIncidentNumber { get; set; }
+    public DateOnly? SafetyIncidentDate { get; set; }
+
+    /// <summary>Notice of the accident and the claim are due within six months of it (s.12). Shown, not enforced.</summary>
+    public DateOnly? ClaimNoticeDueBy { get; set; }
+
+    public IncapacityKind? IncapacityKind { get; set; }
+    public decimal? IncapacityPercentage { get; set; }
+    public DateOnly? IncapacityAssessedOn { get; set; }
+    public string? IncapacityAssessedBy { get; set; }
+    public string? IncapacityNotes { get; set; }
+    public CompensationNotPayableReason? CompensationNotPayableReason { get; set; }
+    public List<MedicalBoardCaseInjuryDto> Injuries { get; set; } = new();
+
+    /// <summary>
+    /// ⚠ Indicative — the labour officer notifies the amount (s.35), it is paid to the Court (s.11(3)) and
+    /// nothing may be set off against it (s.27). Never a settlement line.
+    /// </summary>
+    public decimal? IndicativeCompensation { get; set; }
+    public string? IndicativeCompensationBasis { get; set; }
+    public string? CompensationCurrency { get; set; }
+
+    public decimal? NotifiedCompensation { get; set; }
+    public DateOnly? CompensationNotifiedOn { get; set; }
+    public DateOnly? CompensationDueOn { get; set; }
+    public decimal? AgreedCompensation { get; set; }
+    public DateOnly? CompensationAgreedOn { get; set; }
+
+    /// <summary>Once the labour officer's amount is recorded the assessment it answered is fixed.</summary>
+    public bool AssessmentFixed { get; set; }
+
+    /// <summary>A temporary incapacity is paid for at most this long (s.7(2)(c)) — from the incident.</summary>
+    public int? TemporaryIncapacityMaxMonths { get; set; }
+    public DateOnly? TemporaryPaymentsEndBy { get; set; }
+}
+
+/// <summary>One assessed injury on a case (round 5, lane K-II-b).</summary>
+public class MedicalBoardCaseInjuryDto
+{
+    public Guid Id { get; set; }
+
+    /// <summary>The schedule row it came from; null for the panel's own assessment (s.6(1)(b)).</summary>
+    public Guid? ScheduleItemId { get; set; }
+    public IncapacityScheduleKind? ScheduleKind { get; set; }
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>The row's percentage when assessed — kept, so editing the schedule later moves nothing.</summary>
+    public decimal BasePercentage { get; set; }
+    public LossOfUse LossOfUse { get; set; }
+    public bool NonDominantSide { get; set; }
+    public decimal Percentage { get; set; }
+}
+
+/// <summary>
+/// The incapacity assessment of a case — the whole assessment, replacing the last (round 5, lane K-II-b).
+/// </summary>
+/// <remarks>
+/// ⚠ <b>The injuries are the whole set</b>: leaving one out removes it (the replace-set convention).
+/// Allowed on a listed or decided case until the labour officer's amount is recorded.
+/// </remarks>
+public class AssessIncapacityDto
+{
+    /// <summary>Required. Send either permanent value — which one follows from the percentage (s.38).</summary>
+    public IncapacityKind? Kind { get; set; }
+
+    public List<AssessedInjuryDto>? Injuries { get; set; }
+
+    /// <summary>Today when omitted; never in the future.</summary>
+    public DateOnly? AssessedOn { get; set; }
+
+    /// <summary>Required: the attending medical officer (s.2(3)).</summary>
+    [MaxLength(200)]
+    public string? AssessedBy { get; set; }
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    public CompensationNotPayableReason? NotPayableReason { get; set; }
+}
+
+/// <summary>One injury in an assessment: a schedule row, or the panel's own figure.</summary>
+/// <remarks>
+/// <list type="bullet">
+///   <item><b>A Third Schedule row</b>: the row's percentage, with <see cref="LossOfUse"/> (partial = 50 %)
+///   and, on an arm or hand, <see cref="NonDominantSide"/> (90 %). <see cref="Percentage"/> is not sent.</item>
+///   <item><b>A First Schedule (disfigurement) row</b>: <see cref="Percentage"/> up to the row's — the
+///   row's own when omitted (s.8).</item>
+///   <item><b>No row</b>: the panel's own assessment of lost earning capacity (s.6(1)(b)) —
+///   <see cref="Description"/> and <see cref="Percentage"/> required.</item>
+/// </list>
+/// </remarks>
+public class AssessedInjuryDto
+{
+    public Guid? ScheduleItemId { get; set; }
+
+    [MaxLength(300)]
+    public string? Description { get; set; }
+
+    public decimal? Percentage { get; set; }
+    public LossOfUse? LossOfUse { get; set; }
+    public bool NonDominantSide { get; set; }
+}
+
+/// <summary>What the labour officer notified, and any agreement (round 5, lane K-II-b) — the whole record.</summary>
+public class RecordCompensationDto
+{
+    public decimal? NotifiedCompensation { get; set; }
+    public DateOnly? NotifiedOn { get; set; }
+
+    /// <summary>Three months after the notification when omitted (s.35).</summary>
+    public DateOnly? DueOn { get; set; }
+
+    /// <summary>Never below the Act's amount (s.15): the notified amount, or else the indicative one.</summary>
+    public decimal? AgreedCompensation { get; set; }
+    public DateOnly? AgreedOn { get; set; }
+}
+
+/// <summary>A row of a tenant's compensation schedule (round 5, lane K-II-b).</summary>
+public class IncapacityScheduleItemDto
+{
+    public Guid Id { get; set; }
+    public IncapacityScheduleKind Kind { get; set; }
+    public string Injury { get; set; } = string.Empty;
+    public decimal Percentage { get; set; }
+    public string Source { get; set; } = string.Empty;
+    public bool AppliesToArmOrHand { get; set; }
+    public bool IsActive { get; set; }
+    public int SortOrder { get; set; }
+}
+
+/// <summary>Adding or changing a schedule row. ⚠ Assessments already made keep the percentage they used.</summary>
+public class SaveIncapacityScheduleItemDto
+{
+    public IncapacityScheduleKind? Kind { get; set; }
+
+    [MaxLength(300)]
+    public string Injury { get; set; } = string.Empty;
+
+    public decimal? Percentage { get; set; }
+
+    [MaxLength(200)]
+    public string Source { get; set; } = string.Empty;
+
+    public bool AppliesToArmOrHand { get; set; }
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
 }
 
 public class MedicalBoardMemberDto

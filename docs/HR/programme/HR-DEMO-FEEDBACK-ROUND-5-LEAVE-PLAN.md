@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J, I, K, L, K-II-0 and K-II-a done; K-II-b next, then M.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J, I, K, L and K-II (0, a, b) done; M next.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -27,7 +27,7 @@
 > | **K** | **DONE** 2026-09-26 — the medical board, step one: a purpose, physicians from the register, the facility and examination checked, documents through the upload gate, cancel or dissolve, a leave gate that takes only a relevant, recent board, and the board defects · `run-round5-k.mjs` 144, green twice · § 8 |
 > | **L** | **DONE** 2026-09-26 — encashment on exit only: the leaver's line pays annual leave owed at the last day (the leave owed report's working, `ProRateOnExit` binding), none on summary dismissal; the cap a setting (56); in-service off on the demo and hidden in the portal; the L3 limits · `run-round5-l.mjs` 51, green twice · § 8 |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
-> | K-II | **planned 2026-09-26** — cases, incapacity and compensation on the standard pattern with statutory defaults; after L, before M. **K-II-0 DONE** 2026-09-26 — PNDCL 187 verified in its primary text, `HR-WORKMENS-COMPENSATION-SCHEDULES.md`. **K-II-a DONE** 2026-09-26 — a board hears cases: several employees, each decided at a sitting whose attendance decided it, a quorum setting, the board reporting by itself; leave's gate and separation's new control read the employee's case · `run-round5-k2a.mjs` 169, green twice · § 8. **K-II-b next** |
+> | K-II | **planned 2026-09-26** — cases, incapacity and compensation on the standard pattern with statutory defaults; after L, before M. **K-II-0 DONE** 2026-09-26 — PNDCL 187 verified in its primary text, `HR-WORKMENS-COMPENSATION-SCHEDULES.md`. **K-II-a DONE** 2026-09-26 — a board hears cases: several employees, each decided at a sitting whose attendance decided it, a quorum setting, the board reporting by itself; leave's gate and separation's new control read the employee's case · `run-round5-k2a.mjs` 169, green twice · § 8. **K-II-b DONE** 2026-09-26 — incapacity and an indicative compensation on the Act's schedules (loaded by an administrator, editable, never rewriting a finding), the three settings, the labour officer's notice and agreement, the SHE incident · `run-round5-k2b.mjs` 144, green twice · § 8 |
 
 ## Context
 
@@ -327,7 +327,10 @@ separation, like leave, links the board and reads the employee's case).
   an attendance tick-list per sitting; the register lists cases beside boards; the leave panel and
   picker read the employee's case.
 
-**K-II-b — Incapacity and compensation** *(corrected to the Act, 2026-09-26)*.
+**K-II-b — Incapacity and compensation** *(corrected to the Act, 2026-09-26)* **· DONE 2026-09-26**
+(§ 8 records where it departed from this text: the schedule is loaded by an administrator's action,
+not seeded by the migration; the figure is worked out from current pay, not twelve months', and kept
+as worked out; the assessment is recorded on a listed or decided case and fixed once notified).
 - **On the case**: incapacity kind (*none · temporary total · temporary partial · permanent partial ·
   permanent total*), and **one or more assessed injuries**, each a schedule row (First or Third
   Schedule, named) or the panel's own assessment of lost earning capacity (s.6(1)(b)), with *loss of
@@ -1709,3 +1712,131 @@ Both green twice.
   attendance on a decided case needs a Medical-admin correction, like a mis-filed paper.
 - The guide's § 7b walk step 5 still said a Pending request "counts for nothing" (stale since lane N3)
   and quoted the gate's pre-K6 sentence — corrected here, with the chapter.
+
+### K-II-b — Incapacity and compensation · DONE 2026-09-26
+
+**Built.**
+
+- **`IncapacityScheduleItem`** — a tenant's compensation schedule: kind (disfigurement, First Schedule,
+  s.8 · incapacity, Third Schedule, s.6), injury, percentage, **source** (required), whether it is an
+  arm or hand, in use, order; unique per tenant, kind and injury among live rows. **Loaded from
+  `IncapacityScheduleDefaults`** — a copy of the catalogue K-II-0 checked against the Act — by one
+  idempotent action that adds only rows a tenant lacks (48 + 6; 22 arm or hand). Rows are added,
+  changed and retired, never deleted. **Changing the schedule is Medical administration**
+  (`MedicalAdminPolicy`); HR reads it.
+- **`MedicalBoardCaseInjury`** — a schedule row or the panel's own assessment (s.6(1)(b)), with loss
+  of use and the side not favoured. **The row's percentage is copied onto the injury**, so editing the
+  schedule never moves a finding.
+- **The assessment** (`PUT …/cases/{caseId}/incapacity`, the whole set): kind (none, temporary total,
+  temporary partial, permanent — partial or total **derived** from the percentage, s.38), assessed by
+  (required, s.2(3)) and on (never future), notes, not payable and why (s.2(5), (7), (8)). The Schedule's
+  notes applied: partial loss of use half, the non-dominant arm or hand 90 %, a disfigurement up to its
+  row, several injuries summed and **capped at 100 % (s.6(2))**. Each refusal names its rule.
+- **The indicative figure** — percentage × `PermanentTotalIncapacityMonths` × monthly earnings, within
+  `CompensationEarningsCeiling` when set — **worked out when the assessment is saved and kept**, with
+  its working in words, always ending: *indicative; notified by the labour officer (s.35); paid to the
+  Court (s.11(3)); never set off (s.27)*. Temporary incapacity works out no lump sum (payroll's, s.7,
+  at most `TemporaryIncapacityMaxMonths`).
+- **The labour officer's notice and an agreement** (`PUT …/compensation`, the whole record): amount
+  and date, due three months on unless given (s.35); an agreement **never below the Act's amount**
+  (s.15: the notified amount, else the indicative one). **Once a notice is recorded the assessment is
+  fixed**; clearing it frees it. Refused before an assessment and on a not-payable case.
+- **The SHE incident** (`PUT …/safety-incident`, empty body clears): injury-on-duty cases only, and
+  only an incident that names the employee among the people involved (a bare Guid across the
+  SHE↔Medical boundary). The case reads back its number and date, **the six-month date for notice and
+  the claim (s.12)**, and — when temporary — **the date payments run to** (incident + 24 months).
+- **Settings** on `CompanyHrPolicySettings` and the HR policy page: `PermanentTotalIncapacityMonths`
+  (96; empty = no figure), `TemporaryIncapacityMaxMonths` (24), `CompensationEarningsCeiling`
+  (**no default** — R5-Q5).
+- **Screens**: a case's *Incapacity and compensation* block (`MedicalBoardCaseIncapacity`) with the
+  assessment dialog (injury builder, running total), the notice dialog, and the incident picker (SHE's
+  own list of incidents naming the employee); `/hr/medical/boards/incapacity-schedule` (tables per
+  schedule, *Load the Act's schedules*, add/edit/retire — admin only); the three settings on the
+  policy page. Scoped type-check (`tsconfig.round5-lane-k2b.json`) and lint clean.
+- **Migration `20260926195945_AddIncapacityAssessment`**, guarded SQL: the case's 15 nullable columns,
+  the two tables (injuries cascade from the case; a schedule row in use cannot be deleted), the three
+  settings — **96 written on every existing tenant row only in the step that adds the column** (a
+  re-run leaves a tenant that emptied it alone), **24, not the scaffold's 0**, the ceiling empty. The
+  scaffold's `UpdateData` of the seeded tenant dropped for that backfill. **No schedule rows** — a
+  statute's rates are the tenant's to adopt. Proven on a scratch database (16 checks; re-run; Down twice;
+  Up again). UAT applied it at startup: 96 / 24 / empty, checked in SQL.
+
+**Found on the way.**
+
+1. **Every decimal is `decimal(18,4)` whatever the entity says.** `ConfigureDecimalPrecision` sets the
+   column type of every decimal after configuration (18,2 when the name holds Cost, Price, Amount,
+   Total or Salary), silently overriding `[Column(TypeName)]` and `HasPrecision` — the first scaffold
+   carried a ceiling typed 18,4 with precision 2. The attributes were removed and a note put on the
+   entity; the scaffold was deleted, the snapshot restored, and scaffolded once more (the recipe in
+   memory). 18,4 serves both percentages and money; the service rounds money to 2.
+2. **Payroll's pay source is a sentence** ("The flat figure on the employee record; not yet placed on
+   the scale.") and the first working printed it capitalised mid-sentence. It is a phrase in brackets
+   now; the contract reads `(contract …)` as the settlement's does. Found by the suite's first run.
+
+**Changed from the plan, and why.**
+
+1. **The schedule is loaded by an administrator's action, not seeded by the migration** (the plan said
+   seeded per tenant). A statute's rates written into every database by a migration would be a data
+   decision for every client; one button (idempotent) lets each adopt them. UAT's 54 rows were loaded
+   through that action by the suite's first run — this lane's data step.
+2. **Earnings are the current basic pay, not the previous twelve months (s.9).** No HR-facing reader
+   of payroll history exists and UAT's payslip snapshots are empty. The source is payroll's basic,
+   else the employee record's figure, else the contract — the settlement's own — and the working says
+   the Act uses twelve months and that the labour officer's figure governs.
+3. **The figure is kept as worked out** rather than recomputed on read: pay and settings change, and a
+   figure somebody has read must not move under them. Re-assessing works it out afresh.
+4. **The assessment is recorded on a listed or decided case**, not only a decided one: the attending
+   medical officer's assessment (s.2(3)) is its own act and may come before or after the board's
+   finding. It is fixed once the labour officer's notice is recorded.
+5. **The review date is the case's own** (from the finding), not a second one on the assessment.
+6. **Permanent partial and total are derived**, not chosen: the dialog offers *Permanent*, and 100 %
+   decides (s.38).
+
+**Suite.** `dev-harness/hr-leave/run-round5-k2b.mjs`: **144 assertions, green twice.** Its first runs
+found the wording defect (above) and two fixture facts: leave.emp carries a flat GHS 6,600 (so
+leave.mgr is the no-pay subject, and leave.emp now proves the flat figure exactly, GHS 31,680.00), and
+**recording who was involved in an incident needs SHE Write *and* an employee link** — HR gave up SHE
+Write on 2026-09-03 (DR-10) and admin has no link — so a harness **SHE Manager (leave.she, minted
+once)** records the incidents; HR's *read* of them (the picker's call) is asserted.
+- [1] the Act's 54 rows by admin only (HR 403), 6/48/22, the arm at the shoulder 100, sources; a second
+  load adds nothing; a harness row added (source required, % bounded, no duplicate).
+- [2] thirteen refusals in exact words; 80 × 90 % = 72, 35 × 50 % = 17.5, the panel's 5 → 94.5,
+  permanent partial; 100 + 40 → 100, permanent total, the set replaced (3 soft-deleted); a
+  disfigurement at 30 and at its row's 50; temporary, none and not-payable sentences exact; the
+  harness row assessed at 12, edited to 50 — the finding still 12; retired, refused.
+- [3] GHS 544,320.00 with its full working; ceiling 36,000 → GHS 272,160.00, 120,000 → unchanged, none;
+  60 months → GHS 340,200.00; empty → not worked out; a setting changed after — unchanged; no pay → not
+  worked out; the flat figure → GHS 31,680.00 with its source as a phrase.
+- [4] the notice's refusals; the floor both ways (indicative, then notified); due three months on;
+  fixed, then free again.
+- [5] incidents minted in Safety by the harness SHE Manager; injury cases only; an incident not naming
+  the employee refused; the number, date, s.12 date and s.7 end date read back; unlinked with no body.
+- [6] every new verb 403 to an employee and a line manager; the schedule's writes 403 to HR.
+- Clean-up: the harness incidents retired, the harness row retired, the settings back (96 / 24 /
+  empty). The Act's 54 rows stay.
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green twice:
+
+- **Slices 1–13 at their recorded counts** — slice 1 72/75, the same three environmental failures;
+  slice 4 54 (K-II-a's fix holding); slice 8 79.
+- **The round 5 suites:** `-e` 119, `-f` 20, `-d` 74, `-a` 89, `-n` 92, `-c` 112, `-g` 55, `-h` 142,
+  `-j` 44, `-i` 88, `-k` 144, `-l` 51, **`-k2a` 169** (the board read, now carrying injuries and the
+  incident, unchanged for it).
+- **`run-round5-k2b.mjs` was 144 a third time**, run last.
+- **Cleanup:** the 24 harness types the pass minted were switched off, measured first; only TDC's nine
+  are active. Settings 96 / 24 / empty, quorum 1. The Act's 54 schedule rows stay (the lane's data
+  step); no harness incident is live.
+- **The API log holds nothing from this lane:** 3,739 notification-sender lines (no mail server on
+  UAT), 15 failures of the notification clean-up's own update contending with the sweeps' writes and
+  one clean-up run that gave up, one payroll-profile foreign-key failure — the one employee this lane
+  minted, the harness SHE Manager (cross-module defect #23) — and one procurement calendar failure for
+  another tenant. **No request answered 500.**
+
+**Noted, not built.**
+- The statutory claim filing with the Labour Department, death compensation (s.3), the Court's review
+  (s.17), periodical payment schedules (payroll's), and s.9's twelve months until payroll exposes them.
+- "Loss of two or more parts of the hand: not more than for the loss of the whole hand" (the Schedule's
+  note) is not enforced — the Schedule names no *whole hand* row to cap against; the panel's
+  judgement, and the 100 % cap, remain.
+- A fresh tenant's schedule is empty until an administrator loads it; the board page says so and
+  still takes the panel's own assessment.

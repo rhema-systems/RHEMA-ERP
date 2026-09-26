@@ -179,6 +179,64 @@ public class MedicalBoardsController : ControllerBase
         Guid id, Guid sittingId, [FromBody] SetMedicalBoardSittingAttendanceDto dto, CancellationToken ct = default)
         => await Guarded<MedicalBoardSittingDto>(async () => Ok(await _service.SetSittingAttendanceAsync(id, sittingId, dto, ct)));
 
+    // ── Incapacity and compensation (round 5, lane K-II-b; PNDCL 187) ────────────────────────
+
+    /// <summary>Record a case's incapacity assessment, replacing the last</summary>
+    /// <remarks>
+    /// The injuries are the whole set. The indicative figure is worked out and kept. ⚠ Refused once the
+    /// labour officer's amount is recorded against the assessment.
+    /// </remarks>
+    [HttpPut("{id:guid}/cases/{caseId:guid}/incapacity")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
+    public async Task<ActionResult<MedicalBoardDto>> AssessIncapacity(
+        Guid id, Guid caseId, [FromBody] AssessIncapacityDto dto, CancellationToken ct = default)
+        => await Guarded<MedicalBoardDto>(async () => Ok(await _service.AssessIncapacityAsync(id, caseId, dto, ct)));
+
+    /// <summary>Record the labour officer's notified amount (s.35) and any agreement (s.15)</summary>
+    [HttpPut("{id:guid}/cases/{caseId:guid}/compensation")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
+    public async Task<ActionResult<MedicalBoardDto>> RecordCompensation(
+        Guid id, Guid caseId, [FromBody] RecordCompensationDto dto, CancellationToken ct = default)
+        => await Guarded<MedicalBoardDto>(async () => Ok(await _service.RecordCompensationAsync(id, caseId, dto, ct)));
+
+    /// <summary>Name the SHE incident an injury-on-duty case rests on — an empty body clears it</summary>
+    /// <remarks>⚠ <c>EmptyBodyBehavior.Allow</c>: the frontend's <c>apiService.put</c> drops a null body.</remarks>
+    [HttpPut("{id:guid}/cases/{caseId:guid}/safety-incident")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
+    public async Task<ActionResult<MedicalBoardDto>> LinkSafetyIncident(
+        Guid id, Guid caseId,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Guid? incidentId,
+        CancellationToken ct = default)
+        => await Guarded<MedicalBoardDto>(async () => Ok(await _service.LinkSafetyIncidentAsync(id, caseId, incidentId, ct)));
+
+    /// <summary>The compensation schedule</summary>
+    [HttpGet("incapacity-schedule")]
+    [Authorize(Policy = HrPermissions.MedicalReadPolicy)]
+    public async Task<ActionResult<IReadOnlyList<IncapacityScheduleItemDto>>> GetSchedule(
+        [FromQuery] bool includeInactive = false, CancellationToken ct = default)
+        => await Guarded<IReadOnlyList<IncapacityScheduleItemDto>>(async () => Ok(await _service.GetScheduleAsync(includeInactive, ct)));
+
+    /// <summary>Load PNDCL 187's First and Third Schedules — only the rows not already there</summary>
+    /// <remarks>⚠ Medical ADMIN: the statute's rates are configuration, not casework.</remarks>
+    [HttpPost("incapacity-schedule/load-defaults")]
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
+    public async Task<ActionResult<IReadOnlyList<IncapacityScheduleItemDto>>> LoadDefaultSchedule(CancellationToken ct = default)
+        => await Guarded<IReadOnlyList<IncapacityScheduleItemDto>>(async () => Ok(await _service.LoadDefaultScheduleAsync(ct)));
+
+    [HttpPost("incapacity-schedule")]
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
+    public async Task<ActionResult<IncapacityScheduleItemDto>> AddScheduleItem(
+        [FromBody] SaveIncapacityScheduleItemDto dto, CancellationToken ct = default)
+        => await Guarded<IncapacityScheduleItemDto>(async () => Ok(await _service.AddScheduleItemAsync(dto, ct)));
+
+    /// <summary>Change or retire a schedule row</summary>
+    /// <remarks>⚠ Assessments already recorded keep the percentage they used.</remarks>
+    [HttpPut("incapacity-schedule/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
+    public async Task<ActionResult<IncapacityScheduleItemDto>> UpdateScheduleItem(
+        Guid itemId, [FromBody] SaveIncapacityScheduleItemDto dto, CancellationToken ct = default)
+        => await Guarded<IncapacityScheduleItemDto>(async () => Ok(await _service.UpdateScheduleItemAsync(itemId, dto, ct)));
+
     // ⚠ There is no board-level conclude (lane K-II-a). A board reports by itself when its last open
     // case closes with at least one decided; what used to be PUT {id}/conclude is now per case.
 

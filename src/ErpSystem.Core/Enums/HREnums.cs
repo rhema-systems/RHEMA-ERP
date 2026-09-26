@@ -5118,6 +5118,79 @@ public enum MedicalBoardKind
 }
 
 /// <summary>
+/// The incapacity a medical board case assesses (round 5, lane K-II-b; PNDCL 187 ss.5–7, 38).
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Permanent partial and permanent total are not chosen independently.</b> The service derives
+/// which from the assessed percentage: 100 % or more is permanent total (s.38), anything less partial.
+/// Temporary incapacity (s.7) is paid periodically through payroll; it carries no lump-sum figure here.
+/// </remarks>
+public enum IncapacityKind
+{
+    /// <summary>Assessed, and no incapacity found.</summary>
+    [Description("No incapacity")]
+    None = 1,
+
+    /// <summary>Absence certified necessary by a medical practitioner (s.7(2)(b)).</summary>
+    [Description("Temporary total")]
+    TemporaryTotal = 2,
+
+    /// <summary>After it, until final assessment (s.7(2)(b)).</summary>
+    [Description("Temporary partial")]
+    TemporaryPartial = 3,
+
+    /// <summary>Less than 100 % (s.6).</summary>
+    [Description("Permanent partial")]
+    PermanentPartial = 4,
+
+    /// <summary>100 % or more (ss.5, 38).</summary>
+    [Description("Permanent total")]
+    PermanentTotal = 5
+}
+
+/// <summary>Which schedule an incapacity schedule row belongs to (round 5, lane K-II-b).</summary>
+public enum IncapacityScheduleKind
+{
+    /// <summary>PNDCL 187, First Schedule — disfiguring injuries (s.8): a percentage UP TO the row's.</summary>
+    [Description("Disfigurement (First Schedule)")]
+    Disfigurement = 1,
+
+    /// <summary>PNDCL 187, Third Schedule — incapacity (s.6(1)(a)): the row's percentage.</summary>
+    [Description("Incapacity (Third Schedule)")]
+    Incapacity = 2
+}
+
+/// <summary>
+/// How much of a member an assessed injury took (the Third Schedule's notes).
+/// </summary>
+public enum LossOfUse
+{
+    /// <summary>The member lost — or its use totally and permanently lost, which the Schedule treats the same.</summary>
+    [Description("Lost, or total loss of use")]
+    Total = 1,
+
+    /// <summary>Permanent partial loss of use: fifty percent of the row's percentage.</summary>
+    [Description("Partial loss of use (50 %)")]
+    Partial = 2
+}
+
+/// <summary>Why no compensation is payable although an injury is assessed (PNDCL 187 s.2).</summary>
+public enum CompensationNotPayableReason
+{
+    /// <summary>s.2(5): the injury was attributable to the employee being under the influence of drink or drugs.</summary>
+    [Description("Drink or drugs (s.2(5))")]
+    DrinkOrDrugs = 1,
+
+    /// <summary>s.2(7): the injury was deliberately self-inflicted.</summary>
+    [Description("Deliberately self-inflicted (s.2(7))")]
+    DeliberateSelfInjury = 2,
+
+    /// <summary>s.2(8): a false representation about a previous injury or illness.</summary>
+    [Description("False representation (s.2(8))")]
+    FalseRepresentation = 3
+}
+
+/// <summary>
 /// The question a medical board is asked (round 5, lane K1 — decision A6).
 /// </summary>
 /// <remarks>
