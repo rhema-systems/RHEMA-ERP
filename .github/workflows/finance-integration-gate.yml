@@ -39,7 +39,9 @@ env:
 jobs:
   finance-contracts:
     name: Finance consumer and SQL Server contracts
-    runs-on: ubuntu-latest
+    # Keep the gate on the image it is verified against instead of inheriting the
+    # announced ubuntu-latest migration to Ubuntu 26.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     services:
@@ -54,10 +56,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -95,12 +97,9 @@ jobs:
           dotnet restore tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj
 
       - name: Build Finance API test assembly once
-        # The Data project intentionally provides TdcFastEfBuild for routine Debug verification:
-        # runtime migration discovery is retained, while 350+ MB of historical generated EF target
-        # models are omitted. The standard GitHub runner cannot compile that historical metadata in
-        # its memory envelope, and these contracts use EnsureCreated rather than migration tooling.
-        # Keep the property explicit here so a future project-default change cannot silently make the
-        # integration gate resource-dependent. Release migration validation remains a separate gate.
+        # These contracts use EnsureCreated from the current EF model; they do not enumerate or apply
+        # migrations. TdcFastEfBuild therefore omits generated historical target models while normal
+        # application, migration-tooling and release builds retain the complete migration assembly.
         run: |
           dotnet build tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
             --configuration Debug \

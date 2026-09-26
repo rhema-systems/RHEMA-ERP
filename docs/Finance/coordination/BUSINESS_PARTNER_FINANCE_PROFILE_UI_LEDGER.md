@@ -62,3 +62,18 @@
   - focused AP/WHT/subledger regression set: 129 passed, 0 failed;
   - full frontend TypeScript gate remains red on the latest-master baseline across HR, Inventory, Procurement, Civil Engineering and stale generated Next routes; Finance-owned diagnostics found during integration were corrected and verified separately.
 - Operational note: a running local API held the normal Debug API output, so verification used isolated output directories and did not interrupt the user's server.
+
+## Finance integration-gate recovery
+
+- Failed run: `36234391858`, job `108383425785`, against `5f51bf1eb`.
+- Root cause: the workflow requested `TdcFastEfBuild=true`, but the post-baseline Data project no longer implemented that item-selection path. The hosted runner compiled about 259 MB of generated EF migration target-model source, stopped making progress after Core completed, and GitHub cancelled the build before any Finance contract ran.
+- Correction:
+  - restored an explicit contract-test-only `TdcFastEfBuild` item group that omits migration designers and the model snapshot;
+  - retained the full migration assembly for normal application, EF tooling, release and migration-verification builds;
+  - pinned the gate to `ubuntu-24.04` ahead of the announced `ubuntu-latest` image migration;
+  - moved the gate's official checkout and .NET setup actions to their Node 24 releases.
+- Database state: unchanged; no migration was added or applied.
+- Verification:
+  - evaluated MSBuild's focused compile set: 439 source items, 0 migration designers, 0 model snapshots and 45 executable migration bodies;
+  - reproduced the workflow's exact API test-assembly build locally: passed with 0 errors in 8m 55s;
+  - pushed PR gate remains the final verification.
