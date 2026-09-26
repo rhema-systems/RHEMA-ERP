@@ -1501,6 +1501,7 @@ public sealed class FixedAssetDisposalFoundationTests
             Code = "IFRS",
             Name = "IFRS",
             Purpose = "Primary",
+            FunctionalCurrencyCode = "GHS",
             IsActive = true,
             IsDefault = true,
             AllowsPosting = true,

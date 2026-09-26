@@ -150,8 +150,10 @@ public sealed class ArReceiptPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "USD",
-            Rate = 12.5m,
-            InverseRate = 0.08m,
+            // Tenant rates are stored as 1 functional-currency unit = N transaction-currency
+            // units. Posting snapshots use the reciprocal transaction-to-functional multiplier.
+            Rate = 0.08m,
+            InverseRate = 12.5m,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -279,8 +281,8 @@ public sealed class ArReceiptPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "USD",
-            Rate = 10m,
-            InverseRate = 0.1m,
+            Rate = 0.1m,
+            InverseRate = 10m,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -295,8 +297,8 @@ public sealed class ArReceiptPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "EUR",
-            Rate = 13m,
-            InverseRate = 1m / 13m,
+            Rate = 1m / 13m,
+            InverseRate = 13m,
             EffectiveDate = new DateTime(2026, 7, 1),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -313,13 +315,13 @@ public sealed class ArReceiptPostingMigrationTests
         fixture.Payment.TotalAmount = 10m;
         fixture.Payment.AllocatedAmount = 0m;
         fixture.Payment.CurrencyCode = "USD";
-        fixture.Payment.ExchangeRate = originRate.Rate;
+        fixture.Payment.ExchangeRate = originRate.InverseRate;
         fixture.Payment.ExchangeRateId = originRate.Id;
         fixture.BankAccount.Currency = "USD";
         fixture.Invoice.TotalAmount = 8m;
         fixture.Invoice.PaidAmount = 0m;
         fixture.Invoice.CurrencyCode = "EUR";
-        fixture.Invoice.ExchangeRate = applicationRate.Rate;
+        fixture.Invoice.ExchangeRate = applicationRate.InverseRate;
         fixture.Invoice.BaseCurrencyAmount = 104m;
         fixture.Invoice.Status = InvoiceStatus.Sent;
         EnableCurrencyForAccounts(db, tenantId, "USD", fixture.BankGlAccount, customerAdvanceAccount);

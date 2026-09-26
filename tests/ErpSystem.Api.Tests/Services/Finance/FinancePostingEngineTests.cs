@@ -405,7 +405,7 @@ public sealed class FinancePostingEngineTests
 
     [Fact]
     [Trait("Category", "AccountingBookPeriodC4")]
-    public async Task PostAsync_ShouldFailClosed_WhenExactBookPeriodAuthorityIsMissing()
+    public async Task PostAsync_ShouldUseTenantFiscalPeriod_WhenLegacyBookPeriodAuthorityIsMissing()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -416,16 +416,16 @@ public sealed class FinancePostingEngineTests
         var credit = SeedAccount(db, tenantId, "2110", AccountType.Liability);
         await db.SaveChangesAsync();
 
-        await FluentActions.Awaiting(() => CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id)))
-            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_PERIOD_REQUIRED:*");
-        db.JournalEntries.Should().BeEmpty();
-        (await db.AccountBalances.CountAsync(item => item.AccountId == debit.Id)).Should().Be(0);
-        (await db.AccountBalances.CountAsync(item => item.AccountId == credit.Id)).Should().Be(0);
+        await CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+
+        db.JournalEntries.Should().ContainSingle();
+        (await db.AccountBalances.CountAsync(item => item.AccountId == debit.Id)).Should().Be(1);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == credit.Id)).Should().Be(1);
     }
 
     [Fact]
     [Trait("Category", "AccountingBookPeriodC4")]
-    public async Task PostAsync_ShouldFailClosed_WhenOuterPeriodIsOpenButExactBookPeriodIsClosed()
+    public async Task PostAsync_ShouldUseTenantFiscalPeriod_WhenLegacyBookPeriodIsClosed()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -436,9 +436,9 @@ public sealed class FinancePostingEngineTests
         var credit = SeedAccount(db, tenantId, "2120", AccountType.Liability);
         await db.SaveChangesAsync();
 
-        await FluentActions.Awaiting(() => CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id)))
-            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_PERIOD_NOT_OPEN:*");
-        db.JournalEntries.Should().BeEmpty();
+        await CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+
+        db.JournalEntries.Should().ContainSingle();
     }
 
     [Fact]
@@ -1487,8 +1487,12 @@ public sealed class FinancePostingEngineTests
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=C1MigrationDiscovery;Trusted_Connection=True")
             .Options;
         using var discoveryContext = new ApplicationDbContext(options);
-        discoveryContext.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+        var currentMigrationIds = discoveryContext.GetService<IMigrationsAssembly>().Migrations.Keys.ToArray();
+        currentMigrationIds.Should().Contain("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+        currentMigrationIds.Should().Equal(currentMigrationIds.OrderBy(id => id, StringComparer.Ordinal));
+        currentMigrationIds.Should().OnlyContain(id =>
+            string.CompareOrdinal(id, "20260916132000_DisposableDevelopmentCurrentModelBaseline") >= 0);
+        currentMigrationIds.Should().NotContain("20260905151918_AddStablePostingAccountingBookIdentity");
     }
 
     [Fact]

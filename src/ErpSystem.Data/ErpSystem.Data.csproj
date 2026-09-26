@@ -52,10 +52,12 @@
   <ItemGroup Condition="'$(TdcFastEfBuild)' == 'true'">
     <!--
       Focused contract builds create their database from the current EF model and
-      do not enumerate or apply the migration chain. Excluding generated target
-      models on that explicit path avoids compiling roughly 250 MB of historical
-      metadata on a hosted runner. Normal application, migration-tooling and
-      release builds retain the complete migration assembly.
+      do not apply the migration chain. Excluding generated target models on that
+      explicit path avoids compiling roughly 250 MB of historical metadata on a
+      hosted runner. The disposable baseline designer remains included so the
+      migration-discovery contract can prove the active chain starts at the reset
+      boundary. Normal application, migration-tooling and release builds retain
+      the complete migration assembly.
 
       Do not use TdcFastEfBuild for `dotnet ef migrations` or runtime MigrateAsync
       verification because migration discovery attributes live in the generated
@@ -63,6 +65,7 @@
     -->
     <Compile Remove="Migrations\*.Designer.cs" />
     <Compile Remove="Migrations\ApplicationDbContextModelSnapshot.cs" />
+    <Compile Include="Migrations\20260916132000_DisposableDevelopmentCurrentModelBaseline.Designer.cs" />
   </ItemGroup>
 
 </Project>

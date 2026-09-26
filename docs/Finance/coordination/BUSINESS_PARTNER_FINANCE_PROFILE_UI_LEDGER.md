@@ -76,4 +76,13 @@
 - Verification:
   - evaluated MSBuild's focused compile set: 439 source items, 0 migration designers, 0 model snapshots and 45 executable migration bodies;
   - reproduced the workflow's exact API test-assembly build locally: passed with 0 errors in 8m 55s;
-  - pushed PR gate remains the final verification.
+  - pushed run `36237894891` proved the optimized assembly build completes on the hosted runner, then exposed seven stale consumer fixtures;
+  - aligned AR rate fixtures to the governed functional-to-transaction storage convention while retaining transaction-to-functional posting snapshots;
+  - supplied required functional-currency authority in fixed-asset disposal book fixtures;
+  - replaced retired per-book-period expectations with tenant fiscal-period authority checks;
+  - made migration discovery assert the reset boundary plus valid post-baseline migrations instead of assuming the baseline remains the only migration;
+  - retained the reset baseline designer in the focused build so migration discovery continues to prove the active chain boundary;
+  - all seven formerly failing contracts pass together locally (7/7 in 2m 20s).
+  - the complete Finance-owned consumer filter passes locally (141/141 in 3m 23s);
+  - independent accounting-contract review: APPROVED with no blocking findings; reviewer independently reproduced the seven corrected contracts (7/7).
+- Remaining verification: the next pushed PR gate.

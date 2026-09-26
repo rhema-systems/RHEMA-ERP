@@ -57,6 +57,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # The repository contains a legacy gitlink without a .gitmodules entry.
+          # This read-only gate does not need persisted credentials, and disabling
+          # them avoids checkout's post-job recursive submodule cleanup.
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -222,7 +227,7 @@ jobs:
 
       - name: Upload Finance contract results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: finance-integration-contract-results
           path: artifacts/finance-test-results/
