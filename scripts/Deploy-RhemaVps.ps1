@@ -9,6 +9,8 @@ param(
     [string]$ReuseApiOutputFromCommit,
     [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
     [string]$ReuseFrontendBuildFromCommit,
+    [ValidateSet('.next', '.next-production')]
+    [string]$ReuseFrontendOutputDirectory = '.next',
     [switch]$SkipBrowserSmoke,
     [switch]$LocalVps,
     [ValidatePattern('^RhemaERP_[A-Za-z0-9_]{1,119}$')]
@@ -33,6 +35,7 @@ $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepositoryRoot = Split-Path -Parent $ScriptRoot
 $RemoteHelperLocalPath = Join-Path $ScriptRoot 'vps\Invoke-RhemaVpsRemote.ps1'
 . (Join-Path $ScriptRoot 'vps\New-RhemaVpsPreflightHelper.ps1')
+. (Join-Path $ScriptRoot 'vps\Set-StagedFrontendRuntime.ps1')
 $BrowserSmokePath = Join-Path $ScriptRoot 'vps\Test-RhemaVpsBrowserSmoke.mjs'
 $ReleaseRoot = Join-Path $RepositoryRoot 'artifacts\vps-releases'
 $RemotePackagesRoot = 'C:\RhemaERP\packages'
@@ -572,7 +575,10 @@ function New-ReleaseArtifacts {
         'A local Next.js process is using this frontend. Stop it before release build.'
 
     $nextOutput = Join-Path $frontendRoot '.next'
+    Assert-True ($ReuseFrontendOutputDirectory -eq '.next' -or -not [string]::IsNullOrWhiteSpace($ReuseFrontendBuildFromCommit)) `
+        'A different reusable output directory requires -ReuseFrontendBuildFromCommit.'
     if (-not [string]::IsNullOrWhiteSpace($ReuseFrontendBuildFromCommit)) {
+        $nextOutput = Join-Path $frontendRoot $ReuseFrontendOutputDirectory
         $resolvedFrontendCommit = (@(& git rev-parse --verify `
                     "$ReuseFrontendBuildFromCommit^{commit}" 2>$null) -join '').Trim()
         Assert-True ($LASTEXITCODE -eq 0 -and
@@ -605,6 +611,8 @@ function New-ReleaseArtifacts {
             API_URL = "$PublicBaseUrl/api"
             NEXTAUTH_URL = $PublicBaseUrl
             NEXT_TELEMETRY_DISABLED = '1'
+            NEXT_DIST_DIR = '.next'
+            NEXT_OUTPUT = ''
             SYNCFUSION_LICENSE = $syncfusionLicenseKey
         }
         try {
@@ -653,6 +661,7 @@ function New-ReleaseArtifacts {
         (Join-Path $frontendRoot 'package-lock.json'), `
         (Join-Path $frontendRoot 'next.config.js') `
         -Destination $frontendOutput -Force
+    Set-StagedFrontendRuntime -FrontendDirectory $frontendOutput
     Push-Location $frontendOutput
     try {
         Invoke-NativeChecked 'npm.cmd' @(

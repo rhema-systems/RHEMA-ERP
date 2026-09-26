@@ -172,6 +172,31 @@ failure before restarting services. The matching generated helper supports
 -FreshDatabaseName <name>` for an interrupted, uncommitted cutover. It refuses a
 different release/database or an already committed cutover.
 
+### Recovery after a completed build in `.next-production`
+
+If packaging fails looking for `frontend\.next\BUILD_ID` after Next.js reports a
+successful build, retain `frontend\.next-production` and the release's `api`
+directory. The build wrapper defaults to `.next-production`; VPS packaging now
+explicitly builds into `.next` and stages a direct `next start` runtime with
+matching configuration and manifest paths. Repository-only start/prestart
+wrappers are not required by the deployed package.
+
+After pulling the deployment layout fix, retry the approved fresh-database
+deployment with these additional arguments (the commit is the completed build's
+source, not the newer deployment-script commit):
+
+```powershell
+-ReuseApiOutputFromCommit 1c116bea62a7302e61eb335a7547c1dd21cfdb1e `
+-ReuseFrontendBuildFromCommit 1c116bea62a7302e61eb335a7547c1dd21cfdb1e `
+-ReuseFrontendOutputDirectory '.next-production'
+```
+
+Both reuse options check source parity and required output files. They stop if
+application inputs changed. Keep the normal preflight, package validation and
+backup steps. A failure during packaging occurs before fresh database creation
+or service changes. Do not use this retry to bypass a later migration/cutover
+failure; inspect that deployment's evidence first.
+
 ### Procurement, Inventory and QS deployment seeds
 
 Test deployments automatically run the operational baseline. Fresh cutovers run

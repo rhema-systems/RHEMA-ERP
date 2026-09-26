@@ -1336,6 +1336,9 @@ function Invoke-Apply {
         'Staged frontend Next.js runtime is missing.'
     $stagedFrontendPackage = Get-Content `
         (Join-Path $stageFrontend 'package.json') -Raw | ConvertFrom-Json
+    Assert-True ($stagedFrontendPackage.scripts.start -eq 'next start' -and
+        -not $stagedFrontendPackage.scripts.PSObject.Properties['prestart']) `
+        'Staged frontend must start directly without repository-only wrapper scripts.'
     $stagedNextPackage = Get-Content `
         (Join-Path $stageFrontend 'node_modules\next\package.json') -Raw |
         ConvertFrom-Json
