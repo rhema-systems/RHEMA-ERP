@@ -186,7 +186,7 @@ export function ApInvoicePrintDocument({
             </div>
             <div>
               <dt>Canonical supplier ID</dt>
-              <dd className={styles.auditValue}>{invoice.supplierId}</dd>
+              <dd className={styles.auditValue}>{invoice.businessPartnerId}</dd>
             </div>
           </dl>
         </div>

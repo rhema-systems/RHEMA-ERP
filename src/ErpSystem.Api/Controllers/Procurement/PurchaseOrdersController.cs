@@ -13,6 +13,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Inventory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -2396,10 +2397,22 @@ public class PurchaseOrdersController : ControllerBase
                     }
                 }
 
+                var weightMaster = poItem.InventoryItemId.HasValue
+                    ? await _unitOfWork.Repository<InventoryItem>().GetQueryable(value =>
+                        value.Id == poItem.InventoryItemId.Value && value.TenantId == purchaseOrder.TenantId && !value.IsDeleted)
+                        .SingleOrDefaultAsync()
+                    : null;
+                var capturedWeight = ReceiptItemWeight.Capture(weightMaster, itemDto.UnitWeightKg);
+                if (itemDto.UnitWeightKg.HasValue && weightMaster == null)
+                    return BadRequest("A transaction weight requires a controlled inventory item.");
+
                 var receiptItem = new PurchaseOrderReceiptItem
                 {
                     Id = Guid.NewGuid(),
                     ReceiptId = receipt.Id,
+                    UnitWeightKg = capturedWeight,
+                    WeightStockUom = weightMaster?.UnitOfMeasure,
+                    WeightOverridden = itemDto.UnitWeightKg.HasValue,
                     PurchaseOrderItemId = itemDto.PurchaseOrderItemId,
                     ReceivedQuantity = itemDto.ReceivedQuantity,
                     AcceptedQuantity = 0,
@@ -2617,6 +2630,11 @@ public class PurchaseOrdersController : ControllerBase
                     "This receipt idempotency key was already used. Reload the receipt history.",
                 correlationId
             });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new ProblemDetails { Status = 400, Title = "Invalid receipt", Detail = ex.Message,
+                Extensions = { ["code"] = "RCV_INPUT_INVALID", ["correlationId"] = correlationId } });
         }
         catch (Exception ex)
         {
@@ -3790,7 +3808,9 @@ public class PurchaseOrdersController : ControllerBase
             }
 
             var stored = candidates[0];
-            if (stored.ReceivedQuantity != requested.ReceivedQuantity ||
+            if (stored.WeightOverridden != requested.UnitWeightKg.HasValue ||
+                (requested.UnitWeightKg.HasValue && stored.UnitWeightKg != requested.UnitWeightKg) ||
+                stored.ReceivedQuantity != requested.ReceivedQuantity ||
                 stored.LocationId != requested.LocationId ||
                 stored.ExpirationDate != requested.ExpirationDate ||
                 !SameReceiptText(stored.SerialNumber, requested.SerialNumber) ||

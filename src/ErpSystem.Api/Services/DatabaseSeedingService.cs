@@ -2010,7 +2010,7 @@ namespace ErpSystem.Web.Services
                     item.TenantId == tenantId
                     && !item.IsDeleted
                     && item.RegistrationStatus == "Approved"
-                    && (item.PartnerType == "Customer" || item.PartnerType == "Both"));
+                    && BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType));
 
             if (customer == null)
             {

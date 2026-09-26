@@ -1124,7 +1124,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     p.TenantId == payment.TenantId &&
                     p.Id == payment.BusinessPartnerId &&
                     !p.IsDeleted &&
-                    (p.PartnerType == "Customer" || p.PartnerType == "Both"),
+                    BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType),
                     cancellationToken)
                 ?? throw new InvalidOperationException($"Customer Business Partner {payment.BusinessPartnerId} not found for AR payment.");
 
@@ -1158,7 +1158,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             if (payment.IsCreditNote)
             {
-                var discountAllowedAccountId = settings.DiscountAllowedAccountId;
+                var discountAllowedAccountId = customer.CustomerSalesReturnsAccountId ?? settings.DiscountAllowedAccountId;
                 if (discountAllowedAccountId == null) throw new InvalidOperationException("Sales Discounts Allowed Account not configured in Finance Settings.");
 
                 transactions.Add(new CreateAccountTransactionDto
@@ -1210,7 +1210,7 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 if (discountAllowed > 0)
                 {
-                    var discountAllowedAccountId = settings.DiscountAllowedAccountId;
+                    var discountAllowedAccountId = customer.CustomerTermsDiscountsTakenAccountId ?? settings.DiscountAllowedAccountId;
                     if (discountAllowedAccountId == null) throw new InvalidOperationException("Sales Discounts Allowed Account not configured in Finance Settings.");
 
                     transactions.Add(new CreateAccountTransactionDto
@@ -1291,7 +1291,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var arAccountId = allocation.Invoice.BusinessPartner?.DefaultArAccountId ?? settings.ControlAccountArId;
             if (arAccountId == null) throw new InvalidOperationException("AR Control Account not configured.");
 
-            var discountAllowedAccountId = settings.DiscountAllowedAccountId;
+            var discountAllowedAccountId = allocation.Invoice.BusinessPartner?.CustomerTermsDiscountsTakenAccountId ?? settings.DiscountAllowedAccountId;
             if (discountAllowedAccountId == null) throw new InvalidOperationException("Sales Discounts Allowed Account not configured in Finance Settings.");
 
             var currencyCode = NormalizeCurrency(allocation.CustomerPayment.CurrencyCode);
@@ -1370,7 +1370,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             var arAccountId = creditNote.BusinessPartner?.DefaultArAccountId ?? settings.ControlAccountArId;
             if (arAccountId == null) throw new InvalidOperationException("AR Control Account not configured.");
 
-            var salesReturnsAccountId = settings.DiscountAllowedAccountId;
+            var salesReturnsAccountId = creditNote.BusinessPartner?.CustomerSalesReturnsAccountId ?? settings.DiscountAllowedAccountId;
             if (salesReturnsAccountId == null) throw new InvalidOperationException("Sales Discounts Allowed Account not configured in Finance Settings.");
 
             var currencyCode = NormalizeCurrency(creditNote.Currency);

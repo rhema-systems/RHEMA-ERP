@@ -121,6 +121,10 @@ public class ProcurementPlan : TenantEntity
 /// </summary>
 public class ProcurementPlanItem : TenantEntity
 {
+    /// <summary>Permanent database-generated line reference, independent of editable budget/category codes.</summary>
+    [MaxLength(36)]
+    public string ReferenceNumber { get; private set; } = string.Empty;
+
     [Required]
     public Guid ProcurementPlanId { get; set; }
 

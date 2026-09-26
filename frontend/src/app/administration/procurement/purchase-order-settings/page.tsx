@@ -18,6 +18,8 @@ export default function PurchaseOrderSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<ProcurementSettingsDto | null>(null);
   const [formData, setFormData] = useState<UpdateProcurementSettingsDto>({
+    autoCloseTenders: false,
+    enforceSegregationOfDuties: true,
     autoCreateInventoryItems: false,
     autoCreateSupplierItems: false,
     allowNonInventoryItems: true,
@@ -44,6 +46,8 @@ export default function PurchaseOrderSettingsPage() {
       const data = await procurementSettingsService.getSettings();
       setSettings(data);
       setFormData({
+        autoCloseTenders: data.autoCloseTenders ?? false,
+        enforceSegregationOfDuties: data.enforceSegregationOfDuties ?? true,
         autoCreateInventoryItems: data.autoCreateInventoryItems,
         autoCreateSupplierItems: data.autoCreateSupplierItems,
         allowNonInventoryItems: data.allowNonInventoryItems,
@@ -138,10 +142,10 @@ export default function PurchaseOrderSettingsPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <SettingsIcon className="h-8 w-8" />
-            Purchase Order Settings
+            Procurement Settings
           </h1>
           <p className="text-muted-foreground mt-2">
-            Configure how the system handles items and purchase orders
+            Configure tenders, items and purchase orders
           </p>
         </div>
         <Button onClick={handleSave} disabled={saving}>
@@ -159,7 +163,32 @@ export default function PurchaseOrderSettingsPage() {
         </Button>
       </div>
 
+      <Card>
+        <CardHeader><CardTitle>Segregation of duties</CardTitle></CardHeader>
+        <CardContent className="flex items-start justify-between gap-4">
+          <div>
+            <Label htmlFor="procurement-sod">Enforce segregation of duties for procurement transactions</Label>
+            <p className="text-sm text-muted-foreground mt-1">Requires separate participants for procurement, receiving, and procurement-backed invoices and payments. Permissions, approval stages, inspection requirements, and audit records always apply.</p>
+            <p className="text-sm text-muted-foreground mt-1">Manual Finance AP, mixed payment batches, HR, and settings-change approval retain their existing controls.</p>
+          </div>
+          <Switch id="procurement-sod" checked={formData.enforceSegregationOfDuties ?? true}
+            onCheckedChange={enforceSegregationOfDuties => setFormData(previous => ({ ...previous, enforceSegregationOfDuties }))} />
+        </CardContent>
+      </Card>
+
       {/* Item Creation Settings */}
+      <Card>
+        <CardHeader><CardTitle>Tender closing</CardTitle></CardHeader>
+        <CardContent className="flex items-start justify-between gap-4">
+          <div>
+            <Label htmlFor="auto-close-tenders">Automatically close tenders when the closing date is reached</Label>
+            <p className="text-sm text-muted-foreground mt-1">Checks the submission deadline every minute. Bid opening and evaluation still follow their approval controls.</p>
+          </div>
+          <Switch id="auto-close-tenders" checked={formData.autoCloseTenders ?? false}
+            onCheckedChange={autoCloseTenders => setFormData(previous => ({ ...previous, autoCloseTenders }))} />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Item Creation Settings</CardTitle>

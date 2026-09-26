@@ -14,6 +14,9 @@ namespace ErpSystem.Core.DTOs.Finance;
 
 public class VendorInvoiceDto
 {
+    public Guid? EstateAcquisitionId { get; set; }
+    public EstatePayableKind? EstatePayableKind { get; set; }
+    public bool IsProcurementAutoInvoice { get; set; }
     public Guid Id { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public string? SupplierInvoiceNumber { get; set; }
@@ -109,6 +112,11 @@ public class VendorInvoiceDto
 
 public class VendorInvoiceCreateDto
 {
+    // Set only by the Estate controller after its source and stage authorization checks.
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? EstateAcquisitionId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public EstatePayableKind? EstatePayableKind { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? AutoInvoiceRequestId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string? AutoInvoiceRequestHash { get; set; }
     /// <summary>Opt in only for a new draft; false preserves explicit No Tax and older-client behavior.</summary>
     public bool? ApplyBusinessPartnerDefaults { get; set; }
     public string? SupplierInvoiceNumber { get; set; }
@@ -232,6 +240,7 @@ public class VendorInvoiceUpdateDto
 
 public class VendorInvoiceQueryDto
 {
+    public bool? ProcurementOnly { get; set; }
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
     public string? SearchTerm { get; set; }

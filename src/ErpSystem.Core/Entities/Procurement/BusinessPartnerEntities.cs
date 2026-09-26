@@ -260,6 +260,16 @@ public class BusinessPartner : TenantEntity
     public Guid? DefaultArAccountId { get; set; }
     public virtual Account? DefaultArAccount { get; set; }
 
+    // Customer posting defaults remain independent of the supplier defaults above.
+    public Guid? CustomerSalesAccountId { get; set; }
+    public Guid? CustomerCostOfSalesAccountId { get; set; }
+    public Guid? CustomerInventoryAccountId { get; set; }
+    public Guid? CustomerTermsDiscountsTakenAccountId { get; set; }
+    public Guid? CustomerSalesReturnsAccountId { get; set; }
+    public Guid? CustomerFinanceChargesAccountId { get; set; }
+    public Guid? CustomerWriteoffAccountId { get; set; }
+    public Guid? CustomerOverpaymentWriteoffAccountId { get; set; }
+
     public Guid? DefaultExpenseAccountId { get; set; }
     public virtual Account? DefaultExpenseAccount { get; set; }
 

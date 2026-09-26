@@ -1,6 +1,7 @@
 // Tender Bid Service - API calls for tender bid management
 
 import type { TenderBidInitiationStatus } from '@/lib/tender-bid-initiation';
+import { throwProcurementResponseError } from '@/lib/procurement-api-error';
 
 // ==================== INTERFACES ====================
 
@@ -113,6 +114,11 @@ export interface TenderBidItemDto {
 export interface TenderBidDocumentDto {
   id: string;
   tenderBidId: string;
+  tenderBidItemId?: string;
+  tenderItemId?: string;
+  lotId?: string;
+  lotNumber?: number;
+  itemDescription?: string;
   documentType: string;
   documentName: string;
   fileName?: string;
@@ -393,7 +399,7 @@ export async function updateBid(
   });
 
   if (!response.ok) {
-    throw new Error('Failed to update bid');
+    return throwProcurementResponseError(response, 'Failed to update bid');
   }
 
   return response.json();
@@ -524,7 +530,7 @@ export async function deleteBidItem(
   );
 
   if (!response.ok) {
-    throw new Error('Failed to delete bid item');
+    return throwProcurementResponseError(response, 'Failed to delete bid item');
   }
 }
 
@@ -551,11 +557,13 @@ export async function uploadBidDocument(
   bidId: string,
   file: File,
   documentType: string,
-  documentName?: string
+  documentName?: string,
+  tenderItemId?: string
 ): Promise<TenderBidDocumentDto> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('documentType', documentType);
+  if (tenderItemId) formData.append('tenderItemId', tenderItemId);
   if (documentName) {
     formData.append('documentName', documentName);
   }
@@ -573,8 +581,7 @@ export async function uploadBidDocument(
   );
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(error || 'Failed to upload document');
+    return throwProcurementResponseError(response, 'Failed to upload document');
   }
 
   return response.json();
@@ -742,7 +749,7 @@ export async function deleteBidDocument(
   );
 
   if (!response.ok) {
-    throw new Error('Failed to delete bid document');
+    return throwProcurementResponseError(response, 'Failed to delete bid document');
   }
 }
 

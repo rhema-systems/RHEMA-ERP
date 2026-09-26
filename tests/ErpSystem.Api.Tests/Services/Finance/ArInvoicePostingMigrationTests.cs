@@ -29,7 +29,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ArInvoicePostingMigrationTests
+public sealed partial class ArInvoicePostingMigrationTests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
@@ -1185,8 +1185,10 @@ public sealed class ArInvoicePostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = targetCurrency,
-            Rate = rate,
-            InverseRate = decimal.Round(1m / rate, 6),
+            // Finance stores 1 functional/base unit = Rate transaction/target units.
+            // The invoice carries the inverse multiplier back into functional currency.
+            Rate = decimal.Round(1m / rate, 6),
+            InverseRate = rate,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             QuoteSide = quoteSide,

@@ -15,6 +15,11 @@ export interface ApSupplierDefaultValues {
   lineItems: ApSupplierDefaultLine[];
 }
 
+export const apExpenseLineTypes = ['Expense', 'Service', 'Freight', 'Miscellaneous', 'FinanceCharge'] as const;
+export function isApExpenseLineType(type: string): boolean {
+  return (apExpenseLineTypes as readonly string[]).includes(type);
+}
+
 /** Visible form assignments only. Explicit edits, including selecting No Tax, always win. */
 export function planApSupplierDefaults(values: ApSupplierDefaultValues, defaults: PurchaseOrderSupplierDefaultsDto,
   edited: ReadonlySet<string>, availableTaxIds: ReadonlySet<string>) {
@@ -30,8 +35,12 @@ export function planApSupplierDefaults(values: ApSupplierDefaultValues, defaults
   assign('expenseAccountId', values.expenseAccountId, posting.defaultExpenseAccountId);
   if (!taxUnavailable) assign('taxGroupId', values.taxGroupId, posting.defaultTaxGroupId || 'none');
   values.lineItems.forEach((line, index) => {
-    if (line.lineItemType === 'Expense' && !edited.has(`${line.sourceLineId}:glAccountId`)) {
-      assign(`lineItems.${index}.glAccountId`, line.glAccountId, edited.has('expenseAccountId') ? values.expenseAccountId : posting.defaultExpenseAccountId);
+    if (isApExpenseLineType(line.lineItemType) && !edited.has(`${line.sourceLineId}:glAccountId`)) {
+      const chargeAccount = line.lineItemType === 'Freight' ? posting.defaultFreightAccountId
+        : line.lineItemType === 'Miscellaneous' ? posting.defaultMiscellaneousAccountId
+        : line.lineItemType === 'FinanceCharge' ? posting.defaultFinanceChargesAccountId : undefined;
+      assign(`lineItems.${index}.glAccountId`, line.glAccountId, chargeAccount ||
+        (edited.has('expenseAccountId') ? values.expenseAccountId : posting.defaultExpenseAccountId));
     }
     if (!taxUnavailable && (!line.taxTreatment || line.taxTreatment === 1) &&
         !edited.has('taxGroupId') && !edited.has(`${line.sourceLineId}:taxGroupId`) && !edited.has(`${line.sourceLineId}:taxTreatment`)) {

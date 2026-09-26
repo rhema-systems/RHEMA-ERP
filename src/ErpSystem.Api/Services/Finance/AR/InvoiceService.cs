@@ -1194,9 +1194,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                 return lines.Select(line => new FinanceSourceDocumentLineContext(line.Id, clearingAccountId)).ToArray();
             }
 
+            var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
+                _unitOfWork, TenantId, invoice.JournalEntryId, "CustomerInvoice", invoice.Id, cancellationToken);
             return lines.Select(line => new FinanceSourceDocumentLineContext(
                 line.Id,
-                line.GLAccountId ?? throw new InvalidOperationException(
+                line.GLAccountId ?? originalAccounts?.Account(ResolveLineTag(line), line.Id)
+                ?? throw new InvalidOperationException(
                     $"No revenue account specified for AR line '{line.Description}'.")))
                 .ToArray();
         }
@@ -1319,6 +1322,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             var exchangeRate = NormalizeExchangeRate(invoice.ExchangeRate);
             var accountCache = new Dictionary<Guid, Account>();
 
+            var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
+                _unitOfWork, tenantId, invoice.JournalEntryId, "CustomerInvoice", invoice.Id, cancellationToken);
             var arAccountId = settings.ControlAccountArId
                 ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
             await ResolvePostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
@@ -1364,7 +1369,15 @@ namespace ErpSystem.Api.Services.Finance.AR
                     continue;
                 }
 
+                // Explicit line accounts still require intact original journal evidence on
+                // replay. Fully discounted lines did not produce a revenue posting.
+                var historicalRevenueAccountId = originalAccounts is not null &&
+                    (grossAmount < 0m || RoundMoney(grossAmount - line.DiscountAmount -
+                        documentDiscountAllocations.GetValueOrDefault(line.Id)) > 0m)
+                    ? originalAccounts.Account(ResolveLineTag(line), line.Id)
+                    : (Guid?)null;
                 var revenueAccountId = line.GLAccountId
+                    ?? historicalRevenueAccountId
                     ?? throw new InvalidOperationException($"No revenue account specified for AR line '{line.Description}'.");
                 await ResolvePostingAccountAsync(revenueAccountId, "revenue account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
@@ -1421,9 +1434,11 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 if (line.LineItemType == LineItemType.Inventory && line.CostTotal.HasValue && line.CostTotal.Value > 0m)
                 {
-                    var cogsAccountId = settings.ControlAccountCOGSId
+                    var cogsAccountId = originalAccounts?.Account("AR-COGS", line.Id)
+                        ?? settings.ControlAccountCOGSId
                         ?? throw new InvalidOperationException("COGS account is not configured for AR inventory invoice posting.");
-                    var inventoryAccountId = settings.ControlAccountInventoryId
+                    var inventoryAccountId = originalAccounts?.Account("AR-Inventory")
+                        ?? settings.ControlAccountInventoryId
                         ?? throw new InvalidOperationException("Inventory control account is not configured for AR inventory invoice posting.");
 
                     await ResolvePostingAccountAsync(cogsAccountId, "COGS account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);

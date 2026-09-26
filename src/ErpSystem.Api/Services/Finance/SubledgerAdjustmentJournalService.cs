@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance;
 
-public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalService
+public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalService
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
@@ -69,7 +69,11 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         CreateSubledgerAdjustmentJournalDto dto,
         CancellationToken cancellationToken = default)
     {
-        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
+            : await _context.Database.BeginTransactionAsync(cancellationToken);
+        var replay = await FindCustomerAdjustmentReplayAsync(dto, cancellationToken);
+        if (replay != null) return MapToDto(replay);
         var adjustment = await CreateAndPostCoreAsync(dto, null, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return MapToDto(adjustment);
@@ -83,7 +87,9 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         if (string.IsNullOrWhiteSpace(dto.Reason))
             throw new InvalidOperationException("A reversal reason is required.");
 
-        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = _context.Database.IsRelational()
+            ? await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
+            : await _context.Database.BeginTransactionAsync(cancellationToken);
 
         var original = await LoadAdjustmentAsync(id, asNoTracking: false, cancellationToken)
             ?? throw new KeyNotFoundException($"Subledger adjustment journal '{id}' was not found.");
@@ -145,6 +151,16 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         var adjustmentType = NormalizeAdjustmentType(dto.AdjustmentType);
         if (dto.Amount <= 0)
             throw new InvalidOperationException("Adjustment amount must be greater than zero.");
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+            throw new InvalidOperationException("A reason is required.");
+        var counterparty = await ResolveCounterpartyAsync(
+            module,
+            dto.BusinessPartnerId,
+            dto.BusinessPartnerRoleId,
+            dto.AdjustmentDate,
+            cancellationToken);
+        var originalAdjustment = originalAdjustmentId.HasValue
+            ? await LoadAdjustmentAsync(originalAdjustmentId.Value, false, cancellationToken) : null;
 
         var settings = await _context.FinanceSettings
             .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
@@ -153,6 +169,8 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         var controlAccountId = module == SubledgerModules.AccountsReceivable
             ? settings.ControlAccountArId
             : settings.ControlAccountApId;
+        if (IsCustomerAccountPurpose(purpose))
+            controlAccountId = originalAdjustment?.ControlAccountId ?? controlAccountId;
         if (!controlAccountId.HasValue)
             throw new InvalidOperationException($"{module} control account is not configured in Finance Settings.");
 
@@ -160,8 +178,10 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             .FirstOrDefaultAsync(a => a.Id == controlAccountId.Value && a.TenantId == tenantId && !a.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException($"{module} control account was not found.");
 
+        var requestedContraAccountId = await ResolveCustomerAdjustmentAccountAsync(dto, purpose, adjustmentType,
+            module == SubledgerModules.AccountsReceivable ? counterparty.Partner : null, originalAdjustment, cancellationToken);
         var contraAccountId = ResolveContraAccountId(
-            dto.ContraAccountId,
+            requestedContraAccountId,
             purpose,
             settings,
             originalAdjustmentId.HasValue);
@@ -174,12 +194,6 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         if (contraAccount.Id == controlAccount.Id)
             throw new InvalidOperationException("Contra GL account cannot be the same as the subledger control account.");
 
-        var counterparty = await ResolveCounterpartyAsync(
-            module,
-            dto.BusinessPartnerId,
-            dto.BusinessPartnerRoleId,
-            dto.AdjustmentDate,
-            cancellationToken);
         var baseCurrencyCode = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync()) ?? "GHS";
         var currencyCode = NormalizeCurrency(dto.CurrencyCode) ?? baseCurrencyCode;
         var exchangeRate = dto.ExchangeRate <= 0 ? 1m : dto.ExchangeRate;
@@ -198,7 +212,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
         var now = DateTime.UtcNow;
         var adjustment = new SubledgerAdjustmentJournal
         {
-            Id = Guid.NewGuid(),
+            Id = originalAdjustmentId.HasValue ? Guid.NewGuid() : dto.RequestId ?? Guid.NewGuid(),
             TenantId = tenantId,
             Module = module,
             AdjustmentNumber = adjustmentNumber,
@@ -219,6 +233,7 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             ExchangeRate = exchangeRate,
             BaseCurrencyAmount = baseAmount,
             ContraAccountId = contraAccount.Id,
+            ControlAccountId = controlAccount.Id,
             Status = SubledgerAdjustmentStatuses.Posted,
             Reference = string.IsNullOrWhiteSpace(dto.Reference) ? null : dto.Reference.Trim(),
             Reason = dto.Reason.Trim(),
@@ -487,6 +502,9 @@ public class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJournalServ
             return SubledgerAdjustmentPurposes.StandardAdjustment;
 
         var normalized = purpose.Trim();
+        foreach (var customerPurpose in new[] { SubledgerAdjustmentPurposes.FinanceCharge,
+            SubledgerAdjustmentPurposes.Writeoff, SubledgerAdjustmentPurposes.OverpaymentWriteoff })
+            if (string.Equals(normalized, customerPurpose, StringComparison.OrdinalIgnoreCase)) return customerPurpose;
         if (string.Equals(normalized, SubledgerAdjustmentPurposes.StandardAdjustment, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(normalized, "Standard", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(normalized, "Adjustment", StringComparison.OrdinalIgnoreCase))

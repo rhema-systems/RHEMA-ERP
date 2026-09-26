@@ -255,7 +255,6 @@ public class TenderNotificationService : ITenderNotificationService
                 <h3>{tender.Title}</h3>
                 <p><strong>Tender Number:</strong> {tender.TenderNumber}</p>
                 <p><strong>Type:</strong> {tenderTypeFullName}</p>
-                <p><strong>Estimated Value:</strong> {tender.EstimatedValue:N2} {tender.Currency}</p>
                 <p><strong>Submission Deadline:</strong> {tender.SubmissionDeadline:dddd, MMMM dd, yyyy 'at' HH:mm}</p>
                 {(tender.OpeningDate.HasValue ? $"<p><strong>Opening Date:</strong> {tender.OpeningDate.Value:dddd, MMMM dd, yyyy 'at' HH:mm}</p>" : "")}
             </div>

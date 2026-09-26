@@ -13,11 +13,12 @@ export type VendorInvoiceMatchCorrectiveActionStatus = 'Planned' | 'Completed';
 export type ProcurementAcceptedSupplyKind =
     | 'GoodsReceiptInspection'
     | 'ServiceCompletion'
-    | 'WorksPaymentCertificate';
+    | 'WorksPaymentCertificate'
+    | 'GoodsReceiptConsolidation';
 
 /**
- * Finance-owned, read-only projection of Procurement's canonical Supplier master.
- * `id` is Supplier.Id and is the identity AP reports and invoice commands submit.
+ * Finance-owned, read-only projection of the canonical Business Partner master.
+ * Invoice commands use the explicit Business Partner and role identifiers below.
  */
 export interface ApInvoiceSupplier {
     id: string;
@@ -49,12 +50,22 @@ export interface VendorInvoiceDistribution {
     basis: string;
     journalEntryId?: string | null;
     journalEntryNumber?: string | null;
+    canEdit?: boolean;
+    editBlockReason?: string | null;
+    version?: string;
+    basisVersion?: string;
+    hasOverrides?: boolean;
+    needsReview?: boolean;
+    groups?: Array<{ groupId: string; type: string; description?: string; accountId: string; canChangeAccount: boolean; accountRestriction?: string; debit: number; credit: number }>;
     totalDebit: number;
     totalCredit: number;
-    lines: Array<{ lineId: string; sourceDocumentLineId?: string | null; accountId: string; accountCode: string; accountName: string; type: string; source: string; description: string; debit: number; credit: number }>;
+    lines: Array<{ lineId: string; groupId?: string; sourceDocumentLineId?: string | null; accountId: string; accountCode: string; accountName: string; type: string; source: string; description: string; debit: number; credit: number }>;
 }
 
 export interface VendorInvoice {
+    isProcurementAutoInvoice?: boolean;
+    estateAcquisitionId?: string;
+    estatePayableKind?: 'SurveyorFee' | 'VendorConsideration' | 'StampDuty' | 'OtherAcquisitionCosts';
     id: string;
     invoiceNumber: string;
     supplierInvoiceNumber?: string;
@@ -534,6 +545,7 @@ export interface VendorPayment {
 
 export interface SupplierDebitNoteLine {
     id: string;
+    lineItemType?: string;
     originalVendorInvoiceLineItemId?: string;
     originalFinancePurchaseOrderItemId?: string;
     glAccountId?: string;
@@ -630,6 +642,7 @@ export interface SupplierDebitNote {
 
 export interface SupplierDebitNoteLineRequest {
     id?: string;
+    lineItemType?: string;
     originalVendorInvoiceLineItemId?: string;
     glAccountId?: string;
     description: string;

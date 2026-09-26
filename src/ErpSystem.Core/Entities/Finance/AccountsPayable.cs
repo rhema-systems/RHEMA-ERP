@@ -12,6 +12,9 @@ namespace ErpSystem.Core.Entities.Finance;
 
 #region Enums
 
+/// <summary>Server-owned land acquisition payable source.</summary>
+public enum EstatePayableKind { SurveyorFee = 1, VendorConsideration = 2, StampDuty = 3, OtherAcquisitionCosts = 4 }
+
 /// <summary>
 /// Status of a vendor/supplier invoice through its lifecycle.
 /// </summary>
@@ -109,6 +112,13 @@ public enum PaymentBatchStatus
 /// </summary>
 public class VendorInvoice : TenantEntity
 {
+    public Guid? EstateAcquisitionId { get; set; }
+    public EstatePayableKind? EstatePayableKind { get; set; }
+    /// <summary>Reviewed Procurement distribution overrides; applied by the shared posting builder.</summary>
+    public string? DistributionDraftJson { get; set; }
+    /// <summary>Server-owned receipt consolidation request identity; manual AP remains null.</summary>
+    public Guid? AutoInvoiceRequestId { get; set; }
+    [MaxLength(64)] public string? AutoInvoiceRequestHash { get; set; }
     // ── Identification ──────────────────────────────────────────────────
 
     [Required]
@@ -325,6 +335,13 @@ public class VendorInvoice : TenantEntity
 
     public Guid? ApAccountId { get; set; }
     public virtual Account? ApAccount { get; set; }
+
+    /// <summary>
+    /// Supplier input-tax fallback captured when a new invoice opts into partner defaults.
+    /// Tax-rule accounts take precedence; nonrecoverable tax never uses this account.
+    /// </summary>
+    public Guid? SupplierTaxFallbackAccountId { get; set; }
+    public virtual Account? SupplierTaxFallbackAccount { get; set; }
 
     public Guid? JournalEntryId { get; set; }
 

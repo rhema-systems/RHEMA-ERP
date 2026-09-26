@@ -12,10 +12,11 @@ import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-ac
 import { toast } from 'sonner';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { LandedCostSupplierSummary } from './LandedCostSupplierSummary';
+import { hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
 
 const types = ['Freight / Shipping', 'Customs Duty', 'Insurance', 'Handling', 'Brokerage', 'Storage', 'Other'];
 const typeNames = ['Freight', 'CustomsDuty', 'Insurance', 'Handling', 'Brokerage', 'Storage', 'Other'];
-const methods = [{ value: 'ByValue', label: 'By item value' }, { value: 'ByQuantity', label: 'By quantity' }, { value: 'Equal', label: 'Equally' }];
+const methods = [{ value: 'ByValue', label: 'By item value' }, { value: 'ByQuantity', label: 'By quantity' }, { value: 'ByWeight', label: 'By captured weight' }, { value: 'Equal', label: 'Equally' }];
 type CostRow = SaveReceiptLandedCostDto['costItems'][number];
 
 export function ReceiptLandedCostEntry({ receipt, selected, onSaved, disabled = false }: {
@@ -45,7 +46,7 @@ export function ReceiptLandedCostEntry({ receipt, selected, onSaved, disabled = 
     setSupplierLoading(true); setSupplierError(''); setSuppliers([]);
     businessPartnerService.getAllPartnersForDropdown().then(partners => {
       if (active) setSuppliers(partners.filter(s =>
-        ['Supplier', 'Both', 'Contractor'].includes(s.partnerType) &&
+        (hasSupplierRole(s.partnerType) || hasContractorRole(s.partnerType)) &&
         (s.isActive ?? s.status === 'Active') && !s.isBlacklisted &&
         s.approvalStatus === 'Approved'));
     }).catch(() => {
@@ -110,7 +111,7 @@ export function ReceiptLandedCostEntry({ receipt, selected, onSaved, disabled = 
     <Dialog open={open} onOpenChange={value => { if (!saving) setOpen(value); }}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" onInteractOutside={e => e.preventDefault()}>
         <DialogHeader><DialogTitle>{editing ? 'Edit draft landed costs' : 'Add receipt landed costs'}</DialogTitle>
-          <DialogDescription>{receipt.receiptNumber} — save charges now; allocation and inventory posting are separate actions. This does not change the supplier PO total.</DialogDescription></DialogHeader>
+          <DialogDescription>{receipt.receiptNumber} — save charges now, then allocate and prepare supplier invoices. Final posting happens from Invoices. This does not change the supplier PO total.</DialogDescription></DialogHeader>
         <div><Label htmlFor="receipt-cost-currency">Voucher currency</Label><Input id="receipt-cost-currency" value={currency} maxLength={10} disabled={saving} onChange={e => setCurrency(e.target.value.toUpperCase())} /></div>
         {rows.map((row, index) => <fieldset disabled={saving} key={index} className="space-y-3 rounded-lg border p-3">
           <div className="flex items-center justify-between"><legend className="font-medium">Charge {index + 1}</legend><Button type="button" variant="ghost" size="sm" onClick={() => setRows(rows.filter((_, i) => i !== index))}>Remove charge {index + 1}</Button></div>

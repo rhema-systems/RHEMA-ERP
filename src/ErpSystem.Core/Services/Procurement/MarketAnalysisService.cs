@@ -517,8 +517,7 @@ public class MarketAnalysisService : IMarketAnalysisService
             throw Rule("MARKET_SURVEY_SUPPLIER_NOT_FOUND", "The selected supplier was not found for this tenant.", 404);
         }
 
-        var supportsSupply = string.Equals(supplier.PartnerType, "Supplier", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(supplier.PartnerType, "Both", StringComparison.OrdinalIgnoreCase);
+        var supportsSupply = BusinessPartnerRoles.HasSupplier(supplier.PartnerType);
         if (!supportsSupply || !BusinessPartnerLifecyclePolicy.IsOperationallyApproved(supplier))
         {
             throw Rule("MARKET_SURVEY_SUPPLIER_INELIGIBLE", "Select an active, approved supplier that is not blacklisted.", 409);

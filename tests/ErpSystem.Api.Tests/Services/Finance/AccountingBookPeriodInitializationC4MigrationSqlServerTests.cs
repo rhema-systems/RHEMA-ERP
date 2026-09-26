@@ -13,6 +13,78 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class AccountingBookPeriodInitializationC4MigrationSqlServerTests
 {
     [SqlServerFact]
+    public async Task Reconciliation_CreatesBookV2Shape_AndRejectsIncompleteTranslationEvidence()
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        var evidence = await database.CreatePredecessorAsync();
+        await database.CreateExchangeRatesPredecessorAsync();
+
+        await database.ExecuteAsync(ReconcileAccountingBookPeriodInitializationSchema.ReconciliationSql);
+        var initializationId = Guid.NewGuid();
+        await database.InsertInitializationAsync(evidence.TenantId, evidence.BookId, evidence.PeriodId,
+            initializationId, 1, "book-v2-reconcile", null);
+
+        var incompleteEvidence = () => database.ExecuteAsync($$"""
+INSERT AccountingBookInitializationLines
+ (Id,AccountingBookInitializationId,AccountId,CurrencyCode,OpeningDebit,OpeningCredit,BaseBookSignedBalance,OpeningAdjustment,TranslationRate,CreatedAt,IsDeleted,TenantId)
+VALUES ('{{Guid.NewGuid()}}','{{initializationId}}','{{evidence.AccountId}}',N'GHS',0,0,0,0,1.234567,SYSUTCDATETIME(),0,'{{evidence.TenantId}}');
+""");
+        (await incompleteEvidence.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(547);
+        (await database.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingBookInitializationLines")).Should().Be(0);
+        (await database.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingBookPeriods")).Should().Be(0,
+            "schema reconciliation must never manufacture posting-period authority");
+    }
+
+    [SqlServerFact]
+    public async Task Reconciliation_AcceptsFinanceTranslationMigration_WithoutChangingAuthority()
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        var evidence = await database.CreatePredecessorAsync();
+        await database.CreateExchangeRatesPredecessorAsync();
+        await database.ApplyAsync(up: true);
+        await database.ApplyTranslationAsync();
+        var initializationId = Guid.NewGuid();
+        await database.InsertInitializationAsync(evidence.TenantId, evidence.BookId, evidence.PeriodId,
+            initializationId, 1, "canonical-existing", null);
+        var before = await database.ScalarAsync<string>("SELECT CONVERT(varchar(18),RowVersion,1) FROM AccountingBookInitializations");
+
+        await database.ExecuteAsync(ReconcileAccountingBookPeriodInitializationSchema.ReconciliationSql);
+        await database.ExecuteAsync(ReconcileAccountingBookPeriodInitializationSchema.ReconciliationSql);
+
+        (await database.ScalarAsync<string>("SELECT CONVERT(varchar(18),RowVersion,1) FROM AccountingBookInitializations")).Should().Be(before);
+        (await database.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingBookInitializations")).Should().Be(1);
+        (await database.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingBookPeriods")).Should().Be(0);
+    }
+
+    [SqlServerTheory]
+    [InlineData("missing-column", "C4_RECONCILE_COLUMN_DRIFT")]
+    [InlineData("wrong-precision", "C4_RECONCILE_COLUMN_DRIFT")]
+    [InlineData("missing-foreign-key", "C4_RECONCILE_FK_DRIFT")]
+    [InlineData("disabled-check", "C4_RECONCILE_CHECK_DRIFT")]
+    public async Task Reconciliation_RejectsPartialBookV2Schema(string corruption, string expectedCode)
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        await database.CreatePredecessorAsync();
+        await database.CreateExchangeRatesPredecessorAsync();
+        await database.ApplyAsync(up: true);
+        await database.ApplyTranslationAsync();
+        await database.ExecuteAsync(corruption switch
+        {
+            "missing-column" => "ALTER TABLE AccountingBookInitializations DROP CONSTRAINT CK_AccountingBookInitializations_TranslationMethod; ALTER TABLE AccountingBookInitializations DROP COLUMN TranslationMethod;",
+            "wrong-precision" => "ALTER TABLE AccountingBookInitializationLines DROP CONSTRAINT CK_AccountingBookInitializationLines_TranslationEvidence; ALTER TABLE AccountingBookInitializationLines ALTER COLUMN TranslationRate decimal(18,4) NULL;",
+            "missing-foreign-key" => "ALTER TABLE AccountingBookInitializationLines DROP CONSTRAINT FK_AccountingBookInitializationLines_ExchangeRates_TenantId_TranslationExchangeRateId;",
+            "disabled-check" => "ALTER TABLE AccountingBookInitializationLines NOCHECK CONSTRAINT CK_AccountingBookInitializationLines_TranslationEvidence;",
+            _ => throw new ArgumentOutOfRangeException(nameof(corruption))
+        });
+
+        var reconcile = () => database.ExecuteAsync(ReconcileAccountingBookPeriodInitializationSchema.ReconciliationSql);
+        var exception = (await reconcile.Should().ThrowAsync<SqlException>()).Which;
+        exception.Number.Should().Be(51000);
+        exception.Message.Should().Contain(expectedCode);
+        (await database.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingBookInitializations")).Should().Be(0);
+    }
+
+    [SqlServerFact]
     public async Task Migration_CreatesConstrainedAuthority_RejectsLossyDown_AndRestoresPredecessor()
     {
         await using var database = await DisposableDatabase.CreateAsync();
@@ -251,6 +323,17 @@ VALUES
                 await ExecuteAsync(command.CommandText);
         }
 
+        public Task CreateExchangeRatesPredecessorAsync() => ExecuteAsync("CREATE TABLE ExchangeRates (Id uniqueidentifier NOT NULL CONSTRAINT PK_ExchangeRates PRIMARY KEY, TenantId uniqueidentifier NOT NULL, Rate decimal(18,6) NOT NULL, InverseRate decimal(18,6) NOT NULL);");
+
+        public async Task ApplyTranslationAsync()
+        {
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(_connection).Options;
+            await using var context = new ApplicationDbContext(options);
+            var operations = new ExposedTranslationMigration().BuildUpOperations();
+            foreach (var command in context.GetService<IMigrationsSqlGenerator>().Generate(operations, context.Model))
+                await ExecuteAsync(command.CommandText);
+        }
+
         public async Task<T> ScalarAsync<T>(string sql)
         {
             await using var connection = new SqlConnection(_connection);
@@ -296,6 +379,16 @@ VALUES
         {
             var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
             Down(builder);
+            return builder.Operations;
+        }
+    }
+
+    private sealed class ExposedTranslationMigration : AccountingBookTranslationEvidence
+    {
+        public IReadOnlyList<MigrationOperation> BuildUpOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Up(builder);
             return builder.Operations;
         }
     }

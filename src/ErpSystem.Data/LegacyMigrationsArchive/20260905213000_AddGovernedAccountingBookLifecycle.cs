@@ -24,7 +24,7 @@ IF EXISTS (
         b.[Code] IS NULL OR LEN(b.[Code]) = 0
         OR b.[Code] COLLATE Latin1_General_100_BIN2
            <> UPPER(LTRIM(RTRIM(b.[Code]))) COLLATE Latin1_General_100_BIN2
-        OR DATALENGTH(b.[Code]) <> DATALENGTH(UPPER(LTRIM(RTRIM(b.[Code])))
+        OR DATALENGTH(b.[Code]) <> DATALENGTH(UPPER(LTRIM(RTRIM(b.[Code]))))
         OR LEFT(b.[Code], 1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
         OR b.[Code] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_]%'
         OR b.[Code] COLLATE Latin1_General_100_BIN2 IN (
@@ -79,7 +79,7 @@ IF EXISTS (
         t.[Id] IS NULL OR t.[BaseCurrency] IS NULL OR DATALENGTH(t.[BaseCurrency]) <> 6
         OR t.[BaseCurrency] COLLATE Latin1_General_100_BIN2
            <> UPPER(LTRIM(RTRIM(t.[BaseCurrency]))) COLLATE Latin1_General_100_BIN2
-        OR DATALENGTH(t.[BaseCurrency]) <> DATALENGTH(UPPER(LTRIM(RTRIM(t.[BaseCurrency])))
+        OR DATALENGTH(t.[BaseCurrency]) <> DATALENGTH(UPPER(LTRIM(RTRIM(t.[BaseCurrency]))))
         OR configured.MatchCount <> 1
         OR (configured.MatchCount = 1 AND (
             configured.BaseCurrency IS NULL OR DATALENGTH(configured.BaseCurrency) <> 6

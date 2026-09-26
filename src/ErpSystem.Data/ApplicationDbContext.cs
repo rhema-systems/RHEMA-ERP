@@ -1,4 +1,4 @@
-﻿using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
@@ -238,6 +238,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<TaxRule> TaxRules { get; set; }
     public DbSet<Invoice> Invoices { get; set; }
     public DbSet<VendorInvoice> VendorInvoices { get; set; }
+    public DbSet<VendorInvoiceReceiptAllocation> VendorInvoiceReceiptAllocations { get; set; }
     public DbSet<VendorInvoiceMatchException> VendorInvoiceMatchExceptions { get; set; }
     public DbSet<VendorInvoiceMatchExceptionVariance> VendorInvoiceMatchExceptionVariances { get; set; }
     public DbSet<VendorInvoiceMatchExceptionEvidence> VendorInvoiceMatchExceptionEvidence { get; set; }
@@ -754,6 +755,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<PhysicalCountAction> PhysicalCountActions { get; set; }
     public DbSet<InventoryCostLayer> InventoryCostLayers { get; set; }
     public DbSet<LandedCost> LandedCosts { get; set; }
+    // Discover before the global decimal and tenant-FK passes run.
+    public DbSet<LandedCostReceiptWeight> LandedCostReceiptWeights { get; set; }
+    public DbSet<LandedCostSupplierDocument> LandedCostSupplierDocuments { get; set; }
     public DbSet<LandedCostItem> LandedCostItems { get; set; }
     public DbSet<LandedCostAllocation> LandedCostAllocations { get; set; }
     public DbSet<PurchaseReturn> PurchaseReturns { get; set; }
@@ -1417,6 +1421,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new TenderAwardConfiguration());
         ConfigureProcurementCentralDocumentLinks<TenderDocument>(builder);
         ConfigureProcurementCentralDocumentLinks<TenderBidDocument>(builder);
+        builder.Entity<TenderBidItem>().HasIndex(item => item.TenantId);
+        // The composite FK prevents attaching a line from another supplier bid or tenant.
+        builder.Entity<TenderBidDocument>()
+            .HasOne(document => document.TenderBidItem).WithMany()
+            .HasForeignKey(document => new { document.TenantId, document.TenderBidId, document.TenderBidItemId })
+            .HasPrincipalKey(item => new { item.TenantId, item.TenderBidId, item.Id })
+            .OnDelete(DeleteBehavior.Restrict);
         builder.ApplyConfiguration(new EvaluationTemplateConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateCriterionConfiguration());
         builder.ApplyConfiguration(new ProcurementTenderControlConfiguration());
@@ -2226,10 +2237,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<VendorInvoice>(entity =>
         {
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.EstateAcquisitionId, invoice.EstatePayableKind })
+                .IsUnique().HasFilter("[EstateAcquisitionId] IS NOT NULL");
+            entity.HasOne<LandAcquisition>().WithMany()
+                .HasForeignKey(invoice => new { invoice.TenantId, invoice.EstateAcquisitionId })
+                .HasPrincipalKey(acquisition => new { acquisition.TenantId, acquisition.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.AutoInvoiceRequestId }).IsUnique()
+                .HasFilter("[AutoInvoiceRequestId] IS NOT NULL");
             entity.ToTable("VendorInvoice", table =>
             {
                 table.HasTrigger("TR_VendorInvoice_TDC0504MandatoryMatch");
                 table.HasTrigger("TR_VendorInvoice_AcceptedSupplyProtected");
+                table.HasTrigger("TR_VendorInvoice_ReceiptSource");
+                table.HasTrigger("TR_VendorInvoice_EstateSource");
+                table.HasCheckConstraint("CK_VendorInvoice_EstateSource",
+                    "([EstateAcquisitionId] IS NULL AND [EstatePayableKind] IS NULL) OR ([EstateAcquisitionId] IS NOT NULL AND [EstatePayableKind] IS NOT NULL AND [EstatePayableKind] BETWEEN 1 AND 4 AND [IsOpeningBalance] = 0 AND [PurchaseOrderId] IS NULL AND [AcceptedSupplyKind] IS NULL AND [AutoInvoiceRequestId] IS NULL)");
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_TDC0504MatchingTolerances",
                     "[MatchingPriceTolerancePercent] BETWEEN 0 AND 100 AND [MatchingQuantityTolerancePercent] BETWEEN 0 AND 100");
@@ -2238,10 +2261,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[MatchingSnapshotHash] IS NULL OR LEN([MatchingSnapshotHash]) = 64");
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_AcceptedSupplyCoherent",
-                    "([AcceptedSupplyKind] IS NULL AND [AcceptedSupplySourceId] IS NULL AND [AcceptedSupplySourceReference] IS NULL AND [AcceptedSupplySnapshotHash] IS NULL AND [AcceptedSupplyValidatedAtUtc] IS NULL) OR ([AcceptedSupplyKind] BETWEEN 1 AND 3 AND [AcceptedSupplySourceId] IS NOT NULL AND LEN([AcceptedSupplySourceReference]) BETWEEN 1 AND 100 AND LEN([AcceptedSupplySnapshotHash]) = 64 AND [AcceptedSupplyValidatedAtUtc] IS NOT NULL)");
+                    "([AcceptedSupplyKind] IS NULL AND [AcceptedSupplySourceId] IS NULL AND [AcceptedSupplySourceReference] IS NULL AND [AcceptedSupplySnapshotHash] IS NULL AND [AcceptedSupplyValidatedAtUtc] IS NULL) OR ([AcceptedSupplyKind] BETWEEN 1 AND 4 AND [AcceptedSupplySourceId] IS NOT NULL AND LEN([AcceptedSupplySourceReference]) BETWEEN 1 AND 100 AND LEN([AcceptedSupplySnapshotHash]) = 64 AND [AcceptedSupplyValidatedAtUtc] IS NOT NULL)");
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_AcceptedSupplyPurchaseOrder",
-                    "[AcceptedSupplyKind] IS NULL OR [AcceptedSupplyKind] = 3 OR [PurchaseOrderId] IS NOT NULL");
+                    "[AcceptedSupplyKind] IS NULL OR [AcceptedSupplyKind] = 3 OR ([AcceptedSupplyKind] = 4 AND [AutoInvoiceRequestId] IS NOT NULL) OR [PurchaseOrderId] IS NOT NULL");
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_WhtScopeCoherent",
                     "([WithholdingTaxId] IS NULL AND [WithholdingContractReference] IS NULL AND [WithholdingSupplyCategory] IS NULL) OR ([WithholdingTaxId] IS NOT NULL AND LEN([WithholdingContractReference]) BETWEEN 1 AND 100 AND [WithholdingSupplyCategory] BETWEEN 0 AND 2)");
@@ -2278,6 +2301,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.ApAccount)
                 .WithMany()
                 .HasForeignKey(e => e.ApAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SupplierTaxFallbackAccount)
+                .WithMany()
+                .HasForeignKey(e => e.SupplierTaxFallbackAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.WithholdingTax)
                 .WithMany()
@@ -2321,8 +2348,25 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasFilter("[IsDeleted] = 0 AND [AcceptedSupplyKind] IN (2, 3) AND [AcceptedSupplySourceId] IS NOT NULL");
         });
 
+        builder.Entity<VendorInvoiceReceiptAllocation>(entity =>
+        {
+            entity.ToTable("VendorInvoiceReceiptAllocations", table => table.HasTrigger("TR_VendorInvoiceReceiptAllocations_Source"));
+            entity.HasIndex(value => new { value.TenantId, value.VendorInvoiceLineItemId }).IsUnique();
+            entity.HasIndex(value => new { value.TenantId, value.GoodsReceiptNoteItemId });
+            entity.HasOne(value => value.VendorInvoice).WithMany().HasForeignKey(value => value.VendorInvoiceId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(value => value.VendorInvoiceLineItem).WithMany().HasForeignKey(value => value.VendorInvoiceLineItemId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(value => value.PurchaseOrder).WithMany().HasForeignKey(value => value.PurchaseOrderId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(value => value.PurchaseOrderItem).WithMany().HasForeignKey(value => value.PurchaseOrderItemId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(value => value.PurchaseOrderReceipt).WithMany().HasForeignKey(value => value.PurchaseOrderReceiptId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(value => value.PurchaseOrderReceiptItem).WithMany().HasForeignKey(value => value.PurchaseOrderReceiptItemId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(value => value.InspectionCase).WithMany().HasForeignKey(value => value.InspectionCaseId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(value => value.GoodsReceiptNote).WithMany().HasForeignKey(value => value.GoodsReceiptNoteId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(value => value.GoodsReceiptNoteItem).WithMany().HasForeignKey(value => value.GoodsReceiptNoteItemId).OnDelete(DeleteBehavior.NoAction);
+        });
+
         builder.Entity<VendorInvoiceLineItem>(entity =>
         {
+            entity.ToTable("VendorInvoiceLineItem", table => table.HasTrigger("TR_VendorInvoiceLineItem_ReceiptSource"));
             entity.HasOne<LandedCostItem>().WithMany().HasForeignKey(e => e.LandedCostItemId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.LandedCostItemId).IsUnique()
@@ -10709,6 +10753,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             {
                 if (property.ClrType == typeof(decimal) || property.ClrType == typeof(decimal?))
                 {
+                    if ((entityType.ClrType == typeof(InventoryItem) && property.Name == nameof(InventoryItem.Weight)) ||
+                        (entityType.ClrType == typeof(GoodsReceiptNoteItem) && property.Name == nameof(GoodsReceiptNoteItem.UnitWeightKg)) ||
+                        (entityType.ClrType == typeof(PurchaseOrderReceiptItem) && property.Name == nameof(PurchaseOrderReceiptItem.UnitWeightKg)) ||
+                        (entityType.ClrType == typeof(LandedCostReceiptWeight) && property.Name == nameof(LandedCostReceiptWeight.UnitWeightKg)))
+                    {
+                        property.SetColumnType("decimal(22,6)");
+                        continue;
+                    }
                     // Exchange-rate evidence needs more precision than ordinary quantities. Keep
                     // this explicit because the broad convention below runs after entity-specific
                     // configuration and would otherwise silently reduce it to four decimals.
@@ -10959,6 +11011,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // ProcurementPlanItem entity
         builder.Entity<ProcurementPlanItem>(entity =>
         {
+            entity.Property(i => i.ReferenceNumber).HasMaxLength(36)
+                .HasComputedColumnSql("N'PPL-' + LOWER(REPLACE(CONVERT(nvarchar(36), [Id]), N'-', N''))", stored: true);
+            entity.HasIndex(i => new { i.TenantId, i.ReferenceNumber }).IsUnique();
+            // Retain the existing tenant index when EF discovers the new composite index.
+            entity.HasIndex(i => i.TenantId);
             entity.HasIndex(i => i.ProcurementPlanId);
             entity.HasIndex(i => i.ProcurementBudgetId);
             entity.HasIndex(i => i.ProcurementBudgetAllocationId);
@@ -12497,6 +12554,27 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(lc => lc.PostedById)
                 .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<LandedCostReceiptWeight>(entity =>
+        {
+            entity.ToTable("LandedCostReceiptWeights", table => table.HasTrigger("TR_LandedCostReceiptWeights_Source"));
+            entity.HasIndex(w => new { w.TenantId, w.LandedCostId, w.GoodsReceiptNoteItemId }).IsUnique();
+            entity.HasOne(w => w.LandedCost).WithMany().HasForeignKey(w => w.LandedCostId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(w => w.GoodsReceiptNoteItem).WithMany().HasForeignKey(w => w.GoodsReceiptNoteItemId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<LandedCostSupplierDocument>(entity =>
+        {
+            entity.ToTable("LandedCostSupplierDocuments", table => table.HasTrigger("TR_LandedCostSupplierDocuments_Immutable"));
+            entity.Property(d => d.DocumentNumber).HasComputedColumnSql("'LCSD-' + LOWER(REPLACE(CONVERT(varchar(36), [Id]), '-', ''))", stored: true);
+            entity.HasIndex(d => new { d.TenantId, d.LandedCostItemId }).IsUnique();
+            entity.HasIndex(d => new { d.TenantId, d.DocumentNumber }).IsUnique().HasFilter(null);
+            entity.HasOne(d => d.LandedCostItem).WithMany().HasForeignKey(d => d.LandedCostItemId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(d => d.LandedCost).WithMany().HasForeignKey(d => d.LandedCostId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(d => d.GoodsReceiptNote).WithMany().HasForeignKey(d => d.GoodsReceiptNoteId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(d => d.PurchaseOrder).WithMany().HasForeignKey(d => d.PurchaseOrderId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(d => d.BusinessPartner).WithMany().HasForeignKey(d => d.BusinessPartnerId).OnDelete(DeleteBehavior.NoAction);
         });
 
         // LandedCostItem entity

@@ -1117,7 +1117,8 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         overrideDto.ApprovedAtUtc = EnsureUtc(workflow.CompletedDate.Value);
         if (approvalActors.Count == 0)
             return Fail("SOURCING_METHOD_OVERRIDE_APPROVER_REQUIRED", "The completed workflow has no traceable approved actor.");
-        if (approvalActors.Contains(requisition.RequestedById))
+        if (approvalActors.Contains(requisition.RequestedById) &&
+            await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken))
             return Fail("SOURCING_METHOD_OVERRIDE_SOD_CONFLICT", "The requisition initiator cannot approve the method override.");
 
         if (controlMode != OverrideControlMode.None && !HasPlatformSuperAdministratorBypass())

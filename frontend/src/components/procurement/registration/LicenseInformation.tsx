@@ -11,6 +11,7 @@ import { Plus, X, Award } from 'lucide-react';
 import { type RegistrationFormData } from '@/services/businessPartnerRegistrationService';
 import { licenseTypeService, type LicenseTypeDto } from '@/services/partnerConfigService';
 import { toast } from 'sonner';
+import { hasContractorRole, hasSupplierRole } from '@/lib/business-partner-roles';
 
 interface LicenseInformationProps {
   formData: RegistrationFormData;
@@ -98,7 +99,7 @@ export default function LicenseInformation({ formData, updateFormData }: License
   };
 
   // Show message if partner type is Supplier (licenses typically for contractors)
-  if (formData.partnerType === 'Supplier') {
+  if (hasSupplierRole(formData.partnerType) && !hasContractorRole(formData.partnerType)) {
     return (
       <div className="space-y-6">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -257,7 +258,7 @@ export default function LicenseInformation({ formData, updateFormData }: License
         </div>
       )}
 
-      {licenses.length === 0 && formData.partnerType !== 'Supplier' && (
+      {licenses.length === 0 && hasContractorRole(formData.partnerType) && (
         <div className="text-center py-8 text-gray-500">
           <Award className="w-12 h-12 mx-auto mb-3 text-gray-400" />
           <p>No licenses added yet</p>

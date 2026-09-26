@@ -1,5 +1,7 @@
 'use client';
 
+import { ReceiptItemWeightInput } from '@/components/procurement/ReceiptItemWeightInput';
+
 import { purchaseOrderLineType, requiresPurchaseOrderStock, type PurchaseOrderLineType } from '@/lib/purchase-order-line-types';
 
 import React, { useState, useEffect } from 'react';
@@ -616,6 +618,7 @@ export default function ReceivePurchaseOrderPage() {
         items: itemsToReceive.map(item => ({
           purchaseOrderItemId: item.purchaseOrderItemId,
           receivedQuantity: item.receivedQuantity,
+          unitWeightKg: item.unitWeightKg,
           acceptedQuantity: item.acceptedQuantity,
           rejectedQuantity: item.rejectedQuantity,
           warehouseId: requiresPurchaseOrderStock(item.lineType) ? item.warehouseId || undefined : undefined,
@@ -926,6 +929,11 @@ export default function ReceivePurchaseOrderPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3 pt-3">
+                    {requiresPurchaseOrderStock(item.lineType) && <ReceiptItemWeightInput
+                      inventoryItemId={item.inventoryItemId} stockUnit={item.unitOfMeasure} value={item.unitWeightKg}
+                      disabled={item.missingItemDecision === 'pending' || item.missingItemDecision === 'skip'}
+                      onChange={unitWeightKg => setReceiptItems(current => current.map((line, lineIndex) => lineIndex === index ? { ...line, unitWeightKg } : line))}
+                    />}
                     <div className="grid grid-cols-2 lg:grid-cols-7 gap-3">
                       <div className="space-y-2">
                         <Label htmlFor={`received-${index}`} className="text-xs">Received ({item.unitOfMeasure}) *</Label>

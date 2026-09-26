@@ -1000,7 +1000,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(a =>
                     a.TenantId == TenantId &&
                     a.Module == SubledgerModules.AccountsReceivable &&
-                    a.Status == SubledgerAdjustmentStatuses.Posted &&
+                    (a.Status == SubledgerAdjustmentStatuses.Posted || a.Status == SubledgerAdjustmentStatuses.Reversed) &&
                     !a.IsDeleted)
                 .Include(a => a.BusinessPartner);
 
@@ -1281,7 +1281,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(a =>
                     a.TenantId == TenantId &&
                     a.Module == SubledgerModules.AccountsReceivable &&
-                    a.Status == SubledgerAdjustmentStatuses.Posted &&
+                    (a.Status == SubledgerAdjustmentStatuses.Posted || a.Status == SubledgerAdjustmentStatuses.Reversed) &&
                     a.BusinessPartnerId != Guid.Empty &&
                     a.AdjustmentDate < endExclusive)
                 .Select(a => a.BusinessPartnerId)

@@ -70,7 +70,7 @@ public sealed partial class QuantitySurveyRateLibraryService(
             .ToListAsync(cancellationToken);
         var partners = await db.BusinessPartners.AsNoTracking()
             .Where(value => value.TenantId == tenantId && !value.IsDeleted && value.IsActive &&
-                (value.PartnerType == "Supplier" || value.PartnerType == "Contractor" || value.PartnerType == "Both"))
+                BusinessPartnerRoles.ProcurementTypes.Contains(value.PartnerType))
             .OrderBy(value => value.PartnerCode)
             .Select(value => Option(value.Id, $"{value.PartnerCode} · {value.PartnerName}", value.PartnerType))
             .ToListAsync(cancellationToken);
@@ -1018,7 +1018,7 @@ public sealed partial class QuantitySurveyRateLibraryService(
                 value => value.TenantId == TenantId && value.Id == request.BusinessPartnerId && !value.IsDeleted && value.IsActive,
                 cancellationToken) ?? throw new QuantitySurveyRateLibraryValidationException("Select an active supplier or contractor from the shared business-partner master.");
             if (request.SourceType == QuantitySurveyRateSourceType.SupplierQuotation &&
-                partner.PartnerType is not ("Supplier" or "Both"))
+                !BusinessPartnerRoles.HasSupplier(partner.PartnerType))
                 throw new QuantitySurveyRateLibraryValidationException("A supplier quotation must reference a supplier or Both-type business partner.");
             if ((request.SourceType == QuantitySurveyRateSourceType.ContractorQuotation || item.Category == QuantitySurveyRateItemCategory.Subcontract) &&
                 partner.PartnerType is not ("Contractor" or "Both"))

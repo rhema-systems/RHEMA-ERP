@@ -67,6 +67,7 @@ public class BusinessPartnerDto
 /// </summary>
 public class BusinessPartnerDetailDto : BusinessPartnerDto
 {
+    public BusinessPartnerReceivablesDefaultsDto ReceivablesDefaults { get; set; } = new();
     public BusinessPartnerPostingDefaultsDto PostingDefaults { get; set; } = new();
     // User Account Link
     public Guid? UserId { get; set; }
@@ -204,6 +205,7 @@ public class BusinessPartnerBankAccountDto
 /// </summary>
 public class CreateBusinessPartnerDto
 {
+    public BusinessPartnerReceivablesDefaultsDto? ReceivablesDefaults { get; set; }
     public BusinessPartnerPostingDefaultsDto? PostingDefaults { get; set; }
     [Required]
     [MaxLength(200)]
@@ -313,6 +315,9 @@ public class CreateBusinessPartnerDto
 /// </summary>
 public class UpdateBusinessPartnerDto
 {
+    [MaxLength(20)]
+    public string? PartnerType { get; set; }
+    public BusinessPartnerReceivablesDefaultsDto? ReceivablesDefaults { get; set; }
     // Omitted by older clients: keep the saved defaults unchanged.
     public BusinessPartnerPostingDefaultsDto? PostingDefaults { get; set; }
     [Required]

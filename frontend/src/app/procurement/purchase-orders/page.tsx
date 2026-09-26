@@ -1,5 +1,6 @@
 'use client';
 
+import { hasSupplierRole } from '@/lib/business-partner-roles';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -104,7 +105,7 @@ export default function PurchaseOrdersPage() {
       const data = await businessPartnerService.getActivePartners();
       // Filter to only show Supplier or Both types
       setSuppliers((data || []).filter(bp => 
-        bp.partnerType === 'Supplier' || bp.partnerType === 'Both'
+        hasSupplierRole(bp.partnerType)
       ));
     } catch (err) {
       console.error('Error fetching suppliers:', err);

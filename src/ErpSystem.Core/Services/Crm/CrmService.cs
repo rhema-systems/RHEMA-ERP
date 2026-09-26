@@ -5539,8 +5539,7 @@ public class CrmService : ICrmService
         || account.TenderAwardCount > 0
         || account.OpenOpportunityCount > 0
         || account.ActiveQuoteCount > 0
-        || string.Equals(account.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(account.PartnerType, "Both", StringComparison.OrdinalIgnoreCase)
+        || BusinessPartnerRoles.HasCustomer(account.PartnerType)
         || !string.IsNullOrWhiteSpace(account.CustomerType);
 
     private static int GetRelatedLeadCount(

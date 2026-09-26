@@ -1215,7 +1215,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             }
 
             if (!customer.IsActive
-                || !string.Equals(customer.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase))
+                || !BusinessPartnerRoles.HasCustomer(customer.PartnerType))
             {
                 throw new InvalidOperationException(
                     "Select an active customer business partner for this lease.");

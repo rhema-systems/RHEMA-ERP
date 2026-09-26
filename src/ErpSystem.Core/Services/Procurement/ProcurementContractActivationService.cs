@@ -344,6 +344,7 @@ public sealed class ProcurementContractActivationService :
             throw Conflict("CONTRACT_ACTIVATION_DECISION_NOT_ALLOWED",
                 "Only a pending contract activation may be decided.");
         if (request.Approved &&
+            await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken) &&
             !ProcurementContractActivationRules.IsIndependent(
                 _currentUser.UserId, activation.SubmittedById,
                 activation.Contract.CreatedById))

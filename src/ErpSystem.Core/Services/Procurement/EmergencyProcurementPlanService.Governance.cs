@@ -207,7 +207,8 @@ public partial class EmergencyProcurementPlanService
         EnsureRowVersion(plan.RowVersion, request.RowVersion);
         await RevalidatePreparedAsync(plan, cancellationToken);
         var requisition = plan.PurchaseRequisition!;
-        if (_currentUserProvider.UserId == plan.PreparedById || _currentUserProvider.UserId == requisition.RequestedById)
+        if (await _unitOfWork.IsProcurementSodEnabledAsync(_currentUserProvider.TenantId, cancellationToken) &&
+            (_currentUserProvider.UserId == plan.PreparedById || _currentUserProvider.UserId == requisition.RequestedById))
             await DenyAuthorizationAsync(plan, "EmergencyAuditVouch",
                 "The preparer or requisitioner cannot provide the independent Internal Audit vouch.", correlationId, cancellationToken);
         if (string.IsNullOrWhiteSpace(request.VouchNote) || request.VouchNote.Trim().Length < 10)

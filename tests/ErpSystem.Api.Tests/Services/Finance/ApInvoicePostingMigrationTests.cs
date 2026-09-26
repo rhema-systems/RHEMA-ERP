@@ -31,7 +31,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ApInvoicePostingMigrationTests
+public sealed partial class ApInvoicePostingMigrationTests
 {
     [Fact]
     public async Task DraftDistribution_ShouldUseThePostingTaxEngineAndConfiguredInputTaxAccount()
@@ -77,6 +77,7 @@ public sealed class ApInvoicePostingMigrationTests
             invoice.ApprovalStatus = "Draft";
             invoice.ApprovedById = null;
             invoice.ApprovedDate = null;
+            invoice.LineItems.Single().DiscountPercentage = 10m;
             invoice.LineItems.Single().DiscountAmount = 10m;
             invoice.DiscountAmount = 10m;
             invoice.SubTotal = 90m;
@@ -92,10 +93,10 @@ public sealed class ApInvoicePostingMigrationTests
 
         distribution.Status.Should().Be("Proposed");
         distribution.Currency.Should().Be("GHS");
-        distribution.Lines.Single(line => line.AccountId == fixture.ExpenseAccount.Id).Debit.Should().Be(100m);
+        distribution.Lines.Single(line => line.AccountId == fixture.ExpenseAccount.Id).Debit.Should().Be(90m);
         distribution.Lines.Single(line => line.AccountId == fixture.ApAccount.Id).Credit.Should().Be(90m);
-        distribution.Lines.Single(line => line.Type == "Purchase discount").Credit.Should().Be(10m);
-        distribution.TotalDebit.Should().Be(distribution.TotalCredit).And.Be(100m);
+        distribution.Lines.Should().NotContain(line => line.Type == "Purchase discount");
+        distribution.TotalDebit.Should().Be(distribution.TotalCredit).And.Be(90m);
         distribution.Lines.Should().NotContain(line => line.Type.Contains("WHT"));
         distribution.JournalEntryId.Should().BeNull();
         fixture.Invoice.Status.Should().Be(VendorInvoiceStatus.Draft);
@@ -159,7 +160,7 @@ public sealed class ApInvoicePostingMigrationTests
             db.ChangeTracker.DetectChanges();
             db.ChangeTracker.Entries<VendorInvoiceLineItem>()
                 .Should().NotContain(entry => entry.State == EntityState.Modified);
-            db.ChangeTracker.Entries<Supplier>()
+            db.ChangeTracker.Entries<BusinessPartner>()
                 .Should().NotContain(entry => entry.State == EntityState.Modified);
         };
         var (service, _) = CreateService(db, tenantId);
@@ -761,7 +762,7 @@ public sealed class ApInvoicePostingMigrationTests
     [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task ForeignApInvoice_ShouldRejectCreateWithoutRateEvidence(bool isOpeningBalance)
+    public async Task ForeignApInvoice_ShouldRequireApprovedRateEvidenceOnlyForOpeningBalances(bool isOpeningBalance)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -790,9 +791,27 @@ public sealed class ApInvoicePostingMigrationTests
             }
         });
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*require an approved exchange-rate record*");
-        (await db.VendorInvoices.CountAsync()).Should().Be(1);
+        if (isOpeningBalance)
+        {
+            await action.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*require an approved exchange-rate record*");
+            (await db.VendorInvoices.CountAsync()).Should().Be(1);
+        }
+        else
+        {
+            // Ordinary invoices retain the existing editable-rate contract; the
+            // governed approved-rate requirement belongs to opening invoices.
+            var created = await action();
+            var draft = await db.VendorInvoices.SingleAsync(item => item.Id == created.Id);
+            draft.Status.Should().Be(VendorInvoiceStatus.Draft);
+            draft.CurrencyCode.Should().Be("USD");
+            draft.ExchangeRate.Should().Be(15m);
+            draft.ExchangeRateId.Should().BeNull();
+            draft.BaseCurrencyAmount.Should().Be(1500m);
+            (await db.VendorInvoices.CountAsync()).Should().Be(2);
+        }
+        (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
+        (await db.JournalEntries.AnyAsync()).Should().BeFalse();
     }
 
     [Fact]
@@ -858,7 +877,7 @@ public sealed class ApInvoicePostingMigrationTests
         var act = () => service.PostAsync(fixture.Invoice.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP invoice supplier was not found for this tenant.");
+            .WithMessage("The AP invoice Business Partner was not found for this tenant.");
     }
 
     [Fact]
@@ -1455,7 +1474,12 @@ public sealed class ApInvoicePostingMigrationTests
             InvoiceNumber = "VI-2026-00001",
             SupplierInvoiceNumber = "SUP-001",
             BusinessPartnerId = supplier.Id,
-            SupplierName = supplier.Name,
+            BusinessPartnerRoleId = db.Set<BusinessPartnerRole>().Local.Single(x => x.BusinessPartnerId == supplier.Id).Id,
+            BusinessPartnerApProfileVersionId = db.Set<BusinessPartnerApProfileVersion>().Local.Single(x => x.BusinessPartnerRole.BusinessPartnerId == supplier.Id).Id,
+            BusinessPartnerCode = supplier.PartnerCode,
+            BusinessPartnerLegalName = supplier.LegalName,
+            BusinessPartnerTaxIdentificationNumber = supplier.TaxIdentificationNumber,
+            SupplierName = supplier.PartnerName,
             InvoiceDate = new DateTime(2026, 7, 5),
             ReceivedDate = new DateTime(2026, 7, 5),
             DueDate = new DateTime(2026, 8, 4),
@@ -1700,7 +1724,7 @@ public sealed class ApInvoicePostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId,
         string targetCurrency,
-        decimal rate,
+        decimal functionalPerForeignUnit,
         ExchangeRateQuoteSide quoteSide = ExchangeRateQuoteSide.Mid)
     {
         var exchangeRate = new ExchangeRate
@@ -1709,8 +1733,9 @@ public sealed class ApInvoicePostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = targetCurrency,
-            Rate = rate,
-            InverseRate = decimal.Round(1m / rate, 6),
+            // Rate stores foreign units per functional unit; invoice conversion uses InverseRate.
+            Rate = decimal.Round(1m / functionalPerForeignUnit, 6),
+            InverseRate = functionalPerForeignUnit,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             QuoteSide = quoteSide,
@@ -1748,34 +1773,28 @@ public sealed class ApInvoicePostingMigrationTests
         }
     }
 
-    private static Supplier SeedSupplier(
-        ApplicationDbContext db,
-        Guid tenantId,
-        Guid apAccountId,
-        Guid expenseAccountId)
+    private static BusinessPartner SeedSupplier(ApplicationDbContext db, Guid tenantId, Guid apAccountId, Guid expenseAccountId)
     {
-        var supplier = new Supplier
+        var supplier = new BusinessPartner
         {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            SupplierCode = $"SUP-{tenantId.ToString("N")[..6]}",
-            Name = "Test Supplier",
-            SupplierType = "Vendor",
-            IsActive = true,
-            Status = "Active",
-            DefaultApAccountId = apAccountId,
-            DefaultExpenseAccountId = expenseAccountId,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = "seed"
+            TenantId = tenantId, PartnerCode = $"SUP-{tenantId:N}", PartnerName = "Test Supplier",
+            LegalName = "Test Supplier Limited", TaxIdentificationNumber = "TIN-TEST", PartnerType = "Supplier",
+            IsActive = true, RegistrationStatus = "Approved", ApprovalStatus = "Approved",
+            DefaultApAccountId = apAccountId, DefaultExpenseAccountId = expenseAccountId
         };
-
-        db.Suppliers.Add(supplier);
+        var role = new BusinessPartnerRole { TenantId = tenantId, BusinessPartnerId = supplier.Id,
+            BusinessPartner = supplier, RoleType = BusinessPartnerRoleType.Supplier,
+            Status = BusinessPartnerRoleStatus.Active, ActiveFromUtc = new DateTime(2020,1,1) };
+        var profile = new BusinessPartnerApProfileVersion { TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            BusinessPartnerRole = role, VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020,1,1), DefaultExpenseAccountId = expenseAccountId };
+        db.BusinessPartners.Add(supplier); db.Set<BusinessPartnerRole>().Add(role); db.Set<BusinessPartnerApProfileVersion>().Add(profile);
         return supplier;
     }
 
     private sealed record ApInvoiceFixture(
         VendorInvoice Invoice,
-        Supplier Supplier,
+        BusinessPartner Supplier,
         Account ExpenseAccount,
         Account ApAccount,
         Account TaxAccount);

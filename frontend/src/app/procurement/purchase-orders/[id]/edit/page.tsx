@@ -1,4 +1,5 @@
 'use client';
+import { hasSupplierRole } from '@/lib/business-partner-roles';
 import { PurchaseOrderLineActions, PurchaseOrderPlannedCosts } from '@/components/procurement/PurchaseOrderPlannedCosts';
 import { buildPlannedCostPayload, PlannedCostLine } from '@/lib/purchase-order-landed-costs';
 
@@ -279,7 +280,7 @@ export default function EditPurchaseOrderPage() {
         
         setInventoryItems(itemsData || []);
         setSuppliers((suppliersData || []).filter(bp =>
-          bp.partnerType === 'Supplier' || bp.partnerType === 'Both'
+          hasSupplierRole(bp.partnerType)
         ));
         setWarehouses(warehousesData || []);
       } catch (error) {

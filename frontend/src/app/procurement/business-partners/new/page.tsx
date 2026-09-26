@@ -1,5 +1,10 @@
 'use client';
 
+import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
+import type { BusinessPartnerReceivablesDefaults } from '@/services/businessPartnerService';
+import { BusinessPartnerReceivablesFields } from '@/components/procurement/BusinessPartnerReceivablesFields';
+
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -70,7 +75,7 @@ import {
   useBusinessPartnerPostingCatalogues,
 } from '@/components/procurement/BusinessPartnerPostingFields';
 
-type PartnerType = 'Supplier' | 'Contractor' | 'Customer' | 'Both' | '';
+type PartnerType = 'Supplier' | 'Contractor' | 'Customer' | 'Both' | 'CustomerAndSupplier' | '';
 type CanonicalPartnerRole = 'Supplier' | 'Contractor' | 'Customer';
 
 interface FormData {
@@ -149,6 +154,7 @@ const initialFormData: FormData = {
 };
 
 const partnerTypeOptions = [
+  { value: 'CustomerAndSupplier', label: 'Supplier & Customer', icon: Building2, description: 'One partner with separate payable and receivable accounts' },
   {
     value: 'Supplier',
     label: 'Supplier',
@@ -226,6 +232,7 @@ export default function NewBusinessPartnerPage() {
   const [priceLists, setPriceLists] = useState<PriceListDto[]>([]);
   const [allPartners, setAllPartners] = useState<BusinessPartnerDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [receivablesDefaults, setReceivablesDefaults] = useState<BusinessPartnerReceivablesDefaults>({ defaultArAccountId: null });
   const [postingDefaults, setPostingDefaults] = useState(
     emptyBusinessPartnerPostingDefaults
   );
@@ -320,7 +327,6 @@ export default function NewBusinessPartnerPage() {
           formData.creditLimit === ''
             ? undefined
             : Number(formData.creditLimit),
-        postingDefaults,
       };
 
       // Add customer-specific fields if partner type is Customer
@@ -358,6 +364,7 @@ export default function NewBusinessPartnerPage() {
   };
 
   const isCustomer = formData.roleTypes.includes('Customer');
+  const hasPayables = formData.roleTypes.some(role => role === 'Supplier' || role === 'Contractor');
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
@@ -466,18 +473,11 @@ export default function NewBusinessPartnerPage() {
         <Card>
           <CardContent className="pt-6">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList
-                className={
-                  isCustomer
-                    ? 'grid w-full grid-cols-6'
-                    : 'grid w-full grid-cols-5'
-                }
-              >
+              <TabsList className={`grid w-full ${isCustomer ? 'grid-cols-5' : 'grid-cols-4'}`}>
                 <TabsTrigger value="basic">Details</TabsTrigger>
                 <TabsTrigger value="contact">Contact</TabsTrigger>
                 <TabsTrigger value="banking">Banking</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
-                <TabsTrigger value="accounts">Accounts</TabsTrigger>
                 {isCustomer && (
                   <TabsTrigger value="customer">Customer Details</TabsTrigger>
                 )}
@@ -562,14 +562,6 @@ export default function NewBusinessPartnerPage() {
                       </p>
                     </div>
                   </div>
-
-                  <PartnerTaxDefaultsFields
-                    value={postingDefaults}
-                    onChange={setPostingDefaults}
-                    taxGroups={catalogues.taxGroups}
-                    withholdingTaxes={catalogues.withholdingTaxes}
-                    disabled={saving}
-                  />
 
                   <Separator />
 
@@ -764,31 +756,8 @@ export default function NewBusinessPartnerPage() {
                 </TabsContent>
 
                 <TabsContent value="options" className="py-4">
-                  <PartnerOptionsFields
-                    value={postingDefaults}
-                    onChange={setPostingDefaults}
-                    options={{
-                      paymentTermId: formData.paymentTermId,
-                      taxNumber: formData.taxNumber,
-                      creditLimit: formData.creditLimit,
-                    }}
-                    onOptionsChange={(patch) =>
-                      setFormData((previous) => ({ ...previous, ...patch }))
-                    }
-                    paymentTerms={paymentTerms}
-                    partnerType={formData.partnerType}
-                    bankAccounts={catalogues.bankAccounts}
-                    disabled={saving}
-                  />
-                </TabsContent>
-                <TabsContent value="accounts" className="py-4">
-                  <PartnerAccountsFields
-                    value={postingDefaults}
-                    onChange={setPostingDefaults}
-                    accounts={catalogues.accounts}
-                    bankAccounts={catalogues.bankAccounts}
-                    disabled={saving}
-                  />
+                  <div className="space-y-2"><Label htmlFor="partner-tin">TIN</Label><Input id="partner-tin" value={formData.taxNumber} disabled={saving} onChange={event => setFormData(previous => ({ ...previous, taxNumber: event.target.value }))} /></div>
+                  <p className="text-sm text-muted-foreground">Maintain payment, tax and withholding defaults in Finance Profiles after saving the partner.</p>
                 </TabsContent>
 
                 {/* Customer Details Tab */}

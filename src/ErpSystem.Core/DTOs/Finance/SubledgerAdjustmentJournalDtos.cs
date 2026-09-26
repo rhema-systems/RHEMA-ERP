@@ -43,6 +43,7 @@ public class SubledgerAdjustmentJournalDto
 
 public class CreateSubledgerAdjustmentJournalDto
 {
+    public Guid? RequestId { get; set; }
     [Required]
     [MaxLength(2)]
     public string Module { get; set; } = string.Empty;

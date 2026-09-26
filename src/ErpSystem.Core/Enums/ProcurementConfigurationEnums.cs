@@ -61,7 +61,8 @@ public enum ProcurementAcceptedSupplyKind
 {
     GoodsReceiptInspection = 1,
     ServiceCompletion = 2,
-    WorksPaymentCertificate = 3
+    WorksPaymentCertificate = 3,
+    GoodsReceiptConsolidation = 4
 }
 
 public enum ProcurementMethodType

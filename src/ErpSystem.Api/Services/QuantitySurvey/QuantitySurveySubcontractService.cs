@@ -891,7 +891,7 @@ public sealed class QuantitySurveySubcontractService(
         !value.IsDeleted && value.IsActive && !value.IsBlacklisted &&
         (value.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
          value.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
-        (value.PartnerType == "Supplier" || value.PartnerType == "Contractor" || value.PartnerType == "Both"));
+        BusinessPartnerRoles.ProcurementTypes.Contains(value.PartnerType));
 
     private IQueryable<QuantitySurveySubcontract> Query(bool tracked = false)
     {

@@ -1,4 +1,4 @@
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
@@ -50,6 +50,8 @@ public class LandedCostInvoiceLinkTests
         _costs.Setup(r => r.GetWithDetailsAsync(_cost.Id)).ReturnsAsync(_cost);
         _grns.Setup(r => r.GetWithItemsAsync(_grn.Id)).ReturnsAsync(_grn);
         _unit.SetupGet(u => u.HasActiveTransaction).Returns(true);
+        Repo(Array.Empty<LandedCostReceiptWeight>());
+        Repo(Array.Empty<LandedCostSupplierDocument>());
         Repo(new[] { _invoice }); Repo(new[] { _partner }); Repo(new[] { _grn }); Repo(new[] { _cost }); Repo(new[] { _item });
         _service = new LandedCostService(_costs.Object, _items.Object, Mock.Of<ILandedCostAllocationRepository>(), _grns.Object,
             Mock.Of<IPurchaseOrderLandedCostPlanRepository>(), Mock.Of<IPurchaseOrderReceiptRepository>(),

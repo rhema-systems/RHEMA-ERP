@@ -420,6 +420,7 @@ export interface BudgetValidationResultDto {
 // ============================================================================
 
 export interface ProcurementPlanItemDto {
+  referenceNumber: string;
   id: string;
   procurementPlanId: string;
   inventoryItemId?: string;

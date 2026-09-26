@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
 
-public class TenderBidService : ITenderBidService
+public partial class TenderBidService : ITenderBidService
 {
     private readonly ITenderBidRepository _bidRepository;
     private readonly ITenderRepository _tenderRepository;
@@ -593,6 +593,8 @@ public class TenderBidService : ITenderBidService
                 var removedLots = persistedLots
                     .Where(lot => !selectedLotIds.Contains(lot.LotId))
                     .ToList();
+                await EnsureNoAttachedItemDocumentsAsync(id, existingItems
+                    .Where(item => removedLots.Any(lot => lot.Id == item.BidLotId)).Select(item => item.Id));
                 foreach (var removedLot in removedLots)
                 {
                     var removedItems = existingItems
@@ -656,6 +658,8 @@ public class TenderBidService : ITenderBidService
                 var suppliedTenderItemIds = dto.Items
                     .Select(item => item.TenderItemId)
                     .ToHashSet();
+                await EnsureNoAttachedItemDocumentsAsync(id, existingItems
+                    .Where(item => !suppliedTenderItemIds.Contains(item.TenderItemId)).Select(item => item.Id));
                 foreach (var removedItem in existingItems
                              .Where(item => !suppliedTenderItemIds.Contains(item.TenderItemId))
                              .ToList())
@@ -1271,6 +1275,7 @@ public class TenderBidService : ITenderBidService
                     throw new InvalidOperationException("Can only delete items from draft bids");
                 }
 
+                await EnsureNoAttachedItemDocumentsAsync(item.TenderBidId, [itemId]);
                 await _bidItemRepository.DeleteAsync(itemId);
 
                 // Update total bid amount
@@ -1300,16 +1305,19 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            var bid = await _bidRepository.GetByIdAsync(bidId)
-                ?? throw new InvalidOperationException($"Bid with ID {bidId} not found");
+            return await WithBidDocumentTransactionAsync(async () =>
+            {
+            var bid = await RequireEditableDocumentBidAsync(bidId);
+            var item = await ResolveDocumentBidItemAsync(bid, dto.TenderItemId);
 
             var document = new TenderBidDocument
             {
                 Id = Guid.NewGuid(),
                 TenantId = _currentUserProvider.TenantId,
                 TenderBidId = bidId,
+                TenderBidItemId = item?.Id,
                 DocumentName = dto.DocumentName,
-                DocumentType = dto.DocumentType,
+                DocumentType = item == null ? dto.DocumentType : "TechnicalItemSupportingDocument",
                 FilePath = logicalFileReference,
                 FileType = fileType,
                 FileSize = fileSize,
@@ -1324,9 +1332,11 @@ public class TenderBidService : ITenderBidService
             await _bidDocumentRepository.CreateAsync(document);
             await _unitOfWork.SaveChangesAsync();
 
+
             _logger.LogInformation("Uploaded document {DocumentId} to bid {BidId}", document.Id, bidId);
 
-            return MapBidDocumentToDto(document);
+            return MapBidDocumentToDto(document, item);
+            });
         }
         catch (Exception ex)
         {
@@ -1335,14 +1345,27 @@ public class TenderBidService : ITenderBidService
         }
     }
 
-    public async Task DeleteBidDocumentAsync(Guid documentId)
+    public Task DeleteBidDocumentAsync(Guid documentId) => DeleteBidDocumentAsync(documentId, null);
+
+    public async Task DeleteBidDocumentAsync(Guid documentId, Guid? expectedBidId)
     {
         try
         {
+            await WithBidDocumentTransactionAsync(async () =>
+            {
+            var document = await _unitOfWork.Repository<TenderBidDocument>()
+                .GetQueryable(value => value.Id == documentId && value.TenantId == _currentUserProvider.TenantId && !value.IsDeleted)
+                .AsNoTracking().SingleOrDefaultAsync()
+                ?? throw new TenderBidInitiationValidationException("BID_DOCUMENT_NOT_FOUND", "The bid document was not found.");
+            if (expectedBidId.HasValue && document.TenderBidId != expectedBidId.Value)
+                throw new TenderBidInitiationValidationException("BID_DOCUMENT_NOT_FOUND", "The document was not found in this bid.");
+            await RequireEditableDocumentBidAsync(document.TenderBidId);
             await _bidDocumentRepository.DeleteAsync(documentId);
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Deleted bid document {DocumentId}", documentId);
+            return true;
+            });
         }
         catch (Exception ex)
         {
@@ -2005,11 +2028,19 @@ public class TenderBidService : ITenderBidService
     }
 
     private static TenderBidDocumentDto MapBidDocumentToDto(TenderBidDocument document)
+        => MapBidDocumentToDto(document, document.TenderBidItem);
+
+    private static TenderBidDocumentDto MapBidDocumentToDto(TenderBidDocument document, TenderBidItem? item)
     {
         return new TenderBidDocumentDto
         {
             Id = document.Id,
             TenderBidId = document.TenderBidId,
+            TenderBidItemId = document.TenderBidItemId,
+            TenderItemId = item?.TenderItemId,
+            LotId = item?.TenderItem?.LotId,
+            LotNumber = item?.TenderItem?.Lot?.LotNumber,
+            ItemDescription = item?.TenderItem?.Description,
             DocumentName = document.DocumentName,
             DocumentType = document.DocumentType,
             FilePath = document.FilePath,
@@ -2463,6 +2494,7 @@ public class TenderBidService : ITenderBidService
                 throw new InvalidOperationException($"Bid lot with ID {bidLotId} not found");
 
             // Remove lot assignment from bid items
+            await EnsureNoAttachedItemDocumentsAsync(bidLot.TenderBidId, (bidLot.Items ?? []).Select(item => item.Id));
             if (bidLot.Items != null)
             {
                 foreach (var item in bidLot.Items)

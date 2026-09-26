@@ -196,6 +196,10 @@
     <Compile Include="Services\Finance\FinanceProducerApprovedExecutionContractTests.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260913090000_BusinessPartnerWithholdingTaxDefault.cs" Link="ArchivedMigrationTestSources\20260913090000_BusinessPartnerWithholdingTaxDefault.cs" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">
     <Compile Include="$(TdcFocusedTestFile)" />
     <Compile Include="$(TdcFocusedTestSupportFile)" Condition="'$(TdcFocusedTestSupportFile)' != ''" />

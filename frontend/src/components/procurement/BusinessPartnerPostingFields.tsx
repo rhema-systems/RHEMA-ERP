@@ -31,6 +31,7 @@ import type { Account } from '@/types/finance';
 import type { BankAccount } from '@/types/cash-management';
 import type { TaxGroup } from '@/types/tax';
 import { cn } from '@/lib/utils';
+import { hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
 
 export const emptyBusinessPartnerPostingDefaults =
   (): BusinessPartnerPostingDefaults => ({
@@ -198,14 +199,17 @@ export function PartnerTaxDefaultsFields({
   onChange,
   taxGroups,
   withholdingTaxes = [],
+  partnerType = 'Supplier',
   disabled,
 }: PostingFieldsProps & {
   taxGroups: TaxGroup[];
   withholdingTaxes?: BusinessPartnerWithholdingTaxOption[];
+  partnerType?: string;
 }) {
+  const hasPayables = hasSupplierRole(partnerType) || hasContractorRole(partnerType);
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <div className="flex min-h-9 items-center gap-3">
+      {hasPayables && <><div className="flex min-h-9 items-center gap-3">
         <Switch
           id="subjectToWithholdingDeduction"
           checked={value.subjectToWithholdingDeduction}
@@ -236,8 +240,8 @@ export function PartnerTaxDefaultsFields({
             })
           }
         />
-      </div>
-      {value.subjectToWithholdingDeduction && (
+      </div></>}
+      {hasPayables && value.subjectToWithholdingDeduction && (
         <div className="space-y-1.5">
           <Label htmlFor="defaultWithholdingTaxId">WHT Configuration</Label>
           <PartnerDefaultPicker
@@ -263,7 +267,7 @@ export function PartnerTaxDefaultsFields({
         </div>
       )}
       <div
-        className={`space-y-1.5 ${value.subjectToWithholdingDeduction ? '' : 'md:col-span-2'}`}
+        className={`space-y-1.5 ${hasPayables && value.subjectToWithholdingDeduction ? '' : 'md:col-span-2'}`}
       >
         <Label htmlFor="defaultTaxGroupId">Tax</Label>
         <PartnerDefaultPicker
@@ -352,7 +356,7 @@ export function PartnerOptionsFields({
           }
         />
       </div>
-      <div className="space-y-1.5">
+      {(hasSupplierRole(partnerType) || hasContractorRole(partnerType)) && <div className="space-y-1.5">
         <Label htmlFor="defaultBankAccountId">ChequeBook ID</Label>
         <PartnerDefaultPicker
           id="defaultBankAccountId"
@@ -367,7 +371,7 @@ export function PartnerOptionsFields({
             onChange({ ...value, defaultBankAccountId })
           }
         />
-      </div>
+      </div>}
       <div className="space-y-1.5">
         <Label htmlFor="creditLimit">Credit Limit</Label>
         <Input
@@ -389,14 +393,12 @@ export function PartnerOptionsFields({
 export const businessPartnerAccountFields = [
   ['defaultCashAccountId', 'Cash'],
   ['defaultApAccountId', 'Accounts Payable'],
-  ['defaultTermsDiscountsAvailableAccountId', 'Terms Discounts Available'],
   ['defaultTermsDiscountsTakenAccountId', 'Terms Discounts Taken'],
   ['defaultFinanceChargesAccountId', 'Finance Charges'],
   ['defaultExpenseAccountId', 'Purchases'],
-  ['defaultTradeDiscountAccountId', 'Trade Discount'],
   ['defaultMiscellaneousAccountId', 'Miscellaneous'],
   ['defaultFreightAccountId', 'Freight'],
-  ['defaultTaxAccountId', 'Tax'],
+  ['defaultTaxAccountId', 'Input tax fallback'],
   ['defaultWriteoffAccountId', 'Writeoffs'],
   ['defaultAccruedPurchasesAccountId', 'Accrued Purchases'],
   ['defaultPurchasePriceVarianceAccountId', 'Purchase Price Variance'],
@@ -419,20 +421,21 @@ export function eligiblePartnerAccounts(
         account.accountType === 'Liability' &&
         (account.allowDirectPosting || account.isControlAccount)
       );
+    if (key === 'defaultTaxAccountId')
+      return (
+        (account.accountType === 'Asset' || account.accountType === 'Liability') &&
+        (account.allowDirectPosting || account.isControlAccount)
+      );
     if (!account.allowDirectPosting || account.isControlAccount) return false;
     if (key === 'defaultCashAccountId') return account.accountType === 'Asset';
+    if (key === 'defaultWriteoffAccountId')
+      return account.accountType === 'Revenue' || account.accountType === 'Expense';
     if (key === 'defaultExpenseAccountId')
       return (
         account.accountType === 'Asset' || account.accountType === 'Expense'
       );
     if (key === 'defaultPurchasePriceVarianceAccountId')
       return account.accountType === 'Expense';
-    if (key === 'defaultTaxAccountId')
-      return (
-        account.accountType === 'Asset' ||
-        account.accountType === 'Liability' ||
-        account.accountType === 'Expense'
-      );
     return true;
   });
 }
@@ -449,6 +452,9 @@ export function PartnerAccountsFields({
   );
   return (
     <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">Trade discounts reduce the invoice purchase amount. Payment discounts post when taken. Cash defaults select the payment bank when no bank is explicitly chosen; a creditor cash account must identify one active bank with that GL account.</p>
+      <p className="text-sm text-muted-foreground">For Freight, Miscellaneous and Finance Charges, select the matching invoice line type with supplier defaults enabled. Review the account on the draft before approval. Capitalized freight continues through Landed Cost.</p>
+      <p className="text-sm text-muted-foreground">Input tax fallback applies to recoverable purchase tax only when the tax rule has no receivable account. Enable supplier defaults on a new invoice to capture this account; tax rates, exemptions and nonrecoverable tax remain controlled by the tax rules.</p>
       <div className="flex flex-wrap items-center gap-4">
         <Label id="cashAccountSourceLabel">Use Cash Account From</Label>
         <RadioGroup

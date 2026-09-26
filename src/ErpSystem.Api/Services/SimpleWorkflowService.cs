@@ -51,6 +51,7 @@ public class SimpleWorkflowService : IWorkflowService
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SimpleWorkflowService> _logger;
+    private readonly IProcurementSodPolicy? _sodPolicy;
 
     public SimpleWorkflowService(
         IWorkflowEngine workflowEngine,
@@ -73,7 +74,8 @@ public class SimpleWorkflowService : IWorkflowService
         ICurrentUserService currentUserService,
         UserManager<ApplicationUser> userManager,
         IUnitOfWork unitOfWork,
-        ILogger<SimpleWorkflowService> logger)
+        ILogger<SimpleWorkflowService> logger,
+        IProcurementSodPolicy? sodPolicy = null)
     {
         _workflowEngine = workflowEngine;
         _entityTypeRepository = entityTypeRepository;
@@ -96,6 +98,7 @@ public class SimpleWorkflowService : IWorkflowService
         _userManager = userManager;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _sodPolicy = sodPolicy;
     }
 
     public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId) =>
@@ -412,11 +415,13 @@ public class SimpleWorkflowService : IWorkflowService
         if (canApprove && isApprovalStep)
         {
             var approvalConfig = GetApprovalConfig(stepInstance);
+            var enforceSeparation = _sodPolicy is null || await _sodPolicy.IsRequiredForSourceAsync(
+                instance.TenantId, entityType, entityId);
             var guardErrors = WorkflowApprovalGuardValidator.Validate(
                 approvalConfig,
                 instance.InitiatedById,
                 approvals.ToList(),
-                workflowUserId);
+                workflowUserId, enforceSeparation);
             if (guardErrors.Count > 0)
             {
                 canApprove = false;
@@ -427,7 +432,7 @@ public class SimpleWorkflowService : IWorkflowService
                     string.Join(" ", guardErrors));
             }
 
-            if (canApprove)
+            if (canApprove && enforceSeparation)
             {
                 var crossStepErrors = await ValidateCrossStepSodAsync(
                     approvalConfig,

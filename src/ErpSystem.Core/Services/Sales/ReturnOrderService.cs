@@ -1154,7 +1154,7 @@ public class ReturnOrderService : IReturnOrderService
             ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
         await ResolveCreditNotePostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
-        var salesReturnsAccountId = settings.DiscountAllowedAccountId
+        var salesReturnsAccountId = creditNote.BusinessPartner.CustomerSalesReturnsAccountId ?? settings.DiscountAllowedAccountId
             ?? throw new InvalidOperationException("Sales returns/allowance account is not configured for this tenant.");
         await ResolveCreditNotePostingAccountAsync(salesReturnsAccountId, "sales returns/allowance account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 

@@ -105,7 +105,7 @@ const roundMoney = (amount: number) => Math.round((amount + Number.EPSILON) * 10
 export default function NewVendorPaymentPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const preselectedSupplierId = searchParams.get('supplierId');
+    const preselectedSupplierId = searchParams.get('businessPartnerId') || searchParams.get('supplierId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
     const existingAdvancePaymentId = searchParams.get('paymentId');
     const isLinkedInvoicePayment =

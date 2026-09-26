@@ -21,6 +21,14 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('stock movement currency', () => {
+  it('sends the selected item to the history API and links to the ledger', async () => {
+    vi.mocked(inventoryManagementService.getInventoryItems).mockResolvedValue([{ id: 'item', itemCode: 'ITEM-1', name: 'Device kit' } as any]);
+    render(<StockMovementsPage />);
+    await screen.findByRole('option', { name: 'ITEM-1 — Device kit' });
+    fireEvent.change(screen.getByLabelText('Movement item'), { target: { value: 'item' } });
+    await waitFor(() => expect(inventoryManagementService.getStockMovements).toHaveBeenLastCalledWith(expect.objectContaining({ inventoryItemId: 'item' })));
+    expect(screen.getByRole('link', { name: 'Inventory Ledger' })).toHaveAttribute('href', '/reports/inventory/inventory-ledger');
+  });
   it.each([['GHS', 'GHS'], ['EUR', '€']])('uses tenant %s for history, total and detail costs', async (code, label) => {
     const movements = await inventoryManagementService.getStockMovements();
     vi.mocked(inventoryManagementService.getStockMovements).mockResolvedValue(movements.map(m => ({ ...m, currencyCode: code })));

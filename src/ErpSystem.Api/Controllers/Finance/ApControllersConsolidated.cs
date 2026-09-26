@@ -30,6 +30,8 @@ namespace ErpSystem.Api.Controllers.Finance
     [Authorize]
     [ApiController]
     [Route("api/ap/invoices")]
+    [Route("api/procurement/supplier-invoices")]
+    [TypeFilter(typeof(ProcurementSupplierInvoiceBoundaryFilter))]
     public class VendorInvoiceController : ControllerBase
     {
         private readonly IVendorInvoiceService _invoiceService;
@@ -38,6 +40,7 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IVendorInvoiceMatchExceptionService? _matchExceptionService;
         private readonly IProcurementAcceptedSupplyService? _acceptedSupplyService;
         private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
+        private readonly ICurrentUserProvider? _procurementActor;
 
         public VendorInvoiceController(
             IVendorInvoiceService invoiceService,
@@ -45,7 +48,8 @@ namespace ErpSystem.Api.Controllers.Finance
             ApplicationDbContext dbContext,
             IVendorInvoiceMatchExceptionService? matchExceptionService = null,
             IProcurementAcceptedSupplyService? acceptedSupplyService = null,
-            IFinanceBudgetCommitmentService? budgetCommitments = null)
+            IFinanceBudgetCommitmentService? budgetCommitments = null,
+            ICurrentUserProvider? procurementActor = null)
         {
             _invoiceService = invoiceService;
             _currentUserService = currentUserService;
@@ -53,17 +57,54 @@ namespace ErpSystem.Api.Controllers.Finance
             _matchExceptionService = matchExceptionService;
             _acceptedSupplyService = acceptedSupplyService;
             _budgetCommitments = budgetCommitments;
+            _procurementActor = procurementActor;
         }
+
+        private bool IsInternalAutoInvoiceActor => _procurementActor is { IsAuthenticated: true, IsExternalUser: false } &&
+            _procurementActor.TenantId != Guid.Empty && _procurementActor.UserId != Guid.Empty;
+
+        [HttpGet("auto-invoice/receipts")]
+        public async Task<ActionResult<IReadOnlyList<ProcurementInvoiceReceiptDto>>> AutoInvoiceReceipts([FromQuery] Guid businessPartnerId, CancellationToken cancellationToken)
+        {
+            if (!IsInternalAutoInvoiceActor || !await HasAnyPermissionAsync(FinancePermissions.CreateApInvoices, FinancePermissions.ManageApInvoices)) return Forbid();
+            try { return Ok(await _invoiceService.GetAutoInvoiceReceiptsAsync(businessPartnerId, cancellationToken)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException e) { return UnprocessableEntity(AutoInvoiceProblem(e.Message)); }
+        }
+
+        [HttpPost("auto-invoice")]
+        public async Task<ActionResult<VendorInvoiceDto>> AutoInvoice([FromBody] ProcurementAutoInvoiceRequestDto request, CancellationToken cancellationToken)
+        {
+            if (!IsInternalAutoInvoiceActor || !await HasAnyPermissionAsync(FinancePermissions.CreateApInvoices, FinancePermissions.ManageApInvoices)) return Forbid();
+            try { return Ok(await _invoiceService.CreateAutoInvoiceAsync(request, DimensionProducer, cancellationToken)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (ArgumentException e) { return UnprocessableEntity(AutoInvoiceProblem(e.Message)); }
+            catch (InvalidOperationException e) { return Conflict(AutoInvoiceProblem(e.Message, 409)); }
+        }
+
+        [HttpGet("{id:guid}/receipt-links")]
+        public async Task<ActionResult<IReadOnlyList<VendorInvoiceReceiptLinkDto>>> ReceiptLinks(Guid id, CancellationToken cancellationToken)
+        {
+            if (!IsInternalAutoInvoiceActor || !await HasAnyPermissionAsync(FinancePermissions.ViewFinance, FinancePermissions.ManageApInvoices, FinancePermissions.CreateApInvoices)) return Forbid();
+            try { return Ok(await _invoiceService.GetReceiptLinksAsync(id, cancellationToken)); }
+            catch (KeyNotFoundException) { return NotFound(); }
+        }
+
+        private static ProblemDetails AutoInvoiceProblem(string detail, int status = 422) => new()
+        {
+            Status = status, Title = "Auto Invoice unavailable", Detail = detail,
+            Extensions = { ["code"] = "PROCUREMENT_AUTO_INVOICE_VALIDATION" }
+        };
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
         [HttpGet("supplier-defaults")]
         public async Task<ActionResult<PurchaseOrderSupplierDefaultsDto?>> GetSupplierDefaults(
-            [FromQuery] Guid supplierId, [FromQuery] Guid? purchaseOrderId, CancellationToken cancellationToken,
-            [FromQuery] DateTime? invoiceDate = null)
+            [FromQuery] Guid businessPartnerId, [FromQuery] Guid? purchaseOrderId, CancellationToken cancellationToken,
+            [FromQuery] DateTime? invoiceDate = null, [FromQuery] Guid? businessPartnerRoleId = null)
         {
             if (!await HasAnyPermissionAsync(FinancePermissions.CreateApInvoices, FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices))
                 return Forbid();
-            try { return Ok(await _invoiceService.GetSupplierDefaultsAsync(supplierId, purchaseOrderId, cancellationToken, invoiceDate)); }
+            try { return Ok(await _invoiceService.GetSupplierDefaultsAsync(businessPartnerId, purchaseOrderId, cancellationToken, invoiceDate, businessPartnerRoleId)); }
             catch (KeyNotFoundException exception)
             { return NotFound(new ProblemDetails { Status = 404, Title = "Supplier defaults unavailable", Detail = exception.Message }); }
             catch (InvalidOperationException exception)
@@ -105,12 +146,67 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<VendorInvoiceDistributionDto>> GetDistribution(Guid id, CancellationToken cancellationToken)
         {
             // Same invoice-read authorization as GetById; this is not a GL maintenance operation.
-            try { return Ok(await _invoiceService.GetDistributionAsync(id, cancellationToken)); }
+            try
+            {
+                var distribution = await _invoiceService.GetDistributionAsync(id, cancellationToken);
+                distribution.CanEdit &= await HasAnyPermissionAsync(FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices);
+                if (!distribution.CanEdit && distribution.EditBlockReason is null && distribution.Status != "Posted")
+                    distribution.EditBlockReason = "Invoice maintenance permission is required to edit distributions.";
+                return Ok(distribution);
+            }
             catch (KeyNotFoundException exception)
             { return NotFound(new ProblemDetails { Status = 404, Title = "Invoice distribution unavailable", Detail = exception.Message }); }
             catch (InvalidOperationException exception)
             { return UnprocessableEntity(new ProblemDetails { Status = 422, Title = "Invoice distribution unavailable", Detail = exception.Message }); }
         }
+
+        [HttpGet("~/api/procurement/supplier-invoices/{id:guid}/distribution/accounts")]
+        public async Task<IActionResult> DistributionAccounts(Guid id, CancellationToken cancellationToken)
+        {
+            if (!await HasAnyPermissionAsync(FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices)) return Forbid();
+            var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            return Ok(await _dbContext.Accounts.AsNoTracking().Where(account => account.TenantId == tenantId && !account.IsDeleted &&
+                account.Status == ErpSystem.Core.Enums.AccountStatus.Active && account.AllowDirectPosting && !account.IsControlAccount &&
+                account.AccountType == ErpSystem.Core.Enums.AccountType.Expense && !account.BudgetTrackingEnabled)
+                .OrderBy(account => account.AccountNumber)
+                .Select(account => new { account.Id, AccountCode = account.AccountNumber, account.AccountNumber, account.AccountName,
+                    AccountType = "Expense", account.AllowDirectPosting, account.IsControlAccount }).ToListAsync(cancellationToken));
+        }
+
+        [HttpPut("~/api/procurement/supplier-invoices/{id:guid}/distribution")]
+        public Task<ActionResult<VendorInvoiceDistributionDto>> SaveDistribution(Guid id,
+            [FromBody] SaveVendorInvoiceDistributionDto request, CancellationToken cancellationToken) =>
+            WriteDistribution(id, request, false, cancellationToken);
+
+        [HttpPost("~/api/procurement/supplier-invoices/{id:guid}/distribution/reset")]
+        public Task<ActionResult<VendorInvoiceDistributionDto>> ResetDistribution(Guid id,
+            [FromBody] SaveVendorInvoiceDistributionDto request, CancellationToken cancellationToken) =>
+            WriteDistribution(id, request, true, cancellationToken);
+
+        private async Task<ActionResult<VendorInvoiceDistributionDto>> WriteDistribution(Guid id,
+            SaveVendorInvoiceDistributionDto request, bool reset, CancellationToken cancellationToken)
+        {
+            if (!await HasAnyPermissionAsync(FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices)) return Forbid();
+            try
+            {
+                return Ok(reset ? await _invoiceService.ResetDistributionAsync(id, request, cancellationToken)
+                    : await _invoiceService.SaveDistributionAsync(id, request, cancellationToken));
+            }
+            catch (KeyNotFoundException) { return NotFound(); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvoiceDistributionConflictException exception)
+            { return Conflict(DistributionProblem(exception.Message, 409)); }
+            catch (DbUpdateConcurrencyException)
+            { return Conflict(DistributionProblem("The invoice changed. Reload and review the distribution before saving.", 409)); }
+            catch (InvalidOperationException exception)
+            { return UnprocessableEntity(DistributionProblem(exception.Message, 422)); }
+        }
+
+        private static ProblemDetails DistributionProblem(string message, int status) => new()
+        {
+            Status = status, Title = "Supplier invoice distribution", Detail = message,
+            Extensions = { ["code"] = status == 409 ? "AP_DISTRIBUTION_CHANGED" : "AP_DISTRIBUTION_INVALID" }
+        };
 
         /// <summary>Retrieves a vendor invoice by its system-generated invoice number.</summary>
         [HttpGet("by-number/{invoiceNumber}")]

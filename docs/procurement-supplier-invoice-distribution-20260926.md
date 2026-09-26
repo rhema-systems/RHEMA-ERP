@@ -1,0 +1,52 @@
+# Procurement supplier invoice distributions
+
+The Distribution dialog on a Procurement Supplier Invoice supports adding, splitting, removing and editing draft posting lines, saving, reloading and resetting to invoice defaults. The purchase order itself remains a purchasing control document. Saving a distribution does not create a journal or approve the invoice.
+
+## Controls
+
+- Only same-tenant Procurement invoices with PO, accepted-supply, auto-invoice or landed-cost ownership can use the mutation routes. Existing invoice maintenance permissions apply. Manual Finance and opening invoices cannot use the editor.
+- Only Draft and Rejected invoices without posted journal evidence are editable. Posted distribution reads the immutable ledger.
+- Both UI and server reject unbalanced totals, empty/negative/two-sided rows, fractional cents, missing accounts and missing posting purposes. Each source posting purpose must retain its original debit/credit total, preventing balanced inflation or removal of liabilities/taxes.
+- Ordinary expense allocations can select active, direct-posting non-control expense accounts. Tax, control, receipt, asset and budget accounts retain their source account; split amounts remain editable. A newly selected budget-tracked account must instead be assigned on the invoice line with its budget evidence.
+- Saves/resets use version and posting-basis checks, an authenticated editor, audit records, serializable transactions and the invoice posting application lock. Posting revalidates the saved draft, current account eligibility, source totals and foreign-currency rounding. Stale drafts require review.
+- Saved lines retain source line IDs, tags, dimensions, exchange-rate evidence and tax metadata through the central Finance posting engine. Same-account splits within one source purpose consolidate at posting to preserve unambiguous control/tax lineage. Linked supplier credits reverse expense account splits proportionately.
+
+## Validation
+
+Before the supplier-credit follow-up, 115 unique selected backend cases had passing latest results across `invoice-distribution-editing-final.trx`, `invoice-distribution-ap-regression.trx` and `invoice-distribution-fx.trx`. These include save/reload/post/retry, locked posted invoices, stale versions/basis, cross-tenant and invalid accounts, unbalanced/invalid rows and FX rounding. Tests use the real Finance posting engine with in-memory EF; transaction orchestration assertions are not proof of SQL concurrency.
+
+The focused frontend batch passed 21 cases, covering the Procurement editor, service boundaries and restored Finance form. Scoped TypeScript checks for the editor and the broader 71-file follow-up both passed. API/Core/Data/tests built with analyzers disabled; the normal-analyzer build gate remains open.
+
+Migration `20260925230000_ProcurementInvoiceDistributionDraft` added one nullable draft column only to `RhemaERP_Procurement_Verification_20260925`. Migration history and column shape were checked; hashes of all pre-existing invoice columns and partner rows remained unchanged. The source `RhemaERP` database was not modified.
+
+Authenticated browser verification passed on existing clone invoice VI-2026-00003: split debit, edit amounts, add/remove row, reject an unbalanced GHS 190 debit against GHS 200 credit, save GHS 120 + 80 debit against GHS 200 credit, close and reopen with those amounts intact. The initial requests timed out during a slow host run; the editor retained edits and reload reconciled the committed state. The final save visibly reported "Distribution saved." SQL independently confirmed three saved rows, Draft status, no invoice journal and unchanged totals of 23 journals/85 transactions. Evidence: `tmp/procurement-validation-20260925/distribution-live-database.json`. Debit headings, amounts and totals are green; Credit is red, as requested, and were visually checked in the browser.
+
+The final 47-case backend batch has passing latest results: 44 passed initially, then two linked-credit cases passed after reloading their detached fixture supplier, and one migration test passed after replacing its outdated baseline-only assumption with checks that archived supplier migrations cannot replay. Full and partial supplier credits reverse both original expense accounts, preserve a single AP control transaction and post idempotently. Across all distribution/AP/credit result files there are 130 unique backend cases with passing latest results; the focused frontend batch remains 21 passing cases. Evidence: `invoice-distribution-credit-regression.trx`, `invoice-distribution-credit-rerun.trx` and `distribution-final-summary.json`.
+
+The API compile completed with analyzers disabled but could not overwrite the running API assembly. The test project was built without rebuilding project references, then the newly compiled API DLL/PDB were copied into its test output before execution. The assembly hash was checked. After tests passed, only the verification API was restarted; its loaded binary path now matches the tested assembly hash. The frontend stayed running. Startup seeding and background services remain disabled, and the database remains the verification clone. This restart rotates the isolated test-session signing keys and may require signing in again.
+
+No live invoice approval, GL posting or payment was performed. The existing works invoice VI-2026-00004 still needs Finance to configure VAT-STD's AP input-tax account before a distribution can be resolved. No accounting mappings were invented.
+
+The initial September 26 readiness check found database/startup healthy and the virus-scanner process unavailable. The existing scanner was restarted with its existing localhost-only configuration; no scanning controls were disabled. After API warmup, `/health/ready` returned HTTP 200 with database, scanner and startup all Healthy. Evidence: `tmp/procurement-validation-20260925/distribution-runtime-health.json`.
+
+## September 26 continuation: tax and posting-period readiness
+
+The existing freight invoice VI-2026-00003 remains Draft with line tax treatment PendingReview. Source landed-cost voucher LC26097409 and its GHS 200 freight charge contain no tax classification. The invoice reviewer must choose the applicable line treatment; the header default only affects new lines. No treatment, tax account mapping or invoice posting was invented.
+
+The Procurement form used the administrative tax-groups endpoint, whose query parameters do not filter by purchase applicability. It now uses the existing active purchase-groups endpoint, excludes withholding groups from line tax choices, and separates its tenant/purchase query cache from Finance AR. Finance invoice pages were not changed in this continuation.
+
+The IFRS September 2026 exact-book period was absent. A Future period was created through the UI (dfe960c9-0d11-4c12-930c-7e57400300d3). The first opening request correctly failed because no published AccountingBookPeriodLifecycle workflow existed. After the user selected the existing active financeapprover account, the UI was used to create, configure, validate and publish Verification Accounting Period Approval (a5706602-3b2d-438c-85e0-f4e41e3b382a). Its single approval step assigns only financeapprover, prohibits initiator approval and requires distinct approvers. No user roles or permissions were changed.
+
+The request was then successfully submitted. The UI shows Future / Pending Open / Awaiting a different authorized checker. SQL confirms the published workflow and pending transition, linked to workflow instance 2baa9dd8-e516-497d-9712-4b35a227194f. Evidence: `tmp/procurement-validation-20260925/period-approval-setup.json`. The period is not yet Open; the financeapprover login/decision remains outstanding. All writes were confined to the verification clone.
+
+While configuring the missing entity type, the workflow wizard reset its Custom selection whenever its input was empty. A narrow UI fix preserves the explicit Custom selection. Visible verification successfully entered AccountingBookPeriodLifecycle and created the draft, then the designer validated and saved its proper Approval node. The wizard's placeholder Manual node was replaced before publication.
+
+The corrected Procurement tax picker was verified in a fresh browser form without saving a new invoice: it offered only No Tax and the configured UAT purchase-VAT group; the sales-only standard scheme and WHT group were absent. The broader follow-up TypeScript check completed with exit code 0 (`tax-cache-typecheck.log`). The user's existing invoice tab was preserved without saving or overwriting its edits.
+
+A second, focused TypeScript check explicitly included both modified pages/components and passed (exit 0, `tmp/tax-workflow-tsconfig.json`, `tax-workflow-typecheck.log`). SQL permission verification found financeapprover belongs to Finance User and has Finance.Read but not Finance.AccountingBooks.Periods.Approve. Existing roles carrying that permission are SuperAdmin, TenantAdmin and Financial Controller; none was assigned because they grant broader authority. A user question is pending to authorize a dedicated verification-only role granting only the period approval permission. No permissions have been changed, and the period remains awaiting independent approval.
+
+## Supplier invoice form layout follow-up
+
+Following the user's layout feedback, the Procurement create/edit form now uses compact invoice details, numbered line cards with wider account/description fields, a desktop totals panel and a sticky save bar. Tax defaults/withholding and accounting dimensions are expandable sections after the lines; notes follow separately. Narrow layouts stack line fields and totals. Line tax review remains visible, and unavailable saved header tax groups have an explicit label instead of an empty selector.
+
+The existing invoice was visually checked at desktop and 768px widths. Both secondary sections expanded correctly, the GHS 200 invoice and its existing values remained intact, and captured browser error logs were empty. The focused TypeScript check passed (`invoice-layout-typecheck.log`); the pre-render form logic and input/Controller bindings were compared with the pre-layout snapshot and preserved. No invoice save, tax classification, approval, permission grant or posting was performed during this layout follow-up. Finance invoice pages were not edited.

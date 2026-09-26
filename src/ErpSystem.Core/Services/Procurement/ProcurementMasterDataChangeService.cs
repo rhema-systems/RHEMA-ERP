@@ -1157,11 +1157,13 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             var properties = new List<JsonProperty>();
             foreach (var item in rootProperties)
             {
-                if (entity is BusinessPartner && string.Equals(item.Name, "postingDefaults", StringComparison.OrdinalIgnoreCase))
+                if (entity is BusinessPartner && (string.Equals(item.Name, "postingDefaults", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Name, "receivablesDefaults", StringComparison.OrdinalIgnoreCase)))
                 {
                     if (item.Value.ValueKind != JsonValueKind.Object)
                         throw new ProcurementMasterDataChangeValidationException("FIELD_VALUE_INVALID", "PostingDefaults must be a JSON object.");
-                    var defaultFields = typeof(BusinessPartnerPostingDefaultsDto).GetProperties()
+                    var defaultFields = (string.Equals(item.Name, "receivablesDefaults", StringComparison.OrdinalIgnoreCase)
+                        ? typeof(BusinessPartnerReceivablesDefaultsDto) : typeof(BusinessPartnerPostingDefaultsDto)).GetProperties()
                         .Select(property => property.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
                     foreach (var nested in item.Value.EnumerateObject())
                     {
@@ -1208,6 +1210,14 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                     throw new ProcurementMasterDataChangeValidationException("FIELD_VALUE_INVALID",
                         $"'{property.Name}' has an invalid value: {exception.Message}");
                 }
+                if (entity is BusinessPartner rolePartner && property.Name == nameof(BusinessPartner.PartnerType))
+                {
+                    try { BusinessPartnerRoles.ValidateRoleChange(rolePartner.PartnerType, value as string ?? string.Empty); }
+                    catch (InvalidOperationException exception)
+                    {
+                        throw new ProcurementMasterDataChangeValidationException("PARTNER_ROLE_INVALID", exception.Message);
+                    }
+                }
                 property.SetValue(entity, value);
                 normalized[property.Name] = value;
             }
@@ -1252,6 +1262,9 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
                         var postingDefaults = BusinessPartnerPostingDefaults.FromPartner(partner);
                         await BusinessPartnerPostingDefaultValidation.ValidateAsync(postingDefaults, partner.PartnerType, _unitOfWork, _currentUser);
                         BusinessPartnerPostingDefaults.Apply(partner, postingDefaults);
+                        if (partner.DefaultArAccountId.HasValue)
+                            await BusinessPartnerPostingDefaultValidation.ValidateReceivablesAsync(
+                                new() { DefaultArAccountId = partner.DefaultArAccountId }, partner.PartnerType, _unitOfWork, _currentUser);
                     }
                     catch (InvalidOperationException exception)
                     {

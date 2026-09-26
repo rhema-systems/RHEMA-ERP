@@ -23,9 +23,9 @@ namespace ErpSystem.Core.Tests.Services.Inventory;
 public sealed class InventoryStatutoryReportServiceTests
 {
     [Fact]
-    public void CatalogueDefinesTheNineTdc0702ReportsOnTheSharedReportProtocol()
+    public void CatalogueIncludesInventoryLedgerOnTheSharedReportProtocol()
     {
-        InventoryStatutoryReportCatalogue.Definitions.Should().HaveCount(9);
+        InventoryStatutoryReportCatalogue.Definitions.Should().HaveCount(10);
         InventoryStatutoryReportCatalogue.Definitions.Select(item => item.Code).Should().OnlyHaveUniqueItems();
         InventoryStatutoryReportCatalogue.Definitions.Should().OnlyContain(item =>
             item.Query.StartsWith(InventoryStatutoryReportCatalogue.QueryPrefix, StringComparison.Ordinal) &&
@@ -144,12 +144,12 @@ public sealed class InventoryStatutoryReportServiceTests
         var seeder = new InventoryStatutoryReportSeeder(
             context, NullLogger<InventoryStatutoryReportSeeder>.Instance);
 
-        (await seeder.SeedAsync()).Should().Be(18);
+        (await seeder.SeedAsync()).Should().Be(20);
         (await seeder.SeedAsync()).Should().Be(0);
-        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(18);
+        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(20);
         (await context.Reports.IgnoreQueryFilters()
                 .CountAsync(item => item.TenantId == firstTenantId && item.ModuleId != null))
-            .Should().Be(9);
+            .Should().Be(10);
 
         var deleted = await context.Reports.IgnoreQueryFilters()
             .FirstAsync(item => item.TenantId == firstTenantId);
@@ -160,7 +160,92 @@ public sealed class InventoryStatutoryReportServiceTests
         (await seeder.SeedTenantAsync(firstTenantId)).Should().Be(1);
         deleted.IsDeleted.Should().BeFalse();
         deleted.DeletedAt.Should().BeNull();
-        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(18);
+        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(20);
+    }
+
+    [Fact]
+    public async Task LedgerIncludesOpeningAndHiddenMovementsBeforePaginationAndIncludesCompleteEndDate()
+    {
+        await using var fixture = new Fixture();
+        fixture.AddMovement(fixture.TenantId, "ITEM-LEDGER", Guid.NewGuid());
+        var source = fixture.Context.StockMovements.Local.Single();
+        source.InventoryItem.CurrentStock = 9999; // Current stock and the duplicate operational log are not ledger inputs.
+        var day = new DateTime(2026, 9, 20, 0, 0, 0, DateTimeKind.Utc);
+        AddLedgerMovement(fixture.Context, source, day.AddDays(-1), 100, MovementDirection.In, InventoryMovementType.OpeningBalance);
+        AddLedgerMovement(fixture.Context, source, day.AddHours(1), 20, MovementDirection.In, InventoryMovementType.PurchaseReceipt);
+        AddLedgerMovement(fixture.Context, source, day.AddHours(2), 10, MovementDirection.Out, InventoryMovementType.SalesIssue);
+        AddLedgerMovement(fixture.Context, source, day.AddHours(23), 5, MovementDirection.In, InventoryMovementType.PurchaseReceipt);
+        AddLedgerMovement(fixture.Context, source, day.AddDays(1), 500, MovementDirection.In, InventoryMovementType.PurchaseReceipt);
+        AddLedgerMovement(fixture.Context, source, day.AddHours(3), 500, MovementDirection.In, InventoryMovementType.PurchaseReceipt).IsPosted = false;
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.ExecuteAsync(InventoryStatutoryReportCatalogue.QueryPrefix + InventoryStatutoryReportCatalogue.LedgerCode,
+            new ExecuteReportDto { Page = 2, PageSize = 1, Parameters = new()
+            {
+                ["startDate"] = "2026-09-20", ["endDate"] = "2026-09-20", ["movementType"] = "PurchaseReceipt",
+                ["inventoryItemId"] = source.InventoryItemId, ["warehouseId"] = source.WarehouseId
+            } }, true);
+        result.TotalRows.Should().Be(2);
+        var row = result.Data.Should().ContainSingle().Subject;
+        row["BalanceBefore"].Should().Be(110m);
+        row["BalanceAfter"].Should().Be(115m);
+        row["QuantityIn"].Should().Be(5m);
+        row["QuantityOut"].Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task LedgerKeepsTenantAndLocationAuthorizationForHistoricalBalances()
+    {
+        await using var fixture = new Fixture();
+        var allowedLocation = Guid.NewGuid();
+        fixture.AllowInventoryScope = request => request.LocationId == allowedLocation;
+        fixture.AddMovement(fixture.TenantId, "VISIBLE", allowedLocation);
+        fixture.AddMovement(fixture.TenantId, "DENIED", Guid.NewGuid());
+        fixture.AddMovement(fixture.ForeignTenantId, "FOREIGN", Guid.NewGuid());
+        foreach (var source in fixture.Context.StockMovements.Local.ToList())
+            AddLedgerMovement(fixture.Context, source, DateTime.UtcNow.AddDays(-1), 9, MovementDirection.In, InventoryMovementType.PurchaseReceipt);
+        await fixture.Context.SaveChangesAsync();
+        var result = await fixture.Service.ExecuteAsync(InventoryStatutoryReportCatalogue.QueryPrefix + InventoryStatutoryReportCatalogue.LedgerCode,
+            new ExecuteReportDto { Page = 1, PageSize = 100 }, true);
+        var row = result.Data.Should().ContainSingle().Subject;
+        row["ItemCode"].Should().Be("VISIBLE");
+        row["BalanceBefore"].Should().Be(0m);
+        row["BalanceAfter"].Should().Be(9m);
+    }
+
+    [Fact]
+    public async Task LedgerUsesDeterministicChronologyAndRetainsZeroQuantityValueAdjustments()
+    {
+        await using var fixture = new Fixture();
+        fixture.AddMovement(fixture.TenantId, "TIES", Guid.NewGuid());
+        var source = fixture.Context.StockMovements.Local.Single();
+        var date = DateTime.UtcNow.AddDays(-1);
+        var first = AddLedgerMovement(fixture.Context, source, date, 10, MovementDirection.In, InventoryMovementType.PurchaseReceipt);
+        var second = AddLedgerMovement(fixture.Context, source, date, 3, MovementDirection.Out, InventoryMovementType.SalesIssue);
+        var third = AddLedgerMovement(fixture.Context, source, date, 0, MovementDirection.In, InventoryMovementType.LandedCostRevaluation);
+        first.CreatedAt = date; second.CreatedAt = date.AddSeconds(1); third.CreatedAt = date.AddSeconds(2);
+        third.TotalValue = 7m;
+        await fixture.Context.SaveChangesAsync();
+        var result = await fixture.Service.ExecuteAsync(InventoryStatutoryReportCatalogue.QueryPrefix + InventoryStatutoryReportCatalogue.LedgerCode,
+            new ExecuteReportDto { Page = 1, PageSize = 100, Parameters = new() { ["itemCode"] = "TIES" } }, true);
+        result.Data.Select(row => row["BalanceBefore"]).Should().Equal(0m, 10m, 7m);
+        result.Data.Select(row => row["BalanceAfter"]).Should().Equal(10m, 7m, 7m);
+        result.Data.Last()["TotalValue"].Should().Be(7m);
+    }
+
+    private static InventoryMovement AddLedgerMovement(ApplicationDbContext context, StockMovement source, DateTime date,
+        decimal quantity, MovementDirection direction, InventoryMovementType type)
+    {
+        var movement = new InventoryMovement
+        {
+            Id = Guid.NewGuid(), TenantId = source.TenantId, InventoryItemId = source.InventoryItemId, InventoryItem = source.InventoryItem,
+            WarehouseId = source.WarehouseId, Warehouse = source.Warehouse!, LocationId = source.LocationId, Location = source.Location,
+            MovementNumber = Guid.NewGuid().ToString("N"), MovementDate = date, PostingDate = date, PostedAt = date,
+            MovementType = type, Direction = direction, Quantity = quantity, UnitCost = 2m, TotalValue = quantity * 2m,
+            IsPosted = true, ReferenceType = ReferenceType.Manual
+        };
+        context.InventoryMovements.Add(movement);
+        return movement;
     }
 
     private sealed class Fixture : IAsyncDisposable

@@ -295,7 +295,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     !item.IsDeleted)
                 .SingleOrDefaultAsync(cancellationToken)
                 ?? throw RetainedApplicationNotEligible();
-            if (registration.PartnerType != "Supplier" ||
+            if (!BusinessPartnerRoles.HasSupplier(registration.PartnerType) ||
                 registration.Status is not ("Draft" or "MoreInfoRequired") ||
                 !VerifiedContactMatchesRegistration(
                     registration, request.Channel, contact))

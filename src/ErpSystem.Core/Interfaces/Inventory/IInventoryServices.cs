@@ -331,6 +331,7 @@ public interface IInventoryValuationService
 /// </summary>
 public interface ILandedCostService
 {
+    Task<LandedCostDetailDto> SetReceiptWeightAsync(Guid id, Guid receiptItemId, SetLandedCostReceiptWeightDto dto, Guid userId);
     Task<IEnumerable<LandedCostDto>> GetAllAsync();
     Task<IEnumerable<LandedCostDto>> GetByGRNAsync(Guid grnId);
     Task<LandedCostDetailDto?> GetByIdAsync(Guid id);

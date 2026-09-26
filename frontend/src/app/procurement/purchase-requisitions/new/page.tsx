@@ -1,5 +1,6 @@
 'use client';
 
+import { hasSupplierRole } from '@/lib/business-partner-roles';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -152,7 +153,7 @@ export default function NewPurchaseRequisitionPage() {
         setInventoryItems(itemsData || []);
         // Filter to only show Supplier or Both types
         setSuppliers((suppliersData || []).filter(bp => 
-          bp.partnerType === 'Supplier' || bp.partnerType === 'Both'
+          hasSupplierRole(bp.partnerType)
         ));
         setLinkageOptions(linkageData);
         setDepartments((departmentsData || []).filter((department) => department.isActive));

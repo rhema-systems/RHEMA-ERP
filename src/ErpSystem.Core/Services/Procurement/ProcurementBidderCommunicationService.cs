@@ -1628,9 +1628,7 @@ public sealed class ProcurementBidderCommunicationService : IProcurementBidderCo
                      BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
                  item.BusinessPartner.RegistrationStatus ==
                      BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
-                (item.BusinessPartner.PartnerType == "Supplier" ||
-                 item.BusinessPartner.PartnerType == "Contractor" ||
-                 item.BusinessPartner.PartnerType == "Both"))
+                BusinessPartnerRoles.ProcurementTypes.Contains(item.BusinessPartner.PartnerType))
             .Select(item => item.BusinessPartnerId)
             .ToListAsync(cancellationToken)).ToHashSet();
 

@@ -1,5 +1,10 @@
 'use client';
 
+import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
+import { BusinessPartnerReceivablesFields } from '@/components/procurement/BusinessPartnerReceivablesFields';
+import { PartnerAccountsFields, emptyBusinessPartnerPostingDefaults, useBusinessPartnerPostingCatalogues } from '@/components/procurement/BusinessPartnerPostingFields';
+
+
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -51,6 +56,7 @@ export default function BusinessPartnerDetailPage() {
   const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
+  const postingCatalogues = useBusinessPartnerPostingCatalogues();
   const [partner, setPartner] = useState<BusinessPartnerDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -454,7 +460,7 @@ export default function BusinessPartnerDetailPage() {
             )}
           </TabsTrigger>
           <TabsTrigger value="financial">Financial Info</TabsTrigger>
-          {(partner.partnerType === 'Supplier' || partner.partnerType === 'Both') && (
+          {hasSupplierRole(partner.partnerType) && (
             <TabsTrigger value="purchase-orders">
               Purchase Orders ({purchaseOrders.length})
             </TabsTrigger>
@@ -815,7 +821,7 @@ export default function BusinessPartnerDetailPage() {
         </TabsContent>
 
         {/* Purchase Orders Tab */}
-        {(partner.partnerType === 'Supplier' || partner.partnerType === 'Both') && (
+        {hasSupplierRole(partner.partnerType) && (
           <TabsContent value="purchase-orders">
             <Card>
               <CardHeader>

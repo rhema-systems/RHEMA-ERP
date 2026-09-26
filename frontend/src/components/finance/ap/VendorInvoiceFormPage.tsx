@@ -97,7 +97,7 @@ const invoiceSchema = z.object({
     supplierId: z.string().min(1, 'Supplier is required'),
     supplierInvoiceNumber: z.string().optional(),
     purchaseOrderId: z.string().optional(),
-    acceptedSupplyKind: z.enum(['GoodsReceiptInspection', 'ServiceCompletion', 'WorksPaymentCertificate']).optional(),
+    acceptedSupplyKind: z.enum(['GoodsReceiptInspection', 'ServiceCompletion', 'WorksPaymentCertificate', 'GoodsReceiptConsolidation']).optional(),
     acceptedSupplySourceId: z.string().optional(),
     invoiceDate: z.date(),
     dueDate: z.date(),
@@ -373,8 +373,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const watchWithholdingTaxRate = watchIsOpeningBalance || withholdingDecision !== true ? 0 : Number(form.watch('withholdingTaxRate') || 0);
     const watchLineItems = form.watch('lineItems') || [];
     const { data: supplierDefaults, isFetching: supplierDefaultsLoading, error: supplierDefaultsError } = useQuery({
-        queryKey: ['ap-invoice-supplier-defaults', currentTenantCode, watchSupplierId, selectedPurchaseOrderId, watchInvoiceDateTime],
-        queryFn: () => accountsPayableService.getInvoiceSupplierDefaults(watchSupplierId, selectedPurchaseOrderId || undefined, watchInvoiceDate ? format(watchInvoiceDate, 'yyyy-MM-dd') : undefined),
+        queryKey: ['ap-invoice-supplier-defaults', currentTenantCode, watchSupplierId, selectedSupplier?.businessPartnerRoleId, selectedPurchaseOrderId, watchInvoiceDateTime],
+        queryFn: () => accountsPayableService.getInvoiceSupplierDefaults(watchSupplierId, selectedPurchaseOrderId || undefined, watchInvoiceDate ? format(watchInvoiceDate, 'yyyy-MM-dd') : undefined, selectedSupplier?.businessPartnerRoleId),
         enabled: Boolean(watchSupplierId) && !watchIsOpeningBalance,
     });
     const supplierWithholding = supplierDefaults?.withholdingDefault;
@@ -445,7 +445,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     useEffect(() => {
         if (!isEditMode || !editInvoice || !suppliersData?.items || editHydratedRef.current) return;
 
-        const supplier = suppliersData.items.find(item => item.businessPartnerId === editInvoice.businessPartnerId);
+        const supplier = suppliersData.items.find(item => item.businessPartnerId === editInvoice.businessPartnerId && (!editInvoice.businessPartnerRoleId || item.businessPartnerRoleId === editInvoice.businessPartnerRoleId));
         if (!supplier) return;
 
         editHydratedRef.current = true;
@@ -1023,7 +1023,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         isEditMode &&
         editInvoice &&
         suppliersData &&
-        !suppliersData.items.some(item => item.businessPartnerId === editInvoice.businessPartnerId)
+        !suppliersData.items.some(item => item.businessPartnerId === editInvoice.businessPartnerId && (!editInvoice.businessPartnerRoleId || item.businessPartnerRoleId === editInvoice.businessPartnerRoleId))
     );
 
     if (

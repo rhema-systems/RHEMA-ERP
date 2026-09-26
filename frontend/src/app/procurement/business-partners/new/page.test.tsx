@@ -29,30 +29,36 @@ async function openTab(name: string) {
   await waitFor(() => expect(screen.getByRole('tab', { name })).toHaveAttribute('data-state', 'active'));
 }
 
-describe('new business partner defaults', () => {
-  it('saves supplier credit, TIN and WHT from their respective tabs without customer-only gating', async () => {
+describe('new business partner canonical finance setup', () => {
+  it('saves canonical Supplier role and TIN then opens governed Finance Profiles', async () => {
     render(<NewBusinessPartnerPage />);
     fireEvent.click(screen.getByRole('button', { name: 'Supplier' }));
     fireEvent.change(screen.getByLabelText('Partner Name *'), { target: { value: 'Freight Supplier' } });
-    fireEvent.click(screen.getByRole('switch', { name: 'Subject To Withholding Deduction' }));
-    fireEvent.change(screen.getByLabelText('WHT Rate (%)'), { target: { value: '5' } });
+    expect(screen.queryByRole('tab', { name: 'Accounts Payable' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('WHT Rate (%)')).not.toBeInTheDocument();
     await openTab('Options');
     fireEvent.change(screen.getByLabelText('TIN'), { target: { value: 'TIN-NEW' } });
-    fireEvent.change(screen.getByLabelText('Credit Limit'), { target: { value: '9000' } });
-    await openTab('Accounts');
-    expect(screen.getByText('Purchase Price Variance')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save Partner' }));
-    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({ partnerType: 'Supplier', roleTypes: ['Supplier'], creditLimit: 9000, taxNumber: 'TIN-NEW', postingDefaults: expect.objectContaining({ subjectToWithholdingDeduction: true, withholdingTaxRate: 5 }) })));
+    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({ roleTypes: ['Supplier'], taxNumber: 'TIN-NEW' })));
+    const request = vi.mocked(businessPartnerService.createPartner).mock.calls[0][0];
+    expect(request).not.toHaveProperty('postingDefaults');
+    expect(request).not.toHaveProperty('receivablesDefaults');
     expect(push).toHaveBeenCalledWith('/procurement/business-partners/new-supplier/edit?tab=finance-profiles');
   });
-
-  it('keeps Credit Limit in Options only and requests the customer tax catalogue for customers', async () => {
+  it('allows independent Supplier and Customer roles on one partner', async () => {
+    render(<NewBusinessPartnerPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Supplier' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customer' }));
+    fireEvent.change(screen.getByLabelText('Partner Name *'), { target: { value: 'Dual Partner' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Partner' }));
+    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({ roleTypes: ['Supplier', 'Customer'] })));
+  });
+  it('hides legacy account and WHT editors for customer records', async () => {
     render(<NewBusinessPartnerPage />);
     fireEvent.click(screen.getByRole('button', { name: 'Customer' }));
-    await waitFor(() => expect(businessPartnerService.getPostingOptions).toHaveBeenCalledWith('Customer'));
-    await openTab('Customer Details');
-    expect(screen.queryByLabelText('Credit Limit')).not.toBeInTheDocument();
-    await openTab('Options');
-    expect(screen.getAllByLabelText('Credit Limit')).toHaveLength(1);
+    expect(screen.queryByRole('switch', { name: 'Subject To Withholding Deduction' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Accounts Receivable' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Accounts Payable' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Customer Details' })).toBeInTheDocument();
   });
 });

@@ -32,7 +32,7 @@ IF EXISTS (
         OR b.[Code] IS NULL OR LEN(b.[Code]) = 0
         OR b.[Code] COLLATE Latin1_General_100_BIN2
            <> UPPER(LTRIM(RTRIM(b.[Code]))) COLLATE Latin1_General_100_BIN2
-        OR DATALENGTH(b.[Code]) <> DATALENGTH(UPPER(LTRIM(RTRIM(b.[Code])))
+        OR DATALENGTH(b.[Code]) <> DATALENGTH(UPPER(LTRIM(RTRIM(b.[Code]))))
         OR LEFT(b.[Code], 1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
         OR b.[Code] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_]%'
         OR b.[Code] COLLATE Latin1_General_100_BIN2 IN (

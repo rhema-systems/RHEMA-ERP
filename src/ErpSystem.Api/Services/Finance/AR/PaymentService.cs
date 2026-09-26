@@ -1913,8 +1913,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         "The foreign-currency customer advance is missing its approved origin-rate evidence.");
                 }
 
-                var arAccountId = customer.DefaultArAccountId
-                    ?? settings.ControlAccountArId
+                var arAccountId = settings.ControlAccountArId
                     ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
                 var advanceAccountId = settings.CustomerAdvanceAccountId
                     ?? throw new InvalidOperationException("Customer advance account is not configured for this tenant.");
@@ -2933,8 +2932,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var exchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
             var accountCache = new Dictionary<Guid, Account>();
 
-            var arAccountId = customer.DefaultArAccountId
-                ?? settings.ControlAccountArId
+            var arAccountId = settings.ControlAccountArId
                 ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
             await ResolveReceiptPostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
@@ -3128,7 +3126,10 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (discountAllowed > 0m)
             {
-                var discountAccountId = settings.DiscountAllowedAccountId
+                var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
+                    _unitOfWork, tenantId, payment.JournalEntryId, "CustomerPayment", payment.Id, cancellationToken);
+                var discountAccountId = originalAccounts?.Account("AR-Discount")
+                    ?? settings.DiscountAllowedAccountId
                     ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
                 await ResolveReceiptPostingAccountAsync(discountAccountId, "sales discount allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
@@ -3502,8 +3503,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var exchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
             var accountCache = new Dictionary<Guid, Account>();
 
-            var arAccountId = customer.DefaultArAccountId
-                ?? settings.ControlAccountArId
+            var arAccountId = settings.ControlAccountArId
                 ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
             await ResolveReceiptPostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
@@ -4245,7 +4245,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 : payment.CurrencyCode.Trim().ToUpperInvariant();
             var exchangeRate = payment.ExchangeRate <= 0m ? 1m : payment.ExchangeRate;
             var baseAmount = decimal.Round(payment.TotalAmount * exchangeRate, 2, MidpointRounding.AwayFromZero);
-            var arAccountId = customer.DefaultArAccountId ?? settings?.ControlAccountArId;
+            var arAccountId = settings?.ControlAccountArId;
 
             var transactionNumber = await _documentNumberingService.GenerateAsync(
                 DocumentNumberingModules.Finance,

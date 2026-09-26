@@ -1,5 +1,7 @@
 'use client';
 
+import { ItemWeightFields } from '@/components/inventory/ItemWeightFields';
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -148,7 +150,9 @@ export default function InventoryItemsPage() {
     // Tax
     isTaxable: true,
     // Physical Properties
-    shippingWeight: 0,
+    weight: undefined,
+      weightUnit: 'kg',
+      shippingWeight: 0,
     // Media
     imageUrl: undefined, thumbnailUrl: undefined
   });
@@ -324,6 +328,8 @@ export default function InventoryItemsPage() {
       // Tax
       isTaxable: true, purchaseTaxOption: item.purchaseTaxOption, salesTaxOption: item.salesTaxOption,
       // Physical Properties
+      weight: item.weight ?? undefined,
+      weightUnit: item.weightUnit ?? undefined,
       shippingWeight: item.shippingWeight || 0,
       // Media
       barcode: item.barcode,
@@ -457,6 +463,8 @@ export default function InventoryItemsPage() {
       // Tax
       isTaxable: true,
       // Physical Properties
+      weight: undefined,
+      weightUnit: 'kg',
       shippingWeight: 0,
       // Media
       imageUrl: undefined, thumbnailUrl: undefined
@@ -897,6 +905,7 @@ export default function InventoryItemsPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2"><ItemWeightFields weight={formData.weight} weightUnit={formData.weightUnit} stockUnit={formData.unitOfMeasure} onChange={values => setFormData({ ...formData, ...values })} /></div>
                   <div className="space-y-2"><Label>Shipping Weight</Label>
                     <Input type="number" step="0.01" value={formData.shippingWeight} onChange={(e) => setFormData({...formData, shippingWeight: parseFloat(e.target.value) || 0})} />
                   </div>
@@ -1663,7 +1672,8 @@ export default function InventoryItemsPage() {
                 <div className="space-y-2"><Label>Safety Stock</Label><Input type="number" value={formData.safetyStock} onChange={(e) => setFormData({...formData, safetyStock: parseFloat(e.target.value) || 0})} /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Shipping Weight</Label><Input type="number" step="0.01" value={formData.shippingWeight} onChange={(e) => setFormData({...formData, shippingWeight: parseFloat(e.target.value) || 0})} /></div>
+                <div className="col-span-2"><ItemWeightFields weight={formData.weight} weightUnit={formData.weightUnit} stockUnit={formData.unitOfMeasure} onChange={values => setFormData({ ...formData, ...values })} /></div>
+                  <div className="space-y-2"><Label>Shipping Weight</Label><Input type="number" step="0.01" value={formData.shippingWeight} onChange={(e) => setFormData({...formData, shippingWeight: parseFloat(e.target.value) || 0})} /></div>
                 <div className="space-y-2"><Label>Warranty Days</Label><Input type="number" value={formData.warrantyDays} onChange={(e) => setFormData({...formData, warrantyDays: parseInt(e.target.value) || 0})} /></div>
               </div>
               <div className="flex items-center space-x-6 pt-2">

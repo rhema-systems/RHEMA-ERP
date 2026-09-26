@@ -54,7 +54,7 @@ export const getFinancePostingErrorPresentation = (
         };
     }
 
-    const governedFailure = message.match(/^([A-Z][A-Z0-9_]+):\s*(.+)$/s);
+    const governedFailure = message.match(/^([A-Z][A-Z0-9_]+):\s*([\s\S]+)$/);
     if (governedFailure) {
         const [, code, explanation] = governedFailure;
         const title = governedFailureTitle(code, fallbackTitle);

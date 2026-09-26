@@ -10,10 +10,11 @@ public static class WorkflowApprovalGuardValidator
         WorkflowApprovalConfigDto? config,
         Guid initiatedById,
         IReadOnlyCollection<WorkflowApproval> approvals,
-        Guid userId)
+        Guid userId,
+        bool enforceSeparation = true)
     {
         var errors = new List<string>();
-        if (config == null || userId == Guid.Empty)
+        if (config == null || userId == Guid.Empty || !enforceSeparation)
         {
             return errors;
         }

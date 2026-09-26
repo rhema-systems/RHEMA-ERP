@@ -57,6 +57,7 @@ export interface PagedResult<T> {
 }
 
 export interface VendorInvoiceQuery {
+    procurementOnly?: boolean;
     page?: number;
     pageSize?: number;
     searchTerm?: string;
@@ -120,12 +121,14 @@ export interface InvoiceSupplierDefaults extends PurchaseOrderSupplierDefaultsDt
     };
 }
 
-class AccountsPayableService {
-    public async getInvoiceSupplierDefaults(supplierId: string, purchaseOrderId?: string, invoiceDate?: string): Promise<InvoiceSupplierDefaults | null> {
-        const query = new URLSearchParams({ supplierId });
+export class AccountsPayableService {
+    constructor(private readonly invoiceBaseUrl = '/ap/invoices') {}
+    public async getInvoiceSupplierDefaults(businessPartnerId: string, purchaseOrderId?: string, invoiceDate?: string, businessPartnerRoleId?: string): Promise<InvoiceSupplierDefaults | null> {
+        const query = new URLSearchParams({ businessPartnerId });
         if (purchaseOrderId) query.set('purchaseOrderId', purchaseOrderId);
         if (invoiceDate) query.set('invoiceDate', invoiceDate);
-        return apiService.get<InvoiceSupplierDefaults | null>(`/ap/invoices/supplier-defaults?${query}`);
+        if (businessPartnerRoleId) query.set('businessPartnerRoleId', businessPartnerRoleId);
+        return apiService.get<InvoiceSupplierDefaults | null>(`${this.invoiceBaseUrl}/supplier-defaults?${query}`);
     }
     private readonly baseUrl = '/ap';
 
@@ -133,6 +136,7 @@ class AccountsPayableService {
 
     public async getInvoices(query: VendorInvoiceQuery = {}): Promise<PagedResult<VendorInvoice>> {
         const params = new URLSearchParams();
+        if (query.procurementOnly) params.append('ProcurementOnly', 'true');
         if (query.page) params.append('Page', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
         if (query.searchTerm) params.append('SearchTerm', query.searchTerm);
@@ -149,86 +153,86 @@ class AccountsPayableService {
         if (query.sortBy) params.append('SortBy', query.sortBy);
         if (query.sortDescending !== undefined) params.append('SortDescending', query.sortDescending.toString());
 
-        return apiService.get<PagedResult<VendorInvoice>>(`${this.baseUrl}/invoices?${params.toString()}`);
+        return apiService.get<PagedResult<VendorInvoice>>(`${this.invoiceBaseUrl}?${params.toString()}`);
     }
 
     public async getInvoice(id: string): Promise<VendorInvoice> {
-        return apiService.get<VendorInvoice>(`${this.baseUrl}/invoices/${id}`);
+        return apiService.get<VendorInvoice>(`${this.invoiceBaseUrl}/${id}`);
     }
 
     /** Returns canonical Supplier.Id values through a tenant-scoped Finance read model. */
     public async getInvoiceSuppliers(): Promise<ApInvoiceSupplier[]> {
-        return apiService.get<ApInvoiceSupplier[]>(`${this.baseUrl}/invoices/suppliers`);
+        return apiService.get<ApInvoiceSupplier[]>(`${this.invoiceBaseUrl}/suppliers`);
     }
 
     public async getInvoiceDistribution(id: string): Promise<VendorInvoiceDistribution> {
-        return apiService.get<VendorInvoiceDistribution>(`/ap/invoices/${id}/distribution`);
+        return apiService.get<VendorInvoiceDistribution>(`${this.invoiceBaseUrl}/${id}/distribution`);
     }
 
     /** Returns canonical Business Partner AP roles, including corrective readiness feedback. */
     public async getInvoiceSupplierEntryOptions(): Promise<ApInvoiceSupplierEntryOption[]> {
-        return apiService.get<ApInvoiceSupplierEntryOption[]>(`${this.baseUrl}/invoices/entry-suppliers`);
+        return apiService.get<ApInvoiceSupplierEntryOption[]>(`${this.invoiceBaseUrl}/entry-suppliers`);
     }
 
     public async getGoodsInvoiceEntry(purchaseOrderId: string, currentInvoiceId?: string): Promise<ApGoodsInvoiceEntry> {
         const query = new URLSearchParams({ purchaseOrderId });
         if (currentInvoiceId) query.set('currentInvoiceId', currentInvoiceId);
-        return apiService.get<ApGoodsInvoiceEntry>(`${this.baseUrl}/invoices/goods-entry?${query}`);
+        return apiService.get<ApGoodsInvoiceEntry>(`${this.invoiceBaseUrl}/goods-entry?${query}`);
     }
 
     public async getInvoiceBudgetCells(budgetDate: string, accountId: string): Promise<ApBudgetCell[]> {
         const query = new URLSearchParams({ budgetDate, accountId });
-        return apiService.get<ApBudgetCell[]>(`${this.baseUrl}/invoices/budget-cells?${query.toString()}`);
+        return apiService.get<ApBudgetCell[]>(`${this.invoiceBaseUrl}/budget-cells?${query.toString()}`);
     }
 
     public async createInvoice(data: VendorInvoiceCreateRequest): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices`, data);
+        return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}`, data);
     }
 
     public async getAcceptedSupplyOptions(
         purchaseOrderId: string
     ): Promise<ProcurementAcceptedSupplyOptions> {
         return apiService.get<ProcurementAcceptedSupplyOptions>(
-            `${this.baseUrl}/invoices/accepted-supply-options?purchaseOrderId=${encodeURIComponent(purchaseOrderId)}`
+            `${this.invoiceBaseUrl}/accepted-supply-options?purchaseOrderId=${encodeURIComponent(purchaseOrderId)}`
         );
     }
 
     public async updateInvoice(id: string, data: VendorInvoiceUpdateRequest): Promise<VendorInvoice> {
-        return apiService.put<VendorInvoice>(`${this.baseUrl}/invoices/${id}`, data);
+        return apiService.put<VendorInvoice>(`${this.invoiceBaseUrl}/${id}`, data);
     }
 
     public async approveInvoice(id: string, comments?: string): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/approve`, comments || 'Approved');
+        return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}/${id}/approve`, comments || 'Approved');
     }
 
     public async submitInvoiceForApproval(id: string): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/submit`, {});
+        return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}/${id}/submit`, {});
     }
 
     public async refreshInvoiceBudget(id: string): Promise<FinanceSourceDocumentDimension> {
         return apiService.post<FinanceSourceDocumentDimension>(
-            `${this.baseUrl}/invoices/${id}/budget-refresh`,
+            `${this.invoiceBaseUrl}/${id}/budget-refresh`,
             {},
         );
     }
 
     public async getThreeWayMatchReadiness(id: string): Promise<InvoiceMatchingResult> {
-        return apiService.get<InvoiceMatchingResult>(`${this.baseUrl}/invoices/${id}/match/readiness`);
+        return apiService.get<InvoiceMatchingResult>(`${this.invoiceBaseUrl}/${id}/match/readiness`);
     }
 
     public async performThreeWayMatch(id: string): Promise<InvoiceMatchingResult> {
-        return apiService.post<InvoiceMatchingResult>(`${this.baseUrl}/invoices/${id}/match/three-way`, {});
+        return apiService.post<InvoiceMatchingResult>(`${this.invoiceBaseUrl}/${id}/match/three-way`, {});
     }
 
     public async getMatchExceptionOverview(id: string): Promise<VendorInvoiceMatchExceptionOverview> {
-        return apiService.get<VendorInvoiceMatchExceptionOverview>(`${this.baseUrl}/invoices/${id}/match-exceptions`);
+        return apiService.get<VendorInvoiceMatchExceptionOverview>(`${this.invoiceBaseUrl}/${id}/match-exceptions`);
     }
 
     public async requestMatchException(
         id: string,
         data: CreateVendorInvoiceMatchExceptionRequest
     ): Promise<VendorInvoiceMatchException> {
-        return apiService.post<VendorInvoiceMatchException>(`${this.baseUrl}/invoices/${id}/match-exceptions`, data);
+        return apiService.post<VendorInvoiceMatchException>(`${this.invoiceBaseUrl}/${id}/match-exceptions`, data);
     }
 
     public async decideMatchException(
@@ -237,7 +241,7 @@ class AccountsPayableService {
         comment: string,
         rowVersion: string
     ): Promise<VendorInvoiceMatchException> {
-        return apiService.post<VendorInvoiceMatchException>(`${this.baseUrl}/invoices/match-exceptions/${exceptionId}/decision`, {
+        return apiService.post<VendorInvoiceMatchException>(`${this.invoiceBaseUrl}/match-exceptions/${exceptionId}/decision`, {
             approved,
             comment,
             rowVersion,
@@ -249,7 +253,7 @@ class AccountsPayableService {
         reason: string,
         rowVersion: string
     ): Promise<VendorInvoiceMatchException> {
-        return apiService.post<VendorInvoiceMatchException>(`${this.baseUrl}/invoices/match-exceptions/${exceptionId}/cancel`, {
+        return apiService.post<VendorInvoiceMatchException>(`${this.invoiceBaseUrl}/match-exceptions/${exceptionId}/cancel`, {
             reason,
             rowVersion,
         });
@@ -262,17 +266,17 @@ class AccountsPayableService {
         evidence: VendorInvoiceMatchExceptionEvidenceRequest[]
     ): Promise<VendorInvoiceMatchException> {
         return apiService.post<VendorInvoiceMatchException>(
-            `${this.baseUrl}/invoices/match-exceptions/${exceptionId}/corrective-action/complete`,
+            `${this.invoiceBaseUrl}/match-exceptions/${exceptionId}/corrective-action/complete`,
             { completionNote, rowVersion, evidence }
         );
     }
 
     public async rejectInvoice(id: string, comments: string): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/reject`, comments);
+        return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}/${id}/reject`, comments);
     }
 
     public async voidInvoice(id: string, comments?: string): Promise<VendorInvoice> {
-        return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/void`, comments || 'Voided by user');
+        return apiService.post<VendorInvoice>(`${this.invoiceBaseUrl}/${id}/void`, comments || 'Voided by user');
     }
 
     // --- Vendor Payments ---

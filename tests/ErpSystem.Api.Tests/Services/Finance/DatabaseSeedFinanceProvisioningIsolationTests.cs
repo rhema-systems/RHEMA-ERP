@@ -34,6 +34,12 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
                          new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(keeper).Options))
         {
             var createScript = setup.Database.GenerateCreateScript()
+                // Preserve deterministic document references in this SQLite
+                // harness; production and migration tests use the SQL Server forms.
+                .Replace("N'PPL-' + LOWER(REPLACE(CONVERT(nvarchar(36), [Id]), N'-', N''))",
+                    "'PPL-' || lower(replace([Id], '-', ''))", StringComparison.Ordinal)
+                .Replace("'LCSD-' + LOWER(REPLACE(CONVERT(varchar(36), [Id]), '-', ''))",
+                    "'LCSD-' || lower(replace([Id], '-', ''))", StringComparison.Ordinal)
                 .Replace("nvarchar(max)", "TEXT", StringComparison.OrdinalIgnoreCase)
                 .Replace("N'", "'", StringComparison.Ordinal)
                 .Replace("LEN(", "LENGTH(", StringComparison.OrdinalIgnoreCase)

@@ -26,6 +26,7 @@ using Syncfusion.DocIO.DLS;
 using Syncfusion.DocIORenderer;
 using CentralDocumentMetadataTemplateEntity = ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate;
 using BusinessPartner = ErpSystem.Core.Entities.Procurement.BusinessPartner;
+using BusinessPartnerRoles = ErpSystem.Core.Entities.Procurement.BusinessPartnerRoles;
 
 namespace ErpSystem.Api.Controllers.DocumentManagement;
 
@@ -1171,7 +1172,7 @@ public sealed class DocumentManagementController : ControllerBase
             item.TenantId == procedureCase.TenantId
             && !item.IsDeleted
             && item.IsActive
-            && item.PartnerType == "Customer");
+            && BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType));
 
         if (Guid.TryParse(sourceReference, out var customerId))
         {

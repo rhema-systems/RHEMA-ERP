@@ -4555,7 +4555,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ? new InvoiceMatchingResultDto
                 {
                     VendorInvoiceId = invoice.Id,
-                    IsRequired = ProcurementInvoiceThreeWayMatchRules.IsRequired(
+                    IsRequired = invoice.AutoInvoiceRequestId.HasValue || ProcurementInvoiceThreeWayMatchRules.IsRequired(
                         invoice.PurchaseOrderId, invoice.IsOpeningBalance),
                     Message = "The authoritative invoice matching service is not registered.",
                     DecisionKeys = ProcurementPaymentReadinessRules.DecisionKeys.ToList(),
@@ -5416,8 +5416,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (activeAllocations.Any(a => a.DiscountAmount > 0m))
             {
-                var discountAccountId = settings.DiscountReceivedAccountId
-                    ?? throw new InvalidOperationException("Purchase discount received account is not configured for this tenant.");
+                var discountAccountId = await ResolvePaymentDiscountAccountAsync(payment, supplier, settings, cancellationToken);
                 await ResolvePaymentPostingAccountAsync(discountAccountId, "purchase discount received account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
                 foreach (var allocation in activeAllocations.Where(a => a.DiscountAmount > 0m))

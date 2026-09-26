@@ -10,6 +10,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+using ErpSystem.Tests.Services.Finance;
 
 namespace ErpSystem.Tests.Services;
 
@@ -26,6 +27,11 @@ public class LandedCostServiceTests
 
     private LandedCostService CreateService()
     {
+        var weights = new Mock<IGenericRepository<LandedCostReceiptWeight>>();
+        weights.Setup(r => r.GetQueryable(It.IsAny<Expression<Func<LandedCostReceiptWeight, bool>>>()))
+            .Returns(Array.Empty<LandedCostReceiptWeight>().AsAsyncQueryable());
+        _unitOfWork.Setup(u => u.Repository<LandedCostReceiptWeight>()).Returns(weights.Object);
+        _unitOfWork.SetupGet(u => u.HasActiveTransaction).Returns(true);
         return new LandedCostService(
             _landedCostRepository.Object,
             _landedCostItemRepository.Object,
@@ -36,6 +42,34 @@ public class LandedCostServiceTests
             _supplierRepository.Object,
             _unitOfWork.Object,
             _logger.Object);
+    }
+
+    [Fact]
+    public async Task AllocationExcludesUnacceptedReceiptLinesAndUsesAcceptedQuantityOnly()
+    {
+        var accepted = new GoodsReceiptNoteItem { InventoryItemId = Guid.NewGuid(), ReceivedQuantity = 100, AcceptedQuantity = 92, RejectedQuantity = 8, UnitCost = 10 };
+        var pending = new GoodsReceiptNoteItem { InventoryItemId = Guid.NewGuid(), ReceivedQuantity = 30, AcceptedQuantity = 0, UnitCost = 10 };
+        var grn = new GoodsReceiptNote { Items = new List<GoodsReceiptNoteItem> { accepted, pending } };
+        var cost = new LandedCost { GoodsReceiptNoteId = grn.Id, Status = "Draft", Currency = "GHS" };
+        var items = new List<LandedCostItem> { new() { LandedCostId = cost.Id, Description = "Freight", AmountInBaseCurrency = 92, AllocationMethod = "ByQuantity" } };
+        var allocations = new List<LandedCostAllocation>(); cost.Items = items; cost.Allocations = allocations;
+        SetupAllocationHarness(cost, grn, items, allocations);
+        await CreateService().AllocateCostsAsync(cost.Id, Guid.NewGuid());
+        allocations.Should().ContainSingle();
+        allocations[0].GoodsReceiptNoteItemId.Should().Be(accepted.Id);
+        allocations[0].Quantity.Should().Be(92); allocations[0].AllocatedAmount.Should().Be(92);
+    }
+
+    [Fact]
+    public async Task AllocationDoesNotFallbackToReceivingWhenNothingHasBeenAccepted()
+    {
+        var grn = new GoodsReceiptNote { Items = new List<GoodsReceiptNoteItem> { new() { ReceivedQuantity = 100, AcceptedQuantity = 0 } } };
+        var cost = new LandedCost { GoodsReceiptNoteId = grn.Id, Status = "Draft" };
+        var allocations = new List<LandedCostAllocation>();
+        SetupAllocationHarness(cost, grn, new List<LandedCostItem>(), allocations);
+        var action = () => CreateService().AllocateCostsAsync(cost.Id, Guid.NewGuid());
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*No accepted GRN lines*");
+        allocations.Should().BeEmpty(); cost.Status.Should().Be("Draft");
     }
 
     [Fact]
@@ -126,7 +160,7 @@ public class LandedCostServiceTests
     }
 
     [Fact]
-    public async Task AllocateCostsAsync_ByWeight_AllocatesByItemWeightTimesQty()
+    public async Task AllocateCostsAsync_ByWeight_AllocatesByCapturedWeightTimesQty()
     {
         var grnId = Guid.NewGuid();
         var landedCostId = Guid.NewGuid();
@@ -149,6 +183,7 @@ public class LandedCostServiceTests
                     GoodsReceiptNoteId = grnId,
                     InventoryItemId = inventoryA.Id,
                     InventoryItem = inventoryA,
+                    UnitWeightKg = 2m, UnitOfMeasure = "EA", WeightStockUom = "EA",
                     AcceptedQuantity = 10
                 },
                 new()
@@ -157,6 +192,7 @@ public class LandedCostServiceTests
                     GoodsReceiptNoteId = grnId,
                     InventoryItemId = inventoryB.Id,
                     InventoryItem = inventoryB,
+                    UnitWeightKg = 1m, UnitOfMeasure = "EA", WeightStockUom = "EA",
                     AcceptedQuantity = 10
                 }
             }

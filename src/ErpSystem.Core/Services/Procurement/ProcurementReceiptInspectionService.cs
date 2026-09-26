@@ -1073,8 +1073,9 @@ public sealed class ProcurementReceiptInspectionService :
                 inspection.SupplierAcknowledgementStatus, inspection.ResolutionStatus))
             throw Conflict("RCV_CLOSURE_NOT_READY",
                 "Supplier acknowledgement and evidenced return dispatch or accepted replacement are required before closure.");
-        if ((inspection.DecidedByUserId ?? inspection.SubmittedByUserId) == _currentUser.UserId ||
-            inspection.CreatedByUserId == _currentUser.UserId)
+        if (await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken) &&
+            ((inspection.DecidedByUserId ?? inspection.SubmittedByUserId) == _currentUser.UserId ||
+             inspection.CreatedByUserId == _currentUser.UserId))
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "Quality-hold closure requires an actor independent from inspection creation and approval.");
 
@@ -1088,8 +1089,9 @@ public sealed class ProcurementReceiptInspectionService :
                     inspection.SupplierAcknowledgementStatus, inspection.ResolutionStatus))
                 throw Conflict("RCV_CLOSURE_NOT_READY",
                     "Supplier acknowledgement and evidenced return dispatch or accepted replacement are required before closure.");
-            if ((inspection.DecidedByUserId ?? inspection.SubmittedByUserId) == _currentUser.UserId ||
-                inspection.CreatedByUserId == _currentUser.UserId)
+            if (await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken) &&
+                ((inspection.DecidedByUserId ?? inspection.SubmittedByUserId) == _currentUser.UserId ||
+                 inspection.CreatedByUserId == _currentUser.UserId))
                 throw new ProcurementReceiptInspectionAuthorizationException(
                     "Quality-hold closure requires an actor independent from inspection creation and approval.");
 
@@ -1158,11 +1160,11 @@ public sealed class ProcurementReceiptInspectionService :
             .AsNoTracking().GroupBy(item => item.PurchaseOrderReceiptId)
             .Select(group => group.OrderByDescending(item => item.Sequence).First())
             .ToListAsync(cancellationToken);
-        if (latest.Count != receipts.Count || latest.Any(item =>
-                !ProcurementReceiptInspectionRules.IsApMatchingResolved(
+        if (!latest.Any(item =>
+                ProcurementReceiptInspectionRules.IsApEligible(
                     item.Status, item.PendingQuantity, item.ApEligibleQuantity)))
             throw Conflict("RCV_AP_INSPECTION_NOT_ELIGIBLE",
-                "AP matching is blocked until each governed inspection either approves accepted quantities or closes a zero-eligible rejected receipt.");
+                "At least one receipt needs approved accepted quantities. Pending and rejected quantities cannot authorize invoicing.");
     }
 
     private async Task ApplyAcceptedQuantitiesAndStockAsync(

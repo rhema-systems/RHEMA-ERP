@@ -73,12 +73,7 @@ export default function BidReviewStep({ tender, bidData, uploadedDocuments = [],
               <p className="text-sm text-gray-500">Tender Type</p>
               <Badge>{tender.tenderType}</Badge>
             </div>
-            <div>
-              <p className="text-sm text-gray-500">Estimated Value</p>
-              <p className="font-medium">
-                {tender.currency} {tender.estimatedValue?.toLocaleString()}
-              </p>
-            </div>
+
           </div>
         </CardContent>
       </Card>
@@ -256,6 +251,7 @@ export default function BidReviewStep({ tender, bidData, uploadedDocuments = [],
                     <CheckCircle className="h-5 w-5 text-green-600" />
                     <div>
                       <p className="font-medium text-sm">{doc.documentName}</p>
+                      {doc.tenderBidItemId && <p className="text-xs text-gray-600">Lot {doc.lotNumber}: {doc.itemDescription}</p>}
                       <p className="text-xs text-gray-500">
                         {doc.documentType} • {doc.fileSize ? `${(doc.fileSize / 1024).toFixed(1)} KB` : 'Unknown size'}
                       </p>

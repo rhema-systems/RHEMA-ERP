@@ -246,7 +246,8 @@ public sealed class ProcurementComplianceDecisionService : IProcurementComplianc
                         ProcurementPolicyRuleKind.Authority, match.Rule.SourceDecisionKey));
                     continue;
                 }
-                if (!approval.PreventInitiatorApproval)
+                if (!approval.PreventInitiatorApproval &&
+                    await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken))
                 {
                     findings.Add(Finding("PR_AUTHORITY_WORKFLOW_SOD_INCOMPLETE",
                         $"Workflow stage '{workflowStep.Name}' does not prevent the requisition initiator from approving.",

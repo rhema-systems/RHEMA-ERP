@@ -27,7 +27,7 @@ import type { Account, Currency, SubledgerAdjustmentType, SubledgerModule } from
 import type { Customer } from '@/types/ar';
 
 const moduleSchema = z.enum(['AR', 'AP']);
-const purposeSchema = z.literal('StandardAdjustment');
+const purposeSchema = z.enum(['StandardAdjustment', 'FinanceCharge', 'Writeoff', 'OverpaymentWriteoff']);
 
 const adjustmentSchema = z.object({
     module: moduleSchema,
@@ -40,10 +40,14 @@ const adjustmentSchema = z.object({
     amount: z.number().min(0.01, 'Amount must be greater than zero'),
     currencyCode: z.string().min(3, 'Currency is required').max(3, 'Use a 3-letter currency code'),
     exchangeRate: z.number().min(0.000001, 'Exchange rate must be greater than zero'),
-    contraAccountId: z.string().min(1, 'Contra account is required'),
+    contraAccountId: z.string(),
     reference: z.string().max(100).optional(),
     reason: z.string().min(1, 'Reason is required').max(500, 'Reason cannot exceed 500 characters'),
     notes: z.string().max(2000).optional(),
+}).superRefine((value, ctx) => {
+    if (value.purpose === 'StandardAdjustment' && !value.contraAccountId) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['contraAccountId'], message: 'Contra account is required' });
+    }
 });
 
 type AdjustmentFormValues = z.infer<typeof adjustmentSchema>;
@@ -91,6 +95,7 @@ export default function NewSubledgerAdjustmentPage() {
     const [isRateLoading, setIsRateLoading] = useState(false);
     const [accountOpen, setAccountOpen] = useState(false);
     const rateRequestRef = useRef(0);
+    const [requestId] = useState(() => crypto.randomUUID());
 
     const form = useForm<AdjustmentFormValues>({
         resolver: zodResolver(adjustmentSchema),
@@ -113,6 +118,7 @@ export default function NewSubledgerAdjustmentPage() {
     });
 
     const selectedModule = form.watch('module');
+    const purpose = form.watch('purpose');
     const adjustmentType = form.watch('adjustmentType');
     const amount = Number(form.watch('amount')) || 0;
     const currencyCode = form.watch('currencyCode') || 'GHS';
@@ -267,6 +273,7 @@ export default function NewSubledgerAdjustmentPage() {
         form.setValue('businessPartnerId', '');
         form.setValue('businessPartnerRoleId', '');
         form.setValue('adjustmentType', selectedModule === 'AP' ? 'Credit' : 'Debit');
+        form.setValue('purpose', 'StandardAdjustment');
     }, [form, selectedModule]);
 
     const signedSubledgerAmount = selectedModule === 'AR'
@@ -295,6 +302,7 @@ export default function NewSubledgerAdjustmentPage() {
         setIsSubmitting(true);
         try {
             const result = await financeDataService.createSubledgerAdjustmentJournal({
+                requestId,
                 module: data.module,
                 purpose: data.purpose,
                 businessPartnerId: data.businessPartnerId,
@@ -305,7 +313,7 @@ export default function NewSubledgerAdjustmentPage() {
                 amount: data.amount,
                 currencyCode: data.currencyCode.toUpperCase(),
                 exchangeRate: data.exchangeRate,
-                contraAccountId: data.contraAccountId,
+                contraAccountId: data.contraAccountId || '00000000-0000-0000-0000-000000000000',
                 reference: data.reference || undefined,
                 reason: data.reason,
                 notes: data.notes || undefined,
@@ -381,6 +389,24 @@ export default function NewSubledgerAdjustmentPage() {
             </Breadcrumb>
 
             <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+                {selectedModule === 'AR' && <Card className="xl:col-span-2"><CardContent className="pt-6 space-y-3">
+                    <Label htmlFor="customer-adjustment-purpose">Customer adjustment purpose</Label>
+                    <Select value={purpose} onValueChange={(value: AdjustmentFormValues['purpose']) => {
+                        form.setValue('purpose', value);
+                        form.setValue('adjustmentType', value === 'Writeoff' ? 'Credit' : 'Debit');
+                        form.setValue('contraAccountId', '');
+                        if (value !== 'StandardAdjustment') {
+                            form.setValue('currencyCode', baseCurrencyCode);
+                            form.setValue('exchangeRate', 1);
+                        }
+                    }}><SelectTrigger id="customer-adjustment-purpose"><SelectValue /></SelectTrigger><SelectContent>
+                        <SelectItem value="StandardAdjustment">Standard adjustment</SelectItem>
+                        <SelectItem value="FinanceCharge">Finance charge</SelectItem>
+                        <SelectItem value="Writeoff">Writeoff</SelectItem>
+                        <SelectItem value="OverpaymentWriteoff">Overpayment writeoff (AR credit balance)</SelectItem>
+                    </SelectContent></Select>
+                    {purpose !== 'StandardAdjustment' && <p className="text-sm text-muted-foreground">Uses the customer's configured account unless you select an eligible contra account override below. Posts a customer balance adjustment in the functional currency; individual invoice settlement and customer advances use their document workflows.</p>}
+                </CardContent></Card>}
                 <Card>
                     <CardHeader>
                         <CardTitle>Adjustment Details</CardTitle>
@@ -437,6 +463,7 @@ export default function NewSubledgerAdjustmentPage() {
                             <Label>Adjustment Type</Label>
                             <Select
                                 value={adjustmentType}
+                                disabled={purpose !== 'StandardAdjustment'}
                                 onValueChange={(value: SubledgerAdjustmentType) => form.setValue('adjustmentType', value)}
                             >
                                 <SelectTrigger>
@@ -508,7 +535,7 @@ export default function NewSubledgerAdjustmentPage() {
                         </div>
 
                         <div className="space-y-2 md:col-span-2">
-                            <Label>Contra GL Account</Label>
+                            <Label>{purpose === 'StandardAdjustment' ? 'Contra GL Account' : 'Contra account override (optional)'}</Label>
                             {accountsLoading ? (
                                 <Skeleton className="h-10 w-full" />
                             ) : (
@@ -518,7 +545,7 @@ export default function NewSubledgerAdjustmentPage() {
                                     options={accountOptions}
                                     value={selectedAccountId}
                                     selectedOption={selectedAccount}
-                                    placeholder="Select contra account"
+                                    placeholder={purpose === 'StandardAdjustment' ? 'Select contra account' : 'Use customer account mapping'}
                                     searchPlaceholder="Search accounts..."
                                     emptyText="No posting accounts found."
                                     onSelect={(id) => {

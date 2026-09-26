@@ -502,6 +502,10 @@ public class TenderBidDocument : TenantEntity
     [Required]
     public Guid TenderBidId { get; set; }
 
+    /// <summary>Null for bid-level documents; otherwise the exact supplier bid line.</summary>
+    public Guid? TenderBidItemId { get; set; }
+    public virtual TenderBidItem? TenderBidItem { get; set; }
+
     [Required]
     [MaxLength(200)]
     public string DocumentName { get; set; } = string.Empty;

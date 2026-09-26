@@ -7,6 +7,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -281,7 +282,7 @@ public sealed partial class PurchaseReturnService : IPurchaseReturnService
         var value = await RequireReturnAsync(returnId);
         await RequireCapabilityAsync("procurement.inventory.adjust.approve", value.WarehouseId, null, "Approve", value.ReturnNumber);
         if (!value.ApprovalRequired || value.Status != "Submitted") throw Conflict("INV_SUPPLIER_RETURN_STATE", "Only a submitted supplier return with an approval workflow can be approved.");
-        if (value.RequestedById == userId) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return requester cannot approve the same return.");
+        if (value.RequestedById == userId && await new ProcurementSodPolicy(_unitOfWork).IsRequiredForSourceAsync(value.TenantId, WorkflowEntityType, value.Id)) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return requester cannot approve the same return.");
         if (!await _workflow.CanUserApproveAsync(WorkflowEntityType, returnId, userId))
             throw Forbidden("INV_SUPPLIER_RETURN_WORKFLOW_FORBIDDEN", "You are not assigned to the active supplier-return workflow step.");
         var result = await _workflow.ProcessApprovalAsync(WorkflowEntityType, returnId, userId, "Approve");
@@ -305,7 +306,7 @@ public sealed partial class PurchaseReturnService : IPurchaseReturnService
         var value = await RequireReturnAsync(returnId);
         await RequireCapabilityAsync("procurement.inventory.adjust.approve", value.WarehouseId, null, "Reject", value.ReturnNumber);
         if (value.Status != "Submitted") throw Conflict("INV_SUPPLIER_RETURN_STATE", "Only a submitted supplier return can be rejected.");
-        if (value.RequestedById == userId) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return requester cannot reject the same return.");
+        if (value.RequestedById == userId && await new ProcurementSodPolicy(_unitOfWork).IsRequiredForSourceAsync(value.TenantId, WorkflowEntityType, value.Id)) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return requester cannot reject the same return.");
         if (string.IsNullOrWhiteSpace(reason)) throw Validation("INV_SUPPLIER_RETURN_REJECTION_REASON", "A rejection reason is required.");
         if (!await _workflow.CanUserApproveAsync(WorkflowEntityType, returnId, userId))
             throw Forbidden("INV_SUPPLIER_RETURN_WORKFLOW_FORBIDDEN", "You are not assigned to the active supplier-return workflow step.");
@@ -333,7 +334,7 @@ public sealed partial class PurchaseReturnService : IPurchaseReturnService
                 var value = await RequireReturnAsync(returnId);
                 await RequireCapabilityAsync("procurement.inventory.issue", value.WarehouseId, null, "Ship", value.ReturnNumber);
                 if (!CanDispatchState(value)) throw Conflict("INV_SUPPLIER_RETURN_STATE", "The supplier return is not ready for dispatch.");
-                if (value.ApprovalRequired && value.ApprovedById == userId) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return approver cannot dispatch the same return.");
+                if (value.ApprovalRequired && value.ApprovedById == userId && await new ProcurementSodPolicy(_unitOfWork).IsRequiredForSourceAsync(value.TenantId, WorkflowEntityType, value.Id)) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return approver cannot dispatch the same return.");
                 if (!value.ApprovalRequired && await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, value.Id))
                     throw Conflict("INV_SUPPLIER_RETURN_WORKFLOW_RETAINED", "An existing active approval instance must be completed before dispatch.");
                 await ValidateSourceAsync(value);

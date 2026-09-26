@@ -1554,7 +1554,22 @@ public sealed class BankingSettlementService : IBankingSettlementService
         var activeAllocations = loaded.CustomerPayment.Allocations.Where(value => !value.IsReversal).ToArray();
         var activeAppliedAmount = activeAllocations.Sum(value => value.AllocatedAmount + value.DiscountAmount);
         var discountToReverse = activeAllocations.Sum(value => value.DiscountAmount);
-        if (discountToReverse > 0m && settings.DiscountAllowedAccountId == null)
+        // Reverse the receipt's actual discount account, even if its customer or
+        // Finance default has changed since posting. Legacy untagged receipts
+        // retain their existing Finance-default resolution.
+        Guid? discountReversalAccountId = settings.DiscountAllowedAccountId;
+        if (discountToReverse > 0m && loaded.CustomerPayment.JournalEntryId.HasValue)
+        {
+            var originalAccounts = await _context.AccountTransactions
+                .Where(line => line.TenantId == tenantId && !line.IsDeleted &&
+                    line.JournalEntryId == loaded.CustomerPayment.JournalEntryId.Value &&
+                    line.TransactionTag == "AR-Discount" && line.DebitAmount > 0m)
+                .Select(line => line.AccountId).Distinct().ToListAsync(cancellationToken);
+            if (originalAccounts.Count > 1)
+                throw new InvalidOperationException("The original receipt contains multiple discount accounts; reconcile its discount distribution before returning the cheque.");
+            if (originalAccounts.Count == 1) discountReversalAccountId = originalAccounts[0];
+        }
+        if (discountToReverse > 0m && discountReversalAccountId == null)
         {
             throw new InvalidOperationException(
                 "Configure the discount-allowed account before reversing a cheque receipt that used a payment discount.");
@@ -1672,7 +1687,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
                         ReturnedChequeProducer(), share.Evidence.Id, settings.ControlAccountArId.Value,
                         loaded.ReturnDate, cancellationToken);
                     var discountDimensions = await _settlementDimensions.ResolvePostingDimensionsAsync(
-                        ReturnedChequeProducer(), share.Evidence.Id, settings.DiscountAllowedAccountId!.Value,
+                        ReturnedChequeProducer(), share.Evidence.Id, discountReversalAccountId!.Value,
                         loaded.ReturnDate, cancellationToken);
                     lines.Add(new FinancePostingLineDto
                     {
@@ -1687,7 +1702,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
                     });
                     lines.Add(new FinancePostingLineDto
                     {
-                        AccountId = settings.DiscountAllowedAccountId.Value,
+                        AccountId = discountReversalAccountId!.Value,
                         CreditAmount = share.Amount,
                         TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
                         TransactionCreditAmount = share.Amount,
@@ -1706,7 +1721,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
                         ?? Array.Empty<FinancePostingDimensionValueDto>()
                     : await _sourceDimensions.ResolvePostingDimensionsAsync(
                         ReturnedChequeProducer(), loaded.Id, customerLineId,
-                        settings.DiscountAllowedAccountId!.Value, loaded.ReturnDate, cancellationToken);
+                        discountReversalAccountId!.Value, loaded.ReturnDate, cancellationToken);
                 lines.Add(new FinancePostingLineDto
                 {
                     AccountId = settings.ControlAccountArId.Value,
@@ -1721,7 +1736,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 });
                 lines.Add(new FinancePostingLineDto
                 {
-                    AccountId = settings.DiscountAllowedAccountId!.Value,
+                    AccountId = discountReversalAccountId!.Value,
                     CreditAmount = discountToReverse,
                     TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
                     TransactionCreditAmount = discountToReverse,

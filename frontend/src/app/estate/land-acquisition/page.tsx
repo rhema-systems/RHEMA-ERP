@@ -2,6 +2,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
+import { SupplierInvoiceWorkspaceButton } from '@/components/procurement/SupplierInvoiceWorkspaceButton';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowRight,
@@ -4319,7 +4320,7 @@ function WorkspaceDialog({
 
     if (!accountsPayableInvoiceId || !accountsPayableSupplierId) return;
     const params = new URLSearchParams({
-      supplierId: accountsPayableSupplierId,
+      businessPartnerId: accountsPayableSupplierId,
       invoiceId: accountsPayableInvoiceId,
       amount: `${values.amountDue || ''}`,
       referenceNumber: item.projectReference,
@@ -4716,6 +4717,9 @@ function WorkspaceDialog({
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {accountsPayableInvoiceId && (
+                      <SupplierInvoiceWorkspaceButton invoiceId={accountsPayableInvoiceId} />
+                    )}
+                    {accountsPayableInvoiceId && (
                       <Button
                         type="button"
                         size="sm"
@@ -4738,6 +4742,7 @@ function WorkspaceDialog({
                       </Button>
                     )}
                     {accountsPayableInvoiceId ? (
+                      (Boolean(accountsPayablePaymentId) || ['Approved', 'PartiallyPaid', 'Overdue'].includes(String(values.accountsPayableInvoiceStatus))) &&
                       <Button
                         type="button"
                         size="sm"
@@ -4962,7 +4967,9 @@ function WorkspaceDialog({
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {otherAccountsPayableInvoiceId && <SupplierInvoiceWorkspaceButton invoiceId={otherAccountsPayableInvoiceId} />}
                     {otherAccountsPayableInvoiceId ? (
+                      (Boolean(otherAccountsPayablePaymentId) || ['Approved', 'PartiallyPaid', 'Overdue'].includes(String(values.otherAccountsPayableInvoiceStatus))) &&
                       <Button
                         type="button"
                         size="sm"

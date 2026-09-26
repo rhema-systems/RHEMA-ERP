@@ -1,9 +1,9 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import BidDocumentsStep from './BidDocumentsStep';
 import { parseBidDocumentRequirements } from './documentRequirements';
-import type { CreateTenderBidDto } from '@/services/tenderBidService';
+import type { CreateTenderBidDto, TenderBidDocumentDto } from '@/services/tenderBidService';
 import type { TenderDetailDto } from '@/services/tenderService';
 
 const show = (requiredDocuments?: string) => render(<BidDocumentsStep
@@ -11,6 +11,25 @@ const show = (requiredDocuments?: string) => render(<BidDocumentsStep
   tender={{ requiredDocuments } as TenderDetailDto} />);
 
 describe('Published bid document requirements', () => {
+  it('does not count item evidence as a required bid-level document', () => {
+    render(<BidDocumentsStep bidData={{} as CreateTenderBidDto} updateBidData={vi.fn()} bidId="saved-bid"
+      tender={{ requiredDocuments: JSON.stringify([{ documentType: 'TaxClearance', documentName: 'Tax evidence', isRequired: true }]) } as TenderDetailDto}
+      uploadedDocuments={[{ id: 'doc-1', documentName: 'item-tax.pdf', documentType: 'TaxClearance', tenderBidItemId: 'line-1' } as TenderBidDocumentDto]} />);
+    expect(screen.queryByText('item-tax.pdf')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose File' })).toBeInTheDocument();
+  });
+
+  it('requires confirmation before removing a saved document', async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+    render(<BidDocumentsStep bidData={{} as CreateTenderBidDto} updateBidData={vi.fn()} bidId="saved-bid"
+      tender={{ requiredDocuments: JSON.stringify([{ documentType: 'TaxClearance', documentName: 'Tax evidence', isRequired: true }]) } as TenderDetailDto}
+      uploadedDocuments={[{ id: 'doc-1', documentName: 'tax.pdf', documentType: 'TaxClearance' } as TenderBidDocumentDto]}
+      onDocumentDelete={remove} />);
+    fireEvent.click(screen.getByRole('button', { name: /remove/i }));
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove document' }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith('doc-1'));
+  });
   it.each([undefined, '', '[]'])('does not invent requirements for %s', value => {
     show(value);
     expect(screen.getByText(/no supporting document requirements/)).toBeInTheDocument();

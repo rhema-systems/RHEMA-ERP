@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
@@ -1091,7 +1092,7 @@ public class AssetDisposalService : IAssetDisposalService
                 && item.Id == dto.BuyerBusinessPartnerId.Value
                 && !item.IsDeleted
                 && item.IsActive
-                && (item.PartnerType == "Customer" || item.PartnerType == "Both"));
+                && BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType));
         if (buyer == null)
         {
             throw new InvalidOperationException("The selected disposal buyer must be an active same-tenant customer/business partner.");

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
@@ -53,7 +55,10 @@ public class ProcurementSettingsService : IProcurementSettingsService
                 _currentUserProvider.TenantId,
                 _currentUserProvider.UserId);
 
+            var oldControls = new { settings.AutoCloseTenders, settings.EnforceSegregationOfDuties };
             // Update settings
+            if (dto.EnforceSegregationOfDuties.HasValue) settings.EnforceSegregationOfDuties = dto.EnforceSegregationOfDuties.Value;
+            if (dto.AutoCloseTenders.HasValue) settings.AutoCloseTenders = dto.AutoCloseTenders.Value;
             settings.AutoCreateInventoryItems = dto.AutoCreateInventoryItems;
             settings.AutoCreateSupplierItems = dto.AutoCreateSupplierItems;
             settings.AllowNonInventoryItems = dto.AllowNonInventoryItems;
@@ -74,6 +79,25 @@ public class ProcurementSettingsService : IProcurementSettingsService
             settings.Notes = dto.Notes;
             settings.UpdatedAt = DateTime.UtcNow;
 
+            if (oldControls.AutoCloseTenders != settings.AutoCloseTenders ||
+                oldControls.EnforceSegregationOfDuties != settings.EnforceSegregationOfDuties)
+            {
+                await _unitOfWork.Repository<AuditLog>().AddAsync(new AuditLog
+                {
+                    TenantId = _currentUserProvider.TenantId,
+                    UserId = _currentUserProvider.UserId,
+                    Username = _currentUserProvider.Username,
+                    Action = "PROCUREMENT_CONTROLS_CHANGED",
+                    Resource = "ProcurementSettings",
+                    ResourceId = settings.Id.ToString(),
+                    OldValues = JsonSerializer.Serialize(oldControls),
+                    NewValues = JsonSerializer.Serialize(new { settings.AutoCloseTenders, settings.EnforceSegregationOfDuties }),
+                    Timestamp = DateTime.UtcNow,
+                    IpAddress = "Unknown",
+                    CreatedBy = _currentUserProvider.FullName,
+                    CreatedById = _currentUserProvider.UserId
+                });
+            }
             await _settingsRepository.UpdateAsync(settings);
             await _unitOfWork.SaveChangesAsync();
 
@@ -179,6 +203,8 @@ public class ProcurementSettingsService : IProcurementSettingsService
         {
             Id = settings.Id,
             TenantId = settings.TenantId,
+            AutoCloseTenders = settings.AutoCloseTenders,
+            EnforceSegregationOfDuties = settings.EnforceSegregationOfDuties,
             AutoCreateInventoryItems = settings.AutoCreateInventoryItems,
             AutoCreateSupplierItems = settings.AutoCreateSupplierItems,
             AllowNonInventoryItems = settings.AllowNonInventoryItems,

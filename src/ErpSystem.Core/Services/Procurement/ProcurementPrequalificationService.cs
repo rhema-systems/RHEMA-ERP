@@ -107,7 +107,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
             .AsNoTracking().ToListAsync(cancellationToken);
         var suppliers = await Suppliers.GetQueryable(item => item.TenantId == _currentUser.TenantId && item.IsActive &&
                 !item.IsBlacklisted && !item.IsDeleted &&
-                (item.PartnerType == "Supplier" || item.PartnerType == "Both" || item.PartnerType == "Contractor"))
+                BusinessPartnerRoles.ProcurementTypes.Contains(item.PartnerType))
             .OrderBy(item => item.PartnerName).AsNoTracking().ToListAsync(cancellationToken);
         if (_currentUser.IsExternalUser)
         {

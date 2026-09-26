@@ -30,6 +30,10 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
+    <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierInvoiceBoundaryTests.cs" />
+    <Compile Include="Controllers\Procurement\EstateSupplierInvoiceLineageTests.cs" />
     <Compile Include="Services\Workflow\OptionalApprovalConfigurationTests.cs" />
     <Compile Include="Services\Workflow\PurchaseReturnWorkflowRegistrationTests.cs" />
     <Compile Include="Services\Workflow\SalesAgreementOptionalApprovalTests.cs" />
@@ -72,6 +76,7 @@
     <Compile Include="Controllers\Finance\ChequesControllerTests.cs" />
     <Compile Include="Controllers\Finance\BankStatementsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\BusinessPartnersControllerContactRouteTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderBidDocumentBoundaryTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementConfigurationProfilesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementComplianceDecisionsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementPolicySetsControllerTests.cs" />
@@ -221,6 +226,16 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementClassificationLayoutPhase3Tests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.DistributionEditing.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementInvoiceDistributionControllerTests.cs" />
+    <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.PartnerDefaults.cs" />
+    <Compile Include="Services\Finance\PartnerReceivablesDefaultsCompatibilityTests.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.PartnerCharges.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.SupplierTax.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.SupplierWriteoffs.cs" />
+    <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.PartnerDefaults.cs" />
+    <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.PartnerDefaults.cs" />
+    <Compile Include="Services\Finance\CustomerPostingSettingsFixture.cs" />
     <Compile Include="Services\Finance\CanonicalVendorInvoiceBusinessPartnerTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />

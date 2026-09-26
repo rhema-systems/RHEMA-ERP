@@ -9,13 +9,16 @@ import { FileText, Upload, X, CheckCircle, Download, Loader2 } from 'lucide-reac
 import { toast } from 'sonner';
 import { type CreateTenderBidDto, type TenderBidDocumentDto } from '@/services/tenderBidService';
 import { type TenderDetailDto, type TenderDocumentRequirement } from '@/services/tenderService';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { BidLotItemDocuments } from './BidLotItemDocuments';
+import { validateBidDocumentFile } from './bid-document-files';
 
 interface BidDocumentsStepProps {
   bidData: CreateTenderBidDto;
   updateBidData: (updates: Partial<CreateTenderBidDto>) => void;
   bidId?: string; // Bid ID if already created (for draft)
   uploadedDocuments?: TenderBidDocumentDto[]; // Already uploaded documents
-  onDocumentUpload?: (file: File, documentType: string) => Promise<void>;
+  onDocumentUpload?: (file: File, documentType: string, tenderItemId?: string) => Promise<void>;
   onDocumentDelete?: (documentId: string) => Promise<void>;
   tender?: TenderDetailDto | null; // Tender details with requirements
 }
@@ -31,6 +34,7 @@ export default function BidDocumentsStep({
 }: BidDocumentsStepProps) {
   const [uploading, setUploading] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({});
+  const [documentToDelete, setDocumentToDelete] = useState<string | null>(null);
 
   const { documentRequirements, requirementsError } = useMemo(() => {
     try {
@@ -46,37 +50,8 @@ export default function BidDocumentsStep({
     // Find the requirement for this document type
     const requirement = documentRequirements.find(req => req.documentType === documentType);
 
-    // Validate file size
-    const maxSizeMB = requirement?.maxFileSizeMB || 20;
-    const maxSizeBytes = maxSizeMB * 1024 * 1024;
-    if (file.size > maxSizeBytes) {
-      toast.error(`File size must be less than ${maxSizeMB}MB`);
-      return;
-    }
-
-    // Validate file type
-    if (requirement?.allowedFileTypes) {
-      const allowedExtensions = requirement.allowedFileTypes.split(',').map(ext => ext.trim().toLowerCase());
-      const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
-
-      if (!allowedExtensions.includes(fileExtension)) {
-        toast.error(`Only ${requirement.allowedFileTypes} files are allowed`);
-        return;
-      }
-    } else {
-      // Default validation
-      const allowedTypes = [
-        'application/pdf',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'image/jpeg',
-        'image/png'
-      ];
-      if (!allowedTypes.includes(file.type)) {
-        toast.error('Only PDF, DOC, DOCX, JPG, and PNG files are allowed');
-        return;
-      }
-    }
+    const fileError = validateBidDocumentFile(file, requirement);
+    if (fileError) { toast.error(fileError); return; }
 
     setSelectedFiles(prev => ({ ...prev, [documentType]: file }));
   };
@@ -99,34 +74,33 @@ export default function BidDocumentsStep({
       toast.success('Document uploaded successfully');
     } catch (error) {
       console.error('Error uploading document:', error);
-      toast.error('Failed to upload document');
+      toast.error(error instanceof Error ? error.message : 'Failed to upload document');
     } finally {
       setUploading(null);
     }
   };
 
-  const handleDelete = async (documentId: string) => {
-    if (!onDocumentDelete) return;
-
-    if (!confirm('Are you sure you want to delete this document?')) {
-      return;
-    }
+  const confirmDelete = async () => {
+    if (!onDocumentDelete || !documentToDelete) return false;
 
     try {
-      await onDocumentDelete(documentId);
+      await onDocumentDelete(documentToDelete);
       toast.success('Document deleted successfully');
+      setDocumentToDelete(null);
+      return true;
     } catch (error) {
       console.error('Error deleting document:', error);
-      toast.error('Failed to delete document');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete document');
+      return false;
     }
   };
 
   const getUploadedDocument = (documentType: string) => {
-    return uploadedDocuments.find(doc => doc.documentType === documentType);
+    return uploadedDocuments.find(doc => !doc.tenderBidItemId && doc.documentType === documentType);
   };
 
   const isDocumentUploaded = (documentType: string) => {
-    return uploadedDocuments.some(doc => doc.documentType === documentType);
+    return uploadedDocuments.some(doc => !doc.tenderBidItemId && doc.documentType === documentType);
   };
 
   return (
@@ -203,7 +177,8 @@ export default function BidDocumentsStep({
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleDelete(uploadedDoc.id)}
+                            disabled={!onDocumentDelete}
+                            onClick={() => setDocumentToDelete(uploadedDoc.id)}
                           >
                             <X className="h-4 w-4 mr-1" />
                             Remove
@@ -266,6 +241,15 @@ export default function BidDocumentsStep({
           </div>
         </CardContent>
       </Card>
+
+      <BidLotItemDocuments tender={tender} bidData={bidData} bidId={bidId}
+        documents={uploadedDocuments} onUpload={onDocumentUpload}
+        onDelete={onDocumentDelete ? setDocumentToDelete : undefined} />
+
+      <ConfirmationDialog open={documentToDelete !== null}
+        onOpenChange={open => { if (!open) setDocumentToDelete(null); }}
+        title="Remove bid document?" description="Remove this supporting document from the draft bid?"
+        confirmText="Remove document" variant="destructive" onConfirm={confirmDelete} />
 
       {/* Upload Guidelines */}
       {documentRequirements.length > 0 && <Card className="bg-yellow-50 border-yellow-200">

@@ -46,6 +46,9 @@ public class LandedCostSupplierInvoiceTests
     private readonly FinancePostingProducerContext _producer = new(FinanceDimensionRouteId.FinanceApVendorInvoice);
     private bool _transaction;
     private readonly Mock<ILandedCostService> _landed = new();
+    private readonly List<LandedCostSupplierDocument> _documents = new();
+    private readonly FinanceSettings _settings;
+    private readonly GoodsReceiptNote _receipt;
     private readonly Mock<IWorkflowIntegrationService> _approval = new();
     private readonly Mock<IFinancePostingEngine> _finance = new();
 
@@ -59,6 +62,9 @@ public class LandedCostSupplierInvoiceTests
         _freight = new LandedCostItem { TenantId = _tenant, LandedCostId = _cost.Id, LandedCost = _cost, Description = "Freight", Amount = 310, AmountInBaseCurrency = 310, Currency = "GHS", ExchangeRate = 1 };
         _handling = new LandedCostItem { TenantId = _tenant, LandedCostId = _cost.Id, LandedCost = _cost, Description = "Handling", Amount = 50, AmountInBaseCurrency = 50, Currency = "GHS", ExchangeRate = 1 };
         _cost.Items = new List<LandedCostItem> { _freight, _handling };
+        _receipt = new GoodsReceiptNote { TenantId = _tenant, GRNNumber = "GRN-LC-TEST" };
+        _cost.GoodsReceiptNoteId = _receipt.Id;
+        Repo(new List<GoodsReceiptNote> { _receipt }); Repo(_documents); Repo(new List<AuditLog>());
         _journal = new JournalEntry { TenantId = _tenant };
         _posting = new FinancePostingEvent { TenantId = _tenant, SourceDocumentId = _cost.Id, SourceModule = "Inventory", SourceDocumentType = "InventoryLandedCost", PostingAction = "PostLandedCost", PostingStatus = "Posted", JournalEntryId = _journal.Id };
         _credit = new AccountTransaction { TenantId = _tenant, JournalEntryId = _journal.Id, AccountId = _accrual.Id, CreditAmount = 360, FunctionalCurrencyCode = "GHS" };
@@ -68,7 +74,8 @@ public class LandedCostSupplierInvoiceTests
         Repo(_partnerRoles); Repo(_apProfiles);
         Repo(new List<JournalEntry> { _journal }); Repo(new List<FinancePostingEvent> { _posting });
         Repo(new List<AccountTransaction> { _credit }); Repo(new List<Account> { _accrual, _ap });
-        Repo(new List<FinanceSettings> { new() { TenantId = _tenant, BaseCurrency = "GHS", ControlAccountApId = _ap.Id, ControlAccountGRVAccrualId = Guid.NewGuid() } });
+        _settings = new FinanceSettings { TenantId = _tenant, BaseCurrency = "GHS", ControlAccountApId = _ap.Id, ControlAccountGRVAccrualId = Guid.NewGuid() };
+        Repo(new List<FinanceSettings> { _settings });
         Repo(new List<PaymentTerm>()); Repo(new List<FinancePurchaseOrderReceipt>()); Repo(_lines);
         var invoiceRepo = Repo(_invoices);
         invoiceRepo.Setup(r => r.AddAsync(It.IsAny<VendorInvoice>())).ReturnsAsync((VendorInvoice invoice) =>
@@ -131,6 +138,35 @@ public class LandedCostSupplierInvoiceTests
             EffectiveFrom = new DateTime(2020, 1, 1),
             SubjectToWithholding = false
         });
+    }
+
+    [Fact]
+    public async Task ExplicitApRoleIsPreservedAndCannotChangeOnChargeReplay()
+    {
+        AddTransactionReadyApRole(_partner, BusinessPartnerRoleType.Contractor);
+        var contractor = _partnerRoles.Single(role => role.RoleType == BusinessPartnerRoleType.Contractor);
+        var request = Request();
+        foreach (var charge in request.Charges) charge.BusinessPartnerRoleId = contractor.Id;
+        var created = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, request, _producer));
+        Assert.Equal(contractor.Id, created.BusinessPartnerRoleId);
+        Assert.Equal(created.Id, Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, request, _producer)).Id);
+        foreach (var charge in request.Charges) charge.BusinessPartnerRoleId = _partnerRoles.First().Id;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.CreateFromLandedCostAsync(_cost.Id, request, _producer));
+        Assert.Single(_invoices);
+    }
+
+    [Fact]
+    public async Task PreparationPreservesExplicitApRoleForDualRolePartner()
+    {
+        AddTransactionReadyApRole(_partner, BusinessPartnerRoleType.Contractor);
+        var contractor = _partnerRoles.Single(role => role.RoleType == BusinessPartnerRoleType.Contractor);
+        var request = new PostLandedCostDto { InvoiceDate = new DateTime(2026, 9, 9),
+            Charges = new() {
+                new() { CostItemId = _freight.Id, BusinessPartnerId = _partner.Id, BusinessPartnerRoleId = contractor.Id, SupplierInvoiceNumber = "DUAL-ROLE" },
+                new() { CostItemId = _handling.Id, BusinessPartnerId = _partner.Id, BusinessPartnerRoleId = contractor.Id, SupplierInvoiceNumber = "DUAL-ROLE" }
+            } };
+        var result = await _service.PrepareLandedCostInvoicesAsync(_cost.Id, request, _producer);
+        Assert.Equal(contractor.Id, Assert.Single(result.Invoices).BusinessPartnerRoleId);
     }
 
     [Fact]
@@ -225,10 +261,10 @@ public class LandedCostSupplierInvoiceTests
     }
 
     [Theory]
-    [InlineData("not-posted")] [InlineData("foreign")] [InlineData("reversed")] [InlineData("bad-credit")]
+    [InlineData("draft")] [InlineData("foreign")] [InlineData("reversed")] [InlineData("bad-credit")]
     public async Task MissingOrInvalidPostedSourceCannotGenerateInvoices(string reason)
     {
-        if (reason == "not-posted") _cost.Status = "Allocated";
+        if (reason == "draft") _cost.Status = "Draft";
         if (reason == "foreign") _cost.TenantId = Guid.NewGuid();
         if (reason == "reversed") _journal.ReversalJournalEntryId = Guid.NewGuid();
         if (reason == "bad-credit") _credit.CreditAmount = 359;
@@ -348,36 +384,72 @@ public class LandedCostSupplierInvoiceTests
     };
 
     [Fact]
-    public async Task OnePostCreatesPendingTaxDraftAndRetryDoesNotRepostInventory()
+    public async Task PreparationCreatesPendingTaxDraftAndDocumentsWithoutPostingInventory()
     {
-        _cost.Status = "Allocated";
-        var result = await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
-        Assert.True(result.InventoryPosted); Assert.False(result.InvoicesPending);
+        _cost.Status = "Allocated"; _settings.ControlAccountGRVAccrualId = _accrual.Id;
+        var result = await _service.PrepareLandedCostInvoicesAsync(_cost.Id, PostRequest(), _producer);
+        Assert.False(result.InventoryPosted); Assert.False(result.InvoicesPending);
         var invoice = Assert.Single(result.Invoices);
         Assert.Equal(VendorInvoiceStatus.Draft, invoice.Status); Assert.Equal(0, invoice.TaxAmount);
         Assert.All(invoice.LineItems, l => Assert.Equal(TaxTreatment.PendingReview, l.TaxTreatment));
-        var again = await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
+        var again = await _service.PrepareLandedCostInvoicesAsync(_cost.Id, PostRequest(), _producer);
         Assert.Equal(invoice.Id, Assert.Single(again.Invoices).Id);
-        _landed.Verify(s => s.PostToInventoryAsync(_cost.Id, It.IsAny<Guid>()), Times.Once);
+        Assert.Equal("Allocated", _cost.Status);
+        Assert.Equal(2, _documents.Count);
+        Assert.All(_documents, d => { Assert.Equal(_receipt.Id, d.GoodsReceiptNoteId); Assert.Equal(_partner.Id, d.BusinessPartnerId); });
+        _landed.Verify(s => s.PostToInventoryAsync(_cost.Id, It.IsAny<Guid>()), Times.Never);
+        _finance.Verify(f => f.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LegacyPostEntryRejectsBeforeAnyMutation()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer));
+        Assert.Empty(_invoices); Assert.Empty(_documents);
+        _landed.Verify(s => s.PostToInventoryAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]
     public async Task AlreadyPostedVoucherGeneratesOnlyDrafts()
     {
-        var result = await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
+        var result = await _service.PrepareLandedCostInvoicesAsync(_cost.Id, PostRequest(), _producer);
         Assert.Single(result.Invoices); _landed.Verify(s => s.PostToInventoryAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
     }
 
-    [Fact]
-    public async Task InvoiceFailureAfterInventoryPostingIsPendingAndSafelyRecoverable()
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task InvoicePostOwnsValuationAndApTransactionAndRollsBackFailure(bool failAp)
     {
-        _cost.Status = "Allocated"; _credit.CreditAmount = 359;
-        var result = await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
-        Assert.True(result.InventoryPosted); Assert.True(result.InvoicesPending); Assert.Empty(result.Invoices);
-        Assert.Equal("BILL-1", _freight.ReferenceNumber); Assert.Equal(_partner.Id, _freight.SupplierId);
-        _credit.CreditAmount = 360;
-        var again = await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
-        Assert.False(again.InvoicesPending); Assert.Single(again.Invoices);
+        _cost.Status = "Allocated"; _settings.ControlAccountGRVAccrualId = _accrual.Id;
+        await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer);
+        var invoice = Assert.Single(_invoices);
+        invoice.Status = VendorInvoiceStatus.Approved; invoice.ApprovalStatus = "Approved";
+        _landed.Setup(s => s.PostToInventoryAsync(_cost.Id, It.IsAny<Guid>())).ReturnsAsync(() =>
+        { Assert.True(_transaction); _cost.Status = "Posted"; return true; });
+        var journalId = Guid.NewGuid();
+        _finance.Setup(f => f.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                Assert.True(_transaction); Assert.Equal("Posted", _cost.Status);
+                if (failAp) throw new InvalidOperationException("AP posting failed");
+                return new FinancePostingResultDto { JournalEntryId = journalId, PostingEventId = Guid.NewGuid(), WasDuplicate = invoice.JournalEntryId.HasValue };
+            });
+        if (failAp)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => _service.PostAsync(invoice.Id));
+            Assert.Null(invoice.JournalEntryId);
+            _unit.Verify(u => u.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
+            // Preparation alone committed. The posting owner rolls valuation and AP back together.
+            _unit.Verify(u => u.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        }
+        else
+        {
+            var posted = await _service.PostAsync(invoice.Id);
+            Assert.NotNull(posted.JournalEntryId);
+            var retry = await _service.PostAsync(invoice.Id);
+            Assert.Equal(posted.JournalEntryId, retry.JournalEntryId);
+            _unit.Verify(u => u.CommitAsync(It.IsAny<CancellationToken>()), Times.Exactly(3));
+        }
         _landed.Verify(s => s.PostToInventoryAsync(_cost.Id, It.IsAny<Guid>()), Times.Once);
     }
 
@@ -385,20 +457,20 @@ public class LandedCostSupplierInvoiceTests
     [InlineData("supplier")] [InlineData("reference")] [InlineData("missing-line")] [InlineData("foreign")] [InlineData("draft")]
     public async Task InvalidBillingNeverPostsInventory(string reason)
     {
-        _cost.Status = "Allocated"; var request = PostRequest();
+        _cost.Status = "Allocated"; _settings.ControlAccountGRVAccrualId = _accrual.Id; var request = PostRequest();
         if (reason == "supplier") request.Charges[0].BusinessPartnerId = Guid.Empty;
         if (reason == "reference") request.Charges[0].SupplierInvoiceNumber = "";
         if (reason == "missing-line") request.Charges.RemoveAt(0);
         if (reason == "foreign") _cost.TenantId = Guid.NewGuid();
         if (reason == "draft") _cost.Status = "Draft";
-        await Assert.ThrowsAnyAsync<Exception>(() => _service.PostLandedCostAsync(_cost.Id, request, _producer));
+        await Assert.ThrowsAnyAsync<Exception>(() => _service.PrepareLandedCostInvoicesAsync(_cost.Id, request, _producer));
         _landed.Verify(s => s.PostToInventoryAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never); Assert.Empty(_invoices);
     }
 
     [Fact]
     public async Task PendingTaxBlocksSubmitApprovalAndPostingUntilReviewed()
     {
-        await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
+        await _service.PrepareLandedCostInvoicesAsync(_cost.Id, PostRequest(), _producer);
         var invoice = Assert.Single(_invoices);
         await Assert.ThrowsAsync<InvalidOperationException>(() => _service.SubmitForApprovalAsync(invoice.Id));
         invoice.Status = VendorInvoiceStatus.PendingApproval;
@@ -408,7 +480,7 @@ public class LandedCostSupplierInvoiceTests
         foreach (var line in invoice.LineItems) line.TaxTreatment = TaxTreatment.OutOfScope;
         var posting = await BuildPosting(invoice);
         Assert.Equal(360, posting.Lines.Sum(l => l.DebitAmount));
-        var again = await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
+        var again = await _service.PrepareLandedCostInvoicesAsync(_cost.Id, PostRequest(), _producer);
         Assert.Equal(invoice.Id, Assert.Single(again.Invoices).Id);
         Assert.All(invoice.LineItems, l => Assert.Equal(TaxTreatment.OutOfScope, l.TaxTreatment));
     }
@@ -416,7 +488,7 @@ public class LandedCostSupplierInvoiceTests
     [Fact]
     public async Task SubmitLoadsTaxLinesBeforeFreezingOrStartingWorkflow()
     {
-        await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
+        await _service.PrepareLandedCostInvoicesAsync(_cost.Id, PostRequest(), _producer);
         var invoice = Assert.Single(_invoices);
         // A real header lookup does not Include line items. The final check must use
         // the loaded lines, not rely on entities already being tracked by creation.
@@ -506,7 +578,7 @@ public class LandedCostSupplierInvoiceTests
     [Fact]
     public async Task NoApproval_StillRequiresLandedCostTaxReviewBeforeWorkflowOrPosting()
     {
-        await _service.PostLandedCostAsync(_cost.Id, PostRequest(), _producer);
+        await _service.PrepareLandedCostInvoicesAsync(_cost.Id, PostRequest(), _producer);
         var invoice = Assert.Single(_invoices);
         SetSubmission(invoice.Id, required: false);
 

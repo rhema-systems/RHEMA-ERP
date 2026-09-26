@@ -27,10 +27,14 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementSupplierOnboardingTokenServiceTests
 {
-    [Fact]
-    public async Task IssueOptionsReturnTenantDraftsWithoutExistingTokens()
+    [Theory]
+    [InlineData("Supplier")]
+    [InlineData(BusinessPartnerRoles.CustomerAndSupplier)]
+    public async Task IssueOptionsReturnTenantDraftsWithoutExistingTokens(string partnerType)
     {
         await using var fixture = new Fixture(paid: false);
+        fixture.Registration.PartnerType = partnerType;
+        await fixture.Context.SaveChangesAsync();
 
         var beforeIssue = await fixture.Service.GetIssueOptionsAsync(
             "issue-options-before");
