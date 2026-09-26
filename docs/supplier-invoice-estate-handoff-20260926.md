@@ -75,7 +75,17 @@ Shared integration surfaces include `VendorInvoiceService`, AP DTOs/model, the A
 
 ## Verification status
 
-Implementation and final checks are in progress. This document is the integration contract, not a release sign-off. Before merge readiness is claimed, record the final normal build, focused backend/UI test results, migration review and the live verification limits below.
+Finance PR 255 is integrated. Draft PR 256 packages the reviewed supplier/Estate changes; this document remains an integration contract rather than a release sign-off.
+
+Final canonical contract verification on 26 September:
+
+- API invoice contracts: **402 passed, zero skipped**, covering Estate lineage, Procurement boundaries, Auto Invoice, landed cost, AP/AR posting and replay, payments, partner defaults and adjustments. One separate migration-discovery case is deliberately excluded because fast EF builds omit historical migration designer metadata; its normal-build gate remains open.
+- Core partner defaults and procurement budget selection: **52 passed, zero skipped**.
+- Frontend: **38 focused tests passed**, followed by **5 Auto Invoice role tests passed** after its final role-selection change (overlapping runs, not 43 distinct tests). Scoped TypeScript passed.
+- Core, Data, API and test contract assemblies compiled using the supported fast EF build with analyzers disabled. These are contract-test artifacts, not a normal migration deployment build.
+- The first compiled SQL migration run exposed three missing parentheses in two archived prerequisite migrations linked into the test project. Those predicates were corrected. Direct execution of the extracted SQL passed **25 checks** against a fresh disposable database, which was removed afterward. Existing databases were not changed. The rebuilt, combined C3/C4 SQL migration suite then passed **15 of 15 tests with zero skips**, covering real SQL application, preflight rejection, schema reconciliation, lineage constraints and bounded rollback.
+
+Evidence is retained in `tmp/procurement-validation-20260925/` and `tmp/c3-c4-actual-precursor-source-sql-verification-20260926.log`. The normal full migration/analyzer build, canonical database migration/discovery and live Estate-to-posting lifecycle remain open gates.
 
 Prior live checks used `http://localhost:3000`, API `http://127.0.0.1:5003`, and `RhemaERP_Procurement_Verification_20260925`. Those results predate the Finance canonical merge and are not validation of the new database model. Startup seeding and background workers remain disabled for verification. Record the separate Finance-based copy and fresh checks when prepared.
 
