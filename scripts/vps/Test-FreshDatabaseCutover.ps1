@@ -89,13 +89,15 @@ function Assert-DeploymentId {
 }
 function Assert-FreshDatabaseServiceIdentity { Add-TestEvent 'check-identity' }
 function Get-FreshExpectedMigrationIds { return @('migration-one','migration-two') }
+function Get-RhemaOperationalPassword { return 'fixture-only-bootstrap' }
 function Invoke-RhemaFreshDatabaseProvisioning {
     param([string]$SourceConnectionString,[string]$FreshDatabaseName,[string]$StagedApiDirectory,
-        [string[]]$ExpectedMigrationIds,[string]$WorkDirectory)
+        [string[]]$ExpectedMigrationIds,[string]$WorkDirectory,[string]$OperationalUatPassword)
     Add-TestEvent 'provision'
     Assert-True ($script:Services.RhemaERPAPI -eq 'Running' -and $script:Services.RhemaERPFrontend -eq 'Running') 'Provisioning must precede service interruption.'
     Assert-True ($SourceConnectionString -like '*Initial Catalog=OriginalDb*') 'Provisioning lost original database identity.'
     Assert-True ($ExpectedMigrationIds.Count -eq 2) 'Provisioning lost expected migration IDs.'
+    Assert-True ($OperationalUatPassword -eq 'fixture-only-bootstrap') 'Fresh cutover did not request operational account seeding.'
     if($script:Failure -eq 'provision') { throw 'Injected provisioning failure' }
     $builder=New-Object System.Data.SqlClient.SqlConnectionStringBuilder $SourceConnectionString
     $builder['Initial Catalog']=$FreshDatabaseName

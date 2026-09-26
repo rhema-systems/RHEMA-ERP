@@ -148,9 +148,11 @@ if (args.Length > 0 && args[0] == "seed")
 // and master data. Existing passwords and tenant-owned master records are preserved.
 if (args.Length > 0 && args[0] == "seed-operational-uat")
 {
+    var migrationCommandOptions = MigrationCommandOptions.Parse(args);
     var tempBuilder = CreateSeedBuilder(args);
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
-    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddHttpContextAccessor();
+    tempBuilder.Services.AddErpSystemCliDatabase(tempBuilder.Configuration, migrationCommandOptions.CommandTimeoutSeconds);
     tempBuilder.Services.AddErpSystemIdentity();
     tempBuilder.Services.AddDatabaseSeeding();
 
@@ -287,10 +289,13 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 }
 
 // Check for full database seeding command (roles, workflows, modules, etc.)
-if (args.Length > 0 && args[0] == "seed-db")
+if (args.Length > 0 && args[0] is "seed-db" or "seed-deployment-uat")
 {
     var migrationCommandOptions = MigrationCommandOptions.Parse(args);
     var tempBuilder = CreateSeedBuilder(args);
+    var includeOperationalUat = args[0] == "seed-deployment-uat";
+    if (includeOperationalUat && string.IsNullOrWhiteSpace(tempBuilder.Configuration["UatBootstrap:SharedPassword"]))
+        throw new InvalidOperationException("Deployment UAT seeding requires the protected UatBootstrap__SharedPassword setting.");
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
@@ -312,6 +317,11 @@ if (args.Length > 0 && args[0] == "seed-db")
 
         var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
         await seedingService.SeedAsync();
+        if (includeOperationalUat)
+        {
+            db.ChangeTracker.Clear();
+            await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.OperationalUatBaselineSeeder>().SeedAsync();
+        }
     }
 
     Console.WriteLine("✅ Database seeding completed!");
@@ -573,7 +583,7 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
         $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, "
-        + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, "
+        + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-deployment-uat, seed-operational-uat, seed-workflows, "
         + "seed-supplier-onboarding-e2e, seed-hr-all, seed-hr-org-authority, seed-hr-demo, "
         + "seed-finance-baseline, seed-finance-demo-dimensions, rebuild-db, repair-finance-po-schema.");
     return;

@@ -110,9 +110,18 @@ function Invoke-NativeChecked {
         [string[]]$Arguments,
         [string]$FailureMessage
     )
-    & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "$FailureMessage (exit code $LASTEXITCODE)."
+    # Build/dependency/browser tools do not need the account-bootstrap secret.
+    # The dedicated deployment helper still inherits it for seed-only calls.
+    $nativePriorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $null, 'Process')
+        & $Command @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "$FailureMessage (exit code $LASTEXITCODE)."
+        }
+    } finally {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $nativePriorOperationalPassword, 'Process')
+        $nativePriorOperationalPassword = $null
     }
 }
 
@@ -915,6 +924,8 @@ function Write-RunResult {
 
 Push-Location $RepositoryRoot
 $freshApplyAttempted = $false
+$priorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+$operationalPasswordPrompted = $false
 try {
     Assert-True ([string]::IsNullOrWhiteSpace($FreshDatabaseName) -or $LocalVps) `
         'Fresh database cutover must run directly on the VPS with -LocalVps.'
@@ -1027,6 +1038,10 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         exit 0
     }
 
+    if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
+        Assert-True ([bool]$LocalVps) 'Set protected UatBootstrap__SharedPassword on the VPS or run with -LocalVps for the secure account-password prompt.'
+    }
+
     Assert-CommandExists 'dotnet'
     Assert-CommandExists 'npm.cmd'
     Assert-CommandExists 'robocopy.exe'
@@ -1063,6 +1078,21 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         }
     })
 
+    if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
+        $secureOperationalPassword = Read-Host 'Initial password for NEW Procurement, Inventory and QS test accounts (existing passwords are preserved)' -AsSecureString
+        $passwordPointer = [IntPtr]::Zero
+        try {
+            $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureOperationalPassword)
+            $operationalPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
+            Assert-True (-not [string]::IsNullOrWhiteSpace($operationalPassword)) 'An initial account password is required.'
+            [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $operationalPassword, 'Process')
+            $operationalPasswordPrompted = $true
+        } finally {
+            if ($passwordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
+            $secureOperationalPassword.Dispose(); $operationalPassword=$null
+        }
+    }
+
     Invoke-Step 'Apply API, migrations, and frontend' {
         if ($FreshDatabaseName) { $script:freshApplyAttempted = $true }
         Invoke-RemoteHelper $remoteHelperPath 'Apply' @{
@@ -1078,6 +1108,12 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
             ApiReadyTimeoutSeconds = $ApiReadyTimeoutSeconds
         }
     } | Out-Host
+
+    if (-not $FreshDatabaseName) {
+        Invoke-Step 'Seed and verify Procurement, Inventory and QS baseline' {
+            Invoke-RemoteHelper $remoteHelperPath 'SeedOperational' @{ DeploymentId=$deploymentId }
+        } | Out-Host
+    }
 
     $verifyOutput = @(Invoke-Step 'Verify deployed services and database' {
         Invoke-RemoteHelper $remoteHelperPath 'Verify' @{
@@ -1142,5 +1178,9 @@ catch {
     throw
 }
 finally {
+    if ($operationalPasswordPrompted) {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $priorOperationalPassword, 'Process')
+    }
+    $priorOperationalPassword=$null
     Pop-Location
 }

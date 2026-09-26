@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Preflight', 'Backup', 'Apply', 'ResumeFrontend', 'Verify', 'RollbackFresh', 'CompleteFresh')]
+    [ValidateSet('Preflight', 'Backup', 'Apply', 'SeedOperational', 'ResumeFrontend', 'Verify', 'RollbackFresh', 'CompleteFresh')]
     [string]$Action,
 
     [string]$DeploymentId,
@@ -37,6 +37,7 @@ function Assert-True {
 }
 
 __RHEMA_FRESHDATABASEPROVISIONING_LIBRARY__
+__RHEMA_OPERATIONALUATVERIFICATION_LIBRARY__
 __RHEMA_FRESHDATABASECUTOVER_LIBRARY__
 
 $UsesNssmApiConfiguration = -not (Test-Path -LiteralPath $ApiServiceXml)
@@ -186,6 +187,39 @@ function Get-DatabaseConnectionString {
     Assert-True (-not [string]::IsNullOrWhiteSpace($value)) `
         'Database connection setting is missing from the API service configuration.'
     return $value
+}
+
+function Get-RhemaOperationalPassword {
+    param([switch]$Optional)
+    $value = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [string](Get-ApiServiceEnvironment)['UatBootstrap__SharedPassword']
+    }
+    if ([string]::IsNullOrWhiteSpace($value) -and -not $Optional) {
+        throw 'Operational account bootstrap password is missing. Use the LocalVps secure prompt or protected UatBootstrap__SharedPassword setting.'
+    }
+    return $value
+}
+
+function Invoke-OperationalSeed {
+    Assert-DeploymentId
+    $connectionString = Get-DatabaseConnectionString
+    $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder $connectionString
+    $work = Join-Path $PackagesRoot "operational-$DeploymentId"
+    Assert-True (-not (Test-Path -LiteralPath $work)) 'Operational seed work directory already exists; review its evidence before retrying.'
+    [void](New-Item -ItemType Directory -Path $work)
+    $settings = @{ Logging=@{LogLevel=@{Default='Warning'}}; Serilog=@{MinimumLevel=@{Default='Warning'};WriteTo=@(@{Name='Console'})} }
+    [IO.File]::WriteAllText((Join-Path $work 'appsettings.json'), ($settings | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    try {
+        $command = Invoke-RhemaFreshApiCli -ApiExecutable (Join-Path $ApiRoot 'ErpSystem.Api.exe') `
+            -ContentRoot $work -ConnectionString $connectionString -Command 'seed-operational-uat' `
+            -OperationalUatPassword (Get-RhemaOperationalPassword)
+        $snapshot = Get-RhemaOperationalSeedSnapshot $connectionString $builder.InitialCatalog
+        Assert-RhemaOperationalSeedReadiness $snapshot
+        $evidence = [ordered]@{ database=$builder.InitialCatalog; command=$command; operationalSeed=$snapshot }
+        [IO.File]::WriteAllText((Join-Path $work 'verification.json'), ($evidence | ConvertTo-Json -Depth 7), (New-Object Text.UTF8Encoding($false)))
+        Write-Output 'OPERATIONAL_SEED|PASS'
+    } finally { $connectionString=$null; $builder=$null }
 }
 
 function Invoke-DatabaseTable {
@@ -769,6 +803,9 @@ function Invoke-Preflight {
 
     $environment = Get-ApiServiceEnvironment
     Assert-SyncfusionLicenseConfigured
+    if ([string]::IsNullOrWhiteSpace((Get-RhemaOperationalPassword -Optional))) {
+        Write-Output 'UAT_CREDENTIAL|REQUIRED'
+    } else { Write-Output 'UAT_CREDENTIAL|CONFIGURED' }
     $requiredSettings = @{
         'StartupInitialization__SeedDevelopmentData' = 'true'
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
@@ -1638,6 +1675,7 @@ switch ($Action) {
     'Preflight' { Invoke-Preflight }
     'Backup' { Invoke-Backup }
     'Apply' { Invoke-Apply }
+    'SeedOperational' { Invoke-OperationalSeed }
     'ResumeFrontend' { Invoke-ResumeFrontend }
     'Verify' { Invoke-Verify }
     'RollbackFresh' { Restore-FreshDatabaseCutover }

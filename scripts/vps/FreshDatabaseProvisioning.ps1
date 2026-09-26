@@ -66,8 +66,9 @@ SELECT CASE WHEN EXISTS(SELECT 1 FROM sys.databases WHERE name=N'$FreshDatabaseN
 
 function Invoke-RhemaFreshApiCli {
     param([string]$ApiExecutable, [string]$ContentRoot, [string]$ConnectionString,
-          [ValidateSet('apply-migrations','seed-db')][string]$Command,
-          [int]$TimeoutSeconds = 3600)
+          [ValidateSet('apply-migrations','seed-db','seed-deployment-uat','seed-operational-uat')][string]$Command,
+          [int]$TimeoutSeconds = 3600,
+          [string]$OperationalUatPassword)
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $ApiExecutable
     $start.WorkingDirectory = $ContentRoot
@@ -95,12 +96,14 @@ function Invoke-RhemaFreshApiCli {
         DOTNET_CLI_TELEMETRY_OPTOUT='1'; DOTNET_PROCESSOR_COUNT='2'; DOTNET_GCHeapHardLimit='0x100000000'
     }
     foreach ($entry in $environment.GetEnumerator()) { $start.EnvironmentVariables[$entry.Key] = [string]$entry.Value }
+    if (-not [string]::IsNullOrWhiteSpace($OperationalUatPassword)) {
+        $start.EnvironmentVariables['UatBootstrap__SharedPassword'] = $OperationalUatPassword
+    }
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $start
     $began = [DateTime]::UtcNow
     $evidence = $null
-    Write-Host "FRESH_PROGRESS|Starting $Command on the separate database. The existing application remains running."
-    $evidence = $null
+    Write-Host "FRESH_PROGRESS|Starting $Command. Runtime credentials and raw seed output are suppressed."
     try {
         [void]$process.Start()
         $outTask = $process.StandardOutput.ReadToEndAsync()
@@ -156,7 +159,8 @@ function Invoke-RhemaFreshDatabaseProvisioning {
           [Parameter(Mandatory=$true)][string]$FreshDatabaseName,
           [Parameter(Mandatory=$true)][string]$StagedApiDirectory,
           [Parameter(Mandatory=$true)][string[]]$ExpectedMigrationIds,
-          [Parameter(Mandatory=$true)][string]$WorkDirectory)
+          [Parameter(Mandatory=$true)][string]$WorkDirectory,
+          [string]$OperationalUatPassword)
     $builder = Get-RhemaFreshConnectionBuilder $SourceConnectionString $FreshDatabaseName
     $expected = @($ExpectedMigrationIds | Sort-Object -Unique)
     if ($expected.Count -eq 0 -or $expected.Count -ne $ExpectedMigrationIds.Count -or
@@ -189,11 +193,25 @@ function Invoke-RhemaFreshDatabaseProvisioning {
         $actual = @($history.Rows | ForEach-Object { [string]$_.MigrationId })
         if (($actual -join "`n") -cne ($expected -join "`n")) { throw 'Release migration history mismatch.' }
         $stage = 'SeedFirstPass'
-        $steps += Invoke-RhemaFreshApiCli $exe $contentRoot $newConnection 'seed-db'
+        $seedCommand = if ([string]::IsNullOrWhiteSpace($OperationalUatPassword)) { 'seed-db' } else { 'seed-deployment-uat' }
+        $steps += Invoke-RhemaFreshApiCli $exe $contentRoot $newConnection $seedCommand -OperationalUatPassword $OperationalUatPassword
         $first = Get-RhemaFreshSeedCounts $newConnection $FreshDatabaseName
+        $operationalFirst = $null
+        if ($seedCommand -eq 'seed-deployment-uat') {
+            $stage = 'VerifyOperationalFirstPass'
+            $operationalFirst = Get-RhemaOperationalSeedSnapshot $newConnection $FreshDatabaseName
+            Assert-RhemaOperationalSeedReadiness $operationalFirst
+        }
         $stage = 'SeedSecondPass'
-        $steps += Invoke-RhemaFreshApiCli $exe $contentRoot $newConnection 'seed-db'
+        $steps += Invoke-RhemaFreshApiCli $exe $contentRoot $newConnection $seedCommand -OperationalUatPassword $OperationalUatPassword
         $second = Get-RhemaFreshSeedCounts $newConnection $FreshDatabaseName
+        $operationalSecond = $null
+        if ($operationalFirst) {
+            $stage = 'VerifyOperationalSecondPass'
+            $operationalSecond = Get-RhemaOperationalSeedSnapshot $newConnection $FreshDatabaseName
+            Assert-RhemaOperationalSeedReadiness $operationalSecond
+            if ($operationalFirst.Fingerprint -cne $operationalSecond.Fingerprint) { throw 'Operational UAT repeat seeding changed governed seed identities or master data.' }
+        }
         $stage = 'VerifySeedIdempotency'
         if (($first | ConvertTo-Json -Compress) -cne ($second | ConvertTo-Json -Compress)) { throw 'Second seed pass changed canonical baseline counts.' }
         if ($second.BusinessPartnerRoles -lt 1 -or $second.BusinessPartnerApProfileVersions -lt 1 -or
@@ -214,16 +232,23 @@ SELECT (SELECT COUNT_BIG(*) FROM sys.foreign_keys WHERE is_disabled=1 OR is_not_
         return [pscustomobject]@{
             ConnectionString=$newConnection; DatabaseName=$FreshDatabaseName; MigrationIds=$actual;
             SeedCounts=$second; CliEvidence=$steps; PhysicalIntegrityPassed=$true; ForeignKeysTrusted=$true
+            OperationalSeed=$operationalSecond
         }
     } catch {
         $safeReason = ''
         if ($_.Exception.Message -cmatch '^Fresh database SQL operation failed \(SQL number (-?\d+|unavailable)\)\.') {
             $safeReason = ' SQL error number: ' + $Matches[1] + '.'
-        } elseif ($_.Exception.Message -cmatch '^Fresh database CLI (apply-migrations|seed-db) failed or timed out \(exit code (-?\d+|unavailable)\)\.') {
+        } elseif ($_.Exception.Message -cmatch '^Fresh database CLI (apply-migrations|seed-db|seed-deployment-uat|seed-operational-uat) failed or timed out \(exit code (-?\d+|unavailable)\)\.') {
             $safeReason = ' CLI exit code: ' + $Matches[2] + '.'
         }
         $safeException = New-Object InvalidOperationException "Fresh provisioning failed at $stage.$safeReason Existing application database remains unchanged; new target $FreshDatabaseName is retained for review. No raw command output or connection details were persisted."
         $failureEvidence = [ordered]@{ Stage=$stage; Database=$FreshDatabaseName; Reason=$safeReason }
+        if ($stage -eq 'VerifyOperationalFirstPass' -and $null -ne $operationalFirst) {
+            $failureEvidence.OperationalFailures = @($operationalFirst.Failures)
+        }
+        if ($stage -eq 'VerifyOperationalSecondPass' -and $null -ne $operationalSecond) {
+            $failureEvidence.OperationalFailures = @($operationalSecond.Failures)
+        }
         if ($_.Exception.Data.Contains('SafeCliEvidence')) {
             $diagnostics = $_.Exception.Data['SafeCliEvidence']
             $safeException.Data['SafeCliEvidence'] = $diagnostics

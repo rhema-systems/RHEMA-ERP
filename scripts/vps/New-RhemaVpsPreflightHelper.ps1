@@ -38,7 +38,7 @@ function New-RhemaVpsPreflightHelper {
     $marker = '__RHEMA_CANONICAL_PREFLIGHT_BUNDLE__'
     if ([regex]::Matches($source, $marker).Count -ne 1) { throw 'Expected one preflight bundle placeholder.' }
     $source = $source.Replace($marker, $encoded)
-    foreach ($library in @('FreshDatabaseProvisioning', 'FreshDatabaseCutover')) {
+    foreach ($library in @('FreshDatabaseProvisioning', 'OperationalUatVerification', 'FreshDatabaseCutover')) {
         $libraryMarker = "__RHEMA_$($library.ToUpperInvariant())_LIBRARY__"
         if ([regex]::Matches($source, $libraryMarker).Count -ne 1) { throw "Expected one $library library placeholder." }
         $source = $source.Replace($libraryMarker, [IO.File]::ReadAllText((Join-Path $probeRoot "$library.ps1")))

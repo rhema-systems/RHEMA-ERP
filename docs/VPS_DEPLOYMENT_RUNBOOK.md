@@ -108,8 +108,9 @@ command itself repeats preflight before any build/backup/apply stage.
 Use this only when a separate fresh test database has been approved. It preserves
 the current database and its users, settings and transactions; those records are
 **not copied into the new application database**. The fresh database receives the
-current canonical development seed. Obtain seeded sign-in details through the
-existing protected administrator process; the deploy script does not print them.
+current canonical development seed plus the operational module baseline below.
+Obtain administrator sign-in details through the existing protected process;
+the deploy script does not print credentials.
 This is a one-time cutover option. For later releases, omit `-FreshDatabaseName`
 and use the normal deployment path against the newly configured database.
 
@@ -170,6 +171,49 @@ failure before restarting services. The matching generated helper supports
 `-Action RollbackFresh -DeploymentId <id> -ExpectedCommit <full-sha>
 -FreshDatabaseName <name>` for an interrupted, uncommitted cutover. It refuses a
 different release/database or an already committed cutover.
+
+### Procurement, Inventory and QS deployment seeds
+
+Test deployments automatically run the operational baseline. Fresh cutovers run
+`seed-deployment-uat` (base plus operational seeds) twice before changing services,
+and verify stable identities and master data. Later ordinary deployments run
+`seed-operational-uat` after migrations and verify its database results.
+
+| Area | Dedicated usernames |
+|---|---|
+| Procurement | `procurementofficer`, `procurementapprover`, `procurementevaluator`, `tdc0102-checker-201531` |
+| Inventory / Stores | `storesofficer`, `storesmanager` |
+| Quantity Survey | `uat.qs.preparer`, `uat.qs.reviewer`, `uat.qs.approver` |
+| Finance review for procurement | `financereviewer`, `financeapprover` |
+
+Accounts receive DEFAULT tenant membership and their existing module roles.
+The baseline also augments the established administrator, manager, employee,
+AP officer and Finance manager actors for the UAT workflow. Existing passwords
+are not reset. New dedicated accounts use `UatBootstrap__SharedPassword` from
+protected VPS configuration or the current deployment process. If absent,
+`-LocalVps` prompts securely after package creation and verified backups, immediately
+before applying the release. The input is inherited by the deployment helper and
+passed through the isolated seed process environment. Native build, dependency
+and browser tools have this setting removed from their environment, including
+when it was supplied to the deployment process in advance. It is not written
+to service settings, command arguments or deployment evidence. Dry run never
+prompts or seeds; it reports only whether this setting is configured. SSH mode
+requires the protected setting to exist on the VPS. The initial password needs
+at least 8 characters, including uppercase, lowercase, a digit and a symbol.
+Distribute it through your protected process.
+
+Inventory fixtures include 5 units of measure, 6 categories, 2 warehouses
+(`DEMO-PM`, `WH-02`), 3 locations and 9 items with base/purchase/stocking UOM
+links. Stores access includes both warehouses. The seeder adds the canonical
+supplier fixtures and required warehouse responsibilities. It creates no stock
+balances, invoices, payments or journals. Existing master records and draft
+supplier profiles are preserved; readiness conflicts stop verification for review
+instead of silently changing user-owned data.
+
+Fresh provisioning evidence includes `operationalSeed` counts and a fingerprint.
+Normal deployment evidence is under
+`C:\RhemaERP\packages\operational-<deployment-id>\verification.json`.
+Neither includes passwords, hashes of passwords or contact details.
 Provisioning failures retain sanitized stage, exit/SQL codes and output hashes in
 `C:\RhemaERP\packages\fresh-<deployment-id>\failure.json`; raw CLI output and
 connection strings are excluded.

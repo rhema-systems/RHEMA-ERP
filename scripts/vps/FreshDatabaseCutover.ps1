@@ -53,11 +53,12 @@ function Invoke-FreshDatabaseCutover {
     }
     $result = Invoke-RhemaFreshDatabaseProvisioning -SourceConnectionString $source.ConnectionString `
         -FreshDatabaseName $FreshDatabaseName -StagedApiDirectory $StageApi `
-        -ExpectedMigrationIds (Get-FreshExpectedMigrationIds) -WorkDirectory (Join-Path $PackagesRoot "fresh-$DeploymentId")
+        -ExpectedMigrationIds (Get-FreshExpectedMigrationIds) -WorkDirectory (Join-Path $PackagesRoot "fresh-$DeploymentId") `
+        -OperationalUatPassword (Get-RhemaOperationalPassword)
     $provisionEvidence = [ordered]@{
         database = $FreshDatabaseName; migrations = $result.MigrationIds; seedCounts = $result.SeedCounts
         commands = $result.CliEvidence; physicalIntegrityPassed = $result.PhysicalIntegrityPassed
-        foreignKeysTrusted = $result.ForeignKeysTrusted
+        foreignKeysTrusted = $result.ForeignKeysTrusted; operationalSeed = $result.OperationalSeed
     }
     [IO.File]::WriteAllText((Join-Path $Backup 'fresh-provisioning.json'), ($provisionEvidence | ConvertTo-Json -Depth 6),
         (New-Object Text.UTF8Encoding($false)))
