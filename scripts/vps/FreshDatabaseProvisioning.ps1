@@ -98,6 +98,7 @@ function Invoke-RhemaFreshApiCli {
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $start
     $began = [DateTime]::UtcNow
+    $evidence = $null
     Write-Host "FRESH_PROGRESS|Starting $Command on the separate database. The existing application remains running."
     $evidence = $null
     try {
@@ -222,7 +223,22 @@ SELECT (SELECT COUNT_BIG(*) FROM sys.foreign_keys WHERE is_disabled=1 OR is_not_
             $safeReason = ' CLI exit code: ' + $Matches[2] + '.'
         }
         $safeException = New-Object InvalidOperationException "Fresh provisioning failed at $stage.$safeReason Existing application database remains unchanged; new target $FreshDatabaseName is retained for review. No raw command output or connection details were persisted."
-        if ($_.Exception.Data.Contains('SafeCliEvidence')) { $safeException.Data['SafeCliEvidence'] = $_.Exception.Data['SafeCliEvidence'] }
+        $failureEvidence = [ordered]@{ Stage=$stage; Database=$FreshDatabaseName; Reason=$safeReason }
+        if ($_.Exception.Data.Contains('SafeCliEvidence')) {
+            $diagnostics = $_.Exception.Data['SafeCliEvidence']
+            $safeException.Data['SafeCliEvidence'] = $diagnostics
+            # Only this explicit allowlist survives the child PowerShell boundary.
+            # Never serialize the exception, its full Data dictionary or raw output.
+            $failureEvidence.Cli = [ordered]@{
+                Command=$diagnostics.Command; ExitCode=$diagnostics.ExitCode; Seconds=$diagnostics.Seconds
+                OutputSha256=$diagnostics.OutputSha256; ExceptionTypes=$diagnostics.ExceptionTypes
+                SqlErrorNumbers=$diagnostics.SqlErrorNumbers; GuardCodes=$diagnostics.GuardCodes
+            }
+        }
+        try {
+            [IO.File]::WriteAllText((Join-Path $contentRoot 'failure.json'), ($failureEvidence | ConvertTo-Json -Depth 5),
+                (New-Object Text.UTF8Encoding($false)))
+        } catch { } # Preserve the original failure even if evidence cannot be written.
         throw $safeException
     } finally { $newConnection=$null; $builder=$null }
 }

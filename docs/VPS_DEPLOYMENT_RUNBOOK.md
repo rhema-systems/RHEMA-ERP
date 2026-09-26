@@ -168,6 +168,9 @@ failure before restarting services. The matching generated helper supports
 `-Action RollbackFresh -DeploymentId <id> -ExpectedCommit <full-sha>
 -FreshDatabaseName <name>` for an interrupted, uncommitted cutover. It refuses a
 different release/database or an already committed cutover.
+Provisioning failures retain sanitized stage, exit/SQL codes and output hashes in
+`C:\RhemaERP\packages\fresh-<deployment-id>\failure.json`; raw CLI output and
+connection strings are excluded.
 
 Regression checks (no deployment):
 

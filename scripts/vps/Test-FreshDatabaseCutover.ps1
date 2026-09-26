@@ -314,8 +314,76 @@ try {
     $script:Events.Clear(); $script:freshApplyAttempted=$true; $script:MockRollbackFailure=$true
     Assert-TestThrows $catchProbe '*Injected public smoke failure*'
     Assert-True ($script:Events.Contains('remote:RollbackFresh')) 'Root did not attempt rollback after late failure.'
+
+    # Exercise the real CLI failed-start catch without starting any executable.
+    # An inherited PowerShell variable must never become diagnostic evidence.
+    $provisionTokens=$null; $provisionErrors=$null
+    $provisionAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'FreshDatabaseProvisioning.ps1'),[ref]$provisionTokens,[ref]$provisionErrors)
+    Assert-True ($provisionErrors.Count -eq 0) 'Provisioning library must parse.'
+    foreach($functionName in @('Assert-RhemaFreshDatabaseName','Get-RhemaFreshConnectionBuilder','Invoke-RhemaFreshApiCli','Invoke-RhemaFreshDatabaseProvisioning')) {
+        $functionNode=$provisionAst.Find({param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
+        },$true)
+        Assert-True ($null -ne $functionNode) "Provisioning function is missing: $functionName"
+        Invoke-Expression $functionNode.Extent.Text
+    }
+    $evidence=[pscustomobject]@{ UnexpectedSecret='caller-only-evidence-marker'; ExitCode=99 }
+    $startFailure=$false
+    try {
+        Invoke-RhemaFreshApiCli -ApiExecutable (Join-Path $testRoot 'nonexistent\missing.exe') -ContentRoot $testRoot `
+            -ConnectionString 'Server=fixture;Database=RhemaERP_DiagnosticFixture;Integrated Security=True' `
+            -Command 'apply-migrations' -TimeoutSeconds 1 | Out-Null
+    } catch {
+        Assert-True (-not $_.Exception.Data.Contains('SafeCliEvidence')) 'Failed process start inherited caller diagnostic evidence.'
+        Assert-True ($_.Exception.Message -like '*exit code unavailable*' -and $_.Exception.Message -notmatch 'caller-only-evidence-marker|99') 'Failed-start message leaked caller evidence.'
+        $startFailure=$true
+    }
+    Assert-True $startFailure 'Nonexistent executable unexpectedly started.'
+
+    # Run the actual provisioning stage catch with SQL/CLI boundaries mocked.
+    # Its durable failure artifact must select allowed metadata rather than
+    # serializing arbitrary exception.Data properties or source connections.
+    $diagnosticStage=Join-Path $testRoot 'diagnostics\api'
+    foreach($file in @('ErpSystem.Api.exe','ErpSystem.Api.dll','ErpSystem.Data.dll','ErpSystem.Api.runtimeconfig.json')) {
+        Write-TestMarker (Join-Path $diagnosticStage $file) 'non-executable-test-fixture'
+    }
+    $diagnosticWork=Join-Path $testRoot 'diagnostics\work'
+    $script:DiagnosticSqlCalls=0
+    function Test-RhemaFreshDatabaseTarget {
+        param([string]$SourceConnectionString,[string]$FreshDatabaseName)
+        Assert-True ($FreshDatabaseName -eq 'RhemaERP_DiagnosticFixture') 'Diagnostic fixture selected wrong target.'
+    }
+    function Invoke-RhemaFreshSql {
+        param([string]$ConnectionString,[string]$ExpectedDatabase,[string]$Sql)
+        $script:DiagnosticSqlCalls++
+        Assert-True ($ExpectedDatabase -eq 'master' -and $Sql.Contains('CREATE DATABASE [RhemaERP_DiagnosticFixture]')) 'Unexpected SQL operation during injected CLI failure.'
+        return ,(New-Object System.Data.DataTable)
+    }
+    function Invoke-RhemaFreshApiCli {
+        param([string]$ApiExecutable,[string]$ContentRoot,[string]$ConnectionString,[string]$Command)
+        $failure=New-Object InvalidOperationException 'Fresh database CLI apply-migrations failed or timed out (exit code 17).'
+        $failure.Data['SafeCliEvidence']=[pscustomobject]@{
+            Command=$Command; ExitCode=17; Seconds=2.5; OutputSha256=('A'*64)
+            ExceptionTypes=@('System.InvalidOperationException'); SqlErrorNumbers=@('51727'); GuardCodes=@('CANONICAL_FIXTURE')
+            UnexpectedSecret='unexpected-diagnostic-secret'; SourceConnectionString=$ConnectionString
+        }
+        throw $failure
+    }
+    Assert-TestThrows {
+        Invoke-RhemaFreshDatabaseProvisioning `
+            -SourceConnectionString 'Server=fixture;Database=OriginalDb;User ID=fixture;Password=source-secret-only' `
+            -FreshDatabaseName 'RhemaERP_DiagnosticFixture' -StagedApiDirectory $diagnosticStage `
+            -ExpectedMigrationIds @('20260916132000_DisposableDevelopmentCurrentModelBaseline') -WorkDirectory $diagnosticWork
+    } '*Fresh provisioning failed at ApplyMigrations*CLI exit code: 17*'
+    Assert-True ($script:DiagnosticSqlCalls -eq 1) 'Provisioning continued after injected CLI failure.'
+    $failureText=Get-Content -Raw -LiteralPath (Join-Path $diagnosticWork 'failure.json')
+    $failureRecord=$failureText | ConvertFrom-Json
+    Assert-True ($failureRecord.Stage -eq 'ApplyMigrations' -and $failureRecord.Database -eq 'RhemaERP_DiagnosticFixture') 'Durable diagnostics lost stage or target identity.'
+    Assert-True ($failureRecord.Cli.ExitCode -eq 17 -and $failureRecord.Cli.OutputSha256 -eq ('A'*64) -and $failureRecord.Cli.Command -eq 'apply-migrations') 'Durable diagnostics lost allowed CLI metadata.'
+    Assert-True ($failureText -notmatch 'UnexpectedSecret|unexpected-diagnostic-secret|SourceConnectionString|source-secret-only|Password|caller-only-evidence-marker') 'Durable diagnostics leaked non-allowlisted evidence or credentials.'
     Write-Host 'PASS: provisioning isolation; partial swap/API/frontend failure rollback; late verification rollback; NSSM/WinSW secret/file preservation; unrelated and committed deployment rejection.'
     Write-Host 'PASS: actual deployment Apply flag scope and outer catch rollback dispatch, identity, original-error preservation and pre-Apply isolation.'
+    Write-Host 'PASS: failed-start evidence scope isolation and allowlisted durable provisioning failure diagnostics; no real SQL or CLI executed.'
 } finally {
     $resolved=[IO.Path]::GetFullPath($testRoot)
     $parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
