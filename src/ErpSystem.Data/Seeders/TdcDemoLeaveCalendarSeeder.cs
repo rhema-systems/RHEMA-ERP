@@ -220,7 +220,11 @@ public class TdcDemoLeaveCalendarSeeder
                 CountWeekendsAsLeave = false,
                 CountHolidaysAsLeave = false,
                 AllowCarryOver = false,
-                MinServiceMonthsToAccess = 3
+                MinServiceMonthsToAccess = 3,
+
+                // Round 5, lane H (decision A5): days beyond the limit may be charged to annual
+                // leave, as in the public service, with HR deciding at the final approval.
+                AllowOffsetAgainstAnnual = true
             },
             new()
             {

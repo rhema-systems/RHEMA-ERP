@@ -348,7 +348,10 @@ public class LeaveReminderService : ILeaveReminderService
                             && r.Status == LeaveStatus.Approved
                             && r.ObservanceConfirmedDate == null
                             && r.StartDate >= today
-                            && r.StartDate <= startHorizon)
+                            && r.StartDate <= startHorizon
+                            // The annual part of a split (round 5, lane H) begins while the employee
+                            // is already away on its first part: that part was the one asked about.
+                            && r.SplitFromRequestId == null)
             .Select(r => new { r.Id, r.RequestNumber, r.EmployeeId, r.StartDate, LeaveTypeName = r.LeaveType!.Name })
             .ToListAsync(cancellationToken);
 
@@ -368,12 +371,19 @@ public class LeaveReminderService : ILeaveReminderService
         // `Close` existed, refused before the end date, and nobody was ever prompted to use it — so
         // approved leave stayed approved for ever (R-10). This is the prompt.
         var closureDue = today.AddDays(-policy.LeaveClosureGraceDays);
+        // ⚠ Round 5, lane H: a request whose absence goes on as annual leave is not over when its
+        // own end date passes. It is closed with its annual part, so chasing it would ask for a
+        // confirmation the service routes to the part still running.
+        var splitRequests = _unitOfWork.Repository<LeaveRequest>().GetQueryable();
         var unclosed = await _unitOfWork.Repository<LeaveRequest>()
             .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
                             && (r.Status == LeaveStatus.Approved || r.Status == LeaveStatus.InProgress)
                             && r.ClosureDate == null
                             && r.EndDate <= closureDue
-                            && r.EndDate >= backlogFloor)
+                            && r.EndDate >= backlogFloor
+                            && !splitRequests.Any(a => a.SplitFromRequestId == r.Id && !a.IsDeleted
+                                                    && (a.Status == LeaveStatus.Approved || a.Status == LeaveStatus.InProgress)
+                                                    && a.ClosureDate == null))
             .Select(r => new { r.Id, r.RequestNumber, r.EmployeeId, r.EndDate, LeaveTypeName = r.LeaveType!.Name })
             .ToListAsync(cancellationToken);
 

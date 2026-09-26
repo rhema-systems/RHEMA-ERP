@@ -132,6 +132,12 @@ export default function LeaveTypeDetailPage() {
             <InfoRow label="Counts holidays" value={yn(t.countHolidaysAsLeave)} />
             <InfoRow label="Requires approval" value={yn(t.requiresApproval)} />
             <InfoRow label="Requires reliever" value={yn(t.requiresReliever)} />
+            {t.category === 'Other' && (
+              <InfoRow
+                label="Beyond the limit"
+                value={t.allowOffsetAgainstAnnual ? 'May be charged to annual leave' : 'Refused'}
+              />
+            )}
             <InfoRow label="Has sub-types" value={yn(t.hasSubTypes)} />
           </InfoCard>
 

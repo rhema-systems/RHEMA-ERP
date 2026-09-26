@@ -297,6 +297,8 @@ public class LeaveService : ILeaveService
                     $"'{subType.SubTypeName}' has been retired and cannot be requested.");
         }
 
+        RefuseExcessToAnnualAsk(leaveType, dto.ChargeExcessToAnnual);
+
         // A request raised FROM a plan carries its id. The join has existed since the port and
         // nothing ever wrote it, so an approved plan dead-ended and the employee re-keyed their own
         // dates (closure plan L-9 / R-1). Now that a screen writes it, it needs guarding: the plan
@@ -368,11 +370,9 @@ public class LeaveService : ILeaveService
 
         var accruedAvailable = await GetAccruedAvailableDaysAsync(
             dto.EmployeeId, dto.LeaveTypeId, dto.LeaveSubTypeId, currentYear, balance);
-        if (accruedAvailable < totalDays)
-        {
-            throw new InvalidOperationException(
-                $"Insufficient accrued leave balance. Available: {accruedAvailable} days, Requested: {totalDays} days");
-        }
+        await EnsureDaysCoveredAsync(
+            dto.EmployeeId, leaveType, dto.StartDate, dto.EndDate, totalDays, accruedAvailable, dto.ChargeExcessToAnnual,
+            $"Insufficient accrued leave balance. Available: {accruedAvailable} days, Requested: {totalDays} days");
 
         // The sub-type's own annual cap, which nothing enforced before wave D (L-28 / decision D-2).
         if (dto.LeaveSubTypeId is Guid capSubTypeId)
@@ -493,6 +493,8 @@ public class LeaveService : ILeaveService
                     $"'{subType.SubTypeName}' has been retired and cannot be requested.");
         }
 
+        RefuseExcessToAnnualAsk(leaveType, dto.ChargeExcessToAnnual);
+
         if (dto.EndDate < dto.StartDate)
             throw new InvalidOperationException("Leave end date must be after or equal to start date.");
 
@@ -524,9 +526,10 @@ public class LeaveService : ILeaveService
             // ⚠ Nothing is given back (round 5, lane N3). This used to add the draft's own days as
             // "already reserved by this draft", but a draft reserves nothing — only Pending counts as
             // pending — so a 10-day draft with 5 days left could be edited to 15.
-            if (accruedAvailable < totalDays)
-                throw new InvalidOperationException(
-                    $"Insufficient accrued leave balance. Available: {accruedAvailable} days, Requested: {totalDays} days");
+            await EnsureDaysCoveredAsync(
+                request.EmployeeId, leaveType, dto.StartDate, dto.EndDate, totalDays, accruedAvailable,
+                dto.ChargeExcessToAnnual,
+                $"Insufficient accrued leave balance. Available: {accruedAvailable} days, Requested: {totalDays} days");
         }
 
         // The sub-type's annual cap, checked whatever changed: moving onto a capped sub-type
@@ -563,6 +566,7 @@ public class LeaveService : ILeaveService
         request.SecondRelieverEmployeeId = dto.SecondRelieverEmployeeId;
         request.RelieverNotes      = dto.RelieverNotes;
         request.HandoverNotes      = dto.HandoverNotes;
+        request.ChargeExcessToAnnual = dto.ChargeExcessToAnnual;
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
@@ -582,6 +586,49 @@ public class LeaveService : ILeaveService
 
         _logger.LogInformation("Draft leave request updated: {requestId}", id);
         return await GetLeaveRequestByIdAsync(id);
+    }
+
+    /// <inheritdoc />
+    public async Task<LeaveExcessPreviewDto> PreviewExcessAsync(
+        Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, DateOnly startDate, DateOnly endDate)
+    {
+        await GetOwnedEmployeeAsync(employeeId);
+        var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
+
+        if (endDate < startDate)
+            throw new InvalidOperationException("Leave end date must be after or equal to start date.");
+
+        // The same figures the create check reads, so the form and the refusal cannot disagree.
+        var requested = await CalculateLeaveDaysAsync(startDate, endDate, leaveType);
+        var year = LeaveYear.For(startDate, await _leaveYear.StartMonthAsync());
+        var tenantId = GetTenantId();
+        var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
+            lb => lb.TenantId == tenantId &&
+                  lb.EmployeeId == employeeId &&
+                  lb.LeaveTypeId == leaveTypeId &&
+                  lb.Year == year);
+        var available = await GetAccruedAvailableDaysAsync(employeeId, leaveTypeId, leaveSubTypeId, year, balance);
+
+        var preview = new LeaveExcessPreviewDto
+        {
+            RequestedDays = requested,
+            AvailableDays = available,
+            AllowsOffsetAgainstAnnual = leaveType.AllowOffsetAgainstAnnual,
+        };
+        if (requested <= available) return preview;
+
+        preview.ExcessDays = requested - Math.Floor(Math.Max(0m, available));
+        if (!leaveType.AllowOffsetAgainstAnnual) return preview;
+
+        var split = await PlanExcessSplitAsync(employeeId, leaveType, startDate, endDate, available);
+        if (split is null) return preview;
+
+        preview.ExcessDays = split.ExcessDays;
+        preview.AnnualLeaveTypeName = split.Annual?.Name;
+        preview.AnnualDays = split.Annual is null ? null : split.AnnualDays;
+        preview.AnnualAvailableDays = split.AnnualAvailable;
+        preview.Refusal = split.Refusal;
+        return preview;
     }
 
     public async Task<bool> SubmitForApprovalAsync(Guid id)
@@ -699,19 +746,11 @@ public class LeaveService : ILeaveService
                 "This leave type requires a reliever. Name one on the request before submitting it.");
 
         var year = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
-        var tenantId = GetTenantId();
-        var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
-            lb => lb.TenantId == tenantId &&
-                  lb.EmployeeId == request.EmployeeId &&
-                  lb.LeaveTypeId == request.LeaveTypeId &&
-                  lb.Year == year);
-
-        var available = await GetAccruedAvailableDaysAsync(
-            request.EmployeeId, request.LeaveTypeId, request.LeaveSubTypeId, year, balance);
-        var headroom = available + (request.Status == LeaveStatus.Pending ? request.TotalDays : 0m);
-        if (headroom < request.TotalDays)
-            throw new InvalidOperationException(
-                $"Insufficient accrued leave balance. Available: {headroom} days, Requested: {request.TotalDays} days");
+        var headroom = await AvailableToRequestAsync(request);
+        await EnsureDaysCoveredAsync(
+            request.EmployeeId, leaveType, request.StartDate, request.EndDate, request.TotalDays, headroom,
+            request.ChargeExcessToAnnual,
+            $"Insufficient accrued leave balance. Available: {headroom} days, Requested: {request.TotalDays} days");
 
         if (request.LeaveSubTypeId is Guid subTypeId)
             await EnsureSubTypeCapAsync(request.EmployeeId, subTypeId, year, request.TotalDays, request.Id);
@@ -856,6 +895,30 @@ public class LeaveService : ILeaveService
     }
 
     /// <summary>
+    /// Refuses a caller who cannot decide this request at its current step, before anything about
+    /// the request is worked out (round 5, lane H).
+    /// </summary>
+    /// <remarks>
+    /// The same two arms the decision itself runs (<see cref="HrWorkflowFallbackAuthority"/>): the
+    /// engine's assignee when a definition is published, the approval permission when none is. It
+    /// comes first where the checks that follow answer with the employee's own figures, which are
+    /// for the people deciding the request.
+    /// </remarks>
+    private async Task EnsureMayDecideAsync(Guid id, Guid userId, string actionDescription)
+    {
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserService.Roles, actionDescription, HrPermissions.ApproveLeave);
+        }
+    }
+
+    /// <summary>
     /// Refuses a decision on a request that is not waiting for one (round 5, lane D).
     /// </summary>
     /// <remarks>
@@ -893,6 +956,19 @@ public class LeaveService : ILeaveService
 
         RefuseSelfApproval(request.EmployeeId, "leave request");
 
+        // Round 5, lane H: days beyond the limit, charged to annual leave, split off at the final
+        // approval. ⚠ Whether they CAN be is settled here, before the engine is asked, and at every
+        // stage: a refusal after the final step was recorded would leave the workflow approved and
+        // the request not (the L-1 shape). ⚠ The approver is checked first: that refusal names what
+        // the employee's annual leave can take, which is for the people deciding the request. The
+        // suite found it telling a manager who no longer decided it.
+        ExcessSplit? split = null;
+        if (request.ChargeExcessToAnnual)
+        {
+            await EnsureMayDecideAsync(id, userId, "approve a leave request");
+            split = await PlanApprovalSplitAsync(request);
+        }
+
         var comments = dto.Comments ?? dto.ApprovalNotes;
 
         var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
@@ -902,18 +978,41 @@ public class LeaveService : ILeaveService
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
         adapter.ApplyApprovalOutcome(request, approvalOutcome, userId);
 
+        // Only the FINAL approval splits: on a two-stage definition the first leaves it Pending.
+        var annualPart = request.Status == LeaveStatus.Approved && split is not null
+            ? SplitOffAnnualPart(request, split)
+            : null;
+
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
+            if (annualPart is not null)
+            {
+                // ⚠ Numbered inside the transaction: the sequence saves through the shared context,
+                // which would otherwise write the split request on its own, outside it.
+                annualPart.RequestNumber = await GenerateRequestNumberAsync();
+                await _leaveRepository.AddAsync(annualPart);
+            }
             await _leaveRepository.UpdateAsync(request);
             await _unitOfWork.SaveChangesAsync(ct);
             // Recalculate balance from source data after approval outcome
             await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
+            if (annualPart is not null)
+                await _recalculationService.RecalculateAsync(
+                    annualPart.EmployeeId, annualPart.LeaveTypeId,
+                    LeaveYear.For(annualPart.StartDate, await _leaveYear.StartMonthAsync()));
         });
 
         // One call for both directions. On a two-stage definition the first approval leaves the
         // request Pending at the HR step, and the reconciler correctly posts NOTHING then — days
         // must not be booked against leave nobody has finally approved.
         await ReconcileAttendanceAsync(request.Id);
+        if (annualPart is not null)
+        {
+            await ReconcileAttendanceAsync(annualPart.Id);
+            _logger.LogInformation(
+                "Leave request {number} split at approval: {kept} day(s) kept, {annual} day(s) charged to annual leave as {annualNumber}",
+                request.RequestNumber, request.TotalDays, annualPart.TotalDays, annualPart.RequestNumber);
+        }
 
         _logger.LogInformation("Leave request approved: {requestNumber}", request.RequestNumber);
         return await GetLeaveRequestByIdAsync(id);
@@ -937,6 +1036,17 @@ public class LeaveService : ILeaveService
 
         RefuseSelfApproval(request.EmployeeId, "leave request");
 
+        // A third decision verb beside approve and reject, and it needs both of their paths. With a
+        // definition published the engine decides who may send a request back; with none, nobody
+        // could - CanUserApproveAsync answers false for everyone and there would be no instance to
+        // cancel - so the request would sit at Pending with cancellation as its only exit. Exactly
+        // the reasoning LeavePlanService.SuggestChangesAsync carries; this is its mirror.
+        //
+        // ⚠ Asked FIRST (round 5, lane H). The date checks below answer with the employee's own
+        // figures — what their leave, and now their annual leave, can still take — and those are for
+        // the approver. They used to run before this, so anyone could read them off a refusal.
+        await EnsureMayDecideAsync(id, userId, "send a leave request back with suggested dates");
+
         // ⚠ VALIDATE BEFORE TOUCHING THE WORKFLOW. The approver's dates face the same checks the
         // employee's did — overlap, the past, the balance — because validating only on ACCEPT put
         // the consequence of the approver's mistake on the employee.
@@ -949,30 +1059,14 @@ public class LeaveService : ILeaveService
         await EnsureMovedDatesAreValidAsync(
             request, dto.SuggestedStartDate, dto.SuggestedEndDate, suggestedType);
 
-        // A third decision verb beside approve and reject, and it needs both of their paths. With a
-        // definition published the engine decides who may send a request back; with none, nobody
-        // could - CanUserApproveAsync answers false for everyone and there would be no instance to
-        // cancel - so the request would sit at Pending with cancellation as its only exit. Exactly
-        // the reasoning LeavePlanService.SuggestChangesAsync carries; this is its mirror.
+        // Sending it back returns it to the employee, so the live approval is cancelled; a fresh one
+        // starts when they answer.
         if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
         {
-            var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-            if (!canApprove)
-                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-            // Sending it back returns it to the employee, so the live approval is cancelled; a
-            // fresh one starts when they answer.
             var cancelResult = await _workflowIntegrationService.CancelWorkflowAsync(
                 EntityType, id, "Approver suggested alternative dates");
             if (!cancelResult.Success)
                 throw new InvalidOperationException(cancelResult.Message ?? "Failed to update the approval workflow.");
-        }
-        else
-        {
-            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserService.Roles,
-                "send a leave request back with suggested dates",
-                HrPermissions.ApproveLeave);
         }
 
         request.Status = LeaveStatus.ChangesSuggested;
@@ -1074,6 +1168,14 @@ public class LeaveService : ILeaveService
             throw new InvalidOperationException("This leave has already been closed and cannot be moved.");
 
         await RefuseMovingMaternityAsync(request, "moved");
+
+        // Round 5, lane H: the two parts of a split absence were approved as one, and moving either
+        // alone would leave a gap or an overlap between them.
+        if (await FindLiveSplitAsync(request) is { } split)
+            throw new InvalidOperationException(
+                $"This absence was split when it was approved: {split.Casual.RequestNumber} for the days within the "
+                + $"limit and {split.Annual.RequestNumber} for the days charged to annual leave. The two were approved "
+                + "as one absence and are not moved apart. To change the dates, cancel it and raise it again.");
 
         if (string.IsNullOrWhiteSpace(dto.Reason))
             throw new InvalidOperationException(
@@ -1190,6 +1292,10 @@ public class LeaveService : ILeaveService
             throw new InvalidOperationException(
                 "You cannot recall yourself from leave. A recall is the employer's act and has to be recorded by someone else.");
 
+        // Round 5, lane H: an absence split at approval is recalled as one, whichever part it is made on.
+        if (await FindLiveSplitAsync(request) is { } split)
+            return await RecallSplitAbsenceAsync(id, split, dto.EffectiveDate, dto.Reason.Trim());
+
         if (dto.EffectiveDate <= request.StartDate)
             throw new InvalidOperationException(
                 "A recall dated on or before the first day of the leave means none of it was taken. Cancel the request instead - "
@@ -1269,6 +1375,81 @@ public class LeaveService : ILeaveService
         request.ObservanceConfirmedDate = null;
         request.ObservanceConfirmedById = null;
         return true;
+    }
+
+    /// <summary>
+    /// Recalls an employee from an absence split at approval (round 5, lane H), whichever part the
+    /// recall was made on: the later, annual part gives way first.
+    /// </summary>
+    /// <remarks>
+    /// Back on a day inside the annual part: that part is cut short, as a recall of any request is.
+    /// Back before it began: none of the annual part was taken, so it is cancelled and its days go
+    /// back, and the first part is cut short if the day falls inside it.
+    /// </remarks>
+    private async Task<LeaveRequestDto> RecallSplitAbsenceAsync(
+        Guid viewedId, SplitAbsence split, DateOnly backOn, string reason)
+    {
+        var (first, annual) = split;
+
+        if (backOn <= first.StartDate)
+            throw new InvalidOperationException(
+                "A recall dated on or before the first day of the leave means none of it was taken. Cancel the request instead - "
+                + "that is the action that releases every day.");
+
+        if (backOn > annual.EndDate)
+            throw new InvalidOperationException(
+                $"This leave already ends on {annual.EndDate:dd MMM yyyy}, so a recall from {backOn:dd MMM yyyy} "
+                + "would give nothing back. Close the leave instead.");
+
+        var firstCut = false;
+        if (backOn > annual.StartDate)
+        {
+            if (!await TryCurtailAsync(annual, backOn, reason))
+                throw new InvalidOperationException(
+                    "That recall date does not shorten the leave - every chargeable day falls before it. "
+                    + "Check the date against the leave type's weekend and holiday rules.");
+        }
+        else
+        {
+            // Back on the annual part's first day, or before it: false when the first part ends before the day back.
+            firstCut = await TryCurtailAsync(first, backOn, reason);
+            CancelUntakenPart(annual, $"Recalled: back at work on {backOn:dd MMM yyyy}, before this part began. {reason}");
+        }
+
+        var startMonth = await _leaveYear.StartMonthAsync();
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            await _leaveRepository.UpdateAsync(first);
+            await _leaveRepository.UpdateAsync(annual);
+            await _unitOfWork.SaveChangesAsync(ct);
+            if (firstCut)
+                await _recalculationService.RecalculateAsync(
+                    first.EmployeeId, first.LeaveTypeId, LeaveYear.For(first.StartDate, startMonth));
+            await _recalculationService.RecalculateAsync(
+                annual.EmployeeId, annual.LeaveTypeId, LeaveYear.For(annual.StartDate, startMonth));
+        });
+
+        await ReconcileAttendanceAsync(first.Id);
+        await ReconcileAttendanceAsync(annual.Id);
+
+        _logger.LogInformation(
+            "Split absence {first} + {annual} recalled from {effective}: {what}",
+            first.RequestNumber, annual.RequestNumber, backOn,
+            annual.Status == LeaveStatus.Cancelled ? "the annual part was not taken" : "the annual part cut short");
+
+        return await GetLeaveRequestByIdAsync(viewedId);
+    }
+
+    /// <summary>
+    /// Takes back the annual part of a split that was never taken (round 5, lane H): cancelled, so
+    /// its days return to annual leave. Changes the entity only.
+    /// </summary>
+    private void CancelUntakenPart(LeaveRequest part, string reason)
+    {
+        part.Status = LeaveStatus.Cancelled;
+        part.CancellationDate = _clock.UtcNow;
+        // The column holds 500; the reason may carry the recaller's own words.
+        part.CancellationReason = reason.Length <= 500 ? reason : reason[..500];
     }
 
     /// <inheritdoc />
@@ -1388,9 +1569,9 @@ public class LeaveService : ILeaveService
                 ? request.TotalDays
                 : 0m);
 
-        if (headroom < newDays)
-            throw new InvalidOperationException(
-                $"Insufficient leave balance for the new dates. Available: {headroom} days, needed: {newDays} days.");
+        await EnsureDaysCoveredAsync(
+            request.EmployeeId, leaveType, newStart, newEnd, newDays, headroom, request.ChargeExcessToAnnual,
+            $"Insufficient leave balance for the new dates. Available: {headroom} days, needed: {newDays} days.");
 
         // A move can change the number of chargeable days, and can cross into a different year — so
         // the sub-type's annual cap is re-checked against the year the request is moving INTO. The
@@ -1493,6 +1674,8 @@ public class LeaveService : ILeaveService
             dto.ClosureConfirmedByName = NameOf(request.ClosureConfirmedById);
         }
 
+        await FillSplitAsync(dto, request, tenantId);
+
         // When the employee is due back, and how the reported (or confirmed) day stands against it
         // (round 5, B3). Granted leave only: nobody is due back from leave nobody granted.
         if (CountsAsTaken(request.Status))
@@ -1512,8 +1695,13 @@ public class LeaveService : ILeaveService
             }
             else
             {
+                // A split absence (round 5, lane H) goes on as annual leave: due back after that ends.
+                var absenceEnd = dto.ChargedToAnnualStatus is LeaveStatus.Approved or LeaveStatus.InProgress
+                                 && dto.ChargedToAnnualEndDate is DateOnly annualEnd
+                    ? annualEnd
+                    : request.EndDate;
                 dto.ExpectedReturnDate = DateOnly.FromDateTime(await _workingDayCalculator.AddWorkingDaysAsync(
-                    tenantId, request.EndDate.ToDateTime(TimeOnly.MinValue), 1));
+                    tenantId, absenceEnd.ToDateTime(TimeOnly.MinValue), 1));
             }
         }
 
@@ -1530,6 +1718,66 @@ public class LeaveService : ILeaveService
         await MarkApprovedPlanMatchesAsync(new List<LeaveRequestDto> { dto }, tenantId);
 
         return dto;
+    }
+
+    /// <summary>
+    /// The other half of a split, named, and while a request is undecided what approving it now
+    /// would charge to annual leave (round 5, lane H). Single read only.
+    /// </summary>
+    private async Task FillSplitAsync(LeaveRequestDto dto, LeaveRequest request, Guid tenantId)
+    {
+        if (request.SplitFromRequestId is Guid firstId)
+        {
+            var first = await _leaveRepository.GetQueryable()
+                .Where(r => r.TenantId == tenantId && r.Id == firstId)
+                .Select(r => new { r.RequestNumber, TypeName = r.LeaveType.Name, r.StartDate, r.Status })
+                .FirstOrDefaultAsync();
+            if (first is null) return;
+
+            dto.SplitFromRequestNumber = first.RequestNumber;
+            dto.SplitFromLeaveTypeName = first.TypeName;
+            dto.SplitFromStartDate = first.StartDate;
+            dto.SplitFromStatus = first.Status;
+            return;
+        }
+
+        if (!request.ChargeExcessToAnnual) return;
+
+        var annualPart = await _leaveRepository.GetQueryable()
+            .Where(r => r.TenantId == tenantId && r.SplitFromRequestId == request.Id)
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new { r.Id, r.RequestNumber, TypeName = r.LeaveType.Name, r.TotalDays, r.EndDate, r.Status })
+            .FirstOrDefaultAsync();
+
+        if (annualPart is not null)
+        {
+            dto.ChargedToAnnualRequestId = annualPart.Id;
+            dto.ChargedToAnnualRequestNumber = annualPart.RequestNumber;
+            dto.ChargedToAnnualLeaveTypeName = annualPart.TypeName;
+            dto.ChargedToAnnualDays = annualPart.TotalDays;
+            dto.ChargedToAnnualEndDate = annualPart.EndDate;
+            dto.ChargedToAnnualStatus = annualPart.Status;
+            return;
+        }
+
+        if (request.Status is not (LeaveStatus.Draft or LeaveStatus.Pending or LeaveStatus.ChangesSuggested))
+            return;
+
+        var leaveType = request.LeaveType ?? await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
+        var available = await AvailableToRequestAsync(request);
+        if (request.TotalDays <= available) return;
+
+        if (!leaveType.AllowOffsetAgainstAnnual)
+        {
+            dto.ExcessToAnnualRefusal =
+                $"{leaveType.Name} no longer lets the days beyond its limit be charged to annual leave.";
+            return;
+        }
+
+        var split = await PlanExcessSplitAsync(request.EmployeeId, leaveType, request.StartDate, request.EndDate, available);
+        if (split is null) return;
+        dto.ExcessToAnnualDays = split.Annual is null ? split.ExcessDays : split.AnnualDays;
+        dto.ExcessToAnnualRefusal = split.Refusal;
     }
 
     /// <summary>
@@ -2697,6 +2945,12 @@ public class LeaveService : ILeaveService
         var leaveTypeId  = request.LeaveTypeId;
         var year         = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
 
+        // Round 5, lane H: the annual part of a split goes with the request it was split from. The two
+        // are one absence and the annual part is only its continuation. Cancelled on its own, the
+        // annual part leaves this request standing.
+        var split = await FindLiveSplitAsync(request);
+        var annualPart = split is not null && split.Casual.Id == request.Id ? split.Annual : null;
+
         // A request out for approval holds a live workflow instance. Withdraw it, or the approver's
         // queue goes on offering leave that no longer exists. A missing instance is not an error: a
         // request can be Pending on a tenant with no published definition.
@@ -2715,18 +2969,30 @@ public class LeaveService : ILeaveService
         request.CancellationDate = _clock.UtcNow;
         request.CancellationReason = reason;
 
+        if (annualPart is not null)
+            CancelUntakenPart(annualPart,
+                $"Cancelled with {request.RequestNumber}, the request it was split from" + (reason is null ? "." : $": {reason}"));
+
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
             await _leaveRepository.UpdateAsync(request);
+            if (annualPart is not null)
+                await _leaveRepository.UpdateAsync(annualPart);
             await _unitOfWork.SaveChangesAsync(ct);
             // Recalculate balance from source data after cancellation
             await _recalculationService.RecalculateAsync(employeeId, leaveTypeId, year);
+            if (annualPart is not null)
+                await _recalculationService.RecalculateAsync(
+                    annualPart.EmployeeId, annualPart.LeaveTypeId,
+                    LeaveYear.For(annualPart.StartDate, await _leaveYear.StartMonthAsync()));
         });
 
         // The days are no longer being taken, so they come off the attendance register too —
         // otherwise a cancelled request keeps inflating DaysOnLeave on the monthly summary, and
         // with it the payroll export.
         await ReconcileAttendanceAsync(request.Id);
+        if (annualPart is not null)
+            await ReconcileAttendanceAsync(annualPart.Id);
 
         return true;
     }
@@ -2762,72 +3028,133 @@ public class LeaveService : ILeaveService
                 "You cannot confirm your own return from leave. Your manager or HR confirms it.");
 
         var today = _clock.TodayUtc;
-        var resumedOn = dto.ResumptionDate ?? request.ResumptionDate;
+
+        // ⚠ Round 5, lane H: an absence split at approval is closed as one, whichever part the
+        // confirmation is made on. Its return is reported on the annual part, where it ends, and the
+        // day back is judged against the part it falls in.
+        var split = await FindLiveSplitAsync(request);
+        var reportedOn = split?.Annual ?? request;
+        var resumedOn = dto.ResumptionDate ?? reportedOn.ResumptionDate;
 
         if (resumedOn is DateOnly day && day > today)
             throw new InvalidOperationException("A return can only be confirmed for a day that has come.");
 
+        var target = split is not null && resumedOn is DateOnly backDay && backDay <= split.Annual.StartDate
+            ? split.Casual
+            : reportedOn;
+        var notes = string.IsNullOrWhiteSpace(dto.ClosureNotes) ? null : dto.ClosureNotes.Trim();
+
+        var daysBefore = target.TotalDays;
+        var curtailed = await ApplyClosureAsync(target, resumedOn, reportedOn.ResumptionReportedDate != null, notes);
+
+        // The split's other part: taken in full when the day back fell in the annual part, and never
+        // taken when it fell before the annual part began.
+        LeaveRequest? other = null;
+        var otherCancelled = false;
+        if (split is not null)
+        {
+            if (ReferenceEquals(target, split.Annual))
+            {
+                other = split.Casual;
+                MarkClosed(other, null, notes);
+            }
+            else
+            {
+                other = split.Annual;
+                target.ResumptionReportedDate ??= other.ResumptionReportedDate;
+                target.ResumptionReportedById ??= other.ResumptionReportedById;
+                CancelUntakenPart(other, $"Not taken: back at work on {resumedOn:dd MMM yyyy}, before this part began.");
+                otherCancelled = true;
+            }
+        }
+
+        var startMonth = await _leaveYear.StartMonthAsync();
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            await _leaveRepository.UpdateAsync(target);
+            if (other is not null)
+                await _leaveRepository.UpdateAsync(other);
+            await _unitOfWork.SaveChangesAsync(ct);
+            // Completed counts as taken like Approved and InProgress, so closing moves nothing - unless
+            // an early return gave days back, or a split's annual part was never taken, and then the
+            // balance has to be re-derived.
+            if (curtailed)
+                await _recalculationService.RecalculateAsync(
+                    target.EmployeeId, target.LeaveTypeId, LeaveYear.For(target.StartDate, startMonth));
+            if (otherCancelled)
+                await _recalculationService.RecalculateAsync(
+                    other!.EmployeeId, other.LeaveTypeId, LeaveYear.For(other.StartDate, startMonth));
+        });
+
+        // The days after an early return come off the attendance register (the posting prunes), and
+        // an annual part never taken comes off whole.
+        if (curtailed)
+            await ReconcileAttendanceAsync(target.Id);
+        if (otherCancelled)
+            await ReconcileAttendanceAsync(other!.Id);
+
+        _logger.LogInformation(
+            "Leave request {number} closed: back {back}{early}{late}{split}",
+            target.RequestNumber, resumedOn?.ToString("yyyy-MM-dd") ?? "(not stated)",
+            curtailed ? $", {daysBefore - target.TotalDays} day(s) returned" : string.Empty,
+            target.OverstayDays is int o ? $", {o} working day(s) overstayed" : string.Empty,
+            other is null ? string.Empty
+                : otherCancelled ? $"; {other.RequestNumber} not taken" : $"; {other.RequestNumber} closed with it");
+
+        return await GetLeaveRequestByIdAsync(id);
+    }
+
+    /// <summary>
+    /// Judges the day back against one request and closes it (round 5, B3): early cuts it short on
+    /// the employee's report, late records the overstay, none closes it once it is over. True when an
+    /// early return gave days back. Changes the entity only; the caller saves.
+    /// </summary>
+    private async Task<bool> ApplyClosureAsync(LeaveRequest target, DateOnly? resumedOn, bool reported, string? notes)
+    {
+        var today = _clock.TodayUtc;
         var curtailed = false;
-        var daysBefore = request.TotalDays;
 
         if (resumedOn is not DateOnly back)
         {
             // Nobody has said when they were back: the leave is closed as over, once it is.
-            if (request.EndDate > today)
+            if (target.EndDate > today)
                 throw new InvalidOperationException(
                     "This leave has not ended yet. An employee back early reports it and you confirm it; "
                     + "to call someone back, recall them.");
         }
-        else if (back <= request.EndDate)
+        else if (back <= target.EndDate)
         {
-            if (request.ResumptionReportedDate == null)
+            if (!reported)
                 throw new InvalidOperationException(
                     "An early return is confirmed on the employee's own report of it. To call someone back "
                     + "before their leave ends, recall them.");
 
-            if (back <= request.StartDate)
+            if (back <= target.StartDate)
                 throw new InvalidOperationException(
                     "A return on or before the first day of the leave means none of it was taken. Cancel "
                     + "the request instead.");
 
             // A day back that shortens nothing (a weekend before the end, say) closes as on time.
-            curtailed = await TryCurtailAsync(request, back, EarlyResumptionReason);
+            curtailed = await TryCurtailAsync(target, back, EarlyResumptionReason);
         }
         else
         {
-            var (_, _, overstay) = await ClassifyResumptionAsync(request.EndDate, back, GetTenantId());
-            request.OverstayDays = overstay > 0 ? overstay : null;
+            var (_, _, overstay) = await ClassifyResumptionAsync(target.EndDate, back, GetTenantId());
+            target.OverstayDays = overstay > 0 ? overstay : null;
         }
 
+        MarkClosed(target, resumedOn, notes);
+        return curtailed;
+    }
+
+    /// <summary>Records the confirmation that closes a request. Changes the entity only.</summary>
+    private void MarkClosed(LeaveRequest request, DateOnly? resumedOn, string? notes)
+    {
         request.ResumptionDate = resumedOn;
         request.Status = LeaveStatus.Completed;
         request.ClosureDate = _clock.UtcNow;
-        request.ClosureNotes = string.IsNullOrWhiteSpace(dto.ClosureNotes) ? null : dto.ClosureNotes.Trim();
+        request.ClosureNotes = notes;
         request.ClosureConfirmedById = _currentUserService.EmployeeId;
-
-        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
-        {
-            await _leaveRepository.UpdateAsync(request);
-            await _unitOfWork.SaveChangesAsync(ct);
-            // Completed counts as taken like Approved and InProgress, so closing moves nothing - unless
-            // an early return gave days back, and then the balance has to be re-derived.
-            if (curtailed)
-                await _recalculationService.RecalculateAsync(
-                    request.EmployeeId, request.LeaveTypeId,
-                    LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
-        });
-
-        // The days after an early return come off the attendance register (the posting prunes).
-        if (curtailed)
-            await ReconcileAttendanceAsync(request.Id);
-
-        _logger.LogInformation(
-            "Leave request {number} closed: back {back}{early}{late}",
-            request.RequestNumber, resumedOn?.ToString("yyyy-MM-dd") ?? "(not stated)",
-            curtailed ? $", {daysBefore - request.TotalDays} day(s) returned" : string.Empty,
-            request.OverstayDays is int o ? $", {o} working day(s) overstayed" : string.Empty);
-
-        return await GetLeaveRequestByIdAsync(id);
     }
 
     public async Task<LeaveRequestDto> ReportResumptionAsync(Guid id, ReportResumptionDto dto)
@@ -2850,22 +3177,27 @@ public class LeaveService : ILeaveService
         if (resumedOn > today)
             throw new InvalidOperationException("Report your return on the day you are back, not before.");
 
-        if (resumedOn <= request.StartDate)
+        // Round 5, lane H: an absence split at approval ends on its annual part, so its return is
+        // recorded there, and "none of it was taken" is measured from the start of the absence.
+        var split = await FindLiveSplitAsync(request);
+        var target = split?.Annual ?? request;
+
+        if (resumedOn <= (split?.Casual ?? request).StartDate)
             throw new InvalidOperationException(
                 "A return on or before the first day of the leave means none of it was taken. Ask HR to "
                 + "cancel the request instead.");
 
         // Re-reporting before the confirmation corrects the day; the confirmer sees the latest.
-        request.ResumptionDate = resumedOn;
-        request.ResumptionReportedDate = _clock.UtcNow;
-        request.ResumptionReportedById = me;
+        target.ResumptionDate = resumedOn;
+        target.ResumptionReportedDate = _clock.UtcNow;
+        target.ResumptionReportedById = me;
 
-        await _leaveRepository.UpdateAsync(request);
+        await _leaveRepository.UpdateAsync(target);
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Leave request {number}: the employee reported being back on {day}",
-            request.RequestNumber, resumedOn);
-        return await GetLeaveRequestByIdAsync(id);
+            target.RequestNumber, resumedOn);
+        return await GetLeaveRequestByIdAsync(target.Id);
     }
 
     /// <summary>
@@ -2932,6 +3264,15 @@ public class LeaveService : ILeaveService
         var granted = request.Status is LeaveStatus.Approved or LeaveStatus.InProgress;
         var open = request.ClosureDate == null;
 
+        // Round 5, lane H: a split absence's return is reported and confirmed on its annual part,
+        // where it ends, and counts from the first part's first day. The first part offers neither
+        // while the annual part is still running.
+        var continuesAsAnnual = request.ChargedToAnnualStatus is LeaveStatus.Approved or LeaveStatus.InProgress;
+        var absenceStart = request.SplitFromStatus is LeaveStatus.Approved or LeaveStatus.InProgress
+                           && request.SplitFromStartDate is DateOnly firstDay
+            ? firstDay
+            : request.StartDate;
+
         return new LeaveRequestViewerActionsDto
         {
             // The same rules as CancelLeaveRequestAsync: before anything is granted, the employee or
@@ -2942,8 +3283,8 @@ public class LeaveService : ILeaveService
             CancelNeedsReason = granted,
             CanRecall = granted && open && !isSubject && (actingAsDesk || line),
             // Reporting a return needs a day back after the first day of leave.
-            CanReportResumption = granted && open && isSubject && request.StartDate < today,
-            CanConfirmResumption = granted && open && !isSubject && (actingAsDesk || line)
+            CanReportResumption = granted && open && isSubject && absenceStart < today && !continuesAsAnnual,
+            CanConfirmResumption = granted && open && !isSubject && (actingAsDesk || line) && !continuesAsAnnual
                                    && (request.ResumptionReportedDate != null || request.EndDate <= today),
         };
     }
@@ -3346,6 +3687,248 @@ public class LeaveService : ILeaveService
             balance?.UsedDays        ?? 0m,
             balance?.PendingDays     ?? 0m,
             balance?.EncashedDays    ?? 0m);
+    }
+
+    /// <summary>
+    /// What a request's own leave type has left for it: the days that can be taken now, with the
+    /// request's own days counted back in while it is Pending and holds them. A draft, or a request
+    /// sent back with other dates, holds none.
+    /// </summary>
+    private async Task<decimal> AvailableToRequestAsync(LeaveRequest request)
+    {
+        var year = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
+        var tenantId = GetTenantId();
+        var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
+            lb => lb.TenantId == tenantId &&
+                  lb.EmployeeId == request.EmployeeId &&
+                  lb.LeaveTypeId == request.LeaveTypeId &&
+                  lb.Year == year);
+
+        var available = await GetAccruedAvailableDaysAsync(
+            request.EmployeeId, request.LeaveTypeId, request.LeaveSubTypeId, year, balance);
+        return available + (request.Status == LeaveStatus.Pending ? request.TotalDays : 0m);
+    }
+
+    // ─── Beyond the limit, charged to annual leave (round 5, lane H, decision A5) ────────────────
+
+    /// <summary>
+    /// How a request beyond its leave type's limit divides: the days the type keeps, and the rest of
+    /// the absence as annual leave. <see cref="Refusal"/> says why annual leave cannot take them.
+    /// </summary>
+    private sealed record ExcessSplit(
+        decimal RequestedDays, int KeepDays, DateOnly KeepEnd,
+        LeaveType? Annual, DateOnly AnnualStart, decimal AnnualDays, decimal? AnnualAvailable, string? Refusal)
+    {
+        /// <summary>The days beyond what the type keeps, counted by the type's own rules.</summary>
+        public decimal ExcessDays => RequestedDays - KeepDays;
+    }
+
+    /// <summary>The two parts of an absence split at approval: the first, and its annual part.</summary>
+    private sealed record SplitAbsence(LeaveRequest Casual, LeaveRequest Annual);
+
+    /// <summary>
+    /// Refuses the ask where the leave type does not allow it. An unticked box on a type that does
+    /// is just a request that must fit, which the balance check says.
+    /// </summary>
+    private static void RefuseExcessToAnnualAsk(LeaveType leaveType, bool chargeExcessToAnnual)
+    {
+        if (chargeExcessToAnnual && !leaveType.AllowOffsetAgainstAnnual)
+            throw new InvalidOperationException(
+                $"{leaveType.Name} does not let the days beyond its limit be charged to annual leave.");
+    }
+
+    /// <summary>
+    /// The balance check every door shares — create, draft edit, submit and each move — with the one
+    /// way past it: the days beyond the limit, charged to annual leave where the type allows it and
+    /// the request asks for it. Throws the door's own sentence, word for word, when neither holds.
+    /// </summary>
+    /// <remarks>
+    /// On a type that allows it, a request that did not ask is told that it can. One that asked is
+    /// let through only if annual leave could take the extra days now; at the final approval they are
+    /// asked again (<see cref="PlanApprovalSplitAsync"/>), because both figures move in between.
+    /// </remarks>
+    private async Task EnsureDaysCoveredAsync(
+        Guid employeeId, LeaveType leaveType, DateOnly start, DateOnly end, decimal days, decimal available,
+        bool chargeExcessToAnnual, string refusal)
+    {
+        if (days <= available) return;
+
+        if (!leaveType.AllowOffsetAgainstAnnual)
+            throw new InvalidOperationException(chargeExcessToAnnual
+                ? $"{refusal.TrimEnd('.')}. {leaveType.Name} no longer lets the days beyond its limit be charged to annual leave."
+                : refusal);
+
+        if (!chargeExcessToAnnual)
+            throw new InvalidOperationException(
+                $"{refusal.TrimEnd('.')}. {leaveType.Name} lets the days beyond its limit be charged to annual "
+                + "leave: ask for that on the request.");
+
+        var split = await PlanExcessSplitAsync(employeeId, leaveType, start, end, available);
+        if (split?.Refusal is string why)
+            throw new InvalidOperationException(why);
+    }
+
+    /// <summary>
+    /// Divides a request that asks for more than its leave type has left: the type keeps its first
+    /// whole days, in date order, and annual leave takes the rest of the absence. Null when the
+    /// request fits. A refusal is returned, not thrown, so the preview can show it.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Whole days.</b> A request is charged a date at a time, so the type keeps
+    /// ⌊available⌋ days: half a day left cannot hold half of a date.</para>
+    ///
+    /// <para><b>The annual part</b> runs from the first date the type does not keep to the request's
+    /// end, counted by annual leave's own rules. It faces annual leave's eligibility, its service gate
+    /// and what it has left to take now. It does not face annual leave's notice or reliever rules: it
+    /// is part of this request, which met this type's, and it keeps this request's relievers.</para>
+    /// </remarks>
+    private async Task<ExcessSplit?> PlanExcessSplitAsync(
+        Guid employeeId, LeaveType leaveType, DateOnly start, DateOnly end, decimal available)
+    {
+        var dates = await GetChargeableDaysAsync(start, end, leaveType);
+        var keep = (int)Math.Floor(Math.Max(0m, available));
+        if (dates.Count <= keep) return null;
+
+        var keepEnd = keep > 0 ? dates[keep - 1] : start;
+        ExcessSplit Refuse(string why, LeaveType? annualType = null, decimal annualDays = 0m, decimal? annualLeft = null)
+            => new(dates.Count, keep, keepEnd, annualType, dates[keep], annualDays, annualLeft, why);
+
+        if (keep == 0)
+            return Refuse(available <= 0m
+                ? $"No {leaveType.Name} is left this year, so none of this request can be {leaveType.Name}. "
+                  + "Raise it as annual leave instead."
+                : $"{leaveType.Name} has only {available:0.##} of a day left this year, so none of this request "
+                  + $"can be {leaveType.Name}. Raise it as annual leave instead.");
+
+        var tenantId = GetTenantId();
+        var annual = await _leaveTypeRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.Category == LeaveTypeCategory.Annual && t.IsActive)
+            .FirstOrDefaultAsync();
+        if (annual is null)
+            return Refuse("There is no annual leave to charge the extra days to.");
+
+        var annualStart = dates[keep];
+        var annualDays = await CalculateLeaveDaysAsync(annualStart, end, annual);
+        if (annualDays <= 0m)
+            return Refuse(
+                $"The days beyond the {leaveType.Name} limit are not days of {annual.Name}, so nothing can be "
+                + $"charged to it. Ask for {keep} day(s).", annual);
+
+        if (!await _leaveTypeService.IsEmployeeEligibleAsync(annual.Id, employeeId))
+            return Refuse(
+                $"The extra {annualDays:0.##} day(s) cannot be charged to {annual.Name}: this employee does not "
+                + "meet its eligibility rules.", annual, annualDays);
+
+        if (!await _entitlementService.IsAccessibleAsync(employeeId, annual.Id, annualStart))
+            return Refuse(
+                $"The extra {annualDays:0.##} day(s) cannot be charged to {annual.Name}: this employee has not yet "
+                + "completed the service it requires.", annual, annualDays);
+
+        var annualYear = LeaveYear.For(annualStart, await _leaveYear.StartMonthAsync());
+        var annualBalance = await _leaveBalanceRepository.FirstOrDefaultAsync(
+            lb => lb.TenantId == tenantId &&
+                  lb.EmployeeId == employeeId &&
+                  lb.LeaveTypeId == annual.Id &&
+                  lb.Year == annualYear);
+        var annualLeft = await GetAccruedAvailableDaysAsync(employeeId, annual.Id, null, annualYear, annualBalance);
+
+        if (annualLeft < annualDays)
+            return Refuse(
+                $"The extra {annualDays:0.##} day(s) would be charged to {annual.Name}, but only {annualLeft:0.##} "
+                + "day(s) of it can be taken now.", annual, annualDays, annualLeft);
+
+        return new ExcessSplit(dates.Count, keep, keepEnd, annual, annualStart, annualDays, annualLeft, null);
+    }
+
+    /// <summary>
+    /// Whether approving this request splits it, and how. Null when it fits its type or did not ask;
+    /// throws, saying what the approver can do, when the extra days cannot go to annual leave.
+    /// </summary>
+    /// <remarks>
+    /// Asked afresh at approval: the type's figure and annual leave's may both have moved since the
+    /// request was made, and annual leave holds nothing for a request until it is split.
+    /// </remarks>
+    private async Task<ExcessSplit?> PlanApprovalSplitAsync(LeaveRequest request)
+    {
+        if (!request.ChargeExcessToAnnual) return null;
+
+        var leaveType = request.LeaveType ?? await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
+        var available = await AvailableToRequestAsync(request);
+        if (request.TotalDays <= available) return null;
+
+        const string next = " Reject the request, or suggest dates within the limit.";
+        if (!leaveType.AllowOffsetAgainstAnnual)
+            throw new InvalidOperationException(
+                $"{leaveType.Name} no longer lets the days beyond its limit be charged to annual leave, and this "
+                + $"request asks for {request.TotalDays:0.##} day(s) with {Math.Max(0m, available):0.##} left." + next);
+
+        var split = await PlanExcessSplitAsync(request.EmployeeId, leaveType, request.StartDate, request.EndDate, available);
+        if (split?.Refusal is string why)
+            throw new InvalidOperationException(why + next);
+        return split;
+    }
+
+    /// <summary>
+    /// Splits a request at its final approval: it keeps its first days, and a new annual request
+    /// takes the rest of the absence — approved by the same approval, with the same relievers,
+    /// pointing back at it. Changes the entities only; the caller numbers and saves the new one.
+    /// </summary>
+    private static LeaveRequest SplitOffAnnualPart(LeaveRequest request, ExcessSplit split)
+    {
+        var annualPart = new LeaveRequest
+        {
+            TenantId = request.TenantId,
+            EmployeeId = request.EmployeeId,
+            LeaveTypeId = split.Annual!.Id,
+            StartDate = split.AnnualStart,
+            EndDate = request.EndDate,
+            TotalDays = split.AnnualDays,
+            // Asked for when the request was: it is the rest of that request.
+            RequestDate = request.RequestDate,
+            Reason = $"The {split.AnnualDays:0.##} day(s) of {request.RequestNumber} beyond the "
+                     + $"{request.LeaveType?.Name ?? "leave"} limit, charged to annual leave as the employee asked.",
+            Status = LeaveStatus.Approved,
+            ApprovedById = request.ApprovedById,
+            ApprovedDate = request.ApprovedDate,
+            RelieverEmployeeId = request.RelieverEmployeeId,
+            SecondRelieverEmployeeId = request.SecondRelieverEmployeeId,
+            RelieverNotes = request.RelieverNotes,
+            HandoverNotes = request.HandoverNotes,
+            SplitFromRequestId = request.Id,
+        };
+
+        request.EndDate = split.KeepEnd;
+        request.TotalDays = split.KeepDays;
+        return annualPart;
+    }
+
+    /// <summary>
+    /// The absence this request is part of, when it was split at approval and both parts are still
+    /// granted and open. Null otherwise: a part cancelled or closed leaves the other on its own.
+    /// </summary>
+    private async Task<SplitAbsence?> FindLiveSplitAsync(LeaveRequest request)
+    {
+        static bool Live(LeaveRequest r)
+            => r.Status is LeaveStatus.Approved or LeaveStatus.InProgress && r.ClosureDate == null;
+
+        if (!Live(request)) return null;
+        var tenantId = GetTenantId();
+
+        if (request.SplitFromRequestId is Guid firstId)
+        {
+            var first = await _leaveRepository.GetQueryable()
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == firstId);
+            return first is not null && Live(first) ? new SplitAbsence(first, request) : null;
+        }
+
+        if (!request.ChargeExcessToAnnual) return null;
+
+        var annual = await _leaveRepository.GetQueryable()
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId
+                                   && r.SplitFromRequestId == request.Id
+                                   && (r.Status == LeaveStatus.Approved || r.Status == LeaveStatus.InProgress)
+                                   && r.ClosureDate == null);
+        return annual is not null ? new SplitAbsence(request, annual) : null;
     }
 
     /// <summary>

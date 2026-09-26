@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -282,6 +283,16 @@ export default function LeaveApprovalsPage() {
                           <div className="flex flex-wrap items-center gap-1.5">
                             {r.requestNumber}
                             <MatchesApprovedPlanBadge show={r.matchesApprovedPlan} />
+                            {/* Round 5, lane H: approving it may split it; the request page says how. */}
+                            {r.chargeExcessToAnnual && (
+                              <Badge
+                                variant="outline"
+                                className="border-primary/40 text-primary"
+                                title="Asks for the days beyond this leave's limit to be charged to annual leave. Open the request to see the split approving it would make."
+                              >
+                                Extra days to annual leave
+                              </Badge>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>{r.employeeName}</TableCell>

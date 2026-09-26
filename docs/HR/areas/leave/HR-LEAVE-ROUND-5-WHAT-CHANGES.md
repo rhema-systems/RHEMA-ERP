@@ -8,7 +8,8 @@
 > (settings that do what they say, and the demo data), the counting fix in
 > [section 4](#4-a-new-employees-first-two-years), [section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)
 > (the accrual statement and the *leave owed* report) and [section 12](#12-the-year-end--carry-over-and-deferrals)
-> (the year-end) were built and tested on 25 September; nothing else described here is built yet.
+> (the year-end) were built and tested on 25 September, and [section 8](#8-casual-leave-over-its-limit)
+> (casual leave over its limit) on 26 September; nothing else described here is built yet.
 > This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
@@ -377,23 +378,46 @@ set the difference off against your annual leave".)*
 
 **Today.** It cannot be done — a request for more days than are left is refused.
 
-**What changes.** HR can mark a leave type — casual leave, say — as *can be charged to annual leave*.
-Then:
+**What changes** *(built 26 September)*. A leave type can be marked **"days beyond the limit may be
+charged to annual leave"**, and TDC's Casual Leave has it switched on in the demo. Only the *Other*
+kinds can have it: annual leave has nothing to overflow into, and maternity leave is statutory. The
+leave type must also need approval, because HR decides the charge when it approves.
 
-1. **Asking.** On the portal (or at the HR desk), when a request is longer than the days left, the
-   form offers: *"Charge the extra 2 days to my annual leave — HR decides."* The request is accepted
-   only if the employee's annual leave has that many days they can take now.
-2. **Approving.** When HR gives the final approval, the system splits it into **two linked
-   requests**: the casual leave for the days that were left, and annual leave for the rest, one
-   straight after the other.
+1. **Asking.** When the dates come to more than the days left, the form says so before anything is
+   submitted — *"This is 8 days of Casual Leave, and 6 days are left"* — and offers a tick: *"Charge the
+   extra 2 days to my Annual Leave (HR decides)"*. Without the tick the request cannot be submitted.
+   With it, the request is accepted only if annual leave could take those days now: the employee has
+   served annual leave's 12 months, and has the days built up.
+2. **Waiting.** Until it is decided, the whole request counts against casual leave, so the casual
+   balance can read *−2 left* for a while. The approver sees what approving would do: *"Approving it
+   now would split it in two: 6 days of Casual Leave, then 2 days of annual leave, approved together."*
+3. **Approving.** At the final approval the request becomes **two linked requests**: the casual leave
+   for the days that were left, then annual leave for the rest, straight after it, with the same
+   relievers and the same approval. Nothing new lands in anybody's approval queue. If annual leave can
+   no longer take the days (other leave was booked in the meantime), the approval is refused and says
+   so: reject the request, or suggest shorter dates.
 
-**Example.** The casual limit is 5 days and none has been used. The employee needs 7 days away. After
-approval there are two requests: **casual leave for days 1–5** and **annual leave for days 6–7**. The
-casual balance shows 5 used, the annual balance 2 more used, and both requests say they belong
-together.
+**Example (the demo's figures).** Kofi has all 6 of his casual days. He asks for Monday 5 to
+Wednesday 14 October — 8 working days — and ticks the box. Once HR approves there are two requests:
+**Casual Leave, 5–12 October (6 days)** and **Annual Leave, 13–14 October (2 days)**. The casual balance
+shows 6 used, the annual balance 2 more, and each request names the other.
 
-If the employee is **recalled** part-way, the later part — the annual days — is given back first,
-because those were the extra.
+**After approval the two are one absence:**
+
+- **Cancelling** the casual part cancels both. The annual part can be cancelled on its own, and then
+  Kofi is simply back after his casual days.
+- **A recall** gives back the annual days first, because those were the extra. Called back to work on
+  Wednesday 14 October, Kofi keeps his casual days and one annual day; the other annual day goes back.
+  Called back during the casual days, the annual part is dropped whole and the casual part is cut short.
+- **Coming back** is reported and confirmed on the annual part, where the absence ends. If Kofi is
+  back early, during the casual days, the casual part is cut short and the annual part is dropped.
+- **Moving the dates** of either part is refused, because they were approved together. Cancel and
+  raise it again.
+
+**Found while testing, and fixed.** The refusal that says annual leave cannot take the extra days was
+shown to anyone who tried to approve the request, even a manager whose turn had passed, and the same
+was true of an approver's suggested dates. Anyone who is not deciding the request is now refused as
+such, and told nothing about the employee's leave.
 
 ---
 

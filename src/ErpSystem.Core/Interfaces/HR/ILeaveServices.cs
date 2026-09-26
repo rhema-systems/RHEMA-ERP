@@ -9,6 +9,14 @@ public interface ILeaveService
 {
     Task<LeaveRequestDto> CreateLeaveRequestAsync(CreateLeaveRequestDto dto);
     Task<LeaveRequestDto> UpdateDraftAsync(Guid id, CreateLeaveRequestDto dto);
+
+    /// <summary>
+    /// What a request for these dates would ask of its leave type, and of annual leave for the days
+    /// beyond the type's limit (round 5, lane H). Saves nothing; the request forms read it.
+    /// </summary>
+    Task<LeaveExcessPreviewDto> PreviewExcessAsync(
+        Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, DateOnly startDate, DateOnly endDate);
+
     Task<bool> SubmitForApprovalAsync(Guid id);
     Task<LeaveRequestDto> ApproveLeaveAsync(Guid id, ApproveLeaveDto dto);
     Task<LeaveRequestDto> RejectLeaveAsync(Guid id, RejectLeaveDto dto);

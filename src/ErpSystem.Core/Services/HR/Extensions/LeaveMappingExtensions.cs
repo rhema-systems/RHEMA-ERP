@@ -39,6 +39,7 @@ namespace ErpSystem.Application.Extensions
             YearEndBasis = entity.YearEndBasis,
             ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
             Category = entity.Category,
+            AllowOffsetAgainstAnnual = entity.AllowOffsetAgainstAnnual,
             EncashmentRateBasis = entity.EncashmentRateBasis,
             EncashmentRatePerDay = entity.EncashmentRatePerDay,
             EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
@@ -73,6 +74,7 @@ namespace ErpSystem.Application.Extensions
             YearEndBasis = dto.YearEndBasis,
             ProRateFirstYearEntitlement = dto.ProRateFirstYearEntitlement,
             Category = dto.Category ?? LeaveTypeCategory.Other,
+            AllowOffsetAgainstAnnual = dto.AllowOffsetAgainstAnnual ?? false,
             EncashmentRateBasis = dto.EncashmentRateBasis,
             EncashmentRatePerDay = dto.EncashmentRatePerDay,
             EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth,
@@ -281,7 +283,8 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverEmployeeId = dto.SecondRelieverEmployeeId,
             RelieverNotes = dto.RelieverNotes,
             HandoverNotes = dto.HandoverNotes,
-            LeavePlanId = dto.LeavePlanId
+            LeavePlanId = dto.LeavePlanId,
+            ChargeExcessToAnnual = dto.ChargeExcessToAnnual
         };
 
         public static LeaveRequestDto ToDto(this LeaveRequest entity) => new LeaveRequestDto
@@ -311,6 +314,8 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverEmployeeName = entity.SecondRelieverEmployee?.FullName,
             RelieverNotes = entity.RelieverNotes,
             LeavePlanId = entity.LeavePlanId,
+            ChargeExcessToAnnual = entity.ChargeExcessToAnnual,
+            SplitFromRequestId = entity.SplitFromRequestId,
             ApprovedById = entity.ApprovedById,
             ApprovedDate = entity.ApprovedDate,
             RejectionReason = entity.RejectionReason,

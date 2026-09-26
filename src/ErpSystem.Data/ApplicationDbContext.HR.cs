@@ -3051,6 +3051,13 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.LeavePlanId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // The annual part of a split points at the request it was split from (round 5, lane H).
+            // No navigations on either side — see the property.
+            entity.HasOne<LeaveRequest>()
+                .WithMany()
+                .HasForeignKey(x => x.SplitFromRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // Encashment (one-to-one)
             entity.HasOne(x => x.Encashment)
                 .WithOne(x => x.LeaveRequest)

@@ -126,6 +126,18 @@ public class LeaveType : TenantEntity
     /// </remarks>
     public LeaveTypeCategory Category { get; set; } = LeaveTypeCategory.Other;
 
+    /// <summary>
+    /// Days asked for beyond this leave's limit may be charged to the employee's annual leave, with
+    /// HR's approval (round 5, decision A5). Other kinds only.
+    /// </summary>
+    /// <remarks>
+    /// Casual leave is the case the stakeholders raised, and the public-service rule: casual days
+    /// beyond the yearly limit come off annual leave. The employee asks for it on the request; at the
+    /// final approval the request is split in two — this leave for the days it still has, and a
+    /// linked annual request for the rest.
+    /// </remarks>
+    public bool AllowOffsetAgainstAnnual { get; set; }
+
     // ===== ENCASHMENT RATE POLICY (Phase 4) =====
 
     /// <summary>
@@ -542,6 +554,24 @@ public class LeaveRequest : TenantEntity
     public DateTime RequestDate { get; set; }
 
     public Guid? LeavePlanId { get; set; }
+
+    // ── Beyond the limit, charged to annual leave (round 5, lane H, decision A5) ─────────────────
+    /// <summary>
+    /// The employee asked for the days beyond this leave type's limit to be charged to their annual
+    /// leave. Honoured only where the type allows it, and acted on at the final approval, which splits
+    /// the request.
+    /// </summary>
+    public bool ChargeExcessToAnnual { get; set; }
+
+    /// <summary>
+    /// On the annual part of a split: the request it was split from, whose limit the days went
+    /// beyond. Null on every other request.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A bare Guid, its foreign key declared in the model with no navigation — like the actor
+    /// columns below: an unpaired self-navigation would mint a shadow column.
+    /// </remarks>
+    public Guid? SplitFromRequestId { get; set; }
 
     [Required]
     [MaxLength(1000)]

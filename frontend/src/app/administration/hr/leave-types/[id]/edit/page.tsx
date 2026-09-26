@@ -95,6 +95,8 @@ export default function EditLeaveTypePage() {
             countHolidaysAsLeave: leaveType.countHolidaysAsLeave,
             allowCashConversion: leaveType.allowCashConversion,
             requiresReliever: leaveType.requiresReliever,
+            // Seeded like the rest, so a save never switches it off (round 5, lane H).
+            allowOffsetAgainstAnnual: leaveType.allowOffsetAgainstAnnual ?? false,
             // ⚠ Seeded from the DETAIL projection. If this were ever fetched from the plain
             // GET it would arrive undefined, the form would show nothing ticked, and saving
             // would clear every link — which is exactly the money-losing shape L-13 was about.

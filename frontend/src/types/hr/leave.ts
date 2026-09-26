@@ -141,6 +141,11 @@ export interface LeaveType {
   proRateFirstYearEntitlement: boolean;
   /** Annual, Maternity or Other (round 5, A4). Replaced mandatoryAnnualLeave. */
   category: LeaveTypeCategory;
+  /**
+   * Days asked for beyond this leave's limit may be charged to annual leave, HR deciding at the
+   * final approval (round 5, decision A5). Other kinds only.
+   */
+  allowOffsetAgainstAnnual: boolean;
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
   encashmentWorkingDaysPerMonth: number;
@@ -200,6 +205,11 @@ export interface CreateLeaveTypeRequest {
   proRateFirstYearEntitlement: boolean;
   /** Omit to leave the kind unchanged on update; Other on create (round 5, A4). */
   category?: LeaveTypeCategory | null;
+  /**
+   * Omit to leave it unchanged on update; off on create (round 5, A5). The API refuses it on an
+   * Annual or Maternity type, and on a type that does not require approval.
+   */
+  allowOffsetAgainstAnnual?: boolean | null;
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
   encashmentWorkingDaysPerMonth: number;

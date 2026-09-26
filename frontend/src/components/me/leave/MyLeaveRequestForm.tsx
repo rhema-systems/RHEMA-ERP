@@ -30,6 +30,7 @@ import { leaveService } from '@/services/hr/leave.service';
 import { employeeRelieverService } from '@/services/hr/employee-reliever.service';
 import { DateField, FieldRow, SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
 import { fmtDay } from '@/components/hr/leave/AccrualStatementPanel';
+import { ExcessToAnnualOffer } from '@/components/hr/leave/ExcessToAnnualOffer';
 
 export const myLeaveRequestSchema = z
   .object({
@@ -44,6 +45,8 @@ export const myLeaveRequestSchema = z
     handoverNotes: z.string().max(2000).optional().or(z.literal('')),
     /** Set only when the request was raised from an approved plan; never edited on the form. */
     leavePlanId: z.string().optional().or(z.literal('')),
+    /** Round 5, A5: the days beyond the type's limit, charged to annual leave if HR approves. */
+    chargeExcessToAnnual: z.boolean().optional(),
   })
   .refine((v) => v.endDate >= v.startDate, {
     message: 'End date cannot be before the start date',
@@ -75,6 +78,7 @@ export const emptyMyLeaveRequest: MyLeaveRequestFormValues = {
   relieverNotes: '',
   handoverNotes: '',
   leavePlanId: '',
+  chargeExcessToAnnual: false,
 };
 
 export const myLeaveRequestToPayload = (
@@ -96,6 +100,7 @@ export const myLeaveRequestToPayload = (
   // dead-ending and the employee re-keying their own dates (closure plan L-9).
   leavePlanId: v.leavePlanId || null,
   saveAsDraft,
+  chargeExcessToAnnual: !!v.chargeExcessToAnnual,
 });
 
 interface MyLeaveRequestFormProps {
@@ -297,6 +302,18 @@ export function MyLeaveRequestForm({
                 : '.'}
             </p>
           )}
+
+          <ExcessToAnnualOffer
+            employeeId={employeeId}
+            leaveTypeId={leaveTypeId}
+            leaveTypeName={selectedType?.name}
+            leaveSubTypeId={form.watch('leaveSubTypeId') || undefined}
+            startDate={startDate}
+            endDate={endDate}
+            checked={!!form.watch('chargeExcessToAnnual')}
+            onCheckedChange={(v) => form.setValue('chargeExcessToAnnual', v)}
+            forSelf
+          />
 
           <TextareaField form={form} name="reason" label="Reason" rows={3} />
 

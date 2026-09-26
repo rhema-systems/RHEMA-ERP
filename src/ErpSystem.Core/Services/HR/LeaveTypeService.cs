@@ -154,6 +154,7 @@ public class LeaveTypeService : ILeaveTypeService
             YearEndBasis = entity.YearEndBasis,
             ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
             Category = entity.Category,
+            AllowOffsetAgainstAnnual = entity.AllowOffsetAgainstAnnual,
             EncashmentRateBasis = entity.EncashmentRateBasis,
             EncashmentRatePerDay = entity.EncashmentRatePerDay,
             EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
@@ -186,6 +187,7 @@ public class LeaveTypeService : ILeaveTypeService
         entity.TenantId = tenantId;
         if (entity.Category == LeaveTypeCategory.Annual && entity.IsActive)
             await RefuseSecondActiveAnnualAsync(tenantId, exceptId: null);
+        RefuseOffsetWhereItCannotBind(entity);
         await _leaveTypeRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
@@ -240,6 +242,9 @@ public class LeaveTypeService : ILeaveTypeService
         // not turn the tenant's Annual Leave into Other (see CreateLeaveTypeDto.Category).
         if (dto.Category is LeaveTypeCategory category)
             entity.Category = category;
+        // Null leaves it as it is, for the same reason (round 5, lane H).
+        if (dto.AllowOffsetAgainstAnnual is bool offset)
+            entity.AllowOffsetAgainstAnnual = offset;
         entity.EncashmentRateBasis = dto.EncashmentRateBasis;
         entity.EncashmentRatePerDay = dto.EncashmentRatePerDay;
         entity.EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth;
@@ -248,6 +253,9 @@ public class LeaveTypeService : ILeaveTypeService
         // Both doors: making a type Annual, and re-activating an Annual one.
         if (entity.Category == LeaveTypeCategory.Annual && entity.IsActive)
             await RefuseSecondActiveAnnualAsync(tenantId, exceptId: id);
+
+        // Both doors again: switching the offset on, and changing the kind or the approval under it.
+        RefuseOffsetWhereItCannotBind(entity);
 
         await _leaveTypeRepository.UpdateAsync(entity);
         await SyncAllowanceLinksAsync(entity.Id, dto.AllowanceComponentIds);
@@ -591,6 +599,31 @@ public class LeaveTypeService : ILeaveTypeService
             throw new InvalidOperationException(
                 $"'{existing}' is already this organisation's annual leave, and there can only be one. "
                 + "Make this a different kind, or retire the other first.");
+    }
+
+    /// <summary>
+    /// ⚠ <b>Days beyond the limit go to annual leave only from an Other kind that requires
+    /// approval</b> (round 5, lane H, decision A5).
+    /// </summary>
+    /// <remarks>
+    /// Annual leave has nothing to overflow into, and maternity leave is statutory: its days are its
+    /// own. The request is split at its final approval, which is where HR decides the charge, so a
+    /// type approved automatically would charge annual leave with nobody deciding. Refused rather
+    /// than saved and ignored.
+    /// </remarks>
+    private static void RefuseOffsetWhereItCannotBind(LeaveType type)
+    {
+        if (!type.AllowOffsetAgainstAnnual) return;
+
+        if (type.Category != LeaveTypeCategory.Other)
+            throw new InvalidOperationException(
+                "Only leave of the Other kind can charge the days beyond its limit to annual leave, and this is "
+                + (type.Category == LeaveTypeCategory.Annual ? "the annual leave itself." : "maternity leave."));
+
+        if (!type.RequiresApproval)
+            throw new InvalidOperationException(
+                "The days beyond the limit are charged to annual leave when the request is approved, and HR "
+                + "decides it there. A leave type that allows it must require approval.");
     }
 
     /// <summary>

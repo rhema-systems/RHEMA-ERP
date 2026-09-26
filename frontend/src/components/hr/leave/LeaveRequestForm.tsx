@@ -22,6 +22,7 @@ import { leaveService } from '@/services/hr/leave.service';
 import { employeeRelieverService } from '@/services/hr/employee-reliever.service';
 import { DateField, FieldRow, SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
 import { fmtDay } from './AccrualStatementPanel';
+import { ExcessToAnnualOffer } from './ExcessToAnnualOffer';
 
 export const leaveRequestSchema = z
   .object({
@@ -37,6 +38,8 @@ export const leaveRequestSchema = z
     handoverNotes: z.string().max(2000).optional().or(z.literal('')),
     /** Set only when the request was raised from an approved plan; never edited on the form. */
     leavePlanId: z.string().optional().or(z.literal('')),
+    /** Round 5, A5: the days beyond the type's limit, charged to annual leave if HR approves. */
+    chargeExcessToAnnual: z.boolean().optional(),
   })
   .refine((v) => v.endDate >= v.startDate, {
     message: 'End date cannot be before the start date',
@@ -65,6 +68,7 @@ export const emptyLeaveRequest: LeaveRequestFormValues = {
   relieverNotes: '',
   handoverNotes: '',
   leavePlanId: '',
+  chargeExcessToAnnual: false,
 };
 
 interface LeaveRequestFormProps {
@@ -309,6 +313,18 @@ export function LeaveRequestForm({
             </p>
           )}
 
+          <ExcessToAnnualOffer
+            employeeId={employeeId}
+            leaveTypeId={leaveTypeId}
+            leaveTypeName={selectedType?.name}
+            leaveSubTypeId={form.watch('leaveSubTypeId') || undefined}
+            startDate={startDate}
+            endDate={endDate}
+            checked={!!form.watch('chargeExcessToAnnual')}
+            onCheckedChange={(v) => form.setValue('chargeExcessToAnnual', v)}
+            forSelf={false}
+          />
+
           <TextareaField form={form} name="reason" label="Reason" rows={3} />
 
           {rosterApplied && (
@@ -402,4 +418,5 @@ export const leaveRequestFormToPayload = (v: LeaveRequestFormValues, saveAsDraft
   // dead-ending and the employee re-keying their own dates (closure plan L-9).
   leavePlanId: v.leavePlanId || null,
   saveAsDraft,
+  chargeExcessToAnnual: !!v.chargeExcessToAnnual,
 });

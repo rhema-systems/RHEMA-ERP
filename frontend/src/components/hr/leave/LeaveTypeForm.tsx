@@ -74,6 +74,8 @@ export const leaveTypeSchema = z
     countHolidaysAsLeave: z.boolean(),
     allowCashConversion: z.boolean(),
     requiresReliever: z.boolean(),
+    /** Round 5, A5: days beyond the limit may be charged to annual leave. Other kinds only. */
+    allowOffsetAgainstAnnual: z.boolean(),
     requiresMedicalCertificate: z.boolean(),
     selfCertificationDays: z.string().optional().or(z.literal('')),
     medicalBoardThresholdDays: z.string().optional().or(z.literal('')),
@@ -90,6 +92,12 @@ export const leaveTypeSchema = z
   .refine((v) => v.category !== 'Annual' || v.maxDaysPerYear >= v.defaultDaysPerYear, {
     message: 'The highest allocation cannot be below the days per year',
     path: ['maxDaysPerYear'],
+  })
+  // The split happens at the final approval, where HR decides it (round 5, lane H). The server
+  // refuses the pair too; saying so here puts the reason beside the switch.
+  .refine((v) => v.category !== 'Other' || !v.allowOffsetAgainstAnnual || v.requiresApproval, {
+    message: 'Charging annual leave is decided at approval, so this leave must require approval',
+    path: ['allowOffsetAgainstAnnual'],
   })
   // A manual encashment basis is meaningless without the rate it refers to.
   .refine((v) => v.encashmentRateBasis !== 'Manual' || !!v.encashmentRatePerDay, {
@@ -121,6 +129,7 @@ export const emptyLeaveType: LeaveTypeFormValues = {
   countHolidaysAsLeave: false,
   allowCashConversion: false,
   requiresReliever: false,
+  allowOffsetAgainstAnnual: false,
   requiresMedicalCertificate: false,
   selfCertificationDays: '3',
   medicalBoardThresholdDays: '90',
@@ -495,6 +504,12 @@ export function LeaveTypeForm({
           </FieldRow>
           {counting}
           <p className="text-xs text-muted-foreground">Who may take it is on the Eligibility tab.</p>
+          <SwitchField
+            form={form}
+            name="allowOffsetAgainstAnnual"
+            label="Days beyond the limit may be charged to annual leave"
+            description="As in the public service for casual leave. The employee asks for it on the request, HR decides at the final approval, and the request is then split: this leave for the days it has left, annual leave for the rest. It needs approval switched on."
+          />
         </section>
         {medical}
         {workflow}
@@ -640,6 +655,8 @@ export function leaveTypeFormToRequest(v: LeaveTypeFormValues) {
     countHolidaysAsLeave: v.countHolidaysAsLeave,
     allowCashConversion: v.allowCashConversion,
     requiresReliever: v.requiresReliever,
+    // Other kinds only: the server refuses it on annual and maternity leave (round 5, lane H).
+    allowOffsetAgainstAnnual: v.category === 'Other' && v.allowOffsetAgainstAnnual,
     minServiceMonthsToAccess: num(v.minServiceMonthsToAccess),
     carryOverExpiryMonths: num(v.carryOverExpiryMonths),
     forfeitUnusedAfterMonths: num(v.forfeitUnusedAfterMonths),

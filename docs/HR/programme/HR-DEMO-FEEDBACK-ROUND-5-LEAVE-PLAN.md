@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-25): DECIDED, in build — M0 and lanes E, F, D, A, N, C and G done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G and H done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -21,7 +21,8 @@
 > | **N** | **DONE** 2026-09-25 — settings that do what they say: the audit's ghosts, misleading settings and bypasses; the demo data; four more defects found · `run-round5-n.mjs` 92, green twice · § 8 |
 > | **C** | **DONE** 2026-09-25 — accrual: a period counts on its last day; the accrual statement; leave owed as at a date; a leave year that does not start in January · `run-round5-c.mjs` 112, green twice · § 8 |
 > | **G** | **DONE** 2026-09-25 — the year-end, executed for real and fixed: expiry keeps what was taken in time, the reminder agrees with it, carry-over never moves lapsed days, not before the year ends, one pot per type · `run-round5-g.mjs` 55, green twice · § 8 |
-> | H · J · I · K · L | not started, in that order — **H is next** |
+> | **H** | **DONE** 2026-09-26 — casual leave beyond its limit: the ask, the split at the final approval, and the two parts kept as one absence; a leak found and closed · `run-round5-h.mjs` 142, green twice · § 8 |
+> | J · I · K · L | not started, in that order — **J is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -955,3 +956,119 @@ with the ledger asserted before and after:
 
 - `leave.admin` is a TenantAdmin with a known password on UAT, like the `admin` account itself. It
   is recorded in the harness README.
+
+### H — Casual leave beyond its limit · DONE 2026-09-26
+
+**Built.**
+
+- **The setting and the columns.**
+  - `LeaveType.AllowOffsetAgainstAnnual`: may the days asked for beyond this type's limit be charged
+    to annual leave? Only an **Other** kind that **requires approval** may have it, refused at both
+    doors. On update, a save that omits it leaves it alone, as for the kind.
+  - `LeaveRequest.ChargeExcessToAnnual`: the request asks for it.
+  - `LeaveRequest.SplitFromRequestId`: on the annual part, the request it continues. A foreign key
+    with no navigation, and indexed.
+  - Migration `AddLeaveRequestSplit`, guarded SQL: every existing type and request off, the index and
+    key in their own batch. Proven on a scratch database (Up twice, Down twice, Up again, 13 checks)
+    before UAT applied it at startup.
+- **Asking.** One balance check serves every way into a request: create, draft edit, submit, and
+  each move (an approver's suggested dates, the employee's answer, a reschedule). It keeps each
+  one's own refusal word for word, and has one way past it:
+  - The type keeps its first **whole** days, as many as it has left; annual leave takes the rest of
+    the absence, counted by annual leave's own rules.
+  - The extra days face annual leave's eligibility, its service gate, and what it can take now.
+  - A request on a type that allows it, but that did not ask, is told it could.
+  - New `GET api/Leaves/excess-preview` (one's own, or the leave read tier) gives the forms the
+    figures before anything is saved: the days the dates cost, what is left, the excess, and why
+    annual leave cannot take it when it cannot.
+- **Approving.** Whether the split can happen is asked again at every stage, before the engine: the
+  type's figure and annual leave's both move while a request waits. At the **final** approval:
+  - the request keeps its first days;
+  - a new Annual Leave request covers the rest, numbered inside the approval's transaction, with the
+    same approval and relievers, `SplitFromRequestId` set, and no workflow instance (nobody's queue
+    gains anything);
+  - both balances are re-derived, and attendance is posted for both.
+- **One absence afterwards.**
+  - Cancelling the first part cancels the annual part, which can also be cancelled alone.
+  - A recall from either page cuts the annual part first. Back before the annual part begins, it is
+    cancelled, and the first part is cut short if the day falls inside it.
+  - The return is reported and confirmed on the annual part. A day back before it began closes the
+    first part (early, cut short, if inside it) and cancels the annual part as never taken.
+  - Moving either part is refused.
+  - The screens offer only what applies, and the first part's *due back* is after the annual part.
+  - Reminder sweep 1 skips the annual part; sweep 2 skips the first part while the annual part
+    runs.
+- **Screens.**
+  - The leave-type form: an Other type has the switch under its limit.
+  - Both request forms: an offer panel with the tick, from the preview.
+  - Both request pages: a panel that says what approving would split off, or names the other half.
+  - The approvals list: an *Extra days to annual leave* badge.
+  - *Move dates* is hidden on a split pair.
+- **Demo data.** The seeder switches `CAS` on. UAT's `CAS` was switched on through the API, with the
+  whole record echoed from the detail read; every other field was unchanged, and that was asserted.
+
+**Changed from the plan, and why.**
+
+1. **While it waits, the whole request sits on its own type.** Casual leave can read *−2 left*
+   until the split, and annual leave holds nothing for it. So both are asked again at the approval,
+   and the approval is refused, saying why, when annual leave can no longer take the days. The
+   plan's "balances need no change" is true after the split; this is what it means before it.
+2. **The two parts are one absence for every act, not only recall.** The plan named recall.
+   Cancel, the return and a reschedule needed the same treatment:
+   - confirming the return on the first part would have recorded an overstay for days spent on
+     annual leave;
+   - sweep 2 would have chased a first part whose absence was still running;
+   - moving one part alone would leave a gap or an overlap.
+3. **A type that sends days to annual leave must require approval** (not in the plan). HR decides the
+   charge at approval (A5), so a type approved automatically would charge annual leave with nobody
+   deciding.
+4. **The extra days face annual leave's eligibility, service gate and balance, not its notice or
+   reliever rules.** They are part of a request that met the first type's rules, and they keep its
+   relievers.
+5. **Whole days, and nothing left means no split.** The type keeps ⌊left⌋ days. With less than one
+   day left, the request is refused and told to be raised as annual leave, rather than being turned
+   into annual leave whole.
+6. **The preview endpoint is new.** The forms had no chargeable-day count ("the chargeable total will
+   be lower"), and the offer has to name the days.
+
+**Suite.** `dev-harness/hr-leave/run-round5-h.mjs`: **142 assertions, green twice.**
+- Its first run was 140/141. The failure was a leak, found and closed (below).
+- A second assertion for the same leak in *send back with dates* made it 140/142 before the fix.
+- It ran 142 and 142 after the fix.
+- It uses leave.emp, two types of its own (limit 3, working days, as annual leave counts), and TDC's
+  own Annual Leave. The weeks are Monday to Friday, with no public holiday.
+- Past weeks are reached by moving requests in SQL, as lane D does.
+- It retires everything it raised, and opened an annual balance only for the run.
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green:
+
+- **Slices 1–13 are at their recorded counts, but for one run of slice 4.** Slice 1 is 72/75, the
+  same three environmental failures. Slice 4 read 51/52 on this lane's litter (Found in passing,
+  below); with the litter retired it read 54/54 alone. Slices 3, 5 and 7 cover the request paths
+  this lane changed (cancel, recall, close, evidence) and are unchanged: 33, 51, 34.
+- **The round 5 suites:** `run-round5-e.mjs` 119, `-f` 20, `-d` 74 (cancel, recall and the return,
+  on requests that are not split), `-a` 89, `-n` 92 (the suggested-dates door among them), `-c`
+  112, `-g` 55.
+- **`run-round5-h.mjs` was 142 a third time**, run last, with the cleanup that retires every
+  request it raised.
+- **Cleanup:** the 25 harness types the older slices minted were switched off, measured first (all
+  created by these runs, none of TDC's). Only TDC's nine are active, and `CAS` is the one with the new
+  setting on. No request of the suite's is left on leave.emp, in any status.
+- **The API log holds nothing from this lane:** 22 failed notification clean-up commands (one of
+  them a deadlock victim), the notification clean-up's own error, and one procurement calendar
+  failure. No request answered 500.
+
+**Found in passing.**
+
+- ⚠ **L-69: a refusal told a non-approver about the employee's leave.** Approve checked whether annual
+  leave could still take the extra days before it checked who was approving. So a manager whose stage
+  had passed got *"… only 1 day(s) of it can be taken now"* (400) instead of *not your step* (401).
+  *Send back with dates* has always validated the dates before the approver, so its refusals could
+  quote the employee's balance, and with this lane their annual leave too. Both now ask
+  `EnsureMayDecideAsync` first: the engine's own question, or the approval permission when no
+  definition is published.
+- ⚠ **The suite's own litter broke slice 4.** Its early runs left 60 cancelled requests on leave.emp
+  in the next six weeks. Slice 4 reads leave.emp's register for the next 30 days, a page of 100
+  newest first, and its own request fell off the page: 51/52, the two assertions under
+  `if (found)` never ran. The 60 were retired (measured; none held attendance), and the suite now
+  retires every request it raises, cancelled ones included, and asserts it did.

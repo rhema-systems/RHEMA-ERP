@@ -40,6 +40,7 @@ import type {
   LeaveAccrualStatement,
   LeaveOwedReport,
   LeaveYearInfo,
+  LeaveExcessPreview,
 } from '@/types/hr/leave-request';
 
 /**
@@ -61,6 +62,26 @@ class LeaveService {
 
   getByNumber(requestNumber: string): Promise<LeaveRequest> {
     return apiService.get<LeaveRequest>(`${this.baseUrl}/by-number/${requestNumber}`);
+  }
+
+  /**
+   * What these dates cost the leave type, and whether the days beyond its limit could be charged to
+   * annual leave (round 5, lane H). The request forms read it before anything is saved.
+   */
+  getExcessPreview(params: {
+    employeeId: string;
+    leaveTypeId: string;
+    startDate: string;
+    endDate: string;
+    leaveSubTypeId?: string | null;
+  }): Promise<LeaveExcessPreview> {
+    return apiService.get<LeaveExcessPreview>(`${this.baseUrl}/excess-preview`, {
+      employeeId: params.employeeId,
+      leaveTypeId: params.leaveTypeId,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      leaveSubTypeId: params.leaveSubTypeId || undefined,
+    });
   }
 
   /**

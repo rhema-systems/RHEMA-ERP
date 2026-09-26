@@ -91,6 +91,29 @@ export interface LeaveRequest {
    */
   matchesApprovedPlan?: boolean;
 
+  // ── Beyond the limit, charged to annual leave (round 5, lane H, decision A5) ──────────────────
+  /** The employee asked for the days beyond this leave's limit to go to annual leave. */
+  chargeExcessToAnnual?: boolean;
+  /**
+   * While undecided: the days approving it now would charge to annual leave, and why they could
+   * not be, when they could not. Single-request read only.
+   */
+  excessToAnnualDays?: number | null;
+  excessToAnnualRefusal?: string | null;
+  /** On a request split at approval: the annual part that took the rest of the absence. */
+  chargedToAnnualRequestId?: string | null;
+  chargedToAnnualRequestNumber?: string | null;
+  chargedToAnnualLeaveTypeName?: string | null;
+  chargedToAnnualDays?: number | null;
+  chargedToAnnualEndDate?: string | null;
+  chargedToAnnualStatus?: LeaveStatus | null;
+  /** On the annual part of a split: the request it was split from, where the absence began. */
+  splitFromRequestId?: string | null;
+  splitFromRequestNumber?: string | null;
+  splitFromLeaveTypeName?: string | null;
+  splitFromStartDate?: string | null;
+  splitFromStatus?: LeaveStatus | null;
+
   /**
    * Attendance days recorded as OnLeave against this request. Single-request read only. It should
    * equal `totalDays` once approved; fewer means some days already had attendance recorded and were
@@ -225,6 +248,31 @@ export interface CreateLeaveRequest {
   leavePlanId?: string | null;
   /** Keep as Draft instead of entering the approval workflow immediately. */
   saveAsDraft: boolean;
+  /**
+   * Charge the days beyond the leave type's limit to annual leave, HR deciding (round 5, A5). The
+   * API refuses it on a type that does not allow it; see `LeaveExcessPreview`.
+   */
+  chargeExcessToAnnual?: boolean;
+}
+
+/**
+ * What a request for these dates would cost its leave type, and of annual leave beyond the type's
+ * limit (round 5, lane H). `GET api/Leaves/excess-preview`; saves nothing.
+ */
+export interface LeaveExcessPreview {
+  /** The days the dates cost on this leave type, counted by its own rules. */
+  requestedDays: number;
+  /** What the type has left that can be taken now. */
+  availableDays: number;
+  /** The whole days beyond what the type can take: 0 when the request fits. */
+  excessDays: number;
+  allowsOffsetAgainstAnnual: boolean;
+  annualLeaveTypeName?: string | null;
+  /** What annual leave would be charged, counted by its own rules. */
+  annualDays?: number | null;
+  annualAvailableDays?: number | null;
+  /** Why the extra days cannot be charged to annual leave, when they cannot. */
+  refusal?: string | null;
 }
 
 export interface ApproveLeaveRequest {

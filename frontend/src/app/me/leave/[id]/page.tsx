@@ -66,6 +66,7 @@ import {
   RescheduleTrailPanel,
   RecallPanel,
 } from '@/components/hr/leave/LeaveDateChangeDialogs';
+import { SplitAbsencePanel } from '@/components/hr/leave/SplitAbsencePanel';
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -303,8 +304,17 @@ export default function MyLeaveRequestDetailPage({
   const canRespond = isMine && request.status === 'ChangesSuggested';
   // Move approved leave without cancelling and re-keying it (R-8), and say it is still going (R-7).
   // Not maternity: its dates follow the birth, so they are confirmed, never moved (round 5, A4).
+  // Round 5, lane H: the two parts of a split absence were approved as one and are not moved apart.
+  const running = (s?: string | null) => s === 'Approved' || s === 'InProgress';
+  const splitRunning =
+    (!!request.chargedToAnnualRequestId && running(request.chargedToAnnualStatus)) ||
+    (!!request.splitFromRequestId && running(request.splitFromStatus));
   const canReschedule =
-    isMine && request.status === 'Approved' && !request.closureDate && request.leaveTypeCategory !== 'Maternity';
+    isMine &&
+    request.status === 'Approved' &&
+    !request.closureDate &&
+    request.leaveTypeCategory !== 'Maternity' &&
+    !splitRunning;
   const canConfirm =
     isMine && request.status === 'Approved' && !request.closureDate && !request.observanceConfirmedDate;
 
@@ -394,6 +404,7 @@ export default function MyLeaveRequestDetailPage({
       {/* Read-only here. Recall is the employer's act, but the employee is the person it happens
           to, so their own copy of the record has to say it happened and why. */}
       <RecallPanel request={request} />
+      <SplitAbsencePanel request={request} hrefFor={(requestId) => `/me/leave/${requestId}`} />
 
       <Card>
         <CardHeader>

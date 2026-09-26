@@ -19,8 +19,10 @@ same evening; chapter 4's kind section, § 4.4.5, chapter 4b and § 23 (the audi
 to L-64) describe it. Lane C (accrual: the counting fix, the accrual statement, and the *leave owed*
 report) landed after it; § 1.3, § 1.3b, chapter 4b, chapter 13 and its new § 13b, § 19.1 and § 23
 (L-41 and half of L-48 closed; L-65 and L-66) describe it. Lane G (the year-end, run for real and
-fixed) landed the same night; chapter 17 and § 23 (L-42 closed; L-67 and L-68) describe it. The
-other chapters still describe the module before round 5.
+fixed) landed the same night; chapter 17 and § 23 (L-42 closed; L-67 and L-68) describe it. Lane H
+(casual leave beyond its limit, charged to annual leave) landed 2026-09-26; chapter 4's kind section,
+chapters 6, 7, 11 and 18, § 19.3, § 19.4 and § 23 (L-69) describe it. The other chapters still
+describe the module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
@@ -1142,6 +1144,21 @@ rulebook; what unpaid leave deducts is payroll's. *Forfeit unused after* says wh
 clears a year's leftover days that a settlement or a cash-in would count, and never stops anyone
 taking leave.
 
+*(Lane H, 2026-09-26.)* **An Other type has one more switch under its limit: *Days beyond the limit
+may be charged to annual leave*.** On, a request that asks for more days than the type has left can
+ask for the extra days to be charged to annual leave, and HR decides at the final approval, which
+splits the request in two (chapter 7). TDC's **Casual Leave** has it on — the public-service rule for
+casual leave — and nothing else does.
+
+- ⚠ **Only an Other kind that requires approval can have it**, at both doors. On an Annual type the
+  save is refused (*"… and this is the annual leave itself"*), on a Maternity type likewise, and
+  switching *Requires approval* off under it is refused: *"The days beyond the limit are charged to
+  annual leave when the request is approved, and HR decides it there. A leave type that allows it
+  must require approval."*
+- **A save that does not mention it leaves it alone**, as for the kind.
+- The **Overview** tab of an Other type reads *Beyond the limit: May be charged to annual leave* or
+  *Refused*.
+
 ⚠ **Advanced opens itself when a field inside it fails**, so a refusal is never hidden under a closed
 section.
 
@@ -1784,6 +1801,19 @@ until the record exists, and both forms have always carried **Save as draft**; w
 wrong was that somebody filled the whole form, pressed Submit, and was told *then* to go and get a
 certificate, having never been warned. So the warning moved to before the button.
 
+**A panel when the dates go beyond the limit** *(round 5, lane H)* appears under the dates once the
+chosen days come to more than the type has left. The figures come from the server, counted by the
+type's own rules (`GET api/Leaves/excess-preview`):
+
+> **This is 8 days of Casual Leave, and 6 days are left.**
+> ☐ Charge the extra 2 days to the employee's Annual Leave (HR decides)
+> *If it is approved, the request is split in two: 6 days of Casual Leave, then 2 days of Annual
+> Leave, which has 14 days that can be taken now. Without the tick it cannot be submitted.*
+
+On a type that does not allow it, or when annual leave cannot take the days, the panel is amber and
+says why instead: the service annual leave requires (twelve months), or *"… but only N day(s) of it
+can be taken now"*. The tick clears itself when the dates or the type change so that they fit.
+
 **Footer, three buttons:** **Cancel** · **Save as draft** · **Submit request**.
 
 ### ▶ Walk it
@@ -1921,6 +1951,32 @@ same rules on their own.
 ⚠ **Without that panel a recall is invisible**: the end date simply looks earlier, and the record
 reads as though the leave was always that short. Everything else on this screen is a fact about what
 was asked for; this is a fact about what happened to it.
+
+- **Beyond the limit, charged to annual leave** *(blue — round 5, lane H)*. While the request is
+  undecided: *Approving it now would split it in two: 6 days of Casual Leave, then 2 days of annual
+  leave, approved together* — or, amber, why it could not. After the final approval, on the first
+  part: *Split at approval — 2 days of this absence went beyond the Casual Leave limit and are charged
+  to Annual Leave as LV2026000123, to 2026-10-14*, with the number a link. On the annual part: *The rest
+  of an absence beyond its limit*, linking back, with the day the absence began.
+
+**Split at the final approval, and one absence after it** *(lane H)*. The first approval changes
+nothing. The final one keeps the first request's first whole days — as many as the type had left —
+and creates an **Annual Leave** request for the rest of the dates, counted by annual leave's rules,
+approved by the same approval, with the same relievers, and with no approval of its own: nobody's
+queue gains anything. If annual leave can no longer take the days (other leave was booked meanwhile),
+the approval is refused before anything is recorded: *"The extra 2 day(s) would be charged to Annual
+Leave, but only 1 day(s) of it can be taken now. Reject the request, or suggest dates within the
+limit."* From then on the two are one absence:
+
+| Act | On a split absence |
+|---|---|
+| **Cancel** the first part | cancels the annual part too, saying *Cancelled with LV…, the request it was split from* |
+| **Cancel** the annual part | cancels it alone; the first part stands |
+| **Recall**, from either page | back on a day inside the annual part: that part is cut short. Back before it began: it is cancelled, and the first part is cut short if the day falls inside it |
+| **I'm back at work** / **Confirm return** | offered on the **annual part only**, where the absence ends. A day back before the annual part began closes the first part (early if inside it) and cancels the annual part as not taken |
+| **Move dates** | not offered, and refused: *"The two were approved as one absence and are not moved apart. To change the dates, cancel it and raise it again."* |
+
+The first part's **Due back** is the day after the annual part ends.
 
 **Three tabs:** Overview · Attachments · Workflow.
 
@@ -2736,6 +2792,10 @@ button: **Open approval inbox** → `/workflow/inbox`, the cross-module queue.
 
 **The table:** a **select-all checkbox**, then per row a checkbox, Request · Employee · Leave type ·
 From · To · Days · Status. Clicking a row opens the request; clicking its checkbox does not.
+
+*(Round 5, lane H.)* A request that asks for its extra days to go to annual leave carries a badge,
+**Extra days to annual leave**, beside its number. Open it before approving: the request page says
+what the final approval would split off, or why it cannot.
 
 **The bulk dialog** lists exactly what you are about to decide — number, employee, dates — with a
 comment box *(optional for approve, **required** for reject)*.
@@ -3678,6 +3738,11 @@ enforced, and each had a plausible way to be wrong: a sign, an off-by-one and an
 ⚠ **A 90-day backlog floor** stops the first sweep on an established database queuing years of
 history. A comparable engine's first live run queued 275 reminders, of which 242 were history.
 
+*(Round 5, lane H.)* **An absence split at approval is asked about once.** *Leave starting soon*
+skips the annual part, which begins while the employee is already away on the first. *Leave not
+closed* skips the first part while its annual part is still running: the two are closed together,
+on the annual part.
+
 ### 👁 The six endpoints
 
 | Endpoint | Does |
@@ -3809,6 +3874,7 @@ pointing out:
 | **Relievers are a dropdown, not a search** | the options are her **own roster**, labelled *"Kofi Asante (priority 1)"* |
 | **When the roster is empty, it says what will happen** | *"You have no pre-defined relievers, so one will be assigned automatically when you submit — usually your manager."* |
 | **A certificate is asked for before she gets to Submit** *(new)* | *"You will need a medical certificate — excuse duty — for this. Sick Leave allows 3 day(s) on your own word, and you have chosen 5. **Save it as a draft**, attach the certificate, then submit it."* |
+| **Beyond the limit, she can ask** *(round 5, lane H)* | *"This is 8 days of Casual Leave, and 6 days are left. ☐ Charge the extra 2 days to **my** Annual Leave (HR decides)"* — chapter 6's panel, in her own words |
 
 ▶ **Walk it. 🔴 LIVE WRITE 17 — this is the request the room watches go all the way through.**
 
@@ -3854,6 +3920,10 @@ first working day after the leave) is shown on granted leave.
 
 **The orange *Recalled from leave* panel is on her screen too**, with the reason and the name of
 whoever recorded it.
+
+*(Round 5, lane H.)* **A split absence shows both halves.** Each request links to the other. While
+the annual part is still to come or under way, the first part offers no *I'm back at work*: she
+reports her return on the annual part, where the absence ends, and neither part offers *Move dates*.
 
 > "She does not get a Recall button, and that is the point of the rule rather than a limitation of
 > the screen. A recall is something an employer does *to* somebody — if she could press it she could
@@ -4068,7 +4138,7 @@ are scheduled in the round 5 plan; until then, read chapter 4's settings with th
 lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60**; lane N
 closed six of the audit's eleven and two in part, and found and closed four more, **L-61 to L-64**;
 lane C closed L-41 and half of L-48, and found and closed two more, **L-65 and L-66**; lane G closed
-L-42 and found and closed two more, **L-67 and L-68**.
+L-42 and found and closed two more, **L-67 and L-68**; lane H found and closed one, **L-69**.
 The round 5 blocks are listed after the settings audit.
 
 ### ✅ Closed
@@ -4233,6 +4303,15 @@ plan's § 8.
 |---|---|---|---|
 | **L-67** | ch. 17 | ⚠ **Days that had lapsed could be carried forward again.** Carry-over read the closing year's carried days as the row held them, so if nobody had run the expiry that year, the days that lapsed at the end of March travelled into the next year a second time | Carry-over counts the closing year's carried days only as far as they were still usable, by the expiry's own rule, whether or not the expiry was run |
 | **L-68** | ch. 17 | **A forfeiture preview did not show what the run would do.** The run expires carried days first and then forfeits what is unused; the preview left the balance untouched, so it counted the days its own expiry step was about to remove as unused and forfeitable | Forfeiture reads the carried days after the lapse in both, so the preview forfeits exactly what the run would |
+
+### ✅ Round 5 lane H — casual leave beyond its limit, 2026-09-26 — one found and closed
+
+Proved by `dev-harness/hr-leave/run-round5-h.mjs` (142 assertions, green twice). The build record is
+the round 5 plan's § 8.
+
+| # | Where | Finding | Closed by |
+|---|---|---|---|
+| **L-69** | ch. 7, 11 | ⚠ **A refusal told a non-approver about the employee's leave.** Approve checked whether the extra days could still go to annual leave before it checked who was approving, so a manager whose stage had passed was answered with *"… only 1 day(s) of it can be taken now"* instead of *not your step*. *Send back with dates* had always checked the dates before the approver, so its refusals could quote the employee's balance too. Found by the lane's own suite, on its first run | Both ask the engine's own question first — is this person deciding this step? — and refuse as that, saying nothing about the leave |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 

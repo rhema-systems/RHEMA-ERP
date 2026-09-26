@@ -36,6 +36,12 @@ public class LeaveTypeDto
 
     /// <summary>Annual, Maternity or Other (round 5, A4). Replaces <c>MandatoryAnnualLeave</c>.</summary>
     public LeaveTypeCategory Category { get; set; }
+
+    /// <summary>
+    /// Days asked for beyond this leave's limit may be charged to annual leave, HR deciding at the
+    /// final approval (round 5, decision A5). Other kinds only.
+    /// </summary>
+    public bool AllowOffsetAgainstAnnual { get; set; }
     public EncashmentRateBasis EncashmentRateBasis { get; set; }
     public decimal? EncashmentRatePerDay { get; set; }
     public int EncashmentWorkingDaysPerMonth { get; set; }
@@ -93,6 +99,13 @@ public class CreateLeaveTypeDto
     /// unmentioned field means "clear it".
     /// </remarks>
     public LeaveTypeCategory? Category { get; set; }
+
+    /// <summary>
+    /// Days beyond the limit may be charged to annual leave (round 5, A5). ⚠ <b>Null means "not
+    /// saying"</b>, as for <see cref="Category"/>: off on create, UNCHANGED on update. Refused on an
+    /// Annual or Maternity type, and on a type that does not require approval.
+    /// </summary>
+    public bool? AllowOffsetAgainstAnnual { get; set; }
     public EncashmentRateBasis EncashmentRateBasis { get; set; } = EncashmentRateBasis.DerivedFromEmoluments;
     public decimal? EncashmentRatePerDay { get; set; }
     public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
@@ -809,6 +822,42 @@ public class CreateLeaveRequestDto
     public string? HandoverNotes { get; set; }
     public Guid? LeavePlanId { get; set; }
     public bool SaveAsDraft { get; set; }
+
+    /// <summary>
+    /// Charge the days beyond this leave's limit to annual leave, HR deciding (round 5, decision
+    /// A5). Allowed only where the leave type says so; see <see cref="LeaveExcessPreviewDto"/>.
+    /// </summary>
+    public bool ChargeExcessToAnnual { get; set; }
+}
+
+/// <summary>
+/// What a request for these dates would ask of its leave type, and of annual leave beyond the type's
+/// limit (round 5, lane H). Read by the request forms before anything is saved.
+/// </summary>
+public class LeaveExcessPreviewDto
+{
+    /// <summary>The days the dates cost on this leave type, counted by its own rules.</summary>
+    public decimal RequestedDays { get; set; }
+
+    /// <summary>What the leave type has left that can be taken now.</summary>
+    public decimal AvailableDays { get; set; }
+
+    /// <summary>The days beyond what the type can take: 0 when the request fits.</summary>
+    public decimal ExcessDays { get; set; }
+
+    /// <summary>Whether the leave type lets those days be charged to annual leave.</summary>
+    public bool AllowsOffsetAgainstAnnual { get; set; }
+
+    public string? AnnualLeaveTypeName { get; set; }
+
+    /// <summary>The days annual leave would be charged, counted by annual leave's rules.</summary>
+    public decimal? AnnualDays { get; set; }
+
+    /// <summary>What annual leave has left that can be taken now.</summary>
+    public decimal? AnnualAvailableDays { get; set; }
+
+    /// <summary>Why the extra days cannot be charged to annual leave, when they cannot.</summary>
+    public string? Refusal { get; set; }
 }
 
 public class LeaveRequestDto
@@ -856,6 +905,38 @@ public class LeaveRequestDto
     /// goes through both approvals, but the approver can see at a glance that the dates were agreed.
     /// </summary>
     public bool MatchesApprovedPlan { get; set; }
+
+    // ── Beyond the limit, charged to annual leave (round 5, lane H, decision A5) ───────────────
+    /// <summary>The employee asked for the days beyond this leave's limit to go to annual leave.</summary>
+    public bool ChargeExcessToAnnual { get; set; }
+
+    /// <summary>
+    /// While the request is undecided: the days that would be charged to annual leave if it were
+    /// approved now, and why they could not be, when they could not. Single read only.
+    /// </summary>
+    public decimal? ExcessToAnnualDays { get; set; }
+    public string? ExcessToAnnualRefusal { get; set; }
+
+    /// <summary>
+    /// On a request split at approval: the annual part that took the days beyond the limit. The
+    /// absence runs on to its end date. Single read only.
+    /// </summary>
+    public Guid? ChargedToAnnualRequestId { get; set; }
+    public string? ChargedToAnnualRequestNumber { get; set; }
+    public string? ChargedToAnnualLeaveTypeName { get; set; }
+    public decimal? ChargedToAnnualDays { get; set; }
+    public DateOnly? ChargedToAnnualEndDate { get; set; }
+    public LeaveStatus? ChargedToAnnualStatus { get; set; }
+
+    /// <summary>
+    /// On the annual part of a split: the request it was split from, where the absence began.
+    /// Number, type, start and status are filled on the single read only.
+    /// </summary>
+    public Guid? SplitFromRequestId { get; set; }
+    public string? SplitFromRequestNumber { get; set; }
+    public string? SplitFromLeaveTypeName { get; set; }
+    public DateOnly? SplitFromStartDate { get; set; }
+    public LeaveStatus? SplitFromStatus { get; set; }
 
     /// <summary>
     /// Who finally approved the request and when, and why it was refused if it was.

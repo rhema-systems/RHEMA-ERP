@@ -5,7 +5,7 @@
 lane N — § 2.7, the 44 letter and email templates; lane N-b2 — § 2.8, company-schedule reminders;
 lane O — § 2.9, the technician-role flag and the person's exception).
 
-**Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2), and
+**Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2, and `AllowOffsetAgainstAnnual` added 2026-09-26), and
 all four of leave's CHILD tables (38)** — plus, not as a full survey, the three `OrientationProgram` notice and
 certificate switches lane K-b1 made real (§ 2.6: two were ghosts). Three ghosts found, all in the first — **and one setting that is none of the
 four statuses**, which is why there are now five. The per-module settings for attendance, travel,
@@ -522,8 +522,21 @@ dropped the flag.
 |---|---|---|---|
 | `Category` | `Other`. On save, null means Other on create and **unchanged** on update | **Enforced** | [1] a second ACTIVE Annual is refused at both doors (create; switching an Annual type on), a switched-off type may be Annual, and the Annual type's own save is allowed with its row unchanged; [2] Maternity takes leave at 5 days' notice where Other with the same 30 days refuses, and refuses send-back and move where Other accepts both; [3] plans refuse Other and Maternity and accept Annual; [4] in-service encashment refuses Other and Maternity, and Annual passes to the next check; [5] the compliance register holds Annual rows only |
 
-⚠ **Readers still to come**, in their lanes: the balances view (J), the casual-leave set-off (H), the
-reminders (I) and the leaver's settlement (L2).
+⚠ **Readers still to come**, in their lanes: the balances view (J), the reminders (I) and the
+leaver's settlement (L2). The casual-leave set-off (H) landed 2026-09-26: only an **Other** kind may
+charge its extra days to annual leave, and the charge always lands on the tenant's one active Annual
+type.
+
+### Beyond the limit — `AllowOffsetAgainstAnnual` (round 5, lane H) — added 2026-09-26
+
+Decision A5: days asked for beyond a leave type's limit may be charged to annual leave, the employee
+asking and HR deciding at the final approval, which splits the request (`LeaveRequest.SplitFromRequestId`
+on the annual part). Migration `AddLeaveRequestSplit` added it off for every existing type; UAT's
+`CAS` was switched on through the API, and the demo seeder sets it on `CAS`.
+
+| Setting | Default | Status | Proof — `run-round5-h.mjs`, both positions |
+|---|---|---|---|
+| `AllowOffsetAgainstAnnual` | off. On save, null means off on create and **unchanged** on update | **Enforced** | [1] off and on read back through both mappers; a save without it leaves it on; refused on an Annual or Maternity type and on a type that does not require approval, at both doors; [2] with it on, a request beyond the limit that asks is accepted and one that does not is told it could; with it off the plain refusal, and asking is refused; [3] the final approval splits 5 days into 3 + 2 on annual leave, the ledger exact on both types; [9] the split is re-checked at approval, refused when annual leave can no longer take the days; [10] annual leave's service gate applies to the extra days |
 
 ### The rest of `LeaveType`
 

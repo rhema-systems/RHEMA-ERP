@@ -209,6 +209,40 @@ namespace ErpSystem.Api.Controllers.HR
         }
 
         /// <summary>
+        /// What a request for these dates would cost its leave type, and whether the days beyond
+        /// the type's limit could be charged to annual leave (round 5, lane H). Saves nothing.
+        /// </summary>
+        [HttpGet("excess-preview")]
+        [ProducesResponseType(typeof(LeaveExcessPreviewDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveExcessPreviewDto>> PreviewExcess(
+            [FromQuery] Guid employeeId,
+            [FromQuery] Guid leaveTypeId,
+            [FromQuery] DateOnly startDate,
+            [FromQuery] DateOnly endDate,
+            [FromQuery] Guid? leaveSubTypeId = null)
+        {
+            // The same door as the balances it reads: one's own, or the leave read tier.
+            if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
+                return Forbid();
+
+            try
+            {
+                return Ok(await _leaveService.PreviewExcessAsync(
+                    employeeId, leaveTypeId, leaveSubTypeId, startDate, endDate));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Update an existing draft leave request
         /// </summary>
         [HttpPut("{id:guid}/draft")]

@@ -33,6 +33,7 @@ import {
 import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import { MedicalBoardLinkPanel } from '@/components/hr/leave/MedicalBoardLinkPanel';
 import { MatchesApprovedPlanBadge } from '@/components/hr/leave/MatchesApprovedPlanBadge';
+import { SplitAbsencePanel } from '@/components/hr/leave/SplitAbsencePanel';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -243,7 +244,12 @@ export default function LeaveRequestDetailPage() {
   // The employee's answer. HR can drive it from here too — the endpoint is self-or-leave-write.
   const canRespond = r.status === 'ChangesSuggested';
   // Moving approved dates, and saying it is still going ahead. Neither applies once it is closed.
-  const canReschedule = r.status === 'Approved' && !r.closureDate && !isMaternity;
+  // Round 5, lane H: the two parts of a split absence were approved as one and are not moved apart.
+  const running = (s?: string | null) => s === 'Approved' || s === 'InProgress';
+  const splitRunning =
+    (!!r.chargedToAnnualRequestId && running(r.chargedToAnnualStatus)) ||
+    (!!r.splitFromRequestId && running(r.splitFromStatus));
+  const canReschedule = r.status === 'Approved' && !r.closureDate && !isMaternity && !splitRunning;
   const canConfirm = r.status === 'Approved' && !r.closureDate && !r.observanceConfirmedDate;
   // Recall applies to leave that has been granted, including leave already under way — that is the
   // case it mainly exists for. The employer's act: HR, or the employee's supervisor or head of
@@ -329,6 +335,7 @@ export default function LeaveRequestDetailPage() {
           <SuggestedDatesPanel request={r} />
           <RescheduleTrailPanel request={r} />
           <RecallPanel request={r} />
+          <SplitAbsencePanel request={r} hrefFor={(requestId) => `/hr/leave/requests/${requestId}`} />
           {/*
             ⚠ The board arm of the evidence gate (G4/R-15b). The link endpoint went in first and I
             recorded the gate as closed while nothing in the product could call it — so a leave type
