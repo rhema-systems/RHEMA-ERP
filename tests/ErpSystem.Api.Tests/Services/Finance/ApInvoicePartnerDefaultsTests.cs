@@ -429,7 +429,7 @@ public sealed class ApInvoicePartnerDefaultsTests
         request.LineItems.Add(new() { Description = "Exempt", Quantity = 1, UnitPrice = 10, TaxTreatment = TaxTreatment.Exempt });
         request.LineItems.Add(new() { Description = "Explicit rate", Quantity = 1, UnitPrice = 10, TaxRate = 2.5m });
         await fixture.ApplyAsync(request);
-        request.ApAccountId.Should().Be(account);
+        request.ApAccountId.Should().BeNull("partner and invoice defaults cannot override the Finance AP control account");
         request.PaymentTermsDays.Should().Be(45);
         request.LineItems[0].TaxGroupId.Should().Be(selectedTax);
         request.LineItems[1].TaxGroupId.Should().BeNull();
@@ -447,7 +447,7 @@ public sealed class ApInvoicePartnerDefaultsTests
             .ReturnsAsync(new TaxCalculationResultDto { BaseAmount = 100m, TotalTaxAmount = 15m, GrandTotal = 115m });
         var invoice = await fixture.Service.CreateAsync(fixture.Request());
         invoice.Status.Should().Be(VendorInvoiceStatus.Draft);
-        invoice.ApAccountId.Should().Be(fixture.Partner.DefaultApAccountId);
+        invoice.ApAccountId.Should().BeNull("new invoices resolve AP control exclusively from Finance settings at posting");
         invoice.ExpenseAccountId.Should().Be(fixture.Partner.DefaultExpenseAccountId);
         invoice.TaxAmount.Should().Be(15m);
         invoice.TotalAmount.Should().Be(115m);
@@ -490,10 +490,10 @@ public sealed class ApInvoicePartnerDefaultsTests
         fixture.Context.BusinessPartners.Add(fixture.Partner);
         await fixture.Context.SaveChangesAsync();
         var request = fixture.Request();
-        request.SupplierId = fixture.Partner.Id;
+        request.BusinessPartnerId = fixture.Partner.Id;
         var invoice = await fixture.Service.CreateAsync(request);
         var supplier = await fixture.Context.Suppliers.SingleAsync();
-        supplier.Id.Should().Be(invoice.SupplierId);
+        supplier.Id.Should().Be(invoice.BusinessPartnerId);
         supplier.SupplierCode.Should().Be(fixture.Partner.PartnerCode);
         supplier.DefaultApAccountId.Should().Be(fixture.Partner.DefaultApAccountId);
         supplier.DefaultExpenseAccountId.Should().Be(fixture.Partner.DefaultExpenseAccountId);
@@ -577,7 +577,7 @@ public sealed class ApInvoicePartnerDefaultsTests
         }
         public VendorInvoiceCreateDto Request() => new()
         {
-            SupplierId = Supplier.Id, ApplyBusinessPartnerDefaults = true, ApplySupplierWithholdingDefaults = true,
+            BusinessPartnerId = Supplier.Id, ApplyBusinessPartnerDefaults = true, ApplySupplierWithholdingDefaults = true,
             InvoiceDate = new DateTime(2026, 9, 13),
             CurrencyCode = "GHS", LineItems = [new() { Description = "Goods", Quantity = 1, UnitPrice = 100 }]
         };

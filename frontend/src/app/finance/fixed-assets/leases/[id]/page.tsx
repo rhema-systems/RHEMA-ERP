@@ -11,6 +11,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { leaseAccountingService, type LeaseContractDetail, type LeaseStatus } from '@/services/finance/leaseAccountingService';
 import { SourceDocumentDimensionDefaultsPanel, SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues, toFinanceSourceDimensionFormState } from '@/lib/finance/source-document-dimensions';
+import { toast } from 'sonner';
 
 export default function LeaseDetailPage() {
   const params = useParams();
@@ -53,7 +54,7 @@ export default function LeaseDetailPage() {
       });
       await refresh();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Activation failed');
+      toast.error(error instanceof Error ? error.message : 'The lease was not activated. Review its commencement data and Finance mappings, then retry.');
     }
   };
 
@@ -67,7 +68,7 @@ export default function LeaseDetailPage() {
       });
       await refresh();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Failed to post period');
+      toast.error(error instanceof Error ? error.message : 'The lease period was not posted. Review the period status and required account mappings, then retry.');
     }
   };
 

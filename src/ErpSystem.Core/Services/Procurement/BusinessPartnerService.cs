@@ -119,13 +119,15 @@ public class BusinessPartnerService : IBusinessPartnerService
 
     public async Task<BusinessPartnerDetailDto> CreateAsync(CreateBusinessPartnerDto dto)
     {
+        var roleTypes = ResolveRoleTypes(dto.RoleTypes, dto.PartnerType);
+        var legacyPartnerType = ProjectLegacyPartnerType(roleTypes);
         if (_currentUserProvider.IsExternalUser && dto.CreditLimit.HasValue)
             throw new UnauthorizedAccessException("Credit limits are maintained by internal business-partner administrators.");
         ValidateCreditLimit(dto.CreditLimit);
         if (dto.PostingDefaults != null)
-            await ValidatePostingDefaultsAsync(dto.PostingDefaults, dto.PartnerType);
-        var partnerCode = await _partnerRepository.GeneratePartnerCodeAsync(dto.PartnerType);
-        var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId, dto.PartnerType, useDefaultWhenMissing: true);
+            await ValidatePostingDefaultsAsync(dto.PostingDefaults, legacyPartnerType);
+        var partnerCode = await _partnerRepository.GeneratePartnerCodeAsync(legacyPartnerType);
+        var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId, legacyPartnerType, useDefaultWhenMissing: true);
 
         var partner = new BusinessPartner
         {
@@ -133,7 +135,10 @@ public class BusinessPartnerService : IBusinessPartnerService
             TenantId = _currentUserProvider.TenantId,
             PartnerCode = partnerCode,
             PartnerName = dto.PartnerName,
-            PartnerType = dto.PartnerType,
+            // PROCUREMENT COMPATIBILITY NOTE: PartnerType is a lossy projection retained for
+            // older Procurement queries. BusinessPartnerRole is the canonical source for all new
+            // Finance and cross-module counterparty decisions.
+            PartnerType = legacyPartnerType,
             LegalName = dto.PartnerName,
             BusinessRegistrationNumber = dto.RegistrationNumber,
             TaxIdentificationNumber = dto.TaxNumber,
@@ -157,6 +162,16 @@ public class BusinessPartnerService : IBusinessPartnerService
             Currency = dto.Currency
         };
 
+        partner.Roles = roleTypes.Select(roleType => new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(),
+            TenantId = partner.TenantId,
+            RoleType = roleType,
+            Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = DateTime.UtcNow,
+            CreatedById = _currentUserProvider.UserId
+        }).ToList();
+
         // PROCUREMENT OWNERSHIP NOTE: Finance uses PaymentTermId as the authoritative value.
         // PaymentTerms is intentionally dual-written for older procurement screens/reports; do not
         // parse or bulk-backfill historical free text without agreement from the procurement owner.
@@ -166,7 +181,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         if (dto.PostingDefaults != null) BusinessPartnerPostingDefaults.Apply(partner, dto.PostingDefaults);
 
         // Set customer-specific fields if partner type is Customer
-        if (dto.PartnerType == "Customer")
+        if (roleTypes.Contains(BusinessPartnerRoleType.Customer))
         {
             partner.CustomerType = dto.CustomerType;
             partner.DefaultDiscount = dto.DefaultDiscount;
@@ -799,6 +814,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             PartnerName = partner.PartnerName,
             CompanyName = partner.PartnerName, // Alias for frontend compatibility
             PartnerType = partner.PartnerType,
+            RoleTypes = MapRoleTypes(partner),
             RegistrationNumber = partner.BusinessRegistrationNumber,
             TaxNumber = partner.TaxIdentificationNumber,
             VatNumber = partner.VATNumber,
@@ -840,6 +856,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             PartnerCode = partner.PartnerCode,
             PartnerName = partner.PartnerName,
             PartnerType = partner.PartnerType,
+            RoleTypes = MapRoleTypes(partner),
             RegistrationNumber = partner.BusinessRegistrationNumber,
             TaxNumber = partner.TaxIdentificationNumber,
             VatNumber = partner.VATNumber,
@@ -1009,6 +1026,54 @@ public class BusinessPartnerService : IBusinessPartnerService
 
         return dto;
     }
+
+    /// <summary>
+    /// Expands the old single PartnerType value only when a client has not yet adopted RoleTypes.
+    /// Keeping the adapter here avoids proliferating legacy parsing through Finance posting code.
+    /// </summary>
+    private static IReadOnlyCollection<BusinessPartnerRoleType> ResolveRoleTypes(
+        IEnumerable<string>? requestedRoles,
+        string legacyPartnerType)
+    {
+        var parsed = (requestedRoles ?? Array.Empty<string>())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => Enum.TryParse<BusinessPartnerRoleType>(value, true, out var role)
+                ? role
+                : throw new ArgumentException($"Unsupported Business Partner role '{value}'."))
+            .Distinct()
+            .ToList();
+        if (parsed.Count > 0) return parsed;
+        return legacyPartnerType.Trim().ToUpperInvariant() switch
+        {
+            "SUPPLIER" => new[] { BusinessPartnerRoleType.Supplier },
+            "CONTRACTOR" => new[] { BusinessPartnerRoleType.Contractor },
+            "CUSTOMER" => new[] { BusinessPartnerRoleType.Customer },
+            "BOTH" => new[] { BusinessPartnerRoleType.Supplier, BusinessPartnerRoleType.Contractor },
+            _ => throw new ArgumentException($"Unsupported Business Partner type '{legacyPartnerType}'.")
+        };
+    }
+
+    /// <summary>
+    /// Temporary projection for Procurement code that still reads one PartnerType string. When a
+    /// partner also has Customer, the supplier/contractor projection is preserved so Procurement
+    /// eligibility does not regress; canonical Finance selectors query BusinessPartnerRole.
+    /// </summary>
+    private static string ProjectLegacyPartnerType(IReadOnlyCollection<BusinessPartnerRoleType> roles)
+    {
+        var supplier = roles.Contains(BusinessPartnerRoleType.Supplier);
+        var contractor = roles.Contains(BusinessPartnerRoleType.Contractor);
+        if (supplier && contractor) return "Both";
+        if (supplier) return "Supplier";
+        if (contractor) return "Contractor";
+        if (roles.Contains(BusinessPartnerRoleType.Customer)) return "Customer";
+        throw new ArgumentException("Select at least one Business Partner role.");
+    }
+
+    private static List<string> MapRoleTypes(BusinessPartner partner) =>
+        partner.Roles?.Where(role => !role.IsDeleted)
+            .OrderBy(role => role.RoleType)
+            .Select(role => role.RoleType.ToString())
+            .ToList() ?? new List<string>();
 
     private static List<string> MapCategoryNames(BusinessPartner partner)
     {

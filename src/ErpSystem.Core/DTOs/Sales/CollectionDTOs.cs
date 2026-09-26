@@ -25,7 +25,7 @@ public class CollectionActivitySummaryDto
 
 public class CollectionActivityDetailDto : CollectionActivitySummaryDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public Guid? InvoiceId { get; set; }
     public string? InvoiceNumber { get; set; }
     public string? Description { get; set; }
@@ -36,7 +36,7 @@ public class CollectionActivityDetailDto : CollectionActivitySummaryDto
 public class CreateCollectionActivityDto
 {
     [Required]
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public Guid? InvoiceId { get; set; }
     [Required]
     public string Subject { get; set; } = string.Empty;
@@ -82,7 +82,7 @@ public class PaymentPlanSummaryDto
 
 public class PaymentPlanDetailDto : PaymentPlanSummaryDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedDate { get; set; }
@@ -108,7 +108,7 @@ public class PaymentPlanInstallmentDto
 public class CreatePaymentPlanDto
 {
     [Required]
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     [Required]
     public string PlanName { get; set; } = string.Empty;
     public decimal TotalDebt { get; set; }

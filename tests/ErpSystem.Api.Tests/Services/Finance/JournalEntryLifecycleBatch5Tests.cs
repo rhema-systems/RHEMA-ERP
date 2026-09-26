@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -64,6 +65,109 @@ public sealed partial class JournalEntryLifecycleBatch5Tests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "DeltaAdjustment")]
+    public async Task DeltaBook_ShouldAcceptOnlyDedicatedDeltaAdjustmentJournalType()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var baseBook = await db.AccountingBooks.SingleAsync(book => book.Code == "IFRS");
+        baseBook.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        var deltaBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS_AUDIT_ADJ", Name = "IFRS Audit Adjustments",
+            Purpose = "Controlled year-end audit adjustments", BookType = AccountingBookType.Delta,
+            BaseAccountingBookId = baseBook.Id, LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(deltaBook);
+        await db.SaveChangesAsync();
+
+        var ordinary = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        ordinary.BookClassification = deltaBook.Code;
+        var ordinaryAct = () => CreateJournalService(db, tenantId).CreateJournalEntryAsync(ordinary);
+        await ordinaryAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*accepts only the dedicated Delta Adjustment journal type*");
+
+        var governed = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        governed.BookClassification = deltaBook.Code;
+        governed.JournalType = "Delta Adjustment";
+        var created = await CreateJournalService(db, tenantId).CreateJournalEntryAsync(governed);
+
+        created.JournalType.Should().Be("Delta Adjustment");
+        created.BookClassification.Should().Be(deltaBook.Code);
+        created.PostingStatus.Should().Be("Draft");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "DeltaAdjustment")]
+    public async Task DeltaAdjustment_ShouldPostReverseReportAndRespectExactBookPeriod()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var period = await db.FiscalPeriods.SingleAsync(item => item.TenantId == tenantId);
+        var baseBook = await db.AccountingBooks.SingleAsync(book => book.Code == "IFRS");
+        baseBook.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        baseBook.FunctionalCurrencyCode = "GHS";
+        var deltaBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS_CONSOL_ADJ", Name = "IFRS consolidation adjustments",
+            Purpose = "Controlled consolidation adjustments", BookType = AccountingBookType.Delta,
+            BaseAccountingBookId = baseBook.Id, LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS", IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(deltaBook);
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, deltaBook, debitAccount, creditAccount);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, deltaBook.Code);
+        await db.SaveChangesAsync();
+
+        var request = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        request.BookClassification = deltaBook.Code;
+        request.JournalType = "Delta Adjustment";
+        request.Description = "Consolidation fair-value adjustment";
+        var journalService = CreateJournalService(db, tenantId);
+        var journal = await journalService.CreateJournalEntryAsync(request);
+        await journalService.UpdateApprovalStatusAsync(journal.Id, "Approved", "Approved", Guid.NewGuid());
+
+        var posted = await journalService.PostJournalEntryAsync(journal.Id);
+        posted.PostingStatus.Should().Be("Posted");
+        posted.BookClassification.Should().Be(deltaBook.Code);
+        (await db.AccountTransactions.Where(item => item.JournalEntryId == journal.Id).ToListAsync())
+            .Should().OnlyContain(item => item.AccountingBookId == deltaBook.Id && item.PostingStatus == "Posted");
+
+        var currentUser = CreateCurrentUser(tenantId);
+        var reportService = new AccountingBookService(db, currentUser.Object);
+        var adjusted = await reportService.GetDeltaCombinedReportAsync(deltaBook.Id, new DateTime(2026, 7, 31));
+        adjusted.Lines.Single(item => item.AccountId == debitAccount.Id).DeltaSignedBalance.Should().Be(100m);
+        adjusted.Lines.Single(item => item.AccountId == creditAccount.Id).DeltaSignedBalance.Should().Be(-100m);
+
+        var reversal = await journalService.ReverseJournalEntryAsync(
+            journal.Id, "Remove consolidation adjustment", new DateTime(2026, 7, 5));
+        reversal.PostingStatus.Should().Be("Posted");
+        reversal.BookClassification.Should().Be(deltaBook.Code);
+        reversal.OriginalJournalId.Should().Be(journal.Id);
+        var reversed = await reportService.GetDeltaCombinedReportAsync(deltaBook.Id, new DateTime(2026, 7, 31));
+        reversed.Lines.Should().OnlyContain(item => item.DeltaSignedBalance == 0m && item.CombinedSignedBalance == 0m);
+
+        var deltaPeriod = await db.AccountingBookPeriods.SingleAsync(item =>
+            item.AccountingBookId == deltaBook.Id && item.FiscalPeriodId == period.Id);
+        deltaPeriod.PeriodStatus = AccountingBookPeriodStatus.Closed;
+        await db.SaveChangesAsync();
+        var blockedRequest = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        blockedRequest.BookClassification = deltaBook.Code;
+        blockedRequest.JournalType = "Delta Adjustment";
+        var blocked = await journalService.CreateJournalEntryAsync(blockedRequest);
+        await journalService.UpdateApprovalStatusAsync(blocked.Id, "Approved", "Approved", Guid.NewGuid());
+
+        await FluentActions.Awaiting(() => journalService.PostJournalEntryAsync(blocked.Id))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*ACCOUNTING_BOOK_PERIOD_NOT_OPEN*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
     [Trait("Category", "JournalLifecycle")]
     public async Task ForeignDraftJournal_ShouldRetainApprovedExchangeRateEvidence()
     {
@@ -100,6 +204,40 @@ public sealed partial class JournalEntryLifecycleBatch5Tests
         foreignLine.ExchangeRate.Should().Be(rate.Rate);
         (await db.AccountTransactions.SingleAsync(line => line.Id == foreignLine.Id))
             .ExchangeRateId.Should().Be(rate.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalLifecycle")]
+    public async Task ForeignDraftJournal_ShouldNormalizeFunctionalAmountsUsingPostingPrecision()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var rate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 12.345m, InverseRate = decimal.Round(1m / 12.345m, 6),
+            EffectiveDate = new DateTime(2026, 7, 1), RateType = ExchangeRateType.Daily,
+            QuoteSide = ExchangeRateQuoteSide.Mid, RateSource = "Approved precision test rate",
+            IsActive = true, ApprovalStatus = RateApprovalStatus.Approved
+        };
+        db.ExchangeRates.Add(rate);
+        await db.SaveChangesAsync();
+        var request = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        request.Transactions[0].Amount = 37.035m;
+        request.Transactions[0].CurrencyCode = "USD";
+        request.Transactions[0].ForeignAmount = 3m;
+        request.Transactions[0].ExchangeRate = rate.Rate;
+        request.Transactions[0].ExchangeRateId = rate.Id;
+        request.Transactions[1].Amount = 37.04m;
+
+        var journal = await CreateJournalService(db, tenantId).CreateJournalEntryAsync(request);
+
+        journal.TotalDebit.Should().Be(37.04m);
+        journal.TotalCredit.Should().Be(37.04m);
+        journal.Transactions.Single(line => line.TransactionType == "Debit").Amount.Should().Be(37.04m);
     }
 
     [Fact]

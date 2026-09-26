@@ -3945,7 +3945,8 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             // Validate Trial Balance (Debits = Credits)
             var transactions = await _unitOfWork.Repository<AccountTransaction>()
-                .GetQueryable(t => t.TenantId == TenantId && t.FiscalPeriodId == periodId)
+                .GetQueryable(t => t.TenantId == TenantId && t.FiscalPeriodId == periodId &&
+                    !t.IsDeleted && t.PostingStatus == "Posted")
                 .ToListAsync(cancellationToken);
 
             decimal totalDebits = transactions.Sum(t => t.DebitAmount);

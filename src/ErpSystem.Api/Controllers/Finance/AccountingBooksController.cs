@@ -24,6 +24,28 @@ public sealed class AccountingBooksController : ControllerBase
     public async Task<IActionResult> GetBook(Guid id, CancellationToken cancellationToken = default) =>
         Ok(await _service.GetBookAsync(id, cancellationToken));
 
+    [HttpGet("{id:guid}/delta-combined-report")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<IActionResult> GetDeltaCombinedReport(Guid id, [FromQuery] DateTime asOfDate, CancellationToken cancellationToken = default) =>
+        Ok(await _service.GetDeltaCombinedReportAsync(id, asOfDate, cancellationToken));
+
+    [HttpGet("{id:guid}/delta-ledger")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<IActionResult> GetDeltaLedger(
+        Guid id,
+        [FromQuery] DateTime? fromDate,
+        [FromQuery] DateTime? toDate,
+        CancellationToken cancellationToken = default) =>
+        Ok(await _service.GetDeltaLedgerAsync(id, fromDate, toDate, cancellationToken));
+
+    [HttpGet("delta-combined-report")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<IActionResult> GetMultiDeltaCombinedReport(
+        [FromQuery] Guid[] deltaAccountingBookIds,
+        [FromQuery] DateTime asOfDate,
+        CancellationToken cancellationToken = default) =>
+        Ok(await _service.GetDeltaCombinedReportAsync(deltaAccountingBookIds, asOfDate, cancellationToken));
+
     [HttpPost]
     [Authorize(Policy = FinancePermissions.ManageAccountingBooks)]
     public async Task<IActionResult> Create([FromBody] CreateAccountingBookDto request, CancellationToken cancellationToken) =>
@@ -48,4 +70,34 @@ public sealed class AccountingBooksController : ControllerBase
     [Authorize(Policy = FinancePermissions.ApproveAccountingBookTransitions)]
     public async Task<IActionResult> RejectTransition(Guid id, [FromBody] DecideAccountingBookTransitionDto request, CancellationToken cancellationToken) =>
         Ok(await _service.RejectTransitionAsync(id, request, cancellationToken));
+
+    [HttpPost("{id:guid}/primary-replacement")]
+    [Authorize(Policy = FinancePermissions.RequestAccountingBookTransitions)]
+    public async Task<IActionResult> RequestPrimaryReplacement(Guid id, [FromBody] RequestPrimaryAccountingBookReplacementDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.RequestPrimaryReplacementAsync(id, request, cancellationToken));
+
+    [HttpPost("{id:guid}/primary-replacement/approve")]
+    [Authorize(Policy = FinancePermissions.ApproveAccountingBookTransitions)]
+    public async Task<IActionResult> ApprovePrimaryReplacement(Guid id, [FromBody] DecideAccountingBookTransitionDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.ApprovePrimaryReplacementAsync(id, request, cancellationToken));
+
+    [HttpPost("{id:guid}/primary-replacement/reject")]
+    [Authorize(Policy = FinancePermissions.ApproveAccountingBookTransitions)]
+    public async Task<IActionResult> RejectPrimaryReplacement(Guid id, [FromBody] DecideAccountingBookTransitionDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.RejectPrimaryReplacementAsync(id, request, cancellationToken));
+
+    [HttpPost("{id:guid}/primary-replacement/reversal")]
+    [Authorize(Policy = FinancePermissions.RequestAccountingBookTransitions)]
+    public async Task<IActionResult> RequestPrimaryReplacementReversal(Guid id, [FromBody] RequestPrimaryAccountingBookReversalDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.RequestPrimaryReplacementReversalAsync(id, request, cancellationToken));
+
+    [HttpPost("{id:guid}/primary-replacement/reversal/approve")]
+    [Authorize(Policy = FinancePermissions.ApproveAccountingBookTransitions)]
+    public async Task<IActionResult> ApprovePrimaryReplacementReversal(Guid id, [FromBody] DecideAccountingBookTransitionDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.ApprovePrimaryReplacementReversalAsync(id, request, cancellationToken));
+
+    [HttpPost("{id:guid}/primary-replacement/reversal/reject")]
+    [Authorize(Policy = FinancePermissions.ApproveAccountingBookTransitions)]
+    public async Task<IActionResult> RejectPrimaryReplacementReversal(Guid id, [FromBody] DecideAccountingBookTransitionDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.RejectPrimaryReplacementReversalAsync(id, request, cancellationToken));
 }

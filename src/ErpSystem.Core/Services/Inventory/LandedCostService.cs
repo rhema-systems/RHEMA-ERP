@@ -132,7 +132,7 @@ public class LandedCostService : ILandedCostService
         var cost = await _landedCostRepository.GetWithDetailsAsync(id) ?? throw new ArgumentException("Landed cost not found.");
         var item = cost.Items.SingleOrDefault(i => i.Id == itemId && !i.IsDeleted) ?? throw new ArgumentException("Cost line not found.");
         var invoice = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(i =>
-            i.Id == invoiceId && i.TenantId == cost.TenantId && !i.IsDeleted).Include(i => i.Supplier).SingleOrDefaultAsync()
+            i.Id == invoiceId && i.TenantId == cost.TenantId && !i.IsDeleted).Include(i => i.BusinessPartner).SingleOrDefaultAsync()
             ?? throw new ArgumentException("Invoice not found in this company.");
         var grn = await _grnRepository.GetWithItemsAsync(cost.GoodsReceiptNoteId) ?? throw new ArgumentException("Receipt not found.");
         if (cost.Status == "Cancelled" || invoice.Status == VendorInvoiceStatus.Voided || invoice.Status == VendorInvoiceStatus.Rejected || invoice.IsOpeningBalance)
@@ -141,18 +141,18 @@ public class LandedCostService : ILandedCostService
             throw new InvalidOperationException("The invoice belongs to a different purchase order.");
         if (!string.Equals(invoice.CurrencyCode, item.Currency, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The invoice and cost line currencies must match.");
-        // Use the same stable supplier code bridge as AP; supplier names are not identity keys.
-        var partners = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
-            !p.IsDeleted && p.TenantId == cost.TenantId && (p.Id == invoice.SupplierId ||
-                (invoice.Supplier.SupplierCode != "" && p.PartnerCode == invoice.Supplier.SupplierCode))).Take(2).ToListAsync();
-        if (partners.Count != 1 || (item.SupplierId.HasValue && item.SupplierId != partners[0].Id))
+        // AP and landed cost now share the same canonical Business Partner identity; no code/name
+        // matching or Finance Supplier bridge is permitted here.
+        var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
+            !p.IsDeleted && p.TenantId == cost.TenantId && p.Id == invoice.BusinessPartnerId).SingleOrDefaultAsync();
+        if (partner is null || (item.SupplierId.HasValue && item.SupplierId != invoice.BusinessPartnerId))
             throw new InvalidOperationException("The invoice supplier does not uniquely match this cost supplier. Review the supplier mapping before linking.");
         if (!string.IsNullOrWhiteSpace(item.InvoiceNumber) && item.InvoiceNumber != invoice.InvoiceNumber)
             throw new InvalidOperationException("This charge is already linked to another invoice. Review the existing link instead of replacing it.");
         item.InvoiceNumber = invoice.InvoiceNumber;
         item.InvoiceDate = invoice.InvoiceDate;
-        item.SupplierId = partners[0].Id;
-        item.SupplierName = partners[0].PartnerName;
+        item.SupplierId = partner.Id;
+        item.SupplierName = partner.PartnerName;
         item.LastModifiedById = userId; item.UpdatedAt = DateTime.UtcNow;
         cost.LastModifiedById = userId; cost.UpdatedAt = DateTime.UtcNow;
         await _landedCostItemRepository.UpdateAsync(item);

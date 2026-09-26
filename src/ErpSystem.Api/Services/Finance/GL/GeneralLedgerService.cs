@@ -115,8 +115,10 @@ namespace ErpSystem.Api.Services.Finance.GL
                     IsSegmented = true,
                     IsControlAccount = accountDto.IsControlAccount,
                     AllowDirectPosting = accountDto.IsPostingAllowed,
+                    BudgetTrackingEnabled = accountDto.BudgetTrackingEnabled,
                     Status = AccountStatus.Active,
                     TenantId = tenantId,
+                    EffectiveDate = now.Date,
                     CreatedAt = now,
                     CreatedBy = userName
                 };
@@ -444,7 +446,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         continue; 
                     }
 
-                    decimal rate = exchangeRateEntity.Rate;
+                    decimal rate = exchangeRateEntity.InverseRate;
                     decimal newBaseBalance = foreignBalance * rate;
                     decimal adjustment = newBaseBalance - currentBaseBalance;
 

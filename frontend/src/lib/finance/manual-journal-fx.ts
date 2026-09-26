@@ -34,6 +34,13 @@ export interface ManualJournalRateRequest {
   quoteSide: ExchangeRateQuoteSide;
 }
 
+/** Matches FinancePostingEngine.RoundMoney for the non-negative journal inputs. */
+export function roundJournalMoney(amount: number): number {
+  if (!Number.isFinite(amount)) return 0;
+  const floatingPointGuard = Number.EPSILON * Math.max(1, Math.abs(amount));
+  return Math.round((amount + floatingPointGuard) * 100) / 100;
+}
+
 const RATE_TYPES = new Set<ExchangeRateType>([
   'Daily',
   'Average',
@@ -186,10 +193,10 @@ export function recalculateJournalFunctionalAmounts<
   return {
     ...line,
     ...(line.foreignDebit && rate > 0
-      ? { debit: line.foreignDebit * rate }
+      ? { debit: roundJournalMoney(line.foreignDebit * rate) }
       : {}),
     ...(line.foreignCredit && rate > 0
-      ? { credit: line.foreignCredit * rate }
+      ? { credit: roundJournalMoney(line.foreignCredit * rate) }
       : {}),
   } as T;
 }

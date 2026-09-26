@@ -388,6 +388,12 @@ export const navigationItems: NavItem[] = [
             icon: FileText,
           },
           {
+            title: 'Delta Ledger',
+            href: '/finance/delta-ledger',
+            icon: Layers3,
+            permissions: ['Finance.Read'],
+          },
+          {
             // Journal batches were delivered as a complete controlled workspace, but the
             // route was previously absent from navigation. Keep this operational feature
             // beside individual journals and let the existing permission filter hide it

@@ -7,8 +7,7 @@ public class FinancePurchaseOrderDto
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
-    public Guid VendorId { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string? VendorName { get; set; }
     public string? SupplierName { get; set; }
     public DateTime OrderDate { get; set; }
@@ -60,7 +59,7 @@ public class FinancePurchaseOrderItemDto
 public class CreateFinancePurchaseOrderDto
 {
     [Required]
-    public Guid VendorId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
 
     public string? OrderNumber { get; set; }
     public DateTime? OrderDate { get; set; }

@@ -607,7 +607,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
             select new ExposureRow
             {
                 SettlementBalanceId = balance.Id,
-                CustomerId = balance.CounterpartyId,
+                BusinessPartnerId = balance.CounterpartyId,
                 CustomerCode = partner == null ? string.Empty : partner.PartnerCode,
                 CustomerName = partner == null ? "Unresolved business partner" : partner.PartnerName,
                 CustomerEmail = partner == null ? null : partner.PrimaryEmail,
@@ -664,7 +664,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException("The task's posted AR settlement evidence is unavailable. Rebuild the settlement read model before continuing.");
         var partner = await _db.BusinessPartners.AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == task.CustomerId && item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(item => item.Id == task.BusinessPartnerId && item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
         var assignee = task.AssignedToId.HasValue
             ? await _db.Users.AsNoTracking().FirstOrDefaultAsync(item => item.Id == task.AssignedToId.Value, cancellationToken)
             : null;
@@ -674,7 +674,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         return Map(new ExposureRow
         {
             SettlementBalanceId = balance.Id,
-            CustomerId = balance.CounterpartyId,
+            BusinessPartnerId = balance.CounterpartyId,
             CustomerCode = partner?.PartnerCode ?? string.Empty,
             CustomerName = partner?.PartnerName ?? "Unresolved business partner",
             CustomerEmail = partner?.PrimaryEmail,
@@ -726,7 +726,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
             ReferenceNumber = $"ARCOL-{now:yyyyMMdd}-{Guid.NewGuid():N}"[..27].ToUpperInvariant(),
             CollectionContext = CollectionActivityValues.FinanceArContext,
             IsPrimaryTask = true,
-            CustomerId = exposure.CounterpartyId,
+            BusinessPartnerId = exposure.CounterpartyId,
             InvoiceId = exposure.SourceDocumentId,
             Subject = $"Follow up overdue invoice {exposure.SourceDocumentNumber}",
             ActivityType = CollectionActivityValues.FollowUpTaskType,
@@ -757,7 +757,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
             CollectionContext = CollectionActivityValues.FinanceArContext,
             IsPrimaryTask = false,
             ParentActivityId = task.Id,
-            CustomerId = task.CustomerId,
+            BusinessPartnerId = task.BusinessPartnerId,
             InvoiceId = task.InvoiceId,
             Subject = Clean(subject, 200) ?? activityType,
             ActivityType = activityType,
@@ -885,7 +885,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         return new ArCollectionWorkItemDto
         {
             SettlementBalanceId = row.SettlementBalanceId,
-            CustomerId = row.CustomerId,
+            BusinessPartnerId = row.BusinessPartnerId,
             CustomerCode = row.CustomerCode,
             CustomerName = row.CustomerName,
             CustomerEmail = row.CustomerEmail,
@@ -945,7 +945,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
         task.Id,
         task.ReferenceNumber,
         task.InvoiceId,
-        task.CustomerId,
+        task.BusinessPartnerId,
         task.CollectionStatus,
         task.AssignedToId,
         task.Priority,
@@ -1023,7 +1023,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
             return task.AssignedToId?.ToString();
 
         var partner = await _db.BusinessPartners.AsNoTracking()
-            .Where(item => item.Id == task.CustomerId && item.TenantId == TenantId && !item.IsDeleted)
+            .Where(item => item.Id == task.BusinessPartnerId && item.TenantId == TenantId && !item.IsDeleted)
             .Select(item => new
             {
                 item.PrimaryEmail,
@@ -1106,7 +1106,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
     private sealed class ExposureRow
     {
         public Guid SettlementBalanceId { get; init; }
-        public Guid CustomerId { get; init; }
+        public Guid BusinessPartnerId { get; init; }
         public string CustomerCode { get; init; } = string.Empty;
         public string CustomerName { get; init; } = string.Empty;
         public string? CustomerEmail { get; init; }

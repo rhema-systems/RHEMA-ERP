@@ -28,23 +28,6 @@ public interface ICustomerService
     Task<PagedResult<CustomerDto>> GetAllAsync(CustomerQueryDto query, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Creates a new customer.
-    /// Validates credit limit, generates customer code if not provided.
-    /// </summary>
-    Task<CustomerDto> CreateAsync(CustomerCreateDto dto, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Updates an existing customer.
-    /// </summary>
-    Task<CustomerDto> UpdateAsync(CustomerUpdateDto dto, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Soft-deletes a customer (marks as inactive).
-    /// Validates that customer has no outstanding balance.
-    /// </summary>
-    Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Gets customer's outstanding balance and aging details.
     /// </summary>
     Task<CustomerBalanceDto> GetBalanceAsync(Guid customerId, CancellationToken cancellationToken = default);

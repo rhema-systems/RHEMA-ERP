@@ -6,7 +6,7 @@ vi.mock('next/navigation', () => ({
     useParams: () => ({ id: 'invoice-123' }),
 }));
 
-vi.mock('../../create/page', () => ({
+vi.mock('@/components/finance/ap/VendorInvoiceFormPage', () => ({
     VendorInvoiceFormPage: ({ editInvoiceId }: { editInvoiceId?: string }) => (
         <div>Editing {editInvoiceId}</div>
     ),

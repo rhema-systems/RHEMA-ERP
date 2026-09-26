@@ -129,7 +129,8 @@ public partial class DatabaseSeedingServiceTests
 
         var bookWorkflowCodes = new[]
         {
-            "AccountingBookInitialization", "AccountingBookPeriodLifecycle", "AccountingBookLifecycle"
+            "AccountingBookInitialization", "AccountingBookPeriodLifecycle", "AccountingBookLifecycle",
+            "DeltaAdjustmentJournal"
         };
         var bookDefinitions = await context.WorkflowDefinitions
             .Include(definition => definition.EntityType)
@@ -137,7 +138,7 @@ public partial class DatabaseSeedingServiceTests
             .Where(definition => definition.TenantId == tenant.Id &&
                 bookWorkflowCodes.Contains(definition.EntityType.Code))
             .ToListAsync();
-        bookDefinitions.Should().HaveCount(3);
+        bookDefinitions.Should().HaveCount(4);
         bookDefinitions.Select(definition => definition.EntityType.Code).Should().BeEquivalentTo(bookWorkflowCodes);
         bookDefinitions.Should().OnlyContain(definition => definition.IsActive &&
             definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&

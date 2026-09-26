@@ -33,6 +33,7 @@ namespace ErpSystem.Web.Services
         Task SeedWithoutMigrationAsync();
         Task SeedBasicDataAsync();
         Task SeedWorkflowDefinitionsAsync();
+        Task SeedFinanceWorkflowDefinitionsAsync();
         Task SeedTestUsersAsync();
         Task SeedMaintenanceE2ETestDataAsync();
         Task<bool> HasSeedDataAsync();
@@ -416,8 +417,7 @@ namespace ErpSystem.Web.Services
         {
             // Keep this lightweight and idempotent so startup can repair baseline workflow definitions
             // without enabling the broader development/demo data seed.
-            _logger.LogInformation("Ensuring finance permission catalogue and baseline role grants are seeded...");
-            await EnsureFinancePermissionAssignmentsAsync();
+            await SeedFinanceWorkflowDefinitionsAsync();
             _logger.LogInformation("Ensuring EHC workflow is seeded...");
             await EnsureEhcWorkflowSeededAsync();
             if (_context.Database.IsSqlServer())
@@ -427,8 +427,6 @@ namespace ErpSystem.Web.Services
                 // historical data migrations. Reapply this idempotent tenant notification authority.
                 await _context.Database.ExecuteSqlRawAsync(EhcPropertyEnquiryNotificationHandoffConfiguration.Sql);
             }
-            _logger.LogInformation("Ensuring finance workflows are seeded...");
-            await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");
             await EnsureBusinessPartnerWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring procurement receipt-inspection workflow is seeded...");
@@ -449,6 +447,17 @@ namespace ErpSystem.Web.Services
 
             // Routine startup must not repair Draft user edits or publish a deliberately
             // disabled UAT workflow. Explicit UAT provisioning owns template publication.
+        }
+
+        public async Task SeedFinanceWorkflowDefinitionsAsync()
+        {
+            // The Finance development host uses a deliberately narrow baseline command.
+            // Converge only Finance approval authority here, without installing unrelated
+            // module workflows or development/demo data.
+            _logger.LogInformation("Ensuring finance permission catalogue and baseline role grants are seeded...");
+            await EnsureFinancePermissionAssignmentsAsync();
+            _logger.LogInformation("Ensuring finance workflows are seeded...");
+            await EnsureFinanceWorkflowsSeededAsync();
         }
 
         /// <summary>
@@ -1346,10 +1355,12 @@ namespace ErpSystem.Web.Services
                 {
                     var tenantId = tenant.Id;
                     await RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(tenantId);
+                    await RetireAccountingBookApplicabilityWorkflowDefinitionsAsync(tenantId);
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
                         var approvalStages = spec.EntityCode is
                             "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
+                                or "DeltaAdjustmentJournal"
                             ? AccountingBookApprovalStages
                             : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
                                 ? FinancePaymentApprovalStages
@@ -1420,6 +1431,36 @@ namespace ErpSystem.Web.Services
                 "Retired {WorkflowDefinitionCount} active SupplierReturn workflow definition(s) for tenant {TenantId}; FIN-INT-012/013 remain quarantined.",
                 retiredCount,
                 tenantId);
+        }
+
+        private async Task RetireAccountingBookApplicabilityWorkflowDefinitionsAsync(Guid tenantId)
+        {
+            var definitions = await _context.WorkflowDefinitions
+                .Include(item => item.EntityType)
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+                .ToListAsync();
+            var retiredAt = DateTime.UtcNow;
+            var retiredCount = 0;
+            foreach (var definition in definitions.Where(item =>
+                         item.EntityType != null &&
+                         (WorkflowEntityTypeKeyMatches(item.EntityType.Code, "AccountingBookApplicabilityPolicy") ||
+                          WorkflowEntityTypeKeyMatches(item.EntityType.Name, "AccountingBookApplicabilityPolicy"))))
+            {
+                definition.IsActive = false;
+                definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                definition.RetiredAt = retiredAt;
+                definition.RetiredById = null;
+                definition.UpdatedAt = retiredAt;
+                definition.UpdatedBy = "System";
+                definition.LastModifiedById = null;
+                retiredCount++;
+            }
+
+            if (retiredCount == 0) return;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation(
+                "Retired {WorkflowDefinitionCount} accounting-book applicability workflow definition(s) for tenant {TenantId}; ordinary selection is automatic.",
+                retiredCount, tenantId);
         }
 
         private static int RetireQuarantinedSupplierReturnWorkflowDefinitions(
@@ -1734,6 +1775,9 @@ namespace ErpSystem.Web.Services
                 // General Ledger
                 new("JournalEntry", "Journal Entry", typeof(JournalEntry).FullName, "Journal Entry Approval",
                     "Sequential finance journal approval: Accounts Officer review -> Finance Manager approval -> Financial Controller final approval."),
+                new("DeltaAdjustmentJournal", "Delta Adjustment Journal", typeof(JournalEntry).FullName,
+                    "Delta Adjustment Journal Approval",
+                    "Independent Financial Controller approval of an explicit adjustment posted only to a governed Delta accounting book."),
                 new("JournalBatch", "Journal Batch", typeof(JournalBatch).FullName, "Journal Batch Approval",
                     "Batch-level journal approval with per-entry decisions, control totals, partial posting, and batch reversal controls."),
                 new("AccountingBookInitialization", "Accounting Book Initialization", typeof(AccountingBookInitialization).FullName,
@@ -1742,7 +1786,6 @@ namespace ErpSystem.Web.Services
                     "Accounting Book Period Lifecycle Approval", "Independent approval of exact-book period opening and close transitions."),
                 new("AccountingBookLifecycle", "Accounting Book Lifecycle", typeof(AccountingBook).FullName,
                     "Accounting Book Lifecycle Approval", "Independent approval of governed accounting-book state transitions."),
-
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
                     "AP purchase order approval before supplier commitment, receiving, invoicing, or closure."),
@@ -9912,7 +9955,10 @@ namespace ErpSystem.Web.Services
                     // on HrPermissions.RoleGrants — plus the hr.access module gate.
                     .Concat(HrPermissions.GrantsFor(Constants.Roles.ManagingDirector))
                     .Concat(HrModuleAccessGrants).ToArray(),
-                ["Financial Controller"] = FinancePermissions.AllNames,
+                // Checker-side Finance authority. Accounting-book maker permissions are
+                // deliberately excluded so this role can decide governed requests without
+                // also originating them. Existing databases are converged by RoleRevocations.
+                ["Financial Controller"] = FinancePermissions.FinancialControllerNames,
                 ["Budget Officer"] = new[]
                 {
                     "Finance.Read",
@@ -10012,11 +10058,11 @@ namespace ErpSystem.Web.Services
                 _context.RolePermissions.AddRange(missingPermissions);
             }
 
-            // The loop above is add-only, so a role that SHRINKS in HrPermissions.RoleGrants keeps
-            // its old rows on an already-seeded tenant. HrPermissions.RoleRevocations lists what a
-            // role must not hold; delete those rows so the seed, the fallback handler and the
-            // database agree (HR loses HR.She.Write).
-            foreach (var (roleName, revokedNames) in HrPermissions.RoleRevocations)
+            // The loop above is add-only, so a role that SHRINKS keeps its old rows on an
+            // already-seeded tenant. The domain revocation maps list what a role must not hold;
+            // delete those rows so current databases converge with the role contract.
+            foreach (var (roleName, revokedNames) in HrPermissions.RoleRevocations
+                         .Concat(FinancePermissions.RoleRevocations))
             {
                 var role = await _roleManager.FindByNameAsync(roleName);
                 if (role == null)
@@ -10044,7 +10090,7 @@ namespace ErpSystem.Web.Services
 
                 _context.RolePermissions.RemoveRange(rows);
                 _logger.LogInformation(
-                    "Revoked {Count} permission grant(s) from role {Role} per HrPermissions.RoleRevocations: {Permissions}",
+                    "Revoked {Count} permission grant(s) from role {Role} per domain role revocations: {Permissions}",
                     rows.Count, roleName, string.Join(", ", revokedNames));
             }
 

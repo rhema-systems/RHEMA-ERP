@@ -29,9 +29,9 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
     {
         var active = lines.Where(line => !line.IsDeleted).ToArray();
         if (active.Length == 0) throw new InvalidOperationException("Posting contains no balance lines.");
-        var functionalAuthority = await ResolveFunctionalCurrencyAsync(tenantId, cancellationToken);
+        var functionalAuthority = await ResolveBookCurrencyAsync(tenantId, accountingBookId, cancellationToken);
         if (!string.Equals(functionalCurrencyCode, functionalAuthority, StringComparison.Ordinal))
-            throw new InvalidOperationException("Posting functional currency does not exactly match tenant authority.");
+            throw new InvalidOperationException("Posting functional currency does not exactly match accounting-book authority.");
         if (active.Any(line => line.TenantId != tenantId || line.AccountingBookId != accountingBookId
                 || line.FiscalPeriodId != fiscalPeriodId
                 || !string.Equals(line.BookClassification, accountingBookCode, StringComparison.Ordinal)
@@ -151,7 +151,7 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
                 item.AccountingBookCode, item.FunctionalCurrencyCode, item.TransactionCurrencyCode,
                 item.SignedForeignBalance, item.SignedFunctionalBalance, item.TransactionCount,
                 item.FirstTransactionDate, item.LastTransactionDate)).ToListAsync(cancellationToken);
-        var functionalAuthority = await ResolveFunctionalCurrencyAsync(tenantId, cancellationToken);
+        var functionalAuthority = await ResolveBookCurrencyAsync(tenantId, book.Id, cancellationToken);
         if (balances.Any(item => !string.Equals(item.AccountingBookCode, book.Code, StringComparison.Ordinal)
                 || !string.Equals(item.FunctionalCurrencyCode, functionalAuthority, StringComparison.Ordinal))
             || exposures.Any(item => !string.Equals(item.AccountingBookCode, book.Code, StringComparison.Ordinal)
@@ -168,7 +168,7 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
     {
         var book = await ResolveBookAsync(tenantId, RequireCode(request.AccountingBookCode), cancellationToken);
         var primaryBook = await ResolveDefaultPostingBookAsync(tenantId, cancellationToken);
-        var functionalAuthority = await ResolveFunctionalCurrencyAsync(tenantId, cancellationToken);
+        var functionalAuthority = await ResolveBookCurrencyAsync(tenantId, book.Id, cancellationToken);
         if (request.Apply && (string.IsNullOrWhiteSpace(request.Reason) || string.IsNullOrWhiteSpace(request.IdempotencyKey)
             || !request.ApprovedByUserId.HasValue || request.ApprovedByUserId == Guid.Empty
             || request.ApprovedByUserId == requestedByUserId))
@@ -377,19 +377,18 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
         return books[0];
     }
 
-    private async Task<string> ResolveFunctionalCurrencyAsync(Guid tenantId, CancellationToken token)
+    private async Task<string> ResolveBookCurrencyAsync(Guid tenantId, Guid accountingBookId, CancellationToken token)
     {
-        var configured = await _context.FinanceSettings.AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
-            .Take(2).Select(item => item.BaseCurrency).ToListAsync(token);
-        if (configured.Count > 1)
-            throw new InvalidOperationException("Tenant functional-currency authority is ambiguous.");
-        var value = configured.Count == 1 ? configured[0] : await _context.Tenants.AsNoTracking()
-            .Where(item => item.Id == tenantId && !item.IsDeleted)
-            .Select(item => item.BaseCurrency).SingleOrDefaultAsync(token);
+        var book = await _context.AccountingBooks.AsNoTracking()
+            .Include(item => item.BaseAccountingBook)
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == accountingBookId && !item.IsDeleted, token)
+            ?? throw new InvalidOperationException("Accounting-book currency authority is unavailable.");
+        var value = book.BookType == AccountingBookType.Delta
+            ? book.BaseAccountingBook?.FunctionalCurrencyCode
+            : book.FunctionalCurrencyCode;
         if (string.IsNullOrWhiteSpace(value) || value.Length != 3
             || !string.Equals(value, value.ToUpperInvariant(), StringComparison.Ordinal))
-            throw new InvalidOperationException("Tenant functional-currency authority is unavailable or noncanonical.");
+            throw new InvalidOperationException("Accounting-book currency authority is unavailable or noncanonical.");
         return value;
     }
 

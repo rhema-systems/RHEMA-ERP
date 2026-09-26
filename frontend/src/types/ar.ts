@@ -72,7 +72,12 @@ export interface InvoiceLineItem {
 export interface Invoice {
     id: string;
     invoiceNumber: string;
-    customerId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId: string;
+    businessPartnerArProfileVersionId: string;
+    businessPartnerCode: string;
+    businessPartnerLegalName?: string;
+    businessPartnerTin?: string;
     customerName: string;
     customerAddress?: string;
     invoiceDate: string;
@@ -106,7 +111,8 @@ export interface Invoice {
 }
 
 export interface InvoiceCreateRequest {
-    customerId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     invoiceDate: string;
     dueDate?: string;
     currencyCode: string;
@@ -139,8 +145,13 @@ export interface InvoiceLineItemRequest {
 export interface CustomerPayment {
     id: string;
     paymentNumber: string;
-    customerId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId: string;
+    businessPartnerArProfileVersionId: string;
+    businessPartnerCode: string;
     customerName: string;
+    businessPartnerLegalName?: string;
+    businessPartnerTaxIdentificationNumber?: string;
     paymentDate: string;
     totalAmount: number;
     allocatedAmount: number;
@@ -194,7 +205,8 @@ export interface CustomerPayment {
 }
 
 export interface PaymentCreateRequest {
-    customerId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     paymentDate: string;
     totalAmount: number;
     paymentMethod: string;
@@ -370,7 +382,7 @@ export interface AgingReport {
         overdueCustomers: number;
     };
     customers: Array<{
-        customerId: string;
+        businessPartnerId: string;
         customerCode: string;
         customerName: string;
         current: number;
@@ -405,7 +417,7 @@ export interface CustomerDetailedLedgerReport {
 }
 
 export interface CustomerDetailedLedgerAccount {
-    customerId: string;
+    businessPartnerId: string;
     customerCode: string;
     customerName: string;
     currencyCode: string;

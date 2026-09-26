@@ -385,7 +385,7 @@ public sealed class BackendReportingExportFoundationTests
                 {
                     new CustomerDetailedLedgerAccountDto
                     {
-                        CustomerId = customerId,
+                        BusinessPartnerId = customerId,
                         CustomerCode = "CUST-001",
                         CustomerName = "Customer A",
                         CurrencyCode = "GHS",
@@ -430,7 +430,7 @@ public sealed class BackendReportingExportFoundationTests
             ReportType = "customer-statement",
             PeriodStart = PeriodStart,
             PeriodEnd = AsOfDate,
-            CustomerIds = new List<Guid> { customerId },
+            BusinessPartnerIds = new List<Guid> { customerId },
             ShowCustomerCurrency = true
         });
 
@@ -468,7 +468,7 @@ public sealed class BackendReportingExportFoundationTests
                 {
                     new SupplierDetailedLedgerAccountDto
                     {
-                        SupplierId = supplierId,
+                        BusinessPartnerId = supplierId,
                         SupplierCode = "SUP-001",
                         SupplierName = "Supplier A",
                         CurrencyCode = "GHS",
@@ -512,7 +512,7 @@ public sealed class BackendReportingExportFoundationTests
             ReportType = "supplier-statement",
             PeriodStart = PeriodStart,
             PeriodEnd = AsOfDate,
-            SupplierIds = new List<Guid> { supplierId }
+            BusinessPartnerIds = new List<Guid> { supplierId }
         });
 
         result.ReportType.Should().Be(FinanceReportExportTypes.SupplierStatement);

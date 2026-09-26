@@ -75,6 +75,7 @@ export default function BankAccountsPage() {
         ).map(([, summary]) => summary);
 
         return {
+            asOfDate: new Date().toISOString(),
             totalBalance: activeAccounts.reduce((total, account) => total + account.currentBalance, 0),
             currency,
             accountCount: activeAccounts.length,

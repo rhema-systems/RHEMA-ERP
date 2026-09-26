@@ -118,31 +118,15 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
         (supplier) => Boolean(supplier.businessPartnerId)
       ),
   });
-  const selectedSupplierOption = suppliers.find(
-    (supplier) => supplier.businessPartnerId === vendorId
-  );
-  const supplierIdentityQuery = useQuery({
-    queryKey: ['ap-supplier-identity', vendorId],
-    queryFn: () => accountsPayableService.getApSupplierIdentity(vendorId),
-    enabled: Boolean(vendorId && !selectedSupplierOption),
-  });
-  const resolvedSupplierId =
-    selectedSupplierOption?.supplierId ??
-    (supplierIdentityQuery.data?.businessPartnerId === vendorId
-      ? supplierIdentityQuery.data.supplierId
-      : undefined);
-  const willCreateApIdentity = Boolean(
-    selectedSupplierOption?.businessPartnerId && !selectedSupplierOption.supplierId
-  );
   const { data: invoicePage } = useQuery({
-    queryKey: ['posted-supplier-invoices', vendorId, resolvedSupplierId],
+    queryKey: ['posted-supplier-invoices', vendorId],
     queryFn: () =>
       accountsPayableService.getInvoices({
-        supplierId: resolvedSupplierId as string,
+        businessPartnerId: vendorId,
         page: 1,
         pageSize: 200,
       }),
-    enabled: Boolean(vendorId && resolvedSupplierId),
+    enabled: Boolean(vendorId),
   });
   const { data: accounts = [] } = useQuery({
     queryKey: ['supplier-debit-note-posting-accounts'],
@@ -468,8 +452,6 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
               onValueChange={handleInvoiceChange}
               disabled={
                 !vendorId ||
-                !resolvedSupplierId ||
-                supplierIdentityQuery.isPending ||
                 Boolean(noteId)
               }
             >
@@ -488,23 +470,6 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
                 ))}
               </SelectContent>
             </Select>
-            {vendorId && !selectedSupplierOption && supplierIdentityQuery.isPending && (
-              <p className="text-xs text-muted-foreground">
-                Resolving the Finance partner to its AP supplier identity…
-              </p>
-            )}
-            {willCreateApIdentity && (
-              <p className="text-xs text-muted-foreground">
-                This approved Business Partner has no AP activity yet. Finance will create its
-                controlled AP identity when the first debit note is saved.
-              </p>
-            )}
-            {vendorId && !selectedSupplierOption && supplierIdentityQuery.isError && (
-              <p className="text-xs text-destructive">
-                Posted invoices are unavailable until this business partner has
-                one unambiguous AP supplier identity.
-              </p>
-            )}
           </div>
           <div className="space-y-2">
             <Label>Debit-note date *</Label>

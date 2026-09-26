@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -149,13 +150,24 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 .Options;
             var context = new ApplicationDbContext(options);
             var unitOfWork = new UnitOfWork(context);
+            var businessPartnerId = Guid.NewGuid();
+            context.BusinessPartners.Add(new BusinessPartner
+            {
+                Id = businessPartnerId,
+                TenantId = tenantId,
+                PartnerCode = "SUP-0506",
+                PartnerName = "TDC supplier",
+                PartnerType = "Supplier",
+                RegistrationStatus = "Approved"
+            });
 
             var originalInvoice = new VendorInvoice
             {
                 Id = invoiceId,
                 TenantId = tenantId,
                 InvoiceNumber = "INV-0506",
-                SupplierId = Guid.NewGuid(),
+                BusinessPartnerId = businessPartnerId,
+                BusinessPartnerCode = "SUP-0506",
                 SupplierName = "TDC supplier",
                 InvoiceDate = DateTime.UtcNow,
                 TotalAmount = 100m,
@@ -170,7 +182,9 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 Id = paymentId,
                 TenantId = tenantId,
                 PaymentNumber = "VP-0506",
-                SupplierId = Guid.NewGuid(),
+                BusinessPartnerId = businessPartnerId,
+                BusinessPartnerCode = "SUP-0506",
+                BusinessPartnerName = "TDC supplier",
                 TotalAmount = 100m,
                 CurrencyCode = "GHS",
                 Status = VendorPaymentStatus.PendingAuthorization
@@ -192,7 +206,8 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
                     InvoiceNumber = "INV-0506-REPLACEMENT",
-                    SupplierId = Guid.NewGuid(),
+                    BusinessPartnerId = businessPartnerId,
+                    BusinessPartnerCode = "SUP-0506",
                     SupplierName = "TDC supplier",
                     InvoiceDate = DateTime.UtcNow,
                     TotalAmount = 100m,

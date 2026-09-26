@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { format } from 'date-fns';
 import { Loader2, ArrowLeft, Check, ChevronsUpDown } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -22,7 +21,6 @@ import { cn } from '@/lib/utils'; // Assuming this utility exists
 
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import { financeService } from '@/services/finance.service';
 import { BankAccountType, CreateBankAccountDto } from '@/types/cash-management';
 import { Account, Currency } from '@/types/finance';
 
@@ -34,9 +32,6 @@ const formSchema = z.object({
     accountType: z.nativeEnum(BankAccountType),
     currency: z.string().min(1, 'Currency is required'),
     glAccountId: z.string().optional(),
-    openingBalance: z.number(),
-    openingBalanceExchangeRate: z.number().min(0.0001, 'Exchange rate must be greater than zero'),
-    openingDate: z.string().min(1, 'Opening date is required'),
     notes: z.string().optional(),
 });
 
@@ -59,9 +54,6 @@ export default function NewBankAccountPage() {
             accountType: BankAccountType.Checking,
             currency: '',
             glAccountId: '',
-            openingBalance: 0,
-            openingBalanceExchangeRate: 1,
-            openingDate: format(new Date(), 'yyyy-MM-dd'),
             notes: '',
         },
     });
@@ -85,7 +77,6 @@ export default function NewBankAccountPage() {
                 const baseCurrency = currenciesData.find(c => c.isBaseCurrency);
                 if (baseCurrency) {
                     form.setValue('currency', baseCurrency.currencyCode);
-                    form.setValue('openingBalanceExchangeRate', 1);
                 }
             } catch (error) {
                 console.error('Failed to load dependency data:', error);
@@ -100,25 +91,9 @@ export default function NewBankAccountPage() {
         loadData();
     }, [form, toast]);
 
-    const selectedCurrency = form.watch('currency');
-    const baseCurrencyCode = currencies.find((c) => c.isBaseCurrency)?.currencyCode ?? 'GHS';
-
-    const applyCurrencyRate = async (currencyCode: string) => {
+    const applyCurrency = (currencyCode: string) => {
         const normalizedCurrency = currencyCode.trim().toUpperCase();
         form.setValue('currency', normalizedCurrency);
-
-        if (!normalizedCurrency || normalizedCurrency === baseCurrencyCode) {
-            form.setValue('openingBalanceExchangeRate', 1);
-            return;
-        }
-
-        try {
-            const rate = await financeService.getCurrentExchangeRate(normalizedCurrency);
-            form.setValue('openingBalanceExchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1));
-        } catch (error) {
-            console.error('Failed to fetch exchange rate:', error);
-            form.setValue('openingBalanceExchangeRate', 1);
-        }
     };
 
     // Filter GL accounts based on search
@@ -265,7 +240,7 @@ export default function NewBankAccountPage() {
                                     render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Currency</FormLabel>
-                                            <Select onValueChange={applyCurrencyRate} defaultValue={field.value}>
+                                            <Select onValueChange={applyCurrency} defaultValue={field.value}>
                                                 <FormControl>
                                                     <SelectTrigger>
                                                         <SelectValue placeholder="Select currency" />
@@ -284,32 +259,6 @@ export default function NewBankAccountPage() {
                                     )}
                                 />
                             </div>
-
-                            <FormField
-                                control={form.control}
-                                name="openingBalanceExchangeRate"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Opening Balance Exchange Rate</FormLabel>
-                                        <FormControl>
-                                            <Input
-                                                type="number"
-                                                step="0.000001"
-                                                disabled={selectedCurrency === baseCurrencyCode}
-                                                value={field.value ?? 1}
-                                                onChange={(event) => field.onChange(event.target.value === '' ? 1 : Number(event.target.value))}
-                                                onBlur={field.onBlur}
-                                                name={field.name}
-                                                ref={field.ref}
-                                            />
-                                        </FormControl>
-                                        <FormDescription>
-                                            1 {selectedCurrency || baseCurrencyCode} = {form.watch('openingBalanceExchangeRate') || 1} {baseCurrencyCode}
-                                        </FormDescription>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
 
                             <FormField
                                 control={form.control}
@@ -359,7 +308,7 @@ export default function NewBankAccountPage() {
 
                                                                     // Also try to match currency if possible
                                                                     if (account.currencyCode) {
-                                                                        void applyCurrencyRate(account.currencyCode);
+                                                                        applyCurrency(account.currencyCode);
                                                                     }
 
                                                                     setOpenGlSelect(false);
@@ -396,43 +345,6 @@ export default function NewBankAccountPage() {
                                     </FormItem>
                                 )}
                             />
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <FormField
-                                    control={form.control}
-                                    name="openingDate"
-                                    render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Opening Date</FormLabel>
-                                            <FormControl>
-                                                <Input type="date" {...field} />
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-                                <FormField
-                                    control={form.control}
-                                    name="openingBalance"
-                                    render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Opening Balance</FormLabel>
-                                            <FormControl>
-                                                <Input
-                                                    type="number"
-                                                    step="0.01"
-                                                    value={field.value ?? 0}
-                                                    onChange={(event) => field.onChange(event.target.value === '' ? 0 : Number(event.target.value))}
-                                                    onBlur={field.onBlur}
-                                                    name={field.name}
-                                                    ref={field.ref}
-                                                />
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-                            </div>
 
                             <FormField
                                 control={form.control}

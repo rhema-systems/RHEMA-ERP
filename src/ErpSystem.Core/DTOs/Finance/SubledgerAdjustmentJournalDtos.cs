@@ -8,10 +8,14 @@ public class SubledgerAdjustmentJournalDto
     public string Module { get; set; } = string.Empty;
     public string AdjustmentNumber { get; set; } = string.Empty;
     public string Purpose { get; set; } = string.Empty;
-    public Guid? CustomerId { get; set; }
-    public string? CustomerName { get; set; }
-    public Guid? SupplierId { get; set; }
-    public string? SupplierName { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public Guid? BusinessPartnerArProfileVersionId { get; set; }
+    public string BusinessPartnerCode { get; set; } = string.Empty;
+    public string BusinessPartnerName { get; set; } = string.Empty;
+    public string? BusinessPartnerLegalName { get; set; }
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
     public DateTime AdjustmentDate { get; set; }
     public DateTime? DueDate { get; set; }
     public string AdjustmentType { get; set; } = string.Empty;
@@ -46,9 +50,10 @@ public class CreateSubledgerAdjustmentJournalDto
     [MaxLength(30)]
     public string? Purpose { get; set; }
 
-    public Guid? CustomerId { get; set; }
+    [Required]
+    public Guid BusinessPartnerId { get; set; }
 
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
 
     [Required]
     public DateTime AdjustmentDate { get; set; } = DateTime.UtcNow;

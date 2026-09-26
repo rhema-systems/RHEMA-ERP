@@ -111,8 +111,8 @@ export interface TaxCalculationRequest {
     baseAmount: number;
     taxGroupId?: string | null;
     manualTaxIds?: string[] | null;
-    customerId?: string | null;
-    supplierId?: string | null;
+    businessPartnerId?: string | null;
+    businessPartnerRole?: 'Supplier' | 'Contractor' | 'Customer' | null;
     documentId?: string | null;
     documentType?: string | null; // Invoice, Order, etc.
 }
@@ -189,7 +189,7 @@ export interface WhtCertificate {
     vendorPaymentId: string;
     paymentNumber: string;
     paymentStatus: string;
-    supplierId: string;
+    businessPartnerId: string;
     supplierName: string;
     supplierTin?: string | null;
     paymentDate: string;
@@ -236,7 +236,7 @@ export interface WhtCertificateQuery {
     page?: number;
     pageSize?: number;
     searchTerm?: string;
-    supplierId?: string;
+    businessPartnerId?: string;
     fromDate?: string;
     toDate?: string;
     status?: string;
@@ -249,11 +249,13 @@ export interface GenerateWhtCertificateDto {
 
 export interface WhtCalculationRequest {
     taxId: string;
-    supplierId: string;
+    businessPartnerId: string;
     paymentDate: string;
     taxableBase: number;
     excludeVendorPaymentId?: string;
     vendorInvoiceIds?: string[];
+    contractReference: string;
+    supplyCategory: 'Goods' | 'Works' | 'Services' | 0 | 1 | 2;
 }
 
 export interface WhtCalculationResult {
@@ -270,13 +272,17 @@ export interface WhtCalculationResult {
     withholdingAmount: number;
     taxPayableAccountId?: string | null;
     calculationNote: string;
+    contractReference: string;
+    supplyCategory: 'Goods' | 'Works' | 'Services' | 0 | 1 | 2;
+    statutoryPeriodStart: string;
+    statutoryPeriodEnd: string;
 }
 
 export interface WhtRemittanceLiability {
     vendorPaymentId: string;
     paymentNumber: string;
     paymentDate: string;
-    supplierId: string;
+    businessPartnerId: string;
     supplierName: string;
     supplierTin?: string | null;
     currencyCode: string;
@@ -318,7 +324,7 @@ export interface WhtRemittanceLine {
     certificateId?: string | null;
     paymentNumber: string;
     paymentDate: string;
-    supplierId: string;
+    businessPartnerId: string;
     supplierName: string;
     supplierTin?: string | null;
     taxCode?: string | null;

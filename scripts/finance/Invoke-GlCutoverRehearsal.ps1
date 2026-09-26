@@ -35,8 +35,8 @@ $supersededMigrations = @(
     '20260312013725_AddProjectResourceRoutingRequirements'
 )
 $approvedNamePattern = '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$'
-$authoritativeMigrationCount = 1
-$authoritativeLatestMigration = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
+$authoritativeMigrationCount = 16
+$authoritativeLatestMigration = '20260925051637_CanonicalCollectionBusinessPartnerIdentity'
 $disposableMigrationCommandTimeoutSeconds = 600
 $migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
 $sqlcmdMaxVariableWidth = 8000
@@ -146,7 +146,9 @@ function Assert-FinalReviewedGitState([string]$operation = 'RehearseFinalClone')
         $ignoredRelevant = @(& git ls-files --others --ignored --exclude-standard -- '*.cs' '*.csproj' '*.props' '*.targets' `
             '*.json' '*.config' '*.ps1' '*.psm1' '*.sql' '*.cshtml' '*.ts' '*.tsx' '*.js' '*.jsx' '*.user' '*.suo' '.env' '.env.*' | Where-Object {
             $normalized = $_.Replace('\','/')
-            $isGeneratedPath = $normalized -match '(?i)(^|/)(bin|obj|out|publish|debug|debugpublic|release|releases|outputs|x64|x86|bld|log|artifacts|\.artifacts|node_modules|\.next|dist|coverage|testresults[^/]*|\.vs|\.idea|\.cache)/'
+            $isGeneratedPath = $normalized -match '(?i)(^|/)(bin|obj|out|publish|debug|debugpublic|release|releases|outputs|x64|x86|bld|log|artifacts|\.artifacts|node_modules|\.next(?:-[^/]+)?|dist|coverage|testresults[^/]*|\.vs|\.idea|\.cache)/' -or
+                $normalized -ceq 'frontend/next-env.d.ts' -or
+                $normalized -match '(?i)^frontend/public/syncfusion/'
             -not $isGeneratedPath
         })
         if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect ignored files for relevant workspace changes.' }

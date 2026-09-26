@@ -434,9 +434,9 @@ public sealed class ArCustomerStatementDocumentBuilder : FinanceTabularReportDoc
         if (toDate < fromDate)
             throw new ArgumentException("The statement end date must be on or after the start date.");
 
-        var customerIds = GuidListOption(request, "customerIds");
+        var businessPartnerIds = GuidListOption(request, "businessPartnerIds");
         var showCustomerCurrency = BoolOption(request, "showCustomerCurrency");
-        var report = await _reports.GetCustomerDetailedLedgerAsync(fromDate, toDate, customerIds, showCustomerCurrency, cancellationToken);
+        var report = await _reports.GetCustomerDetailedLedgerAsync(fromDate, toDate, businessPartnerIds, showCustomerCurrency, cancellationToken);
         var sections = report.Customers.Select((customer, index) => new FinancePrintableSection(
             $"{customer.CustomerName} ({customer.CustomerCode})",
             $"Statement currency: {customer.CurrencyCode}",

@@ -19,7 +19,7 @@ public partial class VendorInvoiceService
         if (_landedCosts == null) throw new InvalidOperationException("Landed-cost posting is not configured.");
         if (_unitOfWork.HasActiveTransaction) throw new InvalidOperationException("Start posting outside another transaction.");
         if (dto == null || dto.InvoiceDate == default || dto.Charges == null || dto.Charges.Count is < 1 or > 100 ||
-            dto.Charges.Any(c => c == null || c.CostItemId == Guid.Empty || c.SupplierId == Guid.Empty ||
+            dto.Charges.Any(c => c == null || c.CostItemId == Guid.Empty || c.BusinessPartnerId == Guid.Empty ||
                 string.IsNullOrWhiteSpace(c.SupplierInvoiceNumber) || c.SupplierInvoiceNumber.Trim().Length > 100) ||
             dto.Charges.Select(c => c.CostItemId).Distinct().Count() != dto.Charges.Count)
             throw new ArgumentException("Enter the invoice date, supplier and invoice reference for every charge before posting. Tax is completed later in AP.");
@@ -52,7 +52,7 @@ public partial class VendorInvoiceService
                     l.TenantId == TenantId && !l.IsDeleted && l.LandedCostItemId.HasValue && itemIds.Contains(l.LandedCostItemId.Value))
                     .Include(l => l.VendorInvoice).ToListAsync(cancellationToken);
                 var canonicalSuppliers = new Dictionary<Guid, Guid>();
-                foreach (var id in dto.Charges.Select(c => c.SupplierId).Distinct().OrderBy(id => id))
+                foreach (var id in dto.Charges.Select(c => c.BusinessPartnerId).Distinct().OrderBy(id => id))
                 {
                     await _unitOfWork.AcquireTransactionLockAsync($"LandedCostSupplier:{TenantId:N}:{id:N}", cancellationToken);
                     var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
@@ -60,17 +60,17 @@ public partial class VendorInvoiceService
                     if (partner == null || !partner.IsActive || partner.IsBlacklisted ||
                         partner.RegistrationStatus is not ("Active" or "Approved") || partner.PartnerType == "Customer")
                         throw new InvalidOperationException("Every charge needs an active, approved cost supplier in this company.");
-                    var supplier = await ResolveSupplierIdentityForInvoiceAsync(id, true, cancellationToken);
-                    if (supplier.IsBlacklisted) throw new InvalidOperationException("The cost supplier is blacklisted.");
+                    var supplier = (await ResolveCanonicalApPartnerAsync(
+                        id, null, dto.InvoiceDate, cancellationToken)).Partner;
                     canonicalSuppliers[id] = supplier.Id;
-                    foreach (var charge in dto.Charges.Where(c => c.SupplierId == id))
+                    foreach (var charge in dto.Charges.Where(c => c.BusinessPartnerId == id))
                     {
                         var item = items[charge.CostItemId];
                         var linked = links.SingleOrDefault(l => l.LandedCostItemId == item.Id);
                         if (linked != null)
                         {
                             if (linked.VendorInvoice.IsDeleted || linked.VendorInvoice.Status == VendorInvoiceStatus.Voided ||
-                                linked.VendorInvoice.SupplierId != supplier.Id || linked.VendorInvoice.SupplierInvoiceNumber != charge.SupplierInvoiceNumber.Trim())
+                                linked.VendorInvoice.BusinessPartnerId != supplier.Id || linked.VendorInvoice.SupplierInvoiceNumber != charge.SupplierInvoiceNumber.Trim())
                                 throw new InvalidOperationException("A charge already belongs to another invoice. Open its existing invoice instead.");
                             continue;
                         }
@@ -81,7 +81,7 @@ public partial class VendorInvoiceService
                         item.UpdatedAt = DateTime.UtcNow; item.LastModifiedById = CurrentUserId;
                     }
                 }
-                foreach (var group in dto.Charges.GroupBy(c => (Supplier: canonicalSuppliers[c.SupplierId],
+                foreach (var group in dto.Charges.GroupBy(c => (Supplier: canonicalSuppliers[c.BusinessPartnerId],
                     Currency: items[c.CostItemId].Currency.Trim().ToUpperInvariant(), Reference: c.SupplierInvoiceNumber.Trim())))
                 {
                     if (group.Select(c => items[c.CostItemId].ExchangeRate).Distinct().Count() != 1 ||
@@ -112,7 +112,7 @@ public partial class VendorInvoiceService
                 InvoiceDate = dto.InvoiceDate.Date, UseSavedBillingDetails = true,
                 Charges = dto.Charges.Select(c => new LandedCostInvoiceChargeDto
                 {
-                    CostItemId = c.CostItemId, SupplierId = c.SupplierId, SupplierInvoiceNumber = c.SupplierInvoiceNumber.Trim()
+                    CostItemId = c.CostItemId, BusinessPartnerId = c.BusinessPartnerId, SupplierInvoiceNumber = c.SupplierInvoiceNumber.Trim()
                 }).ToList()
             }, producer, cancellationToken);
             return new() { InventoryPosted = true, Invoices = invoices, Message = "Inventory posted. Supplier invoice drafts are ready for tax review in AP." };
@@ -152,7 +152,7 @@ public partial class VendorInvoiceService
             throw new ArgumentException("Choose a receipt cost voucher, invoice date and distinct charges.");
         foreach (var charge in dto.Charges)
         {
-            if (charge.SupplierId == Guid.Empty || string.IsNullOrWhiteSpace(charge.SupplierInvoiceNumber) || charge.SupplierInvoiceNumber.Trim().Length > 100)
+            if (charge.BusinessPartnerId == Guid.Empty || string.IsNullOrWhiteSpace(charge.SupplierInvoiceNumber) || charge.SupplierInvoiceNumber.Trim().Length > 100)
                 throw new ArgumentException("Select a cost supplier and enter its invoice reference for every charge.");
             if ((charge.TaxTreatment.HasValue && !Enum.IsDefined(charge.TaxTreatment.Value)) ||
                 (charge.TaxTreatment == TaxTreatment.Standard && !charge.TaxGroupId.HasValue) ||
@@ -176,7 +176,7 @@ public partial class VendorInvoiceService
                 var items = cost.Items.Where(i => !i.IsDeleted).ToDictionary(i => i.Id);
                 if (dto.Charges.Any(c => !items.ContainsKey(c.CostItemId)))
                     throw new ArgumentException("Every selected charge must belong to this voucher.");
-                if (dto.UseSavedBillingDetails && dto.Charges.Any(c => items[c.CostItemId].SupplierId != c.SupplierId ||
+                if (dto.UseSavedBillingDetails && dto.Charges.Any(c => items[c.CostItemId].SupplierId != c.BusinessPartnerId ||
                     items[c.CostItemId].ReferenceNumber != c.SupplierInvoiceNumber.Trim()))
                     throw new InvalidOperationException("Billing details changed. Refresh the voucher before retrying Post.");
 
@@ -184,18 +184,16 @@ public partial class VendorInvoiceService
                 var existing = await _unitOfWork.Repository<VendorInvoiceLineItem>()
                     .GetQueryable(l => l.TenantId == TenantId && !l.IsDeleted && l.LandedCostItemId.HasValue && requestedIds.Contains(l.LandedCostItemId.Value))
                     .Include(l => l.VendorInvoice).ToListAsync(cancellationToken);
-                var suppliers = new Dictionary<Guid, (BusinessPartner Partner, Supplier Supplier)>();
-                foreach (var partnerId in dto.Charges.Select(c => c.SupplierId).Distinct().OrderBy(id => id))
+                var suppliers = new Dictionary<Guid, BusinessPartner>();
+                foreach (var partnerId in dto.Charges.Select(c => c.BusinessPartnerId).Distinct().OrderBy(id => id))
                 {
                     await _unitOfWork.AcquireTransactionLockAsync($"LandedCostSupplier:{TenantId:N}:{partnerId:N}", cancellationToken);
                     var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
                         p.Id == partnerId && p.TenantId == TenantId && !p.IsDeleted).SingleOrDefaultAsync(cancellationToken)
                         ?? throw new ArgumentException("Select a saved cost supplier from this company.");
-                    var supplier = await ResolveSupplierIdentityForInvoiceAsync(partner.Id, true, cancellationToken);
-                    if (!partner.IsActive || partner.IsBlacklisted || partner.RegistrationStatus is not ("Active" or "Approved") ||
-                        string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase) || supplier.IsBlacklisted)
-                        throw new InvalidOperationException("The selected cost supplier must be active, approved and not blacklisted.");
-                    suppliers.Add(partnerId, (partner, supplier));
+                    var supplier = (await ResolveCanonicalApPartnerAsync(
+                        partner.Id, null, dto.InvoiceDate, cancellationToken)).Partner;
+                    suppliers.Add(partnerId, supplier);
                 }
 
                 // CreateCore and supplier defaults query canonical identities from the database.
@@ -204,7 +202,7 @@ public partial class VendorInvoiceService
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var output = new List<VendorInvoiceDto>();
-                var groups = dto.Charges.GroupBy(c => (Supplier: suppliers[c.SupplierId].Supplier.Id,
+                var groups = dto.Charges.GroupBy(c => (Supplier: suppliers[c.BusinessPartnerId].Id,
                     Currency: items[c.CostItemId].Currency.Trim().ToUpperInvariant(), Reference: c.SupplierInvoiceNumber.Trim()));
                 foreach (var group in groups)
                 {
@@ -217,7 +215,7 @@ public partial class VendorInvoiceService
                     {
                         var old = linked[0].VendorInvoice;
                         if (linked.Count != group.Count() || linked.Any(l => l.VendorInvoiceId != old.Id) || old.IsDeleted ||
-                            old.SupplierId != group.Key.Supplier || old.SupplierInvoiceNumber != group.Key.Reference ||
+                            old.BusinessPartnerId != group.Key.Supplier || old.SupplierInvoiceNumber != group.Key.Reference ||
                             old.CurrencyCode != group.Key.Currency ||
                             old.Status == VendorInvoiceStatus.Voided || group.Any(c => linked.Any(l =>
                                 l.LandedCostItemId == c.CostItemId && c.TaxTreatment.HasValue && (l.TaxTreatment != c.TaxTreatment || l.TaxGroupId != c.TaxGroupId))))
@@ -230,7 +228,7 @@ public partial class VendorInvoiceService
 
                     var create = new VendorInvoiceCreateDto
                     {
-                        SupplierId = group.Key.Supplier, SupplierInvoiceNumber = group.Key.Reference,
+                        BusinessPartnerId = group.Key.Supplier, SupplierInvoiceNumber = group.Key.Reference,
                         InvoiceDate = dto.InvoiceDate.Date, CurrencyCode = group.Key.Currency, ExchangeRate = rates[0],
                         MatchingType = InvoiceMatchingType.None,
                         Reference = cost.LandedCostNumber,
@@ -239,7 +237,7 @@ public partial class VendorInvoiceService
                         {
                             var item = items[c.CostItemId];
                             // Only supplier/reference metadata is assigned; posted values and allocations remain immutable.
-                            item.SupplierId = c.SupplierId; item.SupplierName = suppliers[c.SupplierId].Partner.PartnerName;
+                            item.SupplierId = c.BusinessPartnerId; item.SupplierName = suppliers[c.BusinessPartnerId].PartnerName;
                             item.ReferenceNumber = group.Key.Reference; item.UpdatedAt = DateTime.UtcNow; item.LastModifiedById = CurrentUserId;
                             return new VendorInvoiceLineItemCreateDto
                             {
@@ -317,7 +315,7 @@ public partial class VendorInvoiceService
                 p.Id == item.SupplierId && p.TenantId == TenantId && !p.IsDeleted).SingleOrDefaultAsync(token);
             if (partner == null || !partner.IsActive || partner.IsBlacklisted ||
                 partner.RegistrationStatus is not ("Active" or "Approved") ||
-                (partner.Id != supplier.Id && (string.IsNullOrWhiteSpace(partner.PartnerCode) || partner.PartnerCode != supplier.SupplierCode)))
+                partner.Id != supplier.Id)
                 throw new InvalidOperationException("The invoice supplier does not match its landed-cost charges.");
             if (!string.IsNullOrWhiteSpace(item.InvoiceNumber) && item.InvoiceNumber != invoice.InvoiceNumber)
                 throw new InvalidOperationException("A landed-cost charge is linked to a different invoice.");

@@ -218,7 +218,7 @@ public sealed class FixedAssetDisposalFoundationTests
         completed.SettlementInvoiceAmount.Should().Be(1100m);
         services.InvoiceService.Verify(service => service.CreateAsync(
             It.Is<InvoiceCreateDto>(invoice =>
-                invoice.CustomerId == fixture.Buyer.Id &&
+                invoice.BusinessPartnerId == fixture.Buyer.Id &&
                 invoice.Reference!.StartsWith("FA-DISPOSAL:") &&
                 invoice.LineItems.Count == 1 &&
                 invoice.LineItems[0].LineItemType == nameof(LineItemType.FixedAssetDisposal) &&
@@ -266,7 +266,7 @@ public sealed class FixedAssetDisposalFoundationTests
         completed.CustomerPaymentId.Should().NotBeNull();
         services.PaymentService.Verify(service => service.CreateAsync(
             It.Is<PaymentCreateDto>(payment =>
-                payment.CustomerId == fixture.Buyer.Id &&
+                payment.BusinessPartnerId == fixture.Buyer.Id &&
                 payment.TotalAmount == 1100m &&
                 payment.BankAccountId == bank.Id &&
                 payment.TransactionReference == "BANK-ADVICE-001" &&
@@ -1049,7 +1049,7 @@ public sealed class FixedAssetDisposalFoundationTests
                 {
                     Id = Guid.NewGuid(),
                     InvoiceNumber = $"INV-{Guid.NewGuid():N}"[..20],
-                    CustomerId = dto.CustomerId,
+                    BusinessPartnerId = dto.BusinessPartnerId,
                     InvoiceDate = dto.InvoiceDate,
                     SubTotal = subtotal,
                     TotalAmount = subtotal,
@@ -1074,7 +1074,7 @@ public sealed class FixedAssetDisposalFoundationTests
             {
                 Id = Guid.NewGuid(),
                 PaymentNumber = $"RCP-{Guid.NewGuid():N}"[..20],
-                CustomerId = dto.CustomerId,
+                BusinessPartnerId = dto.BusinessPartnerId,
                 PaymentDate = dto.PaymentDate,
                 TotalAmount = dto.TotalAmount,
                 CurrencyCode = dto.CurrencyCode,
@@ -1501,6 +1501,7 @@ public sealed class FixedAssetDisposalFoundationTests
             Code = "IFRS",
             Name = "IFRS",
             Purpose = "Primary",
+            FunctionalCurrencyCode = "GHS",
             IsActive = true,
             IsDefault = true,
             AllowsPosting = true,

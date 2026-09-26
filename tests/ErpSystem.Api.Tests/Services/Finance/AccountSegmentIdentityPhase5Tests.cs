@@ -155,6 +155,40 @@ public sealed class AccountSegmentIdentityPhase5Tests
     }
 
     [Fact]
+    public async Task DemoDimensionValues_AreMissingOnlyIdempotentAndDoNotCreateJournalDefaults()
+    {
+        await using var db = CreateContext();
+        var tenant = NewTenant("TDC");
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync();
+        var at = new DateTime(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+        var seeder = new FinanceDemoDimensionValueSeeder(db, NullLogger.Instance);
+
+        await seeder.SeedAsync(tenant.Id, at);
+        var department = await db.FinanceDimensionDefinitions.SingleAsync(item =>
+            item.TenantId == tenant.Id && item.Code == "DEPARTMENT");
+        var finance = await db.FinanceDimensionValues.SingleAsync(item =>
+            item.TenantId == tenant.Id && item.FinanceDimensionDefinitionId == department.Id && item.Code == "DEPT-FIN");
+        finance.Name = "Administrator-renamed Finance cost centre";
+        finance.UpdatedAt = at.AddDays(1);
+        finance.UpdatedBy = "Administrator";
+        await db.SaveChangesAsync();
+        var administratorTimestamp = finance.UpdatedAt;
+
+        await seeder.SeedAsync(tenant.Id, at.AddDays(2));
+
+        var expectedCount = FinanceDemoDimensionValueSeeder.ExpectedValueCodes.Sum(item => item.Value.Count);
+        (await db.FinanceDimensionValues.CountAsync(item => item.TenantId == tenant.Id && !item.IsDeleted))
+            .Should().Be(expectedCount);
+        var preserved = await db.FinanceDimensionValues.SingleAsync(item => item.Id == finance.Id);
+        preserved.Name.Should().Be("Administrator-renamed Finance cost centre");
+        preserved.UpdatedBy.Should().Be("Administrator");
+        preserved.UpdatedAt.Should().Be(administratorTimestamp);
+        (await db.FinanceDimensionAccountRules.CountAsync(item => item.TenantId == tenant.Id))
+            .Should().Be(0, "demo values must not become automatic account or journal defaults");
+    }
+
+    [Fact]
     public void Migration_RemovesOptionalityAndAddsLifecycleConcurrencyAndExactSetIndexes()
     {
         var source = ArchivedMigrationSource.Read("20260904003118_AddGovernedAccountSegmentIdentity.cs");
@@ -174,7 +208,8 @@ public sealed class AccountSegmentIdentityPhase5Tests
         using var context = new ApplicationDbContext(options);
 
         context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+            .Contain("20260916132000_DisposableDevelopmentCurrentModelBaseline",
+                "the discovery contract must remain valid as later Finance migrations are added");
         ArchivedMigrationSource.Read("20260904003118_AddGovernedAccountSegmentIdentity.cs")
             .Should().Contain("AddGovernedAccountSegmentIdentity");
     }
@@ -336,16 +371,17 @@ public sealed class AccountSegmentIdentityPhase5Tests
     {
         await using var db = CreateContext();
         var fixture = await SeedStructureAsync(db, "TDC");
-        var service = CombinationService(db, fixture.TenantId);
+        var books = new Mock<IAccountingBookService>();
+        books.Setup(item => item.SyncAccountMappingsAsync(
+                It.IsAny<Account>(), It.IsAny<IReadOnlyCollection<AccountAccountingBookUpdateDto>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = CombinationService(db, fixture.TenantId, books);
         var combination = ValidCombination(fixture);
         combination.AccountNumber = " tdc-6100 ";
         combination.SegmentValues[0].Value = " tdc ";
         combination.SegmentValues[1].Value = " 6100 ";
 
-        var result = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
-        {
-            Combinations = [combination]
-        });
+        var result = await service.BulkCreateAccountsAsync(BulkRequest(combination));
 
         result.SuccessCount.Should().Be(1);
         result.ErrorCount.Should().Be(0);
@@ -355,6 +391,37 @@ public sealed class AccountSegmentIdentityPhase5Tests
         account.SegmentValues.OrderBy(item => item.SegmentPosition).Select(item => item.SegmentValue)
             .Should().Equal("TDC", "6100");
         account.SegmentValues.Should().OnlyContain(item => !item.IsLocked && item.EndDate == null);
+        books.Verify(item => item.SyncAccountMappingsAsync(
+            account,
+            It.Is<IReadOnlyCollection<AccountAccountingBookUpdateDto>>(mappings =>
+                mappings.Count == 1 && mappings.Single().IsEnabled),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task BulkCombinations_RequireGovernedMappingsAndDoNotPersistRejectedAccounts()
+    {
+        await using var db = CreateContext();
+        var fixture = await SeedStructureAsync(db, "TDC");
+        var books = new Mock<IAccountingBookService>();
+        books.Setup(item => item.SyncAccountMappingsAsync(
+                It.IsAny<Account>(), It.IsAny<IReadOnlyCollection<AccountAccountingBookUpdateDto>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Classification is invalid."));
+        var service = CombinationService(db, fixture.TenantId, books);
+
+        var missingMappings = () => service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
+        {
+            Combinations = [ValidCombination(fixture)]
+        });
+        await missingMappings.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*enabled accounting-book classification*");
+
+        var rejected = await service.BulkCreateAccountsAsync(BulkRequest(ValidCombination(fixture)));
+        rejected.SuccessCount.Should().Be(0);
+        rejected.ErrorCount.Should().Be(1);
+        (await db.Accounts.CountAsync()).Should().Be(0,
+            "a mapping rejection must not leave an unclassified GL account behind");
+        (await db.AccountSegmentValues.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -366,10 +433,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
 
         var malformedAlphanumeric = ValidCombination(fixture);
         malformedAlphanumeric.SegmentValues[0].Value = "T-@";
-        var first = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
-        {
-            Combinations = [malformedAlphanumeric]
-        });
+        var first = await service.BulkCreateAccountsAsync(BulkRequest(malformedAlphanumeric));
         first.ErrorCount.Should().Be(1);
         first.Errors.Single().Error.Should().Contain("Alphanumeric format");
 
@@ -378,10 +442,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
         var malformedAlpha = ValidCombination(fixture);
         malformedAlpha.AccountNumber = "TDC-A1CD";
         malformedAlpha.SegmentValues[1].Value = "A1CD";
-        var second = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
-        {
-            Combinations = [malformedAlpha]
-        });
+        var second = await service.BulkCreateAccountsAsync(BulkRequest(malformedAlpha));
         second.ErrorCount.Should().Be(1);
         second.Errors.Single().Error.Should().Contain("Alpha format");
         (await db.Accounts.CountAsync()).Should().Be(0);
@@ -412,20 +473,14 @@ public sealed class AccountSegmentIdentityPhase5Tests
 
         foreach (var invalid in cases)
         {
-            var result = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
-            {
-                Combinations = [invalid]
-            });
+            var result = await service.BulkCreateAccountsAsync(BulkRequest(invalid));
             result.ErrorCount.Should().Be(1);
             result.SuccessCount.Should().Be(0);
         }
 
         fixture.CompanyValue.IsActive = false;
         await db.SaveChangesAsync();
-        var inactive = await service.BulkCreateAccountsAsync(new BulkCreateAccountsRequestDto
-        {
-            Combinations = [ValidCombination(fixture)]
-        });
+        var inactive = await service.BulkCreateAccountsAsync(BulkRequest(ValidCombination(fixture)));
         inactive.ErrorCount.Should().Be(1);
         (await db.Accounts.CountAsync()).Should().Be(0);
     }
@@ -436,6 +491,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
         await using var db = CreateContext();
         var fixture = await SeedStructureAsync(db, "TDC");
         var account = AddAccountWithIdentity(db, fixture, "TDC-6100");
+        account.BudgetTrackingEnabled = true;
         await db.SaveChangesAsync();
         using var unitOfWork = new UnitOfWork(db);
         var currentUser = CurrentUser(fixture.TenantId);
@@ -452,6 +508,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
             Id = account.Id, AccountCode = "6100", AccountNumber = "tdc-6100", AccountName = account.AccountName,
             AccountType = account.AccountType.ToString(), AccountCategory = account.AccountCategory,
             AccountSubCategory = account.AccountSubCategory, CurrencyCode = account.CurrencyCode,
+            BudgetTrackingEnabled = false,
             SegmentValues =
             [
                 new() { Id = Guid.NewGuid(), AccountId = Guid.NewGuid(), SegmentStructureId = fixture.Company.Id,
@@ -464,6 +521,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
         });
 
         response.AccountNumber.Should().Be("TDC-6100");
+        response.BudgetTrackingEnabled.Should().BeFalse();
         var responseRows = response.SegmentValues.ToList();
         responseRows.Should().HaveCount(2);
         responseRows.Select(item => item.SegmentPosition).Should().Equal(1, 2);
@@ -481,6 +539,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
         var stored = await db.Accounts.Include(item => item.SegmentValues).SingleAsync(item => item.Id == account.Id);
         stored.AccountNumber.Should().Be("TDC-6100");
         stored.AccountCode.Should().Be("6100");
+        stored.BudgetTrackingEnabled.Should().BeFalse();
         var active = stored.SegmentValues.Where(item => !item.IsDeleted).OrderBy(item => item.SegmentPosition).ToList();
         active.Select(item => item.SegmentValue).Should().Equal("TDC", "6100");
         active.Should().OnlyContain(item => item.AccountId == account.Id && item.TenantId == fixture.TenantId
@@ -582,14 +641,38 @@ public sealed class AccountSegmentIdentityPhase5Tests
         ])).Should().ThrowAsync<DbUpdateConcurrencyException>();
     }
 
-    private static AccountCombinationService CombinationService(ApplicationDbContext db, Guid tenantId)
+    private static AccountCombinationService CombinationService(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Mock<IAccountingBookService>? books = null)
     {
         var tenantSettings = new Mock<ITenantSettingsService>();
         tenantSettings.Setup(item => item.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        if (books is null)
+        {
+            books = new Mock<IAccountingBookService>();
+            books.Setup(item => item.SyncAccountMappingsAsync(
+                    It.IsAny<Account>(), It.IsAny<IReadOnlyCollection<AccountAccountingBookUpdateDto>>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+        }
         return new AccountCombinationService(new UnitOfWork(db), CurrentUser(tenantId).Object,
-            tenantSettings.Object, new AccountSegmentIdentityService(db),
+            tenantSettings.Object, new AccountSegmentIdentityService(db), books.Object,
             NullLogger<AccountCombinationService>.Instance);
     }
+
+    private static BulkCreateAccountsRequestDto BulkRequest(params AccountCombinationPreviewDto[] combinations) => new()
+    {
+        Combinations = combinations.ToList(),
+        AccountingBooks =
+        [
+            new AccountAccountingBookUpdateDto
+            {
+                AccountingBookId = Guid.NewGuid(),
+                AccountClassificationId = Guid.NewGuid(),
+                IsEnabled = true
+            }
+        ]
+    };
 
     private static Mock<ICurrentUserService> CurrentUser(Guid tenantId)
     {

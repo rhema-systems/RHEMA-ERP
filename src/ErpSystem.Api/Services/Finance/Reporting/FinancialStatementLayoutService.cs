@@ -47,8 +47,6 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
     {
         var query = _context.FinancialStatementLayouts
             .AsNoTracking()
-            .Include(layout => layout.AccountingBook)
-            .Include(layout => layout.Versions)
             .Where(layout => layout.TenantId == TenantId && !layout.IsDeleted);
 
         if (statementType.HasValue)
@@ -70,9 +68,34 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
             .OrderBy(layout => layout.StatementType)
             .ThenBy(layout => layout.AccountingBook.SortOrder)
             .ThenBy(layout => layout.Code)
+            .Select(layout => new FinancialStatementLayoutSummaryDto
+            {
+                Id = layout.Id,
+                Code = layout.Code,
+                Name = layout.Name,
+                Description = layout.Description,
+                StatementType = layout.StatementType,
+                AccountingBookId = layout.AccountingBookId,
+                AccountingBookCode = layout.AccountingBook.Code,
+                AccountingBookName = layout.AccountingBook.Name,
+                IsDefault = layout.IsDefault,
+                IsActive = layout.IsActive,
+                IsProtectedStandard = layout.IsProtectedStandard,
+                StandardSourceLayoutId = layout.StandardSourceLayoutId,
+                Revision = layout.Revision,
+                LatestVersionNumber = layout.Versions
+                    .Where(version => !version.IsDeleted)
+                    .Select(version => (int?)version.VersionNumber)
+                    .Max() ?? 0,
+                PublishedVersionNumber = layout.Versions
+                    .Where(version => !version.IsDeleted
+                        && version.Status == FinancialStatementLayoutVersionStatus.Published)
+                    .Select(version => (int?)version.VersionNumber)
+                    .Max()
+            })
             .ToListAsync(cancellationToken);
 
-        return layouts.Select(MapSummary).ToList();
+        return layouts;
     }
 
     public async Task<FinancialStatementLayoutDto?> GetLayoutAsync(
@@ -87,8 +110,12 @@ public sealed class FinancialStatementLayoutService : IFinancialStatementLayoutS
         Guid layoutId,
         CancellationToken cancellationToken = default)
     {
-        var layout = await LoadLayoutAsync(layoutId, asNoTracking: true, cancellationToken);
-        if (layout == null)
+        var exists = await _context.FinancialStatementLayouts.AsNoTracking().AnyAsync(layout =>
+            layout.Id == layoutId
+            && layout.TenantId == TenantId
+            && !layout.IsDeleted,
+            cancellationToken);
+        if (!exists)
         {
             throw new KeyNotFoundException("Financial statement layout was not found.");
         }

@@ -25,6 +25,11 @@ public sealed class AccountingBookInitializationController(IAccountingBookInitia
         [FromQuery] Guid? sourceAccountingBookId, CancellationToken ct) =>
         Ok(await service.PrepareAsync(accountingBookId, mode, cutoffDate, sourceAccountingBookId, ct));
 
+    [HttpPost("delta-structure")]
+    [Authorize(Policy = FinancePermissions.ManageAccountingBookInitialization)]
+    public async Task<IActionResult> PrepareDeltaStructure(Guid accountingBookId, CancellationToken ct) =>
+        Ok(await service.EnsureDeltaStructureAsync(accountingBookId, ct));
+
     [HttpPut]
     [Authorize(Policy = FinancePermissions.ManageAccountingBookInitialization)]
     public async Task<IActionResult> Configure(Guid accountingBookId, [FromBody] ConfigureAccountingBookInitializationDto request, CancellationToken ct) => Ok(await service.ConfigureAsync(accountingBookId, request, ct));

@@ -19,7 +19,7 @@ public class AgingReportDto
 
 public class CustomerAgingDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string CustomerCode { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
     public decimal Current { get; set; }
@@ -56,7 +56,7 @@ public class DetailedAgingReportDto
 
 public class CustomerDetailedAgingDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string CustomerCode { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
     public List<InvoiceAgingDto> Invoices { get; set; } = new();
@@ -93,7 +93,7 @@ public class InvoiceAgingDto
 
 public class CustomerStatementDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string CustomerCode { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
     public string? CustomerAddress { get; set; }
@@ -134,7 +134,7 @@ public class CustomerDetailedLedgerReportDto
 
 public class CustomerDetailedLedgerAccountDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string CustomerCode { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
     public string CurrencyCode { get; set; } = "GHS";
@@ -173,7 +173,7 @@ public class CollectionsDashboardDto
 
 public class OverdueCustomerDto
 {
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public decimal TotalOverdue { get; set; }
     public int OverdueInvoiceCount { get; set; }
@@ -209,7 +209,7 @@ public class ArSummaryDto
 public class SalesSummaryDto
 {
     public string Period { get; set; } = string.Empty;
-    public Guid? CustomerId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public string? CustomerName { get; set; }
     public decimal TotalSales { get; set; }
     public decimal TotalCollected { get; set; }
@@ -221,7 +221,7 @@ public class SalesSummaryQueryDto
 {
     public DateTime FromDate { get; set; }
     public DateTime ToDate { get; set; }
-    public Guid? CustomerId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public Guid? ProductId { get; set; }
     public string GroupBy { get; set; } = "Month"; // Day, Week, Month, Quarter, Year, Customer, Product
 }

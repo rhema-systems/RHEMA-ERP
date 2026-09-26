@@ -32,7 +32,7 @@ async function openTab(name: string) {
 describe('new business partner defaults', () => {
   it('saves supplier credit, TIN and WHT from their respective tabs without customer-only gating', async () => {
     render(<NewBusinessPartnerPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Supplier', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Supplier' }));
     fireEvent.change(screen.getByLabelText('Partner Name *'), { target: { value: 'Freight Supplier' } });
     fireEvent.click(screen.getByRole('switch', { name: 'Subject To Withholding Deduction' }));
     fireEvent.change(screen.getByLabelText('WHT Rate (%)'), { target: { value: '5' } });
@@ -41,14 +41,14 @@ describe('new business partner defaults', () => {
     fireEvent.change(screen.getByLabelText('Credit Limit'), { target: { value: '9000' } });
     await openTab('Accounts');
     expect(screen.getByText('Purchase Price Variance')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Save Partner', exact: true }));
-    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({ partnerType: 'Supplier', creditLimit: 9000, taxNumber: 'TIN-NEW', postingDefaults: expect.objectContaining({ subjectToWithholdingDeduction: true, withholdingTaxRate: 5 }) })));
-    expect(push).toHaveBeenCalledWith('/procurement/business-partners/new-supplier');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Partner' }));
+    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({ partnerType: 'Supplier', roleTypes: ['Supplier'], creditLimit: 9000, taxNumber: 'TIN-NEW', postingDefaults: expect.objectContaining({ subjectToWithholdingDeduction: true, withholdingTaxRate: 5 }) })));
+    expect(push).toHaveBeenCalledWith('/procurement/business-partners/new-supplier/edit?tab=finance-profiles');
   });
 
   it('keeps Credit Limit in Options only and requests the customer tax catalogue for customers', async () => {
     render(<NewBusinessPartnerPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Customer', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customer' }));
     await waitFor(() => expect(businessPartnerService.getPostingOptions).toHaveBeenCalledWith('Customer'));
     await openTab('Customer Details');
     expect(screen.queryByLabelText('Credit Limit')).not.toBeInTheDocument();

@@ -8,7 +8,7 @@
     "prebuild": "node scripts/copy-syncfusion-pdfviewer-assets.js",
     "build": "node scripts/run-next-build.js",
     "prestart": "node scripts/copy-syncfusion-pdfviewer-assets.js",
-    "start": "next start",
+    "start": "node scripts/run-next-start.js",
     "lint": "eslint . --ext .ts,.tsx --fix",
     "lint:check": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",

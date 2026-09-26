@@ -109,6 +109,7 @@ Required direction:
 - Seed tenant-specific workflow definitions for every Finance approval action.
 - Keep thresholds, approver roles, and routing rules configurable in workflow definitions.
 - Do not hardcode approval thresholds where workflow configuration can express them.
+- Complete Finance-wide notification action routing and exact-record deep links as tracked in `docs/finance-notification-deep-link-follow-up.md`.
 
 ### Tenant Isolation Model
 

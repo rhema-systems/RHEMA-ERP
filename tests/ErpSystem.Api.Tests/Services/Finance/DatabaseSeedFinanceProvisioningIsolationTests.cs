@@ -1,4 +1,5 @@
 using ErpSystem.Api.Extensions;
+using ErpSystem.Api.Services.Finance.Settings;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -136,9 +137,39 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
         (await verify.AccountAccountingBooks.CountAsync(item =>
             item.TenantId == tenantId && accounts.Select(account => account.Id).Contains(item.AccountId)))
             .Should().Be(9);
+        var baselineBooks = await verify.AccountingBooks.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && new[] { "BASE", "IFRS_ADJUSTMENTS", "USD_PARALLEL" }.Contains(item.Code))
+            .ToListAsync();
+        baselineBooks.Should().HaveCount(3);
+        baselineBooks.Should().OnlyContain(item => item.IsActive && item.AllowsPosting
+            && item.LifecycleStatus == AccountingBookLifecycleStatus.Active,
+            "standard books must be immediately usable in a newly provisioned tenant");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.PrimaryFull && item.Code == "BASE");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.Delta && item.Code == "IFRS_ADJUSTMENTS");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.ParallelFull && item.Code == "USD_PARALLEL");
         (await verify.AccountAccountingBooks.Where(item => item.TenantId == tenantId)
-            .AllAsync(item => !item.IsEnabled)).Should().BeTrue(
-            "the three freshly configured books are deliberately non-posting until governed activation");
+            .AllAsync(item => item.IsEnabled)).Should().BeTrue(
+            "the executable baseline enables only mappings whose classification authority was validated");
+
+        var initializations = await verify.AccountingBookInitializations.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted).ToListAsync();
+        initializations.Should().HaveCount(3);
+        initializations.Should().OnlyContain(item =>
+            item.InitializationStatus == AccountingBookInitializationStatus.Approved
+            && item.RequiredAccountCount == item.CoveredAccountCount
+            && item.EvidenceFingerprint.Length == 64
+            && item.ReconciliationFingerprint != null && item.ReconciliationFingerprint.Length == 64);
+        var initializationService = new AccountingBookInitializationService(
+            verify, currentUser.Object, Mock.Of<IWorkflowService>(), Mock.Of<IFinanceAuditService>());
+        foreach (var book in baselineBooks)
+        {
+            var validation = await initializationService.ValidateCurrentApprovedEvidenceAsync(book.Id);
+            validation.IsValid.Should().BeTrue(validation.Blocker);
+        }
+
+        (await verify.AccountingBookApplicabilityPolicies.AsNoTracking()
+            .CountAsync(item => item.TenantId == tenantId && !item.IsDeleted)).Should().Be(0,
+            "ordinary posting now resolves Primary automatically and no routing policy is provisioned");
     }
 
     private static async Task AddSupplierPrerequisitesAsync(ApplicationDbContext db, Guid tenantId)

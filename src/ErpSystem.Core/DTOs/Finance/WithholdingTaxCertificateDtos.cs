@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Finance;
 
@@ -7,7 +8,7 @@ public sealed class WhtCertificateQueryDto
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
     public string? SearchTerm { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public string? Status { get; set; }
@@ -36,7 +37,7 @@ public sealed class WhtCertificateDto
     public Guid VendorPaymentId { get; set; }
     public string PaymentNumber { get; set; } = string.Empty;
     public VendorPaymentStatus PaymentStatus { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? SupplierTin { get; set; }
     public DateTime PaymentDate { get; set; }
@@ -83,12 +84,14 @@ public sealed class WhtCertificateVersionDto
 public sealed class WhtCalculationRequestDto
 {
     public Guid TaxId { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public DateTime PaymentDate { get; set; }
     public decimal TaxableBase { get; set; }
     public Guid? ExcludeVendorPaymentId { get; set; }
     // The server resolves the persisted transaction decision/rate; clients cannot supply a free-form payment override.
     public List<Guid> VendorInvoiceIds { get; set; } = new();
+    public string? ContractReference { get; set; }
+    public WhtSupplyCategory? SupplyCategory { get; set; }
 }
 
 public sealed class WhtCalculationResultDto
@@ -106,6 +109,10 @@ public sealed class WhtCalculationResultDto
     public decimal WithholdingAmount { get; set; }
     public Guid? TaxPayableAccountId { get; set; }
     public string CalculationNote { get; set; } = string.Empty;
+    public string ContractReference { get; set; } = string.Empty;
+    public WhtSupplyCategory SupplyCategory { get; set; }
+    public DateTime StatutoryPeriodStart { get; set; }
+    public DateTime StatutoryPeriodEnd { get; set; }
 }
 
 public sealed class WhtRemittanceQueryDto
@@ -177,7 +184,7 @@ public sealed class WhtRemittanceLineDto
     public Guid? CertificateId { get; set; }
     public string PaymentNumber { get; set; } = string.Empty;
     public DateTime PaymentDate { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? SupplierTin { get; set; }
     public string? TaxCode { get; set; }
@@ -191,7 +198,7 @@ public sealed class WhtRemittanceLiabilityDto
     public Guid VendorPaymentId { get; set; }
     public string PaymentNumber { get; set; } = string.Empty;
     public DateTime PaymentDate { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? SupplierTin { get; set; }
     public string CurrencyCode { get; set; } = "GHS";

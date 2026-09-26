@@ -51,6 +51,7 @@ public sealed class DocumentsController : ControllerBase
         [DocumentTypes.FinanceBudgetConsolidated] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceBudgetScenarioComparison] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceTrialBalance] = FinancePermissions.ExportFinanceReports,
+        [DocumentTypes.FinanceBaseDeltaReport] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceIncomeStatement] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceBalanceSheet] = FinancePermissions.ExportFinanceReports,
         [DocumentTypes.FinanceCashFlowStatement] = FinancePermissions.ExportFinanceReports,

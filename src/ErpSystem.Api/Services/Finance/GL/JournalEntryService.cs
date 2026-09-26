@@ -33,6 +33,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly FinanceDimensionAdministrationService? _financeDimensions;
         private readonly IWorkflowService? _approvalWorkflow;
         private const string RetiredOpeningBalanceJournalType = "Opening Balance";
+        private const string DeltaAdjustmentJournalType = "Delta Adjustment";
         private const string AllActiveBooksCode = "ALL_ACTIVE_BOOKS";
 
         public JournalEntryService(
@@ -109,22 +110,57 @@ namespace ErpSystem.Api.Services.Finance.GL
                     j.SourceModule.ToUpper() == normalizedSourceModule);
             }
 
-            var entries = await query
-                .Include(j => j.Transactions)
-                .ThenInclude(t => t.Account)
-                .Include(j => j.Transactions)
-                .ThenInclude(t => t.FinanceDimensionSet)
-                .ThenInclude(set => set!.Items)
-                .Include(j => j.Transactions)
-                .ThenInclude(t => t.FinanceDimensionSnapshot)
-                .ThenInclude(snapshot => snapshot!.Items)
-                .Include(j => j.Attachments)
-                .Include(j => j.JournalBatchItem)
-                .ThenInclude(i => i!.JournalBatch)
+            var entries = await query.AsNoTracking()
                 .OrderByDescending(j => j.EntryDate)
+                .ThenByDescending(j => j.JournalEntryNumber)
+                .Select(j => new JournalEntryListRow
+                {
+                    Id = j.Id,
+                    JournalNumber = j.JournalEntryNumber,
+                    TransactionDate = j.EntryDate,
+                    JournalType = j.JournalType,
+                    Description = j.Description,
+                    Reference = j.ReferenceNumber,
+                    SourceModule = j.SourceModule,
+                    OriginModuleCode = j.OriginModuleCode,
+                    SourceDocumentId = j.SourceDocumentId,
+                    SourceDocumentType = j.SourceDocumentType,
+                    BookClassification = j.BookClassification,
+                    FiscalPeriodId = j.FiscalPeriodId,
+                    TotalDebit = j.TotalDebitAmount,
+                    TotalCredit = j.TotalCreditAmount,
+                    Status = j.PostingStatus,
+                    IsReversed = j.IsReversed,
+                    ReversalJournalId = j.ReversalJournalEntryId,
+                    OriginalJournalId = j.OriginalJournalEntryId,
+                    ReversalDate = j.ReversalDate,
+                    ReversalReason = j.ReversalReason,
+                    ReversalType = j.ReversalType,
+                    JournalBatchId = j.JournalBatchItem == null ? null : j.JournalBatchItem.JournalBatchId,
+                    JournalBatchNumber = j.JournalBatchItem == null ? null : j.JournalBatchItem.JournalBatch.BatchNumber,
+                    JournalBatchItemId = j.JournalBatchItem == null ? null : j.JournalBatchItem.Id,
+                    PostedDate = j.PostingDate,
+                    PostedByUserId = j.PostedByUserId,
+                    RequiresApproval = j.RequiresApproval,
+                    ApprovalStatus = j.ApprovalStatus,
+                    ApprovedByUserId = j.ApprovedByUserId,
+                    ApprovedDate = j.ApprovedDate,
+                    RejectionReason = j.RejectionReason,
+                    WithdrawalReason = j.WithdrawalReason,
+                    WithdrawnByUserId = j.WithdrawnByUserId,
+                    WithdrawnDate = j.WithdrawnDate,
+                    AttachmentCount = j.Attachments.Count,
+                    StoredAttachmentCount = j.AttachmentCount,
+                    HasStoredAttachments = j.HasAttachments,
+                    CreatedAt = j.CreatedAt,
+                    CreatedById = j.CreatedById,
+                    CreatedBy = j.CreatedBy,
+                    UpdatedAt = j.UpdatedAt,
+                    UpdatedBy = j.UpdatedBy
+                })
                 .ToListAsync(cancellationToken);
 
-            return entries.Select(MapToDto).ToList();
+            return entries.Select(MapListRowToDto).ToList();
         }
 
         public async Task<JournalEntryDto?> GetJournalEntryByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -169,21 +205,13 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
         {
-            var tenantId = TenantId;
-            var entries = await _context.JournalEntries
-                .Include(j => j.Transactions)
-                .ThenInclude(t => t.Account)
-                .Include(j => j.Transactions)
-                .ThenInclude(t => t.FinanceDimensionSet)
-                .ThenInclude(set => set!.Items)
-                .Include(j => j.Attachments)
-                .Include(j => j.JournalBatchItem)
-                .ThenInclude(i => i!.JournalBatch)
-                .Where(j => j.TenantId == tenantId && !j.IsDeleted && j.EntryDate >= startDate && j.EntryDate <= endDate)
-                .OrderByDescending(j => j.EntryDate)
-                .ToListAsync(cancellationToken);
-
-            return entries.Select(MapToDto).ToList();
+            return await GetJournalEntriesAsync(
+                status: null,
+                startDate,
+                endDate,
+                fiscalPeriodId: null,
+                sourceModule: null,
+                cancellationToken);
         }
 
         public async Task<JournalEntryDto> CreateJournalEntryAsync(CreateJournalEntryDto dto, CancellationToken cancellationToken = default)
@@ -202,10 +230,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                 tenantId,
                 string.IsNullOrWhiteSpace(dto.BookClassification) ? "IFRS" : dto.BookClassification,
                 cancellationToken);
+            await ValidateJournalBookPurposeAsync(accountingBook, dto.JournalType, cancellationToken);
             var bookClassification = accountingBook.Code;
             Guid.TryParse(_currentUserService.UserId, out var currentUserId);
 
             var transactions = dto.Transactions.ToList();
+            NormalizeManualJournalAmounts(transactions);
             await ValidateManualJournalExchangeRateEvidenceAsync(
                 transactions, tenantId, dto.TransactionDate, cancellationToken);
 
@@ -339,6 +369,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 entry.TenantId,
                 string.IsNullOrWhiteSpace(dto.BookClassification) ? entry.BookClassification : dto.BookClassification,
                 cancellationToken);
+            await ValidateJournalBookPurposeAsync(accountingBook, entry.JournalType, cancellationToken);
             entry.BookClassification = accountingBook.Code;
             entry.AccountingBookId = accountingBook.Id;
 
@@ -348,6 +379,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     throw new InvalidOperationException("Journal entry must have at least one transaction line.");
 
                 var transactionDtos = dto.Transactions.ToList();
+                NormalizeManualJournalAmounts(transactionDtos);
                 await ValidateManualJournalExchangeRateEvidenceAsync(
                     transactionDtos, entry.TenantId, transactionDate, cancellationToken);
 
@@ -861,6 +893,11 @@ namespace ErpSystem.Api.Services.Finance.GL
                  !string.IsNullOrWhiteSpace(entry.ApprovalWorkflowId)))
                 throw new InvalidOperationException("A directly completed journal cannot claim a workflow or human approval.");
 
+            var accountingBook = await _context.AccountingBooks.AsNoTracking()
+                .SingleOrDefaultAsync(book => book.TenantId == entry.TenantId && book.Id == entry.AccountingBookId && !book.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("The journal accounting book is unavailable.");
+            await ValidateJournalBookPurposeAsync(accountingBook, entry.JournalType, cancellationToken);
+
             var transactions = entry.Transactions
                 .Where(t => !t.IsDeleted)
                 .OrderBy(t => t.LineNumber)
@@ -1087,8 +1124,30 @@ namespace ErpSystem.Api.Services.Finance.GL
                     throw new InvalidOperationException(
                         $"Journal line {item.LineNumber} exchange-rate value does not match the selected approved record.");
                 }
+
+                if (!item.Line.ForeignAmount.HasValue || item.Line.ForeignAmount.Value <= 0m)
+                {
+                    throw new InvalidOperationException(
+                        $"Journal line {item.LineNumber} requires a positive original {item.CurrencyCode} amount.");
+                }
+
+                var expectedFunctionalAmount = RoundMoney(item.Line.ForeignAmount.Value * rate.Rate);
+                if (RoundMoney(item.Line.Amount) != expectedFunctionalAmount)
+                {
+                    throw new InvalidOperationException(
+                        $"Journal line {item.LineNumber} functional amount must be {expectedFunctionalAmount:0.00} after applying the approved exchange rate.");
+                }
             }
         }
+
+        private static void NormalizeManualJournalAmounts(IEnumerable<CreateAccountTransactionDto> transactions)
+        {
+            foreach (var transaction in transactions)
+                transaction.Amount = RoundMoney(transaction.Amount);
+        }
+
+        private static decimal RoundMoney(decimal amount)
+            => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
         private async Task<string> GetBaseCurrencyCodeForTenantAsync(Guid tenantId, CancellationToken cancellationToken)
         {
@@ -1151,6 +1210,39 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (matches.Count != 1)
                 throw new InvalidOperationException("Accounting book is unavailable or ambiguous for this tenant.");
             return matches[0];
+        }
+
+        private async Task ValidateJournalBookPurposeAsync(
+            AccountingBook book,
+            string? journalType,
+            CancellationToken cancellationToken)
+        {
+            var isDeltaAdjustment = string.Equals(journalType?.Trim(), DeltaAdjustmentJournalType, StringComparison.OrdinalIgnoreCase);
+            var isDeltaBook = book.BookType == AccountingBookType.Delta;
+
+            if (isDeltaBook != isDeltaAdjustment)
+            {
+                throw new InvalidOperationException(isDeltaBook
+                    ? "A Delta accounting book accepts only the dedicated Delta Adjustment journal type."
+                    : "A Delta Adjustment journal must target an explicit Delta accounting book.");
+            }
+
+            if (!isDeltaBook) return;
+            if (!book.IsActive || !book.AllowsPosting || book.LifecycleStatus != AccountingBookLifecycleStatus.Active)
+                throw new InvalidOperationException("The selected Delta accounting book must be active and posting-enabled.");
+            if (!book.BaseAccountingBookId.HasValue)
+                throw new InvalidOperationException("The selected Delta accounting book has no governed base-book authority.");
+
+            var baseBookReady = await _context.AccountingBooks.AsNoTracking().AnyAsync(baseBook =>
+                baseBook.TenantId == book.TenantId &&
+                baseBook.Id == book.BaseAccountingBookId.Value &&
+                !baseBook.IsDeleted &&
+                baseBook.IsActive &&
+                baseBook.AllowsPosting &&
+                baseBook.LifecycleStatus == AccountingBookLifecycleStatus.Active,
+                cancellationToken);
+            if (!baseBookReady)
+                throw new InvalidOperationException("The Delta accounting book's governed base book must remain active and posting-enabled.");
         }
 
         private static bool IsAllActiveBooks(string? bookClassification)
@@ -1224,6 +1316,103 @@ namespace ErpSystem.Api.Services.Finance.GL
                 UpdatedAt = entry.UpdatedAt,
                 UpdatedBy = entry.UpdatedBy
             };
+        }
+
+        private static JournalEntryDto MapListRowToDto(JournalEntryListRow entry)
+        {
+            var attachmentCount = entry.AttachmentCount > 0
+                ? entry.AttachmentCount
+                : entry.StoredAttachmentCount;
+            return new JournalEntryDto
+            {
+                Id = entry.Id,
+                JournalNumber = entry.JournalNumber,
+                TransactionDate = entry.TransactionDate,
+                JournalType = entry.JournalType,
+                Description = entry.Description,
+                Reference = entry.Reference,
+                SourceModule = entry.SourceModule,
+                OriginModuleCode = entry.OriginModuleCode,
+                SourceDocumentId = entry.SourceDocumentId,
+                SourceDocumentType = entry.SourceDocumentType,
+                BookClassification = entry.BookClassification,
+                FiscalPeriodId = entry.FiscalPeriodId,
+                TotalDebit = entry.TotalDebit,
+                TotalCredit = entry.TotalCredit,
+                Status = entry.Status,
+                IsReversed = entry.IsReversed,
+                ReversalJournalId = entry.ReversalJournalId,
+                OriginalJournalId = entry.OriginalJournalId,
+                ReversalDate = entry.ReversalDate,
+                ReversalReason = entry.ReversalReason,
+                ReversalType = entry.ReversalType,
+                JournalBatchId = entry.JournalBatchId,
+                JournalBatchNumber = entry.JournalBatchNumber,
+                JournalBatchItemId = entry.JournalBatchItemId,
+                PostedDate = entry.PostedDate,
+                PostedByUserId = entry.PostedByUserId,
+                RequiresApproval = entry.RequiresApproval,
+                ApprovalStatus = entry.ApprovalStatus,
+                ApprovedByUserId = entry.ApprovedByUserId,
+                ApprovedDate = entry.ApprovedDate,
+                RejectionReason = entry.RejectionReason,
+                WithdrawalReason = entry.WithdrawalReason,
+                WithdrawnByUserId = entry.WithdrawnByUserId,
+                WithdrawnDate = entry.WithdrawnDate,
+                HasAttachments = entry.HasStoredAttachments || attachmentCount > 0,
+                AttachmentCount = attachmentCount,
+                CreatedAt = entry.CreatedAt,
+                CreatedById = entry.CreatedById,
+                CreatedBy = entry.CreatedBy,
+                UpdatedAt = entry.UpdatedAt,
+                UpdatedBy = entry.UpdatedBy
+            };
+        }
+
+        private sealed class JournalEntryListRow
+        {
+            public Guid Id { get; init; }
+            public string JournalNumber { get; init; } = string.Empty;
+            public DateTime TransactionDate { get; init; }
+            public string JournalType { get; init; } = string.Empty;
+            public string? Description { get; init; }
+            public string? Reference { get; init; }
+            public string? SourceModule { get; init; }
+            public string? OriginModuleCode { get; init; }
+            public Guid? SourceDocumentId { get; init; }
+            public string? SourceDocumentType { get; init; }
+            public string BookClassification { get; init; } = string.Empty;
+            public Guid? FiscalPeriodId { get; init; }
+            public decimal TotalDebit { get; init; }
+            public decimal TotalCredit { get; init; }
+            public string Status { get; init; } = string.Empty;
+            public bool IsReversed { get; init; }
+            public Guid? ReversalJournalId { get; init; }
+            public Guid? OriginalJournalId { get; init; }
+            public DateTime? ReversalDate { get; init; }
+            public string? ReversalReason { get; init; }
+            public string? ReversalType { get; init; }
+            public Guid? JournalBatchId { get; init; }
+            public string? JournalBatchNumber { get; init; }
+            public Guid? JournalBatchItemId { get; init; }
+            public DateTime? PostedDate { get; init; }
+            public Guid? PostedByUserId { get; init; }
+            public bool RequiresApproval { get; init; }
+            public string? ApprovalStatus { get; init; }
+            public Guid? ApprovedByUserId { get; init; }
+            public DateTime? ApprovedDate { get; init; }
+            public string? RejectionReason { get; init; }
+            public string? WithdrawalReason { get; init; }
+            public Guid? WithdrawnByUserId { get; init; }
+            public DateTime? WithdrawnDate { get; init; }
+            public int AttachmentCount { get; init; }
+            public int StoredAttachmentCount { get; init; }
+            public bool HasStoredAttachments { get; init; }
+            public DateTime CreatedAt { get; init; }
+            public Guid? CreatedById { get; init; }
+            public string? CreatedBy { get; init; }
+            public DateTime? UpdatedAt { get; init; }
+            public string? UpdatedBy { get; init; }
         }
 
         private static AccountTransactionDto MapTransactionToDto(AccountTransaction transaction)

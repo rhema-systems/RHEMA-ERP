@@ -6,6 +6,7 @@ using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -21,6 +22,77 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class AccountingBookPeriodInitializationC4Tests
 {
+    [Fact]
+    public void InitializationFingerprint_DoesNotTreatPrimaryDesignationAsFinancialEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        var bookId = Guid.NewGuid();
+        var periodId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var cutoff = new DateTime(2025, 12, 31);
+
+        string Current(AccountingBookType bookType, AccountingBookType sourceType) =>
+            AccountingBookInitializationFingerprint.Evidence(
+                tenantId, bookId, "MANAGEMENT", bookType, "GHS",
+                AccountingBookInitializationMode.BaseBookCopyAtCutoff, cutoff, periodId,
+                "2025-12", new DateTime(2025, 12, 1), cutoff,
+                sourceId, "IFRS", sourceType, "GHS", "INIT-1", "Opening authority", "lines");
+        string Legacy(AccountingBookType bookType, AccountingBookType sourceType) =>
+            AccountingBookInitializationFingerprint.LegacyEvidenceV2(
+                tenantId, bookId, "MANAGEMENT", bookType, "GHS",
+                AccountingBookInitializationMode.BaseBookCopyAtCutoff, cutoff, periodId,
+                "2025-12", new DateTime(2025, 12, 1), cutoff,
+                sourceId, "IFRS", sourceType, "GHS", "INIT-1", "Opening authority", "lines");
+
+        Current(AccountingBookType.ParallelFull, AccountingBookType.PrimaryFull)
+            .Should().Be(Current(AccountingBookType.PrimaryFull, AccountingBookType.ParallelFull));
+        Legacy(AccountingBookType.ParallelFull, AccountingBookType.PrimaryFull)
+            .Should().NotBe(Legacy(AccountingBookType.PrimaryFull, AccountingBookType.ParallelFull));
+    }
+
+    [Fact]
+    public async Task ApprovedLegacyInitialization_RemainsValidAfterPrimaryDesignationChanges()
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        await db.SaveChangesAsync();
+        var service = InitializationService(db, state.TenantId, Guid.NewGuid());
+        await service.ConfigureAsync(state.Book.Id, Independent(state, "legacy-primary-replacement", 0m));
+        await service.SubmitAsync(state.Book.Id);
+        var initialization = db.AccountingBookInitializations.Include(item => item.Lines).Single();
+        initialization.RowVersion = [11];
+        await db.SaveChangesAsync();
+        await InitializationService(db, state.TenantId, Guid.NewGuid()).ApproveAsync(state.Book.Id,
+            new DecideAccountingBookInitializationDto
+            {
+                Reason = "Approved before primary replacement",
+                RowVersion = Convert.ToBase64String([11])
+            });
+
+        var lineEvidence = string.Join('|', initialization.Lines.OrderBy(item => item.AccountId)
+            .Select(item => $"{item.AccountId:N}:{item.CurrencyCode}:{AccountingBookInitializationFingerprint.Decimal(item.OpeningDebit)}:{AccountingBookInitializationFingerprint.Decimal(item.OpeningCredit)}:{AccountingBookInitializationFingerprint.Decimal(item.BaseBookSignedBalance)}:{AccountingBookInitializationFingerprint.Decimal(item.OpeningAdjustment)}"));
+        var legacyEvidence = AccountingBookInitializationFingerprint.LegacyEvidenceV2(
+            state.TenantId, state.Book.Id, state.Book.Code, AccountingBookType.PrimaryFull,
+            state.Book.FunctionalCurrencyCode, initialization.Mode, initialization.CutoffDate,
+            state.CutoffPeriod.Id, state.CutoffPeriod.PeriodCode, state.CutoffPeriod.StartDate,
+            state.CutoffPeriod.EndDate, null, null, null, null, initialization.IdempotencyKey,
+            initialization.Reason, lineEvidence);
+        var mappings = db.AccountAccountingBooks.Include(item => item.Account)
+            .Include(item => item.AccountClassification).OrderBy(item => item.AccountId).ToList();
+        var authority = string.Join('|', mappings.Select(item =>
+            $"{item.AccountId:N}:{item.Account.AccountNumber}:{item.Account.AccountType}:{item.Id:N}:{item.AccountClassificationId:N}:{item.AccountClassification.Code}:{item.AccountClassification.Status}:{item.AccountClassification.IsPostingClassification}"));
+        initialization.EvidenceFingerprint = legacyEvidence;
+        initialization.ReconciliationFingerprint = AccountingBookInitializationFingerprint.Reconciliation(
+            legacyEvidence, authority, string.Empty, string.Empty,
+            initialization.TotalDebits, initialization.TotalCredits);
+
+        state.Book.BookType = AccountingBookType.ParallelFull;
+        await db.SaveChangesAsync();
+
+        var validation = await service.ValidateCurrentApprovedEvidenceAsync(state.Book.Id);
+        validation.IsValid.Should().BeTrue(validation.Blocker);
+    }
+
     [Fact]
     public void Controllers_UseCanonicalReadManageAndCheckerPermissions_AndExposeNoDelete()
     {
@@ -40,7 +112,7 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         var initialization = typeof(AccountingBookInitializationController).GetMethods(BindingFlags.Instance | BindingFlags.Public);
         foreach (var read in new[] { nameof(AccountingBookInitializationController.Get), nameof(AccountingBookInitializationController.GetReadiness), nameof(AccountingBookInitializationController.Prepare) })
             initialization.Single(item => item.Name == read).GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ViewFinance);
-        foreach (var manage in new[] { nameof(AccountingBookInitializationController.Configure), nameof(AccountingBookInitializationController.Submit) })
+        foreach (var manage in new[] { nameof(AccountingBookInitializationController.PrepareDeltaStructure), nameof(AccountingBookInitializationController.Configure), nameof(AccountingBookInitializationController.Submit) })
             initialization.Single(item => item.Name == manage).GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ManageAccountingBookInitialization);
         foreach (var decide in new[] { nameof(AccountingBookInitializationController.Approve), nameof(AccountingBookInitializationController.Reject) })
             initialization.Single(item => item.Name == decide).GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ApproveAccountingBookInitialization);
@@ -201,6 +273,7 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         var result = await InitializationService(db, state.TenantId, Guid.NewGuid()).ConfigureAsync(state.Book.Id, request);
         result.SourceAccountingBookId.Should().Be(source.Id);
         result.IsBalanced.Should().BeTrue();
+        result.Lines.Should().Contain(line => line.AccountNumber == "1000" && line.AccountName == "1000" && line.AccountType == "Asset");
     }
 
     [Fact]
@@ -256,6 +329,132 @@ public sealed class AccountingBookPeriodInitializationC4Tests
     }
 
     [Fact]
+    public async Task DeltaStructure_IsPreparedFromBase_AndInitializationRemainsZeroOnly()
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        var delta = new AccountingBook
+        {
+            TenantId = state.TenantId, Code = "IFRS_CONSOL_ADJ", Name = "IFRS consolidation adjustments",
+            Purpose = "Consolidation adjustments", BookType = AccountingBookType.Delta,
+            LifecycleStatus = AccountingBookLifecycleStatus.Initializing,
+            BaseAccountingBookId = state.Book.Id, IsActive = false, AllowsPosting = false
+        };
+        db.AccountingBooks.Add(delta);
+        await db.SaveChangesAsync();
+        var initialization = InitializationService(db, state.TenantId, Guid.NewGuid());
+
+        await FluentActions.Awaiting(() => initialization.PrepareAsync(delta.Id, "IndependentOpeningBalances",
+                new DateTime(2025, 12, 31), null))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*DELTA_ACCOUNT_MAPPINGS_REQUIRED*");
+
+        var preparedStructure = await initialization.EnsureDeltaStructureAsync(delta.Id);
+        preparedStructure.AccountMappingCount.Should().Be(2);
+        preparedStructure.ClassificationCount.Should().Be(2);
+        db.AccountAccountingBooks.Count(item => item.AccountingBookId == delta.Id && item.IsEnabled).Should().Be(2);
+
+        var preparation = await initialization.PrepareAsync(delta.Id, "IndependentOpeningBalances",
+            new DateTime(2025, 12, 31), null);
+        preparation.Accounts.Should().HaveCount(2);
+        preparation.Accounts.Should().OnlyContain(item => item.AuthoritativeSignedBalance == 0m);
+
+        var baseAssetClassification = await db.AccountClassifications.SingleAsync(item =>
+            item.AccountingBookId == state.Book.Id && item.Code == "ASSET");
+        baseAssetClassification.Name = "Assets governed by IFRS";
+        baseAssetClassification.DisplayOrder = 25;
+        var baseDebitMapping = await db.AccountAccountingBooks.SingleAsync(item =>
+            item.AccountingBookId == state.Book.Id && item.AccountId == state.Debit.Id);
+        baseDebitMapping.IsEnabled = false;
+        await db.SaveChangesAsync();
+
+        var refreshedStructure = await initialization.EnsureDeltaStructureAsync(delta.Id);
+        refreshedStructure.AccountMappingCount.Should().Be(1);
+        var deltaAssetClassification = await db.AccountClassifications.SingleAsync(item =>
+            item.AccountingBookId == delta.Id && item.Code == "ASSET");
+        deltaAssetClassification.Name.Should().Be("Assets governed by IFRS");
+        deltaAssetClassification.DisplayOrder.Should().Be(25);
+        (await db.AccountAccountingBooks.SingleAsync(item =>
+            item.AccountingBookId == delta.Id && item.AccountId == state.Debit.Id)).IsEnabled.Should().BeFalse();
+
+        baseDebitMapping.IsEnabled = true;
+        await db.SaveChangesAsync();
+        await initialization.EnsureDeltaStructureAsync(delta.Id);
+        (await db.AccountAccountingBooks.SingleAsync(item =>
+            item.AccountingBookId == delta.Id && item.AccountId == state.Debit.Id)).IsEnabled.Should().BeTrue();
+
+        await FluentActions.Awaiting(() => initialization.PrepareAsync(delta.Id, "BaseBookCopyAtCutoff",
+                new DateTime(2025, 12, 31), state.Book.Id))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*DELTA_INITIALIZATION_MODE_INVALID*");
+
+        state.Book.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        state.Book.IsActive = true; state.Book.AllowsPosting = true;
+        delta.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        delta.IsActive = true; delta.AllowsPosting = true;
+        await db.SaveChangesAsync();
+        var report = await new AccountingBookService(db, User(state.TenantId, Guid.NewGuid()).Object)
+            .GetDeltaCombinedReportAsync(delta.Id, new DateTime(2026, 1, 31));
+        report.BaseAccountingBookCode.Should().Be("IFRS");
+        report.DeltaAccountingBookCode.Should().Be("IFRS_CONSOL_ADJ");
+        report.Lines.Should().HaveCount(2);
+        report.Lines.Should().OnlyContain(item => item.BaseSignedBalance == 0m
+            && item.DeltaSignedBalance == 0m && item.CombinedSignedBalance == 0m);
+    }
+
+    [Fact]
+    public async Task DeltaCombinedReport_AggregatesPostedHistoryAndRetainsDisabledMappedAccounts()
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        var delta = new AccountingBook
+        {
+            TenantId = state.TenantId, Code = "IFRS_CONSOL_ADJ", Name = "IFRS consolidation adjustments",
+            Purpose = "Consolidation", BookType = AccountingBookType.Delta,
+            BaseAccountingBookId = state.Book.Id, FunctionalCurrencyCode = "GHS",
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(delta);
+        var deltaAsset = Classification(state.TenantId, delta.Id, "ASSET", AccountType.Asset);
+        var deltaEquity = Classification(state.TenantId, delta.Id, "EQUITY", AccountType.Equity);
+        db.AccountClassifications.AddRange(deltaAsset, deltaEquity);
+        var deltaDebitMapping = Mapping(state.TenantId, delta.Id, state.Debit.Id, deltaAsset.Id);
+        db.AccountAccountingBooks.AddRange(deltaDebitMapping,
+            Mapping(state.TenantId, delta.Id, state.Credit.Id, deltaEquity.Id));
+        var journalId = Guid.NewGuid();
+        db.AccountTransactions.AddRange(
+            Transaction(state, state.Book.Id, journalId, state.Debit.Id, new DateTime(2026, 1, 10), 1_000m, 0m, "Posted"),
+            Transaction(state, state.Book.Id, journalId, state.Credit.Id, new DateTime(2026, 1, 10), 0m, 1_000m, "Posted"),
+            Transaction(state, delta.Id, journalId, state.Debit.Id, new DateTime(2026, 1, 20), 125m, 0m, "Posted"),
+            Transaction(state, delta.Id, journalId, state.Credit.Id, new DateTime(2026, 1, 20), 0m, 125m, "Posted"),
+            Transaction(state, delta.Id, journalId, state.Debit.Id, new DateTime(2026, 1, 21), 900m, 0m, "Draft"),
+            Transaction(state, delta.Id, journalId, state.Debit.Id, new DateTime(2026, 2, 1), 700m, 0m, "Posted"));
+        await db.SaveChangesAsync();
+
+        // Historical posted balances must remain reportable if a mapping is later disabled.
+        deltaDebitMapping.IsEnabled = false;
+        await db.SaveChangesAsync();
+
+        var report = await new AccountingBookService(db, User(state.TenantId, Guid.NewGuid()).Object)
+            .GetDeltaCombinedReportAsync(delta.Id, new DateTime(2026, 1, 31));
+
+        report.Lines.Should().HaveCount(2);
+        report.Lines.Single(item => item.AccountId == state.Debit.Id).Should().BeEquivalentTo(new
+        {
+            BaseSignedBalance = 1_000m,
+            DeltaSignedBalance = 125m,
+            CombinedSignedBalance = 1_125m
+        });
+        report.Lines.Single(item => item.AccountId == state.Credit.Id).Should().BeEquivalentTo(new
+        {
+            BaseSignedBalance = -1_000m,
+            DeltaSignedBalance = -125m,
+            CombinedSignedBalance = -1_125m
+        });
+        report.BaseTotal.Should().Be(0m);
+        report.DeltaTotal.Should().Be(0m);
+        report.CombinedTotal.Should().Be(0m);
+    }
+
+    [Fact]
     public async Task Initialization_DecisionDtoResolvesTenantUserDisplayNames()
     {
         await using var db = Context();
@@ -306,6 +505,62 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         readiness.IsReady.Should().BeTrue();
         readiness.RequiredPeriodCount.Should().Be(1);
         readiness.ReadyPeriodCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ApprovedInitialization_IgnoresNewMappingsEffectiveAfterCutoff_ButRejectsRetroactiveMappings()
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        await db.SaveChangesAsync();
+        var maker = Guid.NewGuid();
+        var service = InitializationService(db, state.TenantId, maker);
+        await service.ConfigureAsync(state.Book.Id, Independent(state, "future-account-mapping", 0m));
+        await service.SubmitAsync(state.Book.Id);
+        var evidence = db.AccountingBookInitializations.Single();
+        evidence.RowVersion = [9];
+        await db.SaveChangesAsync();
+        await InitializationService(db, state.TenantId, Guid.NewGuid()).ApproveAsync(state.Book.Id,
+            new DecideAccountingBookInitializationDto { Reason = "Approved cutoff evidence", RowVersion = Convert.ToBase64String([9]) });
+
+        var newAccount = Account(state.TenantId, "1050", AccountType.Asset);
+        newAccount.EffectiveDate = new DateTime(2026, 1, 1);
+        db.Accounts.Add(newAccount);
+        var assetClassification = db.AccountClassifications.Single(item => item.AccountingBookId == state.Book.Id
+            && item.CoreAccountType == AccountType.Asset);
+        db.AccountAccountingBooks.Add(Mapping(state.TenantId, state.Book.Id, newAccount.Id, assetClassification.Id));
+        await db.SaveChangesAsync();
+
+        (await service.ValidateCurrentApprovedEvidenceAsync(state.Book.Id)).IsValid.Should().BeTrue();
+
+        newAccount.EffectiveDate = new DateTime(2025, 12, 31);
+        await db.SaveChangesAsync();
+        var retroactive = await service.ValidateCurrentApprovedEvidenceAsync(state.Book.Id);
+        retroactive.IsValid.Should().BeFalse();
+        retroactive.Blocker.Should().Contain("exactly one opening line");
+    }
+
+    [Fact]
+    public async Task ApprovedInitialization_PreservesZeroHistoricalLine_WhenAccountBecomesFutureEffective()
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        await db.SaveChangesAsync();
+        var maker = Guid.NewGuid();
+        var service = InitializationService(db, state.TenantId, maker);
+        await service.ConfigureAsync(state.Book.Id, Independent(state, "future-dated-existing-line", 0m));
+        await service.SubmitAsync(state.Book.Id);
+        var evidence = db.AccountingBookInitializations.Single();
+        evidence.RowVersion = [10];
+        await db.SaveChangesAsync();
+        await InitializationService(db, state.TenantId, Guid.NewGuid()).ApproveAsync(state.Book.Id,
+            new DecideAccountingBookInitializationDto { Reason = "Approved zero opening evidence", RowVersion = Convert.ToBase64String([10]) });
+
+        state.Debit.EffectiveDate = new DateTime(2026, 1, 1);
+        await db.SaveChangesAsync();
+
+        var retained = await service.ValidateCurrentApprovedEvidenceAsync(state.Book.Id);
+        retained.IsValid.Should().BeTrue();
     }
 
     [Fact]
@@ -433,6 +688,14 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         AccountingBookId = book, Code = code, Name = code, CoreAccountType = type, Status = AccountClassificationStatus.Active, IsPostingClassification = true };
     private static AccountAccountingBook Mapping(Guid tenant, Guid book, Guid account, Guid classification) => new() { TenantId = tenant,
         AccountingBookId = book, AccountId = account, AccountClassificationId = classification, IsEnabled = true };
+    private static AccountTransaction Transaction(State state, Guid bookId, Guid journalId, Guid accountId,
+        DateTime date, decimal debit, decimal credit, string status) => new()
+    {
+        TenantId = state.TenantId, AccountingBookId = bookId, BookClassification = "IFRS",
+        JournalEntryId = journalId, AccountId = accountId, FiscalPeriodId = state.Period.Id,
+        TransactionDate = date, DebitAmount = debit, CreditAmount = credit,
+        FunctionalCurrencyCode = "GHS", PostingStatus = status
+    };
     private static ApplicationDbContext Context() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
         .UseInMemoryDatabase($"c4-{Guid.NewGuid():N}").Options);
     private static IAccountingBookPeriodService PeriodService(ApplicationDbContext db, Guid tenant, Guid actor, IFinanceAuditService? audit = null) =>

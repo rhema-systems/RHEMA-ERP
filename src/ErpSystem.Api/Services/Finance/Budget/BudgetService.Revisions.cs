@@ -27,23 +27,43 @@ public partial class BudgetService
 
         var revisions = await query
             .OrderByDescending(revision => revision.CreatedAt)
-            .Include(revision => revision.SourceScenario)!.ThenInclude(scenario => scenario!.FiscalYear)
-            .Include(revision => revision.SourceScenario)!.ThenInclude(scenario => scenario!.BudgetReturns)
-                .ThenInclude(budgetReturn => budgetReturn.BudgetEntries)
-            .Include(revision => revision.ResultScenario)
-            .Include(revision => revision.Lines.Where(line => !line.IsDeleted))
-                .ThenInclude(line => line.Account)
-            .Include(revision => revision.Lines.Where(line => !line.IsDeleted))
-                .ThenInclude(line => line.FiscalPeriod)
-            .Include(revision => revision.Lines.Where(line => !line.IsDeleted))
-                .ThenInclude(line => line.SegmentValue)
-            .AsSplitQuery()
+            .Select(revision => new BudgetRevisionSummaryRow
+            {
+                Id = revision.Id,
+                RevisionNumber = revision.RevisionNumber,
+                RevisionType = revision.RevisionType,
+                SourceScenarioId = revision.SourceScenarioId,
+                SourceScenarioName = revision.SourceScenario == null ? string.Empty : revision.SourceScenario.Name,
+                FiscalYearId = revision.SourceScenario == null ? Guid.Empty : revision.SourceScenario.FiscalYearId,
+                FiscalYearName = revision.SourceScenario == null || revision.SourceScenario.FiscalYear == null
+                    ? string.Empty
+                    : revision.SourceScenario.FiscalYear.FiscalYearName,
+                ResultScenarioId = revision.ResultScenarioId,
+                ResultScenarioName = revision.ResultScenario == null ? null : revision.ResultScenario.Name,
+                EffectiveDate = revision.EffectiveDate,
+                BoardResolutionReference = revision.BoardResolutionReference,
+                BoardResolutionDate = revision.BoardResolutionDate,
+                Justification = revision.Justification,
+                Status = revision.Status,
+                IncreaseAmountBase = revision.Lines
+                    .Where(line => !line.IsDeleted && line.AdjustmentAmountBase > 0m)
+                    .Sum(line => (decimal?)line.AdjustmentAmountBase) ?? 0m,
+                ReductionAmountBase = revision.Lines
+                    .Where(line => !line.IsDeleted && line.AdjustmentAmountBase < 0m)
+                    .Sum(line => (decimal?)line.AdjustmentAmountBase) ?? 0m,
+                NetChangeAmountBase = revision.Lines
+                    .Where(line => !line.IsDeleted)
+                    .Sum(line => (decimal?)line.AdjustmentAmountBase) ?? 0m,
+                SubmittedAt = revision.SubmittedAt,
+                ApprovedAt = revision.ApprovedAt,
+                AppliedAt = revision.AppliedAt,
+                RejectionReason = revision.RejectionReason,
+                CreatedAt = revision.CreatedAt,
+                RowVersion = revision.RowVersion
+            })
             .ToListAsync();
 
-        var result = new List<BudgetRevisionDto>(revisions.Count);
-        foreach (var revision in revisions)
-            result.Add(await MapRevisionAsync(revision));
-        return result;
+        return revisions.Select(MapRevisionSummary).ToList();
     }
 
     public async Task<BudgetRevisionDto> GetRevisionAsync(Guid id)
@@ -657,6 +677,35 @@ public partial class BudgetService
         };
     }
 
+    private static BudgetRevisionDto MapRevisionSummary(BudgetRevisionSummaryRow revision)
+        => new()
+        {
+            Id = revision.Id,
+            RevisionNumber = revision.RevisionNumber,
+            RevisionType = revision.RevisionType,
+            SourceScenarioId = revision.SourceScenarioId,
+            SourceScenarioName = revision.SourceScenarioName,
+            FiscalYearId = revision.FiscalYearId,
+            FiscalYearName = revision.FiscalYearName,
+            ResultScenarioId = revision.ResultScenarioId,
+            ResultScenarioName = revision.ResultScenarioName,
+            EffectiveDate = revision.EffectiveDate,
+            BoardResolutionReference = revision.BoardResolutionReference,
+            BoardResolutionDate = revision.BoardResolutionDate,
+            Justification = revision.Justification,
+            Status = revision.Status,
+            IncreaseAmountBase = revision.IncreaseAmountBase,
+            ReductionAmountBase = Math.Abs(revision.ReductionAmountBase),
+            NetChangeAmountBase = revision.NetChangeAmountBase,
+            SubmittedAt = revision.SubmittedAt,
+            ApprovedAt = revision.ApprovedAt,
+            AppliedAt = revision.AppliedAt,
+            RejectionReason = revision.RejectionReason,
+            CreatedAt = revision.CreatedAt,
+            RowVersion = Convert.ToBase64String(revision.RowVersion),
+            Lines = []
+        };
+
     private async Task<BudgetScenario> RequireOfficialOrHistoricalScenarioAsync(Guid id)
         => await _context.BudgetScenarios
             .AsNoTracking()
@@ -756,6 +805,33 @@ public partial class BudgetService
 
     private static string Truncate(string value, int maximumLength)
         => value.Length <= maximumLength ? value : value[..maximumLength];
+
+    private sealed class BudgetRevisionSummaryRow
+    {
+        public Guid Id { get; init; }
+        public string RevisionNumber { get; init; } = string.Empty;
+        public string RevisionType { get; init; } = string.Empty;
+        public Guid SourceScenarioId { get; init; }
+        public string SourceScenarioName { get; init; } = string.Empty;
+        public Guid FiscalYearId { get; init; }
+        public string FiscalYearName { get; init; } = string.Empty;
+        public Guid? ResultScenarioId { get; init; }
+        public string? ResultScenarioName { get; init; }
+        public DateTime EffectiveDate { get; init; }
+        public string BoardResolutionReference { get; init; } = string.Empty;
+        public DateTime BoardResolutionDate { get; init; }
+        public string Justification { get; init; } = string.Empty;
+        public string Status { get; init; } = string.Empty;
+        public decimal IncreaseAmountBase { get; init; }
+        public decimal ReductionAmountBase { get; init; }
+        public decimal NetChangeAmountBase { get; init; }
+        public DateTime? SubmittedAt { get; init; }
+        public DateTime? ApprovedAt { get; init; }
+        public DateTime? AppliedAt { get; init; }
+        public string? RejectionReason { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public byte[] RowVersion { get; init; } = [];
+    }
 
     private readonly record struct BudgetCell(Guid? SegmentValueId, Guid AccountId, Guid FiscalPeriodId);
 }

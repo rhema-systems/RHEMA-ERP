@@ -4,11 +4,11 @@ export const ALL_ACTIVE_BOOKS_CODE = 'ALL_ACTIVE_BOOKS';
 
 export const DEFAULT_ACCOUNTING_BOOKS: AccountingBook[] = [
     {
-        id: 'default-ifrs',
+        id: 'default-base',
         tenantId: '',
-        code: 'IFRS',
-        name: 'IFRS',
-        purpose: 'Primary',
+        code: 'BASE',
+        name: 'Ghana Statutory Primary',
+        purpose: 'Ghana Statutory',
         isActive: true,
         isDefault: true,
         allowsPosting: true,
@@ -16,26 +16,26 @@ export const DEFAULT_ACCOUNTING_BOOKS: AccountingBook[] = [
         sortOrder: 10,
     },
     {
-        id: 'default-local-statutory',
+        id: 'default-ifrs-adjustments',
         tenantId: '',
-        code: 'LOCAL_STATUTORY',
-        name: 'Local Statutory',
-        purpose: 'Statutory',
-        isActive: true,
+        code: 'IFRS_ADJUSTMENTS',
+        name: 'IFRS Adjustments',
+        purpose: 'IFRS adjustments',
+        isActive: false,
         isDefault: false,
-        allowsPosting: true,
+        allowsPosting: false,
         isSystemDefined: true,
         sortOrder: 20,
     },
     {
-        id: 'default-management',
+        id: 'default-usd-parallel',
         tenantId: '',
-        code: 'MANAGEMENT',
-        name: 'Management',
-        purpose: 'Management',
-        isActive: true,
+        code: 'USD_PARALLEL',
+        name: 'USD Parallel',
+        purpose: 'Foreign-currency replica',
+        isActive: false,
         isDefault: false,
-        allowsPosting: true,
+        allowsPosting: false,
         isSystemDefined: true,
         sortOrder: 30,
     },
@@ -44,9 +44,8 @@ export const DEFAULT_ACCOUNTING_BOOKS: AccountingBook[] = [
 export const normalizeAccountingBookCode = (code?: string): string => {
     const normalized = (code || '').trim().toUpperCase();
     if (normalized === ALL_ACTIVE_BOOKS_CODE) return ALL_ACTIVE_BOOKS_CODE;
-    if (normalized === 'LOCAL' || normalized === 'BASE') return 'LOCAL_STATUTORY';
-    if (normalized === 'MANAGEMENT') return 'MANAGEMENT';
-    return normalized || 'IFRS';
+    if (normalized === 'LOCAL' || normalized === 'LOCAL_STATUTORY' || normalized === 'PRIMARY') return 'BASE';
+    return normalized || 'BASE';
 };
 
 export const getAccountingBookName = (
@@ -60,7 +59,7 @@ export const getAccountingBookName = (
         (books || []).find(book => normalizeAccountingBookCode(book.code) === normalized)?.name ||
         DEFAULT_ACCOUNTING_BOOKS.find(book => book.code === normalized)?.name ||
         code ||
-        'IFRS'
+        'BASE'
     );
 };
 
@@ -94,17 +93,11 @@ export const isAccountEligibleForBook = (account: Account, bookCode: string): bo
         return mapping.isEnabled;
     }
 
-    if (normalized === 'IFRS') {
-        return account.isIFRSClassified !== false;
+    if (normalized === 'BASE') {
+        return account.isBaseClassified !== false;
     }
 
-    if (normalized === 'LOCAL_STATUTORY') {
-        return account.isBaseFrameworkClassified ?? account.isBaseClassified ?? true;
-    }
-
-    if (normalized === 'MANAGEMENT') {
-        return account.isLocalFrameworkClassified ?? account.isLocalClassified ?? account.isManagementClassified ?? false;
-    }
-
-    return true;
+    // Derived books are mapping-governed. Never infer their eligibility from legacy
+    // IFRS/Local/Management booleans when an explicit book mapping is absent.
+    return false;
 };

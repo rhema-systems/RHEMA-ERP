@@ -88,11 +88,11 @@ public sealed class FinancialStatementClassificationLayoutPhase3Tests
         await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"phase3-standards-{Guid.NewGuid():N}").Options);
         db.Tenants.Add(new Tenant { Id = tenantId, Code = "TEN", Name = "Tenant", Status = TenantStatus.Active, BaseCurrency = "GHS" });
-        var book = new AccountingBook { Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary", Purpose = "Primary", IsActive = true, AllowsPosting = true };
+        var book = new AccountingBook { Id = Guid.NewGuid(), TenantId = tenantId, Code = "BASE", Name = "Ghana Statutory Primary", Purpose = "Ghana Statutory", IsActive = true, AllowsPosting = true };
         db.AccountingBooks.Add(book);
         db.AccountClassifications.AddRange(
-            Classification(tenantId, book.Id, "ASSET_ROOT", "Assets"),
-            Classification(tenantId, book.Id, "LIABILITY_ROOT", "Liabilities"),
+            Classification(tenantId, book.Id, "ASSETS", "Assets"),
+            Classification(tenantId, book.Id, "LIABILITIES", "Liabilities"),
             Classification(tenantId, book.Id, "EQUITY_ROOT", "Equity"),
             Classification(tenantId, book.Id, "REVENUE_ROOT", "Revenue"),
             Classification(tenantId, book.Id, "EXPENSE_ROOT", "Expenses"));

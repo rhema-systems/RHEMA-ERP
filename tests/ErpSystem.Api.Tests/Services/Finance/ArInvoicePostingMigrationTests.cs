@@ -123,7 +123,7 @@ public sealed class ArInvoicePostingMigrationTests
 
         var created = await service.CreateAsync(new InvoiceCreateDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             InvoiceDate = new DateTime(2026, 7, 6),
             DueDate = new DateTime(2026, 8, 5),
             CurrencyCode = "GHS",
@@ -164,7 +164,7 @@ public sealed class ArInvoicePostingMigrationTests
 
         var action = () => service.CreateAsync(new InvoiceCreateDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             InvoiceDate = new DateTime(2026, 7, 6),
             DueDate = new DateTime(2026, 8, 5),
             CurrencyCode = "GHS",
@@ -316,7 +316,7 @@ public sealed class ArInvoicePostingMigrationTests
 
         var action = () => service.CreateAsync(new InvoiceCreateDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             InvoiceDate = new DateTime(2026, 7, 5),
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
@@ -353,7 +353,7 @@ public sealed class ArInvoicePostingMigrationTests
         var lineId = Guid.NewGuid();
         var request = new InvoiceCreateDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             InvoiceDate = new DateTime(2026, 7, 6),
             DueDate = new DateTime(2026, 8, 5),
             CurrencyCode = "GHS",
@@ -392,7 +392,7 @@ public sealed class ArInvoicePostingMigrationTests
         var (service, _) = CreateService(db, tenantId);
         var request = new InvoiceCreateDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             InvoiceDate = new DateTime(2026, 7, 6),
             DueDate = new DateTime(2026, 8, 5),
             CurrencyCode = "GHS",
@@ -643,7 +643,8 @@ public sealed class ArInvoicePostingMigrationTests
         var fixture = await SeedSentArInvoiceAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherArAccount = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
-        fixture.Customer.DefaultArAccountId = otherArAccount.Id;
+        var financeSettings = await db.FinanceSettings.SingleAsync(settings => settings.TenantId == tenantId);
+        financeSettings.ControlAccountArId = otherArAccount.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
@@ -1024,6 +1025,10 @@ public sealed class ArInvoicePostingMigrationTests
         var taxAccount = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var discountAccount = SeedAccount(db, tenantId, "5200", AccountType.Expense);
         var customer = SeedCustomer(db, tenantId, arAccount.Id);
+        var customerRole = db.Set<BusinessPartnerRole>().Local.Single(role =>
+            role.BusinessPartnerId == customer.Id && role.RoleType == BusinessPartnerRoleType.Customer);
+        var arProfile = db.Set<BusinessPartnerArProfileVersion>().Local.Single(profile =>
+            profile.BusinessPartnerRoleId == customerRole.Id);
 
         db.Set<FinanceSettings>().Add(new FinanceSettings
         {
@@ -1041,6 +1046,11 @@ public sealed class ArInvoicePostingMigrationTests
             TenantId = tenantId,
             InvoiceNumber = "INV-2026-00001",
             BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = customerRole.Id,
+            BusinessPartnerArProfileVersionId = arProfile.Id,
+            BusinessPartnerCode = customer.PartnerCode,
+            BusinessPartnerLegalName = customer.LegalName,
+            BusinessPartnerTin = customer.TaxIdentificationNumber,
             CustomerName = customer.PartnerName,
             CustomerAddress = customer.PhysicalAddress,
             InvoiceDate = new DateTime(2026, 7, 5),
@@ -1234,6 +1244,31 @@ public sealed class ArInvoicePostingMigrationTests
         };
 
         db.Set<BusinessPartner>().Add(customer);
+        var customerRole = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerId = customer.Id,
+            RoleType = BusinessPartnerRoleType.Customer,
+            Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2026, 1, 1),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.Set<BusinessPartnerRole>().Add(customerRole);
+        db.Set<BusinessPartnerArProfileVersion>().Add(new BusinessPartnerArProfileVersion
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerRoleId = customerRole.Id,
+            VersionNumber = 1,
+            Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2026, 1, 1),
+            ApprovedAtUtc = DateTime.UtcNow,
+            DecisionReason = "Regression fixture",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
         return customer;
     }
 

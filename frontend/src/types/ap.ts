@@ -27,13 +27,14 @@ export interface ApInvoiceSupplier {
     currency?: string | null;
 }
 
-/**
- * Supplier option for invoice entry. `id` may be a canonical Supplier id or an approved
- * Business Partner id; the Finance invoice command resolves it to the persisted Supplier id.
- */
+/** Canonical Business Partner AP-role option with explicit transaction readiness. */
 export interface ApInvoiceSupplierEntryOption extends ApInvoiceSupplier {
-    supplierId?: string | null;
-    businessPartnerId?: string | null;
+    businessPartnerId: string;
+    businessPartnerRoleId: string;
+    roleType: 'Supplier' | 'Contractor';
+    isTransactionReady: boolean;
+    readinessCode: string;
+    readinessMessage: string;
 }
 
 export interface ApGoodsInvoiceEntry {
@@ -57,8 +58,13 @@ export interface VendorInvoice {
     id: string;
     invoiceNumber: string;
     supplierInvoiceNumber?: string;
-    supplierId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
+    businessPartnerApProfileVersionId?: string;
+    businessPartnerCode: string;
     supplierName: string;
+    businessPartnerLegalName?: string;
+    businessPartnerTaxIdentificationNumber?: string;
     purchaseOrderId?: string;
     purchaseOrderNumber?: string;
     invoiceDate: string;
@@ -88,6 +94,8 @@ export interface VendorInvoice {
     withholdingTaxAccountId?: string;
     withholdingCertificateNumber?: string;
     withholdingCertificateDate?: string;
+    withholdingContractReference?: string;
+    withholdingSupplyCategory?: WhtSupplyCategory;
     matchingType: InvoiceMatchingType;
     matchingStatus: InvoiceMatchingStatus;
     matchingNotes?: string;
@@ -279,7 +287,8 @@ export interface VendorInvoiceMatchExceptionReportRow {
     exceptionId: string;
     vendorInvoiceId: string;
     invoiceNumber: string;
-    supplierId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     supplierName: string;
     purchaseOrderId: string;
     purchaseOrderNumber: string;
@@ -319,7 +328,8 @@ export interface VendorInvoiceCreateRequest {
     applySupplierWithholdingDefaults?: boolean | null;
     withholdingTaxRateOverride?: number | null;
     supplierInvoiceNumber?: string;
-    supplierId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     purchaseOrderId?: string;
     acceptedSupplyKind?: ProcurementAcceptedSupplyKind;
     acceptedSupplySourceId?: string;
@@ -339,6 +349,8 @@ export interface VendorInvoiceCreateRequest {
     withholdingTaxAccountId?: string | null;
     withholdingCertificateNumber?: string;
     withholdingCertificateDate?: string;
+    withholdingContractReference?: string;
+    withholdingSupplyCategory?: WhtSupplyCategory;
     matchingType?: InvoiceMatchingType;
     expenseAccountId?: string;
     apAccountId?: string;
@@ -372,7 +384,7 @@ export interface ProcurementAcceptedSupplyOptions {
     worksHandoffRoute: string;
 }
 
-export interface VendorInvoiceUpdateRequest extends VendorInvoiceCreateRequest {
+export interface VendorInvoiceUpdateRequest extends Omit<VendorInvoiceCreateRequest, 'businessPartnerId' | 'businessPartnerRoleId'> {
     id: string;
 }
 
@@ -616,17 +628,6 @@ export interface SupplierDebitNote {
     financeDimensions?: FinanceSourceDocumentDimension;
 }
 
-/**
- * Explicit bridge between Finance's business-partner master and Procurement's supplier master.
- * The identifiers are intentionally kept separate; clients must not infer identity from names or codes.
- */
-export interface ApSupplierIdentity {
-    businessPartnerId: string;
-    supplierId: string;
-    displayName: string;
-    isVerified: boolean;
-}
-
 export interface SupplierDebitNoteLineRequest {
     id?: string;
     originalVendorInvoiceLineItemId?: string;
@@ -673,7 +674,8 @@ export interface SupplierDebitNoteApplicationResult {
 }
 
 export interface VendorPaymentCreateRequest {
-    supplierId: string;
+    businessPartnerId: string;
+    businessPartnerRoleId?: string;
     paymentDate: string;
     totalAmount: number;
     paymentMethod?: VendorPaymentMethod;
@@ -963,7 +965,7 @@ export interface ApAgingReport {
 }
 
 export interface SupplierAgingDetail {
-    supplierId: string;
+    businessPartnerId: string;
     supplierName: string;
     supplierCode?: string;
     totalOutstanding: number;
@@ -1008,8 +1010,7 @@ export interface SupplierDetailedLedgerReport {
 }
 
 export interface SupplierDetailedLedgerAccount {
-    supplierId: string;
-    businessPartnerId?: string;
+    businessPartnerId: string;
     supplierCode: string;
     supplierName: string;
     currencyCode: string;
@@ -1179,8 +1180,12 @@ export interface OutstandingVendorInvoice {
     earlyPaymentDiscountDueDate?: string;
     isDiscountAvailable: boolean;
     discountAmount?: number;
+    withholdingContractReference?: string;
+    withholdingSupplyCategory?: WhtSupplyCategory;
     paymentReadiness?: VendorPaymentInvoiceReadiness;
 }
+
+export type WhtSupplyCategory = 'Goods' | 'Works' | 'Services' | 0 | 1 | 2;
 
 export interface VendorPaymentInvoiceReadiness {
     vendorInvoiceId: string;

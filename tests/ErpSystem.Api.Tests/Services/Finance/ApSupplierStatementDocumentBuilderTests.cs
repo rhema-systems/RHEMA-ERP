@@ -141,7 +141,7 @@ public sealed class ApSupplierStatementDocumentBuilderTests
         {
             ["fromDate"] = "2026-07-01",
             ["toDate"] = "2026-07-31",
-            ["supplierIds"] = supplierId.ToString(),
+            ["businessPartnerIds"] = supplierId.ToString(),
             ["showSupplierCurrency"] = "false"
         }
     };
@@ -197,7 +197,7 @@ public sealed class ApSupplierStatementDocumentBuilderTests
         {
             new SupplierDetailedLedgerAccountDto
             {
-                SupplierId = supplierId,
+                BusinessPartnerId = supplierId,
                 SupplierCode = "SUP-001",
                 SupplierName = "TDC Works Supplier",
                 CurrencyCode = "GHS",

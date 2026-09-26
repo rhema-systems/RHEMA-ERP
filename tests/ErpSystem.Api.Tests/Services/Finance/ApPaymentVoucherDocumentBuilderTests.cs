@@ -166,14 +166,15 @@ public sealed class ApPaymentVoucherDocumentBuilderTests
             BaseCurrency = "GHS",
             Address = "Tema, Ghana"
         };
-        var supplier = new Supplier
+        var supplier = new BusinessPartner
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            SupplierCode = "SUP-001",
-            Name = "TDC Works Supplier",
-            SupplierType = "Vendor",
-            Status = "Active"
+            PartnerCode = "SUP-001",
+            PartnerName = "TDC Works Supplier",
+            PartnerType = "Supplier",
+            TaxIdentificationNumber = "TIN-001",
+            IsActive = true
         };
         var bankAccount = new BankAccount
         {
@@ -199,8 +200,11 @@ public sealed class ApPaymentVoucherDocumentBuilderTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "AP-PAY-2026-0001",
-            SupplierId = supplier.Id,
-            Supplier = supplier,
+            BusinessPartnerId = supplier.Id,
+            BusinessPartner = supplier,
+            BusinessPartnerCode = supplier.PartnerCode,
+            BusinessPartnerName = supplier.PartnerName,
+            BusinessPartnerTaxIdentificationNumber = supplier.TaxIdentificationNumber,
             PaymentDate = new DateTime(2026, 8, 3),
             TotalAmount = 12_345.67m,
             AllocatedAmount = 0m,
@@ -263,7 +267,7 @@ public sealed class ApPaymentVoucherDocumentBuilderTests
         }
 
         db.Tenants.Add(tenant);
-        db.Set<Supplier>().Add(supplier);
+        db.Set<BusinessPartner>().Add(supplier);
         db.BankAccounts.Add(bankAccount);
         db.Set<VendorPayment>().Add(payment);
         return payment;

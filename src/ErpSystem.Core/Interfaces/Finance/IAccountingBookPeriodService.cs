@@ -21,4 +21,7 @@ public interface IAccountingBookInitializationService
     Task<AccountingBookInitializationDto> RejectAsync(Guid accountingBookId, DecideAccountingBookInitializationDto request, CancellationToken cancellationToken = default);
     Task<AccountingBookActivationReadinessDto> GetReadinessAsync(Guid accountingBookId, CancellationToken cancellationToken = default);
     Task<AccountingBookInitializationEvidenceValidationDto> ValidateCurrentApprovedEvidenceAsync(Guid accountingBookId, CancellationToken cancellationToken = default);
+    Task<DeltaBookStructurePreparationDto> EnsureDeltaStructureAsync(Guid accountingBookId, CancellationToken cancellationToken = default);
+    Task<int> ApplyGovernedParallelOpeningAsync(Guid accountingBookId, CancellationToken cancellationToken = default);
+    Task<int> ReplayHistoricalParallelTransactionsAsync(Guid accountingBookId, CancellationToken cancellationToken = default);
 }

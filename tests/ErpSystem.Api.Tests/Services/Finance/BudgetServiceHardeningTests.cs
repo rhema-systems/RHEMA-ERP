@@ -560,6 +560,48 @@ public class BudgetServiceHardeningTests
     }
 
     [Fact]
+    public async Task GetRevisionsAsync_ReturnsRegisterSummaryWithoutMaterializingDetailLines()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var official = CreateScenario("Approved");
+        official.FiscalYearId = fiscalYear.Id;
+        official.Name = "FY2026 Official";
+        var revision = new BudgetRevision
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            RevisionNumber = "BR-2026-00002",
+            RevisionType = "Virement",
+            SourceScenarioId = official.Id,
+            SourceScenario = official,
+            EffectiveDate = new DateTime(2026, 8, 1),
+            BoardResolutionReference = "TDC/BOARD/2026/052",
+            BoardResolutionDate = new DateTime(2026, 7, 28),
+            Justification = "Move approved funds between operating activities.",
+            Status = "Submitted",
+            RowVersion = new byte[8],
+            Lines =
+            [
+                CreateRevisionLine(Guid.NewGuid(), Guid.NewGuid(), -40m),
+                CreateRevisionLine(Guid.NewGuid(), Guid.NewGuid(), 25m),
+                CreateRevisionLine(Guid.NewGuid(), Guid.NewGuid(), 15m)
+            ]
+        };
+        db.AddRange(fiscalYear, official, revision);
+        await db.SaveChangesAsync();
+
+        var result = (await CreateService(db).GetRevisionsAsync()).Single();
+
+        result.SourceScenarioName.Should().Be("FY2026 Official");
+        result.FiscalYearName.Should().Be("FY2026");
+        result.IncreaseAmountBase.Should().Be(40m);
+        result.ReductionAmountBase.Should().Be(40m);
+        result.NetChangeAmountBase.Should().Be(0m);
+        result.Lines.Should().BeEmpty("the register endpoint returns summaries; detail lines have their own endpoint");
+    }
+
+    [Fact]
     public async Task ApplyRevisionAsync_CreatesAnImmutableOfficialSuccessorAndSupersedesSource()
     {
         await using var db = CreateContext();

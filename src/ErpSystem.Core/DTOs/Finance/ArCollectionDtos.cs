@@ -9,7 +9,7 @@ namespace ErpSystem.Core.DTOs.Finance;
 public sealed class ArCollectionWorkItemDto
 {
     public Guid SettlementBalanceId { get; set; }
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string CustomerCode { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
     public string? CustomerEmail { get; set; }

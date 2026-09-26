@@ -86,11 +86,40 @@ public sealed class JournalBatchService : IJournalBatchService
             .OrderByDescending(x => x.CreatedAt)
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
-            .Include(x => x.FiscalPeriod)
-            .Include(x => x.Items.Where(item => !item.IsDeleted))
-                .ThenInclude(item => item.JournalEntry)
-                    .ThenInclude(journal => journal.Transactions)
-            .AsSplitQuery()
+            .Select(batch => new JournalBatchListProjection
+            {
+                Id = batch.Id,
+                BatchNumber = batch.BatchNumber,
+                Description = batch.Description,
+                FiscalPeriodId = batch.FiscalPeriodId,
+                FiscalPeriodName = batch.FiscalPeriod == null ? null : batch.FiscalPeriod.PeriodName,
+                BookClassification = batch.BookClassification,
+                ControlCurrencyCode = batch.ControlCurrencyCode,
+                BatchType = batch.BatchType,
+                ApprovalStatus = batch.ApprovalStatus,
+                ApprovalRequired = batch.ApprovalRequired,
+                PostingStatus = batch.PostingStatus,
+                ReversalStatus = batch.ReversalStatus,
+                IsVoided = batch.IsVoided,
+                ExpectedDebitTotal = batch.ExpectedDebitTotal,
+                ActualDebitTotal = batch.Items
+                    .Where(item => !item.IsDeleted)
+                    .Sum(item => (decimal?)item.JournalEntry.TotalDebitAmount) ?? 0m,
+                ActualCreditTotal = batch.Items
+                    .Where(item => !item.IsDeleted)
+                    .Sum(item => (decimal?)item.JournalEntry.TotalCreditAmount) ?? 0m,
+                EntryCount = batch.Items.Count(item => !item.IsDeleted),
+                ExpectedJournalCount = batch.ExpectedJournalCount,
+                ApprovedEntryCount = batch.Items.Count(item => !item.IsDeleted
+                    && item.ReviewStatus == JournalBatchItemReviewStatus.Approved),
+                RejectedEntryCount = batch.Items.Count(item => !item.IsDeleted
+                    && item.ReviewStatus == JournalBatchItemReviewStatus.Rejected),
+                PostedEntryCount = batch.Items.Count(item => !item.IsDeleted
+                    && item.PostingStatus == JournalBatchItemPostingStatus.Posted),
+                CreatedAt = batch.CreatedAt,
+                SubmittedAt = batch.SubmittedAt,
+                PostingCompletedAt = batch.PostingCompletedAt
+            })
             .ToListAsync(cancellationToken);
 
         return new JournalBatchListResultDto
@@ -1702,6 +1731,44 @@ public sealed class JournalBatchService : IJournalBatchService
         };
     }
 
+    private static JournalBatchListItemDto MapListItem(JournalBatchListProjection batch)
+    {
+        var debit = Money(batch.ActualDebitTotal);
+        return new JournalBatchListItemDto
+        {
+            Id = batch.Id,
+            BatchNumber = batch.BatchNumber,
+            Description = batch.Description,
+            FiscalPeriodId = batch.FiscalPeriodId,
+            FiscalPeriodName = batch.FiscalPeriodName,
+            BookClassification = batch.BookClassification,
+            ControlCurrencyCode = batch.ControlCurrencyCode,
+            BatchType = batch.BatchType,
+            ApprovalStatus = batch.ApprovalStatus,
+            ApprovalRequired = batch.ApprovalRequired,
+            PostingStatus = batch.PostingStatus,
+            ReversalStatus = batch.ReversalStatus,
+            IsVoided = batch.IsVoided,
+            DisplayStatus = DisplayStatus(
+                batch.IsVoided,
+                batch.ReversalStatus,
+                batch.PostingStatus,
+                batch.ApprovalStatus),
+            ExpectedDebitTotal = batch.ExpectedDebitTotal,
+            ActualDebitTotal = debit,
+            ActualCreditTotal = Money(batch.ActualCreditTotal),
+            Variance = debit - batch.ExpectedDebitTotal,
+            EntryCount = batch.EntryCount,
+            ExpectedJournalCount = batch.ExpectedJournalCount,
+            ApprovedEntryCount = batch.ApprovedEntryCount,
+            RejectedEntryCount = batch.RejectedEntryCount,
+            PostedEntryCount = batch.PostedEntryCount,
+            CreatedAt = batch.CreatedAt,
+            SubmittedAt = batch.SubmittedAt,
+            PostingCompletedAt = batch.PostingCompletedAt
+        };
+    }
+
     private static JournalBatchDetailDto MapDetail(JournalBatch batch)
     {
         var list = MapListItem(batch);
@@ -1837,21 +1904,59 @@ public sealed class JournalBatchService : IJournalBatchService
             JournalBatchItemIds = run.Items.Where(x => !x.IsDeleted).Select(x => x.JournalBatchItemId).ToList()
         };
 
-    private static string DisplayStatus(JournalBatch batch)
+    private static string DisplayStatus(JournalBatch batch) => DisplayStatus(
+        batch.IsVoided,
+        batch.ReversalStatus,
+        batch.PostingStatus,
+        batch.ApprovalStatus);
+
+    private static string DisplayStatus(
+        bool isVoided,
+        JournalBatchReversalStatus reversalStatus,
+        JournalBatchPostingStatus postingStatus,
+        JournalBatchApprovalStatus approvalStatus)
     {
-        if (batch.IsVoided) return "Voided";
-        if (batch.ReversalStatus == JournalBatchReversalStatus.Reversed) return "Reversed";
-        if (batch.ReversalStatus == JournalBatchReversalStatus.ReversalPending) return "Reversal Pending";
-        if (batch.PostingStatus == JournalBatchPostingStatus.Posted) return "Posted";
-        if (batch.PostingStatus == JournalBatchPostingStatus.PartiallyPosted) return "Partially Posted";
-        if (batch.PostingStatus == JournalBatchPostingStatus.Posting) return "Posting";
-        return batch.ApprovalStatus switch
+        if (isVoided) return "Voided";
+        if (reversalStatus == JournalBatchReversalStatus.Reversed) return "Reversed";
+        if (reversalStatus == JournalBatchReversalStatus.ReversalPending) return "Reversal Pending";
+        if (postingStatus == JournalBatchPostingStatus.Posted) return "Posted";
+        if (postingStatus == JournalBatchPostingStatus.PartiallyPosted) return "Partially Posted";
+        if (postingStatus == JournalBatchPostingStatus.Posting) return "Posting";
+        return approvalStatus switch
         {
             JournalBatchApprovalStatus.PartiallyApproved => "Partially Approved",
             JournalBatchApprovalStatus.PendingApproval => "Pending Approval",
             JournalBatchApprovalStatus.ReadyToPost => "Ready to Post",
-            _ => batch.ApprovalStatus.ToString()
+            _ => approvalStatus.ToString()
         };
+    }
+
+    private sealed class JournalBatchListProjection
+    {
+        public Guid Id { get; init; }
+        public string BatchNumber { get; init; } = string.Empty;
+        public string Description { get; init; } = string.Empty;
+        public Guid FiscalPeriodId { get; init; }
+        public string? FiscalPeriodName { get; init; }
+        public string BookClassification { get; init; } = string.Empty;
+        public string ControlCurrencyCode { get; init; } = string.Empty;
+        public JournalBatchType BatchType { get; init; }
+        public JournalBatchApprovalStatus ApprovalStatus { get; init; }
+        public bool ApprovalRequired { get; init; }
+        public JournalBatchPostingStatus PostingStatus { get; init; }
+        public JournalBatchReversalStatus ReversalStatus { get; init; }
+        public bool IsVoided { get; init; }
+        public decimal ExpectedDebitTotal { get; init; }
+        public decimal ActualDebitTotal { get; init; }
+        public decimal ActualCreditTotal { get; init; }
+        public int EntryCount { get; init; }
+        public int? ExpectedJournalCount { get; init; }
+        public int ApprovedEntryCount { get; init; }
+        public int RejectedEntryCount { get; init; }
+        public int PostedEntryCount { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public DateTime? SubmittedAt { get; init; }
+        public DateTime? PostingCompletedAt { get; init; }
     }
 
     private async Task AuditAsync(

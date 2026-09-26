@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,7 @@ import {
   PartnerTaxDefaultsFields,
   useBusinessPartnerPostingCatalogues,
 } from '@/components/procurement/BusinessPartnerPostingFields';
+import { BusinessPartnerFinanceProfilesPanel } from '@/components/finance/BusinessPartnerFinanceProfilesPanel';
 
 const emptyForm: UpdateBusinessPartnerDto = {
   partnerName: '',
@@ -67,10 +68,13 @@ const emptyForm: UpdateBusinessPartnerDto = {
 export default function EditBusinessPartnerPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const id = Array.isArray(params?.id) ? params.id[0] : (params?.id ?? '');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState('details');
+  const [activeTab, setActiveTab] = useState(
+    searchParams.get('tab') === 'finance-profiles' ? 'finance-profiles' : 'details'
+  );
   const [partner, setPartner] = useState<BusinessPartnerDetailDto | null>(null);
   const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
@@ -259,11 +263,12 @@ export default function EditBusinessPartnerPage() {
         <Card>
           <CardContent className="p-4">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="details">Details</TabsTrigger>
                 <TabsTrigger value="contact">Contact</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
                 <TabsTrigger value="accounts">Accounts</TabsTrigger>
+                <TabsTrigger value="finance-profiles">Finance Profiles</TabsTrigger>
               </TabsList>
               <div className="h-[min(620px,calc(100vh-250px))] min-h-80 overflow-y-auto px-1">
                 <TabsContent value="details" className="space-y-5 py-3">
@@ -477,6 +482,13 @@ export default function EditBusinessPartnerPage() {
                     accounts={catalogues.accounts}
                     bankAccounts={catalogues.bankAccounts}
                     disabled={saving}
+                  />
+                </TabsContent>
+                <TabsContent value="finance-profiles" className="py-3">
+                  <BusinessPartnerFinanceProfilesPanel
+                    businessPartnerId={id}
+                    paymentTerms={paymentTerms}
+                    withholdingTaxes={catalogues.withholdingTaxes}
                   />
                 </TabsContent>
               </div>

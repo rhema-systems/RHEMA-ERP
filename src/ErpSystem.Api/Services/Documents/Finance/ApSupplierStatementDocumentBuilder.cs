@@ -84,7 +84,7 @@ public sealed class ApSupplierStatementDocumentBuilder : IDocumentBuilder
             var report = await _apReportsService.GetSupplierDetailedLedgerAsync(
                 parameters.FromDate,
                 parameters.ToDate,
-                parameters.SupplierIds,
+                parameters.BusinessPartnerIds,
                 parameters.ShowSupplierCurrency,
                 cancellationToken);
 
@@ -136,9 +136,9 @@ public sealed class ApSupplierStatementDocumentBuilder : IDocumentBuilder
             throw new ArgumentException("The statement end date must be on or after the start date.");
         }
 
-        var supplierIds = ParseGuidListOption(request, "supplierIds", "supplierId");
+        var businessPartnerIds = ParseGuidListOption(request, "businessPartnerIds", "businessPartnerId");
         var showSupplierCurrency = ParseBoolOption(request, "showSupplierCurrency", false);
-        return new StatementParameters(fromDate, toDate, supplierIds, showSupplierCurrency);
+        return new StatementParameters(fromDate, toDate, businessPartnerIds, showSupplierCurrency);
     }
 
     private static DateTime ParseDateOption(
@@ -960,7 +960,7 @@ public sealed class ApSupplierStatementDocumentBuilder : IDocumentBuilder
     private sealed record StatementParameters(
         DateTime FromDate,
         DateTime ToDate,
-        IReadOnlyCollection<Guid> SupplierIds,
+        IReadOnlyCollection<Guid> BusinessPartnerIds,
         bool ShowSupplierCurrency);
 
     private sealed record SupplierSheetReference(

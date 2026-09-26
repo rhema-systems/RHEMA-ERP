@@ -17,9 +17,9 @@ public interface IArReportsService
     /// Groups outstanding invoices by age buckets: 0-30, 31-60, 61-90, 90+ days.
     /// </summary>
     /// <param name="asOfDate">Date to calculate aging from (default: today)</param>
-    /// <param name="customerId">Optional: Filter by specific customer</param>
+    /// <param name="businessPartnerId">Optional canonical Business Partner filter.</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    Task<AgingReportDto> GetAgingReportAsync(DateTime? asOfDate = null, Guid? customerId = null, CancellationToken cancellationToken = default);
+    Task<AgingReportDto> GetAgingReportAsync(DateTime? asOfDate = null, Guid? businessPartnerId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rebuilds AR settlement balances from posted customer invoices, receipts, allocations, credit notes, withholding, and posting events.
@@ -36,13 +36,13 @@ public interface IArReportsService
     /// </summary>
     Task<SubledgerUnappliedSettlementReportDto> GetUnappliedSettlementsAsync(
         DateTime? asOfDate = null,
-        Guid? customerId = null,
+        Guid? businessPartnerId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates detailed aging report with invoice-level breakdown.
     /// </summary>
-    Task<DetailedAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? customerId = null, CancellationToken cancellationToken = default);
+    Task<DetailedAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? businessPartnerId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates customer statement for a specific period.
@@ -52,7 +52,7 @@ public interface IArReportsService
     /// - Payments received
     /// - Closing balance
     /// </summary>
-    Task<CustomerStatementDto> GetCustomerStatementAsync(Guid customerId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
+    Task<CustomerStatementDto> GetCustomerStatementAsync(Guid businessPartnerId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates customer detailed ledger balances and period movements for one or more customers.
@@ -60,7 +60,7 @@ public interface IArReportsService
     Task<CustomerDetailedLedgerReportDto> GetCustomerDetailedLedgerAsync(
         DateTime fromDate,
         DateTime toDate,
-        IReadOnlyCollection<Guid>? customerIds = null,
+        IReadOnlyCollection<Guid>? businessPartnerIds = null,
         bool showCustomerCurrency = false,
         CancellationToken cancellationToken = default);
 
@@ -97,5 +97,5 @@ public interface IArReportsService
     /// <summary>
     /// Exports customer statement to PDF.
     /// </summary>
-    Task<byte[]> ExportCustomerStatementAsync(Guid customerId, DateTime fromDate, DateTime toDate, string format = "PDF", CancellationToken cancellationToken = default);
+    Task<byte[]> ExportCustomerStatementAsync(Guid businessPartnerId, DateTime fromDate, DateTime toDate, string format = "PDF", CancellationToken cancellationToken = default);
 }

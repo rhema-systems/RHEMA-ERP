@@ -1511,7 +1511,7 @@ public class WorkOrderService : IWorkOrderService
 
             return await _invoiceService.CreateAsync(new InvoiceCreateDto
             {
-                CustomerId = customerPartner.Id,
+                BusinessPartnerId = customerPartner.Id,
                 InvoiceDate = DateTime.UtcNow.Date,
                 Reference = workOrder.WorkOrderNumber,
                 Notes = $"Maintenance work order {workOrder.WorkOrderNumber} generated from job card {workOrder.JobCard.JobCardNumber}.",

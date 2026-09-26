@@ -49,6 +49,10 @@ export default function AccountClassificationsPage() {
     const [usageLoading, setUsageLoading] = useState(false);
     const [retiring, setRetiring] = useState<AccountClassification | null>(null);
     const [retirementReason, setRetirementReason] = useState('');
+    const selectedBook = books.find(book => book.id === bookId);
+    const isBaseGoverned = selectedBook?.bookType === 'Delta';
+    const isRetiredBook = selectedBook?.lifecycleStatus === 'Retired';
+    const isReadOnlyBook = isBaseGoverned || isRetiredBook;
 
     const load = useCallback(async (selectedBookId?: string) => {
         setLoading(true); setError(null);
@@ -110,7 +114,21 @@ export default function AccountClassificationsPage() {
         finally { setSaving(false); }
     };
 
-    const possibleParents = items.filter(item => item.id !== editing?.id && !item.isPostingClassification
+    const editingDescendantIds = new Set<string>();
+    if (editing) {
+        const pending = [editing.id];
+        while (pending.length > 0) {
+            const parentId = pending.pop();
+            if (!parentId) continue;
+            items.filter(item => item.parentClassificationId === parentId).forEach(child => {
+                if (!editingDescendantIds.has(child.id)) {
+                    editingDescendantIds.add(child.id);
+                    pending.push(child.id);
+                }
+            });
+        }
+    }
+    const possibleParents = items.filter(item => item.id !== editing?.id && !editingDescendantIds.has(item.id) && !item.isPostingClassification
         && item.status !== 'Retired' && item.coreAccountType === form.coreAccountType);
     const compatibleSystemRoles = systemRoles.filter(role =>
         form.coreAccountType === 'Liability' ? liabilityRoles.has(role) : form.coreAccountType === 'Asset' && !liabilityRoles.has(role));
@@ -122,8 +140,11 @@ export default function AccountClassificationsPage() {
                 <h1 className="flex items-center gap-2 text-2xl font-semibold"><Tags className="h-6 w-6" />Account classifications</h1>
                 <p className="text-muted-foreground">Configure book-specific hierarchy, presentation and default accounting behavior.</p>
             </div>
-            {canConfigure && <Button onClick={() => openEditor()} disabled={!bookId}><Plus className="mr-2 h-4 w-4" />New classification</Button>}
+            {canConfigure && <Button onClick={() => openEditor()} disabled={!bookId || isReadOnlyBook}><Plus className="mr-2 h-4 w-4" />New classification</Button>}
         </div>
+
+        {isBaseGoverned && <Alert><AlertTitle>Governed by the base book</AlertTitle><AlertDescription>Delta classifications mirror the governed base-book structure. Prepare or refresh them from the Delta book’s initialization page; they cannot be edited or retired here.</AlertDescription></Alert>}
+        {isRetiredBook && <Alert><AlertTitle>Historical classification structure</AlertTitle><AlertDescription>This accounting book is retired. Its classifications remain available for historical reporting but cannot be changed.</AlertDescription></Alert>}
 
         <Card><CardHeader><CardTitle>Classification hierarchy</CardTitle><CardDescription>Accounts can be assigned only to active posting leaves compatible with their core account type.</CardDescription></CardHeader>
             <CardContent className="space-y-4">
@@ -142,8 +163,8 @@ export default function AccountClassificationsPage() {
                         <Badge variant={item.status === 'Active' ? 'default' : 'secondary'}>{item.status}</Badge>
                         <Badge variant="outline">{item.isLeaf && item.isPostingClassification ? 'Posting leaf' : `${item.childCount} children`}</Badge>
                         <Button variant="ghost" size="sm" onClick={() => void showUsage(item)}>{item.enabledAccountCount}/{item.totalAccountCount} used</Button>
-                        {canConfigure && <Button variant="ghost" size="icon" aria-label={`Edit ${item.code}`} disabled={item.status === 'Retired'} onClick={() => openEditor(item)}><Pencil className="h-4 w-4" /></Button>}
-                        {canConfigure && item.status !== 'Retired' && <Button variant="outline" size="sm" disabled={!item.canRetire} onClick={() => setRetiring(item)}>Retire</Button>}
+                        {canConfigure && <Button variant="ghost" size="icon" aria-label={`Edit ${item.code}`} disabled={item.status === 'Retired' || isReadOnlyBook} onClick={() => openEditor(item)}><Pencil className="h-4 w-4" /></Button>}
+                        {canConfigure && item.status !== 'Retired' && <Button variant="outline" size="sm" title={item.hasDraftLayoutReference ? 'Referenced by a live Draft financial-statement layout' : undefined} disabled={!item.canRetire || isReadOnlyBook} onClick={() => setRetiring(item)}>Retire</Button>}
                     </div>)}
                 </div>}
             </CardContent>
@@ -151,7 +172,7 @@ export default function AccountClassificationsPage() {
 
         <Dialog open={editing !== undefined} onOpenChange={open => { if (!open) setEditing(undefined); }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{editing ? `Edit ${editing.code}` : 'Create classification'}</DialogTitle><DialogDescription>Codes become immutable after the classification is used by an account.</DialogDescription></DialogHeader>
             <div className="grid gap-4 md:grid-cols-2">
-                <div><Label htmlFor="classification-code">Code</Label><Input id="classification-code" value={form.code} onChange={event => setForm({ ...form, code: event.target.value.toUpperCase() })} disabled={Boolean(editing?.totalAccountCount)} /></div>
+                <div><Label htmlFor="classification-code">Code</Label><Input id="classification-code" value={form.code} onChange={event => setForm({ ...form, code: event.target.value.toUpperCase() })} disabled={Boolean(editing?.totalAccountCount)} /><p className="mt-1 text-xs text-muted-foreground">Stable code: uppercase letters, numbers and underscores only.</p></div>
                 <div><Label htmlFor="classification-name">Name</Label><Input id="classification-name" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></div>
                 <div><Label>Core account type</Label><Select value={form.coreAccountType} disabled={Boolean(editing?.totalAccountCount)} onValueChange={value => setForm({ ...form, coreAccountType: value as AccountType, parentClassificationId: null, systemRole: null })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{accountTypes.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select></div>
                 <div><Label>Parent</Label><Select value={form.parentClassificationId ?? 'none'} onValueChange={value => setForm({ ...form, parentClassificationId: value === 'none' ? null : value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">No parent</SelectItem>{possibleParents.map(parent => <SelectItem key={parent.id} value={parent.id}>{parent.code} — {parent.name}</SelectItem>)}</SelectContent></Select></div>

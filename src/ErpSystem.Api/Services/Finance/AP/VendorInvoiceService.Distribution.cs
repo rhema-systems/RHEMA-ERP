@@ -10,7 +10,7 @@ public partial class VendorInvoiceService
     {
         var invoice = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(value =>
                 value.TenantId == TenantId && value.Id == id && !value.IsDeleted)
-            .AsNoTracking().Include(value => value.Supplier).Include(value => value.LineItems)
+            .AsNoTracking().Include(value => value.BusinessPartner).Include(value => value.LineItems)
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new KeyNotFoundException("Vendor invoice was not found for this tenant.");
         var posting = await _unitOfWork.Repository<FinancePostingEvent>().GetQueryable(value =>

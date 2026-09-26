@@ -24,6 +24,7 @@ import { Ruler, Plus, Search, MoreHorizontal, Pencil, Trash2, ToggleLeft, Toggle
 import Link from 'next/link';
 import type { UnitType } from '@/types/unit-accounts';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
+import { toast } from 'sonner';
 
 export default function UnitTypesPage() {
     const [unitTypes, setUnitTypes] = useState<UnitType[]>([]);
@@ -63,7 +64,7 @@ export default function UnitTypesPage() {
             await loadData(); // Refresh the list
         } catch (error) {
             console.error('Failed to delete unit type:', error);
-            alert('Failed to delete unit type. It may be in use by unit accounts.');
+            toast.error('The unit type was not deleted. It may still be assigned to one or more unit accounts; remove those assignments and retry.');
         }
     };
 

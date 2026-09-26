@@ -4,6 +4,7 @@ using ErpSystem.Api.Services.Documents.Finance;
 using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Models;
@@ -157,13 +158,20 @@ public sealed class WhtCertificateDocumentBuilderTests
         var db = new ApplicationDbContext(options);
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "BASE", Name = "Ghana Statutory Primary",
+            Purpose = "Ghana Statutory", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
         var journal = new JournalEntry
         {
             Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryNumber = "JE-WHT-2025-001",
             JournalType = "AP Payment", EntryDate = new DateTime(2025, 1, 15),
             Description = "Posted supplier payment", PostingStatus = "Posted", IsBalanced = true,
             TotalDebitAmount = 150_000m, TotalCreditAmount = 150_000m,
-            BookClassification = "IFRS", FiscalPeriodId = Guid.NewGuid()
+            AccountingBookId = book.Id, BookClassification = book.Code, FiscalPeriodId = Guid.NewGuid()
         };
         var certificate = new WithholdingTaxCertificate
         {
@@ -171,7 +179,7 @@ public sealed class WhtCertificateDocumentBuilderTests
             CertificateNumber = "WHT-2025-0001", VersionNumber = 1, Status = WhtCertificateStatus.Issued,
             IssueDate = new DateTime(2025, 1, 15), IssuedAtUtc = new DateTime(2026, 8, 25, 12, 0, 0, DateTimeKind.Utc),
             IssuedByName = "Ama Tax Controller", PaymentNumber = "VP-2025-0001",
-            SupplierId = Guid.NewGuid(), SupplierName = "Tema Engineering Services Ltd", SupplierTin = "C0001234567",
+            BusinessPartnerId = Guid.NewGuid(), SupplierName = "Tema Engineering Services Ltd", SupplierTin = "C0001234567",
             PaymentDate = new DateTime(2025, 1, 15), CurrencyCode = "GHS", TaxCode = "WHT-SERV",
             TaxName = "Withholding Tax - Services", TaxRate = 10m, TaxableBase = 150_000m,
             WithholdingAmount = 15_000m, NetPaidAmount = 135_000m,
@@ -183,6 +191,7 @@ public sealed class WhtCertificateDocumentBuilderTests
             Id = userId, TenantId = tenantId, UserName = "finance.demo.controller",
             NormalizedUserName = "FINANCE.DEMO.CONTROLLER", FirstName = "Ama", LastName = "Controller"
         });
+        db.AccountingBooks.Add(book);
         db.JournalEntries.Add(journal);
         db.WithholdingTaxCertificates.Add(certificate);
         await db.SaveChangesAsync();

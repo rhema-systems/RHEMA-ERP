@@ -265,7 +265,7 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
                                 <div className="space-y-1">
                                     <span className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Vendor / Supplier</span>
                                     <p className="text-base font-bold text-slate-100">{po.vendorName || 'Not Specified'}</p>
-                                    <p className="text-xs text-muted-foreground">ID: {po.vendorId}</p>
+                                    <p className="text-xs text-muted-foreground">ID: {po.businessPartnerId}</p>
                                 </div>
                                 <div className="space-y-1">
                                     <span className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">System Reference</span>
@@ -444,7 +444,7 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
                 <div className="rounded border border-slate-300 p-4">
                     <h2 className="mb-3 text-sm font-bold uppercase tracking-wide">Vendor / Supplier</h2>
                     <p className="text-base font-semibold">{po.vendorName || 'Not Specified'}</p>
-                    <p className="mt-1 text-xs text-slate-600">ID: {po.vendorId}</p>
+                    <p className="mt-1 text-xs text-slate-600">ID: {po.businessPartnerId}</p>
                 </div>
                 <div className="rounded border border-slate-300 p-4">
                     <h2 className="mb-3 text-sm font-bold uppercase tracking-wide">Order Information</h2>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -56,9 +56,11 @@ export function AccountBookAssignments({ accountType, value, onChange, historica
 
     const setEnabled = (book: AccountingBook, enabled: boolean) => {
         const existing = value.find(item => item.accountingBookId === book.id);
-        const next = value.filter(item => item.accountingBookId !== book.id);
-        if (enabled) next.push(existing ?? { accountingBookId: book.id, isEnabled: true });
-        onChange(next.map(item => item.accountingBookId === book.id ? { ...item, isEnabled: enabled } : item));
+        if (existing) {
+            onChange(value.map(item => item.accountingBookId === book.id ? { ...item, isEnabled: enabled } : item));
+            return;
+        }
+        if (enabled) onChange([...value, { accountingBookId: book.id, isEnabled: true }]);
     };
 
     const setClassification = (bookId: string, classificationId: string) => {

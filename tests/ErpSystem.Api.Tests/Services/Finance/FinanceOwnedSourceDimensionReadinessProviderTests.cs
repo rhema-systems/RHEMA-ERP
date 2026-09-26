@@ -123,7 +123,7 @@ public sealed class FinanceOwnedSourceDimensionReadinessProviderTests
         {
             Id = invoiceId,
             TenantId = tenantId,
-            SupplierId = supplierId,
+            BusinessPartnerId = supplierId,
             InvoiceNumber = "VI-READINESS-001",
             SupplierName = "Readiness Supplier",
             InvoiceDate = new DateTime(2026, 8, 30),

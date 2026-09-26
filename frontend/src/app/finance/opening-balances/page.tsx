@@ -648,18 +648,18 @@ export default function OpeningBalancesPage() {
             // The UI never exposes generated GL lines for editing, preserving source-to-ledger truth.
             let created: OpeningBalanceBatch;
             if (specialized.kind === 'supplierAdvance') {
-                created = await financeDataService.createSupplierAdvanceOpeningBalance({ ...common, supplierId: specialized.partyId });
+                created = await financeDataService.createSupplierAdvanceOpeningBalance({ ...common, businessPartnerId: specialized.partyId });
             } else if (specialized.kind === 'customerAdvance') {
-                created = await financeDataService.createCustomerAdvanceOpeningBalance({ ...common, customerId: specialized.partyId });
+                created = await financeDataService.createCustomerAdvanceOpeningBalance({ ...common, businessPartnerId: specialized.partyId });
             } else if (specialized.kind === 'apWithholding' && tax?.payableAccountId) {
                 created = await financeDataService.createApWithholdingOpeningBalance({
-                    ...common, supplierId: specialized.partyId, taxId: tax.id,
+                    ...common, businessPartnerId: specialized.partyId, taxId: tax.id,
                     withholdingTaxAccountId: tax.payableAccountId,
                     taxableBase: Number(specialized.taxableBase), netPaidAmount: Number(specialized.netPaidAmount),
                 });
             } else if (specialized.kind === 'arWithholding' && tax?.receivableAccountId) {
                 created = await financeDataService.createArWithholdingOpeningBalance({
-                    ...common, customerId: specialized.partyId, taxId: tax.id,
+                    ...common, businessPartnerId: specialized.partyId, taxId: tax.id,
                     withholdingTaxAccountId: tax.receivableAccountId,
                     certificateNumber: specialized.certificateNumber.trim() || undefined,
                     certificateDate: specialized.certificateDate || undefined,

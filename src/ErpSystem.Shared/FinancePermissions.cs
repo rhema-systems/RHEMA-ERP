@@ -88,6 +88,9 @@ public static class FinancePermissions
     public const string ApproveApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Approve";
     public const string PostApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Post";
     public const string ReverseApSupplierDebitNotes = "Finance.AP.SupplierDebitNotes.Reverse";
+    public const string ManageBusinessPartnerFinanceProfiles = "Finance.BusinessPartners.Profiles.Manage";
+    public const string ApproveBusinessPartnerFinanceProfiles = "Finance.BusinessPartners.Profiles.Approve";
+    public const string OverrideApWithholding = "Finance.AP.OverrideWithholding";
 
     public const string ManageArInvoices = "Finance.AR.Invoices.Manage";
     public const string CreateArInvoices = "Finance.AR.Invoices.Create";
@@ -197,10 +200,7 @@ public static class FinancePermissions
         new(ApproveAccountingBookPeriods, "Approve Accounting Book Periods", "Independently approve exact-book period transitions.", CategoryPeriodClose),
         new(ManageAccountingBookInitialization, "Manage Accounting Book Initialization", "Prepare and submit governed exact-book opening evidence.", CategoryMigration),
         new(ApproveAccountingBookInitialization, "Approve Accounting Book Initialization", "Independently approve governed accounting-book opening evidence.", CategoryMigration),
-        new(ViewAccountingBookApplicabilityPolicy, "View Accounting Book Applicability Policy", "View Finance-owned book-selection policy configuration.", CategoryGeneralLedger),
-        new(ManageAccountingBookApplicabilityPolicy, "Manage Accounting Book Applicability Policy", "Create and submit effective-dated book-selection policy versions.", CategoryGeneralLedger),
-        new(ApproveAccountingBookApplicabilityPolicy, "Approve Accounting Book Applicability Policy", "Independently approve, reject, or retire book-selection policies.", CategoryGeneralLedger),
-        new(ResolveAccountingBookApplicability, "Resolve Accounting Book Applicability", "Resolve and freeze governed book-selection evidence without posting.", CategoryGeneralLedger),
+        new(ResolveAccountingBookApplicability, "Resolve Primary Book Selection", "Resolve and freeze automatic Primary-book selection evidence without posting.", CategoryGeneralLedger),
         new(ViewAccountingEvents, "View Accounting Events", "View canonical event groups and exact-book posting evidence.", CategoryGeneralLedger),
         new(PrepareAccountingEvents, "Prepare Accounting Events", "Prepare an immutable accounting event for independent release.", CategoryGeneralLedger),
         new(OrchestrateAccountingEvents, "Orchestrate Accounting Events", "Create an atomic set of governed accounting-book representations.", CategoryGeneralLedger),
@@ -231,6 +231,9 @@ public static class FinancePermissions
         new(EditApInvoices, "Edit AP Invoices", "Edit draft supplier invoices.", CategoryAccountsPayable),
         new(DeleteApInvoices, "Delete AP Invoices", "Delete draft supplier invoices.", CategoryAccountsPayable),
         new(MaintainApInvoices, "Maintain AP Invoices", "Create and update supplier invoices.", CategoryAccountsPayable),
+        new(ManageBusinessPartnerFinanceProfiles, "Manage Business Partner Finance Profiles", "Prepare effective-dated AP and AR defaults on the canonical Business Partner.", CategoryAccountsPayable),
+        new(ApproveBusinessPartnerFinanceProfiles, "Approve Business Partner Finance Profiles", "Independently approve effective-dated AP and AR defaults.", CategoryAccountsPayable),
+        new(OverrideApWithholding, "Override AP Withholding", "Override a supplier withholding default with a mandatory reason and audit evidence.", CategoryAccountsPayable),
         new(SubmitApInvoices, "Submit AP Invoices", "Submit supplier invoices for approval.", CategoryAccountsPayable),
         new(ApproveApInvoices, "Approve AP Invoices", "Approve or reject supplier invoices.", CategoryAccountsPayable),
         new(PostApInvoices, "Post AP Invoices", "Post approved supplier invoices to the ledger.", CategoryAccountsPayable),
@@ -339,6 +342,34 @@ public static class FinancePermissions
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
+
+    /// <summary>
+    /// Maker-side accounting-book authorities. These must not be assigned to the
+    /// Financial Controller checker role, otherwise the same operational role can
+    /// prepare requests and decide them merely by switching user accounts.
+    /// </summary>
+    public static readonly string[] AccountingBookMakerNames =
+    {
+        ManageAccountingBooks,
+        RequestAccountingBookTransitions,
+        ManageAccountingBookPeriods,
+        ManageAccountingBookInitialization
+    };
+
+    public static readonly string[] FinancialControllerNames = AllNames
+        .Except(AccountingBookMakerNames, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    /// <summary>
+    /// Grants that must be removed from already-provisioned roles. The database
+    /// seeder is otherwise add-only, so narrowing a role definition would not
+    /// repair existing installations.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string[]> RoleRevocations =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Financial Controller"] = AccountingBookMakerNames
+        };
 
     public static readonly string[] AllPolicyNames = AllNames
         .Concat(new[]

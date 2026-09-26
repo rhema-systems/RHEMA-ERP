@@ -121,4 +121,25 @@ describe('journal entry mapper currency contract', () => {
       { dimensionCode: 'FUND', valueCode: 'GOG' },
     ]);
   });
+
+  it('sends the same per-line money precision enforced during posting', () => {
+    const result = mapJournalEntryFormToCreateDto(
+      header,
+      [
+        {
+          id: '1', accountId: 'expense', description: 'USD expense',
+          currencyCode: 'USD', exchangeRateId: 'rate-1', exchangeRate: 12.345,
+          debit: 37.035, credit: 0, foreignDebit: 3,
+        },
+        {
+          id: '2', accountId: 'payable', description: 'Functional credit',
+          currencyCode: 'GHS', exchangeRate: 1, debit: 0, credit: 37.04,
+        },
+      ],
+      undefined,
+      'GHS'
+    );
+
+    expect(result.transactions.map(line => line.amount)).toEqual([37.04, 37.04]);
+  });
 });

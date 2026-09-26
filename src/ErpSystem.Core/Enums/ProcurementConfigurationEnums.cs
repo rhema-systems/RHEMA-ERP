@@ -41,6 +41,17 @@ public enum ProcurementCategoryClass
 }
 
 /// <summary>
+/// Statutory classification used to accumulate AP withholding thresholds.
+/// Service sub-types remain procurement concerns; WHT groups them under Services.
+/// </summary>
+public enum WhtSupplyCategory
+{
+    Goods = 0,
+    Works = 1,
+    Services = 2
+}
+
+/// <summary>
 /// Identifies the authoritative operational record that confirms a supplier's
 /// performance before Accounts Payable can match an invoice. The values are
 /// intentionally shared by Procurement, Projects/QS, and Finance; ownership of

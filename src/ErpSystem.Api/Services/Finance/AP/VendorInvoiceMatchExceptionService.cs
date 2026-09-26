@@ -220,7 +220,7 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
         }
 
         var invoice = await _db.VendorInvoices
-            .Include(item => item.Supplier)
+            .Include(item => item.BusinessPartner)
             .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == invoiceId && !item.IsDeleted,
                 cancellationToken)
             ?? throw NotFound("AP_INVOICE_NOT_FOUND", "The vendor invoice was not found in the current tenant.");

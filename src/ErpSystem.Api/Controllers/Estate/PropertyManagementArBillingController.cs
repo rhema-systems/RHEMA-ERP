@@ -241,7 +241,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                 : await _invoiceService.CreateAsync(
                 new InvoiceCreateDto
                 {
-                    CustomerId = asset.CustomerBusinessPartnerId.Value,
+                    BusinessPartnerId = asset.CustomerBusinessPartnerId.Value,
                     InvoiceDate = billingStart,
                     DueDate = billingStart,
                     Reference = reference,
@@ -301,7 +301,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                 $"/finance/ar/invoices/{invoice.Id}",
                 BillingMetadata(
                     invoice.InvoiceNumber,
-                    invoice.CustomerId,
+                    invoice.BusinessPartnerId,
                     invoice.CustomerName,
                     invoice.TotalAmount,
                     invoice.CurrencyCode,
@@ -451,7 +451,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         var assessedOn = DateTime.UtcNow.Date;
         var penaltyInvoice = await _invoiceService.CreateAsync(new InvoiceCreateDto
         {
-            CustomerId = sourceInvoice.BusinessPartnerId,
+            BusinessPartnerId = sourceInvoice.BusinessPartnerId,
             InvoiceDate = assessedOn,
             DueDate = assessedOn,
             Reference = BuildRentPenaltyReference(asset.AssetCode, sourceInvoice.InvoiceNumber),
@@ -487,7 +487,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             "Invoice",
             penaltyInvoice.Id,
             $"/finance/ar/invoices/{penaltyInvoice.Id}",
-            BillingMetadata(penaltyInvoice.InvoiceNumber, penaltyInvoice.CustomerId, penaltyInvoice.CustomerName, penaltyAmount, penaltyInvoice.CurrencyCode, asset.PropertyFileReference, asset.ProjectUnitCode ?? asset.AssetCode),
+            BillingMetadata(penaltyInvoice.InvoiceNumber, penaltyInvoice.BusinessPartnerId, penaltyInvoice.CustomerName, penaltyAmount, penaltyInvoice.CurrencyCode, asset.PropertyFileReference, asset.ProjectUnitCode ?? asset.AssetCode),
             cancellationToken);
 
         return Ok(new EstateRentPenaltyAssessmentResult(
@@ -549,7 +549,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         var agreementReference = FieldValue(fields, "finalSignedAgreementReference") ?? FieldValue(fields, "generatedAgreementReference");
         var invoice = await _invoiceService.CreateAsync(new InvoiceCreateDto
         {
-            CustomerId = customerId,
+            BusinessPartnerId = customerId,
             InvoiceDate = DateTime.UtcNow.Date,
             DueDate = DateTime.UtcNow.Date,
             Reference = BuildSaleInvoiceReference(sourceCase.ReferenceNumber ?? sourceCase.Id.ToString(), isLease),
@@ -591,7 +591,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             "Invoice",
             invoice.Id,
             $"/finance/ar/invoices/{invoice.Id}",
-            BillingMetadata(invoice.InvoiceNumber, invoice.CustomerId, invoice.CustomerName, invoice.TotalAmount, invoice.CurrencyCode, sourceCase.ReferenceNumber, propertyUnit),
+            BillingMetadata(invoice.InvoiceNumber, invoice.BusinessPartnerId, invoice.CustomerName, invoice.TotalAmount, invoice.CurrencyCode, sourceCase.ReferenceNumber, propertyUnit),
             cancellationToken);
 
         await NotifyCustomerEstateInvoiceAsync(
@@ -802,7 +802,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         var propertyUnit = FieldValue(fields, "propertyUnit") ?? FieldValue(fields, "listingReference") ?? sourceCase.Title;
         var invoice = await _invoiceService.CreateAsync(new InvoiceCreateDto
         {
-            CustomerId = customerId,
+            BusinessPartnerId = customerId,
             InvoiceDate = DateTime.UtcNow.Date,
             DueDate = DateTime.UtcNow.Date,
             Reference = BuildPremiumInvoiceReference(sourceCase.ReferenceNumber ?? sourceCase.Id.ToString()),
@@ -836,7 +836,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             "Invoice",
             invoice.Id,
             $"/finance/ar/invoices/{invoice.Id}",
-            BillingMetadata(invoice.InvoiceNumber, invoice.CustomerId, invoice.CustomerName, invoice.TotalAmount, invoice.CurrencyCode, sourceCase.ReferenceNumber, propertyUnit),
+            BillingMetadata(invoice.InvoiceNumber, invoice.BusinessPartnerId, invoice.CustomerName, invoice.TotalAmount, invoice.CurrencyCode, sourceCase.ReferenceNumber, propertyUnit),
             cancellationToken);
 
         await NotifyCustomerPremiumChargeAsync(
@@ -902,7 +902,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             "Invoice",
             invoice.Id,
             $"/finance/ar/invoices/{invoice.Id}",
-            BillingMetadata(invoice.InvoiceNumber, invoice.CustomerId, invoice.CustomerName, invoice.TotalAmount, invoice.CurrencyCode, request.SourceRecordReference, request.PropertyUnit),
+            BillingMetadata(invoice.InvoiceNumber, invoice.BusinessPartnerId, invoice.CustomerName, invoice.TotalAmount, invoice.CurrencyCode, request.SourceRecordReference, request.PropertyUnit),
             cancellationToken);
 
         return Ok(invoice);
@@ -923,7 +923,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             "CustomerPayment",
             payment.Id,
             $"/finance/ar/payments/{payment.Id}",
-            BillingMetadata(payment.PaymentNumber, payment.CustomerId, payment.CustomerName, payment.TotalAmount, payment.CurrencyCode, request.SourceRecordReference, request.PropertyUnit),
+            BillingMetadata(payment.PaymentNumber, payment.BusinessPartnerId, payment.CustomerName, payment.TotalAmount, payment.CurrencyCode, request.SourceRecordReference, request.PropertyUnit),
             cancellationToken);
 
         return Ok(payment);

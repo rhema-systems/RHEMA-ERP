@@ -36,8 +36,8 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
   const pending = voucher.costItems.filter(c => !c.invoiceId && !c.invoiceNumber);
   const groups = groupLandedCostsBySupplier(charges.map(row => {
     const cost = voucher.costItems.find(c => c.id === row.costItemId)!;
-    return { ...cost, supplierId: row.supplierId,
-      supplierName: suppliers.find(s => s.id === row.supplierId)?.partnerName,
+    return { ...cost, supplierId: row.businessPartnerId,
+      supplierName: suppliers.find(s => s.id === row.businessPartnerId)?.partnerName,
       referenceNumber: row.supplierInvoiceNumber };
   }));
   const load = async () => {
@@ -50,14 +50,14 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
     finally { setLoading(false); }
   };
   const start = () => {
-    setCharges(voucher.costItems.map(c => ({ costItemId: c.id, supplierId: c.supplierId || '', supplierInvoiceNumber: c.referenceNumber || '' })));
+    setCharges(voucher.costItems.map(c => ({ costItemId: c.id, businessPartnerId: c.supplierId || '', supplierInvoiceNumber: c.referenceNumber || '' })));
     setInvoiceDate(voucher.costItems.find(c => c.invoiceDate)?.invoiceDate?.slice(0, 10) || new Date().toLocaleDateString('en-CA'));
     setError(''); setCreated([]); setInventoryPosted(voucher.status === 'Posted'); setOpen(true); void load();
   };
   const change = (id: string, patch: Partial<Charge>) => setCharges(rows => rows.map(c => c.costItemId === id ? { ...c, ...patch } : c));
   const save = async () => {
     if (submitting.current) return;
-    if (!invoiceDate || charges.length === 0 || charges.some(c => !c.supplierId || !c.supplierInvoiceNumber.trim())) {
+    if (!invoiceDate || charges.length === 0 || charges.some(c => !c.businessPartnerId || !c.supplierInvoiceNumber.trim())) {
       setError('Select a supplier and enter its invoice reference for every charge. Tax is completed later on the invoice draft.'); return;
     }
     submitting.current = true; setBusy(true); onBusyChange?.(true); setError('');
@@ -97,7 +97,7 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
               <div className="flex justify-between gap-3"><p className="text-sm font-medium">{cost.description} · {cost.currency} {cost.amount.toFixed(2)}</p>
                 {cost.invoiceNumber && <span>{cost.invoiceNumber}</span>}</div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div><Label>Cost supplier</Label><Select value={row.supplierId} onValueChange={value => change(row.costItemId, { supplierId: value })}>
+                <div><Label>Cost supplier</Label><Select value={row.businessPartnerId} onValueChange={value => change(row.costItemId, { businessPartnerId: value })}>
                   <SelectTrigger aria-label={`Invoice charge ${i + 1} supplier`}><SelectValue placeholder="Select supplier" /></SelectTrigger>
                   <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.partnerCode} — {s.partnerName}</SelectItem>)}</SelectContent>
                 </Select></div>

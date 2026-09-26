@@ -42,6 +42,7 @@ import type {
     CreateAccountTransactionDto,
     JournalType,
 } from '@/types/finance';
+import { roundJournalMoney } from './manual-journal-fx';
 
 // ─── Frontend Form Shapes ────────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ export function mapJournalEntryFormToCreateDto(
         if (l.debit > 0) {
             transactions.push({
                 accountId: l.accountId,
-                amount: l.debit,
+                amount: roundJournalMoney(l.debit),
                 transactionType: 'Debit',
                 description: l.description || undefined,
                 reference: header.referenceNumber || 'JE',
@@ -140,7 +141,7 @@ export function mapJournalEntryFormToCreateDto(
         if (l.credit > 0) {
             transactions.push({
                 accountId: l.accountId,
-                amount: l.credit,
+                amount: roundJournalMoney(l.credit),
                 transactionType: 'Credit',
                 description: l.description || undefined,
                 reference: header.referenceNumber || 'JE',
@@ -210,9 +211,9 @@ export function validateJournalEntryForm(
         errors.push('At least 2 transaction lines with amounts are required.');
     }
 
-    const totalDebit = lines.reduce((sum, l) => sum + (l.debit || 0), 0);
-    const totalCredit = lines.reduce((sum, l) => sum + (l.credit || 0), 0);
-    if (Math.abs(totalDebit - totalCredit) >= 0.01) {
+    const totalDebit = roundJournalMoney(lines.reduce((sum, l) => sum + roundJournalMoney(l.debit || 0), 0));
+    const totalCredit = roundJournalMoney(lines.reduce((sum, l) => sum + roundJournalMoney(l.credit || 0), 0));
+    if (totalDebit !== totalCredit) {
         errors.push(`Entry is not balanced. Debits (${totalDebit.toFixed(2)}) != Credits (${totalCredit.toFixed(2)}).`);
     }
 

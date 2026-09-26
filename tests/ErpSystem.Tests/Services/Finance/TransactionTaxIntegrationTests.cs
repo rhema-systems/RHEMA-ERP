@@ -673,7 +673,7 @@ namespace ErpSystem.Tests.Services.Finance
             var po = new CreateFinancePurchaseOrderDto
             {
                 OrderNumber = "FPO-1001",
-                VendorId = _vendorId,
+                BusinessPartnerId = _vendorId,
                 OrderDate = DateTime.UtcNow,
                 CurrencyCode = "GHS",
                 ExchangeRate = 1.0m,

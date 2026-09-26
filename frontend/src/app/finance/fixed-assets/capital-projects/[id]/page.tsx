@@ -17,6 +17,7 @@ import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.ser
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SourceDocumentDimensionDefaultsPanel, SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues, toFinanceSourceDimensionFormState } from '@/lib/finance/source-document-dimensions';
+import { toast } from 'sonner';
 
 export default function CapitalProjectDetailPage() {
   const params = useParams();
@@ -58,6 +59,7 @@ export default function CapitalProjectDetailPage() {
         setCategories(cats.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })));
       } catch (error) {
         console.error('Failed to load project:', error);
+        toast.error(error instanceof Error ? error.message : 'The capital project could not be loaded. Refresh the page and try again.');
       } finally {
         setLoading(false);
       }
@@ -75,7 +77,7 @@ export default function CapitalProjectDetailPage() {
       await capitalProjectService.updateStatus(id, status);
       await refresh();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Status update failed');
+      toast.error(error instanceof Error ? error.message : 'The project status was not changed. Refresh the project and retry.');
     }
   };
 
@@ -86,7 +88,7 @@ export default function CapitalProjectDetailPage() {
       setCostForm({ sourceDocumentType: 'ManualJournal', amount: 0, transactionDate: new Date().toISOString().split('T')[0], description: '' });
       await refresh();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Failed to add cost');
+      toast.error(error instanceof Error ? error.message : 'The project cost was not added. Review its amount, date and source reference, then retry.');
     }
   };
 
@@ -96,7 +98,7 @@ export default function CapitalProjectDetailPage() {
       await capitalProjectService.removeCost(id, costId);
       await refresh();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Failed to remove cost');
+      toast.error(error instanceof Error ? error.message : 'The project cost was not removed. Refresh the project and retry.');
     }
   };
 
@@ -107,7 +109,7 @@ export default function CapitalProjectDetailPage() {
       setRuleForm({ targetFixedAssetCategoryId: '', proposedAssetName: '', allocationPercentage: 0 });
       await refresh();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Failed to add rule');
+      toast.error(error instanceof Error ? error.message : 'The settlement rule was not added. Review its target category and allocation percentage, then retry.');
     }
   };
 
@@ -117,7 +119,7 @@ export default function CapitalProjectDetailPage() {
       await capitalProjectService.removeSettlementRule(id, ruleId);
       await refresh();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Failed to remove rule');
+      toast.error(error instanceof Error ? error.message : 'The settlement rule was not removed. Refresh the project and retry.');
     }
   };
 
@@ -131,7 +133,7 @@ export default function CapitalProjectDetailPage() {
       });
       await refresh();
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Capitalization failed');
+      toast.error(error instanceof Error ? error.message : 'Capitalization was not completed. No project settlement should be assumed; review the mappings and retry.');
     }
   };
 

@@ -16,7 +16,7 @@ public interface ICollectionService
     Task<PagedResult<CollectionActivitySummaryDto>> GetActivitiesAsync(
         int page = 1, int pageSize = 20,
         string? search = null, string? status = null, string? activityType = null,
-        Guid? customerId = null, Guid? assignedToId = null,
+        Guid? businessPartnerId = null, Guid? assignedToId = null,
         DateTime? startDate = null, DateTime? endDate = null);
     Task<List<CollectionActivitySummaryDto>> GetOverdueFollowUpsAsync(int daysOverdue = 0, Guid? assignedToId = null);
 
@@ -26,9 +26,9 @@ public interface ICollectionService
     Task<PagedResult<PaymentPlanSummaryDto>> GetPlansAsync(
         int page = 1, int pageSize = 20,
         string? search = null, string? status = null,
-        Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null);
+        Guid? businessPartnerId = null, DateTime? startDate = null, DateTime? endDate = null);
     Task<PaymentPlanDetailDto> ApprovePlanAsync(Guid id);
     Task<PaymentPlanDetailDto> CancelPlanAsync(Guid id, string? reason = null);
     Task<PaymentPlanDetailDto> RecordInstallmentPaymentAsync(Guid planId, Guid installmentId, RecordInstallmentPaymentDto dto);
-    Task<List<PaymentPlanInstallmentDto>> GetOverdueInstallmentsAsync(Guid? customerId = null);
+    Task<List<PaymentPlanInstallmentDto>> GetOverdueInstallmentsAsync(Guid? businessPartnerId = null);
 }

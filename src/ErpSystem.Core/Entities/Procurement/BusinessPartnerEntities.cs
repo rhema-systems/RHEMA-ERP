@@ -394,6 +394,12 @@ public class BusinessPartner : TenantEntity
     public virtual ICollection<BusinessPartnerBankAccount> BankAccounts { get; set; } = new List<BusinessPartnerBankAccount>();
     public virtual ICollection<BusinessPartnerDocument> Documents { get; set; } = new List<BusinessPartnerDocument>();
     public virtual ICollection<BusinessPartnerFinancial> Financials { get; set; } = new List<BusinessPartnerFinancial>();
+
+    /// <summary>
+    /// Canonical multi-role capabilities. PartnerType remains only as transitional source data
+    /// until the approved reset removes the legacy single-choice representation.
+    /// </summary>
+    public virtual ICollection<BusinessPartnerRole> Roles { get; set; } = new List<BusinessPartnerRole>();
 }
 
 /// <summary>

@@ -50,6 +50,74 @@ if (args.Length > 0 && args[0] == "apply-migrations")
     return;
 }
 
+// Add missing TDC demonstration values to the DEFAULT tenant's existing Finance
+// transaction dimensions. This command never assigns defaults or posts accounting data.
+if (args.Length > 0 && args[0] == "seed-finance-demo-dimensions")
+{
+    var dimensionBuilder = CreateSeedBuilder(args);
+    dimensionBuilder.Services.AddErpSystemLogging(dimensionBuilder.Configuration);
+    dimensionBuilder.Services.AddHttpContextAccessor();
+    dimensionBuilder.Services.AddErpSystemDatabase(dimensionBuilder.Configuration);
+    var dimensionApp = dimensionBuilder.Build();
+
+    using (var scope = dimensionApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var tenant = await db.Tenants.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Code == "DEFAULT" && !item.IsDeleted);
+        if (tenant is null)
+            throw new InvalidOperationException("FINANCE_DEMO_DIMENSION_TENANT_MISSING: DEFAULT tenant was not found.");
+
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<FinanceDemoDimensionValueSeeder>>();
+        await new FinanceDemoDimensionValueSeeder(db, logger).SeedAsync(tenant.Id, DateTime.UtcNow);
+    }
+
+    Console.WriteLine("Finance demo transaction dimensions seeded successfully.");
+    return;
+}
+
+// Converge the DEFAULT tenant's untouched standard Finance books to the executable
+// out-of-box baseline. The seeder refuses to overwrite user-touched books or books
+// with economic activity, and only fills canonical posting identities that have no
+// approved applicability rule.
+if (args.Length > 0 && args[0] == "seed-finance-baseline")
+{
+    var baselineBuilder = CreateSeedBuilder(args);
+    baselineBuilder.Services.AddErpSystemLogging(baselineBuilder.Configuration);
+    baselineBuilder.Services.AddHttpContextAccessor();
+    baselineBuilder.Services.AddErpSystemDatabase(baselineBuilder.Configuration);
+    baselineBuilder.Services.AddErpSystemIdentity();
+    baselineBuilder.Services.AddDatabaseSeeding();
+    var baselineApp = baselineBuilder.Build();
+
+    using (var scope = baselineApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var tenant = await db.Tenants.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Code == "DEFAULT" && !item.IsDeleted);
+        if (tenant is null)
+            throw new InvalidOperationException("FINANCE_BASELINE_TENANT_MISSING: DEFAULT tenant was not found.");
+
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<FinanceBaselineProvisioningSeeder>>();
+        await new FinanceBaselineProvisioningSeeder(db, logger).SeedAsync(tenant.Id, DateTime.UtcNow);
+
+        // Protected statement layouts depend on the canonical books and classification
+        // hierarchy established by the Finance baseline. Provision them through this same
+        // explicit, idempotent command so hosts that skip broad startup initialization still
+        // receive the clone-only reporting standards.
+        var statementLayoutLogger = scope.ServiceProvider
+            .GetRequiredService<ILogger<FinanceFinancialStatementStandardSeeder>>();
+        await new FinanceFinancialStatementStandardSeeder(db, statementLayoutLogger)
+            .SeedAsync(tenant.Id, DateTime.UtcNow);
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedFinanceWorkflowDefinitionsAsync();
+    }
+
+    Console.WriteLine("Finance executable baseline provisioning completed successfully.");
+    return;
+}
+
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
@@ -488,7 +556,6 @@ if (args.Length > 0 && args[0] == "repair-finance-po-schema")
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await RepairFinanceSettingsSchemaAsync(db);
-        await RepairCustomerPaymentSchemaAsync(db);
         await RepairFinancePurchaseOrderSchemaAsync(db);
     }
 
@@ -508,7 +575,7 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
         $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, "
         + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, "
         + "seed-supplier-onboarding-e2e, seed-hr-all, seed-hr-org-authority, seed-hr-demo, "
-        + "rebuild-db, repair-finance-po-schema.");
+        + "seed-finance-baseline, seed-finance-demo-dimensions, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -1048,7 +1115,6 @@ async Task InitializeDatabaseAsync(
         await context.Database.MigrateAsync(migrationCts.Token);
         await RepairFinanceBaselineSchemaAsync(context, migrationCts.Token);
         await RepairFinanceSettingsSchemaAsync(context, migrationCts.Token);
-        await RepairCustomerPaymentSchemaAsync(context, migrationCts.Token);
         await RepairFinancePurchaseOrderSchemaAsync(context, migrationCts.Token);
     }
     catch (OperationCanceledException ex)
@@ -1297,47 +1363,6 @@ BEGIN
           AND [object_id] = OBJECT_ID(N'[dbo].[RecurringJournalOccurrences]'))
         EXEC(N'CREATE INDEX [IX_RecurringJournalOccurrences_TenantId_ReversalStatus_ReversalDueDate]
             ON [dbo].[RecurringJournalOccurrences] ([TenantId], [ReversalStatus], [ReversalDueDate]);');
-END
-""", cancellationToken);
-}
-
-static async Task RepairCustomerPaymentSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
-{
-    await context.Database.ExecuteSqlRawAsync("""
-IF OBJECT_ID(N'[dbo].[CustomerPayment]', N'U') IS NOT NULL
-   AND OBJECT_ID(N'[dbo].[BusinessPartners]', N'U') IS NOT NULL
-BEGIN
-    DECLARE @legacyCustomerFk sysname;
-
-    SELECT TOP (1) @legacyCustomerFk = fk.[name]
-    FROM sys.foreign_keys fk
-    INNER JOIN sys.foreign_key_columns fkc
-        ON fkc.constraint_object_id = fk.[object_id]
-    INNER JOIN sys.columns pc
-        ON pc.[object_id] = fkc.parent_object_id
-       AND pc.column_id = fkc.parent_column_id
-    WHERE fk.parent_object_id = OBJECT_ID(N'[dbo].[CustomerPayment]')
-      AND fk.referenced_object_id = OBJECT_ID(N'[dbo].[Customers]')
-      AND pc.[name] = N'CustomerId';
-
-    IF @legacyCustomerFk IS NOT NULL
-    BEGIN
-        DECLARE @dropSql nvarchar(max) =
-            N'ALTER TABLE [dbo].[CustomerPayment] DROP CONSTRAINT [' + REPLACE(@legacyCustomerFk, N']', N']]') + N']';
-        EXEC sp_executesql @dropSql;
-    END;
-
-    IF NOT EXISTS (
-        SELECT 1
-        FROM sys.foreign_keys
-        WHERE [name] = N'FK_CustomerPayment_BusinessPartners_CustomerId'
-          AND [parent_object_id] = OBJECT_ID(N'[dbo].[CustomerPayment]')
-    )
-    BEGIN
-        ALTER TABLE [dbo].[CustomerPayment] WITH NOCHECK
-            ADD CONSTRAINT [FK_CustomerPayment_BusinessPartners_CustomerId]
-            FOREIGN KEY ([CustomerId]) REFERENCES [dbo].[BusinessPartners] ([Id]);
-    END;
 END
 """, cancellationToken);
 }

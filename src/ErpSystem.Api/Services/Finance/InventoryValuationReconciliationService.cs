@@ -261,6 +261,7 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
             ?? throw Error("INV_VALUATION_RECONCILIATION_FINANCE_SETTINGS_MISSING",
                 "Finance settings are required before inventory valuation can be reconciled.");
         var cutoff = DateTime.SpecifyKind(period.EndDate.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
+        var primaryBook = await ResolveEffectivePrimaryBookAsync(period.TenantId, cutoff, cancellationToken);
         var mappedAccounts = await _db.InventoryItems.AsNoTracking().Where(value => value.TenantId == period.TenantId && !value.IsDeleted)
             .Select(value => value.InventoryAccountId).ToListAsync(cancellationToken);
         var accountIds = mappedAccounts
@@ -268,6 +269,8 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
         // Retain historical inventory targets even when a master default has subsequently changed.
         var historicalAccounts = await _db.AccountTransactions.AsNoTracking().Where(value => value.TenantId == period.TenantId &&
             !value.IsDeleted && value.PostingStatus == "Posted" && value.TransactionDate <= cutoff && value.TransactionTag != null &&
+            (primaryBook == null || value.AccountingBookId == primaryBook.Id ||
+                (value.AccountingBookId == Guid.Empty && value.BookClassification == primaryBook.Code)) &&
             (value.TransactionTag == "INV-RECEIPT-CONTROL" || value.TransactionTag == "INV-LANDED-COST-CONTROL" ||
              value.TransactionTag == "INV-OPEN-CONTROL" || value.TransactionTag == "INV-ADJ-CONTROL" ||
              value.TransactionTag == "INV-ISSUE-CONTROL" || value.TransactionTag.StartsWith("INV-ISSUE-CTL-") ||
@@ -301,7 +304,9 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
 
         var accountBalances = await _db.AccountTransactions.AsNoTracking().Where(value =>
                 value.TenantId == period.TenantId && accountIds.Contains(value.AccountId) && !value.IsDeleted &&
-                value.PostingStatus == "Posted" && value.TransactionDate <= cutoff)
+                value.PostingStatus == "Posted" && value.TransactionDate <= cutoff &&
+                (primaryBook == null || value.AccountingBookId == primaryBook.Id ||
+                    (value.AccountingBookId == Guid.Empty && value.BookClassification == primaryBook.Code)))
             .GroupBy(value => value.AccountId).Select(group => new { AccountId = group.Key, Balance = group.Sum(value => value.DebitAmount - value.CreditAmount) })
             .OrderBy(value => value.AccountId).ToListAsync(cancellationToken);
         var glValue = Round(accountBalances.Sum(value => value.Balance));
@@ -376,6 +381,8 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
             period.Id,
             CutoffDateUtc = cutoff,
             FunctionalCurrencyCode = Currency(settings.BaseCurrency),
+            AccountingBookId = primaryBook?.Id,
+            AccountingBookCode = primaryBook?.Code,
             InventoryControlAccountId = accountId,
             ReceiptInventoryValue = receiptValue,
             PostedLandedCostValue = postedLanded,
@@ -398,6 +405,45 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
             postedLanded, landedInventory, landedVariance, inventorySubledger, cacheValue,
             currentMovementValue, glValue, variance, hashPayload.ToleranceAmount,
             hashPayload.Exceptions, snapshotHash);
+    }
+
+    private async Task<AccountingBook?> ResolveEffectivePrimaryBookAsync(
+        Guid tenantId,
+        DateTime cutoff,
+        CancellationToken cancellationToken)
+    {
+        var books = await _db.AccountingBooks.AsNoTracking()
+            .Where(value => value.TenantId == tenantId && !value.IsDeleted)
+            .ToListAsync(cancellationToken);
+        if (books.Count == 0)
+            return null;
+
+        var date = cutoff.Date;
+        var designation = await _db.AccountingBookPrimaryDesignations.AsNoTracking()
+            .Where(value => value.TenantId == tenantId && !value.IsDeleted &&
+                value.ReversedAtUtc == null && value.EffectiveFrom <= date)
+            .OrderByDescending(value => value.EffectiveFrom)
+            .ThenByDescending(value => value.ApprovedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        Guid? bookId = designation?.NewPrimaryBookId;
+        if (!bookId.HasValue)
+        {
+            bookId = await _db.AccountingBookPrimaryDesignations.AsNoTracking()
+                .Where(value => value.TenantId == tenantId && !value.IsDeleted &&
+                    value.ReversedAtUtc == null && value.EffectiveFrom > date)
+                .OrderBy(value => value.EffectiveFrom)
+                .ThenBy(value => value.ApprovedAtUtc)
+                .Select(value => (Guid?)value.PreviousPrimaryBookId)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var matches = bookId.HasValue
+            ? books.Where(value => value.Id == bookId.Value).ToList()
+            : books.Where(value => value.IsDefault && value.BookType == AccountingBookType.PrimaryFull).ToList();
+        if (matches.Count != 1)
+            throw Error("INV_VALUATION_RECONCILIATION_PRIMARY_BOOK_AMBIGUOUS",
+                "Exactly one effective primary accounting book is required for inventory valuation reconciliation.");
+        return matches[0];
     }
 
     private IQueryable<InventoryValuationReconciliation> FullQuery() =>
