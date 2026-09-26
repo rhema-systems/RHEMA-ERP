@@ -27,7 +27,7 @@
 > | **K** | **DONE** 2026-09-26 — the medical board, step one: a purpose, physicians from the register, the facility and examination checked, documents through the upload gate, cancel or dissolve, a leave gate that takes only a relevant, recent board, and the board defects · `run-round5-k.mjs` 144, green twice · § 8 |
 > | L | not started — **L is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
-> | K-II | waits on TDC (R5-Q5) |
+> | K-II | **planned 2026-09-26** — cases, incapacity and compensation on the standard pattern with statutory defaults; after L, before M; starts with K-II-0, the PNDCL 187 text verified |
 
 ## Context
 
@@ -87,7 +87,7 @@ became of them.
 | **A3** | **Encashment on exit only.** In-service off on the demo; "HR decides the days, Finance the money" applies to the leaver's settlement; no Sent-to-Finance stage. TDC's answer to L-D8 is still owed. |
 | **A4** | **Kinds: Annual, Maternity, Other.** Annual absorbs `MandatoryAnnualLeave`. Maternity carries its statutory rules (lane A3). Sick leave is Other: its behaviour already lives in its evidence settings. *(Maternity included now — the user's clarification, 2026-09-25.)* |
 | **A5** | **Casual beyond its limit = two linked requests** (casual days + annual days for the excess). The employee may ask on the portal; HR confirms. |
-| **A6** | **Medical board in two steps.** Step one now: purpose (including injury on duty), physicians as members, documents, cancel/dissolve, a relevant-and-recent gate, the board defects. Step two after TDC: several employees per board, incapacity %, compensation. |
+| **A6** | **Medical board in two steps.** Step one now: purpose (including injury on duty), physicians as members, documents, cancel/dissolve, a relevant-and-recent gate, the board defects. Step two after TDC: several employees per board, incapacity %, compensation. **Amended 2026-09-26 (the user): step two does not wait on TDC** — the system serves more clients than TDC, so it is built on the standard pattern (a panel hears cases; workers' compensation assessment) with the statute's figures as defaults and every client-specific number a setting; TDC confirms its values (R5-Q5). Lane K-II. |
 | **A7** | **"Leave owed as at a date" report**, days only; Finance values it. |
 | **B1** | The employee's line manager (HOD) or HR may recall, reason required. The remaining days are kept (as today); expenses go through a claim. |
 | **B2** | HR may cancel approved leave up to and including its first day. |
@@ -105,7 +105,7 @@ became of them.
 | R5-Q2 | In-service encashment (L-D8) and the daily-rate basis (L-D7) | Exit only; rates unchanged |
 | R5-Q3 | Is a leave allowance or salary advance paid when staff proceed on annual leave? | None |
 | R5-Q4 | Who keeps the holiday calendar current (the 2025 changes; holidays the President moves)? | HR; demo list updated (N4) |
-| R5-Q5 | How TDC's medical board works (composition, trigger) and how injury-on-duty cases are handled | Step one only |
+| R5-Q5 | ~~How TDC's medical board works~~ **Reframed 2026-09-26: confirm these defaults** — how many medical members must sit to decide a case (default 1); whether TDC pays the statutory compensation (PNDCL 187: 96 months' earnings × the Third Schedule's percentage) or more; whether TDC holds its own board or relies on the statutory board (s.8) | The statute's figures (K-II) |
 
 ## What exploration found (verified in code 2026-09-24/25, branch `hrdev`)
 
@@ -165,15 +165,16 @@ bypasses. The configuration register and the guide both said "zero ghosts" (firs
 | Does the plan clash check work? | E1 (it does not; fixed and asserted) |
 | Actions inside the plan details modal; what the approver's Cancel does | E4, E5 |
 | Balances show annual; an overview for the rest | J |
-| Medical board: beyond excuse duty, physicians, attachments, cancel vs dissolve, several employees, disability and compensation | K (step one) + K-II (step two) |
+| Medical board: beyond excuse duty, physicians, attachments, cancel vs dissolve, several employees, disability and compensation | K (step one, done) + K-II (step two, planned) |
 | Encashment: HR days, Finance amount, marked paid | L (on the leaver's settlement) |
 | Does the leave year-end work? | G |
 | Resumption confirmed by HOD/HR | D3 |
 
 ## Lanes
 
-Order: **E → F → D → A → N → C → G → H → J → I → K → L → M.** Lane ~~B~~ (the anniversary year) is
-removed by A1; K step two (K-II) waits for R5-Q5.
+Order: **E → F → D → A → N → C → G → H → J → I → K → L → K-II → M.** Lane ~~B~~ (the anniversary
+year) is removed by A1. K step two (K-II) no longer waits for R5-Q5 (A6 amended 2026-09-26); it comes
+after L and before M, so M's final re-read covers the finished shape.
 
 Each lane: its own harness suite `dev-harness/hr-leave/run-round5-<lane>.mjs`, green twice; slices
 1–13 (515) and neighbours at baseline — **except C1, which deliberately changes month-end figures:
@@ -264,8 +265,86 @@ For each finding, the simplest honest option: make it bind, relabel it truthfull
 - **K5 Cancel vs dissolve:** one status, two words — Requested → "Cancel the request"; Convened → "Dissolve the board" (reason required; sittings kept); `CancelledOn` / `CancelledById` recorded; the detail reads back which happened.
 - **K6 The sick-leave gate accepts only a relevant, recent board:** purpose ExtendedSickLeave (or Other), concluded on or after the start of the leave year being counted (`LeaveService.cs:684-691`).
 - **K7 Defects:** conclude requires at least one member; Outcome required and a defined value; exactly one member kind per member row.
-- **K-II, after R5-Q5:** several employees per board (subject rows, a finding each), incapacity % and recommended compensation for injury-on-duty cases (PNDCL 187), separation's bridge.
+- **K-II:** several employees per board, incapacity % and compensation, separation's bridge — its own lane, below.
 - The guide's § 7b and the medical guide updated.
+
+### Lane K-II — The medical board, step two: a panel that hears cases, incapacity and compensation
+
+**Decided 2026-09-26 (the user):** do not wait on TDC. The system serves more clients than TDC, so
+step two is built on the standard pattern, with the statute's figures as defaults and every number a
+client might set differently a setting. R5-Q5 becomes *confirm these defaults*. After L, before M.
+
+**The pattern.** Tribunals, disciplinary panels, credentialing committees and occupational-health
+boards share one shape: **the board is the panel; each employee before it is a case.** One sitting can
+hear several cases; each case concludes on its own finding; **the finding records the sitting at which
+it was decided, and "who decided" is that sitting's attendance.** Incapacity follows the workers'
+compensation pattern: the board records a **medical assessment**, a rule turns it into an
+**indicative** amount, and the money is Finance's and payroll's — as lane L does for the leaver's days.
+
+**K-II-0 — The statute, verified first.** Nothing is seeded until PNDCL 187 has been read in a
+primary copy (the Ministry's link served the Constitution on 2026-09-26; Parliament's repository
+redirects). What a secondary copy (ghanalegal.com) says, to be confirmed section by section:
+
+| Section | What it provides | What K-II does with it |
+|---|---|---|
+| s.2 | The employer is liable to pay compensation | The amount is the employer's to pay; the system computes it indicatively |
+| s.3 | Death: 60 months' earnings | Not a board matter — noted, not built |
+| s.5 | Permanent total incapacity: 96 months' earnings | Setting, default 96 |
+| s.6 | Permanent partial incapacity: the Third Schedule's percentage of the s.5 amount; partial loss of use of a member rated at 50 % of its total-loss percentage | The percentage on the case; the schedule as a reference table |
+| s.7 | Temporary incapacity: periodical payments, at most 24 months (+6 by the Chief Labour Officer) | Recorded on the case; the payments are payroll's |
+| s.8 | Disputes about incapacity resolved by a **medical board appointed by the Chief Labour Officer** — three practitioners (the Minister's, the employer's, optionally the employee's) | A board's kind: the employer's own, or statutory |
+| s.9 | Monthly earnings = the rate over the previous twelve months | The earnings basis, read from payroll (read-only) and shown |
+| s.12 | Notice of the accident and the claim within six months | Shown on an injury case; not enforced |
+| s.14 | The employer arranges free medical examination | The case's examination link (K3) |
+| s.17 | Periodical payments reviewed by the court on a medical certificate | Noted, not built |
+| s.35 | The labour officer notifies the employer of the amount; payable within three months | The notified amount and its due date recorded on the case |
+| Third Schedule | Injuries and the percentage loss of earning capacity (e.g. loss of two limbs 100, arm at the shoulder 80, sight of one eye 40) | Seeded per tenant, editable, each row naming its source |
+
+**K-II-a — The case split.**
+- **`MedicalBoardCase`**: the board, the employee (**unique per board**), purpose, reason, requested
+  by and on, health profile, examination, `SafetyIncidentId` (a bare Guid to SHE's incident, by
+  reference, for injury cases — the SHE↔Medical boundary), status (*Listed · Concluded · Withdrawn*),
+  **`DecidedAtSittingId`**, outcome, findings, recommendation, restrictions, review date, retirement
+  recommendation, concluded by and on, withdrawn by, on and why. Lane K's rules carry over per case
+  (purpose required, the subject's own examination, outcome required, a sitting and a member present).
+- **`MedicalBoard`** keeps the panel: number, status, convened, facility, members, sittings, documents
+  (a document may name a case), and a **kind** — the employer's own board, or a statutory board under
+  s.8. Its lifecycle: Requested → Convened → **Closed** once every case is concluded or withdrawn;
+  cancel and dissolve as now.
+- **Attendance**: which members sat at each sitting. A case concludes at a sitting with at least
+  **`MedicalBoardQuorum`** medical members present — a company setting, **default 1** (today's rule),
+  empty = no minimum. The panel that decided a case is that sitting's attendance, so membership no
+  longer has to freeze for the whole board.
+- **The subject** cannot be a member of a board on which they are a case.
+- **Migration**: every existing board becomes a board with one case (the finding columns move to the
+  case, in SQL); guarded; the old columns dropped in the same migration only once every reader is moved.
+- **Bridges**: `LeaveRequest.MedicalBoardId` stays — with the employee unique per board, the gate reads
+  that employee's case; K6's tests apply to the case. `EmployeeSeparation.MedicalBoardId` points at the
+  case and **gets its control** on the separation form when the reason is medical retirement (closing
+  the column nothing could set).
+- **Screens**: the board page gains *Cases* (add an employee, a finding dialog per case, withdraw) and
+  an attendance tick-list per sitting; the register lists cases beside boards; the leave panel and
+  picker read the employee's case.
+
+**K-II-b — Incapacity and compensation.**
+- **On the case**: incapacity kind (*none · temporary total · temporary partial · permanent partial ·
+  permanent total*), percentage (0–100; required for permanent partial, 100 for permanent total), basis
+  (*a schedule item* — named — or *the panel's clinical judgement*), assessed on, review date.
+- **`IncapacityScheduleItem`**: a per-tenant reference table seeded from the Third Schedule once K-II-0
+  has verified it; editable; each row names its source, so a client that uses another schedule can.
+- **Settings** (`CompanyHrPolicySettings`): `PermanentTotalIncapacityMonths` (default 96, empty = not
+  computed) and `TemporaryIncapacityMaxMonths` (default 24). Guarded migration with the real defaults.
+- **The indicative amount**: percentage × permanent-total months × monthly earnings (s.9 basis from
+  payroll, read-only per the payroll boundary; the basis shown beside the figure). Marked
+  **indicative**. The labour officer's notified amount (s.35) and its due date are recorded when they
+  arrive; paying is Finance's — a hand-off note, as in L2. Temporary incapacity's periodical payments
+  are payroll's; the absence itself is Occupational Injury Leave.
+- An injury case asks for the SHE incident and shows the s.12 six-month notice date.
+
+**Suites**: `run-round5-k2a.mjs`, `run-round5-k2b.mjs`; `run-round5-k.mjs` and slice 8 re-based onto
+cases. **Docs**: guide § 7b, explainer § 14, register rows for the three settings, R5-Q5 reframed.
+**Not built**: the statutory claim filing with the Labour Department, death compensation (s.3), court
+review (s.17), periodical payment schedules (payroll's).
 
 ### Lane L — Encashment on exit only (A3, B5)
 
@@ -298,7 +377,7 @@ For each finding, the simplest honest option: make it bind, relabel it truthfull
 - Recall expenses (s.26): an ordinary claim.
 - A leave allowance (R5-Q3): a payroll element, if TDC pays one.
 - Sick-pay tiers (full pay, then half pay): payroll's.
-- K-II; plans on the calendar.
+- Plans on the calendar. (K-II is now a lane, above.)
 - An accrual statement for somebody with no annual record yet (lane J). The statement reads a
   record, so a row worked out live cannot open one; it says *no record yet* instead. The first
   request opens the record, and the statement with it.
@@ -1361,8 +1440,9 @@ fortnight; it now cancels and retires what it raised. **79, its recorded count.*
   request answered 500.
 
 **Noted, not built.**
-- **K-II** — several employees per board, incapacity % and compensation, separation's bridge —
-  waits on R5-Q5. A board still rules on one employee.
+- **K-II** — several employees per board, incapacity % and compensation, separation's bridge. A
+  board still rules on one employee. *(2026-09-26, after this entry: planned as its own lane on the
+  standard pattern, no longer waiting on R5-Q5 — see Lane K-II.)*
 - **A paper filed on a settled board by mistake cannot be removed** by anyone. A Medical-admin
   correction is the natural answer if it is ever needed.
 - **The typed paper recommendation is not held to K6's tests** — the system cannot read what the

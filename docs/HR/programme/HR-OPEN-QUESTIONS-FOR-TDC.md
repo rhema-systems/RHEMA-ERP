@@ -688,21 +688,33 @@ the wrong number of days.
 
 **Meanwhile:** HR maintains the calendar; the demo list is being updated to the 2025 changes.
 
-### R5-Q5 · How does TDC's medical board work?
+### R5-Q5 · The medical board — please confirm these defaults
+
+*(Reframed 2026-09-26. It first asked how TDC's board works, and the second step waited for the
+answer. It no longer waits: the system is built for more organisations than TDC, so the board follows
+the standard pattern, with the law's figures as defaults that TDC can change.)*
 
 The stakeholders asked for boards beyond excuse duty, boards that review several employees, and
 boards that decide the extent of a disability and recommend compensation. In the public service a
 board is three medical officers — nominated by the employer, SSNIT and the union — and declares an
 officer fit or unfit for duty. The degree of incapacity and the compensation for an **injury at work**
-come from the Workmen's Compensation Law 1987 (PNDCL 187). We need to know:
+come from the Workmen's Compensation Law 1987 (PNDCL 187).
 
-- who sits on TDC's board, and who convenes it;
-- when a board is required;
-- whether one sitting reviews several employees;
-- how TDC handles injury-at-work cases and their compensation.
+**What is being built:** a board is a panel that hears **cases** — one per employee, each with its own
+finding, decided at a recorded sitting. For an injury at work the case records the **incapacity**
+(temporary or permanent, and a percentage, from the law's schedule of injuries or the panel's
+judgement) and an **indicative compensation**, which Finance pays; the amount the Labour Department
+notifies is recorded when it arrives. Please confirm or change:
 
-**Meanwhile:** boards gain a purpose, physicians as members, documents, and a clear cancel/dissolve.
-Several employees per board, and the disability and compensation fields, wait for this answer.
+| | Default | |
+|---|---|---|
+| **1** | **One** medical member must be present at the sitting that decides a case | or TDC's number (the statutory board has three) |
+| **2** | Compensation for permanent total incapacity is **96 months' earnings** (PNDCL 187 s.5), and a partial one the schedule's percentage of it (s.6) | or TDC pays more |
+| **3** | The **law's schedule** of injuries and percentages | or TDC's own |
+| **4** | TDC holds **its own** board, and the statutory board (s.8, appointed by the Chief Labour Officer) is recorded when one sits | or TDC relies on the statutory board only |
+
+**Meanwhile:** boards have a purpose, physicians as members, documents, and a clear cancel/dissolve
+(built 2026-09-26). Cases, incapacity and compensation are built next, on the defaults above.
 
 ---
 

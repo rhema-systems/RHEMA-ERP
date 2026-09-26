@@ -644,12 +644,22 @@ documents could be attached. *Cancel the board* was the only way to stop one.
 - **Fixes:** a board cannot conclude without members, or without an outcome; a member is recorded
   one way only (from the register, as a colleague, or by name).
 
-**Step two — after TDC explains how its board works** ⏳
+**Step two — planned (decided 2026-09-26), no longer waiting on TDC** ⏳
 
-- **Several employees per board**, each with their own finding.
-- **The extent of disability, as a percentage, and recommended compensation.** These belong mainly to
-  injuries at work, under the Workmen's Compensation Law, where the degree of incapacity sets the
-  compensation. Compensation is written on the board as a recommendation; paying it is outside leave.
+The system serves more organisations than TDC, so step two follows the standard way such boards
+work, with the law's figures as defaults that any organisation can change. TDC is asked only to
+confirm the defaults.
+
+- **A board is a panel that hears cases** — one per employee, each with its own finding, decided at a
+  sitting whose attendance is recorded. So one sitting can decide several people, and "who decided"
+  is always answerable. How many medical members must be present is a setting (default one).
+- **The extent of disability, as a percentage, and an indicative compensation** — mainly for injuries
+  at work, under the Workmen's Compensation Law 1987: 96 months' earnings for total permanent
+  incapacity, and the law's schedule of injuries sets the percentage for a partial one (to be checked
+  against the law's own text before anything is set). The figure is **indicative**: the Labour
+  Department notifies the amount due, and Finance pays it.
+- **An injury case links to the safety incident** where the injury was reported.
+- **A medical retirement** can point at its board's case from the separation.
 
 ---
 
@@ -724,7 +734,7 @@ These need TDC's own documents or answers. Until they come, the system runs on t
 | 2 | **Cashing in leave while employed** — confirm it is not allowed — and **which daily rate** values a day of leave | Off; the rates as they are |
 | 3 | Is a **leave allowance** or salary advance paid when staff go on annual leave? | None |
 | 4 | **Who keeps the holiday calendar up to date**, including holidays the President moves | HR; the demo list updated to 2025 |
-| 5 | **How TDC's medical board works**, and how injuries at work are handled | Step one of [section 14](#14-the-medical-board) |
+| 5 | **The medical board's defaults** — how many medical members decide a case, and whether TDC pays the statutory compensation or more *(reframed 2026-09-26: nothing waits on it)* | One member; the law's figures ([section 14](#14-the-medical-board)) |
 
 ---
 
