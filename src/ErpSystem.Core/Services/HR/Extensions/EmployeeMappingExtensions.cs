@@ -133,6 +133,7 @@ public static class EmployeeMappingExtensions
                 ? hired.AddDays(e.ProbationPeriodDays)
                 : null,
             ConfirmationDate = e.ConfirmationDate,
+            ConfirmationSource = e.ConfirmationSource,
             RetirementDate = e.RetirementDate,
             TaxNumber = e.TaxNumber,
             SocialSecurityNumber = e.SocialSecurityNumber,
@@ -267,6 +268,7 @@ public static class EmployeeMappingExtensions
         to.ProbationSource = from.ProbationSource;
         to.ExpectedConfirmationDate = from.ExpectedConfirmationDate;
         to.ConfirmationDate = from.ConfirmationDate;
+        to.ConfirmationSource = from.ConfirmationSource;
         to.RetirementDate = from.RetirementDate;
         to.TaxNumber = from.TaxNumber;
         to.TINNumber = from.TINNumber;

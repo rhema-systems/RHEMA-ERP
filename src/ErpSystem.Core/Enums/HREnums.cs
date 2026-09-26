@@ -263,6 +263,34 @@ public enum ProbationSource
 }
 
 /// <summary>
+/// Where an employee's confirmation date came from (HR finish plan lane 11).
+/// </summary>
+/// <remarks>
+/// <para>⚠ Null on every row that predates lane 11, as with <see cref="ProbationSource"/>: nobody
+/// recorded how those dates arrived, and a default would claim a provenance the data does not
+/// have.</para>
+///
+/// <para>The distinction the user asked for (2026-09-25) is between a date somebody SUPPLIED and
+/// one the system WORKED OUT. A derived date is the hire date plus the probation term, for staff
+/// whose term had ended before they were entered — true of nearly everybody imported, and still a
+/// deduction rather than a record. TDC names any exceptions, and they are corrected by hand.</para>
+/// </remarks>
+public enum ConfirmationSource
+{
+    /// <summary>Confirmed through their probation record, against its authority and letter.</summary>
+    Probation = 1,
+
+    /// <summary>Supplied on import: confirmed before this system, on the date the file gave.</summary>
+    Imported = 2,
+
+    /// <summary>
+    /// Nobody supplied it: the hire date plus the probation term, for somebody whose term had
+    /// ended before they were entered.
+    /// </summary>
+    Derived = 3
+}
+
+/// <summary>
 /// Which kind of tie a <c>RelationshipType</c> describes, so a screen can offer only the values
 /// that make sense on it.
 /// </summary>

@@ -255,6 +255,8 @@ export interface EmployeeDetail extends Employee {
    * issues the letter.
    */
   confirmationDate?: string | null;
+  /** Where `confirmationDate` came from (HR finish plan lane 11). Null on records confirmed before it. */
+  confirmationSource?: ConfirmationSource | null;
   retirementDate?: string | null;
   taxNumber?: string | null;
   socialSecurityNumber?: string | null;
@@ -331,6 +333,20 @@ export const PROBATION_SOURCE_LABEL: Record<ProbationSource, string> = {
   Position: 'from the position',
   PolicyDefault: 'the company default',
   Override: 'set for this employee',
+};
+
+/**
+ * Where an employee's confirmation date came from (HR finish plan lane 11).
+ *
+ * ⚠ `Derived` is a deduction, not a record: the hire date plus the probation term, for staff whose
+ * term had ended before they were entered. The screen says so, so it is never read as supplied.
+ */
+export type ConfirmationSource = 'Probation' | 'Imported' | 'Derived';
+
+export const CONFIRMATION_SOURCE_LABEL: Record<ConfirmationSource, string> = {
+  Probation: 'through the probation record',
+  Imported: 'as supplied on import',
+  Derived: 'worked out from the hire date and the probation term',
 };
 
 // --- Create / Update requests (Department & Section intentionally omitted) ---

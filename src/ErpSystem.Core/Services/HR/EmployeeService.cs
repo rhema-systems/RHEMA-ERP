@@ -535,6 +535,7 @@ public class EmployeeService : IEmployeeService
         employeeEntity.TenantId = GetTenantId();
         employeeEntity.ProbationPeriodDays = probationDays;
         employeeEntity.ProbationSource = probationSource;
+        if (isImport) ApplyImportedConfirmation(employeeEntity);
 
         // Before the insert: State and City are written from the tree so the row is never
         // persisted with a snapshot that disagrees with its own GeoAreaId, not even briefly.
@@ -573,6 +574,51 @@ public class EmployeeService : IEmployeeService
         var created = await _employeeRepository.GetByIdWithDetailsAsync(employeeEntity.Id);
         if (created == null) throw new InvalidOperationException("Employee created but could not be reloaded.");
         return created.ToDetailDto();
+    }
+
+    /// <summary>
+    /// The confirmation date of an imported employee: the one the file supplied, or — when it gave
+    /// none — the hire date plus the probation term, if that term had ended (HR finish plan lane 11).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Runs before <see cref="OpenInitialContractAsync"/>, which opens a probation only for
+    /// somebody arriving unconfirmed. The import had no confirmation column before lane 11, so every
+    /// imported permanent employee arrived unconfirmed and was put on a probation that had ended
+    /// years earlier — 2,191 of UAT's 2,399 staff, measured 2026-09-25.</para>
+    ///
+    /// <para>A derived date is marked as such (<see cref="ConfirmationSource.Derived"/>), so it can
+    /// be told apart from one somebody supplied. The rule is <see cref="ConfirmationDerivation"/>,
+    /// shared with the repair of the employees already entered.</para>
+    /// </remarks>
+    private static void ApplyImportedConfirmation(Employee employee)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+
+        if (employee.ConfirmationDate is { } supplied)
+        {
+            if (employee.DateEmployed is { } hired && supplied < hired)
+                throw new InvalidOperationException(
+                    $"The confirmation date {supplied:yyyy-MM-dd} is before the date employed, {hired:yyyy-MM-dd}.");
+            if (supplied > today)
+                throw new InvalidOperationException(
+                    $"The confirmation date {supplied:yyyy-MM-dd} is in the future. It records a probation already passed.");
+            employee.ConfirmationSource = ConfirmationSource.Imported;
+            return;
+        }
+
+        // Only a permanent appointment carries a probation (see OpenInitialContractAsync), and a
+        // term can only be worked out from a hire date.
+        if (employee.EmploymentType != EmploymentType.Permanent
+            || employee.ProbationPeriodDays <= 0
+            || employee.DateEmployed is not { } start)
+            return;
+
+        var termEnd = ConfirmationDerivation.TermEnd(start, employee.ProbationPeriodDays);
+        if (ConfirmationDerivation.Derive(termEnd, today) is { } derived)
+        {
+            employee.ConfirmationDate = derived;
+            employee.ConfirmationSource = ConfirmationSource.Derived;
+        }
     }
 
     /// <summary>
@@ -628,9 +674,9 @@ public class EmployeeService : IEmployeeService
             || employee.ConfirmationDate != null)
             return;
 
-        // Back to months, the unit ProbationPeriod counts in. At least one: a term of a few days is
-        // still a probation, and a zero-month row would end the day it began.
-        var months = Math.Max(1, (int)Math.Round(employee.ProbationPeriodDays / 30.0));
+        // Back to months, the unit ProbationPeriod counts in — by the same rule a derived
+        // confirmation date uses (lane 11), so the two never disagree about when a term ended.
+        var months = ConfirmationDerivation.TermMonths(employee.ProbationPeriodDays);
         var probationEnd = start.AddMonths(months);
 
         await _unitOfWork.Repository<ProbationPeriod>().AddAsync(new ProbationPeriod

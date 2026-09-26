@@ -363,8 +363,12 @@ public class SheKpiComputationService : ISheKpiComputationService
             .GroupBy(r => r.JobRoleCode.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Select(r => r.PpeTypeId).Distinct().ToList(), StringComparer.OrdinalIgnoreCase);
 
+        // Everybody at work — Active or on probation (HR finish plan lane 11; TDC's call of
+        // 2026-09-23: probation is a contract status, not an availability). ⚠ It was Active only,
+        // so a new hire — the person most likely to be missing PPE — was outside the figure.
         var employees = await _unitOfWork.Repository<Employee>()
-            .GetQueryable(e => e.TenantId == tenantId && !e.IsDeleted && e.StaffStatus == StaffStatus.Active)
+            .GetQueryable(e => e.TenantId == tenantId && !e.IsDeleted && e.IsActive
+                               && (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation))
             .Select(e => new { e.Id, PositionCode = e.Position.Code })
             .ToListAsync(ct);
 

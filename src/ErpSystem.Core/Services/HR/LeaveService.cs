@@ -3829,8 +3829,21 @@ public class LeaveService : ILeaveService
     /// auto-assigned — it stays optional unless the leave type requires one). This is superseded
     /// in Phase 3 by pre-defined relievers configured on the employee profile.
     /// </summary>
+    /// <remarks>
+    /// ⚠ The manager is asked <see cref="CanCover"/> too (HR finish plan lane 11). This was the one
+    /// reliever path that never checked: a suspended or departed manager went straight onto the
+    /// request, because a filled slot is not validated afterwards.
+    /// </remarks>
     private async Task<Guid?> SuggestRelieverAsync(Guid managerId, DateOnly startDate, DateOnly endDate)
     {
+        var tenantId = GetTenantId();
+        var manager = await _employeeRepository.GetQueryable()
+            .Where(e => e.Id == managerId && e.TenantId == tenantId)
+            .Select(e => new { e.IsActive, e.StaffStatus })
+            .FirstOrDefaultAsync();
+        if (manager == null || !CanCover(manager.IsActive, manager.StaffStatus))
+            return null;
+
         var managerHasConflict = await RelieverHasConflictAsync(managerId, startDate, endDate);
 
         return managerHasConflict ? null : managerId;

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/employee.ts",
+    "src/types/hr/probation.ts",
+    "src/services/hr/probation.service.ts",
+    "src/components/hr/probation/ImportedConfirmationRepairDialog.tsx",
+    "src/app/hr/probation/page.tsx",
+    "src/app/hr/employees/[id]/page.tsx"
+  ]
+}

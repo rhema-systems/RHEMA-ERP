@@ -132,6 +132,13 @@ public class EmployeeDetailDto : EmployeeDto
     public DateOnly? ExpectedConfirmationDate { get; set; }
 
     public DateOnly? ConfirmationDate { get; set; }
+
+    /// <summary>
+    /// Where <see cref="ConfirmationDate"/> came from — the probation record, the import file, or
+    /// worked out from the hire date and the term (lane 11). Null before lane 11.
+    /// </summary>
+    public ConfirmationSource? ConfirmationSource { get; set; }
+
     public DateOnly? RetirementDate { get; set; }
     public string? TaxNumber { get; set; }
     public string? SocialSecurityNumber { get; set; }

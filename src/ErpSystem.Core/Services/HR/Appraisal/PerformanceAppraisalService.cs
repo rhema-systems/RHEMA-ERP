@@ -3980,25 +3980,33 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
     /// </summary>
     private async Task<Guid> AssignHRReviewerAsync(PerformanceAppraisal appraisal, CancellationToken cancellationToken)
     {
-        // 1. Prefer an explicitly configured default HR reviewer (must be an active employee).
+        // 1. Prefer an explicitly configured default HR reviewer (must be at work).
+        //
+        // ⚠ "At work" is Active OR on probation (HR finish plan lane 11; TDC's call of 2026-09-23:
+        // probation is a contract status, not an availability). Both steps here asked for Active
+        // only, so an HR officer on probation was never assigned — and on a tenant whose HR staff
+        // were all imported onto probation, nobody was, and the appraisal had no HR reviewer.
         var configuredId = appraisal.AppraisalCycle?.AppraisalSettings?.DefaultHRReviewerId;
         if (configuredId.HasValue && configuredId.Value != Guid.Empty)
         {
             var configured = await _employeeRepository.GetQueryable()
-                .FirstOrDefaultAsync(e => e.TenantId == GetTenantId() && e.Id == configuredId.Value && e.StaffStatus == StaffStatus.Active, cancellationToken);
+                .FirstOrDefaultAsync(e => e.TenantId == GetTenantId() && e.Id == configuredId.Value && e.IsActive
+                                          && (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation),
+                    cancellationToken);
             if (configured != null)
             {
                 _logger.LogInformation("Assigned configured HR reviewer {EmployeeId} for appraisal {AppraisalId}", configured.Id, appraisal.Id);
                 return configured.Id;
             }
-            _logger.LogWarning("Configured DefaultHRReviewerId {Id} is not an active employee; falling back to load-based assignment.", configuredId.Value);
+            _logger.LogWarning("Configured DefaultHRReviewerId {Id} is not at work; falling back to load-based assignment.", configuredId.Value);
         }
 
-        // 2. Otherwise pick the least-loaded active HR employee.
+        // 2. Otherwise pick the least-loaded HR employee at work.
         var hrCandidates = await _employeeRepository.GetQueryable()
             .Include(e => e.Position)
             .Include(e => e.OrganizationUnit)
-            .Where(e => e.TenantId == GetTenantId() && e.StaffStatus == StaffStatus.Active)
+            .Where(e => e.TenantId == GetTenantId() && e.IsActive
+                        && (e.StaffStatus == StaffStatus.Active || e.StaffStatus == StaffStatus.Probation))
             .Where(e =>
                 (e.Position != null && (e.Position.Title.Contains("HR") || e.Position.Title.Contains("Human Resource"))) ||
                 (e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("HR")))

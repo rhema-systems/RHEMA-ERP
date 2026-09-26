@@ -198,6 +198,13 @@ public class Employee : TenantEntity, IDisabilityTypeConsumer
     /// </remarks>
     public DateOnly? ConfirmationDate { get; set; }
 
+    /// <summary>
+    /// Where <see cref="ConfirmationDate"/> came from: the probation record, the import file, or
+    /// worked out from the hire date and the probation term (HR finish plan lane 11).
+    /// </summary>
+    /// <remarks>⚠ Null before lane 11. See <see cref="Core.Enums.ConfirmationSource"/>.</remarks>
+    public ConfirmationSource? ConfirmationSource { get; set; }
+
     public DateOnly? RetirementDate { get; set; }
 
     public DateOnly? EndDate { get; set; } // Populated on exit

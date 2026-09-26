@@ -393,6 +393,16 @@ public static class EmployeeImportWorkbookReader
             endDate = null;
         }
 
+        // HR finish plan lane 11. A blank is not "unconfirmed": the service works the date out from
+        // Date Employed and the position's term when that term has ended (ConfirmationDerivation),
+        // and marks it as worked out. Only a supplied date is checked here.
+        var confirmedOn = Date(Get(EmployeeImportColumns.ConfirmationDate), EmployeeImportColumns.ConfirmationDate, "Confirmation Date", Err);
+        if (confirmedOn != null && dateEmployed != null && confirmedOn < dateEmployed)
+            Err(EmployeeImportColumns.ConfirmationDate, "Confirmation Date is before Date Employed.");
+        else if (confirmedOn > today)
+            Err(EmployeeImportColumns.ConfirmationDate, $"Confirmation Date {EmployeeImportValues.FormatDate(confirmedOn!.Value)} is in the future.");
+        dto.ConfirmationDate = confirmedOn;
+
         // Organisation
         var departmentText = Get(EmployeeImportColumns.Department);
         DepartmentRef? department = null;
@@ -633,6 +643,9 @@ public static class EmployeeImportWorkbookReader
         }
         CheckAges(dob ?? snap.DateOfBirth, dateEmployed ?? snap.DateEmployed, Err, Warn);
 
+        if (!string.IsNullOrWhiteSpace(Get(EmployeeImportColumns.ConfirmationDate)))
+            Warn(EmployeeImportColumns.ConfirmationDate,
+                "Confirmation Date is not applied by an update; an existing employee is confirmed through their probation record.");
         if (!string.IsNullOrWhiteSpace(Get(EmployeeImportColumns.ContractEndDate)))
             Warn(EmployeeImportColumns.ContractEndDate, "Contract End Date is not applied by an update; change the contract on the employee's profile.");
 
