@@ -633,7 +633,8 @@ public sealed partial class ArReceiptPostingMigrationTests
         var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherArAccount = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
-        fixture.Customer.DefaultArAccountId = otherArAccount.Id;
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.ControlAccountArId = otherArAccount.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 

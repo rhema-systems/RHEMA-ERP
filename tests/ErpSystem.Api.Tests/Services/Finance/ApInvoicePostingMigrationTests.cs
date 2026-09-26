@@ -877,7 +877,7 @@ public sealed partial class ApInvoicePostingMigrationTests
         var act = () => service.PostAsync(fixture.Invoice.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP invoice supplier was not found for this tenant.");
+            .WithMessage("The AP invoice Business Partner was not found for this tenant.");
     }
 
     [Fact]
@@ -1724,7 +1724,7 @@ public sealed partial class ApInvoicePostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId,
         string targetCurrency,
-        decimal rate,
+        decimal functionalPerForeignUnit,
         ExchangeRateQuoteSide quoteSide = ExchangeRateQuoteSide.Mid)
     {
         var exchangeRate = new ExchangeRate
@@ -1733,8 +1733,9 @@ public sealed partial class ApInvoicePostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = targetCurrency,
-            Rate = rate,
-            InverseRate = decimal.Round(1m / rate, 6),
+            // Rate stores foreign units per functional unit; invoice conversion uses InverseRate.
+            Rate = decimal.Round(1m / functionalPerForeignUnit, 6),
+            InverseRate = functionalPerForeignUnit,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             QuoteSide = quoteSide,

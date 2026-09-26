@@ -1369,8 +1369,15 @@ namespace ErpSystem.Api.Services.Finance.AR
                     continue;
                 }
 
+                // Explicit line accounts still require intact original journal evidence on
+                // replay. Fully discounted lines did not produce a revenue posting.
+                var historicalRevenueAccountId = originalAccounts is not null &&
+                    (grossAmount < 0m || RoundMoney(grossAmount - line.DiscountAmount -
+                        documentDiscountAllocations.GetValueOrDefault(line.Id)) > 0m)
+                    ? originalAccounts.Account(ResolveLineTag(line), line.Id)
+                    : (Guid?)null;
                 var revenueAccountId = line.GLAccountId
-                    ?? originalAccounts?.Account(ResolveLineTag(line), line.Id)
+                    ?? historicalRevenueAccountId
                     ?? throw new InvalidOperationException($"No revenue account specified for AR line '{line.Description}'.");
                 await ResolvePostingAccountAsync(revenueAccountId, "revenue account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
