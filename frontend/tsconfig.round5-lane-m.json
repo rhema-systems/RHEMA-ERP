@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/medical-board.ts",
+    "src/app/hr/medical/boards/[id]/page.tsx",
+    "src/app/administration/hr/leave-types/page.tsx"
+  ]
+}

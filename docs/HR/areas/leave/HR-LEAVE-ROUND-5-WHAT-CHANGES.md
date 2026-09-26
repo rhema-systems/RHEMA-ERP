@@ -1,22 +1,24 @@
 # Staff leave, round 5 — what changes, in plain terms
 
-> **Status: DECIDED on 25 September 2026 — being built.** [Section 6](#6-leave-plans--relievers-the-clash-check-and-the-approvers-view)
+> **Status: DECIDED on 25 September 2026 — BUILT by 26 September.** Every section below was built
+> and tested. [Section 6](#6-leave-plans--relievers-the-clash-check-and-the-approvers-view)
 > (leave plans), [section 7](#7-cancelling-recalling-and-coming-back-to-work) (cancelling, recall
-> and coming back), [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person)
+> and coming back), [section 9](#9-the-leave-calendar-for-one-person) (the calendar for one person),
 > [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest) (kinds of leave, with the
 > leave-type form that starts from the kind), [section 15](#15-setting-up-leave-types--simpler-and-honest)
 > (settings that do what they say, and the demo data), the counting fix in
 > [section 4](#4-a-new-employees-first-two-years), [section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)
 > (the accrual statement and the *leave owed* report) and [section 12](#12-the-year-end--carry-over-and-deferrals)
-> (the year-end) were built and tested on 25 September, and [section 8](#8-casual-leave-over-its-limit)
+> (the year-end) on 25 September; [section 8](#8-casual-leave-over-its-limit)
 > (casual leave over its limit), [section 10](#10-the-balances-page--annual-leave-first) (the
 > balances page, annual leave first), [section 11](#11-reminders-that-reach-people) (reminders that
-> reach people), step one of [section 14](#14-the-medical-board) (the medical board) and
-> [section 13](#13-cashing-in-leave--only-when-leaving) (cashing in leave only when leaving) on 26
-> September; nothing else described here is built yet.
+> reach people), [section 13](#13-cashing-in-leave--only-when-leaving) (cashing in leave only when
+> leaving) and all of [section 14](#14-the-medical-board) (the medical board — step one, and step two
+> a and b) on 26 September. What remains is a walk through the screens in a browser, and TDC's
+> answers to [section 17](#17-waiting-on-tdc)'s questions — none of which blocks anything.
 > This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
-> Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
+> Changes 180926*. It describes how leave works for employees, managers, HR and Finance now that
 > round 5 is built.
 >
 > **What changed since the first version (24 September).** A review of the plan, a check of Ghanaian
@@ -127,7 +129,7 @@ Annual leave is separate and can be taken straight after.
 
 **Other** covers everything else — sick, casual, compassionate, paternity, study, unpaid, injury at
 work. There is one number, **the days a year allowed** (the limit), and HR decides within it. The
-request form shows *"Limit 10 days · 2 used · 8 left"*. If HR wants to give fewer days than asked,
+request form shows *"Casual Leave: Limit 10 · 2 used · 8 left"*. If HR wants to give fewer days than asked,
 they use *Suggest different dates*, which sends the request back to the employee.
 
 **Sick leave is an "Other" kind with its own evidence rules**, already built:
@@ -282,7 +284,7 @@ right".)*
 - **Line managers cannot open the plans page**, although they give the first approval. The link in
   their approvals inbox leads nowhere useful.
 
-**What changes**
+**What changes** *(built 25 September)*
 
 - **Relievers come from the employee's own reliever list**, in priority order; if it is empty, the
   approver or HR can search for anybody. A plan saved with no reliever has both slots filled from the
@@ -307,7 +309,7 @@ right".)*
   Cancelling always takes the plan out of the approver's queue.
 - **Decline works** — it asks for your own dates.
 - **Spreading leave across the year** already works: several plans in one year — say 5 days in April,
-  10 in August and 9 in December — as long as they do not overlap. A new **Add another period**
+  10 in August and 9 in December — as long as they do not overlap. A new **Plan another period**
   button makes it obvious. Only annual leave can be planned (built with the leave kinds,
   [section 2](#2-kinds-of-leave--annual-maternity-and-the-rest)).
 - **From an approved plan**, *Raise the leave request* (already there) fills in the dates and
@@ -458,7 +460,7 @@ shows whichever leave type has the most days left — often sick leave.
 **What changes** *(built 26 September)*
 
 - **The page opens on annual leave** — one row for **every employee still serving**, not only the
-  people who already have a leave record. On the demo that is all 2,377 staff, where before it was
+  people who already have a leave record. On the demo that is every one of the 2,400 or so staff serving, where before it was
   the 97 who had asked for annual leave this year.
 - **Somebody with no record yet** — nobody has asked for leave on their behalf — gets their figures
   **worked out on the spot**, by the same rules, marked *no record yet*. Nothing is created by
@@ -536,7 +538,7 @@ working correctly".)*
 
 | Setting | Demo value | What it means |
 |---|---|---|
-| **Maximum carry-over** | 5 days | At most 5 unused days move into the next leave year. |
+| **Max carry-over days** | 5 days | At most 5 unused days move into the next leave year. |
 | **Carry-over expires after (months)** | 3 | Carried days must be used by the end of March, or they are lost. |
 | **Forfeit unused after (months)** | off for TDC | Leave from a finished year cannot be booked anyway; this setting only tidied what was left of it. With cashing-in allowed only on leaving, it is not needed. |
 
@@ -722,7 +724,7 @@ does not need a lot of setup complexity".)*
 - three rules that can be **dodged** by saving a request as a draft first and then submitting it —
   minimum notice, the reliever requirement, and the sub-type limit.
 
-**What changes**
+**What changes** *(built 25 September)*
 
 - **The form starts with the kind** ([section 2](#2-kinds-of-leave--annual-maternity-and-the-rest)).
   An *Other* leave type asks for one number — the days a year allowed — plus: paid or not, needs
@@ -737,8 +739,9 @@ does not need a lot of setup complexity".)*
 - **A sub-type counts inside its leave type.** "Malaria" under Sick Leave draws on the sick-leave days;
   its own cap limits it within them. Before, a sub-type's cap replaced the leave type's days, and a
   staff level's allocation stopped applying the moment a sub-type was chosen.
-- **Labels tell the truth.** For example, the eligibility tab will say *"anyone matching **any** rule
-  may take this leave"* — because adding a rule widens who qualifies, it does not narrow it.
+- **Labels tell the truth.** For example, the eligibility tab says *"With no rules, everyone may
+  take this leave. With rules, anyone matching any one of them may."* — because adding a rule widens
+  who qualifies, it does not narrow it.
 - **No more dodging.** Submitting re-checks the notice, the reliever, the sub-type limit and the
   balance, however the request was started. A medical board counts leave that is still waiting for a
   decision, and a request whose dates are moved and get longer needs the certificate the longer leave
@@ -816,8 +819,9 @@ These need TDC's own documents or answers. Until they come, the system runs on t
 
 ---
 
-*Where this comes from: the round 5 plan as decided on 25 September 2026 (its repository copy will be
+*Where this comes from: the round 5 plan as decided on 25 September 2026 (in the repository at
 `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md`), the system as it stood that day, the
 Labour Act 2003 (Act 651) and the Public Services Commission's HR Policy Framework and Manual (2015).
-"Today" describes the system on 25 September 2026; "What changes" describes the plan, not anything
-built. As lanes are built, this document is updated to match.*
+"Today" describes the system on 25 September 2026. "What changes" was the plan; each section now
+says when it was built (25–26 September 2026), and was re-read against the built system on 26
+September.*

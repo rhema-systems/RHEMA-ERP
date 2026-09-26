@@ -358,6 +358,7 @@ public interface ILeaveEncashmentService
         Guid?     leaveTypeId  = null,
         DateTime? from         = null,
         DateTime? to           = null,
-        string?   search       = null);
+        string?   search       = null,
+        LeaveEncashmentStatus? status = null);
     Task<LeaveEncashmentDto>              GetByIdAsync(Guid id);
 }

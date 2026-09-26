@@ -168,7 +168,10 @@ export interface MedicalBoardCase {
   decidedAtSittingId?: string | null;
   /** DateOnly */
   decidedAtSittingDate?: string | null;
-  /** ⚠ Who decided: that sitting's attendance. Empty for a case decided before attendance was recorded. */
+  /**
+   * ⚠ Who decided: that sitting's chair and members present — a secretary or observer present did
+   * not decide. Empty for a case decided before attendance was recorded.
+   */
   decidedBy: string[];
 
   outcome?: MedicalBoardOutcome | null;

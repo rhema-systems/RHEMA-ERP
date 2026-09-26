@@ -92,8 +92,9 @@ public class MedicalBoardCaseDto
     public DateOnly? DecidedAtSittingDate { get; set; }
 
     /// <summary>
-    /// ⚠ Who decided: that sitting's attendance, members removed since included. Empty for a case
-    /// decided before attendance was recorded (lane K-II-a) — the page says so.
+    /// ⚠ Who decided: that sitting's DECIDING attendees — chair and members, removed since included;
+    /// a secretary or observer present did not decide. Empty for a case decided before attendance was
+    /// recorded (lane K-II-a) — the page says so.
     /// </summary>
     public List<string> DecidedBy { get; set; } = new();
 

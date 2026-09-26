@@ -386,7 +386,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         Guid?     leaveTypeId = null,
         DateTime? from        = null,
         DateTime? to          = null,
-        string?   search      = null)
+        string?   search      = null,
+        LeaveEncashmentStatus? status = null)
     {
         var tenantId = GetTenantId();
         var query = _encashmentRepository
@@ -398,6 +399,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
 
         if (employeeId.HasValue)  query = query.Where(e => e.EmployeeId  == employeeId.Value);
         if (leaveTypeId.HasValue) query = query.Where(e => e.LeaveTypeId == leaveTypeId.Value);
+        if (status.HasValue)      query = query.Where(e => e.Status == status.Value);
         if (from.HasValue)        query = query.Where(e => e.ProcessedDate != null && e.ProcessedDate >= from.Value);
         if (to.HasValue)          query = query.Where(e => e.ProcessedDate != null && e.ProcessedDate <= to.Value.AddDays(1));
 

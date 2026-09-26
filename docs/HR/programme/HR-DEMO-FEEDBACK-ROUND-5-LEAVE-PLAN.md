@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J, I, K, L and K-II (0, a, b) done; M next.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-26): DECIDED and BUILT — M0 and lanes E, F, D, A, N, C, G, H, J, I, K, L, K-II (0, a, b) and M done.** Left: the user's browser walks (the walk sheet, W1–W10) and TDC's answers to R5-Q1–Q5 — none blocks. The three flagged deviations (lane D: the supervisor or any unit head above recalls; lane C: owed = built up and not yet taken; lane K: an injury-on-duty board justifies an absence) were **confirmed by the user on 2026-09-26: kept as built**. Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -371,7 +371,7 @@ review (s.17), periodical payment schedules (payroll's).
 - **L3 Defensive, small — it matters only if a client switches in-service on:** encashment holds its days from approval (Approved counts against availability); the guard reads *can take now*; the portal sends the leave-year label; encashment draws only on the current leave year.
 - Not built — A3's fallback if a client enables in-service encashment: days above the statutory 15 only, once those are taken, posted in two steps like awards (recognise at hand-off, settle when paid).
 
-### Lane M — Documentation and answers
+### Lane M — Documentation and answers · DONE 2026-09-26 (§ 8)
 
 - **M0** The repo plan doc (this file) with a status block and the § 8 execution log (the round 4 shape).
 - **M1** The explainer `HR-LEAVE-ROUND-5-WHAT-CHANGES.md` — rewritten to these decisions on 2026-09-25 and updated as lanes land. It doubles as the stakeholders' plain answer to each question in the PDF.
@@ -410,8 +410,29 @@ review (s.17), periodical payment schedules (payroll's).
 
 1. Per lane: the new suite green twice; `dev-harness/hr-leave` slices 1–13 at 515, except the C1 month-end assertions (re-baselined to exact numbers, both positions); neighbours (`hr-medical`, `hr-portal`, `hr-separation`, `hr-finance`) at baseline.
 2. Settings (lane N): every setting kept is asserted in both positions; every setting removed is gone from the DTO, the form and the register.
-3. Browser walks on UAT (plan doc § 5): the plan clash check + roster prefill + approve inside the dialog, **as the line manager arriving from the inbox link**; cancel on the first day, refused the day after; HOD recall; report-and-confirm resumption on time, early and late; the calendar for one employee; the balances annual view and the leave-owed report; casual 7 days → 5 + 2; a board with a physician member and an attachment, dissolved after convening; a leaver's settlement line (annual only).
-4. The guide and the explainer re-read against the live database after the last lane; the findings ledger § 23 corrected, not appended.
+3. Browser walks on UAT (**the walk sheet below** — the draft's "§ 5" never existed in this file): the plan clash check + roster prefill + approve inside the dialog, **as the line manager arriving from the inbox link**; cancel on the first day, refused the day after; HOD recall; report-and-confirm resumption on time, early and late; the calendar for one employee; the balances annual view and the leave-owed report; casual 7 days → 5 + 2; a board with a physician member and an attachment, dissolved after convening; a leaver's settlement line (annual only).
+4. The guide and the explainer re-read against the live database after the last lane; the findings ledger § 23 corrected, not appended. **Done 2026-09-26 (lane M, § 8).**
+
+### The walk sheet — for the user, on UAT (lane M, 2026-09-26)
+
+What a harness cannot prove: that a person can get there, and that the screen says what the server
+does. Each walk names its guide chapter, which scripts it step by step. Personas are the guide's
+(§ 2.2): **`staff`** the subject, **`head.dev`** her manager, **`hr.head`** HR (also a manager),
+**`admin`** for administrator steps. Tick each; note anything the screen says that the chapter does
+not.
+
+| # | Walk | As | Guide | What must be true |
+|---|---|---|---|---|
+| **W1** | A plan submitted with a reliever clash; the manager **opens it from the inbox link** and approves inside the dialog | `staff`, then `head.dev` from *Approvals* | ch. 12 | the roster prefilled the reliever; the clash panel names the clash (not *free*); the link opens the plan; *Approve* only while Submitted |
+| **W2** | Cancel approved leave **on its first day**; try again the day after | `hr.head` | ch. 7 | the first day: cancelled, reason required; the next day: refused, pointing to *Recall* |
+| **W3** | The head of department recalls somebody on leave | `head.dev` | ch. 7 | the recall is offered to the line authority, not only HR; the days after the recall date come back |
+| **W4** | Coming back: on time, early (needs the HOD, days restored) and late (flagged, nothing charged) | `staff`, then `head.dev` | ch. 7, 19 | *I'm back at work* on the portal; *Confirm return* on the desk; the late return reads as overstay days |
+| **W5** | The calendar for one employee, and a unit with everything beneath it | `hr.head` | ch. 9 | the employee filter narrows every scope; a parent unit shows its sub-units |
+| **W6** | Balances: the annual view lists everybody serving; the leave-owed report as at a date | `hr.head` | ch. 13, 13b | people with no record are worked out live (no record created); owed ≠ can take now, and both show |
+| **W7** | Casual leave, 7 days against a 5-day limit | `staff`, approve as `head.dev` then `hr.head` | ch. 7 | the form asks whether the extra 2 go to annual leave; at the final approval the request splits 5 + 2; cancel the first part and both go |
+| **W8** | A board: request it for two employees, a physician and HR as members, a sitting with attendance, one case decided, one withdrawn; a paper about one case | `hr.head` | ch. 7b | *Record the finding* offers the sitting and names who was present; the board reports by itself when the last case closes |
+| **W9** | Incapacity on an injury case: link its SHE incident, assess two injuries, read the indicative figure, record the labour officer's notice | `hr.head` (the Act's schedule is already loaded on UAT; `admin` sees its edit controls) | ch. 7b ⚖ | the running total in the dialog; the working in words, marked indicative; after the notice, *Revise* is gone |
+| **W10** | A medical retirement names its board; a leaver's settlement line | `hr.head` | ch. 7b, separation page | only a decided case recommending retirement can be linked; submit then passes the evidence rule; the settlement's leave line is annual leave only, with its working |
 
 ## 8. Execution log
 
@@ -612,7 +633,8 @@ The API log shows no calendar errors. The two leave types those runs created wer
    above.** B1 treats the two as one; TDC's definitions (finish plan lane 7) separate them
    (`Employees.ManagerId`, `OrganizationUnits.HeadEmployeeId`). So both count, walked upwards as
    discipline resolves head-of-department authority (FR-HR-080). `LeaveService.IsLineAuthorityAsync`
-   holds the rule; if B1 meant the supervisor only, the change is one line.
+   holds the rule; if B1 meant the supervisor only, the change is one line. ✅ **Confirmed by the
+   user 2026-09-26: kept** — supervisor, unit head, or the head of any unit above.
 2. **The line authority can read their people's requests** (a fourth read arm). This is not in the
    plan, but recall and confirmation are unusable without it. It is narrower than giving the Manager
    role `HR.Leave.Read`.
@@ -896,7 +918,8 @@ and slices 3, 7, 10 and 11, which read the rules this lane changed, among them.
    November has not been had on 30 September, so it is owed, and the explainer had already promised
    Finance "built up and not yet taken". Both are shown beside *Owed* (Booked, Awaiting). **For the
    user to confirm.** If the plan's figure was meant, it is the row's Owed − Booked − Awaiting, one
-   line to change.
+   line to change. ✅ **Confirmed by the user 2026-09-26: kept** — owed is built up and not yet
+   taken, and the leaver's settlement, which reuses the working, follows it.
 2. **Adjustments are in owed.** The plan's formula left them out, but opening balances, B7's
    approved deferrals and forfeiture are all adjustments.
 3. **"Unexpired carried" is defined:** in full until the carry-over expiry. From the expiry on, only
@@ -1412,7 +1435,8 @@ reminded at their current rung already.
    *Occupational Injury Leave*'s certificate on arms its board rule at the default 90 days (lane A's
    trap), and then the relevant board is the injury board. Without it HR would have to label an
    injury board *sick leave* to get it accepted — a setting that says something untrue. **Flagged for
-   the user to confirm.**
+   the user to confirm.** ✅ **Confirmed by the user 2026-09-26: kept** — extended sick leave, injury
+   on duty and other justify an absence; fitness for duty and medical retirement do not.
 2. **Dissolve follows *convened*, not *met*.** The explainer said "after it has met"; the plan said
    Convened. A panel exists from convening; the explainer now says so.
 3. **The health profile is filled in, not asked for.** It follows from the examination, or is the
@@ -1840,3 +1864,92 @@ once)** records the incidents; HR's *read* of them (the picker's call) is assert
   judgement, and the 100 % cap, remain.
 - A fresh tenant's schedule is empty until an administrator loads it; the board page says so and
   still takes the panel's own assessment.
+
+### M — The guide and the explainer, re-read against the built system · DONE 2026-09-26
+
+**Done.**
+
+- **Both documents re-read against UAT and the code**, by three read-only reviewers (the guide's
+  chapters 1–7b; 5–13 and the portal; 14–22, the appendices and the explainer; `SELECT` only). **No
+  finding changed a word until it was checked** in the code or in SQL. About **120 corrections to
+  the guide**, in seven batches, and **9 to the explainer**. The findings ledger § 23 was **corrected
+  in place, not appended**: L-21 now reads *posted*, and the L-38…L-48 caveats in chapter 4 read
+  *closed*.
+- **What a presenter would have said wrongly**, the substance of it:
+  - **Recall and Confirm return** are for HR **or the employee's line authority** (lane D). Chapter
+    7's *Behind the page* and Appendix B still said `HR.Leave.Write` outright.
+  - **Your own leave is not in your approvals queue.** Chapter 11 sent the presenter to find it there
+    and press Approve; it now says to point at its absence, then open it from the register.
+  - **Encashment posts to Finance when it is marked paid** (HR finish plan lane 8, the *Finance*
+    column). Chapter 15 said nothing is posted. Approving **holds** the days (L3); the divisor is each
+    leave type's own (L-38); the example is the demo's own row (Efua Seidu, 7,390.00 ÷ 22).
+  - **The balances page opens on the Annual view** (lane J); chapter 13's walk began on the
+    Overview's columns without saying to switch.
+  - **Excuse duty is seeded on for Sick Leave.** § 2.6c, chapter 7b's prerequisite and reset items
+    11 and 18 told the presenter to switch it on and then off again; only the board threshold (90 →
+    10) is the presenter's.
+  - **Arithmetic:** chapter 6's request (a Monday to the Friday of the week after) is ten chargeable
+    days and one weekend, not eight and two; 18 Mar 2026 is a Wednesday; the recall walk keeps seven
+    working days, not four; chapter 14's balance preview did not add up.
+  - **Routes:** `PUT …/{id}/draft`, `POST /api/workflow/entity-summary/batch`,
+    `GET …/mandatory-compliance`, `GET balances/annual` (+export), `GET resumptions-to-confirm`.
+  - **Screens:** the request page's four panels sit *inside* the Overview tab, with the Medical board
+    panel; the Returns to confirm card; the recall field is *The urgent necessity*; the portal shows
+    three leave buttons on TDC (Encashments hidden, lane L1); the year-end badges say *examined /
+    changed / left alone*; six reminder sweeps, not five.
+  - **Headcounts that drift with the harness** (2,377 serving, 691 without a login) now say *about*
+    and carry a dated figure.
+- **Three product defects the re-read found, fixed:**
+  1. ⚠ **A case's *decided by* named the secretary.** `DecidedBy` listed everybody present at the
+     deciding sitting; a secretary or observer is recorded present and does not decide. Now the chair
+     and members only (`Where(a => a.Decides)`). **`run-round5-k2a.mjs` [3] had asserted the wrong
+     list** — the suite checked what the code did, not the rule. It now asserts the rule, and that the
+     sitting still records all three present.
+  2. **The encashment register's Status filter did nothing**: the page always sent `?status=`, and
+     the API had no such parameter. Added (controller, interface, service).
+  3. **The leave-types register buried the nine types in use** under hundreds of retired harness
+     types: **Show retired types (n)**, off by default.
+- **The walk sheet** (W1–W10, under *Verification*) — the browser checks a harness cannot make. The
+  draft's "§ 5" never existed in this file.
+
+**Suites.** `run-round5-k2a.mjs` **170 ×2** (the [3] fix, plus one assertion); `run-round5-k2b.mjs`
+144; **slice 4 59** (+5: [M], the encashment register's Status filter — it asserts first that the year
+holds more than one status, so a single-status year cannot pass on nothing, then that each status
+returns exactly its own rows).
+
+**Neighbours.** Every hr-leave suite, in order, in one pass: **1,860 passing assertions, the only
+failures slice 1's three environmental ones** — slices 1–13 at their recorded counts (slice 1 72/75,
+slice 4 59, slice 8 79); `-e` 119, `-f` 20, `-d` 74, `-a` 89, `-n` 92, `-c` 112, `-g` 55, `-h` 142,
+`-j` 44, `-i` 88, `-k` 144, `-l` 51, `-k2a` 170, `-k2b` 144. ⚠ **It took two attempts, and the first
+found a harness race worth recording:**
+
+- **Lane C [5] plants a last day in the past on `leave.emp` for a few seconds** (a leaver's accrual).
+  The **HR identity reconciliation sweep** (every 5 minutes, since August) switches off the login of
+  anybody whose last day has passed, revokes their sessions, and leaves it off until an HR/identity
+  review reactivates it. On lane M's first pass the sweep landed inside that window: lane C failed
+  from [7] (*Token has been revoked*), and every suite after it died at its first login
+  (*The identity is inactive* → the harness tried to re-create the user → 500). **The product was
+  right** — it did exactly what it should with a leaver's date.
+- **Fixed in the harness:** `leave.emp` reactivated through the review endpoint
+  (`POST /api/administration/hr-identity-reconciliation/users/{id}/reactivate`, as admin, with a
+  note), and lane C [5] now does the same in its `finally` when the sweep has struck, then signs
+  `leave.emp` in afresh. The second pass did not hit the window, so **that guard is written and not
+  yet exercised**. No other leave suite plants a leaver's state on an employee with a login (lanes C
+  [9] and J use the relief fixtures, which have none).
+- ⚠ **`hr-w3-permissions` slice 5** (the only other suite that reads the encashment list) **must not
+  run on UAT, and I ran it anyway**: its setup mints `w3.employee` and links it to the tenant's first
+  employee — on UAT a real TDC staff record (TDC/00040), which had no login. It then died at its
+  second login (its HR fixture was never minted on UAT), having asserted nothing. **Undone once
+  found, about twenty minutes later**: unlinked and the user deleted through the admin endpoints; TDC/00040 has no login again,
+  no `w3.*` user remains, the staff record itself was never written (linking sets only the user's
+  employee id). The change it would have checked adds an optional filter behind the unchanged
+  `HR.Leave.Read` gate.
+
+**Noted, not built.**
+- A presenter's guide on a database the harness writes to will keep drifting: counts carry a date
+  now, but the real fix is the harness retiring what it makes (already noted, above).
+- `hr-medical` and `hr-portal` were read, not run: no hr-medical suite reads `decidedBy`, and
+  hr-portal mints three employees and four users on every run.
+- **Clean-up owed:** the pass left **25 harness leave types switched on** beside TDC's nine (codes
+  `F1…`, `G1…`–`G5…`, `W1…`, `W2…`, all created 2026-09-26 from 21:25). Switching them off, as after
+  every other lane, was refused by my tool permissions this time; it waits on the user.

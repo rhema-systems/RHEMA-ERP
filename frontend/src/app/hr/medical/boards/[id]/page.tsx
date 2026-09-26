@@ -993,7 +993,7 @@ export default function MedicalBoardDetailPage() {
               </Select>
               {decideSitting && (
                 <p className="text-xs text-muted-foreground">
-                  Decided by those present: {presentLine(decideSitting)}.
+                  Present: {presentLine(decideSitting)}. The chair and members among them decide.
                   {decidingCount(decideSitting) === 0 &&
                     ' ⚠ Nobody who decides was recorded there — record the attendance first.'}
                 </p>

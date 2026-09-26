@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Data;
@@ -95,10 +96,13 @@ public class LeaveEncashmentsController : ControllerBase
         [FromQuery] Guid?     leaveTypeId = null,
         [FromQuery] DateTime? from        = null,
         [FromQuery] DateTime? to          = null,
-        [FromQuery] string?   search      = null)
+        [FromQuery] string?   search      = null,
+        // ⚠ The page always sent a status and nothing read it, so its Status filter did nothing
+        // (found in round 5 lane M's re-read of the guide).
+        [FromQuery] LeaveEncashmentStatus? status = null)
     {
         if (year == 0) year = await _leaveYear.CurrentYearAsync();
-        return Ok(await _service.GetAllEncashmentsAsync(year, employeeId, leaveTypeId, from, to, search));
+        return Ok(await _service.GetAllEncashmentsAsync(year, employeeId, leaveTypeId, from, to, search, status));
     }
 
     [HttpGet("{id:guid}")]

@@ -33,9 +33,11 @@ other chapters still describe the module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
-> **53 of the demonstration database's 97 annual leave balances carry the wrong entitlement** —
-> Juniors reading 21 where the rulebook says 15, Managers reading 21 where it says 30. Chapter 13
-> asks you to read that column aloud. Repairing it is five minutes, as admin, and it is now a button.
+> **53 of the demonstration database's 97 annual leave balances used to carry the wrong
+> entitlement** — Juniors reading 21 where the rulebook says 15, Managers reading 21 where it says
+> 30. ✅ **Repaired, and the seed builds them right since 2026-09-18:** on UAT today all 97 match their
+> grade (39 Juniors at 15, 44 Seniors at 21, 14 Managers at 30 — re-checked 2026-09-26). The repair
+> button (chapter 13) is still worth showing — it previews every change before it makes one.
 >
 > The rest of what that build added is explained where it lives: **§1.3b** answers *"how does leave
 > work for somebody who just joined?"*, which this book could not answer before — and, since Wave 3,
@@ -211,7 +213,8 @@ The `HR` role holds `HR.Leave.Read`, `HR.Leave.Write` and `HR.Leave.Approve`. It
 | Balances → the **tenant-wide** recalculation *(new)* | **403** — the per-employee one is theirs |
 
 ⚠ **And one step further out.** The **HR Policy Settings** screen in chapter 4b — which now holds
-the in-service encashment switch, the encashment divisor and the five reminder windows — is
+the in-service encashment switch, the settlement's two numbers, the reminder windows and the
+medical board's settings — is
 **readable by HR and saveable only by an administrator** (`SuperAdmin` / `TenantAdmin`). `hr.head`
 can open it and will get a **403 on Save**. Three of the values on it are trust boundaries, not
 preferences. So chapter 4b, like chapter 17, is performed in **Window C**.
@@ -223,18 +226,18 @@ the point to make — *the system does not offer what it will not allow*. Chapte
 **admin** in a second window for exactly this reason, and you want that window open before you
 start.
 
-### Rule 4 — The newest rules are **switched off** until somebody configures them
+### Rule 4 — The newest rules ship **off**, and the demo has switched on only some of them
 
 This is the rule that will make you think a feature is broken when it is behaving exactly as
 designed. Everything the second build added to the **rulebook** ships **off**, deliberately:
 
 | Feature | State on the demo database | To demonstrate it |
 |---|---|---|
-| **Excuse duty** — a certificate demanded past N days | **off on every leave type** | switch it on for Sick Leave first — § 2.6c |
-| **The medical board threshold** | **blank on every leave type** | same |
-| **Allowances in the encashment rate** | **none linked** | tick them on the leave type — chapter 4 |
-| **In-service encashment** | **ON for this tenant, OFF for a brand-new one** | already works; § 4b explains the difference |
-| **`InProgress`** — leave that is happening now | assigned by a **nightly sweep**, so nothing carries it until one runs | run the sweep by hand — § 2.6b |
+| **Excuse duty** — a certificate demanded past N days | **on for Sick Leave** (3 days on the employee's word) and **Maternity** (0 days); off on the other seven *(UAT, re-checked 2026-09-26)* | already works on Sick Leave — § 2.6c |
+| **The medical board threshold** | **90 days on Sick Leave**; Maternity **blank** on purpose (L-58). The other types store 90, which does nothing while their certificate is off | lower Sick Leave's to 10 for the demo — § 2.6c |
+| **Allowances in the encashment rate** | **linked on Annual (2) and Sick (1)** | chapter 4 |
+| **In-service encashment** | **off**, for this tenant and every new one (round 5 lane L1) — leave is cashed only on exit | § 4b says why; the portal hides its screen |
+| **`InProgress`** — leave that is happening now | assigned by a **nightly sweep**; **four** demo requests carry it today | § 2.6b |
 
 > **Why it ships off, and it is worth saying out loud if anybody asks:**
 >
@@ -242,10 +245,10 @@ designed. Everything the second build added to the **rulebook** ships **off**, d
 > shipped the mechanism and left the policy to the organisation — the numbers you see on the form
 > are starting values, and the screen says so."
 
-⚠ **In-service encashment is the exception, and it is deliberate.** The seeded tenant has it
-**on**, because stakeholders have already been shown that screen and a default that made a
-demonstrated feature vanish would be a worse answer than an inconsistency. A **fresh** tenant starts
-with it off, which is FR-HR-046's reading. Chapter 4b is where that is explained, on screen.
+⚠ **In-service encashment used to be the exception** — the seeded tenant had it on, because the
+screen had been demonstrated. **Round 5 decision A3 switched it off** (Act 651 s.31; FR-HR-046 says
+*only on exit*): the seed line was reversed and UAT switched through HR's own save. Chapter 4b says so
+on screen; TDC's confirmation is R5-Q2.
 
 ---
 
@@ -312,30 +315,34 @@ person sees.
 ### 1.1 The rulebook — nine leave types and four things hanging off each
 
 A **leave type** (`LeaveTypes`) is the top of the tree. The demo database seeds nine: annual,
-sick, casual, maternity, paternity, compassionate, study, unpaid and leave-in-lieu.
+sick, casual, maternity, paternity, compassionate, study, unpaid (*Leave of Absence*) and
+occupational injury.
 
 Each one carries four child collections, all maintained on the tabs in chapter 4:
 
 | Child | Table | What it decides |
 |---|---|---|
-| **Sub-types** | `LeaveSubTypes` | named variants of one type — *Sick → certified / uncertified* — each with its own optional annual cap |
+| **Sub-types** | `LeaveSubTypes` | named variants of one type — on the demo, *Sick → Hospitalisation (30) · Out-patient treatment (7) · Quarantine / notifiable disease (14)* — each with its own optional annual cap, **inside** the type's days |
 | **Allocations** | `LeaveCategoryAllocations` | how many days a **staff level** gets, **effective-dated**, for the whole type |
 | **Eligibility rules** | `LeaveTypeEligibilities` | who may take it at all — by gender, organisation level, organisation unit or position |
 | **Accrual policies** | `LeaveAccrualPolicies` | whether the entitlement arrives all at once or builds up through the year |
 
 ### 1.2 Entitlement — how many days a person actually gets
 
-Three sources, in strict precedence, resolved by `LeaveEntitlementService`:
+Two sources, in strict precedence, resolved by `LeaveEntitlementService`:
 
 ```
-   1. the SUB-TYPE's own cap            (LeaveSubType.MaxDaysAllowed)
+   1. the effective-dated ALLOCATION    (for this employee's staff level, this year)
        ↓ if none
-   2. the effective-dated ALLOCATION    (for this employee's staff level, this year)
-       ↓ if none
-   3. the leave type's DEFAULT          (LeaveType.DefaultDaysPerYear)
+   2. the leave type's DEFAULT          (LeaveType.DefaultDaysPerYear)
 
-   …then clamped to LeaveType.MaxDaysPerYear if one is set.
+   …then, on ANNUAL leave only, clamped to LeaveType.MaxDaysPerYear if one is set.
 ```
+
+⚠ **The sub-type is not a source any more** (round 5 lane N2, § 23 L-44). A sub-type's cap used to
+*replace* the type's entitlement for a request carrying it; now every sub-type draws on the type's one
+pot, and its cap limits that sub-type **inside** the pot, per request. And the ceiling binds on annual
+leave only — on every other kind the days a year *are* the limit (L-39).
 
 ⚠ **That precedence runs once, when the balance row is created, and the answer is then STORED.**
 Nothing re-runs it afterwards. So if an allocation is corrected in March, balances opened in
@@ -427,7 +434,7 @@ Junior grade, hired **1 May**, on the demo configuration:
 
 | | Annual leave | Sick leave | Casual, compassionate, paternity |
 |---|---|---|---|
-| **Day one** | cannot request it. Refused on service until 1 May next year, and **accrues nothing** | **all 12 days**, immediately — full grant, no service bar | **the full entitlement**, immediately |
+| **Day one** | cannot request it. Refused on service until 1 May next year, and **accrues nothing** | **all 12 days**, immediately — full grant, no service bar | compassionate and paternity: **the full entitlement**, immediately. ⚠ **Casual** needs **3 months'** service first (`MinServiceMonthsToAccess`) |
 | **Month 6** | still nothing | unchanged | unchanged |
 | **1 May, year two** | the gate opens and accrual starts | | |
 | **31 December, year two** | **10 days accrued** of 15 — eight completed months at 1.25 ⚠ *true since round 5 lane C; before it the engine said 8.75, because December was never credited inside its own year* | | |
@@ -563,7 +570,8 @@ you which one fired:
 
 The roster fill skips anyone who would fail the last two.
 
-**Three checks were added by the closure build**, and they fire before the eight above:
+**Three checks were added by the closure build.** The two *retired* checks fire before the eight
+above; the sub-type's cap runs after the balance check (it limits days inside the type's pot):
 
 | Check | Refusal |
 |---|---|
@@ -589,7 +597,7 @@ Pending requests as well as the approved ones *(lane N, § 23 L-47)*:
 | Check | Fires when | Refusal |
 |---|---|---|
 | **Excuse duty** | the absence is longer than the type's **self-certification days** and no document of kind *Excuse duty* is attached | *This is 5 day(s) of Sick Leave, and anything longer than 3 day(s) needs excuse duty — a medical certificate — attached before it can be submitted.* — or *moved to those dates*, for a move |
-| **Medical board** | **cumulative days of this leave type in the year** pass the type's board threshold, and neither a concluded board is linked nor a board recommendation attached | *This would take Sick Leave to 12 day(s) in 2026, past the 10-day point at which a medical board must sit. Link a concluded medical board, or attach its recommendation, before submitting.* |
+| **Medical board** | **cumulative days of this leave type in the leave year** pass the type's board threshold, and neither a linked board has **decided this employee's case, about an absence, in this leave year** (lanes K6, K-II-a) nor a board recommendation is attached | *This would take Sick Leave to 12 day(s) in 2026, past the 10-day point at which a medical board must sit. Link a medical board that has reported on the absence during this leave year, or attach its recommendation, before it can be submitted.* — plus one sentence saying why a linked board does not count (chapter 7b) |
 
 > ⚠ **The board rule counts the year, not the request**, for the same reason the sub-type cap does:
 > a per-request threshold is defeated by splitting one absence into two, which is exactly what
@@ -641,7 +649,7 @@ marked on the attendance register can never disagree with the number of days the
 | `CarriedOverDays` | the year-end carry-over run |
 | `UsedDays` | requests that **count as taken** — Approved, **In progress** or Completed |
 | `PendingDays` | submitted-but-undecided requests — **Pending only** |
-| `EncashedDays` | encashments at status *Processed* |
+| `EncashedDays` | encashments at status *Approved* or *Processed* — held from approval, not only once paid (round 5 lane L3) |
 | `AdjustmentDays` | the signed sum of manual adjustments |
 
 > ⚠ **`UsedDays` changed in the second build, and it fixed a live bug worth knowing about.** It used
@@ -658,7 +666,8 @@ marked on the attendance register can never disagree with the number of days the
 id. Everything else is re-derived from source rows by `LeaveBalanceRecalculationService` after
 every write.
 
-> ⚠ **`LeaveBalance` has no sub-type column.** All of Sick's sub-types share one pot. That is a
+> ⚠ **`LeaveBalance` keeps one pot per type.** It has a `LeaveSubTypeId` column, but nothing writes
+> it (0 of 725 rows on UAT, 2026-09-26). All of Sick's sub-types share one pot. That is a
 > deliberate decision (closure plan D-2) and it is why the sub-type cap is enforced as a query at
 > request time rather than as a second balance row. Every *"why doesn't the sub-type cap stick"*
 > question traces back to this one line.
@@ -726,15 +735,15 @@ This is the part that changed most, and it is the best thing in the module to de
 |---|---|
 | **Attendance** | approving leave writes `StaffDailyAttendance` rows at status **On Leave**, one per chargeable day, each carrying the request id. `DaysOnLeave` on the monthly summary — **which the payroll export reads** — is derived from those rows |
 | **Medical** | a medical expense claim can name the sick leave it arose from — **and a leave request can rest on a medical board's finding** (chapter 7b), which leave *reads* and never writes |
-| **Notifications** | the nightly reminder engine raises five kinds of leave chase into the in-app feed |
-| **Finance** | nothing is posted. The encashment payout is **recorded as a money event** in the integration backlog and waits for one Finance sweep |
+| **Notifications** | the nightly reminder engine sends leave reminders **in the app and by email**, each to whoever can act on it — the employee, the approver, the line manager, HR (round 5 lane I; chapter 18) |
+| **Finance** | an encashment **posts** when it is marked paid, through the HR→Finance posting adapter in the same transaction. The leaver's leave line travels with the settlement, which Finance confirms |
 | **Payroll** | nothing is written. Unpaid leave produces no deduction; that is payroll's to apply and is handed off |
 
 ### 1.10 The twelfth reminder engine
 
-HR has eleven date-watching sweeps — assets, certifications, discipline, ID expiry, probation,
-separation, SHE, movements, travel, teams, attendance. Leave, the module with more dates that
-matter than any of them, had none. It now has one. Chapter 18.
+HR has more than a dozen date-watching sweeps — assets, certifications, discipline, ID expiry,
+probation, separation, SHE, movements, travel, teams, recruitment, orientation, the company schedule.
+Leave, the module with more dates that matter than any of them, had none. It now has one. Chapter 18.
 
 > ⚠ **It warns and moves nothing.** Carry-over and forfeiture still belong to the year-end runs in
 > chapter 17, which are deliberately **not** scheduled, because those two acts change people's
@@ -755,7 +764,7 @@ answers most configuration questions on the spot:
 
 | Level | Holds | Screen |
 |---|---|---|
-| **The tenant** — `CompanyHrPolicySettings` | **when the leave year begins**, in-service encashment on or off, the encashment divisor, the five reminder windows, the settlement divisor | **chapter 4b**, admin only |
+| **The tenant** — `CompanyHrPolicySettings` | **when the leave year begins**, in-service encashment on or off (off), the settlement's days per year and leave cap, the reminder windows, the medical board's quorum and compensation figures | **chapter 4b**, admin only |
 | **The leave type** — `LeaveTypes` | days a year, notice, carry-over, weekends and holidays, the encashment rate and its allowances, **excuse duty and the board threshold** | chapter 4 |
 | **The sub-type and the allocation** | the annual cap for one variant; days per staff level, effective-dated | chapter 4's tabs |
 
@@ -770,9 +779,10 @@ answers most configuration questions on the spot:
 a switch actually does anything:**
 [`../HR-CONFIGURATION-REGISTER.md`](../../programme/HR-CONFIGURATION-REGISTER.md) records every assumed value in
 HR, its default, and — the only column that matters — whether it is **Enforced**, **Advisory**,
-**Client-side**, a **Ghost** — or **Unreachable**, a status leave's own child tables added. All
-**47** tenant settings, all **28** on the leave type, and all **38** on its four child tables
-(sub-types, allocations, eligibility, accrual) are surveyed in it. §4.4 of this book is the leave-shaped view of the same question.
+**Client-side**, a **Ghost** — or **Unreachable**, a status leave's own child tables added. The
+tenant settings, the leave type's and its four child tables' (sub-types, allocations, eligibility,
+accrual) are surveyed in it — the settings record has grown to 58 fields and the leave type to 30
+since the survey's first count, each addition with its own row. §4.4 of this book is the leave-shaped view of the same question.
 
 ---
 ## 2. Before the room fills — the prep
@@ -833,9 +843,9 @@ Now open `/me/leave` in the portal window as her. It shows the same figures. Goo
 agree, and they agree *because they call the same server-side definition*, which is worth saying if
 anybody asks how you know.
 
-⚠ **Expect Available to look generous — roughly double the entitlement.** The demo seeder loaded
-each person's opening balance as an **adjustment** of +21 days on top of the leave type's 21-day
-default. That is not a fault and it is not worth hiding: it is exactly how you load balances from a
+⚠ **Expect Available to look generous — up to more than double the entitlement.** The demo seeder
+loaded each person's opening balance as an **adjustment** of +21 days on top of an entitlement that
+already grants the year — 15, 21 or 30 days by staff level (the leave type's own default is 21). That is not a fault and it is not worth hiding: it is exactly how you load balances from a
 legacy system on go-live day, and chapter 14 makes a virtue of it.
 
 ⚠ **And expect *Can take now* to be lower than *Available*.** That is §1.4, it is correct, and it
@@ -943,9 +953,11 @@ is future-dated — leave cannot be raised in the past, and the seeder respects 
 rule — so on the day you rebuild there is nothing in progress to advance. Verified on the 2026-09-18
 rebuild: twelve requests, the earliest starting three days out, `{"advanced":0}`.
 
-**So demonstrate recall against an *Approved* request**, which is allowed and very nearly as good a
-story — the dialog, the orange panel and the days returned are identical. The demo database has
-**four** approved requests to choose from.
+**On UAT today (re-checked 2026-09-26) the sweep has already run:** the **four** seeded demo
+requests that started on 21–23 September are **In progress**, and none is merely Approved — so recall
+can be shown against leave somebody is actually on. On a freshly rebuilt database, demonstrate it
+against an *Approved* request instead: allowed, and very nearly as good a story — the dialog, the
+orange panel and the days returned are identical.
 
 **If you want the stronger version** — calling somebody back from leave they are actually on — raise
 a request that starts today and ends next week, approve it twice, then run the sweep again. That is
@@ -953,11 +965,12 @@ five minutes and it is the only way to get an *In progress* record on a fresh da
 
 ### 2.6c **Required if you are demonstrating excuse duty or the board** — switch it on
 
-Per rule 4 nothing in the demo database requires medical evidence. Five minutes, as `hr.head`:
+**Excuse duty is already on for Sick Leave** (rule 4: 3 days on the employee's word, a board at 90
+days). Only the board threshold needs lowering, so a demo can cross it. Two minutes, as `hr.head`:
 
 1. `/administration/hr/leave-types` → **Sick Leave** → **✏ Edit**.
-2. **Medical evidence** → switch on **Requires excuse duty (a medical certificate)**.
-3. **Self-certification days**: `3`. **Medical board threshold (days per year)**: `10`.
+2. **Medical evidence** → leave **Requires excuse duty** on and **Self-certification days** at `3`.
+3. **Medical board threshold (days per year)**: `10` (from 90).
    ⚠ Ten is chosen so a demo can actually cross it. The form's own defaults are 3 and 90, and they
    are stated on screen as starting values, which is the honest thing to say about them.
 4. **Save.** Read the sentence the form writes back to you before you leave — it explains the two
@@ -999,9 +1012,9 @@ Leave types (Administration → Leave Types)        : ____________
 Requests for the anchor this year                 : ____________
 Rows on /hr/leave/register with no filter         : ____________
 Rows on /hr/leave/balances with no filter         : ____________
-Encashments (should be 1, Processed)              : ____________
+Encashments (the demo's own: 1, Processed)        : ____________
 Compliance rows outstanding                       : ____________
-Encashment divisor / settlement divisor (ch. 4b)  : ______ / ______
+Settlement days per year / leave cap (ch. 4b)     : ______ / ______
 Leave advanced to In progress by 2.6b             : ____________
 Annual Leave: entitled / accrued / can take now   : ______ / ______ / ______
 People away in the current month (calendar)       : ____________
@@ -1100,7 +1113,7 @@ Every card is a link; the whole card is the click target.
 
 ### 📍 Where you are
 
-**Sidebar:** Administration → **HR** → **Leave Types** · `/administration/hr/leave-types` · as
+**Sidebar:** Administration → **HR** → **Time, Attendance & Leave** → **Leave Types** · `/administration/hr/leave-types` · as
 **hr.head** · **8 minutes**
 
 ### 📖 What it is
@@ -1185,17 +1198,19 @@ before it could happen.
 
 ### 👁 On the page — the register
 
-**Header.** Title *Leave Types*, subtitle *Kinds of leave, their entitlement and their rules.*
-One button: **+ New Leave Type**.
+**Header.** Title *Leave Types*, subtitle *Entitlement, carry-over and encashment rules for each
+kind of leave.* One button: **+ New Leave Type**.
 
-**Search box.** Filters by name, client-side.
+**Search box.** Filters by name or code, client-side. **Show retired types (n)** — off by default
+*(round 5 lane M)*: a retired type stays on every request made against it, so retired types
+accumulate, and on UAT hundreds of them (the verification harness's) used to bury the nine in use.
 
 | Column | Shows |
 |---|---|
-| **Name** | the type's name, with its code underneath |
-| **Days / year** | `DefaultDaysPerYear` |
-| **Carry over** | *Yes* + the cap, or *No* |
-| **Paid** | *Yes* / *No* |
+| **Name** | the type's name |
+| **Code** | its code |
+| **Default days** | `DefaultDaysPerYear` |
+| **Rules** | badges — *Unpaid*, *Approval*, *Carry-over*, *Encashable*, and the kind (*Annual*, *Maternity*) |
 | **Status** | Active / Inactive badge |
 | *(unlabelled)* | **⏻ Retire**, on active rows only |
 
@@ -1224,7 +1239,8 @@ carry-over and forfeiture policy, and the encashment rate settings.
 | Encashment | **Allowance components** | a badge — *2 linked* — or blank when the rate is basic alone |
 
 The other four tabs are editable child collections, all the same shape — a table, an **Add**
-button, and a row menu with **Edit** and **Remove**:
+button, and a row menu with **Edit** and **Remove** (⚠ Eligibility has **Remove** only — there is no
+update endpoint for a rule, so a wrong one is removed and added again):
 
 | Tab | Rows are | The field that matters most |
 |---|---|---|
@@ -1233,7 +1249,7 @@ button, and a row menu with **Edit** and **Remove**:
 | **Eligibility** | who may take it | ⚠ **Any** rule that matches admits the employee — rules are OR'd, so each rule added *widens* eligibility, and the tab now says so. A unit, level or position rule may carry **And only this gender**, which narrows that rule alone *(lane N, § 23 L-43)* |
 | **Accrual** | how entitlement builds | **Frequency**, **Mode**, the two pro-rate switches, and **Rate** — where **0 means *derive it from each employee's entitlement***. ⚠ **One policy in force per leave type**, enforced — see below. An **In force** switch turns a policy off without deleting it, and the rule follows the switch *(lane N, § 23 L-40)*. *Once a year* is not offered with incremental accrual: it would credit the year on its last day |
 
-⚠ **Remove is `HR.Leave.Admin` on all four tabs and is hidden from `hr.head`.** Add and Edit are
+⚠ **Remove is `HR.Leave.Admin` on all four tabs and is hidden from `hr.head`.** Add and (where there is one) Edit are
 `HR.Leave.Write` and are available. So an HR officer can add and correct configuration but cannot
 destroy it — which is the right split and is worth one sentence if the room asks.
 
@@ -1325,11 +1341,14 @@ value, marked *(retired — accrues monthly)*, and stays editable.
 
 > "Nine kinds of leave. Each one is a small rulebook of its own."
 
+*(With **Show retired types** off — its default — the register shows the nine in use.)*
+
 **2 — Open Annual Leave and read the Overview aloud, slowly.**
 
-> "Twenty-one days a year. Carries over, capped at five, and the carried days expire at the end of
-> March. Weekends don't count against it, public holidays don't count against it, and it can be
-> converted to cash."
+> "Twenty-one days a year by default — and by staff level, 15, 21 or 30: the allocations tab decides.
+> Carries over, capped at five, and the carried days expire at the end of March. Weekends don't count
+> against it, public holidays don't count against it. And it is cashed in only when somebody leaves —
+> in service, that switch is off."
 
 **3 — Click Accrual and make the point that decides most arguments.**
 
@@ -1389,10 +1408,10 @@ of leave is worth in cash. §4.4.6 lists those, and chapter 4b is the screen the
 
 | Setting | What it does now |
 |---|---|
-| **Sub-type → Max days** | enforced as an **annual cap per employee per sub-type**, checked when a request is raised and when its dates move. ⚠ It is *not* a separate balance — see §1.7. ⚠ *(2026-09-25)* **skipped when a draft is edited**, and for a request carrying the sub-type it **replaces the type's whole entitlement** in the booking check (L-44) |
-| **Sub-type → Active** | retired sub-types are filtered out of the request forms' picker **and refused by the service**, so the API door is shut too. ⚠ *(2026-09-25)* not on every door: creating a sub-type ignores it, and editing a draft validates no sub-type at all (L-44) |
+| **Sub-type → Max days** | enforced as an **annual cap per employee per sub-type**, checked when a request is raised and when its dates move. ⚠ It is *not* a separate balance — see §1.7. ✅ *(closed 2026-09-25, lane N — L-44)* a draft's edit checks it too, and it limits the sub-type **inside** the type's pot rather than replacing the type's entitlement |
+| **Sub-type → Active** | retired sub-types are filtered out of the request forms' picker **and refused by the service**, so the API door is shut too. ✅ *(closed 2026-09-25, lane N — L-44)* on every door: creating a sub-type honours it, and editing a draft validates the sub-type |
 | **Leave type → Active** | the **service** now refuses a retired type, not just the picker. Moving a draft onto a retired type is refused as well |
-| **Accrual → Pro-rate on exit** | a leaver stops accruing on their last day. ⚠ Incremental accrual only — see §1.3. ⚠ *(2026-09-25)* **no payout reads it** — the leaver's settlement uses the stored whole-year figure (L-46) |
+| **Accrual → Pro-rate on exit** | a leaver stops accruing on their last day. ⚠ Incremental accrual only — see §1.3. ✅ *(closed 2026-09-26, lane L — L-46)* the leaver's settlement reads it: the line's build-up stops at the last day when it is on |
 | **Accrual → Pro-rate on join** *(2026-09-18)* | ⚠ **It was read on every accrual calculation and could not change the answer**, because its condition could never be true. ON is what always happened; **OFF is new** and accrues on the company's leave year instead. §1.3 |
 | **Leave type → Carry-over and forfeiture count** *(2026-09-18)* | both year-end runs read it. *Granted* is the behaviour that predates it; *Earned* substitutes accrued-to-date through the same definition the create check uses |
 | **Leave type → Pro-rate the first year** *(2026-09-18)* | scales a joiner's first-year entitlement, and is **refused** alongside incremental accrual rather than ignored |
@@ -1464,7 +1483,8 @@ soft delete does not release a unique index"*.
 
 ### 4.4.5 What is not a ghost — checked and working
 
-⚠ **Corrected 2026-09-25 — not all of these are fully honoured.** A full audit that read each
+⚠ **Corrected 2026-09-25 — not all of these were fully honoured; ✅ by 2026-09-26 round 5 had
+closed every one (§ 23, L-38 to L-48, all closed).** A full audit that read each
 consumer, rather than counting references, found: *minimum notice* and *requires a reliever* are
 skipped by save-as-draft-then-submit; *carry-over expiry* also removes carried days already used;
 *forfeit unused after* affects no leave-taking; *mandatory annual leave* only fed the compliance
@@ -1491,12 +1511,12 @@ which for a product with more than one client is the same problem wearing differ
 
 | Was | Is now | Where |
 |---|---|---|
-| `DefaultWorkingDaysPerMonth = 22`, a private constant in the pay service | **Encashment — working days per month** | chapter 4b |
+| `DefaultWorkingDaysPerMonth = 22`, a private constant in the pay service | each leave type's own **working days per month** (default 22) — the tenant field left chapter 4b in round 5 lane N1, because the type's figure always won (L-38) | chapter 4 |
 | FR-HR-046 and the shipped code disagreeing about whether leave may be encashed in service, **both live at once** | **a tenant switch**, defaulting to the conservative reading | chapter 4b |
-| 7 days before a leave starts | **Announce approved leave this many days ahead** | chapter 4b |
+| 7 days before a leave starts | **Ask the employee about approved leave this many days ahead** | chapter 4b |
 | 2 days' grace before chasing unclosed leave | **Grace before chasing unclosed leave** | chapter 4b |
 | 5 days for an undecided request | **Chase an undecided request after this many days** | chapter 4b |
-| month 9 for mandatory leave | **Start chasing outstanding mandatory leave from month** | chapter 4b |
+| month 9 for mandatory leave | **Start chasing annual leave not yet planned or taken from month of the leave year** | chapter 4b |
 | 30 days before carry-over lapses | **Warn this many days before carry-over expires** | chapter 4b |
 | 3 days' self-certification and a 90-day board threshold | **on the leave type**, because they are rules about a *kind of leave* | this chapter |
 
@@ -1518,7 +1538,7 @@ difference, and were held back until there was one.
 
 ### 📍 Where you are
 
-**Sidebar:** Administration → **HR** → **Settings** → **Policy Settings** ·
+**Sidebar:** Administration → **HR** → **HR Settings** → **Policy Settings** ·
 `/administration/hr/settings/policy` · **as admin, in Window C** · **6 minutes**
 
 ⚠ **`hr.head` can open this screen and cannot save it.** Read is HR's; write is
@@ -1530,7 +1550,7 @@ thing to show deliberately and a bad thing to meet by accident.
 
 One record per company, holding the numbers that are true of the **organisation** rather than of any
 one kind of leave. It is not a leave screen — retirement ages, probation and notice defaults,
-recruitment budget enforcement and succession weights live here too, and eleven services read it.
+recruitment budget enforcement and succession weights live here too, and some thirty services read it.
 Three of its cards belong to leave, and they are the reason this chapter exists.
 
 > **Say this:**
@@ -1544,7 +1564,9 @@ Three of its cards belong to leave, and they are the reason this chapter exists.
 
 **1 — Leave — the leave year → *Leave year starts*.** Default **January**.
 
-This one comes first because the other leave settings are measured from it. A leave year is
+Read this one first because the other leave settings are measured from it — on the page it sits
+after *Leave — encashment* (the order is: … Disciplinary & settlement clocks · **Medical boards** ·
+Leave — encashment · **Leave — the leave year** · Leave — reminder cadence). A leave year is
 **named after the calendar year it starts in** — with an April start, March 2028 belongs to leave
 year 2027 — and entitlement, carry-over expiry and the forfeiture cut-off all count from this month.
 *(Round 5, lane C4, 2026-09-25.)* The two readers that did not follow it now do: first-year
@@ -1614,7 +1636,7 @@ value is in force on the next reminder run, the next payout and the next confirm
 
 ### ▶ Walk it
 
-**1 — Start at the top card, *Leave — the leave year*.**
+**1 — Scroll to *Leave — the leave year* (after *Leave — encashment*) and start there.**
 
 > "Before anything else on this screen: when does your leave year begin? For most of our clients
 > that is January, and that is what this database has. For a client whose leave year runs April to
@@ -1678,7 +1700,9 @@ tenant that has never opened this screen still behaves predictably.
 ⚠ **Two things about the migration that created these columns are worth knowing if you ever meet a
 tenant behaving oddly.** The scaffold wrote `DEFAULT 0` for all six integer columns and repaired
 only the seeded row — so on a migrated database every *other* tenant would have taken a **zero
-divisor** and a reminder engine chasing from *"month 0"*. Every column carries its real default now.
+divisor** and a reminder engine chasing from *"month 0"*. The migration now writes every column's
+real default onto existing rows (a model-built database such as UAT has the values but no default
+constraints — the entity's own defaults supply new rows).
 And the statement that turns in-service encashment on for the demo tenant originally skipped any row
 that looked edited — which silently did nothing on the one database it was written for, leaving that
 screen dark. Both are fixed; both are recorded because they are the shape of failure this kind of
@@ -1711,7 +1735,7 @@ workflow.* One button: **+ New Request**.
 |---|---|---|
 | **Employee** | an employee picker | **type at least 2 characters**; debounced 400 ms; searches **active employees only**. Resets to page 1 |
 | **Year** | next year · this year · last year · the year before | resets to page 1 |
-| **Status** | All · Draft · Pending · **Changes suggested** · Approved · Rejected · Cancelled · In progress · Completed | **server-side** — the count and the paging agree with it |
+| **Status** | All statuses · Draft · Pending · Approved · Rejected · Cancelled · In progress · Completed · **Changes suggested** *(last)* | **server-side** — the count and the paging agree with it |
 
 ⚠ **The status filter used to be client-side**, filtering the page you already had while showing
 the unfiltered total beside it. It now goes into the query, so "show me the rejected ones" means
@@ -1747,7 +1771,9 @@ to — somebody else's leave, presented as if it were theirs.
 
 **2 — Pick your anchor. Read the rows.**
 
-**3 — Set Status to *Approved*, then back to *All statuses*.** Point at the count.
+**3 — Set Status to *Approved*, then back to *All statuses*.** Point at the count — under the
+table, *Page 1 of N · M requests*. ⚠ **It shows only when there is more than one page of 20**, so
+pick an employee with a long history for this step, or there is no count to point at.
 
 > "The count changes with the filter. That sounds obvious, and it is worth saying only because the
 > alternative — filtering what is on your screen while telling you the total for everything — is a
@@ -1763,7 +1789,7 @@ to — somebody else's leave, presented as if it were theirs.
 | Control | Call | Gate |
 |---|---|---|
 | The list | `GET /api/Leaves/employee/{id}/history?year=&status=&pageNumber=&pageSize=` | self-or-`HR.Leave.Read` |
-| Awaiting | `GET /api/Workflow/entity-summary` *(batched)* | *(internal)* |
+| Awaiting | `POST /api/workflow/entity-summary/batch` | *(internal)* |
 
 ---
 
@@ -1814,7 +1840,10 @@ requires excuse duty **and** the dates you have picked exceed its self-certifica
 > the certificate on the request, then submit it.
 
 ⚠ **It is computed live from the leave type and the dates**, and it names the route rather than just
-the rule. This is the answer to a finding recorded as *"no attachment can be added while raising a
+the rule. ⚠ *(Checked 2026-09-26.)* **The panel counts calendar days; the refusal at submit counts
+the request's chargeable days.** On a type that does not charge weekends or holidays the two can
+differ, and the panel may warn where submitting would succeed. The server's count is the one that
+binds. This is the answer to a finding recorded as *"no attachment can be added while raising a
 request"* — which turned out not to be the real complaint. There is nothing to attach a file **to**
 until the record exists, and both forms have always carried **Save as draft**; what was actually
 wrong was that somebody filled the whole form, pressed Submit, and was told *then* to go and get a
@@ -1866,10 +1895,13 @@ can be taken now"*. The tick clears itself when the dates or the type change so 
 
 > "I did not fill these in. The employee has a **reliever roster** on her record — who covers for
 > her, in order — and the form has read it, put priority one in the first slot and priority two in
-> the second, and checked that neither of them is away over these dates.
+> the second.
 >
 > And it tells me it did it. A form that fills a field without saying so is a form that has started
 > lying to the person using it."
+
+⚠ **The form does not check whether a reliever is away over these dates — the server does, when
+the request is saved**, and refuses a reliever who is on leave then. Do not say the form checked it.
 
 **7 — Type a handover note.** `Month-end reconciliation pack is in the shared drive; Kofi has the
 key to the cabinet.`
@@ -1943,29 +1975,34 @@ approved request, and records that leave is still going ahead.
 | **Recall** *(workflow)* | there is a live instance and you raised it | withdraws it to Draft |
 | **📞 Recall** *(from leave — new)* | **Approved** or **In progress**, not closed, and you hold `HR.Leave.Write` **or are the employee's line manager** *(round 5)*: their supervisor, or the head of their unit or of any unit above it | calls the employee back and gives the remaining days back |
 | **✓✓ Confirm return** *(was Close, round 5)* | **Approved** or **In progress**, the return reported or the leave ended, and you are HR or the line manager | closes the leave on the day the employee was back: early cuts it short and returns the days, late records the working days overstayed |
+| **⊘ Cancel** *(red)* | Draft, Pending or Changes suggested (the employee or HR); **Approved or In progress up to and including the first day, HR only, with a reason** *(round 5)* | withdraws it, releases the days, and takes a pending request out of its approver's queue |
 
 ⚠ **Two different things are called Recall, and you should know which is which before a room asks.**
 The workflow one **withdraws a request you raised** from an approval it has not yet cleared, back to
 Draft. The leave one **calls a person back from leave already granted**. They never appear together
 — the first needs a live approval instance, the second needs an approval that has finished — but the
 word is the same and the second is the one this chapter walks.
-| **⊘ Cancel** *(red)* | Draft, Pending or Changes suggested (the employee or HR); **Approved or In progress up to and including the first day, HR only, with a reason** *(round 5)* | withdraws it, releases the days, and takes a pending request out of its approver's queue |
 
 *(Round 5, lane D.)* **Which of Cancel, Recall and Confirm return appear is decided by the server**
 for the person looking (`viewerActions` on the read). Two of the rules turn on facts this page cannot
 know: who you are to the employee, and today's date against the first day. The endpoints enforce the
 same rules on their own.
 
-**Two panels above the tabs, each appearing only when it applies:**
+**Inside the *Overview* tab, above the cards: four panels, each appearing only when it applies,
+then the Medical board panel:**
 
 - **Sent back with different dates** *(blue)* — what was asked for, what was suggested, and the
   approver's note.
 - **Moved N times** *(grey)* — what it was originally approved for, what it says now, why it moved,
   and who moved it last.
-- **📞 Recalled from leave** *(orange — new)* — *Approved to 20 Mar, but expected back on 16 Mar —
-  so the leave now ends 15 Mar. **3 days** went back to the balance.* Then the recall reason, then
+- **📞 Recalled from leave** *(orange — new)* — *Approved to 20 Mar, but expected back on 18 Mar —
+  so the leave now ends 17 Mar. **3 days** went back to the balance.* Then the recall reason, then
   who recorded it and when, then the line that stops the record being misread:
   *The approval stands — this leave was granted and then interrupted.*
+- **Split absence** *(round 5, lane H)* — on a request split at approval: how many days went to
+  annual leave, and to which request; on that second request, the request it continues.
+- **Medical board** — only on a leave type that names a board or has a board threshold: link,
+  change or unlink the board this absence rests on (chapter 7b).
 
 ⚠ **Without that panel a recall is invisible**: the end date simply looks earlier, and the record
 reads as though the leave was always that short. Everything else on this screen is a fact about what
@@ -2017,11 +2054,11 @@ photograph with equal probability. Typing the document is what makes the rule en
 and the table below the uploader shows each attachment's **Kind** so a reader can see what the rule
 saw.
 
-**Overview** — three cards and a conditional fourth:
+**Overview** — three cards, then two that appear only when they apply:
 
 | Card | Rows |
 |---|---|
-| **Leave** | Leave type · Sub-type · Paid · Start · End · Total days · Requested on · **From a plan** *(now the plan's own reference, not just Yes/No)* · **Still going ahead** · **Attendance days marked** |
+| **Leave** | Leave type · Sub-type · Paid · Start date · End date · Total days · Requested on · **From a plan** *(now the plan's own reference, not just Yes/No)* · **Still going ahead** · **Attendance days marked** |
 | **Employee & cover** | Employee *(name and staff number)* · Reliever · Second reliever |
 | **Reason & notes** | Reason · Handover notes · Reliever notes |
 | **Back at work** *(granted leave; round 5)* | Due back *(the first working day after the leave)* · Back on *(and who reported it)* · Timing *(early, on time, or late with the working days overstayed)* · Confirmed by |
@@ -2032,7 +2069,7 @@ chargeable day reached the attendance register. When N is smaller, some of those
 carried a real attendance observation — a punch, or a clerk's note — and leave did not overwrite
 it. **Those days will not reach the payroll export as leave.**
 
-### 7.6 The conversation — the six things that can happen to a submitted request
+### 7.6 The conversation — the eight things that can happen to a submitted request
 
 Worth reading once before you perform chapter 7, because the buttons only make sense together.
 
@@ -2084,7 +2121,7 @@ the first place.
 
 **1 — You are on the request you just raised. Status *Pending*. Read the Leave card.**
 
-> "Twelve calendar days became eight chargeable days. Two weekends came out. If there had been a
+> "Twelve calendar days became ten chargeable days. One weekend came out. If there had been a
 > public holiday in there, that would have come out too — and if that holiday were marked
 > *optional*, it would have stayed in, because the office is open."
 
@@ -2129,8 +2166,8 @@ Leave it on **Accept their dates** and press **Accept and resubmit**.
 
 **7 — Read *Attendance days marked*.**
 
-> "Eight of eight. This is the part that matters most and is the hardest to see. Approving leave
-> didn't just change a status on a leave record — it wrote eight days onto her **attendance**
+> "Ten of ten. This is the part that matters most and is the hardest to see. Approving leave
+> didn't just change a status on a leave record — it wrote ten days onto her **attendance**
 > record, marked *On Leave*, each one pointing back at this request.
 >
 > Why does that matter? Because the monthly attendance summary counts those days, and the
@@ -2164,7 +2201,7 @@ original dates.
 against leave somebody is actually on. An approved future request works identically.
 
 In the dialog: **First day back at work** — pick a date inside the leave, a couple of days before it
-ends. **Why they are being recalled** — `Plant shutdown brought forward; her sign-off is needed on
+ends. **The urgent necessity** — `Plant shutdown brought forward; her sign-off is needed on
 the isolation certificates.`
 
 Read the dialog's own sentence to the room before you confirm:
@@ -2174,12 +2211,12 @@ Read the dialog's own sentence to the room before you confirm:
 
 Press **Recall**.
 
-> "She was on leave. The plant shutdown moved and we need her back on Thursday.
+> "She was on leave. The plant shutdown moved and we need her back on Wednesday.
 >
 > Every system I have seen handles this by cancelling her leave and typing a shorter one. And that
 > is wrong in a way that matters later: the number is gone, the approval is gone, and the record now
 > says she never validly had that leave at all. What actually happened is that she *was* granted it,
-> she *did* take four days of it, and we interrupted the rest.
+> she *did* take seven working days of it, and we interrupted the rest.
 >
 > So: same request, same number, same approval — **and the approval deliberately does not re-open**,
 > because nobody is being asked to authorise anything they have not already seen. The days she took
@@ -2227,10 +2264,10 @@ any screen** — chapter 21 item 13.
 | Answer | `PUT /api/Leaves/{id}/respond-suggestion` | self-or-`HR.Leave.Write` |
 | Move dates | `PUT /api/Leaves/{id}/reschedule` | self-or-`HR.Leave.Write` |
 | Still going | `PUT /api/Leaves/{id}/confirm-observance` | self-or-`HR.Leave.Write` |
-| **Recall** | `PUT /api/Leaves/{id}/recall` | **`HR.Leave.Write` outright** — not self-or-HR, and the subject is refused again inside the service |
+| **Recall** | `PUT /api/Leaves/{id}/recall` | **`HR.Leave.Write` or the employee's line authority** *(round 5, lane D)* — their supervisor, or the head of their unit or of any unit above it. Never self: the subject is refused inside the service |
 | **Link a medical board** | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write`. **The Medical board panel on the request overview** — link, change, unlink. See chapter 7b |
 | Attachments | `POST /api/Leaves/{id}/attachments?evidenceKind=` | self-or-`HR.Leave.Write` |
-| Close / Cancel | `PUT /api/Leaves/{id}/close` · `/cancel` | `HR.Leave.Write` / self-or-write |
+| **Confirm return** *(was Close)* · Cancel | `PUT /api/Leaves/{id}/close` · `/cancel` | `HR.Leave.Write` **or line authority**, never the subject / self-or-write — after approval, HR only, up to the first day |
 
 **Why approve is not permission-gated:** the approver is whoever the workflow engine assigned,
 often a line manager with no HR permission at all. Gating it on a permission would refuse the very
@@ -2262,8 +2299,9 @@ leave an invisible row holding that date and the employee's next punch on it wou
 (`/hr/leave/requests/[id]`); the board lives at **Human Resources → Medical & Health → Medical
 Boards** · `/hr/medical/boards` · as **hr.head** · **10 minutes**
 
-⚠ **Requires §2.6c.** If you have not switched excuse duty on for Sick Leave, nothing in this
-chapter happens and the requests simply submit.
+⚠ **Excuse duty is already on for Sick Leave** (rule 4), so the certificate half of this chapter
+works as seeded. **§2.6c lowers the board threshold from 90 days to 10** so that a demo can reach the
+board half; without it, no sick leave on the demo crosses the threshold.
 
 ### 📖 What it is
 
@@ -2286,8 +2324,9 @@ disciplinary panels and occupational-health boards share. **Several employees ca
 board**, one case each, each asked its own question and decided on its own finding. **Each case is
 decided at a recorded sitting, and the members recorded present there are the panel that decided
 it**, so a case can only be decided where at least the **quorum** of deciding members sat (a company
-setting, default 1). The board **reports by itself** when its last open case closes. The extent of
-incapacity and the Workmen's Compensation Act's figures are the next step, K-II-b.
+setting, default 1). The board **reports by itself** when its last open case closes. Since lane
+K-II-b a case also records the **extent of incapacity** and an indicative compensation under the
+Workmen's Compensation Act — *Incapacity and compensation*, at the end of this chapter.
 
 > **Say this:**
 >
@@ -2304,8 +2343,8 @@ incapacity and the Workmen's Compensation Act's figures are the next step, K-II-
 ### 👁 On the page — the boards register
 
 **Header.** Title *Medical boards*, subtitle *Panels that hear employees' cases — an absence, an
-injury at work, fitness for duty or retirement — and decide each one.* One button: **+ Request a
-board**.
+injury at work, fitness for duty or retirement — and decide each one.* Two buttons:
+**Compensation schedule** (lane K-II-b) and **+ Request a board**.
 
 **Filters:** Status *(All · Requested · Convened · Concluded · Cancelled or dissolved)*, **A case
 about** *(Anything and the five purposes — a board is found by ANY case on it)*, **Convened by**
@@ -2343,7 +2382,7 @@ buttons for whichever step it is at:
 |---|---|
 | **Add a case** | Requested or Convened — another employee before the board |
 | **Appoint a member** | Requested or Convened |
-| **Convene** | Requested — and **only if it has at least one member and one open case** |
+| **Convene** | Requested. ⚠ It is drawn whatever the board holds; **the server refuses** a board with nobody appointed (*Appoint at least one member before convening…*) or nobody before it (*List at least one case before convening…*) |
 | **Record a sitting** | Convened — with a tick-list of who was present |
 | **Cancel the request** | Requested — nobody has been convened, so only the request is stopped |
 | **Dissolve the board** | Convened — the panel is stood down; its members and sittings stay on the record |
@@ -2359,7 +2398,8 @@ about an absence, so leave cannot rest on it* under fitness for duty and medical
 state badge (*Listed · Decided · Withdrawn*), the reason, when and by whom it was listed, the
 examination it was based on, and a link to the health record. A listed case carries **Record the
 finding** (once the board is convened and has sat) and **Withdraw**. A decided case shows the
-finding, **the sitting it was decided at and who decided — the members present there** (or *Not
+finding, **the sitting it was decided at and who decided — the chair and members present there**; a
+secretary or observer present did not decide (or *Not
 recorded — decided before attendance was kept* for boards decided before lane K-II-a), who recorded
 it and when, the review date, and the retirement recommendation. A withdrawn case shows when, by
 whom and why.
@@ -2397,7 +2437,7 @@ its attendance records who sat.
 
 **The finding dialog** *(per case, lane K-II-a)* opens on **Decided at the sitting of** — the board's
 sittings, each with how many were present and how many of them decide, and beneath the chosen one
-*Decided by those present: …* — then **Finding** *(Fit · Fit with restrictions · Temporarily unfit ·
+*Present: … The chair and members among them decide.* — then **Finding** *(Fit · Fit with restrictions · Temporarily unfit ·
 Unfit · Requires further investigation)*, **Recommendation** *(required)*, Findings, Restrictions,
 Review due, and a checkbox: *The board recommends **retirement on medical grounds**.*
 
@@ -2518,7 +2558,8 @@ examination empty unless your anchor has one on file → **Request**. You land o
 > finding, decided on its own. What the board decides about one of them says nothing about the
 > other — and the leave rule knows that."
 
-**7 — Try to convene it before appointing anybody.** The button is not there.
+**7 — Press *Convene* before appointing anybody.** It is refused: *Appoint at least one member
+before convening. A board with nobody on it cannot sit.*
 
 > "A board is its panel. There is nothing to convene."
 
@@ -2561,7 +2602,7 @@ Read the dialog's warning aloud before confirming:
 > once no case is left open.*
 
 The case now reads **Decided**, *Decided at the sitting of* today, *Decided by* the chair and the
-member. If you added a second case in 6b, the board is still **Convened** — withdraw it (a reason is
+member — not the HR secretary, who was present but does not decide. If you added a second case in 6b, the board is still **Convened** — withdraw it (a reason is
 required) or decide it, and the board reports on its own.
 
 > "One case, one finding. Not a table of findings it can add to — because then nothing could answer
@@ -2644,10 +2685,10 @@ injury absence. The typed paper recommendation is still accepted as before.
 | Attach · remove a paper | `POST …/{id}/documents` (multipart, 10 MB, category `hr-medical-board-documents`, scan-mandatory, optional `caseId` — checked before the scan) · `DELETE …/{id}/documents/{docId}` | `HR.Medical.Write` |
 | Point a leave request at a board | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write` — **the Medical board panel**, chapter 7 |
 | Name the board a medical retirement rests on | `PUT /api/hr/separations/{id}/medical-board` (an empty body unlinks) | `HR.Policy.SeparationWrite` — **the separation page's Medical board panel** |
-| The quorum | `PUT /api/hr/policy-settings` (`medicalBoardQuorum`, 1–20; a save that omits it resets it to 1) | the HR policy page |
+| The quorum | `PUT /api/hr/policy-settings` (`medicalBoardQuorum`, 1–20; a save that omits it resets it to 1) | the HR policy page — ⚠ **saving it is `HR.Company.Admin`**: an administrator, not `hr.head` (chapter 4b) |
 | Record a case's incapacity assessment (the whole set) · the labour officer's notice and any agreement · link the SHE incident | `PUT …/{id}/cases/{caseId}/incapacity` · `PUT …/{id}/cases/{caseId}/compensation` · `PUT …/{id}/cases/{caseId}/safety-incident` (an empty body unlinks) | `HR.Medical.Write` — **the case's *Incapacity and compensation* block** |
 | The compensation schedule | `GET …/incapacity-schedule` (Read) · `POST …/incapacity-schedule/load-defaults`, `POST …/incapacity-schedule`, `PUT …/incapacity-schedule/{rowId}` | **`HR.Medical.Admin`** to change it — `/hr/medical/boards/incapacity-schedule` |
-| The compensation settings | `PUT /api/hr/policy-settings` (`permanentTotalIncapacityMonths` — 96, empty = no figure; `temporaryIncapacityMaxMonths` — 24; `compensationEarningsCeiling` — empty) | the HR policy page |
+| The compensation settings | `PUT /api/hr/policy-settings` (`permanentTotalIncapacityMonths` — 96, empty = no figure; `temporaryIncapacityMaxMonths` — 24; `compensationEarningsCeiling` — empty) | the HR policy page — **`HR.Company.Admin`** to save |
 
 ⚠ **"Gated on `HR.Medical.*`" does not mean HR is shut out.** The HR role is granted
 `ViewMedicalRecords` and `MaintainMedicalRecords` deliberately, because HR **administers** this
@@ -2788,7 +2829,7 @@ Identical fields to the new-request form, with two differences:
 
 ### ⚙ Behind the page
 
-`PUT /api/Leaves/{id}` → `UpdateDraftAsync`, self-or-`HR.Leave.Write`. **Draft only** — the service
+`PUT /api/Leaves/{id}/draft` → `UpdateDraftAsync`, self-or-`HR.Leave.Write`. **Draft only** — the service
 refuses anything else.
 
 ⚠ **Moving a draft onto a retired leave type is refused**, with the type named. The check is on
@@ -2961,7 +3002,10 @@ From · To · Days · Status. Rows are clickable and open the request.
 
 **1 — Land on it. Read the count.**
 
-> "Every leave request in the organisation for this year. Four hundred and something rows."
+> "Every leave request in the organisation for this year."
+
+*(On UAT: 593 rows for 2026 on 26 September, most of them the verification harness's. The number
+moves with every run — do not quote it.)*
 
 **2 — Set Status to *Rejected*.**
 
@@ -3028,6 +3072,12 @@ button: **Open approval inbox** → `/workflow/inbox`, the cross-module queue.
 > two stages: the line manager first, then HR confirms the dates. Open a request to see where it
 > sits, or select several to decide them together.
 
+**Returns to confirm** *(round 5, lane D — only when there are any)*. People **you supervise or
+head a unit over** who have reported being back at work: Request · Employee · Leave type · Leave
+ended · Back on · Timing (*Early*, *On time*, or *Late · N working day(s)*). A row opens the request,
+where **✓✓ Confirm return** closes it (chapter 7). HR works the register instead, so `hr.head` sees
+this card only for their own people.
+
 **Pending requests card.** When rows are selected, the header grows a count and two buttons:
 **👍 Approve** and **👎 Reject**.
 
@@ -3075,13 +3125,16 @@ If any failed you get *"2 of 3 processed — 1 could not be: …"* with the reas
 
 > "Two went through, one didn't, and it told me why rather than claiming success."
 
-**6 — The moment worth waiting for.** Find a request **raised for `hr.head` themselves** — or raise
-one in the portal window first — and try to approve it.
+**6 — The moment worth waiting for.** Point at what is **not** here: a request raised for
+`hr.head` themselves — raise one in the portal window first if there is none. It is at a step
+`hr.head` holds, and it is still not listed, because **the queue leaves out the caller's own leave**.
+Open it from the register (chapter 10) or from *Leave Requests* and press **Approve** there.
 
 It is refused: *You cannot approve your own leave request. It has to be approved by someone else.*
 
 > "That's the one rule you'd hope was there. I'm the head of HR, I hold every role in this module,
-> and I cannot approve my own leave. Not hidden — refused, with a reason.
+> and I cannot approve my own leave. It is kept out of my queue — and if I go round the queue to
+> it, it is refused, with a reason.
 >
 > And note *how* it's done. The obvious way is to tell the workflow engine 'the person who raised
 > it can't approve it'. That's wrong here, because HR raises leave **for other people** all day —
@@ -3095,6 +3148,7 @@ It is refused: *You cannot approve your own leave request. It has to be approved
 | The queue | `GET /api/Leaves/my-approvals?pageNumber=&pageSize=` | any authenticated user — the answer is only ever about the caller |
 | Bulk approve | `POST /api/Leaves/bulk-approve` | **not permission-gated** — each item is authorized on its own |
 | Bulk reject | `POST /api/Leaves/bulk-reject` | same; a reason is required |
+| Returns to confirm | `GET /api/Leaves/resumptions-to-confirm` | any authenticated user — only the caller's own people |
 
 **How the queue is built.** Candidate requests are everything at *Pending* in the tenant — not just
 the caller's direct reports — minus the caller's own leave. Each is then put to the workflow
@@ -3250,7 +3304,8 @@ with a blue panel saying it came from a plan.
 | The list | `GET /api/hr/leave-plans?year=` | `HR.Leave.Read` |
 | One plan (the detail window) | `GET /api/hr/leave-plans/{id}` | the owner, `HR.Leave.Read`, **or the person the engine is asking to decide it**, for as long as it is at their step *(round 5)* |
 | Create / edit | `POST` · `PUT /api/hr/leave-plans/{id}` | self-or-`HR.Leave.Write`. On `PUT` the **new** employee id is checked too, so an owner cannot move a draft onto someone else *(round 5)* |
-| Submit / Approve / Reject | `PATCH …/submit` · `/approve` · `/reject` | the engine's assignee. Approve and reject refuse anything but Submitted |
+| Submit | `PATCH …/submit` | the owner or `HR.Leave.Write` |
+| Approve / Reject | `PATCH …/approve` · `/reject` | the engine's assignee. Both refuse anything but Submitted |
 | Suggest / Respond | `PATCH …/suggest-changes` · `/respond-suggestion` | assignee / self |
 | Relievers | `PATCH …/relievers` *(round 5)* | the current assignee or `HR.Leave.Write`, for Submitted, ChangesSuggested and Approved plans. Only the relievers change |
 | Cancel | `PATCH …/cancel` | self-or-`HR.Leave.Write`. The owner until approval; after approval, the leave write tier with a reason and no live request. It records the date and reason and **withdraws the approval** *(round 5)* |
@@ -3274,8 +3329,8 @@ rejected request does not spend a plan — it becomes raiseable again.
 
 ### 📖 What it is
 
-Every balance in the organisation, with all of the working shown. Eleven columns, nine of which are
-the arithmetic of the last two.
+Every balance in the organisation, with all of the working shown. On the Overview, eleven columns,
+nine of which are the arithmetic of the last two; the Annual view drops *Leave type* and has ten.
 
 *(Round 5, lane J, 2026-09-26.)* **It opens on annual leave for every employee still serving**, and
 an **Overview** switch is the page as it was: every leave type, every record.
@@ -3283,7 +3338,8 @@ an **Overview** switch is the page as it was: every leave type, every record.
 ### 👁 Two views — *Annual leave* and *Overview — every type*
 
 **Annual leave** *(the default)* lists **one row for each employee still serving** and hired by the
-end of the chosen year: 2,377 on the demo database, of whom only 97 have an annual record for 2026.
+end of the chosen year: about 2,400 on UAT (it drifts — the verification harness adds people), of
+whom only 97 have an annual record for 2026.
 
 - **Where there is a record**, the row is the record, exactly as the Overview shows it.
 - **Where there is none** — nobody has yet raised a request that would open one — the figures are
@@ -3295,10 +3351,10 @@ end of the chosen year: 2,377 on the demo database, of whom only 97 have an annu
   strength, so they are.
 - Somebody still inside the twelve months' service reads *may take it from 28 Jun 2027*, and their
   **Can take now** is 0.
-- The filters are **Employee**, **Year** and **Unit**; a unit includes every unit beneath it, as on
-  the calendar. A **search box** (name, staff number or unit) and pages of 50 make the long list
-  usable. **Export CSV** exports the list you are looking at, with *Qualifies on* and *Record*
-  columns.
+- The filters are **Employee**, **Year**, and **Level** then **Unit**; a unit includes every unit
+  beneath it, as on the calendar. A **search box** (name, staff number or unit) and pages of 50 make
+  the long list usable. **Export CSV** exports the list you are looking at — fifteen columns, with
+  *Qualifies on* and *Record* last.
 
 **Overview — every type** is every balance record for the year, with the Leave type filter —
 unchanged, and still the place to recalculate one employee.
@@ -3344,7 +3400,8 @@ employee at a time.*
 
 **Recalculate everybody** walks every balance in the company for the chosen year — **admin tier**, a
 step above the button beside it, because it is heavy and organisation-wide. It is what gives a
-correction a route to reach nine hundred people instead of one. Three things about it are worth
+correction a route to reach everybody instead of one person (on UAT, 513 balances across 123
+people for 2026). Three things about it are worth
 saying if it comes up:
 
 - **it has no dry run, and does not need one.** It *derives* its counters from requests and
@@ -3352,7 +3409,7 @@ saying if it comes up:
   days. Running it twice gives the same answer as running it once — asserted, not assumed;
 - **it walks the balances that exist**, not the employee register. Walking employees would *mint*
   balances for people who never had one, which is a different operation;
-- **one employee's failure does not abandon the other 899.** It is counted, noted, and the pass
+- **one employee's failure does not abandon the rest.** It is counted, noted, and the pass
   continues — a correction that stops halfway leaves the company worse off than one that never ran,
   because nobody can tell which half is current.
 
@@ -3393,7 +3450,8 @@ quietly correcting them. Re-running carry-over is a decision of its own.
 
 ### ▶ Walk it
 
-**1 — Arrive unfiltered.** Let the table sit for a second.
+**1 — Switch to *Overview — every type*.** The page opens on *Annual leave*; steps 1 to 4 are the
+Overview. Let the table sit for a second.
 
 > "Every balance in the Corporation for this year. One row per person, per kind of leave. And look
 > at the shape of it — eleven columns, and nine of them are the *working* of the sum."
@@ -3432,8 +3490,10 @@ quietly correcting them. Re-running carry-over is a decision of its own.
 
 | Control | Call | Gate |
 |---|---|---|
-| The table | `GET /api/Leaves/balances?year=&employeeId=&leaveTypeId=` | `HR.Leave.Read` |
-| Export | `GET /api/Leaves/balances/export` *(same filters)* | `HR.Leave.Read` |
+| The annual list *(the default view)* | `GET /api/Leaves/balances/annual?year=&employeeId=&organizationUnitId=` | `HR.Leave.Read` |
+| Its export | `GET /api/Leaves/balances/annual/export` *(same filters)* | `HR.Leave.Read` |
+| The Overview table | `GET /api/Leaves/balances?year=&employeeId=&leaveTypeId=` | `HR.Leave.Read` |
+| Its export | `GET /api/Leaves/balances/export` *(same filters)* | `HR.Leave.Read` |
 | Recalculate | `POST /api/Leaves/balances/recalculate` | `HR.Leave.Write` |
 | Recalculate everybody | `POST /api/Leaves/balances/recalculate-all?year=&leaveTypeId=` | **`HR.Leave.Admin`** |
 | Repair entitlements | `POST /api/Leaves/balances/repair-entitlements?year=&leaveTypeId=&employeeId=&dryRun=` | **`HR.Leave.Admin`** |
@@ -3491,7 +3551,7 @@ serving (suspended staff included) or gone only since. Somebody who left before 
 through their settlement.
 
 ⚠ **On the demo database, do not quote the total as a provision.** As at 31 December 2026 it reads
-about **47,300 days** across 2,376 employees, and 2,037 of them are the opening-balance adjustments
+about **47,300 days** across about 2,400 employees, and 2,037 of them are the opening-balance adjustments
 of chapter 13's step 3 — +21 entries loaded on top of entitlements that already grant the days.
 Show one row's arithmetic instead; that is the point of the screen.
 
@@ -3519,7 +3579,7 @@ Show one row's arithmetic instead; that is the point of the screen.
 | Export | `GET /api/Leaves/balances/owed/export?asOf=` | `HR.Leave.Read` |
 
 It reads the tenant's one **Annual** leave type (chapter 4) and computes everybody's accrual in one
-pass — about a third of a second for 2,376 employees on the demo database. Nothing is written: an
+pass — about a third of a second for some 2,400 employees on the demo database. Nothing is written: an
 employee with no balance row is worked out live and no row is minted for them.
 
 ⚠ **Owed is not *can take now*.** The round 5 plan's formula also subtracted pending and approved
@@ -3542,7 +3602,7 @@ records, of which the balance is the sum.
 
 ### 👁 On the page
 
-**Filters:** Employee · Leave type · Year.
+**Filters:** Employee · Leave type · Year · **Search** *(remarks or employee)*.
 
 **The table:** Employee · Leave type · Year · **Days** *(signed, green positive / red negative)* ·
 Reason code · Remarks · Date · **By**.
@@ -3555,11 +3615,11 @@ not be zero)* · Adjustment date · Reason code · Remarks *(required)*.
 **The balance preview** updates live:
 
 ```
-  Current balance · Annual Leave 2026                      [ 28 available ]
-  Entitled   Accrued   Carried over   Adjustments   Used   Pending   Encashed
-     21        15            0             21         8       7          0
+  Current balance · Annual Leave 2026                      [ 27 available ]
+  Entitled   Carried over   Adjustments   Used   Pending   Encashed
+     21            0             21         8       7          0
 
-  After this adjustment: 30.5 available.
+  After this adjustment: 28.5 available.
 ```
 
 Below zero it turns **red** — a warning, not a block. With no balance row yet, a dashed panel
@@ -3643,23 +3703,26 @@ demo tenant (decision A3); a leaver's settlement is where leave becomes money.
 
 ### 👁 On the page
 
-**Filters:** Year · Status.
+**Filters:** Year · Status. ⚠ *(Fixed 2026-09-26, round 5 lane M.)* The Status filter did nothing
+until then: the page sent it and the API never read it.
 
 **The table:** Employee · Leave type · Year · Days · **Amount** · **How it was worked out** *(new)* ·
-Status · Payment ref · row actions.
+Status · Payment ref · **Finance** *(whether the payout has posted to the books — HR finish plan
+lane 8)* · row actions.
 
 **The new column is the audit of the figure**, in a sentence, on the row:
 
-> *6,600.00 (basic + linked allowances) ÷ 22 working days = 300.00 per day, per HR policy settings.*
+> *7,390.00 (basic + linked allowances) ÷ 22 working days = 335.91 per day, per the 'Annual Leave' leave type.*
 
 ⚠ **It is stored on the payout, not recomputed for display**, and that is the important part. The
-divisor behind it is a *setting* now — recomputing the sentence would quietly restate old payouts the
-moment somebody edited it. Rows paid before the sentence was kept say so plainly —
+divisor behind it is each leave type's own *working days per month* (default 22) — recomputing the
+sentence would quietly restate old payouts the moment somebody edited it. Rows paid before the sentence was kept say so plainly —
 *not recorded — paid before the basis was kept* — rather than showing a blank and implying there was
 nothing to record.
 
-The sentence also names **where the divisor came from**: *per HR policy settings* when the leave type
-left its own figure unset, or *per the 'Annual Leave' leave type* when it did not. The figure and the
+The sentence also names **where the divisor came from** — today always *per the '…' leave type*.
+Older rows read *per HR policy settings*: that tenant figure left the policy page in round 5 lane N1,
+because the type's own figure always won (L-38). The figure and the
 words are built from the same number, so the words cannot describe a basis other than the one that
 produced the amount.
 
@@ -3673,37 +3736,42 @@ so every caller, not just this screen, is fixed.
 
 ### ▶ Walk it
 
-**1 — Arrive on this year.** One row, *Processed*.
+**1 — Arrive on this year and point at Efua Seidu's row** — 5 days, 1,679.55, *Processed*. ⚠ On
+UAT the year holds nine rows (26 September); the other eight are the verification harness's fixtures
+(*A11Ver Actor…*, at 300.00 a day). Point at hers.
 
-> "One encashment, already paid. Read the amount — nobody typed it. The employee asked to convert
+> "An encashment, already paid. Read the amount — nobody typed it. The employee asked to convert
 > days; the system worked out what those days are worth from her salary and the allowances the
 > leave type is linked to."
 
 **2 — Walk the lifecycle without pressing anything.**
 
 > "Requested, approved — twice, like everything else here — then marked paid with a reference.
-> Only that last step moves the balance. Approving an encashment doesn't take the days; paying it
-> does."
+> Approving it **holds** the days: from then on they cannot also be taken as leave. Paying it spends
+> them."
 
 **3 — Read the *How it was worked out* column aloud.**
 
-> "Six thousand six hundred — her basic plus the allowances this leave type counts — divided by
-> twenty-two working days, three hundred cedis a day. And the last clause tells you *where that
-> twenty-two came from*: the company's policy settings, because this leave type did not set its own.
+> "Seven thousand three hundred and ninety — her basic plus the allowances this leave type counts —
+> divided by twenty-two working days: three hundred and thirty-five cedis ninety-one a day. And the
+> last clause tells you *where that twenty-two came from*: the Annual Leave type's own setting.
 >
 > Before this, the row showed an amount and nothing else. Anybody querying their payout had nothing
 > to read, and the honest answer from HR was 'the system worked it out'. That is not an answer."
 
-**4 — Say the honest thing about Finance.**
+**4 — Point at the *Finance* column.**
 
-> "And here is a boundary worth naming. This is real money leaving the company, and HR does **not**
-> post it to the general ledger. HR records the event — who, how many days, how much, when, on
-> whose signature — and Finance posts it in one sweep, once, for every module. Two systems posting
-> the same money is how reconciliations turn into archaeology."
+> "And here is where it meets Finance. This is real money leaving the company, so marking it paid
+> **posts it to the books** — the general ledger — in the same step: the payout is recorded as a
+> leave-encashment expense. HR does not keep a second set of books for it. Every HR money event
+> goes through one posting route, so this register and the ledger cannot disagree about whether it
+> was paid."
 
 ### ⚙ Behind the page
 
-`GET /api/hr/leave-encashments?year=&status=` · `PATCH …/{id}/approve` · `/reject` · `/process`.
+`GET /api/hr/leave-encashments?year=&status=` *(`status` read since lane M)* · `PATCH …/{id}/approve`
+· `/reject` · `/process` — marking paid **posts to Finance in the same transaction** (HR finish plan
+lane 8); if the posting fails, the payment is not marked either.
 
 **The payout is derived server-side** from the employee's emoluments and the leave type's rate
 policy. The caller cannot assert it.
@@ -3713,7 +3781,7 @@ policy. The caller cannot assert it.
 | | |
 |---|---|
 | **Still no encashment detail page**, but the thing the finding was really about — *no audit of the rate* — is on the row. Whether a detail page is worth building is now a preference rather than a gap | |
-| **Nothing is posted to the general ledger.** Unchanged and deliberate: the payout is registered as a money event and waits for one Finance sweep covering every module | |
+| ✅ **Posted to the general ledger** *(corrected 2026-09-26)* — since lane 8, marking paid posts it; the *Finance* column shows each row's posting. Rows paid before lane 8 have none | |
 
 > **The two questions this section used to end on are settled, and it is worth knowing how**, because
 > somebody in the room may have been told they were open:
@@ -3813,7 +3881,7 @@ You land on the new-request form with the employee and the leave type already ch
 
 ### ⚙ Behind the page
 
-`GET /api/Leaves/compliance?year=` · `GET /api/Leaves/compliance/export` — both `HR.Leave.Read`.
+`GET /api/Leaves/mandatory-compliance?year=` · `GET /api/Leaves/compliance/export` — both `HR.Leave.Read`.
 
 **The row carries the staff number and the organisation unit**, and **so does the CSV** — an export
 that disagrees with the screen is its own small bug, and nobody reconciles the two until a figure is
@@ -3868,10 +3936,11 @@ year we are still in, it refuses and names the day it can run from; **Preview** 
 time, which is how a run is checked in December. And **the forfeiture preview now says it is one**
 — it never set the flag, so its panel never turned amber.
 
-⚠ **Read the notes, not the badges.** The first badge says *N processed*, and *processed* means
-**looked at**, not **changed** — a run that examined 900 balances and moved 12 says *900 processed*.
-That was a real complaint, and the fix went into the sentence rather than the badge, because the
-badge's name is used by other callers:
+✅ **The badges say what happened** — *N examined*, *N changed*, *N left alone* *(checked
+2026-09-26)*. The first once read *N processed*, and *processed* meant **looked at**, not
+**changed** — a run that examined 900 balances and moved 12 said *900 processed*. That was a real
+complaint. The API's field keeps its old name, `balancesProcessed`, because other callers read it;
+the badges and the first note say what it means:
 
 > *Examined 900 balance(s): carried over 48 day(s) from 2025 into 2026 across 12, left 888 alone.*
 
@@ -3896,12 +3965,13 @@ to look identical.
 Set **From year** to last year, pick **one** employee, press **Run carry-over**, read the
 confirmation aloud, confirm.
 
-> "One employee, last year into this year. And read the sentence underneath the badges rather than
-> the badges: *examined one balance, carried over five days across one, left none alone.*
+> "One employee, last year into this year. Read the badges and the sentence underneath them:
+> *one examined, one changed, none left alone* — *examined one balance, carried over five days
+> across one, left none alone.*
 >
-> That wording is deliberate. The badge says *processed*, and processed means *looked at* — a run
-> over nine hundred balances that changes twelve of them will tell you it processed nine hundred.
-> True of the loop, false of the work. So the note says what was examined, what moved, and what was
+> That wording is deliberate. The count used to say *processed*, and processed meant *looked at* — a
+> run over nine hundred balances that changed twelve of them told you it processed nine hundred.
+> True of the loop, false of the work. So both now say what was examined, what moved, and what was
 > deliberately left, and those three numbers add up in front of you.
 >
 > This is how you would do it for real. Run it for one person, check the number against what you
@@ -4042,10 +4112,11 @@ on the annual part.
   so there the email waits in the queue and only the in-app message shows.)*
 - **Anybody who cannot be told directly is passed to HR, and the message says why** — an employee
   with no login, a line manager with no login, a request nobody is being asked to decide, a return
-  nobody has reported. On the demo, 691 of the 2,377 people serving have no login.
+  nobody has reported. On UAT, about 690 of the 2,400 or so people serving have no login (692 of
+  2,413 on 26 September; both drift as the harness adds people).
 - **The approver is whoever the engine is asking**: the named approvers of the current step and
   everyone holding its role — the same people as the engine's own *Approval required* notice and the
-  Approvals screen (Rule 2). ⚠ On the demo that is **52 people** at the line-manager step and **905**
+  Approvals screen (Rule 2). ⚠ On the demo that is **about fifty people** (53 on 26 September) at the line-manager step and **about nine hundred** (909)
   at HR confirmation, because the seeded leave definition asks roles, not the employee's own manager
   (L-70).
 - **The September chase** tells each employee how many days are left to plan — the year's available
@@ -4150,7 +4221,7 @@ signed-in admin, passed; only the log showed it. `GetSnapshotsForTenantAsync` is
 read, and `run-round5-i.mjs` [9] checks that the last scheduled sweep completed.
 
 **The nightly host runs three passes, in order:** advance leave into *In progress* **first**, so
-everything after it sees today's truth; then the five reminder sweeps; then the attendance
+everything after it sees today's truth; then the six reminder sweeps; then the attendance
 reconciliation, which checks that every recently-changed request's attendance days match its status
 and repairs any that do not — logging a **warning** when it has to, because drift means something
 changed a leave status without going through the leave service.
@@ -4170,8 +4241,9 @@ employee picker anywhere in this chapter**, and that is the point.
 
 ### 19.1 `/me/leave` — My Leave
 
-Balance cards per leave type, a history list, and four buttons: **Calendar** *(new)* · **Planner** ·
-**Encashments** · **New request**. The year opens on the leave year we are in *(round 5, lane C4)*.
+Balance cards per leave type, a history list, and three buttons: **Calendar** *(new)* · **Planner** ·
+**New request**. A fourth, **Encashments**, appears only where leave may be cashed in while employed
+— **not on TDC** (round 5, lane L1). The year opens on the leave year we are in *(round 5, lane C4)*.
 
 *(Round 5, lane J.)* **Annual leave comes first, and every card leads with what she can take now**
 — *12 days you can take now* — with *21 available for the whole year* beneath it when the two differ.
@@ -4204,7 +4276,7 @@ holidays drawn underneath.
 
 ### 19.3 `/me/leave/new` — Request leave
 
-The same fields as the desk form **minus the employee picker**, plus three differences worth
+The same fields as the desk form **minus the employee picker**, plus five differences worth
 pointing out:
 
 | Difference | What it looks like |
@@ -4212,7 +4284,7 @@ pointing out:
 | **Notice is stated up front** | *"This leave type needs at least 14 days notice before it starts. Drafts can be saved any time."* |
 | **Relievers are a dropdown, not a search** | the options are her **own roster**, labelled *"Kofi Asante (priority 1)"* |
 | **When the roster is empty, it says what will happen** | *"You have no pre-defined relievers, so one will be assigned automatically when you submit — usually your manager."* |
-| **A certificate is asked for before she gets to Submit** *(new)* | *"You will need a medical certificate — excuse duty — for this. Sick Leave allows 3 day(s) on your own word, and you have chosen 5. **Save it as a draft**, attach the certificate, then submit it."* |
+| **A certificate is asked for before she gets to Submit** *(new)* | *"You will need a medical certificate — excuse duty — for this. Sick Leave lets you take 3 day(s) on your own word, and you have chosen 5. **Save it as a draft**, attach the certificate, then submit it."* |
 | **Beyond the limit, she can ask** *(round 5, lane H)* | *"This is 8 days of Casual Leave, and 6 days are left. ☐ Charge the extra 2 days to **my** Annual Leave (HR decides)"* — chapter 6's panel, in her own words |
 
 ▶ **Walk it. 🔴 LIVE WRITE 17 — this is the request the room watches go all the way through.**
@@ -4375,7 +4447,7 @@ The days are there, marked **On Leave**.
 
 > "It never overwrites an observation. If somebody actually clocked in on one of those days — which
 > happens; people come in during their leave — the system leaves that day alone and tells you it
-> skipped it. That's the 'eight of eight' figure on the request screen.
+> skipped it. That's the 'ten of ten' figure on the request screen.
 >
 > And if a leave status ever gets changed some other way, there's a nightly reconciliation that
 > puts the attendance register back in step and logs a warning, because that would mean a bug
@@ -4399,8 +4471,8 @@ Do this after the room empties. Everything below is reversible; nothing needs a 
 
 | # | What you changed | Undo |
 |---|---|---|
-| 1 | **Request created, sent back, answered, approved twice, confirmed, moved, approved twice again, then recalled** *(ch. 6–7, LW 1–10)* | Open it → **Cancel**, reason `Demonstration`. The days go straight back **and the attendance days come off with them**. ⚠ Cancel, do not close — a cancelled request is a clean withdrawal; a closed one is a completed absence that never happened |
-| 2 | **Bulk approval** *(ch. 11, LW 13)* | Cancel each one you approved, as above. ⚠ Check `/hr/attendance/daily` afterwards — the attendance days should be gone. If any remain, the nightly reconciliation will remove them |
+| 1 | **Request created, sent back, answered, approved twice, confirmed, moved, approved twice again, then recalled** *(ch. 6–7, LW 1–10)* | Open it → **Cancel**, reason `Demonstration`. ⚠ Approved leave cancels **only up to and including its first day** *(round 5)* — fine for chapter 6's request, three weeks out; past its first day, leave it (item 13). The days go straight back **and the attendance days come off with them**. ⚠ Cancel, do not close — a cancelled request is a clean withdrawal; a closed one is a completed absence that never happened |
+| 2 | **Bulk approval** *(ch. 11, LW 13)* | Cancel each one you approved, as above — ⚠ only those whose first day has not passed. ⚠ Check `/hr/attendance/daily` afterwards — the attendance days should be gone. If any remain, the nightly reconciliation will remove them |
 | 3 | **Leave plan created, submitted, approved** *(ch. 12, LW 14)* | The ⋯ menu → **Cancel plan**. A cancelled plan stays visible with its history, which is correct. If you also raised the request from it, cancel that first |
 | 4 | **Adjustment posted** *(ch. 14, LW 15)* | **Admin only.** Window C → `/hr/leave/adjustments` → the row → **Delete**. Then check the Balances screen went back |
 | 5 | **Portal request filed** *(ch. 19, LW 17)* | As the employee: open it → **Cancel request**, reason `Demonstration` |
@@ -4409,14 +4481,14 @@ Do this after the room empties. Everything below is reversible; nothing needs a 
 | 8 | **Rehearsal request** *(§2.4)* | Cancel it, if you did not at the time |
 | 9 | **Reminder sweep** *(§2.6a)* | **Nothing to undo, and nothing you can undo.** The dispatch log is an audit record. Its only effect is that those particular reminders will not be sent again — which is the engine working |
 | 10 | **Attachments uploaded** | The request's Attachments tab → the **🗑** icon. The controlled upload and its DMS record go with it |
-| 11 | **Sick Leave configured for excuse duty** *(§2.6c)* | `/administration/hr/leave-types` → Sick Leave → **✏ Edit** → switch **Requires excuse duty** back off. ⚠ Do this, or the next person to raise five days of sick leave on this database will be refused and will not know why |
+| 11 | **Sick Leave's board threshold lowered to 10** *(§2.6c)* | `/administration/hr/leave-types` → Sick Leave → **✏ Edit** → **Medical board threshold** back to `90`. ⚠ Do this, or the next person past ten days of sick leave this year on this database will be sent to a board and will not know why |
 | 12 | **Policy settings saved**, if you did *(ch. 4b)* | Window C → the same screen → put the value back → **Save**. ⚠ It does **not** restate anything already paid — each payout stores the sentence that produced it |
-| 13 | **Recall** *(ch. 7, LW 10)* | ⚠ **There is no un-recall, on any screen.** The end date stays where the recall put it. If you need the record clean, **Cancel the whole request** (item 1) — which is also the honest answer to *"can this be reversed?"*: the interruption happened, and a system that could quietly erase it would be worse |
+| 13 | **Recall** *(ch. 7, LW 10)* | ⚠ **There is no un-recall, on any screen.** The end date stays where the recall put it. If you need the record clean, **Cancel the whole request** (item 1) — ⚠ possible only up to its first day, so a request recalled while *in progress* stays as it is — which is also the honest answer to *"can this be reversed?"*: the interruption happened, and a system that could quietly erase it would be worse |
 | 14 | **Sick leave requests** raised in chapter 7b *(LW 11, and the two in step 5)* | Cancel each, reason `Demonstration`. ⚠ **Cancel, do not close** — a closed request still counts as *taken*, so the cumulative total stays over the board threshold and the next person to raise sick leave here is sent to a board |
 | 15 | **Medical board** *(ch. 7b, LW 12)* | ⚠ **A concluded board cannot be un-concluded** — that is the ratchet, on purpose, and **Cancel the request** / **Dissolve the board** is offered only *until* it reports. So once you have walked chapter 7b to the end there is nothing to press. Leave it: a demonstration board with a finding on it is harmless, and it is a good record to show next time |
 | 16 | **`advance-in-progress` called** *(§2.6b)* | **Nothing to undo and nothing you can undo.** Those requests are genuinely in progress; the nightly sweep would have done it anyway |
 | 17 | **Entitlements repaired** *(§2.3b)* — only if you had to run it | ⚠ **Do not undo this.** It replaced a wrong figure with the one the rulebook resolves, and putting it back would mean restoring a defect. On a database built after 2026-09-18 the seed has already done it and there is nothing here to undo |
-| 18 | **Sick Leave configured for excuse duty** *(§2.6c)* | The same as item 11 — switch **Requires excuse duty** back off if you want the database as it was seeded. ⚠ Leaving it on is harmless and saves the setup next time |
+| 18 | **Excuse duty on Sick Leave** | **Nothing to undo — it is seeded on** (rule 4: 3 days on the employee's word, a board at 90). ⚠ Do not switch it off; only the threshold (item 11) was yours |
 
 **The one thing that cannot be put back** is the **request number**. `LV2026000013` is spent. The
 counter only moves forward, by design — the same rule as staff numbers and requisition numbers. The
@@ -4475,8 +4547,16 @@ list with its current state, because a findings index that quietly drops the fix
 findings index nobody can audit.
 
 **Thirty-six of the thirty-seven are closed. One remains, and it is payroll's.** Four capabilities
-are closed at the API with **no screen control**, and they are listed separately below so that
-nobody promises a stakeholder a button.
+were closed at the API with **no screen control**; one of them still is, and it is listed separately
+below so that nobody promises a stakeholder a button.
+
+> **Where the whole ledger stands (2026-09-26, round 5 built):** of every finding here — the walk's
+> thirty-seven and round 5's L-38 to L-72 — **four are open**: **L-30** (unpaid leave produces no
+> deduction — payroll's), and three round 5 lane I found and left open by design, **L-70** (the seeded
+> approval asks a whole role), **L-71** (the compliance register lists only people with a balance
+> record) and **L-72** (the employee is not told when HR raises and approves leave for them). Every
+> other finding is closed, and the one capability with no screen is the reminder engine's operator
+> endpoints.
 
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
@@ -4488,7 +4568,9 @@ L-42 and found and closed two more, **L-67 and L-68**; lane H found and closed o
 closed the rest of L-48 and found three it leaves open, **L-70 to L-72**; lane K closed the rest of
 **L-47** (the board's purpose and date) and found nothing new; lane L closed **L-46** (the leaver's
 settlement) and found and fixed one of its own before commit (a capped line's explanation overran its
-column and failed the statement's save — § 8 of the round 5 plan).
+column and failed the statement's save — § 8 of the round 5 plan). **Lane K-II** (boards that hear
+several employees' cases; incapacity and compensation) closed the last *unreachable* item — the
+separation's `MedicalBoardId`, below — and found and fixed its own defects before commit (§ 8).
 The round 5 blocks are listed after the settings audit.
 
 ### ✅ Closed
@@ -4510,7 +4592,7 @@ The round 5 blocks are listed after the settings audit.
 | **L-16** | ch. 12 | The plan dialog had no sub-type field | added |
 | **L-17** | ch. 12 | A plan's year came from the list filter | derived from its start date, server-side |
 | **L-18** | ch. 13 | No export from the balance register | CSV from balances, the register and compliance |
-| **L-21** | ch. 15 | The encashment payout was not a registered money event | registered as §Area 2 in the Finance backlog. ⚠ still **not posted** — that waits for one sweep |
+| **L-21** | ch. 15 | The encashment payout was not a registered money event | registered as §Area 2 in the Finance backlog, and ✅ **posted since HR finish plan lane 8**: marking it paid posts it, and the *Finance* column shows it *(corrected 2026-09-26)* |
 | **L-23** | ch. 16 | Compliance never chased anything | the reminder engine chases from month 9 |
 | **L-25** | ch. 17 | "The year-end isn't scheduled" | ⚠ **was never a gap.** It is a recorded decision — those runs move balances. The *reminder* half now exists |
 | **L-27** | ch. 20 | **Approved leave never marked attendance** — the largest structural gap | written on approval, removed on cancel or reschedule, reconciled nightly |
@@ -4552,12 +4634,12 @@ The round 5 blocks are listed after the settings audit.
 |---|---|---|---|
 | **L-30** | §4.4.2 | `LeaveType.IsPaid` produces no deduction. ⚠ **Payroll's, not HR's.** HR records the absence, the days and the fact that the type is unpaid; what that is worth is payroll's arithmetic, and it is handed off in writing | medium *(not ours)* |
 
-### Round 5 — a settings audit, 2026-09-25 — eleven found; lane N closed six, two in part; three wait on their lanes
+### ✅ Round 5 — a settings audit, 2026-09-25 — eleven found, all eleven closed
 
 **Why these were missed.** The 2026-09-18 surveys counted *references* — a setting read by a service
-was called honoured. This audit read what each consumer **does**. Every finding below is scheduled in
-the round 5 plan, whose lane is named in the last column; the plain-terms account is
-`HR-LEAVE-ROUND-5-WHAT-CHANGES.md` § 15.
+was called honoured. This audit read what each consumer **does**. Lane N closed six on the day and two
+in part; lanes C, G, I, K and L closed the rest by 2026-09-26. The last column names the lane; the
+plain-terms account is `HR-LEAVE-ROUND-5-WHAT-CHANGES.md` § 15.
 
 | # | Where | Finding | Round 5 lane |
 |---|---|---|---|
@@ -4570,7 +4652,7 @@ the round 5 plan, whose lane is named in the last column; the plain-terms accoun
 | **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 — **closed** 2026-09-25: an edit checks the sub-type and its cap; creating one honours *Active*; the cap limits the sub-type inside its type's pot |
 | **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 — **closed** 2026-09-25: submit re-runs notice, the reliever requirement, the balance and the cap |
 | **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 — **closed** 2026-09-26: annual leave only, the leave year the person leaves in, owed at the last day (the leave owed report's working) less requests awaiting a decision; *pro-rate on exit* decides where the build-up stops (the line is asked of the year's end); none on summary dismissal, stated at zero; the cap a setting (L2b). The per-type encashment rates still apply in service only, which stays off |
-| **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — **closed**: N3's part 2026-09-25 (Pending counts; a lengthening move re-runs the gate); K6's 2026-09-26 — a linked board counts only if it was asked about an absence (extended sick leave, injury on duty or other) and reported on or after the start of the leave year being counted, and the refusal says which test the linked board failed |
+| **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — **closed**: N3's part 2026-09-25 (Pending counts; a lengthening move re-runs the gate); K6's 2026-09-26 — a linked board counts only if it was asked about an absence (extended sick leave, injury on duty or other) and reported on or after the start of the leave year being counted, and the refusal says which test the linked board failed. Since K-II-a (same day) every test reads **this employee's case** on the board: a board that decided somebody else's case does not count |
 | **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I — C4's part **closed** 2026-09-25: pro-rating counts months of the leave year, the reminder's month is the month of the leave year, and a call naming no year gets the current leave year. The reminders' recipients: ✅ **closed by lane I (2026-09-26)** — each reaches the people who can act on it, in the app and by email, and HR when nobody else can be told |
 
 **On the demo database, the same audit found:** *Leave of Absence (Unpaid)* and *Occupational Injury
@@ -4695,9 +4777,13 @@ never been asked — *"how does leave work for somebody who just joined?"* — a
 entitlement engine rather than the guide. Three were defects, five were policy answers the product
 gave silently with no setting behind them, and one is the calendar-year assumption itself.
 
-**Six are now closed** (chapter 13's repair control, the one-active-accrual-policy rule,
-`ProRateOnJoin`, `PerPayPeriod`, and the two register gaps behind them). **Three remain and are
-scoped**: the carry-over basis, first-year pro-rating, and accrual by staff level.
+**All nine are closed** — the entitlement plan's three waves were complete on 2026-09-18: chapter 13's
+repair control, the one-active-accrual-policy rule, `ProRateOnJoin`, `PerPayPeriod`, the two register
+gaps behind them, the carry-over basis, first-year pro-rating, and accrual by staff level (B4 — it
+already could vary, derived from each level's entitlement; the screens now say so instead of showing
+`0`). What that plan
+leaves unbuilt is deliberate: **the anniversary leave year** (round 5 decision A1: not built — the Act
+counts in calendar years) and **half-day leave**, both recorded as not asked for rather than forgotten.
 
 ⚠ **Read [`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md) § 2.3
 before promising a client an anniversary leave year or half-day leave.** Neither is available, both
@@ -4709,10 +4795,11 @@ are written up rather than hand-waved, and the plan says what each would cost.
 |---|---|---|
 | **The reminder engine's six endpoints** | 18 | `api/hr/leave/reminders/*`, admin. Nothing in the frontend calls them — **not even a client method**. The engine runs on its own timer, so what is missing is an *operator* control (force a sweep, read the dispatch log), not a feature |
 
-⚠ **And one thing that is not on this list because it is not reachable at the API either:**
-`EmployeeSeparation.MedicalBoardId` is a column with no DTO field and no endpoint — **nothing can
-set it**. Chapter 7b says so on the spot. A list of *API-only* capabilities would flatter it by
-inclusion.
+✅ **The one thing that was not even reachable at the API is closed too.**
+`EmployeeSeparation.MedicalBoardId` was a column with no DTO field and no endpoint — nothing could set
+it. Round 5 lane K-II-a (2026-09-26) gave it both at once: `PUT /api/hr/separations/{id}/medical-board`
+and the **Medical board** panel on a medical retirement's separation page, where a decided case that
+recommends retirement stands in for the medical report at submission (chapter 7b).
 
 ⚠ **The second row is new to this list on 2026-09-18 and was not new to the product.** It sat in
 the route table marked *(API only, no screen)* while the list that claims to gather them all said
@@ -4826,7 +4913,7 @@ module enforces one of them. That second one is a question of fact, not of polic
 | Approve / reject / send back | *(the workflow assignee, and never the record's subject)* | | |
 | **Bulk approve / reject** | *(same, per item)* | | |
 | Reschedule · confirm · answer a suggestion | *(self or `HR.Leave.Write`)* | | |
-| **Recall from leave** | — | **`HR.Leave.Write` outright — never the subject, even an HR user recalling themselves** | — |
+| **Recall from leave** · **Confirm return** | — | **`HR.Leave.Write` or the employee's line authority** (their supervisor, or the head of their unit or one above) — **never the subject**, even an HR user recalling themselves *(round 5, lane D)* | — |
 | **Attach evidence / choose its kind** | *(self or `HR.Leave.Write`)* | | |
 | **Link a request to a medical board** | *(self or `HR.Leave.Write`)* — the Medical board panel on the request overview | | |
 | Plans | `HR.Leave.Read` | `HR.Leave.Write` | — |
@@ -4846,6 +4933,8 @@ module enforces one of them. That second one is a question of fact, not of polic
 
 | Document | For |
 |---|---|
+| [`HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md`](../../programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md) | **The fourth build — round 5, staff leave.** Its status table and § 8 execution log say what each lane built and found; its walk sheet is the browser check owed |
+| [`HR-LEAVE-ROUND-5-WHAT-CHANGES.md`](HR-LEAVE-ROUND-5-WHAT-CHANGES.md) | round 5 in plain words, for the people who asked for it — what changes for an employee, a manager and HR |
 | [`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md) | **The third build.** The entitlement engine, accrual, and the assumption that a leave year is a calendar year. ⚠ **§ 2.3 is the answer to "can it do an anniversary leave year, or half-days?"** and § 3 records which decisions are still open |
 | [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) | **The second build, G1–G5** — recall, the configuration turn, the evidence gate, the medical board, and the eight deferred findings. Read its § 0 for what was built and what each slice found |
 | [`HR-LEAVE-CLOSURE-PLAN.md`](HR-LEAVE-CLOSURE-PLAN.md) | **§ 0 is the first build's state of the module.** The gap register and the eleven decisions |
@@ -4855,13 +4944,14 @@ module enforces one of them. That second one is a question of fact, not of polic
 | [`HR-REPORTS-CATALOGUE.md`](../../catalogues/HR-REPORTS-CATALOGUE.md) § 3.3 | the leave reports, three of which are now delivered |
 | [`../HANDOFF-PAYROLL-LEAVE.md`](../../integration/handoffs/HANDOFF-PAYROLL-LEAVE.md) | the three settings HR stores and only payroll can honour |
 | [`../HR-OPEN-QUESTIONS-FOR-TDC.md`](../../programme/HR-OPEN-QUESTIONS-FOR-TDC.md) | ⚠ **its framing is superseded for leave.** L-D7 through L-D10 became configuration with defaults; nothing in this module waits on TDC. **Since 2026-09-25 its § Round 5 holds five leave questions** (conditions of service, cashing in while employed, a leave allowance, the holiday calendar, the medical board) — each with a default the system runs on, none blocking |
-| [`../HR-FINANCE-INTEGRATION-BACKLOG.md`](../../integration/HR-FINANCE-INTEGRATION-BACKLOG.md) § Area 2 | the encashment money event, and why nothing is posted yet |
+| [`../HR-FINANCE-INTEGRATION-BACKLOG.md`](../../integration/HR-FINANCE-INTEGRATION-BACKLOG.md) § Area 2 | the encashment money event — posted since HR finish plan lane 8 |
 | [`../HR-CLOSURE-LEDGER.md`](../../programme/HR-CLOSURE-LEDGER.md) | every decision behind the closure build, with its reasoning |
 
 ---
 
-**End of the leave guide.** The harness has run — **515 assertions** across thirteen slices, green
-twice — so if something in this book turns out to be wrong, the most likely reason is that **a
+**End of the leave guide.** The harness has run — **1,863 assertions** across twenty-seven suites
+(the thirteen slices and round 5's fourteen), each suite green twice, the only failures three
+environmental checks in slice 1 *(lane M's pass, 2026-09-26)* — so if something in this book turns out to be wrong, the most likely reason is that **a
 screen changed after the chapter that describes it**, not that the behaviour underneath is unproved.
 The second most likely is that you are looking for a control that is genuinely an **API only**:
 §23 has that list, and it is **one** item long — it said four until 2026-09-18, when all four were

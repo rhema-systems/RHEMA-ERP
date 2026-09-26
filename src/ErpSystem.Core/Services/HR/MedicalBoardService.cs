@@ -1594,7 +1594,12 @@ public class MedicalBoardService : IMedicalBoardService
                         Status = c.Status,
                         DecidedAtSittingId = c.DecidedAtSittingId,
                         DecidedAtSittingDate = decidedAt?.SittingDate,
-                        DecidedBy = decidedAt is null ? new List<string>() : AttendeesOf(decidedAt).Select(a => a.DisplayName).ToList(),
+                        // ⚠ The DECIDING members present (chair and members) — not everybody in the room.
+                        // A secretary or observer attends without deciding (found in lane M's re-read:
+                        // this listed the secretary among those who decided).
+                        DecidedBy = decidedAt is null
+                            ? new List<string>()
+                            : AttendeesOf(decidedAt).Where(a => a.Decides).Select(a => a.DisplayName).ToList(),
                         Outcome = c.Outcome,
                         Findings = c.Findings,
                         Recommendation = c.Recommendation,
