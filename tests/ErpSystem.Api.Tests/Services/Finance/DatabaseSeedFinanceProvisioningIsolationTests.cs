@@ -2,6 +2,7 @@ using ErpSystem.Api.Extensions;
 using ErpSystem.Api.Services.Finance.Settings;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -206,6 +207,21 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
             CreatedBy = "database-seed-order.tests"
         });
         db.AddRange(user, entityType, definition);
+        db.Accounts.Add(new Account
+        {
+            Id = Guid.Parse("00000005-1000-0000-0000-000000000001"),
+            TenantId = tenantId,
+            AccountCode = "1000",
+            AccountNumber = "1000",
+            AccountName = "Cash and Cash Equivalents",
+            AccountType = AccountType.Asset,
+            AccountCategory = "Current Assets",
+            CurrencyCode = "GHS",
+            IsSegmented = false,
+            IsSystemAccount = true,
+            CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            CreatedBy = "System"
+        });
         await db.SaveChangesAsync();
     }
 

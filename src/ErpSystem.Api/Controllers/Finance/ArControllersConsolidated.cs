@@ -132,9 +132,36 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No invoice exists with the specified identifier.</response>
         /// <response code="500">Internal server error during invoice retrieval.</response>
         [HttpGet("{id}")]
-        public async Task<ActionResult<InvoiceDto>> GetById(Guid id)
+        public async Task<ActionResult<InvoiceDto>> GetById(string id)
         {
-            var invoice = await _invoiceService.GetByIdAsync(id, DimensionProducer);
+            InvoiceDto? invoice;
+            if (Guid.TryParse(id, out var invoiceId))
+            {
+                try
+                {
+                    invoice = await _invoiceService.GetByIdAsync(invoiceId, DimensionProducer);
+                }
+                catch (KeyNotFoundException)
+                {
+                    invoice = null;
+                }
+            }
+            else
+            {
+                invoice = await _invoiceService.GetByInvoiceNumberAsync(id);
+                if (invoice is not null)
+                {
+                    try
+                    {
+                        invoice = await _invoiceService.GetByIdAsync(invoice.Id, DimensionProducer) ?? invoice;
+                    }
+                    catch (KeyNotFoundException)
+                    {
+                        // Fall back to the number lookup so older links still show the invoice details.
+                    }
+                }
+            }
+
             return invoice == null ? NotFound() : Ok(invoice);
         }
 

@@ -28,7 +28,8 @@ public static class JobArchitectureQueryExtensions
     /// <summary>Position, the three actors, and the five classification lookups.</summary>
     public static IQueryable<JobDescription> WithLookups(this IQueryable<JobDescription> query)
         => query
-            .Include(jd => jd.Position)
+            .Include(jd => jd.Position).ThenInclude(p => p.SalaryGrade)
+            .Include(jd => jd.ProposedSalaryGrade)
             .Include(jd => jd.PreparedBy)
             .Include(jd => jd.ReviewedBy)
             .Include(jd => jd.ApprovedBy)

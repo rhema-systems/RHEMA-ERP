@@ -202,6 +202,9 @@ export interface EmployeeDetail extends Employee {
    */
   hasDisability?: boolean;
   disabilityDescription?: string | null;
+  /** Round 3, lane P2: the catalogue row and its name. The description stays as notes. */
+  disabilityTypeId?: string | null;
+  disabilityTypeName?: string | null;
   address?: string | null;
   city?: string | null;
   state?: string | null;
@@ -212,6 +215,20 @@ export interface EmployeeDetail extends Employee {
   businessNumber?: string | null;
   extension?: string | null;
   probationPeriodDays: number;
+  /** Where the term came from. Null on records created before 2026-09-09. */
+  probationSource?: ProbationSource | null;
+  /**
+   * When probation is DUE to end — hire date plus the term, computed by the server on every read.
+   * Not the same thing as `confirmationDate`, which is when it was actually passed.
+   */
+  expectedConfirmationDate?: string | null;
+  /**
+   * The date probation was passed.
+   *
+   * ⚠ Read-only everywhere but the import form. The server refuses a change to it from the
+   * ordinary employee update — it is written by confirming the probation record, which is what
+   * issues the letter.
+   */
   confirmationDate?: string | null;
   retirementDate?: string | null;
   taxNumber?: string | null;
@@ -234,7 +251,54 @@ export interface EmployeeDetail extends Employee {
   terminationReason?: string | null;
   terminationNotes?: string | null;
   isOnProbation: boolean;
+  /**
+   * How basic pay is arrived at — the scale, or an amount agreed for this person. Written only
+   * through `PUT {id}/pay-basis` (the Salary tab), never through the create or the ordinary edit.
+   */
+  payBasis: PayBasis;
+  payBasisNote?: string | null;
 }
+
+/**
+ * Scale or negotiated. HR's fact: the scale is HR's concept (a placement on a notch whose amount
+ * is the pay); payroll is amount-based and never reads the placement. Independent of
+ * employmentType and of isOnPayroll — a permanent employee can be negotiated, a contractor can be
+ * on the scale.
+ */
+export type PayBasis = 'SalaryScale' | 'Negotiated';
+
+export const PAY_BASIS_OPTIONS: { value: PayBasis; label: string; description: string }[] = [
+  {
+    value: 'SalaryScale',
+    label: 'Salary scale',
+    description: 'Basic pay is the amount of the notch the person is placed on.',
+  },
+  {
+    value: 'Negotiated',
+    label: 'Negotiated',
+    description: 'Basic pay is an amount agreed for this person. Placement on the scale is refused while this stands.',
+  },
+];
+
+export interface SetPayBasisRequest {
+  payBasis: PayBasis;
+  /** Required when negotiated: who agreed what, and when. */
+  note?: string | null;
+}
+
+/**
+ * Where an employee's probation term came from.
+ *
+ * The position is the source and the company policy default is the fallback — the same resolution
+ * the probation policy read has always used. `Override` only happens where the position is silent.
+ */
+export type ProbationSource = 'Position' | 'PolicyDefault' | 'Override';
+
+export const PROBATION_SOURCE_LABEL: Record<ProbationSource, string> = {
+  Position: 'from the position',
+  PolicyDefault: 'the company default',
+  Override: 'set for this employee',
+};
 
 // --- Create / Update requests (Department & Section intentionally omitted) ---
 export interface CreateEmployeeRequest {
@@ -259,6 +323,8 @@ export interface CreateEmployeeRequest {
    */
   hasDisability?: boolean;
   disabilityDescription?: string | null;
+  /** Round 3, lane P2: one of the tenant's live disability types; only with hasDisability. */
+  disabilityTypeId?: string | null;
   isFullTime: boolean;
   dateEmployed?: string | null;
   address?: string | null;
@@ -280,7 +346,21 @@ export interface CreateEmployeeRequest {
   telephoneNumber?: string | null;
   mobileNumber?: string | null;
   employmentType: EmploymentType;
-  probationPeriodDays: number;
+  /**
+   * Which kind of engagement the first contract is, from the tenant's contract-type list.
+   * Optional; its duration gives a fixed-term contract its end date.
+   */
+  contractTypeId?: string | null;
+  /**
+   * The probation term in days.
+   *
+   * ⚠ Send `null` and the server derives it from the position, falling back to the company policy
+   * default. A value sent against a position that states its own term is REFUSED — the form only
+   * sends one where the position is silent.
+   */
+  probationPeriodDays?: number | null;
+  /** Accepted on the IMPORT path only: someone confirmed before this system existed. */
+  confirmationDate?: string | null;
   positionId: string;
   organizationUnitId: string; // derived from the selected position
   locationId: string; // required by the service
@@ -291,11 +371,12 @@ export interface CreateEmployeeRequest {
   tinNumber?: string | null;
   bloodType?: BloodType | null;
   salary?: number | null;
-  payTax: boolean;
-  ssFund: boolean;
-  grossUp: boolean;
-  tier2Only: boolean;
-  overtime: boolean;
+  /** Optional since lane E1: the form no longer sends them; absent means untouched on an update. */
+  payTax?: boolean;
+  ssFund?: boolean;
+  grossUp?: boolean;
+  tier2Only?: boolean;
+  overtime?: boolean;
   /**
    * Payroll membership. Off requires a reason and must not carry a salary or any switch above —
    * the service refuses rather than dropping them (EmployeeService.ValidatePayrollMembership).
@@ -327,13 +408,17 @@ export type PayrollReconciliationIssue =
   | 'AwaitingPayrollSetup'
   | 'InactiveInPayroll'
   | 'StillActiveInPayroll'
-  | 'NoPayBasis';
+  | 'NoPayBasis'
+  | 'BasicPayMismatch';
 
 export const PAYROLL_ISSUE_LABELS: Record<PayrollReconciliationIssue, string> = {
   AwaitingPayrollSetup: 'On payroll in HR, not yet set up in Payroll',
   InactiveInPayroll: 'On payroll in HR, switched off in Payroll',
   StillActiveInPayroll: 'Off payroll in HR, still active in Payroll',
   NoPayBasis: 'On payroll with no salary and no graded notch',
+  // Round-2 lane E1. Scale only, and only from a placed NOTCH: the run pays payroll's figure while
+  // HR's placement says another, every month until somebody sees it.
+  BasicPayMismatch: 'Placed on a notch whose amount differs from the payroll basis',
 };
 
 export interface EmployeePayrollStatus {
@@ -342,7 +427,12 @@ export interface EmployeePayrollStatus {
   isOnPayroll: boolean;
   offPayrollReason?: OffPayrollReason | null;
   offPayrollNote?: string | null;
+  /** Scale or negotiated — decides which figure `hrMonthlyBasicPay` is. */
+  payBasis: PayBasis;
+  payBasisNote?: string | null;
   hrMonthlyBasicPay?: number | null;
+  /** Where the figure came from, in words the tab prints beside it. */
+  hrBasicPaySource?: string | null;
   hasActiveSalaryAssignment: boolean;
   hasPayrollProfile: boolean;
   payrollActive?: boolean | null;
@@ -363,7 +453,10 @@ export interface PayrollReconciliationRow {
   offPayrollReason?: OffPayrollReason | null;
   hasPayrollProfile: boolean;
   payrollActive?: boolean | null;
+  payBasis: PayBasis;
   hrMonthlyBasicPay?: number | null;
+  /** Payroll's active basis, so a mismatch row shows both figures. */
+  payrollMonthlyBasicSalary?: number | null;
   issue: PayrollReconciliationIssue;
 }
 
@@ -375,5 +468,42 @@ export interface PayrollReconciliation {
   inactiveInPayroll: number;
   stillActiveInPayroll: number;
   noPayBasis: number;
+  basicPayMismatch: number;
   rows: PayrollReconciliationRow[];
+}
+
+/**
+ * One payroll component beside this employee's exception on it (round 3, lane X; D-3). Mirrors
+ * EmployeePayrollComponentRowDto. Defaults are payroll's; the exception is the per-person override.
+ */
+export interface EmployeePayrollComponentRow {
+  payrollComponentId: string;
+  code: string;
+  name: string;
+  componentType: string;
+  componentTypeName?: string;
+  defaultCalculationType: 'FixedAmount' | 'PercentageOfBasic';
+  defaultAmount: number;
+  defaultRate: number;
+  defaultTaxable: boolean;
+  currencyCode: string;
+  appliesByDefault: boolean;
+  hasException: boolean;
+  exceptionId?: string | null;
+  calculationType?: 'FixedAmount' | 'PercentageOfBasic' | null;
+  amount?: number | null;
+  rate?: number | null;
+  taxable?: boolean | null;
+  applicable?: boolean | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+}
+
+/** Mirrors EmployeePayrollComponentsDto — HR's employee-first read over payroll's tables. */
+export interface EmployeePayrollComponents {
+  employeeId: string;
+  employeeNumber: string;
+  hasPayrollProfile: boolean;
+  payrollProfileId?: string | null;
+  rows: EmployeePayrollComponentRow[];
 }

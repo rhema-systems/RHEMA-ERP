@@ -77,6 +77,8 @@ export interface Team extends AuditFields {
   shiftName?: string | null;
 
   costCenterCode?: string | null;
+  /** Round 2, lane B2: the chart-of-accounts row; costCenterCode above is its snapshot. */
+  financeAccountId?: string | null;
   projectCode?: string | null;
   teamEmail?: string | null;
 
@@ -160,6 +162,8 @@ export interface CreateTeamRequest {
   locationId?: string | null;
   shiftId?: string | null;
   costCenterCode?: string | null;
+  /** Round 2, lane B2: the chart-of-accounts row; costCenterCode above is its snapshot. */
+  financeAccountId?: string | null;
   projectCode?: string | null;
   teamEmail?: string | null;
   effectiveFrom: string;

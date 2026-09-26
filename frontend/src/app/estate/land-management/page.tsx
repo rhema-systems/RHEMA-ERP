@@ -15,7 +15,7 @@ import {
   Link2,
   Loader2,
   MapPin,
-  Plus,
+  Upload,
   Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -42,7 +42,6 @@ import {
   estateAcquisitionService,
   type LandAcquisitionItem,
 } from '@/services/estate-acquisition.service';
-import ExistingLandDialog from './ExistingLandDialog';
 import DemarcateLandDialog from './DemarcateLandDialog';
 import GisAssetLinkDialog from './GisAssetLinkDialog';
 import LandDocumentsPanel from './LandDocumentsPanel';
@@ -190,7 +189,6 @@ export default function EstateLandManagementPage() {
   const [selectedDemarcations, setSelectedDemarcations] = React.useState<
     EstateLandDemarcation[]
   >([]);
-  const [existingLandOpen, setExistingLandOpen] = React.useState(false);
   const [demarcationAsset, setDemarcationAsset] =
     React.useState<EstateManagedAsset | null>(null);
   const [gisLinkAsset, setGisLinkAsset] =
@@ -335,10 +333,7 @@ export default function EstateLandManagementPage() {
                 selectedAsset.demarcationCount
               ? 'Verify every demarcation first.'
               : undefined;
-  const saleListingLabel =
-    selectedAsset?.externalListingType !== 'None'
-      ? 'View Portal Listing'
-      : 'Send to Portal Listings';
+  const saleListingLabel = 'List Demarcation';
 
   const markAssetProjectReady = async (asset: EstateManagedAsset) => {
     const key = `asset:${asset.id}`;
@@ -405,9 +400,11 @@ export default function EstateLandManagementPage() {
               GIS Integration
             </Link>
           </Button>
-          <Button variant="outline" onClick={() => setExistingLandOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Existing Land
+          <Button asChild variant="outline">
+            <Link href="/estate/property-management/EstatePropertyManagementPropertyUnit?import=land">
+              <Upload className="mr-2 h-4 w-4" />
+              Import Land
+            </Link>
           </Button>
           <Button asChild variant="outline">
             <Link href="/estate/land-acquisition">
@@ -695,13 +692,13 @@ export default function EstateLandManagementPage() {
                       {saleListingLabel}
                     </Button>
                   ) : (
-                    <Button asChild variant="outline">
-                      <Link
-                        href={`/estate/property-management/listings?assetId=${encodeURIComponent(selected.asset.id)}&listingType=Sale`}
-                      >
-                        <Globe2 className="mr-2 h-4 w-4" />
-                        {saleListingLabel}
-                      </Link>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDemarcationAsset(selected.asset)}
+                    >
+                      <Globe2 className="mr-2 h-4 w-4" />
+                      {saleListingLabel}
                     </Button>
                   )}
                   {selected.asset.isReadyForProjectManagement ? (
@@ -984,14 +981,6 @@ export default function EstateLandManagementPage() {
           </CardContent>
         </Card>
       </div>
-      <ExistingLandDialog
-        open={existingLandOpen}
-        onOpenChange={setExistingLandOpen}
-        onCreated={async (asset) => {
-          await loadLandRecords(search);
-          setSelectedKey(`asset:${asset.id}`);
-        }}
-      />
       <DemarcateLandDialog
         asset={demarcationAsset}
         open={Boolean(demarcationAsset)}

@@ -421,47 +421,8 @@ public static class SafetyHazardInspectionMappingExtensions
 
     #region InspectionChecklist
 
-    public static SheInspectionChecklistDto ToDto(this SheInspectionChecklist e) => new()
-    {
-        Id = e.Id,
-        TenantId = e.TenantId,
-        CreatedAt = e.CreatedAt,
-        CreatedBy = e.CreatedBy ?? string.Empty,
-        UpdatedAt = e.UpdatedAt,
-        UpdatedBy = e.UpdatedBy,
-        ChecklistNumber = e.ChecklistNumber,
-        Name = e.Name,
-        Description = e.Description,
-        Type = e.Type,
-        Version = e.Version,
-        IsActive = e.IsActive,
-        Items = e.Items.Select(i => i.ToDto()).ToList(),
-    };
-
-    public static SheInspectionChecklist ToEntity(this CreateSheInspectionChecklistDto dto, Guid tenantId, Guid userId) => new()
-    {
-        TenantId = tenantId,
-        ChecklistNumber = dto.ChecklistNumber,
-        Name = dto.Name,
-        Description = dto.Description,
-        Type = dto.Type,
-        Version = dto.Version,
-        IsActive = dto.IsActive,
-        CreatedBy = userId.ToString(),
-    };
-
-    public static void UpdateEntity(this SheInspectionChecklist e, UpdateSheInspectionChecklistDto dto, Guid userId)
-    {
-        e.Name = dto.Name;
-        e.Description = dto.Description;
-        e.Type = dto.Type;
-        e.Version = dto.Version;
-        e.IsActive = dto.IsActive;
-        e.UpdatedAt = DateTime.UtcNow;
-        e.UpdatedBy = userId.ToString();
-    }
-
-    public static SheInspectionChecklistItemDto ToDto(this SheInspectionChecklistItem e) => new()
+    // ── Fields ──
+    public static SheInspectionChecklistFieldDto ToDto(this SheInspectionChecklistField e) => new()
     {
         Id = e.Id,
         CreatedAt = e.CreatedAt,
@@ -469,7 +430,171 @@ public static class SafetyHazardInspectionMappingExtensions
         UpdatedAt = e.UpdatedAt,
         UpdatedBy = e.UpdatedBy,
         ChecklistId = e.ChecklistId,
+        DisplayOrder = e.DisplayOrder,
+        Label = e.Label,
+        FieldType = e.FieldType,
+        IsRequired = e.IsRequired,
+        ChoiceOptions = e.ChoiceOptions,
+        HelpText = e.HelpText,
+    };
+
+    public static SheInspectionChecklistField ToEntity(this CreateSheInspectionChecklistFieldDto dto, Guid tenantId, Guid userId) => new()
+    {
+        TenantId = tenantId,
+        ChecklistId = dto.ChecklistId,
+        DisplayOrder = dto.DisplayOrder,
+        Label = dto.Label,
+        FieldType = dto.FieldType,
+        IsRequired = dto.IsRequired,
+        ChoiceOptions = dto.ChoiceOptions,
+        HelpText = dto.HelpText,
+        CreatedBy = userId.ToString(),
+    };
+
+    public static void UpdateEntity(this SheInspectionChecklistField e, UpdateSheInspectionChecklistFieldDto dto, Guid userId)
+    {
+        e.DisplayOrder = dto.DisplayOrder;
+        e.Label = dto.Label;
+        e.FieldType = dto.FieldType;
+        e.IsRequired = dto.IsRequired;
+        e.ChoiceOptions = dto.ChoiceOptions;
+        e.HelpText = dto.HelpText;
+        e.UpdatedAt = DateTime.UtcNow;
+        e.UpdatedBy = userId.ToString();
+    }
+
+    // ── Sections ──
+    public static SheInspectionChecklistSectionDto ToDto(this SheInspectionChecklistSection e) => new()
+    {
+        Id = e.Id,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
+        ChecklistId = e.ChecklistId,
+        DisplayOrder = e.DisplayOrder,
+        Code = e.Code,
+        Title = e.Title,
+        Description = e.Description,
+        Kind = e.Kind,
+    };
+
+    public static SheInspectionChecklistSection ToEntity(this CreateSheInspectionChecklistSectionDto dto, Guid tenantId, Guid userId) => new()
+    {
+        TenantId = tenantId,
+        ChecklistId = dto.ChecklistId,
+        DisplayOrder = dto.DisplayOrder,
+        Code = dto.Code,
+        Title = dto.Title,
+        Description = dto.Description,
+        Kind = dto.Kind,
+        CreatedBy = userId.ToString(),
+    };
+
+    public static void UpdateEntity(this SheInspectionChecklistSection e, UpdateSheInspectionChecklistSectionDto dto, Guid userId)
+    {
+        e.DisplayOrder = dto.DisplayOrder;
+        e.Code = dto.Code;
+        e.Title = dto.Title;
+        e.Description = dto.Description;
+        e.Kind = dto.Kind;
+        e.UpdatedAt = DateTime.UtcNow;
+        e.UpdatedBy = userId.ToString();
+    }
+
+    // ── Outcomes ──
+    public static SheInspectionChecklistOutcomeDto ToDto(this SheInspectionChecklistOutcome e) => new()
+    {
+        Id = e.Id,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
+        ChecklistId = e.ChecklistId,
+        DisplayOrder = e.DisplayOrder,
+        Label = e.Label,
+        Description = e.Description,
+        MinPercent = e.MinPercent,
+        MaxPercent = e.MaxPercent,
+        ReinspectionWithinDays = e.ReinspectionWithinDays,
+        IsDisqualifying = e.IsDisqualifying,
+    };
+
+    public static SheInspectionChecklistOutcome ToEntity(this CreateSheInspectionChecklistOutcomeDto dto, Guid tenantId, Guid userId) => new()
+    {
+        TenantId = tenantId,
+        ChecklistId = dto.ChecklistId,
+        DisplayOrder = dto.DisplayOrder,
+        Label = dto.Label,
+        Description = dto.Description,
+        MinPercent = dto.MinPercent,
+        MaxPercent = dto.MaxPercent,
+        ReinspectionWithinDays = dto.ReinspectionWithinDays,
+        IsDisqualifying = dto.IsDisqualifying,
+        CreatedBy = userId.ToString(),
+    };
+
+    public static void UpdateEntity(this SheInspectionChecklistOutcome e, UpdateSheInspectionChecklistOutcomeDto dto, Guid userId)
+    {
+        e.DisplayOrder = dto.DisplayOrder;
+        e.Label = dto.Label;
+        e.Description = dto.Description;
+        e.MinPercent = dto.MinPercent;
+        e.MaxPercent = dto.MaxPercent;
+        e.ReinspectionWithinDays = dto.ReinspectionWithinDays;
+        e.IsDisqualifying = dto.IsDisqualifying;
+        e.UpdatedAt = DateTime.UtcNow;
+        e.UpdatedBy = userId.ToString();
+    }
+
+    // ── Signatories ──
+    public static SheInspectionChecklistSignatoryDto ToDto(this SheInspectionChecklistSignatory e) => new()
+    {
+        Id = e.Id,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
+        ChecklistId = e.ChecklistId,
+        DisplayOrder = e.DisplayOrder,
+        RoleLabel = e.RoleLabel,
+        Kind = e.Kind,
+        IsRequired = e.IsRequired,
+    };
+
+    public static SheInspectionChecklistSignatory ToEntity(this CreateSheInspectionChecklistSignatoryDto dto, Guid tenantId, Guid userId) => new()
+    {
+        TenantId = tenantId,
+        ChecklistId = dto.ChecklistId,
+        DisplayOrder = dto.DisplayOrder,
+        RoleLabel = dto.RoleLabel,
+        Kind = dto.Kind,
+        IsRequired = dto.IsRequired,
+        CreatedBy = userId.ToString(),
+    };
+
+    public static void UpdateEntity(this SheInspectionChecklistSignatory e, UpdateSheInspectionChecklistSignatoryDto dto, Guid userId)
+    {
+        e.DisplayOrder = dto.DisplayOrder;
+        e.RoleLabel = dto.RoleLabel;
+        e.Kind = dto.Kind;
+        e.IsRequired = dto.IsRequired;
+        e.UpdatedAt = DateTime.UtcNow;
+        e.UpdatedBy = userId.ToString();
+    }
+
+    // ── Items ──
+    public static SheInspectionChecklistItemDto ToDto(this SheInspectionChecklistItem e, int itemNumber = 0) => new()
+    {
+        Id = e.Id,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
+        ChecklistId = e.ChecklistId,
+        SectionId = e.SectionId,
         ItemOrder = e.ItemOrder,
+        ItemNumber = itemNumber,
         Category = e.Category,
         ItemDescription = e.ItemDescription,
         IsMandatory = e.IsMandatory,
@@ -481,6 +606,7 @@ public static class SafetyHazardInspectionMappingExtensions
     {
         TenantId = tenantId,
         ChecklistId = dto.ChecklistId,
+        SectionId = dto.SectionId,
         ItemOrder = dto.ItemOrder,
         Category = dto.Category,
         ItemDescription = dto.ItemDescription,
@@ -492,12 +618,147 @@ public static class SafetyHazardInspectionMappingExtensions
 
     public static void UpdateEntity(this SheInspectionChecklistItem e, UpdateSheInspectionChecklistItemDto dto, Guid userId)
     {
+        // An omitted section means "unchanged": callers that predate the builder (harness slice 4,
+        // the old flat item dialog) never send one, and stripping it would make the template
+        // unpublishable. Items move between sections by naming the target section.
+        if (dto.SectionId != null)
+            e.SectionId = dto.SectionId;
         e.ItemOrder = dto.ItemOrder;
         e.Category = dto.Category;
         e.ItemDescription = dto.ItemDescription;
         e.IsMandatory = dto.IsMandatory;
         e.RegulatoryReference = dto.RegulatoryReference;
         e.AssociatedRiskLevel = dto.AssociatedRiskLevel;
+        e.UpdatedAt = DateTime.UtcNow;
+        e.UpdatedBy = userId.ToString();
+    }
+
+    // ── Template ──
+
+    /// <summary>
+    /// The template's items laid out as the form prints them: real sections in DisplayOrder, each
+    /// with its items in ItemOrder; then any legacy section-less items grouped by Category into
+    /// synthetic sections (Id = Guid.Empty). Standard-section items get a running ItemNumber.
+    /// </summary>
+    public static List<SheInspectionChecklistSectionDto> LayOutSections(this SheInspectionChecklist e)
+    {
+        var live = e.Items.Where(i => !i.IsDeleted).ToList();
+        var sections = e.Sections.Where(s => !s.IsDeleted).OrderBy(s => s.DisplayOrder).ThenBy(s => s.CreatedAt)
+            .Select(s =>
+            {
+                var dto = s.ToDto();
+                dto.Items = live.Where(i => i.SectionId == s.Id)
+                    .OrderBy(i => i.ItemOrder).ThenBy(i => i.CreatedAt)
+                    .Select(i => i.ToDto()).ToList();
+                return dto;
+            }).ToList();
+
+        var orphans = live.Where(i => i.SectionId == null).OrderBy(i => i.ItemOrder).ThenBy(i => i.CreatedAt).ToList();
+        foreach (var group in orphans.GroupBy(i => string.IsNullOrWhiteSpace(i.Category) ? "General" : i.Category!.Trim()))
+        {
+            sections.Add(new SheInspectionChecklistSectionDto
+            {
+                Id = Guid.Empty,
+                ChecklistId = e.Id,
+                DisplayOrder = sections.Count + 1,
+                Title = group.Key,
+                Kind = SheChecklistSectionKind.Standard,
+                Items = group.Select(i => i.ToDto()).ToList(),
+            });
+        }
+
+        var number = 0;
+        foreach (var s in sections)
+            foreach (var i in s.Items)
+                i.ItemNumber = s.Kind == SheChecklistSectionKind.Standard ? ++number : 0;
+
+        return sections;
+    }
+
+    public static SheInspectionChecklistDto ToDto(this SheInspectionChecklist e)
+    {
+        var sections = e.LayOutSections();
+        return new()
+        {
+            Id = e.Id,
+            TenantId = e.TenantId,
+            CreatedAt = e.CreatedAt,
+            CreatedBy = e.CreatedBy ?? string.Empty,
+            UpdatedAt = e.UpdatedAt,
+            UpdatedBy = e.UpdatedBy,
+            ChecklistNumber = e.ChecklistNumber,
+            Name = e.Name,
+            Description = e.Description,
+            Type = e.Type,
+            Version = e.Version,
+            IsActive = e.IsActive,
+            Status = e.Status,
+            ScoringMode = e.ScoringMode,
+            AllowPartialCompliance = e.AllowPartialCompliance,
+            PrintTitle = e.PrintTitle,
+            PrintSubtitle = e.PrintSubtitle,
+            Instructions = e.Instructions,
+            CriticalSectionNote = e.CriticalSectionNote,
+            PublishedAt = e.PublishedAt,
+            PublishedById = e.PublishedById,
+            PublishedByName = e.PublishedBy?.FullName,
+            RetiredAt = e.RetiredAt,
+            PreviousVersionId = e.PreviousVersionId,
+            ItemCount = e.Items.Count(i => !i.IsDeleted),
+            Fields = e.Fields.Where(f => !f.IsDeleted).OrderBy(f => f.DisplayOrder).ThenBy(f => f.CreatedAt).Select(f => f.ToDto()).ToList(),
+            Sections = sections,
+            Items = sections.SelectMany(s => s.Items).ToList(),
+            Outcomes = e.Outcomes.Where(o => !o.IsDeleted).OrderBy(o => o.DisplayOrder).ThenBy(o => o.CreatedAt).Select(o => o.ToDto()).ToList(),
+            Signatories = e.Signatories.Where(s => !s.IsDeleted).OrderBy(s => s.DisplayOrder).ThenBy(s => s.CreatedAt).Select(s => s.ToDto()).ToList(),
+        };
+    }
+
+    public static SheInspectionChecklist ToEntity(this CreateSheInspectionChecklistDto dto, Guid tenantId, Guid userId) => new()
+    {
+        TenantId = tenantId,
+        ChecklistNumber = dto.ChecklistNumber,
+        Name = dto.Name,
+        Description = dto.Description,
+        Type = dto.Type,
+        Version = dto.Version,
+        IsActive = dto.IsActive,
+        Status = SheChecklistStatus.Draft,
+        ScoringMode = dto.ScoringMode,
+        AllowPartialCompliance = dto.AllowPartialCompliance,
+        PrintTitle = dto.PrintTitle,
+        PrintSubtitle = dto.PrintSubtitle,
+        Instructions = dto.Instructions,
+        CriticalSectionNote = dto.CriticalSectionNote,
+        CreatedBy = userId.ToString(),
+    };
+
+    /// <summary>True when the update would change a field that is frozen once the template is published.</summary>
+    public static bool ChangesLockedStructure(this SheInspectionChecklist e, UpdateSheInspectionChecklistDto dto) =>
+        e.Type != dto.Type
+        || e.Version != dto.Version
+        || e.ScoringMode != dto.ScoringMode
+        || e.AllowPartialCompliance != dto.AllowPartialCompliance
+        || (e.PrintTitle ?? string.Empty) != (dto.PrintTitle ?? string.Empty)
+        || (e.PrintSubtitle ?? string.Empty) != (dto.PrintSubtitle ?? string.Empty)
+        || (e.Instructions ?? string.Empty) != (dto.Instructions ?? string.Empty)
+        || (e.CriticalSectionNote ?? string.Empty) != (dto.CriticalSectionNote ?? string.Empty);
+
+    public static void UpdateEntity(this SheInspectionChecklist e, UpdateSheInspectionChecklistDto dto, Guid userId)
+    {
+        e.Name = dto.Name;
+        e.Description = dto.Description;
+        e.IsActive = dto.IsActive;
+        if (e.Status == SheChecklistStatus.Draft)
+        {
+            e.Type = dto.Type;
+            e.Version = dto.Version;
+            e.ScoringMode = dto.ScoringMode;
+            e.AllowPartialCompliance = dto.AllowPartialCompliance;
+            e.PrintTitle = dto.PrintTitle;
+            e.PrintSubtitle = dto.PrintSubtitle;
+            e.Instructions = dto.Instructions;
+            e.CriticalSectionNote = dto.CriticalSectionNote;
+        }
         e.UpdatedAt = DateTime.UtcNow;
         e.UpdatedBy = userId.ToString();
     }
@@ -540,7 +801,34 @@ public static class SafetyHazardInspectionMappingExtensions
         ClosedDate = e.ClosedDate,
         ClosedById = e.ClosedById,
         ClosedByName = e.ClosedBy?.FullName,
-        Items = e.Items.Select(i => i.ToDto()).ToList(),
+        // ── Checklist run ──
+        ChecklistNumber = e.Checklist?.ChecklistNumber,
+        ChecklistVersion = e.Checklist?.Version,
+        ScoringMode = e.Checklist?.ScoringMode,
+        TotalApplicableItems = e.TotalApplicableItems,
+        TotalCompliantItems = e.TotalCompliantItems,
+        TotalNonCompliantItems = e.TotalNonCompliantItems,
+        TotalPartiallyCompliantItems = e.TotalPartiallyCompliantItems,
+        CriticalNonConformityCount = e.CriticalNonConformityCount,
+        CompliancePercentage = e.CompliancePercentage,
+        RecommendedOutcomeId = e.RecommendedOutcomeId,
+        RecommendedOutcomeLabel = e.RecommendedOutcome?.Label,
+        OutcomeId = e.OutcomeId,
+        OutcomeLabel = e.Outcome?.Label,
+        OutcomeIsDisqualifying = e.Outcome?.IsDisqualifying,
+        OutcomeReinspectionWithinDays = e.Outcome?.ReinspectionWithinDays,
+        OutcomeOverrideReason = e.OutcomeOverrideReason,
+        SubjectComments = e.SubjectComments,
+        CompletedAt = e.CompletedAt,
+        CompletedById = e.CompletedById,
+        CompletedByName = e.CompletedBy?.FullName,
+        Checklist = e.Checklist?.ToDto(),
+        FieldValues = e.FieldValues.Where(v => !v.IsDeleted).OrderBy(v => v.ChecklistField?.DisplayOrder ?? 0).ThenBy(v => v.CreatedAt).Select(v => v.ToDto()).ToList(),
+        Signatures = e.Signatures.Where(x => !x.IsDeleted).OrderBy(x => x.ChecklistSignatory?.DisplayOrder ?? 0).ThenBy(x => x.SignedAt).Select(x => x.ToDto()).ToList(),
+        // Materialised items in form order first, hand-added findings (DisplayOrder 0) after.
+        Items = e.Items.Where(i => !i.IsDeleted)
+            .OrderBy(i => i.DisplayOrder == 0 ? int.MaxValue : i.DisplayOrder).ThenBy(i => i.CreatedAt)
+            .Select(i => i.ToDto()).NumberStandardItems(),
         Hazards = e.Hazards.Select(h => h.ToDto()).ToList(),
         Documents = e.Documents.Select(d => d.ToDto()).ToList(),
     };
@@ -615,6 +903,11 @@ public static class SafetyHazardInspectionMappingExtensions
         UpdatedBy = e.UpdatedBy,
         InspectionId = e.InspectionId,
         ChecklistItemId = e.ChecklistItemId,
+        DisplayOrder = e.DisplayOrder,
+        SectionId = e.ChecklistItem?.SectionId,
+        SectionCode = e.ChecklistItem?.Section?.Code,
+        SectionTitle = e.ChecklistItem?.Section?.Title ?? e.ChecklistItem?.Category,
+        SectionKind = e.ChecklistItem == null ? null : (e.ChecklistItem.Section?.Kind ?? SheChecklistSectionKind.Standard),
         ItemDescription = e.ItemDescription,
         Status = e.Status,
         DeficiencyNoted = e.DeficiencyNoted,
@@ -775,6 +1068,54 @@ public static class SafetyHazardInspectionMappingExtensions
         UploadedById = dto.UploadedById,
         CreatedBy = userId.ToString(),
     };
+
+    #endregion
+    #region ChecklistRun
+
+    public static SafetyInspectionFieldValueDto ToDto(this SafetyInspectionFieldValue e) => new()
+    {
+        Id = e.Id,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
+        InspectionId = e.InspectionId,
+        ChecklistFieldId = e.ChecklistFieldId,
+        Label = e.ChecklistField?.Label ?? string.Empty,
+        FieldType = e.ChecklistField?.FieldType ?? SheChecklistFieldType.Text,
+        ValueText = e.ValueText,
+        ValueReferenceId = e.ValueReferenceId,
+        // Reference fields are resolved to a name by the service after mapping.
+        ValueDisplay = e.ValueText,
+    };
+
+    public static SafetyInspectionSignatureDto ToDto(this SafetyInspectionSignature e) => new()
+    {
+        Id = e.Id,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
+        InspectionId = e.InspectionId,
+        ChecklistSignatoryId = e.ChecklistSignatoryId,
+        RoleLabel = e.RoleLabel,
+        Kind = e.ChecklistSignatory?.Kind ?? SheChecklistSignatoryKind.External,
+        SignedByEmployeeId = e.SignedByEmployeeId,
+        SignedByName = e.SignedBy?.FullName,
+        SignedName = e.SignedName,
+        SignedAt = e.SignedAt,
+        Notes = e.Notes,
+    };
+
+    /// <summary>Assigns the printed running number to materialised standard-section items, in the order given.</summary>
+    public static List<SafetyInspectionItemDto> NumberStandardItems(this IEnumerable<SafetyInspectionItemDto> items)
+    {
+        var list = items.ToList();
+        var n = 0;
+        foreach (var i in list)
+            i.ItemNumber = i.DisplayOrder > 0 && i.SectionKind == SheChecklistSectionKind.Standard ? ++n : 0;
+        return list;
+    }
 
     #endregion
 }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarCheck, CheckCircle2, Loader2, Users } from 'lucide-react';
+import { CalendarCheck, CalendarDays, CheckCircle2, Loader2, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -12,6 +12,7 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
 import { formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import { jobInterviewService } from '@/services/hr/interviews.service';
+import { useAuth } from '@/hooks/use-auth';
 
 /**
  * A panelist's own diary (moved into the portal by area 25 slice 13b).
@@ -35,6 +36,13 @@ import { jobInterviewService } from '@/services/hr/interviews.service';
 export default function MyInterviewPanelPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { hasAnyPermission } = useAuth();
+  // Only shown to someone the diary would actually serve — a plain panelist gets a 403 there, and
+  // a link that 403s is worse than no link.
+  const canSeeSchedule = hasAnyPermission([
+    'HR.Recruitment.Write',
+    'HR.Recruitment.Admin',
+  ]);
 
   const slots = useQuery({
     queryKey: ['hr', 'my-panel-slots'],
@@ -55,10 +63,30 @@ export default function MyInterviewPanelPage() {
 
   return (
     <div className="space-y-6">
+      {/* G-9.6 (2026-09-15): the two halves of "interviews I am involved in" now point at each
+          other. HR's diary already linked here; this is the return trip, for the HR user who also
+          sits on panels and had to remember two places to look.
+
+          A single merged screen was considered and not built: the two lists answer different
+          questions with different authority — this one is the caller's own commitments, which any
+          employee may see, while the diary is every session in the organisation and is gated on
+          recruitment permissions. Merging them would mean one screen whose contents silently change
+          shape with the viewer's role, which is harder to reason about than two honest screens that
+          link. */}
       <PageHeader
         title="My interview panel"
         description="Sessions you are sitting on, and the scorecards you owe."
         backHref="/me"
+        actions={
+          canSeeSchedule ? (
+            <Button variant="outline" asChild>
+              <Link href="/hr/recruitment/interviews">
+                <CalendarDays className="mr-1.5 h-4 w-4" />
+                HR&apos;s full schedule
+              </Link>
+            </Button>
+          ) : undefined
+        }
       />
 
       <Card>

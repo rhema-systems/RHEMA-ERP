@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import React from 'react';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   BookTemplate,
   CheckCircle2,
@@ -30,6 +30,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
 import {
   Select,
   SelectContent,
@@ -37,12 +38,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { CentralDocumentViewerDialog } from '@/components/document-management/CentralDocumentViewerDialog';
+import {
+  CentralDocumentViewerDialog,
+  type CentralDocumentViewerFile,
+} from '@/components/document-management/CentralDocumentViewerDialog';
 import { useToast } from '@/hooks/use-toast';
+import { getStatusBadgeClassName } from '@/lib/status-badge';
+import { organizationLevelService } from '@/services/hr/organization-level.service';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import {
   documentManagementService,
   type CentralDocumentGenerationTemplate,
+  type CentralDocumentVersionDownloadFormat,
+  type CentralDocumentRecordDetail,
+  type CentralDocumentRecord,
   type GeneratedCentralDocumentResult,
 } from '@/services/document-management.service';
 import {
@@ -52,6 +64,10 @@ import {
   type ProcedureCaseSummary,
 } from '@/services/procedure-case.service';
 import { getProcedureWorkspaceTerminology } from '@/lib/procedure-workspace';
+import { LegalPropertyCaseContextDialog } from './LegalPropertyCaseContextDialog';
+import { estateLandManagementService, EstateManagedAssetStatus, type EstateManagedAsset } from '@/services/estate-land-management.service';
+import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import type { LegalWorkspaceField } from '@/services/legal-procedure.service';
 
 const ProcedurePdfViewer = dynamic(
   () => import('@/components/procedures/ProcedurePdfViewer'),
@@ -70,7 +86,32 @@ interface ProcedureCaseWorkspaceProps {
   entityType: string;
   defaultTitle: string;
   workspaceType?: string;
+  caseId?: string;
+  registerOnly?: boolean;
+  caseBasePath?: string;
+  detailOnly?: boolean;
+  intakeFields?: LegalWorkspaceField[];
 }
+
+const LEGAL_PROPERTY_MATTERS = new Set([
+  'LegalTransfer', 'LegalAssignmentSubleaseVesting',
+  'LegalLeaseVariationRenewalSublease', 'LegalMortgage',
+  'LegalMortgageInPrinciple', 'LegalTerminationRecognition',
+  'LegalPropertyAgreementReview',
+]);
+
+const LEGAL_NEW_MATTER_FIELD_KEYS = new Set([
+  'sourceRecordReference', 'transactionType',
+  'propertyFileReference', 'propertyNumber', 'courtProcessType',
+  'courtName', 'caseNumber', 'claimantName', 'defendantName',
+  'claimAmount', 'serviceDate', 'responseDeadline',
+  'instrumentType', 'lesseeName', 'leaseTerm', 'scheduleReference',
+  'assignorName', 'assigneeName', 'vestingInstrumentReference',
+  'mortgageType', 'mortgageeName', 'terminationReason',
+  'recognitionApplicantName', 'transferorName', 'transfereeName',
+  'advisorySubject', 'confidentialityLevel', 'adviceRecipient',
+  'counselName', 'instructionReference', 'feeEstimate',
+]);
 
 const LAND_FEE_ENTITY_TYPES = new Set([
   'EstateLandsPartiallyServiced',
@@ -81,6 +122,15 @@ const LAND_FEE_ENTITY_TYPES = new Set([
 const CHANGE_OF_USE_ENTITY_TYPES = new Set(['EstateChangeOfUse']);
 
 const GENERATED_DOCUMENT_MODULES = new Set(['Estate', 'Legal']);
+
+type DepartmentOption = {
+  id: string;
+  name: string;
+  code: string;
+  organizationLevelId: string;
+  levelName?: string | null;
+};
+
 const LINKED_LEGAL_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
   'Legal Intake': ['assignedLegalOfficer'],
   'Agreement Vetting': [
@@ -90,6 +140,13 @@ const LINKED_LEGAL_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
     'closeoutNotes',
   ],
   'Head of Legal Release': [
+    'signatureStatus',
+    'sealStatus',
+    'dispatchStatus',
+    'estateReturnStatus',
+    'closeoutNotes',
+  ],
+  'Head of Legal Signature': [
     'signatureStatus',
     'sealStatus',
     'dispatchStatus',
@@ -206,6 +263,21 @@ const parseAmount = (value?: string | null): number | null => {
   const parsed = Number(value.replace(/[^\d.-]/g, ''));
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+function safeDownloadName(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
+}
+
+function triggerBlobDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 type StageFieldRequirement = {
   key: string;
@@ -382,6 +454,11 @@ const formatFinanceStatus = (
   fallback = 'Not generated'
 ): string => status?.trim().replace(/([a-z])([A-Z])/g, '$1 $2') || fallback;
 
+const isDepartmentLevel = (name?: string | null, code?: string | null) => {
+  const normalized = `${name ?? ''} ${code ?? ''}`.trim().toLowerCase();
+  return normalized.includes('department') || normalized.includes('dept');
+};
+
 const isLegalTransferStageSignatureRecorded = (
   procedureCase: ProcedureCaseDetail,
   document: ProcedureCaseDocument
@@ -420,10 +497,17 @@ export function ProcedureCaseWorkspace({
   entityType,
   defaultTitle,
   workspaceType,
+  caseId,
+  registerOnly = false,
+  caseBasePath,
+  detailOnly = false,
+  intakeFields = [],
 }: ProcedureCaseWorkspaceProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const terminology = getProcedureWorkspaceTerminology(workspaceType);
-  const requestedCaseId = searchParams.get('caseId');
+  const requestedCaseId = caseId ?? searchParams.get('caseId');
   const prefillSignature = searchParams.toString();
   const prefilledCase = React.useMemo(
     () => ({
@@ -446,6 +530,10 @@ export function ProcedureCaseWorkspace({
     return values;
   }, [prefillSignature, searchParams]);
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
+  const [casePage, setCasePage] = React.useState(1);
+  const [casePageSize, setCasePageSize] = React.useState(10);
+  const [caseTotalCount, setCaseTotalCount] = React.useState(0);
+  const [caseTotalPages, setCaseTotalPages] = React.useState(1);
   const [selectedCase, setSelectedCase] =
     React.useState<ProcedureCaseDetail | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -457,6 +545,37 @@ export function ProcedureCaseWorkspace({
   const [previewDocumentId, setPreviewDocumentId] = React.useState<
     string | null
   >(null);
+  const [dmsViewerDocumentId, setDmsViewerDocumentId] = React.useState<
+    string | null
+  >(null);
+  const [dmsViewerFileOverride, setDmsViewerFileOverride] = React.useState<CentralDocumentViewerFile | null>(null);
+  const [versionHistoryDocumentId, setVersionHistoryDocumentId] = React.useState<string | null>(null);
+  const [versionHistory, setVersionHistory] = React.useState<CentralDocumentRecordDetail | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = React.useState<string>('');
+  const [versionHistoryLoading, setVersionHistoryLoading] = React.useState(false);
+  const [versionHistoryError, setVersionHistoryError] = React.useState<string | null>(null);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
+  const [intakeAttachmentMode, setIntakeAttachmentMode] = React.useState<'upload' | 'dms'>('upload');
+  const [intakeAttachmentFile, setIntakeAttachmentFile] = React.useState<File | null>(null);
+  const [intakeDmsSearch, setIntakeDmsSearch] = React.useState('');
+  const [intakeDmsRecords, setIntakeDmsRecords] = React.useState<CentralDocumentRecord[]>([]);
+  const [intakeDmsRecordId, setIntakeDmsRecordId] = React.useState('');
+  const [isLoadingIntakeDms, setIsLoadingIntakeDms] = React.useState(false);
+  const [linkDocumentTargetId, setLinkDocumentTargetId] = React.useState<string | null>(null);
+  const [newLegalFields, setNewLegalFields] = React.useState<Record<string, string | null>>(prefilledFieldValues);
+  const [legalAssetSearch, setLegalAssetSearch] = React.useState(searchParams.get('field_propertyNumber') || '');
+  const [legalAssets, setLegalAssets] = React.useState<EstateManagedAsset[]>([]);
+  const [selectedLegalAsset, setSelectedLegalAsset] = React.useState<EstateManagedAsset | null>(null);
+  const [legalAssetContext, setLegalAssetContext] = React.useState<EstateManagedAsset | null>(null);
+  const [isLegalAssetContextOpen, setIsLegalAssetContextOpen] = React.useState(false);
+  const [legalAssetContextError, setLegalAssetContextError] = React.useState<string | null>(null);
+  const [legalCustomers, setLegalCustomers] = React.useState<BusinessPartnerDto[]>([]);
+  const [isLegalContextOpen, setIsLegalContextOpen] = React.useState(false);
+  const [departmentOptions, setDepartmentOptions] = React.useState<
+    DepartmentOption[]
+  >([]);
+  const [isLoadingDepartments, setIsLoadingDepartments] =
+    React.useState(false);
   const [generationTemplates, setGenerationTemplates] = React.useState<
     CentralDocumentGenerationTemplate[]
   >([]);
@@ -475,7 +594,9 @@ export function ProcedureCaseWorkspace({
     referenceNumber: prefilledCase.referenceNumber,
     applicantName: prefilledCase.applicantName,
     sourceDepartment: prefilledCase.sourceDepartment,
-    receivedDate: prefilledCase.receivedDate,
+    organizationLevelId: searchParams.get('organizationLevelId') || '',
+    organizationUnitId: searchParams.get('organizationUnitId') || '',
+    receivedDate: prefilledCase.receivedDate || (module === 'Legal' ? new Date().toISOString().slice(0, 10) : ''),
     description: prefilledCase.description,
   });
   const { toast } = useToast();
@@ -503,8 +624,49 @@ export function ProcedureCaseWorkspace({
   const originatingPropertyCaseId = selectedCase?.fields.find(
     (field) => field.key === 'sourceProcedureCaseId'
   )?.value;
+  const linkedLegalAssetId = selectedCase?.fields.find(
+    (field) => field.key === 'estateManagedAssetId'
+  )?.value;
   const isLinkedLegalMatter =
     module === 'Legal' && Boolean(originatingPropertyCaseId);
+  const selectedNewCaseDepartment = departmentOptions.find(
+    (department) => department.id === newCase.organizationUnitId
+  );
+  const legalIntakeFields = intakeFields.filter((field) =>
+    LEGAL_NEW_MATTER_FIELD_KEYS.has(field.key)
+  );
+  React.useEffect(() => {
+    if ((!isCreateDialogOpen || intakeAttachmentMode !== 'dms') && !linkDocumentTargetId) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setIsLoadingIntakeDms(true);
+      void documentManagementService.getRecords(undefined, {
+        search: intakeDmsSearch.trim() || undefined,
+        take: 50,
+      }).then((records) => {
+        if (active) setIntakeDmsRecords(records.filter((record) => record.currentVersion || record.externalDocumentUrl));
+      }).catch(() => {
+        if (active) setIntakeDmsRecords([]);
+      }).finally(() => {
+        if (active) setIsLoadingIntakeDms(false);
+      });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [isCreateDialogOpen, intakeAttachmentMode, intakeDmsSearch, linkDocumentTargetId]);
+  const legalAssetOptions = selectedLegalAsset && !legalAssets.some((asset) => asset.id === selectedLegalAsset.id)
+    ? [selectedLegalAsset, ...legalAssets]
+    : legalAssets;
+  const selectedCaseDepartmentValue =
+    selectedCase?.organizationUnitId ||
+    departmentOptions.find(
+      (department) =>
+        department.name.trim().toLowerCase() ===
+        (selectedCase?.sourceDepartment ?? '').trim().toLowerCase()
+    )?.id ||
+    '';
   const legalTransferFinanceSnapshot = React.useMemo(() => {
     if (!selectedCase || entityType !== 'LegalTransfer') {
       return null;
@@ -737,26 +899,156 @@ export function ProcedureCaseWorkspace({
     selectedCase?.documents.find(
       (document) => document.id === previewDocumentId
     ) ?? null;
+  const dmsViewerDocument =
+    selectedCase?.documents.find(
+      (document) => document.id === dmsViewerDocumentId
+    ) ?? null;
   const previewDocumentUrl = previewDocument
     ? getDocumentPreviewUrl(previewDocument)
     : null;
+
+  const toDmsViewerFile = (
+    document: ProcedureCaseDocument | null | undefined
+  ): CentralDocumentViewerFile | null => {
+    if (!document?.centralDocumentRecordId) {
+      return null;
+    }
+
+    const versionId = document.centralDocumentVersionId;
+    return {
+      documentRecordId: document.centralDocumentRecordId,
+      versionId,
+      title: document.name,
+      fileName:
+        document.fileName ||
+        document.centralDocumentVersion ||
+        document.name,
+      repositoryPath:
+        document.centralDocumentRepositoryPath ||
+        (versionId
+          ? `/api/document-management/records/${encodeURIComponent(
+              document.centralDocumentRecordId
+            )}/versions/${encodeURIComponent(versionId)}/content`
+          : undefined),
+      renditionPath: document.centralDocumentRenditionPath,
+      contentType: document.centralDocumentContentType,
+      sourceLabel: document.providedBy || document.requiredFrom || undefined,
+      version: document.centralDocumentVersion,
+      annotationStateJson: document.centralDocumentAnnotationStateJson,
+    };
+  };
+
+  const refreshSelectedCase = async () => {
+    if (!selectedCase) {
+      return null;
+    }
+
+    const refreshed = await procedureCaseService.getCase(selectedCase.id);
+    setSelectedCase(refreshed);
+    if (!detailOnly) {
+      await loadCases();
+    }
+    return refreshed;
+  };
+
+  const openLegalAssetContext = async () => {
+    if (!selectedCase || !linkedLegalAssetId) return;
+    setLegalAssetContext(null);
+    setLegalAssetContextError(null);
+    setIsLegalAssetContextOpen(true);
+    try {
+      const propertyNumber = selectedCase.fields.find((field) => field.key === 'propertyNumber')?.value || '';
+      const assets = await estateLandManagementService.getManagedAssets({
+        search: propertyNumber || undefined,
+        take: 100,
+      });
+      const asset = assets.find((item) => item.id === linkedLegalAssetId);
+      if (!asset) throw new Error('The linked property is not available in the Estate register.');
+      setLegalAssetContext(asset);
+    } catch (err) {
+      setLegalAssetContextError(err instanceof Error ? err.message : 'Unable to load the linked property.');
+    }
+  };
+
+  const loadVersionHistory = async (recordId: string, preferredVersionId?: string | null) => {
+    setVersionHistory(null);
+    setVersionHistoryError(null);
+    setVersionHistoryLoading(true);
+    try {
+      const detail = await documentManagementService.getRecord(recordId);
+      if (!detail) throw new Error('Version history is unavailable.');
+      setVersionHistory(detail);
+      setSelectedVersionId(preferredVersionId || detail.versions[0]?.id || '');
+    } catch (error) {
+      setVersionHistoryError(error instanceof Error ? error.message : 'Unable to load version history.');
+    } finally {
+      setVersionHistoryLoading(false);
+    }
+  };
+
+  const openVersionHistory = async (document: ProcedureCaseDocument) => {
+    if (!document.centralDocumentRecordId) return;
+    if (versionHistoryDocumentId === document.id) {
+      setVersionHistoryDocumentId(null);
+      return;
+    }
+    setVersionHistoryDocumentId(document.id);
+    await loadVersionHistory(document.centralDocumentRecordId, document.centralDocumentVersionId);
+  };
+
+  const viewSelectedVersion = (document: ProcedureCaseDocument) => {
+    const version = versionHistory?.versions.find((item) => item.id === selectedVersionId);
+    if (!version || !document.centralDocumentRecordId) return;
+    const annotationReview = versionHistory?.annotationReviews
+      .filter((review) => review.documentVersionId === version.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    setDmsViewerFileOverride({
+      documentRecordId: document.centralDocumentRecordId,
+      versionId: version.id,
+      fileUploadRecordId: version.fileUploadRecordId,
+      title: document.name,
+      fileName: version.fileName || document.name,
+      repositoryPath: version.repositoryPath,
+      renditionPath: version.renditionPath,
+      contentType: version.contentType,
+      sourceLabel: document.providedBy || document.requiredFrom || undefined,
+      version: version.versionNumber,
+      annotationStateJson: annotationReview?.annotationStateJson,
+    });
+    setDmsViewerDocumentId(document.id);
+  };
 
   const loadCases = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await procedureCaseService.listCases(module, entityType);
-      setCases(data);
+      if (detailOnly && requestedCaseId) {
+        const detail = await procedureCaseService.getCase(requestedCaseId);
+        setCases([]);
+        setCaseTotalCount(0);
+        setCaseTotalPages(1);
+        setSelectedCase(detail);
+        return;
+      }
+
+      const data = await procedureCaseService.listCasesPage(
+        module,
+        entityType,
+        casePage,
+        casePageSize
+      );
+      setCases(data.items);
+      setCaseTotalCount(data.totalCount);
+      setCaseTotalPages(Math.max(1, data.totalPages || 1));
 
       // Notifications and handoff links pass caseId so reviewers land on the exact Estate procedure case.
-      const targetCaseId =
-        requestedCaseId && data.some((item) => item.id === requestedCaseId)
-          ? requestedCaseId
-          : data[0]?.id;
+      const targetCaseId = requestedCaseId || (registerOnly ? null : data.items[0]?.id);
 
-      if (targetCaseId && selectedCase?.id !== targetCaseId) {
+      if (targetCaseId) {
         const detail = await procedureCaseService.getCase(targetCaseId);
         setSelectedCase(detail);
+      } else if (!targetCaseId) {
+        setSelectedCase(null);
       }
     } catch (err) {
       setError(
@@ -765,11 +1057,69 @@ export function ProcedureCaseWorkspace({
     } finally {
       setIsLoading(false);
     }
-  }, [entityType, module, requestedCaseId, selectedCase?.id]);
+  }, [
+    casePage,
+    casePageSize,
+    detailOnly,
+    entityType,
+    module,
+    registerOnly,
+    requestedCaseId,
+  ]);
 
   React.useEffect(() => {
     void loadCases();
   }, [loadCases]);
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    const loadDepartments = async () => {
+      setIsLoadingDepartments(true);
+      try {
+        const [levels, units] = await Promise.all([
+          organizationLevelService.getAll(),
+          organizationUnitService.getSummary(),
+        ]);
+        if (!mounted) {
+          return;
+        }
+
+        const departmentLevelIds = new Set(
+          levels
+            .filter((level) => level.isActive && isDepartmentLevel(level.name, level.code))
+            .map((level) => level.id)
+        );
+        const departmentUnits = units
+          .filter((unit: OrganizationUnitSummary) =>
+            unit.isActive && departmentLevelIds.has(unit.organizationLevelId)
+          )
+          .sort((left, right) => left.name.localeCompare(right.name))
+          .map((unit) => ({
+            id: unit.id,
+            name: unit.name,
+            code: unit.code,
+            organizationLevelId: unit.organizationLevelId,
+            levelName: unit.levelName,
+          }));
+        setDepartmentOptions(departmentUnits);
+      } catch {
+        if (mounted) {
+          setDepartmentOptions([]);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoadingDepartments(false);
+        }
+      }
+    };
+
+    void loadDepartments();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (
@@ -785,14 +1135,58 @@ export function ProcedureCaseWorkspace({
       Boolean(prefilledCase.sourceDepartment) ||
       Boolean(prefilledCase.receivedDate) ||
       Boolean(prefilledCase.description) ||
+      Boolean(searchParams.get('organizationUnitId')) ||
       Object.keys(prefilledFieldValues).length > 0;
     if (!hasPrefill) {
       return;
     }
 
     appliedPrefillSignatureRef.current = prefillSignature;
-    setNewCase(prefilledCase);
-  }, [prefillSignature, prefilledCase, prefilledFieldValues, requestedCaseId]);
+    setNewCase((current) => ({
+      ...current,
+      ...prefilledCase,
+      receivedDate: prefilledCase.receivedDate || current.receivedDate,
+      organizationLevelId: searchParams.get('organizationLevelId') || '',
+      organizationUnitId: searchParams.get('organizationUnitId') || '',
+    }));
+    setNewLegalFields((current) => ({ ...current, ...prefilledFieldValues }));
+  }, [
+    prefillSignature,
+    prefilledCase,
+    prefilledFieldValues,
+    requestedCaseId,
+    searchParams,
+  ]);
+
+  React.useEffect(() => {
+    if (module !== 'Legal' || !isCreateDialogOpen) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void estateLandManagementService.getManagedAssets({
+        search: legalAssetSearch.trim() || undefined,
+        take: 100,
+      }).then((assets) => {
+        if (active) setLegalAssets(assets);
+      }).catch(() => {
+        if (active) setLegalAssets([]);
+      });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [isCreateDialogOpen, legalAssetSearch, module]);
+
+  React.useEffect(() => {
+    if (module !== 'Legal' || !isCreateDialogOpen) return;
+    let active = true;
+    void businessPartnerService.getActivePartners('Customer').then((customers) => {
+      if (active) setLegalCustomers(customers);
+    }).catch(() => {
+      if (active) setLegalCustomers([]);
+    });
+    return () => { active = false; };
+  }, [isCreateDialogOpen, module]);
 
   React.useEffect(() => {
     if (!supportsGeneratedDocuments) {
@@ -966,25 +1360,76 @@ export function ProcedureCaseWorkspace({
   };
 
   const createCase = async () => {
+    if (module === 'Legal' && (!newCase.title.trim() || !newCase.applicantName.trim())) {
+      setError('Enter the matter title and applicant name.');
+      return;
+    }
+    if (!selectedNewCaseDepartment) {
+      setError('Select the source department from HR organization units.');
+      return;
+    }
+    if (module === 'Legal' && LEGAL_PROPERTY_MATTERS.has(entityType)
+        && !newLegalFields.estateManagedAssetId) {
+      setError('Select the property linked to this Legal matter.');
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
       const created = await procedureCaseService.createCase({
         module,
         entityType,
-        ...newCase,
-        fieldValues: prefilledFieldValues,
+        title: newCase.title,
+        applicantName: newCase.applicantName,
+        sourceDepartment: selectedNewCaseDepartment.name,
+        organizationLevelId: selectedNewCaseDepartment.organizationLevelId,
+        organizationUnitId: selectedNewCaseDepartment.id,
+        receivedDate: newCase.receivedDate,
+        description: newCase.description,
+        fieldValues: module === 'Legal'
+          ? { ...prefilledFieldValues, ...newLegalFields, applicantName: newCase.applicantName }
+          : prefilledFieldValues,
+        hasIntakeAttachment: Boolean(intakeAttachmentMode === 'upload' ? intakeAttachmentFile : intakeDmsRecordId),
       });
-      setSelectedCase(created);
+      let attachedCase = created;
+      const intakeDocument = created.documents.find((document) => document.name === 'Case intake attachment');
+      try {
+        if (intakeDocument && intakeAttachmentMode === 'upload' && intakeAttachmentFile) {
+          attachedCase = await procedureCaseService.uploadDocument(created.id, intakeDocument.id, intakeAttachmentFile);
+        } else if (intakeDocument && intakeAttachmentMode === 'dms' && intakeDmsRecordId) {
+          attachedCase = await documentManagementService.attachRecordToCase(intakeDmsRecordId, created.id, intakeDocument.id);
+        }
+      } catch (attachmentError) {
+        toast({
+          title: 'Case created, attachment not saved',
+          description: attachmentError instanceof Error ? attachmentError.message : 'Open the case to attach the document.',
+          variant: 'destructive',
+        });
+      }
+      setSelectedCase(attachedCase);
+      setIntakeAttachmentFile(null);
+      setIntakeDmsRecordId('');
+      setIntakeDmsSearch('');
       setNewCase({
         title: defaultTitle,
         referenceNumber: '',
         applicantName: '',
         sourceDepartment: '',
-        receivedDate: '',
+        organizationLevelId: '',
+        organizationUnitId: '',
+        receivedDate: module === 'Legal' ? new Date().toISOString().slice(0, 10) : '',
         description: '',
       });
       await loadCases();
+      setIsCreateDialogOpen(false);
+      if (module === 'Legal') {
+        setNewLegalFields({});
+        setSelectedLegalAsset(null);
+        toast({ title: 'Legal matter created', variant: 'success' });
+      } else if (registerOnly || detailOnly) {
+        router.push(caseDetailHref(created.id));
+      }
     } catch (err) {
       setError(
         err instanceof Error
@@ -1027,6 +1472,8 @@ export function ProcedureCaseWorkspace({
         referenceNumber: selectedCase.referenceNumber,
         applicantName: selectedCase.applicantName,
         sourceDepartment: selectedCase.sourceDepartment,
+        organizationLevelId: selectedCase.organizationLevelId,
+        organizationUnitId: selectedCase.organizationUnitId,
         receivedDate: selectedCase.receivedDate,
         description: selectedCase.description,
       });
@@ -1079,6 +1526,29 @@ export function ProcedureCaseWorkspace({
     setError(null);
     try {
       const selectedFile = documentFiles[document.id];
+      if (selectedFile && document.centralDocumentRecordId && document.name !== 'Case intake attachment') {
+        const version = await documentManagementService.uploadVersionFile(
+          document.centralDocumentRecordId,
+          {
+            file: selectedFile,
+            status: 'Current',
+            changeSummary:
+              'Edited workflow copy uploaded from the procedure case workspace.',
+          }
+        );
+        setDocumentFiles((current) => ({ ...current, [document.id]: null }));
+        await refreshSelectedCase();
+        if (versionHistoryDocumentId === document.id) {
+          await loadVersionHistory(document.centralDocumentRecordId, version.id);
+        }
+        toast({
+          title: 'Document version uploaded',
+          description: 'The edited copy is now the current DMS version.',
+          variant: 'success',
+        });
+        return;
+      }
+
       const updated = selectedFile
         ? await procedureCaseService.uploadDocument(
             selectedCase.id,
@@ -1111,6 +1581,135 @@ export function ProcedureCaseWorkspace({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const linkDmsDocument = async () => {
+    if (!selectedCase || !linkDocumentTargetId || !intakeDmsRecordId) return;
+    setIsSaving(true);
+    try {
+      const updated = await documentManagementService.attachRecordToCase(
+        intakeDmsRecordId,
+        selectedCase.id,
+        linkDocumentTargetId
+      );
+      setSelectedCase(updated);
+      setLinkDocumentTargetId(null);
+      setIntakeDmsRecordId('');
+      setIntakeDmsSearch('');
+      await loadCases();
+      toast({ title: 'DMS document attached', variant: 'success' });
+    } catch (err) {
+      toast({
+        title: 'Unable to attach document',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const generateDmsRendition = async (file: CentralDocumentViewerFile) => {
+    if (!file.documentRecordId || !file.versionId) {
+      return null;
+    }
+
+    const version = await documentManagementService.generateVersionRendition(
+      file.documentRecordId,
+      file.versionId,
+      Boolean(file.renditionPath)
+    );
+    await refreshSelectedCase();
+
+    return {
+      ...file,
+      renditionPath: version.renditionPath,
+      repositoryPath: version.repositoryPath || file.repositoryPath,
+      contentType: version.contentType || file.contentType,
+      fileName: version.fileName || file.fileName,
+    };
+  };
+
+  const downloadDmsVersion = async (
+    file: CentralDocumentViewerFile,
+    format: CentralDocumentVersionDownloadFormat
+  ) => {
+    if (!file.documentRecordId || !file.versionId) {
+      throw new Error('This DMS version cannot be downloaded.');
+    }
+
+    const blob = await documentManagementService.downloadVersionFile(
+      file.documentRecordId,
+      file.versionId,
+      format
+    );
+    const extension = format === 'pdf' ? 'pdf' : 'docx';
+    const baseName =
+      file.fileName?.replace(/\.[^.]+$/, '') || file.title || 'document';
+
+    triggerBlobDownload(
+      blob,
+      safeDownloadName(`${baseName}-${file.version || 'version'}.${extension}`)
+    );
+  };
+
+  const saveDmsAnnotations = async (
+    file: CentralDocumentViewerFile,
+    annotationStateJson: string | null,
+    annotatedPdfBlob: Blob | null
+  ) => {
+    if (!file.documentRecordId || !file.versionId) {
+      throw new Error('This DMS version cannot save annotations.');
+    }
+
+    const sourcePdf =
+      annotatedPdfBlob ||
+      (await documentManagementService.downloadVersionFile(
+        file.documentRecordId,
+        file.versionId,
+        'pdf'
+      ));
+    const baseName =
+      file.fileName?.replace(/\.[^.]+$/, '') || file.title || 'document';
+    const annotatedFile = new File(
+      [sourcePdf],
+      safeDownloadName(`${baseName}-annotated.pdf`),
+      { type: 'application/pdf' }
+    );
+    const version = await documentManagementService.uploadVersionFile(
+      file.documentRecordId,
+      {
+        file: annotatedFile,
+        status: 'Current',
+        changeSummary:
+          'PDF annotations, comments, and signatures saved from the procedure case workspace.',
+      }
+    );
+    await documentManagementService.addAnnotationReview(file.documentRecordId, {
+      documentVersionId: version.id,
+      reviewTitle: `${file.title} annotation save`,
+      status: 'Open',
+      syncfusionAnnotationStatus: 'Annotations saved',
+      reviewNotes:
+        'Annotations, comments, and signature marks were saved from the case document viewer.',
+      annotationStateJson: annotationStateJson || '{}',
+    });
+    await refreshSelectedCase();
+    if (versionHistoryDocumentId === dmsViewerDocumentId) {
+      await loadVersionHistory(file.documentRecordId, version.id);
+    }
+
+    return {
+      ...file,
+      versionId: version.id,
+      fileUploadRecordId: version.fileUploadRecordId,
+      fileName: version.fileName || file.fileName,
+      repositoryPath: version.repositoryPath || file.repositoryPath,
+      renditionPath: version.renditionPath || version.repositoryPath,
+      contentType: version.contentType || 'application/pdf',
+      version: version.versionNumber,
+      annotationStateJson: annotationStateJson || '{}',
+    };
   };
 
   const openDocument = async (document: ProcedureCaseDocument) => {
@@ -1497,14 +2096,38 @@ export function ProcedureCaseWorkspace({
     }
   };
 
+  const signPropertyAgreement = async (document: ProcedureCaseDocument) => {
+    if (!selectedCase) return;
+    setSigningDocumentId(document.id);
+    setError(null);
+    try {
+      const updated = await procedureCaseService.signPropertyAgreement(selectedCase.id, document.id);
+      setSelectedCase(updated);
+      await loadCases();
+      toast({
+        title: 'Agreement signed',
+        description: 'The Head of Legal signature has been applied to the agreement PDF.',
+        variant: 'success',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to sign the agreement.');
+    } finally {
+      setSigningDocumentId(null);
+    }
+  };
+
   const renderField = (field: ProcedureCaseDetail['fields'][number]) => {
+    if (module === 'Legal' && (field.key === 'estateManagedAssetId' || field.key === 'customerBusinessPartnerId')) {
+      return null;
+    }
     const isCalculated = CALCULATED_PROCEDURE_FIELD_KEYS.has(field.key);
     const isLinkedLegalReadonly =
       isLinkedLegalMatter && !linkedLegalEditableFields.has(field.key);
     const isDisabled =
       !canEditProcedureField(field.key) ||
       isCalculated ||
-      isLinkedLegalReadonly;
+      isLinkedLegalReadonly ||
+      (entityType === 'LegalPropertyAgreementReview' && field.key === 'signatureStatus');
     const isRequiredForStage = legalTransferRequiredFieldKeys.has(field.key);
     const fieldType = field.fieldType.toLowerCase();
     const fieldId = `procedure-field-${field.id}`;
@@ -1587,6 +2210,232 @@ export function ProcedureCaseWorkspace({
     );
   };
 
+  const renderCreateCaseForm = () => (
+    <div className="space-y-3">
+      {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-title">Matter title</label> : null}
+      <Input
+        id="new-legal-title"
+        value={newCase.title}
+        onChange={(event) =>
+          setNewCase({ ...newCase, title: event.target.value })
+        }
+      />
+      {module === 'Legal' ? (
+        <div className="space-y-2">
+          <label className="text-xs font-medium" htmlFor="new-legal-property-search">Property</label>
+          <Input
+            id="new-legal-property-search"
+            placeholder="Search property or parcel"
+            value={legalAssetSearch}
+            onChange={(event) => setLegalAssetSearch(event.target.value)}
+          />
+          <Select
+            value={newLegalFields.estateManagedAssetId || undefined}
+            onValueChange={(value) => {
+              const asset = legalAssetOptions.find((item) => item.id === value);
+              if (!asset) return;
+              setSelectedLegalAsset(asset);
+              setNewLegalFields((current) => ({
+                ...current,
+                estateManagedAssetId: asset.id,
+                propertyNumber: asset.projectUnitCode || asset.assetCode,
+                propertyFileReference: asset.propertyFileReference || current.propertyFileReference || '',
+              }));
+            }}
+          >
+            <SelectTrigger aria-label="Linked property">
+              <SelectValue placeholder={LEGAL_PROPERTY_MATTERS.has(entityType) ? 'Select property' : 'No property linked'} />
+            </SelectTrigger>
+            <SelectContent>
+              {legalAssetOptions.map((asset) => (
+                <SelectItem key={asset.id} value={asset.id}>
+                  {asset.assetCode} - {asset.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {selectedLegalAsset?.lesseeName ? (
+            <p className="text-xs text-muted-foreground">Current holder: {selectedLegalAsset.lesseeName}</p>
+          ) : null}
+        </div>
+      ) : null}
+      {module === 'Legal' ? (
+        <div className="space-y-2">
+          <label className="text-xs font-medium" htmlFor="new-legal-customer">Applicant account</label>
+          <Select
+            value={newLegalFields.customerBusinessPartnerId || undefined}
+            onValueChange={(value) => {
+              const customer = legalCustomers.find((item) => item.id === value);
+              setNewLegalFields((current) => ({ ...current, customerBusinessPartnerId: value }));
+              if (customer) setNewCase((current) => ({ ...current, applicantName: customer.partnerName }));
+            }}
+          >
+            <SelectTrigger id="new-legal-customer"><SelectValue placeholder="Select existing customer, if applicable" /></SelectTrigger>
+            <SelectContent>
+              {legalCustomers.map((customer) => (
+                <SelectItem key={customer.id} value={customer.id}>
+                  {customer.partnerName} ({customer.partnerCode})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+      {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-applicant">Applicant / party name</label> : null}
+      <Input
+        id="new-legal-applicant"
+        placeholder="Applicant / party name"
+        value={newCase.applicantName}
+        onChange={(event) => {
+          const applicantName = event.target.value;
+          setNewCase((current) => ({ ...current, applicantName }));
+          const linkedCustomer = legalCustomers.find((customer) => customer.id === newLegalFields.customerBusinessPartnerId);
+          if (linkedCustomer && linkedCustomer.partnerName !== applicantName) {
+            setNewLegalFields((current) => ({ ...current, customerBusinessPartnerId: null }));
+          }
+        }}
+      />
+      {module === 'Legal' && legalIntakeFields.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {legalIntakeFields.map((field) => (
+            <div key={field.key} className={field.type === 'textarea' ? 'space-y-1.5 sm:col-span-2' : 'space-y-1.5'}>
+              <label className="text-xs font-medium" htmlFor={`new-legal-${field.key}`}>{field.label}</label>
+              {field.type === 'select' && field.options?.length ? (
+                <Select
+                  value={newLegalFields[field.key] || undefined}
+                  onValueChange={(value) => setNewLegalFields((current) => ({ ...current, [field.key]: value }))}
+                >
+                  <SelectTrigger id={`new-legal-${field.key}`}><SelectValue placeholder={field.label} /></SelectTrigger>
+                  <SelectContent>
+                    {field.options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              ) : field.type === 'textarea' ? (
+                <Textarea
+                  id={`new-legal-${field.key}`}
+                  value={newLegalFields[field.key] || ''}
+                  onChange={(event) => setNewLegalFields((current) => ({ ...current, [field.key]: event.target.value }))}
+                />
+              ) : (
+                <Input
+                  id={`new-legal-${field.key}`}
+                  type={field.type === 'date' ? 'date' : field.type === 'currency' || field.type === 'number' ? 'number' : 'text'}
+                  value={newLegalFields[field.key] || ''}
+                  disabled={field.key === 'propertyNumber' && Boolean(newLegalFields.estateManagedAssetId)}
+                  onChange={(event) => setNewLegalFields((current) => ({ ...current, [field.key]: event.target.value }))}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium">Case attachment</label>
+        <div className="inline-flex rounded-md border border-border" role="group" aria-label="Attachment source">
+          <Button type="button" size="sm" variant={intakeAttachmentMode === 'upload' ? 'default' : 'ghost'} aria-pressed={intakeAttachmentMode === 'upload'} onClick={() => setIntakeAttachmentMode('upload')}>
+            <FileUp className="mr-2 h-4 w-4" /> Upload file
+          </Button>
+          <Button type="button" size="sm" variant={intakeAttachmentMode === 'dms' ? 'default' : 'ghost'} aria-pressed={intakeAttachmentMode === 'dms'} onClick={() => setIntakeAttachmentMode('dms')}>
+            <BookTemplate className="mr-2 h-4 w-4" /> Choose from DMS
+          </Button>
+        </div>
+        {intakeAttachmentMode === 'upload' ? (
+          <Input type="file" aria-label="Upload case attachment" accept=".pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.gif,.bmp,.webp" onChange={(event) => setIntakeAttachmentFile(event.target.files?.[0] ?? null)} />
+        ) : (
+          <>
+            <Input aria-label="Search DMS documents" placeholder="Search DMS title or reference" value={intakeDmsSearch} onChange={(event) => { setIntakeDmsSearch(event.target.value); setIntakeDmsRecordId(''); }} />
+            <Select value={intakeDmsRecordId || undefined} onValueChange={setIntakeDmsRecordId}>
+              <SelectTrigger aria-label="DMS document"><SelectValue placeholder={isLoadingIntakeDms ? 'Loading documents' : 'Select a document'} /></SelectTrigger>
+              <SelectContent>
+                {intakeDmsRecords.map((record) => (
+                  <SelectItem key={record.id} value={record.id}>{record.documentReference} - {record.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!isLoadingIntakeDms && intakeDmsRecords.length === 0 ? <p className="text-xs text-muted-foreground">No matching DMS documents.</p> : null}
+          </>
+        )}
+      </div>
+      {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-department">Source department</label> : null}
+      <Select
+        value={newCase.organizationUnitId || undefined}
+        disabled={isLoadingDepartments || departmentOptions.length === 0}
+        onValueChange={(value) => {
+          const department = departmentOptions.find((item) => item.id === value);
+          setNewCase({
+            ...newCase,
+            sourceDepartment: department?.name ?? '',
+            organizationLevelId: department?.organizationLevelId ?? '',
+            organizationUnitId: department?.id ?? '',
+          });
+        }}
+      >
+        <SelectTrigger id="new-legal-department">
+          <SelectValue
+            placeholder={
+              isLoadingDepartments
+                ? 'Loading departments'
+                : 'Select source department'
+            }
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {departmentOptions.map((department) => (
+            <SelectItem key={department.id} value={department.id}>
+              {department.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {!isLoadingDepartments && departmentOptions.length === 0 ? (
+        <p className="text-xs text-destructive">
+          No active Department-level HR organization units are configured.
+        </p>
+      ) : null}
+      {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-received">Received date</label> : null}
+      <Input
+        id="new-legal-received"
+        type="date"
+        value={newCase.receivedDate}
+        onChange={(event) =>
+          setNewCase({
+            ...newCase,
+            receivedDate: event.target.value,
+          })
+        }
+      />
+      {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-description">Description</label> : null}
+      <Textarea
+        id="new-legal-description"
+        placeholder="Description"
+        value={newCase.description}
+        onChange={(event) =>
+          setNewCase({
+            ...newCase,
+            description: event.target.value,
+          })
+        }
+      />
+      <Button
+        className="w-full gap-2"
+        onClick={() => void createCase()}
+        disabled={isSaving || !selectedNewCaseDepartment}
+      >
+        {isSaving ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Plus className="h-4 w-4" />
+        )}
+        {terminology.createLabel}
+      </Button>
+    </div>
+  );
+
+  const caseDetailHref = (id: string) => {
+    const base = caseBasePath || pathname;
+    return `${base.replace(/\/$/, '')}/cases/${encodeURIComponent(id)}`;
+  };
+
   return (
     <>
       <Card className="border-border bg-card text-card-foreground">
@@ -1595,15 +2444,11 @@ export function ProcedureCaseWorkspace({
             <div>
               <CardTitle>{terminology.title}</CardTitle>
             </div>
-            <Badge
-              variant={
-                selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'
-              }
-            >
-              {selectedCase?.usesConfiguredWorkflow
-                ? 'Administration workflow'
-                : 'Procedure stages'}
-            </Badge>
+            {module !== 'Legal' && module !== 'Planning' ? (
+              <Badge variant={selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'}>
+                {selectedCase?.usesConfiguredWorkflow ? 'Administration workflow' : 'Procedure stages'}
+              </Badge>
+            ) : null}
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1612,129 +2457,132 @@ export function ProcedureCaseWorkspace({
               {error}
             </div>
           ) : null}
-          <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-            <div className="space-y-4">
+          <div className="space-y-4">
+              {!detailOnly ? (
               <div className="rounded-md border border-border bg-background p-4">
-                <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <h2 className="text-sm font-semibold">
                     {terminology.collectionLabel}
                   </h2>
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : null}
+                      <span>
+                        {caseTotalCount} case
+                        {caseTotalCount === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    {allowsManualCaseCreation ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => { setError(null); setIsCreateDialogOpen(true); }}
+                      >
+                        <Plus className="h-4 w-4" />
+                        {terminology.createLabel}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  {cases.length === 0 && !isLoading ? (
-                    <p className="text-sm text-muted-foreground">
-                      {terminology.emptyMessage}
-                    </p>
-                  ) : null}
-                  {cases.map((procedureCase) => (
-                    <button
-                      key={procedureCase.id}
-                      type="button"
-                      className={`w-full rounded-md border p-3 text-left text-sm transition-colors ${
-                        selectedCase?.id === procedureCase.id
-                          ? 'border-primary bg-primary/10'
-                          : 'border-border bg-card hover:bg-muted'
-                      }`}
-                      onClick={() => void selectCase(procedureCase.id)}
-                    >
-                      <div className="font-medium">
-                        {procedureCase.referenceNumber || procedureCase.title}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {procedureCase.currentStageName}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        <Badge variant="outline">{procedureCase.status}</Badge>
-                        {procedureCase.currentAssignedRole ? (
-                          <Badge variant="secondary">
-                            {procedureCase.currentAssignedRole}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                {cases.length === 0 && !isLoading ? (
+                  <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                    {terminology.emptyMessage}
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-sm">
+                      <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">Reference</th>
+                          <th className="px-3 py-2 font-medium">Applicant</th>
+                          <th className="px-3 py-2 font-medium">Stage</th>
+                          <th className="px-3 py-2 font-medium">Assigned</th>
+                          <th className="px-3 py-2 font-medium">Status</th>
+                          <th className="px-3 py-2 text-right font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {cases.map((procedureCase) => (
+                          <tr
+                            key={procedureCase.id}
+                            className="bg-background"
+                          >
+                            <td className="px-3 py-3 align-top">
+                              <div className="font-medium">
+                                {procedureCase.referenceNumber ||
+                                  procedureCase.title}
+                              </div>
+                              <div className="mt-1 max-w-[22rem] truncate text-xs text-muted-foreground">
+                                {procedureCase.title}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 align-top text-muted-foreground">
+                              {procedureCase.applicantName || 'Not set'}
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <Badge variant="secondary">
+                                {procedureCase.currentStageName}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-3 align-top text-muted-foreground">
+                              {procedureCase.currentAssignedRole ||
+                                'Unassigned'}
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <Badge
+                                variant="outline"
+                                className={getStatusBadgeClassName(
+                                  procedureCase.status
+                                )}
+                              >
+                                {procedureCase.status}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-3 text-right align-top">
+                              <Button asChild size="sm" variant="outline">
+                                <Link
+                                  href={caseDetailHref(procedureCase.id)}
+                                  className="gap-2"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View
+                                </Link>
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {caseTotalCount > casePageSize ? (
+                  <Pagination
+                    currentPage={casePage}
+                    totalPages={caseTotalPages}
+                    totalItems={caseTotalCount}
+                    pageSize={casePageSize}
+                    onPageChange={setCasePage}
+                    onPageSizeChange={(nextPageSize) => {
+                      setCasePageSize(nextPageSize);
+                      setCasePage(1);
+                    }}
+                  />
+                ) : null}
               </div>
+              ) : null}
 
-              {allowsManualCaseCreation ? (
+              {allowsManualCaseCreation && !registerOnly && !detailOnly ? (
                 <div className="rounded-md border border-border bg-background p-4">
                   <h2 className="text-sm font-semibold">
                     {terminology.createHeading}
                   </h2>
-                  <div className="mt-3 space-y-3">
-                    <Input
-                      value={newCase.title}
-                      onChange={(event) =>
-                        setNewCase({ ...newCase, title: event.target.value })
-                      }
-                    />
-                    <Input
-                      placeholder="Reference number"
-                      value={newCase.referenceNumber}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          referenceNumber: event.target.value,
-                        })
-                      }
-                    />
-                    <Input
-                      placeholder="Applicant / party name"
-                      value={newCase.applicantName}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          applicantName: event.target.value,
-                        })
-                      }
-                    />
-                    <Input
-                      placeholder="Source department"
-                      value={newCase.sourceDepartment}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          sourceDepartment: event.target.value,
-                        })
-                      }
-                    />
-                    <Input
-                      type="date"
-                      value={newCase.receivedDate}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          receivedDate: event.target.value,
-                        })
-                      }
-                    />
-                    <Textarea
-                      placeholder="Description"
-                      value={newCase.description}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          description: event.target.value,
-                        })
-                      }
-                    />
-                    <Button
-                      className="w-full gap-2"
-                      onClick={() => void createCase()}
-                      disabled={isSaving}
-                    >
-                      <Plus className="h-4 w-4" />
-                      {terminology.createLabel}
-                    </Button>
-                  </div>
+                  <div className="mt-3">{renderCreateCaseForm()}</div>
                 </div>
               ) : null}
-            </div>
-
-            {selectedCase ? (
+            {!registerOnly && selectedCase ? (
               <div className="space-y-4">
                 <div className="rounded-md border border-border bg-background p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -1747,7 +2595,14 @@ export function ProcedureCaseWorkspace({
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline">{selectedCase.status}</Badge>
+                      <Badge
+                        variant="outline"
+                        className={getStatusBadgeClassName(
+                          selectedCase.status
+                        )}
+                      >
+                        {selectedCase.status}
+                      </Badge>
                       {selectedCase.currentAssignedRole ? (
                         <Badge>{selectedCase.currentAssignedRole}</Badge>
                       ) : null}
@@ -1763,6 +2618,18 @@ export function ProcedureCaseWorkspace({
                           : 'Read only'}
                       </Badge>
                       {module === 'Legal' && originatingPropertyCaseId ? (
+                        <Button size="sm" variant="outline" onClick={() => setIsLegalContextOpen(true)}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          View full case
+                        </Button>
+                      ) : null}
+                      {module === 'Legal' && linkedLegalAssetId ? (
+                        <Button size="sm" variant="outline" onClick={() => void openLegalAssetContext()}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          View property
+                        </Button>
+                      ) : null}
+                      {module === 'Legal' && originatingPropertyCaseId ? (
                         <Button asChild size="sm" variant="outline">
                           <Link
                             href={`/estate/property-management/EstatePropertyManagementListingApplication?caseId=${encodeURIComponent(originatingPropertyCaseId)}`}
@@ -1776,6 +2643,13 @@ export function ProcedureCaseWorkspace({
                   </div>
                 </div>
 
+                <Tabs defaultValue="stage" className="space-y-4">
+                  <TabsList className="flex h-auto flex-wrap justify-start">
+                    <TabsTrigger value="stage">Stage details</TabsTrigger>
+                    <TabsTrigger value="documents">Documents</TabsTrigger>
+                    <TabsTrigger value="submit">Submit</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="stage" className="space-y-4">
                 <div className="rounded-md border border-border bg-background p-4">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold">Intake</h2>
@@ -1801,16 +2675,7 @@ export function ProcedureCaseWorkspace({
                       <Input
                         id="procedure-reference-number"
                         value={selectedCase.referenceNumber ?? ''}
-                        disabled={
-                          !canEditProcedureField('referenceNumber') ||
-                          isLinkedLegalMatter
-                        }
-                        onChange={(event) =>
-                          setSelectedCase({
-                            ...selectedCase,
-                            referenceNumber: event.target.value,
-                          })
-                        }
+                        disabled
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -1842,20 +2707,47 @@ export function ProcedureCaseWorkspace({
                       >
                         Source department
                       </label>
-                      <Input
-                        id="procedure-source-department"
-                        value={selectedCase.sourceDepartment ?? ''}
+                      <Select
+                        value={selectedCaseDepartmentValue || undefined}
                         disabled={
                           !canEditProcedureField('sourceDepartment') ||
-                          isLinkedLegalMatter
+                          isLinkedLegalMatter ||
+                          isLoadingDepartments ||
+                          departmentOptions.length === 0
                         }
-                        onChange={(event) =>
+                        onValueChange={(value) => {
+                          const department = departmentOptions.find(
+                            (item) => item.id === value
+                          );
                           setSelectedCase({
                             ...selectedCase,
-                            sourceDepartment: event.target.value,
-                          })
-                        }
-                      />
+                            sourceDepartment: department?.name ?? '',
+                            organizationLevelId:
+                              department?.organizationLevelId ?? null,
+                            organizationUnitId: department?.id ?? null,
+                            organizationLevelName:
+                              department?.levelName ?? null,
+                            organizationUnitName: department?.name ?? null,
+                          });
+                        }}
+                      >
+                        <SelectTrigger id="procedure-source-department">
+                          <SelectValue
+                            placeholder={
+                              isLoadingDepartments
+                                ? 'Loading departments'
+                                : 'Select source department'
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {departmentOptions.map((department) => (
+                            <SelectItem key={department.id} value={department.id}>
+                              {department.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-1.5">
                       <label
@@ -1941,6 +2833,11 @@ export function ProcedureCaseWorkspace({
                           variant={getFinanceStatusBadgeVariant(
                             legalTransferFinanceSnapshot.invoiceStatus
                           )}
+                          className={getStatusBadgeClassName(
+                            formatFinanceStatus(
+                              legalTransferFinanceSnapshot.invoiceStatus
+                            )
+                          )}
                         >
                           Invoice{' '}
                           {formatFinanceStatus(
@@ -1950,6 +2847,12 @@ export function ProcedureCaseWorkspace({
                         <Badge
                           variant={getFinanceStatusBadgeVariant(
                             legalTransferFinanceSnapshot.paymentStatus
+                          )}
+                          className={getStatusBadgeClassName(
+                            formatFinanceStatus(
+                              legalTransferFinanceSnapshot.paymentStatus,
+                              'Pending'
+                            )
                           )}
                         >
                           Payment{' '}
@@ -2123,8 +3026,7 @@ export function ProcedureCaseWorkspace({
                               {generatedDocument.record.title}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              {generatedDocument.dmsReference} ·{' '}
-                              {generatedDocument.sourceLabel}
+                              {generatedDocument.dmsReference}
                             </div>
                             <div className="mt-2 flex flex-wrap gap-2">
                               <Badge variant="outline">
@@ -2210,14 +3112,22 @@ export function ProcedureCaseWorkspace({
                     ))}
                   </div>
                 </div>
+                  </TabsContent>
 
+                  <TabsContent value="documents" className="space-y-4">
                 <div className="rounded-md border border-border bg-background p-4">
                   <h2 className="text-sm font-semibold">Documents</h2>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     {visibleDocuments.map((document) => {
                       const isDmsDocument =
                         isDocumentManagementDocument(document);
-                      const previewUrl = getDocumentPreviewUrl(document);
+                      const updatesDmsVersion = isDmsDocument && document.name !== 'Case intake attachment';
+                      const canModifyDocument =
+                        document.canUploadAtCurrentStage &&
+                        (selectedCase.canEditCurrentStage || document.name === 'Case intake attachment');
+                      const documentStageLabel = document.requiredFrom
+                        ? `Required at ${document.requiredFrom}`
+                        : 'Current stage document';
                       const sourceLabel =
                         document.providedBy &&
                         document.providedBy !== 'Internal'
@@ -2225,6 +3135,7 @@ export function ProcedureCaseWorkspace({
                           : document.requiredFrom;
                       const isReadOnlyProvidedDocument =
                         Boolean(document.fileName) &&
+                        !canModifyDocument &&
                         (isDmsDocument ||
                           (document.providedBy &&
                             document.providedBy !== 'Internal'));
@@ -2264,6 +3175,15 @@ export function ProcedureCaseWorkspace({
                         Boolean(signatureRole) &&
                         selectedCase.canEditCurrentStage &&
                         !legalTransferStageSignatureRecorded;
+                      const propertyAgreementSigned = entityType === 'LegalPropertyAgreementReview' &&
+                        selectedCase.documents.some((item) => item.name === 'Head of Legal signed agreement' && Boolean(item.fileUrl));
+                      const canSignPropertyAgreement =
+                        entityType === 'LegalPropertyAgreementReview' &&
+                        document.name === 'Generated draft agreement' &&
+                        Boolean(document.fileUrl) &&
+                        (selectedCase.currentStageName === 'Head of Legal Signature' || selectedCase.currentStageName === 'Head of Legal Release') &&
+                        selectedCase.canEditCurrentStage &&
+                        !propertyAgreementSigned;
                       return (
                         <div
                           key={document.id}
@@ -2275,7 +3195,7 @@ export function ProcedureCaseWorkspace({
                                 {document.name}
                               </div>
                               <div className="mt-1 text-xs text-muted-foreground">
-                                {sourceLabel}
+                                {sourceLabel || documentStageLabel}
                               </div>
                             </div>
                             <Badge
@@ -2294,7 +3214,19 @@ export function ProcedureCaseWorkspace({
                                 </div>
                                 {document.fileUrl ? (
                                   <div className="mt-2 flex flex-wrap gap-2">
-                                    {!isDmsDocument ? (
+                                    {isDmsDocument ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        onClick={() => {
+                                          setDmsViewerFileOverride(null);
+                                          setDmsViewerDocumentId(document.id);
+                                        }}
+                                      >
+                                        <Eye className="h-3 w-3" />
+                                        View / annotate
+                                      </button>
+                                    ) : (
                                       <button
                                         type="button"
                                         className="inline-flex items-center gap-1 text-primary hover:underline"
@@ -2305,8 +3237,18 @@ export function ProcedureCaseWorkspace({
                                         <ExternalLink className="h-3 w-3" />
                                         Open uploaded file
                                       </button>
+                                    )}
+                                    {isDmsDocument ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        onClick={() => void openVersionHistory(document)}
+                                      >
+                                        <Eye className="h-3 w-3" />
+                                        View versions
+                                      </button>
                                     ) : null}
-                                    {isPdfDocument(document) ? (
+                                    {!isDmsDocument && isPdfDocument(document) ? (
                                       <button
                                         type="button"
                                         className="inline-flex items-center gap-1 text-primary hover:underline"
@@ -2337,11 +3279,49 @@ export function ProcedureCaseWorkspace({
                                         Sign document
                                       </button>
                                     ) : null}
+                                    {canSignPropertyAgreement ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline disabled:opacity-60"
+                                        disabled={Boolean(signingDocumentId)}
+                                        onClick={() => void signPropertyAgreement(document)}
+                                      >
+                                        {signingDocumentId === document.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FilePenLine className="h-3 w-3" />}
+                                        Sign agreement
+                                      </button>
+                                    ) : null}
                                     {legalTransferStageSignatureRecorded ? (
                                       <span className="inline-flex items-center gap-1 text-muted-foreground">
                                         <CheckCircle2 className="h-3 w-3" />
                                         Signed
                                       </span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {isDmsDocument && versionHistoryDocumentId === document.id ? (
+                                  <div className="mt-3 space-y-2 border-t border-border pt-3">
+                                    {versionHistoryLoading ? <p className="text-muted-foreground">Loading versions...</p> : null}
+                                    {versionHistoryError ? <p className="text-destructive">{versionHistoryError}</p> : null}
+                                    {versionHistory && versionHistory.versions.length === 0 ? <p className="text-muted-foreground">No versions available.</p> : null}
+                                    {versionHistory && versionHistory.versions.length > 0 ? (
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <Select value={selectedVersionId} onValueChange={setSelectedVersionId}>
+                                          <SelectTrigger className="w-full min-w-0 sm:w-64" aria-label="Document version">
+                                            <SelectValue placeholder="Choose version" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {versionHistory.versions.map((version) => (
+                                              <SelectItem key={version.id} value={version.id}>
+                                                {version.versionNumber}{version.status === 'Current' ? ' (Current)' : ''} - {version.fileName || 'PDF'}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                        <Button type="button" size="sm" variant="outline" disabled={!selectedVersionId} onClick={() => viewSelectedVersion(document)}>
+                                          <Eye className="mr-1 h-4 w-4" />
+                                          View version
+                                        </Button>
+                                      </div>
                                     ) : null}
                                   </div>
                                 ) : null}
@@ -2352,12 +3332,6 @@ export function ProcedureCaseWorkspace({
                                       <div className="font-semibold">
                                         Digitally signing transfer document
                                       </div>
-                                      <p className="mt-0.5">
-                                        This can take up to a minute while the
-                                        PDF is signed and saved. Wait for the
-                                        success message before submitting the
-                                        stage.
-                                      </p>
                                     </div>
                                   </div>
                                 ) : null}
@@ -2393,13 +3367,19 @@ export function ProcedureCaseWorkspace({
                               <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
                                 Awaiting {document.providedBy}.
                               </div>
+                            ) : !canModifyDocument ? (
+                              <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
+                                {document.fileName
+                                  ? `${documentStageLabel}. This document is view-only outside its owning stage.`
+                                  : `${documentStageLabel}. Upload is available only when the case reaches that stage.`}
+                              </div>
                             ) : (
                               <>
                                 <Input
                                   type="file"
                                   accept=".pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.ico"
                                   disabled={
-                                    !selectedCase.canEditCurrentStage ||
+                                    !canModifyDocument ||
                                     isSaving
                                   }
                                   onChange={(event) =>
@@ -2414,31 +3394,56 @@ export function ProcedureCaseWorkspace({
                                     Selected: {documentFiles[document.id]?.name}
                                   </div>
                                 ) : null}
-                                <Textarea
-                                  placeholder="Notes"
-                                  value={document.notes ?? ''}
-                                  disabled={!selectedCase.canEditCurrentStage}
-                                  onChange={(event) =>
-                                    updateDocumentNotes(
-                                      document.id,
-                                      event.target.value
-                                    )
-                                  }
-                                />
+                                {!updatesDmsVersion ? (
+                                  <Textarea
+                                    placeholder="Notes"
+                                    value={document.notes ?? ''}
+                                    disabled={!canModifyDocument}
+                                    onChange={(event) =>
+                                      updateDocumentNotes(
+                                        document.id,
+                                        event.target.value
+                                      )
+                                    }
+                                  />
+                                ) : module !== 'Legal' ? (
+                                  <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
+                                    Upload an edited Word/PDF copy here to make
+                                    it the current DMS version.
+                                  </div>
+                                ) : null}
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   className="w-full gap-2"
                                   disabled={
-                                    !selectedCase.canEditCurrentStage ||
-                                    isSaving
+                                    !canModifyDocument ||
+                                    isSaving ||
+                                    (updatesDmsVersion &&
+                                      !documentFiles[document.id])
                                   }
                                   onClick={() => void saveDocument(document)}
                                 >
                                   <FileUp className="h-4 w-4" />
-                                  {documentFiles[document.id]
+                                  {updatesDmsVersion
+                                    ? 'Upload edited version'
+                                    : documentFiles[document.id]
                                     ? 'Upload document'
                                     : 'Save notes'}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full gap-2"
+                                  disabled={isSaving}
+                                  onClick={() => {
+                                    setIntakeDmsSearch('');
+                                    setIntakeDmsRecordId('');
+                                    setLinkDocumentTargetId(document.id);
+                                  }}
+                                >
+                                  <BookTemplate className="h-4 w-4" />
+                                  Choose from DMS
                                 </Button>
                               </>
                             )}
@@ -2448,7 +3453,9 @@ export function ProcedureCaseWorkspace({
                     })}
                   </div>
                 </div>
+                  </TabsContent>
 
+                  <TabsContent value="submit" className="space-y-4">
                 <div className="flex flex-col gap-3 rounded-md border border-border bg-background p-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-start gap-2 text-sm text-muted-foreground">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 text-primary" />
@@ -2474,6 +3481,8 @@ export function ProcedureCaseWorkspace({
                     </Button>
                   </div>
                 </div>
+                  </TabsContent>
+                </Tabs>
               </div>
             ) : (
               <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
@@ -2483,6 +3492,87 @@ export function ProcedureCaseWorkspace({
           </div>
         </CardContent>
       </Card>
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{terminology.createHeading}</DialogTitle>
+            {module !== 'Legal' ? (
+              <DialogDescription>
+                Source department is selected from HR organization units at the
+                Department level. The reference number is generated by the
+                system.
+              </DialogDescription>
+            ) : null}
+          </DialogHeader>
+          {module === 'Legal' && error ? (
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
+          ) : null}
+          {renderCreateCaseForm()}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(linkDocumentTargetId)} onOpenChange={(open) => { if (!open) setLinkDocumentTargetId(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>Choose DMS document</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <Input aria-label="Search DMS documents" placeholder="Search title or reference" value={intakeDmsSearch} onChange={(event) => { setIntakeDmsSearch(event.target.value); setIntakeDmsRecordId(''); }} />
+            <Select value={intakeDmsRecordId || undefined} onValueChange={setIntakeDmsRecordId}>
+              <SelectTrigger aria-label="DMS document"><SelectValue placeholder={isLoadingIntakeDms ? 'Loading documents' : 'Select a document'} /></SelectTrigger>
+              <SelectContent>
+                {intakeDmsRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.documentReference} - {record.title}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {!isLoadingIntakeDms && intakeDmsRecords.length === 0 ? <p className="text-xs text-muted-foreground">No matching DMS documents.</p> : null}
+            <Button className="w-full" disabled={!intakeDmsRecordId || isSaving} onClick={() => void linkDmsDocument()}>
+              {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BookTemplate className="mr-2 h-4 w-4" />}
+              Attach document
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isLegalAssetContextOpen} onOpenChange={setIsLegalAssetContextOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>Linked property</DialogTitle></DialogHeader>
+          {legalAssetContextError ? <p className="text-sm text-destructive">{legalAssetContextError}</p> : null}
+          {!legalAssetContext && !legalAssetContextError ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {legalAssetContext ? (
+            <dl className="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-2">
+              <div><dt className="text-muted-foreground">Property</dt><dd className="font-medium">{legalAssetContext.assetCode} - {legalAssetContext.name}</dd></div>
+              <div><dt className="text-muted-foreground">Status</dt><dd>{EstateManagedAssetStatus[legalAssetContext.status]}</dd></div>
+              <div><dt className="text-muted-foreground">Current holder</dt><dd>{legalAssetContext.lesseeName || 'Not recorded'}</dd></div>
+              <div><dt className="text-muted-foreground">Location</dt><dd>{legalAssetContext.location || 'Not recorded'}</dd></div>
+              <div><dt className="text-muted-foreground">Property file</dt><dd>{legalAssetContext.propertyFileReference || 'Not recorded'}</dd></div>
+              <div><dt className="text-muted-foreground">Lease term</dt><dd>{legalAssetContext.leaseTermYears ? `${legalAssetContext.leaseTermYears} years` : 'Not recorded'}</dd></div>
+              <div><dt className="text-muted-foreground">Ground rent</dt><dd>{legalAssetContext.groundRentPayable ?? 'Not applicable'}</dd></div>
+              <div><dt className="text-muted-foreground">Right of entry</dt><dd>{legalAssetContext.rightOfEntryDate?.slice(0, 10) || 'Not recorded'}</dd></div>
+            </dl>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+      <CentralDocumentViewerDialog
+        open={Boolean(dmsViewerDocument)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDmsViewerDocumentId(null);
+            setDmsViewerFileOverride(null);
+          }
+        }}
+        file={dmsViewerFileOverride || toDmsViewerFile(dmsViewerDocument)}
+        enableAnnotations={Boolean(
+          !dmsViewerFileOverride &&
+          dmsViewerDocument?.canUploadAtCurrentStage &&
+            selectedCase?.canEditCurrentStage
+        )}
+        onGenerateRendition={generateDmsRendition}
+        onDownload={downloadDmsVersion}
+        onSaveAnnotations={saveDmsAnnotations}
+      />
+      {module === 'Legal' && selectedCase && originatingPropertyCaseId ? (
+        <LegalPropertyCaseContextDialog
+          legalCaseId={selectedCase.id}
+          open={isLegalContextOpen}
+          onOpenChange={setIsLegalContextOpen}
+        />
+      ) : null}
       <Dialog
         open={Boolean(previewDocument && previewDocumentUrl)}
         onOpenChange={(open) => {

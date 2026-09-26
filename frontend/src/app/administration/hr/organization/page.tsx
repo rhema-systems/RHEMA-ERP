@@ -1,62 +1,53 @@
 'use client';
 
-import { Building2, History, ListTree, FolderTree, Network, Users2 } from 'lucide-react';
+import { History, Network } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
-import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
+import { NavCardGrid, type NavCardItem } from '@/components/hr/common/NavCardGrid';
+import { hrSetupGroup } from '@/config/hr-setup-nav';
+
+/**
+ * Setup for the org backbone.
+ *
+ * ⚠ Unit Change Log is no longer a peer card here. It is the audit trail OF the units configured
+ * on this page, not a fourth thing to configure, so it belongs to the Units screen — where a
+ * unit's own log has always been a tab. The org-wide route is unchanged and is linked below as a
+ * read-only view, beside the organogram.
+ *
+ * Cards come from `config/hr-setup-nav.ts` — see the note on the HR hub page.
+ */
+const group = hrSetupGroup('Organization');
+
+// The read-only counterparts to the editors above: the same records, drawn and logged.
+const views: NavCardItem[] = [
+  {
+    title: 'Organogram',
+    description: 'See the structure drawn — units, posts, reporting lines and sites.',
+    href: '/hr/organogram',
+    icon: Network,
+  },
+  {
+    title: 'Unit Change Log',
+    description: 'Who a unit reported to, who headed it, and when each changed.',
+    href: '/administration/hr/organization/unit-history',
+    icon: History,
+  },
+];
 
 export default function OrganizationSetupPage() {
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title="Organization"
-        description="The HR org backbone: a structure defines its levels, and units are the actual nodes."
+        description={group.description}
+        backHref="/administration/hr"
       />
 
-      <NavCardGrid
-        items={[
-          {
-            title: 'Structures',
-            description: 'Templates that group a set of levels.',
-            href: '/administration/hr/organization/structures',
-            icon: Building2,
-          },
-          {
-            title: 'Levels',
-            description: 'The tiers within a structure — division, department, unit.',
-            href: '/administration/hr/organization/levels',
-            icon: ListTree,
-          },
-          {
-            title: 'Units',
-            description: 'The actual org nodes employees and positions belong to.',
-            href: '/administration/hr/organization/units',
-            icon: FolderTree,
-          },
-          {
-            title: 'Teams',
-            description:
-              'Working groups — permanent, project, task force, committee — and who is in them.',
-            href: '/administration/hr/organization/teams',
-            icon: Users2,
-          },
-          {
-            // Slice 5. The audit trail under the units editor: every restructure and change of head,
-            // across the whole organisation. A unit's own log is a tab on the unit itself.
-            title: 'Unit Change Log',
-            description: 'Who a unit reported to, who headed it, and when each changed.',
-            href: '/administration/hr/organization/unit-history',
-            icon: History,
-          },
-          {
-            // The read-only counterpart to the three editors above: the same records, drawn.
-            // It lives under /hr because HR reads it daily; this card is the way in from the data.
-            title: 'Organogram',
-            description: 'See the structure drawn — units, posts, reporting lines and sites.',
-            href: '/hr/organogram',
-            icon: Network,
-          },
-        ]}
-      />
+      <NavCardGrid items={group.links} />
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Views</h2>
+        <NavCardGrid items={views} />
+      </div>
     </div>
   );
 }

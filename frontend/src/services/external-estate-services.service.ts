@@ -55,7 +55,7 @@ export interface ExternalPropertyPortfolio {
     projectUnitCode?: string | null;
     name: string;
     status: string | number;
-    transactionType: 'Rental' | 'Purchased';
+    transactionType: 'Rental' | 'Lease' | 'Purchased';
     location?: string | null;
     town?: string | null;
     district?: string | null;
@@ -64,6 +64,7 @@ export interface ExternalPropertyPortfolio {
     actualPossessionDate?: string | null;
     leaseTermYears?: number | null;
     monthlyRent?: number | null;
+    fullTermLeaseAmount?: number | null;
     currencyCode: string;
     nextRentBillingDate?: string | null;
     rentGracePeriodDays: number;

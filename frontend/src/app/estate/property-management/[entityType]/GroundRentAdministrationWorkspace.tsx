@@ -7,18 +7,28 @@ import {
   AlertTriangle,
   Banknote,
   CalendarClock,
+  Check,
+  ChevronsUpDown,
   FileText,
   Landmark,
   Loader2,
   Plus,
   Receipt,
   RefreshCw,
+  Search,
   TrendingUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import {
   Card,
   CardContent,
@@ -38,6 +48,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
 import { usePaginatedItems } from '@/hooks/use-paginated-items';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Select,
   SelectContent,
@@ -63,6 +74,11 @@ import {
   type RecordGroundRentReceipt,
   type UpsertGroundRentAccount,
 } from '@/services/estate-ground-rent.service';
+import {
+  estateLandManagementService,
+  type EstateManagedAsset,
+} from '@/services/estate-land-management.service';
+import { cn } from '@/lib/utils';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -115,6 +131,71 @@ const emptyForm = (): UpsertGroundRentAccount => ({
   notes: '',
 });
 
+function getAreaAcres(asset: EstateManagedAsset) {
+  if (
+    asset.areaValue &&
+    (asset.areaUnit?.toLowerCase() === 'acre' ||
+      asset.areaUnit?.toLowerCase() === 'acres')
+  ) {
+    return asset.areaValue;
+  }
+
+  return asset.areaSquareMeters ? asset.areaSquareMeters / 4046.8564224 : undefined;
+}
+
+function toGroundRentAssetOption(
+  asset: EstateManagedAsset,
+  existing?: GroundRentAssetOption
+): GroundRentAssetOption {
+  return {
+    id: asset.id,
+    assessmentAssetId: asset.id,
+    listingScope: asset.listingScope || 'asset',
+    parentAssetId: asset.parentAssetId,
+    assetCode: asset.assetCode,
+    name: asset.name,
+    location: asset.location,
+    areaAcres: existing?.areaAcres ?? getAreaAcres(asset),
+    customerBusinessPartnerId:
+      existing?.customerBusinessPartnerId ?? asset.customerBusinessPartnerId,
+    customerName: existing?.customerName ?? asset.lesseeName,
+    approvedAnnualGroundRent:
+      existing?.approvedAnnualGroundRent ?? asset.groundRentPayable,
+    approvedRatePerAcre:
+      existing?.approvedRatePerAcre ?? asset.groundRentRatePerAcre,
+    currencyCode:
+      existing?.currencyCode ??
+      (asset.currency || asset.externalListingCurrency || 'GHS'),
+    hasGroundRentAccount: existing?.hasGroundRentAccount ?? false,
+  };
+}
+
+function getExistingGroundRentOption(
+  existingOptions: GroundRentAssetOption[],
+  asset: EstateManagedAsset
+) {
+  return existingOptions.find((option) => option.id === asset.id);
+}
+
+function mergePortalListingAssetOptions(
+  assets: EstateManagedAsset[],
+  demarcations: EstateManagedAsset[],
+  existingOptions: GroundRentAssetOption[]
+) {
+  const mappedOptions = [...assets, ...demarcations].map((asset) =>
+    toGroundRentAssetOption(
+      asset,
+      getExistingGroundRentOption(existingOptions, asset)
+    )
+  );
+  const seen = new Set<string>();
+  return mappedOptions.filter((option) => {
+    if (seen.has(option.id)) return false;
+    seen.add(option.id);
+    return true;
+  });
+}
+
 interface ReceiptDialogState {
   account: GroundRentAccount;
   charge: GroundRentCharge;
@@ -136,6 +217,14 @@ export function GroundRentAdministrationWorkspace() {
   const [actionKey, setActionKey] = React.useState('');
   const [setupOpen, setSetupOpen] = React.useState(false);
   const [assessmentAssetId, setAssessmentAssetId] = React.useState('');
+  const [assessmentSearch, setAssessmentSearch] = React.useState('');
+  const [assessmentPickerOpen, setAssessmentPickerOpen] =
+    React.useState(false);
+  const [portalListingAssets, setPortalListingAssets] = React.useState<
+    GroundRentAssetOption[]
+  >([]);
+  const [isAssessmentSearchLoading, setIsAssessmentSearchLoading] =
+    React.useState(false);
   const [assessmentRate, setAssessmentRate] = React.useState('');
   const [assessmentCurrency, setAssessmentCurrency] = React.useState('GHS');
   const [setupForm, setSetupForm] =
@@ -166,12 +255,27 @@ export function GroundRentAdministrationWorkspace() {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [loadedAccounts, loadedOptions] = await Promise.all([
+      const [
+        loadedAccounts,
+        loadedOptions,
+        loadedPortalListingDemarcations,
+      ] = await Promise.all([
         estateGroundRentService.getAccounts(),
         estateGroundRentService.getOptions(),
+        estateLandManagementService.getPortalListingDemarcations(
+          undefined,
+          0,
+          25
+        ),
       ]);
       setAccounts(loadedAccounts);
       setOptions(loadedOptions);
+      const portalOptions = mergePortalListingAssetOptions(
+        [],
+        loadedPortalListingDemarcations,
+        loadedOptions.assets
+      );
+      setPortalListingAssets(portalOptions);
       const requestedAccount = requestedAssetId
         ? loadedAccounts.find(
             (account) => account.estateManagedAssetId === requestedAssetId
@@ -205,6 +309,20 @@ export function GroundRentAdministrationWorkspace() {
             ratePerAcre: requestedAsset.approvedRatePerAcre ?? null,
           });
           setSetupOpen(true);
+        } else {
+          const requestedPortalAsset = portalOptions.find(
+            (asset) => asset.id === requestedAssetId
+          );
+          if (requestedPortalAsset) {
+            appliedRequestedAssetRef.current = requestedAssetId;
+            setAssessmentAssetId(requestedPortalAsset.id);
+            setAssessmentRate(
+              requestedPortalAsset.approvedRatePerAcre == null
+                ? ''
+                : String(requestedPortalAsset.approvedRatePerAcre)
+            );
+            setAssessmentCurrency(requestedPortalAsset.currencyCode || 'GHS');
+          }
         }
       }
     } catch (error: unknown) {
@@ -222,12 +340,55 @@ export function GroundRentAdministrationWorkspace() {
     void loadWorkspace();
   }, [loadWorkspace]);
 
+  const searchPortalListingAssets = React.useCallback(async () => {
+    setIsAssessmentSearchLoading(true);
+    try {
+      const search = assessmentSearch.trim() || undefined;
+      const loadedDemarcations =
+        await estateLandManagementService.getPortalListingDemarcations(
+          search,
+          0,
+          25
+        );
+      const selected = portalListingAssets.find(
+        (asset) => asset.id === assessmentAssetId
+      );
+      const mappedAssets = mergePortalListingAssetOptions(
+        [],
+        loadedDemarcations,
+        options.assets
+      );
+      setPortalListingAssets(
+        selected && !mappedAssets.some((asset) => asset.id === selected.id)
+          ? [selected, ...mappedAssets]
+          : mappedAssets
+      );
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to search portal listing lands.'
+      );
+    } finally {
+      setIsAssessmentSearchLoading(false);
+    }
+  }, [
+    assessmentAssetId,
+    assessmentSearch,
+    options.assets,
+    portalListingAssets,
+  ]);
+
   const selectedAccount =
     accounts.find((account) => account.id === selectedAccountId) || null;
   const selectedAsset = options.assets.find(
     (asset) => asset.id === setupForm.estateManagedAssetId
   );
-  const assessmentAsset = options.assets.find(
+  const groundRentLeaseAssets = React.useMemo(
+    () => options.assets.filter((asset) => asset.customerBusinessPartnerId),
+    [options.assets]
+  );
+  const assessmentAsset = portalListingAssets.find(
     (asset) => asset.id === assessmentAssetId
   );
   const assessmentAmount =
@@ -308,6 +469,7 @@ export function GroundRentAdministrationWorkspace() {
       estateManagedAssetId: assetId,
       customerBusinessPartnerId: asset?.customerBusinessPartnerId || '',
       currencyCode: asset?.currencyCode || current.currencyCode,
+      calculationMethod: asset?.approvedAnnualGroundRent ? 'ApprovedAssessment' : 'FixedAnnualAmount',
       annualAmount: asset?.approvedAnnualGroundRent ?? current.annualAmount,
       ratePerAcre: asset?.approvedRatePerAcre ?? current.ratePerAcre,
     }));
@@ -348,7 +510,7 @@ export function GroundRentAdministrationWorkspace() {
   };
 
   const saveAssessment = async () => {
-    if (!assessmentAssetId || Number(assessmentRate) <= 0) {
+    if (!assessmentAsset || Number(assessmentRate) <= 0) {
       toast.error('Select a land parcel and enter the approved rate per acre.');
       return;
     }
@@ -356,7 +518,7 @@ export function GroundRentAdministrationWorkspace() {
     setActionKey('save-assessment');
     try {
       await estateGroundRentService.assessAsset({
-        estateManagedAssetId: assessmentAssetId,
+        estateManagedAssetId: assessmentAsset.id,
         ratePerAcre: Number(assessmentRate),
         currencyCode: assessmentCurrency,
       });
@@ -572,30 +734,103 @@ export function GroundRentAdministrationWorkspace() {
         <CardContent className="grid gap-4 lg:grid-cols-[2fr_1fr_1fr_auto] lg:items-end">
           <div className="space-y-2">
             <Label>Land parcel</Label>
-            <Select
-              value={assessmentAssetId}
-              onValueChange={(value) => {
-                const asset = options.assets.find((item) => item.id === value);
-                setAssessmentAssetId(value);
-                setAssessmentRate(
-                  asset?.approvedRatePerAcre == null
-                    ? ''
-                    : String(asset.approvedRatePerAcre)
-                );
-                setAssessmentCurrency(asset?.currencyCode || 'GHS');
-              }}
+            <div className="flex gap-2">
+              <Input
+                value={assessmentSearch}
+                onChange={(event) => setAssessmentSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void searchPortalListingAssets();
+                  }
+                }}
+                placeholder="Search portal listing land by code or name"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void searchPortalListingAssets()}
+                disabled={isAssessmentSearchLoading}
+              >
+                {isAssessmentSearchLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="mr-2 h-4 w-4" />
+                )}
+                Search
+              </Button>
+            </div>
+            <Popover
+              open={assessmentPickerOpen}
+              onOpenChange={setAssessmentPickerOpen}
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a land parcel" />
-              </SelectTrigger>
-              <SelectContent>
-                {options.assets.map((asset) => (
-                  <SelectItem key={asset.id} value={asset.id}>
-                    {asset.assetCode} - {asset.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={assessmentPickerOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  <span className="truncate">
+                    {assessmentAsset
+                      ? `${assessmentAsset.assetCode} - ${assessmentAsset.name}`
+                      : 'Select from portal listing results'}
+                  </span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-[var(--radix-popover-trigger-width)] p-0"
+                align="start"
+              >
+                <Command shouldFilter={false}>
+                  <CommandList>
+                    <CommandEmpty>
+                      Search for land already prepared in Portal Listings.
+                    </CommandEmpty>
+                    <CommandGroup>
+                      {portalListingAssets.map((asset) => (
+                        <CommandItem
+                          key={asset.id}
+                          value={`${asset.assetCode} ${asset.name}`}
+                          onSelect={() => {
+                            setAssessmentAssetId(asset.id);
+                            setAssessmentRate(
+                              asset.approvedRatePerAcre == null
+                                ? ''
+                                : String(asset.approvedRatePerAcre)
+                            );
+                            setAssessmentCurrency(asset.currencyCode || 'GHS');
+                            setAssessmentPickerOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              'mr-2 h-4 w-4',
+                              assessmentAssetId === asset.id
+                                ? 'opacity-100'
+                                : 'opacity-0'
+                            )}
+                          />
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">
+                              {asset.assetCode} - {asset.name}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {asset.location || 'No location recorded'}
+                            </div>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <p className="text-xs text-muted-foreground">
+              Only internal Portal Listing land records appear here.
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Approved rate per acre</Label>
@@ -1110,25 +1345,28 @@ export function GroundRentAdministrationWorkspace() {
 
           <div className="grid gap-6 py-2 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
-              <Label>Property / unit</Label>
+              <Label>Land lease / lessee</Label>
               <Select
                 value={setupForm.estateManagedAssetId}
                 onValueChange={selectAsset}
               >
-                <SelectTrigger aria-label="Ground rent property or unit">
+                <SelectTrigger aria-label="Ground rent property">
                   <SelectValue placeholder="Select a property with a linked customer" />
                 </SelectTrigger>
                 <SelectContent>
-                  {options.assets
-                    .filter((asset) => asset.customerBusinessPartnerId)
-                    .map((asset) => (
+                  {groundRentLeaseAssets.map((asset) => (
                     <SelectItem key={asset.id} value={asset.id}>
                       {asset.assetCode} · {asset.name}
                       {asset.customerName ? ` · ${asset.customerName}` : ''}
                     </SelectItem>
-                    ))}
+                  ))}
                 </SelectContent>
               </Select>
+              {groundRentLeaseAssets.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No eligible properties with linked customers are ready for ground-rent setup.
+                </p>
+              ) : null}
               {selectedAsset ? (
                 <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-sm sm:grid-cols-3">
                   <div>
@@ -1499,11 +1737,10 @@ export function GroundRentAdministrationWorkspace() {
               />
               <div>
                 <Label htmlFor="ground-rent-auto-post">
-                  Automatically post generated invoices to Finance GL
+                  Automatically release invoices to customer
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Leave disabled when Finance must review draft invoices before
-                  posting.
+                  Finance approval rules still apply. Leave off to review drafts in Finance before release.
                 </p>
               </div>
             </div>

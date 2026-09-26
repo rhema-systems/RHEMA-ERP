@@ -1,9 +1,12 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Announcements;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -18,17 +21,36 @@ public class HrAnnouncementService : IHrAnnouncementService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IHrAudienceResolver _audience;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IAppEventBus _appEventBus;
     private readonly ILogger<HrAnnouncementService> _logger;
+
+    /// <summary>
+    /// The notification topic a publish raises (round 3, lane P1). Key
+    /// <c>HrAnnouncement.Published.Internal</c>; seeded with in-app ON and email/SMS OFF, so an
+    /// administrator turns the other channels on under Notifications → Topics — which is exactly
+    /// the answer to "must staff log in to see an announcement?": no, once the channel is on.
+    /// Recipients are the announcement's own resolved audience, carried on the event as user ids.
+    /// </summary>
+    private const string TopicEntityType = "HrAnnouncement";
+    private const string PublishedActivity = "Published";
+    private const string TopicAudience = "Internal";
+    private const string RecipientsDataKey = "RecipientUserIds";
+    public const string PublishedTopicKey = TopicEntityType + "." + PublishedActivity + "." + TopicAudience;
 
     public HrAnnouncementService(
         IUnitOfWork unitOfWork,
         IHrAudienceResolver audience,
         ICurrentUserProvider currentUserProvider,
+        UserManager<ApplicationUser> userManager,
+        IAppEventBus appEventBus,
         ILogger<HrAnnouncementService> logger)
     {
         _unitOfWork = unitOfWork;
         _audience = audience;
         _currentUserProvider = currentUserProvider;
+        _userManager = userManager;
+        _appEventBus = appEventBus;
         _logger = logger;
     }
 
@@ -241,7 +263,140 @@ public class HrAnnouncementService : IHrAnnouncementService
         _logger.LogInformation(
             "Announcement '{Title}' published to {Reach} employee(s).", announcement.Title, reach);
 
+        // After the commit, never before it: a notification about an announcement that then
+        // failed to save would be a notice about nothing.
+        await NotifyAudienceAsync(tenantId, announcement, cancellationToken);
+
         return await RequireDtoAsync(id, cancellationToken);
+    }
+
+    // ── Notification on publish (round 3, lane P1) ────────────────────────────
+
+    /// <summary>
+    /// Raise the published topic for everyone the audience rules reach. Best-effort by design:
+    /// the announcement IS published once the row says so, and the portal shows it regardless;
+    /// a notification failure is logged, never surfaced as a failed publish.
+    /// </summary>
+    private async Task NotifyAudienceAsync(
+        Guid tenantId, HrAnnouncement announcement, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EnsurePublishedTopicAsync(tenantId, cancellationToken);
+
+            var employeeIds = await _audience.ResolveAsync(RulesOf(announcement), cancellationToken);
+            var userIds = await ResolveUserIdsAsync(tenantId, employeeIds, cancellationToken);
+            if (userIds.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Announcement '{Title}' reaches {Reach} employee(s) but none has a user account; nothing to notify.",
+                    announcement.Title, employeeIds.Count);
+                return;
+            }
+
+            var summary = string.IsNullOrWhiteSpace(announcement.Summary)
+                ? Truncate(announcement.Body, 240)
+                : announcement.Summary!;
+
+            await _appEventBus.PublishAsync(new EntityActivityEvent
+            {
+                TenantId = tenantId,
+                EntityType = TopicEntityType,
+                Activity = PublishedActivity,
+                Audience = TopicAudience,
+                EntityId = announcement.Id,
+                TriggeredByUserId = _currentUserProvider.UserId == Guid.Empty ? null : _currentUserProvider.UserId,
+                Data = new Dictionary<string, object>
+                {
+                    ["AnnouncementId"] = announcement.Id,
+                    ["Title"] = announcement.Title,
+                    ["Summary"] = summary,
+                    ["Category"] = announcement.Category.ToString(),
+                    ["ActionPath"] = "/me/announcements",
+                    [RecipientsDataKey] = userIds,
+                },
+            }, cancellationToken);
+
+            _logger.LogInformation(
+                "Announcement '{Title}' raised {Topic} for {Users} user(s).",
+                announcement.Title, PublishedTopicKey, userIds.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Announcement '{Title}' was published but its notification could not be raised.",
+                announcement.Title);
+        }
+    }
+
+    /// <summary>Employees → active users of this tenant linked to them, in chunks (an audience can be the whole tenant).</summary>
+    private async Task<List<Guid>> ResolveUserIdsAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> employeeIds, CancellationToken cancellationToken)
+    {
+        var result = new List<Guid>();
+        foreach (var chunk in employeeIds.Chunk(500))
+        {
+            var ids = chunk.ToList();
+            var users = await _userManager.Users
+                .Where(u => u.TenantId == tenantId && u.IsActive && u.EmployeeId != null && ids.Contains(u.EmployeeId.Value))
+                .Select(u => u.Id)
+                .ToListAsync(cancellationToken);
+            result.AddRange(users);
+        }
+        return result.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// One system topic, created on first publish and left to the administrator afterwards. Only
+    /// in-app is on by default; the recipient rule allows every channel so that flipping the
+    /// topic's switches is all it takes.
+    /// </summary>
+    private async Task EnsurePublishedTopicAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var topicRepo = _unitOfWork.Repository<NotificationTopic>();
+        var exists = await topicRepo
+            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && t.Key == PublishedTopicKey)
+            .AnyAsync(cancellationToken);
+        if (exists) return;
+
+        var topic = new NotificationTopic
+        {
+            TenantId = tenantId,
+            Key = PublishedTopicKey,
+            Name = "Staff announcements: published",
+            Description = "System-seeded — raised when HR publishes a staff announcement; sent to everyone in the announcement's audience. Turn email or SMS on here to reach staff who do not open the portal.",
+            EntityType = TopicEntityType,
+            IsSystem = true,
+            IsActive = true,
+            EnableInApp = true,
+            EnableEmail = false,
+            EnableSms = false,
+            InAppTitleTemplate = "{{Title}}",
+            InAppBodyTemplate = "{{Summary}}",
+            SmsBodyTemplate = "{{Title}} — new staff announcement. See the staff portal for the full notice.",
+            ActionUrlTemplate = "{{ActionPath}}",
+            CreatedBy = "System",
+        };
+        await topicRepo.AddAsync(topic);
+        await _unitOfWork.Repository<NotificationTopicRecipient>().AddAsync(new NotificationTopicRecipient
+        {
+            TenantId = tenantId,
+            TopicId = topic.Id,
+            RecipientKind = "UsersFromData",
+            RecipientValue = RecipientsDataKey,
+            IsSystem = true,
+            SendInApp = true,
+            SendEmail = true,
+            SendSms = true,
+            CreatedBy = "System",
+        });
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string Truncate(string text, int max)
+    {
+        var t = (text ?? string.Empty).Trim();
+        return t.Length <= max ? t : t[..max].TrimEnd() + "…";
     }
 
     public async Task<HrAnnouncementDto> ArchiveAsync(

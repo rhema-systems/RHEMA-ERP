@@ -17,10 +17,10 @@ import {
   TextField,
 } from '@/components/hr/employee/tabs/fields';
 import { useToast } from '@/hooks/use-toast';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import type { StaffTravelPolicy } from '@/types/hr/travel-compliance';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 const CABIN_CLASSES = ['Economy', 'PremiumEconomy', 'Business', 'First'] as const;
 const spaced = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -80,11 +80,6 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
   const { toast } = useToast();
   const isEdit = !!policy;
 
-  const { data: units } = useQuery({
-    queryKey: ['organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-    staleTime: 5 * 60 * 1000,
-  });
 
   /**
    * ⚠ **`AppliesToLevelFromId` points at `StaffLevel`, not a salary level.** The field says
@@ -155,7 +150,6 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
   });
 
   const levelOptions = (levels ?? []).map((l) => ({ value: l.id, label: `${l.name} (${l.code})` }));
-  const unitOptions = (units ?? []).map((u) => ({ value: u.id, label: u.name }));
 
   return (
     <form onSubmit={form.handleSubmit((v) => save.mutate(v as Parsed))} className="space-y-6">
@@ -186,14 +180,7 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
               emptyLabel="Any level"
             />
           </FieldRow>
-          <SelectField
-            form={form}
-            name="appliesToOrganizationUnitId"
-            label="Organisation unit"
-            options={unitOptions}
-            allowEmpty
-            emptyLabel="The whole organisation"
-          />
+          <OrganizationUnitPickerField form={form} name="appliesToOrganizationUnitId" label="Organisation unit" allowEmpty emptyLabel="The whole organisation" />
           <p className="text-xs text-muted-foreground">
             Scope is what approval supersedes on: approving this policy stands down whichever other
             policy covers the same unit and level band, so exactly one is ever in force for a

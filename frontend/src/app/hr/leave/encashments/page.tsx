@@ -35,7 +35,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import { useAuth } from '@/hooks/use-auth';
+import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { leaveEncashmentService } from '@/services/hr/leave.service';
 import type { LeaveEncashment } from '@/types/hr/leave-request';
 
@@ -57,7 +57,6 @@ type Pending =
 export default function LeaveEncashmentsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { user } = useAuth();
   const [year, setYear] = useState(String(currentYear));
   const [status, setStatus] = useState(ALL);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -80,7 +79,6 @@ export default function LeaveEncashmentsPage() {
       }
       if (!paymentReference.trim()) throw new Error('A payment reference is required.');
       return leaveEncashmentService.markAsProcessed(p.row.id, {
-        processedByEmployeeId: (user?.id as string) ?? '',
         paymentReference: paymentReference.trim(),
       });
     },
@@ -160,8 +158,10 @@ export default function LeaveEncashmentsPage() {
                   <TableHead>Year</TableHead>
                   <TableHead className="text-right">Days</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>How it was worked out</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Payment ref</TableHead>
+                  <TableHead>Finance</TableHead>
                   <TableHead className="w-[60px]" />
                 </TableRow>
               </TableHeader>
@@ -178,7 +178,7 @@ export default function LeaveEncashmentsPage() {
                   ))
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8}>
+                    <TableCell colSpan={10}>
                       <EmptyState
                         icon={Banknote}
                         title="No encashments"
@@ -196,11 +196,30 @@ export default function LeaveEncashmentsPage() {
                       <TableCell className="text-right">
                         {e.amountPaid?.toLocaleString() ?? '—'}
                       </TableCell>
+                      {/*
+                        ⚠ L-20. The row used to show an amount and nothing else — not the rate, not the
+                        basic pay, not which allowances fed it — so anybody disputing the figure had
+                        nothing to read. The basis is stored ON the payout rather than recomputed,
+                        because the divisor behind it is a setting: recomputing would quietly restate
+                        old payouts the moment somebody edited it.
+                      */}
+                      <TableCell className="max-w-xs text-xs text-muted-foreground">
+                        {e.rateBasis ? (
+                          <span title={e.rateBasis}>{e.rateBasis}</span>
+                        ) : (
+                          <span className="italic">
+                            not recorded — paid before the basis was kept
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <StatusBadge status={e.status} />
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {e.paymentReference || '—'}
+                      </TableCell>
+                      <TableCell>
+                        <FinancePostingInlineStatus sourceDocumentId={e.id} />
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>

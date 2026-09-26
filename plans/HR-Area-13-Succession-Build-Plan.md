@@ -465,7 +465,7 @@ collision in the UI matters: two screens both called "talent pool" would be a su
   this area on inspection". There is money: `EstimatedCost`, `ActualCost` and `CurrencyCode` on
   **`SuccessionDevelopmentActivity`**. The survey missed it because it looked at the plan and the
   candidate — **the cost lives where the work happens, not where the record is filed**. Both events
-  are now registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, along with an overlap the sweep
+  are now registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`, along with an overlap the sweep
   must settle: a `Training`-type activity describes the same spend area 7 budgets through
   `TrainingBudget`, so a successor's course could be counted twice.
 - **D-6 — does completing every milestone finish its activity? NO, deliberately (slice 5).**

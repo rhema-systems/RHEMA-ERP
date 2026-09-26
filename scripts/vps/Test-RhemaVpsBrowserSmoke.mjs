@@ -5,9 +5,18 @@ import os from 'node:os';
 import path from 'node:path';
 
 const baseUrl = (process.argv[2] ?? process.env.RHEMA_VPS_BASE_URL
-  ?? 'https://149.102.145.190:8443').replace(/\/$/, '');
-const chromePath = process.env.RHEMA_CHROME_PATH
-  ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  ?? 'https://63.141.230.56').replace(/\/$/, '');
+const browserCandidates = [
+  process.env.RHEMA_BROWSER_PATH,
+  process.env.RHEMA_CHROME_PATH,
+  `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\Google\\Chrome\\Application\\chrome.exe`,
+  `${process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'}\\Google\\Chrome\\Application\\chrome.exe`,
+  `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\Microsoft\\Edge\\Application\\msedge.exe`,
+  `${process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'}\\Microsoft\\Edge\\Application\\msedge.exe`,
+  process.env.LOCALAPPDATA
+    ? `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`
+    : undefined,
+].filter(Boolean);
 
 async function reservePort() {
   const server = net.createServer();
@@ -22,15 +31,23 @@ async function reservePort() {
   return port;
 }
 
-try {
-  await fs.access(chromePath);
-} catch {
-  throw new Error(`Chrome is required for browser smoke but was not found at ${chromePath}.`);
+let browserPath;
+for (const candidate of browserCandidates) {
+  try {
+    await fs.access(candidate);
+    browserPath = candidate;
+    break;
+  } catch {
+    // Try the next supported Chromium browser location.
+  }
+}
+if (!browserPath) {
+  throw new Error(`Chrome or Edge is required for browser smoke. Checked: ${browserCandidates.join(', ')}`);
 }
 
 const debugPort = await reservePort();
 const profilePath = await fs.mkdtemp(path.join(os.tmpdir(), 'rhema-vps-smoke-'));
-const chrome = spawn(chromePath, [
+const chrome = spawn(browserPath, [
   '--headless=new',
   `--remote-debugging-port=${debugPort}`,
   `--user-data-dir=${profilePath}`,

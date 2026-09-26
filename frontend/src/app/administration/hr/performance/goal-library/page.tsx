@@ -17,9 +17,9 @@ import {
 } from '@/components/hr/employee/tabs/fields';
 import { goalLibraryService } from '@/services/hr/goals.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import type { GoalLibraryItem } from '@/types/hr/goals';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 /**
  * Goal library — reusable goal wording, so the same objective is not rewritten from scratch
@@ -80,10 +80,6 @@ export default function GoalLibraryPage() {
     queryKey: ['hr', 'organization-levels'],
     queryFn: () => organizationLevelService.getAll(),
   });
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
   const { data: positions } = useQuery({
     queryKey: ['hr', 'positions', 'active'],
     queryFn: () => employeePositionService.getActive(),
@@ -92,10 +88,6 @@ export default function GoalLibraryPage() {
   const levelOptions = useMemo(
     () => (levels ?? []).map((l) => ({ value: l.id, label: l.name })),
     [levels],
-  );
-  const unitOptions = useMemo(
-    () => (units ?? []).map((u) => ({ value: u.id, label: u.name })),
-    [units],
   );
   const positionOptions = useMemo(
     () => (positions ?? []).map((p) => ({ value: p.id, label: p.title })),
@@ -187,22 +179,7 @@ export default function GoalLibraryPage() {
               rows={2}
               placeholder="What good looks like — copied into every goal made from this template."
             />
-            <SelectField
-              form={form}
-              name="organizationLevelId"
-              label="Organisation level"
-              options={levelOptions}
-              allowEmpty
-              emptyLabel="Any level"
-            />
-            <SelectField
-              form={form}
-              name="organizationUnitId"
-              label="Organisation unit"
-              options={unitOptions}
-              allowEmpty
-              emptyLabel="Any unit"
-            />
+            <OrganizationUnitPickerField form={form} name="organizationUnitId" levelName="organizationLevelId" label="Organisation unit" levelLabel="Organisation level" allowEmpty emptyLabel="Any unit" allowAnyLevel="Any level" />
             <SelectField
               form={form}
               name="positionId"

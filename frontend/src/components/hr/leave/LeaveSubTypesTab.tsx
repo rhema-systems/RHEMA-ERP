@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { Badge } from '@/components/ui/badge';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import type { LeaveSubType } from '@/types/hr/leave';
 import {
@@ -38,6 +39,8 @@ const toPayload = (leaveTypeId: string, v: FormValues) => ({
 });
 
 export function LeaveSubTypesTab({ leaveTypeId }: { leaveTypeId: string }) {
+  const { canAdminister } = useLeavePermissions();
+
   return (
     <ResourceCollectionTab<LeaveSubType, FormValues>
       parentId={leaveTypeId}
@@ -51,6 +54,7 @@ export function LeaveSubTypesTab({ leaveTypeId }: { leaveTypeId: string }) {
       list={leaveTypeService.getSubTypes.bind(leaveTypeService)}
       create={(id, v) => leaveTypeService.createSubType(toPayload(id, v))}
       update={(id, subTypeId, v) => leaveTypeService.updateSubType(subTypeId, toPayload(id, v))}
+      allowRemove={canAdminister}
       remove={(_id, subTypeId) => leaveTypeService.removeSubType(subTypeId)}
       columns={[
         { header: 'Sub-type', cell: (s) => s.subTypeName },

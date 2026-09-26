@@ -45,24 +45,27 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
     private readonly IInvoiceService _invoiceService;
     private readonly IPaymentService _paymentService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IDistributedLockService _lockService;
 
     public GroundRentAdministrationService(
         ApplicationDbContext db,
         IInvoiceService invoiceService,
         IPaymentService paymentService,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IDistributedLockService lockService)
     {
         _db = db;
         _invoiceService = invoiceService;
         _paymentService = paymentService;
         _currentUserService = currentUserService;
+        _lockService = lockService;
     }
 
     public async Task<EstateGroundRentOptionsDto> GetOptionsAsync(CancellationToken cancellationToken)
     {
         var tenantId = TenantId;
         var configuredAssetIds = await _db.EstateGroundRentAccounts
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Status != "Closed")
             .Select(item => item.EstateManagedAssetId)
             .ToListAsync(cancellationToken);
 
@@ -71,7 +74,11 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             .Where(item =>
                 item.TenantId == tenantId
                 && !item.IsDeleted
-                && item.AssetType == EstateManagedAssetType.Land)
+                && (item.AssetType == EstateManagedAssetType.Land
+                    || (item.ExternalGroundRentRequired == true
+                        && (item.Status == EstateManagedAssetStatus.Leased
+                            || item.Status == EstateManagedAssetStatus.Occupied)))
+                && item.CustomerBusinessPartnerId.HasValue)
             .OrderBy(item => item.AssetCode)
             .ToListAsync(cancellationToken);
 
@@ -145,8 +152,12 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
                 item.Id == request.EstateManagedAssetId
                 && item.TenantId == tenantId
                 && !item.IsDeleted,
-                cancellationToken)
-            ?? throw new KeyNotFoundException("The selected land parcel was not found.");
+                cancellationToken);
+
+        if (asset is null)
+        {
+            return await AssessDemarcationAsync(request, tenantId, cancellationToken);
+        }
 
         if (asset.AssetType != EstateManagedAssetType.Land)
         {
@@ -185,8 +196,62 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             await _db.EstateGroundRentAccounts.AnyAsync(item =>
                 item.TenantId == tenantId
                 && item.EstateManagedAssetId == asset.Id
-                && !item.IsDeleted,
+                && !item.IsDeleted
+                && item.Status != "Closed",
                 cancellationToken));
+    }
+
+    private async Task<EstateGroundRentAssetOptionDto> AssessDemarcationAsync(
+        AssessEstateGroundRentDto request,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var demarcation = await _db.EstateLandDemarcations
+            .Include(item => item.EstateManagedAsset)
+            .FirstOrDefaultAsync(item =>
+                item.Id == request.EstateManagedAssetId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted,
+                cancellationToken)
+            ?? throw new KeyNotFoundException("The selected land parcel was not found.");
+
+        if (demarcation.EstateManagedAsset.AssetType != EstateManagedAssetType.Land)
+        {
+            throw new InvalidOperationException("Ground rent can only be assessed for a land parcel.");
+        }
+
+        var areaAcres = demarcation.AreaSquareFeet / 43560m;
+        if (areaAcres is not > 0)
+        {
+            throw new InvalidOperationException("Record the parcel area before assessing ground rent.");
+        }
+
+        demarcation.GroundRentRatePerAcre = request.RatePerAcre;
+        demarcation.GroundRentComputed = areaAcres * request.RatePerAcre;
+        demarcation.GroundRentPayable = decimal.Ceiling(demarcation.GroundRentComputed.Value);
+        demarcation.ExternalListingCurrency = NormalizeCurrency(request.CurrencyCode);
+        demarcation.UpdatedAt = DateTime.UtcNow;
+        demarcation.UpdatedBy = UserName;
+        demarcation.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var userId)
+            ? userId
+            : null;
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return new EstateGroundRentAssetOptionDto(
+            demarcation.Id,
+            demarcation.ParentLandAssetReference ?? demarcation.EstateManagedAsset.AssetCode,
+            demarcation.Description,
+            demarcation.EstateManagedAsset.Location,
+            areaAcres,
+            null,
+            null,
+            demarcation.GroundRentPayable,
+            demarcation.GroundRentRatePerAcre,
+            NormalizeCurrency(demarcation.ExternalListingCurrency),
+            false);
     }
 
     public async Task<IReadOnlyList<EstateGroundRentAccountDto>> GetAccountsAsync(CancellationToken cancellationToken)
@@ -208,12 +273,29 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
                 && item.TenantId == tenantId
                 && !item.IsDeleted,
                 cancellationToken)
-            ?? throw new KeyNotFoundException("The selected Estate property or unit was not found.");
+            ?? throw new KeyNotFoundException("The selected property or land lease record was not found.");
 
-        if (asset.AssetType != EstateManagedAssetType.Land)
+        if (asset.AssetType != EstateManagedAssetType.Land && asset.ExternalGroundRentRequired != true)
         {
             throw new InvalidOperationException(
-                "Ground rent applies to land assets only. Use the apartment/unit rent amount for non-land leases.");
+                "Ground rent must be selected as a separate charge for this property before setup.");
+        }
+        if (asset.AssetType != EstateManagedAssetType.Land
+            && asset.Status is not EstateManagedAssetStatus.Leased and not EstateManagedAssetStatus.Occupied)
+        {
+            throw new InvalidOperationException("Ground rent for a rental property requires a leased or occupied unit.");
+        }
+
+        if (!asset.CustomerBusinessPartnerId.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Link the rental customer in Lease Management before setting up ground rent.");
+        }
+
+        if (asset.CustomerBusinessPartnerId.Value != request.CustomerBusinessPartnerId)
+        {
+            throw new InvalidOperationException(
+                "The selected lessee does not match the lessee assigned to this land lease record.");
         }
 
         var customer = await _db.BusinessPartners
@@ -234,13 +316,6 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
                 cancellationToken)
             ?? throw new InvalidOperationException("The selected ground-rent income account was not found.");
 
-        if (asset.CustomerBusinessPartnerId.HasValue
-            && asset.CustomerBusinessPartnerId.Value != customer.Id)
-        {
-            throw new InvalidOperationException(
-                "The selected Finance AR customer does not match the customer assigned in the Lease Register.");
-        }
-
         if (incomeAccount.Status != AccountStatus.Active
             || incomeAccount.AccountType != AccountType.Revenue
             || !incomeAccount.AllowDirectPosting
@@ -256,8 +331,15 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             .FirstOrDefaultAsync(item =>
                 item.EstateManagedAssetId == asset.Id
                 && item.TenantId == tenantId
-                && !item.IsDeleted,
+                && !item.IsDeleted
+                && item.Status != "Closed",
                 cancellationToken);
+
+        if (account is not null && account.CustomerBusinessPartnerId != customer.Id)
+        {
+            throw new InvalidOperationException(
+                "Close the previous customer's ground-rent account before setting up billing for the new holder.");
+        }
 
         if (account is null)
         {
@@ -318,6 +400,9 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
         CancellationToken cancellationToken)
     {
         var tenantId = TenantId;
+        await using var lease = await _lockService.TryAcquireAsync(
+            $"estate:ground-rent:{tenantId}:{accountId}", TimeSpan.FromMinutes(30), cancellationToken)
+            ?? throw new InvalidOperationException("Ground-rent billing is already in progress for this account.");
         var account = await _db.EstateGroundRentAccounts
             .Include(item => item.EstateManagedAsset)
             .FirstOrDefaultAsync(item =>
@@ -330,6 +415,12 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
         if (!string.Equals(account.Status, "Active", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Only active ground-rent accounts can generate invoices.");
+        }
+
+        if (account.EstateManagedAsset.CustomerBusinessPartnerId != account.CustomerBusinessPartnerId)
+        {
+            throw new InvalidOperationException(
+                "The ground-rent account customer no longer matches the current property holder. Close the old account and set up a new one.");
         }
 
         var billingStart = ResolveBillingStart(account.EstateManagedAsset);
@@ -368,6 +459,10 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
 
         if (existingCharge is not null)
         {
+            account.NextDueDate = dueDate.AddMonths(MonthsPerPeriod(account.PaymentFrequency));
+            account.UpdatedAt = DateTime.UtcNow;
+            account.UpdatedBy = UserName;
+            await _db.SaveChangesAsync(cancellationToken);
             return new EstateGroundRentActionResultDto(
                 $"Ground-rent invoice {existingCharge.FinanceInvoiceNumber ?? "record"} already exists for {dueDate:yyyy-MM-dd}.",
                 await GetAccountAsync(account.Id, cancellationToken));
@@ -391,7 +486,20 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             $"Ground rent {periodStart:dd MMM yyyy} - {periodEnd:dd MMM yyyy}: {account.EstateManagedAsset.Name}",
             200);
 
-        var invoice = await _invoiceService.CreateAsync(
+        var existingInvoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && !item.IsDeleted
+            && item.BusinessPartnerId == account.CustomerBusinessPartnerId
+            && item.Reference == reference, cancellationToken);
+        if (existingInvoice?.Status == InvoiceStatus.Cancelled)
+        {
+            throw new InvalidOperationException(
+                $"Ground-rent invoice {reference} was cancelled; Finance must resolve it before billing continues.");
+        }
+
+        var invoice = existingInvoice is not null
+            ? await _invoiceService.GetByIdAsync(existingInvoice.Id, cancellationToken)
+                ?? throw new InvalidOperationException("The existing ground-rent invoice could not be loaded.")
+            : await _invoiceService.CreateAsync(
             new InvoiceCreateDto
             {
                 BusinessPartnerId = account.CustomerBusinessPartnerId,
@@ -419,7 +527,8 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             },
             cancellationToken);
 
-        if (account.AutoPostInvoices)
+        if (account.AutoPostInvoices && (existingInvoice is null
+            || existingInvoice.Status is InvoiceStatus.Draft or InvoiceStatus.Approved or InvoiceStatus.ReadyToPost))
         {
             invoice = await _invoiceService.SendInvoiceAsync(invoice.Id, cancellationToken);
         }
@@ -994,7 +1103,7 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
     private static void ValidateAccountRequest(UpsertEstateGroundRentAccountDto request)
     {
         if (request.EstateManagedAssetId == Guid.Empty)
-            throw new InvalidOperationException("Select an Estate property or unit.");
+            throw new InvalidOperationException("Select a property or land lease record.");
         if (request.CustomerBusinessPartnerId == Guid.Empty)
             throw new InvalidOperationException("Select the customer responsible for ground rent.");
         if (request.GroundRentIncomeAccountId == Guid.Empty)
@@ -1034,6 +1143,8 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
 
         if (request.CalculationMethod.Equals("RatePerAcre", StringComparison.OrdinalIgnoreCase))
         {
+            if (asset.AssetType != EstateManagedAssetType.Land)
+                throw new InvalidOperationException("Rate per acre is available for land only. Use a fixed annual ground-rent amount for this property.");
             if (request.RatePerAcre is not > 0m)
                 throw new InvalidOperationException("Enter a ground-rent rate per acre greater than zero.");
             var areaAcres = GetAreaAcres(asset);

@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Services.HR.Extensions;
@@ -31,6 +31,9 @@ public static class CompanyHrPolicyMappingExtensions
             ReviewDueLeadDays              = entity.ReviewDueLeadDays,
             ContractExpiryLeadDays         = entity.ContractExpiryLeadDays,
             ProbationEndLeadDays           = entity.ProbationEndLeadDays,
+            TeamTaskReminderLeadDays       = entity.TeamTaskReminderLeadDays,
+            SalaryChangeRequiresApproval   = entity.SalaryChangeRequiresApproval,
+            CertificationExpiryLeadDays    = entity.CertificationExpiryLeadDays,
             GrievanceRungChaseDays         = entity.GrievanceRungChaseDays,
             ConcernTriageChaseDays         = entity.ConcernTriageChaseDays,
             GrievanceAgreementChaseDays    = entity.GrievanceAgreementChaseDays,
@@ -50,6 +53,8 @@ public static class CompanyHrPolicyMappingExtensions
             // not exist, serialised as a bare `0` that maps to no member name. The database said
             // Block; every reader of this endpoint was told 0.
             EstablishmentEnforcementMode   = entity.EstablishmentEnforcementMode,
+            SalaryStructureTiers           = entity.SalaryStructureTiers,
+            SalaryStructureSource          = entity.SalaryStructureSource,
 
             FitWeightPerformance           = entity.FitWeightPerformance,
             FitWeightCompetency            = entity.FitWeightCompetency,
@@ -64,6 +69,14 @@ public static class CompanyHrPolicyMappingExtensions
             DisciplineBacklogHorizonDays          = entity.DisciplineBacklogHorizonDays,
             SettlementDaysPerYear                 = entity.SettlementDaysPerYear,
             AttendanceRateIncludesApprovedLeave   = entity.AttendanceRateIncludesApprovedLeave,
+            AllowInServiceEncashment              = entity.AllowInServiceEncashment,
+            EncashmentWorkingDaysPerMonth         = entity.EncashmentWorkingDaysPerMonth,
+            LeaveStartingReminderDays             = entity.LeaveStartingReminderDays,
+            LeaveClosureGraceDays                 = entity.LeaveClosureGraceDays,
+            LeaveUndecidedChaseDays               = entity.LeaveUndecidedChaseDays,
+            MandatoryLeaveChaseFromMonth          = entity.MandatoryLeaveChaseFromMonth,
+            LeaveCarryOverExpiryReminderDays      = entity.LeaveCarryOverExpiryReminderDays,
+            LeaveYearStartMonth                   = entity.LeaveYearStartMonth,
         };
     }
 
@@ -85,6 +98,9 @@ public static class CompanyHrPolicyMappingExtensions
         entity.ReviewDueLeadDays              = dto.ReviewDueLeadDays;
         entity.ContractExpiryLeadDays         = dto.ContractExpiryLeadDays;
         entity.ProbationEndLeadDays           = dto.ProbationEndLeadDays;
+        entity.TeamTaskReminderLeadDays       = dto.TeamTaskReminderLeadDays;
+        entity.SalaryChangeRequiresApproval   = dto.SalaryChangeRequiresApproval;
+        entity.CertificationExpiryLeadDays    = dto.CertificationExpiryLeadDays;
         entity.GrievanceRungChaseDays         = dto.GrievanceRungChaseDays;
         entity.ConcernTriageChaseDays         = dto.ConcernTriageChaseDays;
         entity.GrievanceAgreementChaseDays    = dto.GrievanceAgreementChaseDays;
@@ -104,6 +120,8 @@ public static class CompanyHrPolicyMappingExtensions
         // defect, in the one place where it decides whether exceeding an authorised establishment
         // blocks a vacancy or merely warns about it.
         entity.EstablishmentEnforcementMode   = dto.EstablishmentEnforcementMode;
+        entity.SalaryStructureTiers           = dto.SalaryStructureTiers;
+        entity.SalaryStructureSource          = dto.SalaryStructureSource;
 
         entity.FitWeightPerformance           = dto.FitWeightPerformance;
         entity.FitWeightCompetency            = dto.FitWeightCompetency;
@@ -118,5 +136,13 @@ public static class CompanyHrPolicyMappingExtensions
         entity.DisciplineBacklogHorizonDays        = dto.DisciplineBacklogHorizonDays;
         entity.SettlementDaysPerYear               = dto.SettlementDaysPerYear;
         entity.AttendanceRateIncludesApprovedLeave = dto.AttendanceRateIncludesApprovedLeave;
+        entity.AllowInServiceEncashment           = dto.AllowInServiceEncashment;
+        entity.EncashmentWorkingDaysPerMonth      = dto.EncashmentWorkingDaysPerMonth;
+        entity.LeaveStartingReminderDays          = dto.LeaveStartingReminderDays;
+        entity.LeaveClosureGraceDays              = dto.LeaveClosureGraceDays;
+        entity.LeaveUndecidedChaseDays            = dto.LeaveUndecidedChaseDays;
+        entity.MandatoryLeaveChaseFromMonth       = dto.MandatoryLeaveChaseFromMonth;
+        entity.LeaveCarryOverExpiryReminderDays   = dto.LeaveCarryOverExpiryReminderDays;
+        entity.LeaveYearStartMonth                = dto.LeaveYearStartMonth;
     }
 }

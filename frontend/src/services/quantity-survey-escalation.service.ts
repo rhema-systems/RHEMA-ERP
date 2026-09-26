@@ -169,7 +169,7 @@ export const quantitySurveyEscalationService = {
       request
     ),
   list: (query: QuantitySurveyEscalationFormulaQuery) =>
-    apiService.get<QuantitySurveyEscalationFormulaPage>(root, query),
+    apiService.get<QuantitySurveyEscalationFormulaPage>(root, { ...query }),
   get: (id: string) =>
     apiService.get<QuantitySurveyEscalationFormula>(`${root}/${id}`),
   create: (request: SaveQuantitySurveyEscalationFormula) =>

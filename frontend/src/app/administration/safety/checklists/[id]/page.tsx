@@ -1,59 +1,90 @@
 'use client';
 
-import { useParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { z } from 'zod';
-import { Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { CheckCircle2, Copy, Loader2, Archive, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
-import {
-  TextField,
-  NumberField,
-  TextareaField,
-  SelectField,
-  SwitchField,
-  FieldRow,
-} from '@/components/hr/employee/tabs/fields';
-import { RiskBadge } from '@/components/hr/safety/RiskBadge';
+import { ChecklistFormTab } from '@/components/hr/safety/checklist/ChecklistFormTab';
+import { ChecklistFieldsTab } from '@/components/hr/safety/checklist/ChecklistFieldsTab';
+import { ChecklistSectionsTab } from '@/components/hr/safety/checklist/ChecklistSectionsTab';
+import { ChecklistOutcomesTab } from '@/components/hr/safety/checklist/ChecklistOutcomesTab';
+import { ChecklistSignatoriesTab } from '@/components/hr/safety/checklist/ChecklistSignatoriesTab';
+import { ChecklistPrintForm } from '@/components/hr/safety/checklist/ChecklistPrintForm';
 import { safetyChecklistService } from '@/services/hr/safety-checklist.service';
-import { SHE_RISK_LEVEL_OPTIONS } from '@/types/hr/safety-hazards';
-import type { SheInspectionChecklistItem } from '@/types/hr/safety-inspections';
 
-const blank = (v?: string) => (v && v.length > 0 ? v : null);
+type Action = 'publish' | 'retire' | 'newVersion' | 'delete';
 
-const itemSchema = z.object({
-  itemOrder: z.coerce.number().min(0).max(999),
-  category: z.string().min(1, 'A category is required').max(100),
-  itemDescription: z.string().min(1, 'Describe what is checked').max(500),
-  isMandatory: z.boolean(),
-  regulatoryReference: z.string().max(200).optional().or(z.literal('')),
-  associatedRiskLevel: z
-    .enum(['Negligible', 'Low', 'Medium', 'High', 'Critical'])
-    .optional()
-    .or(z.literal('')),
-});
-type ItemForm = z.input<typeof itemSchema>;
-const emptyItem: ItemForm = {
-  itemOrder: 1,
-  category: '',
-  itemDescription: '',
-  isMandatory: false,
-  regulatoryReference: '',
-  associatedRiskLevel: '',
-};
-
-/** One checklist template and its ordered items. */
+/**
+ * The checklist builder (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §5): one template,
+ * shaped across six tabs. Draft → Publish freezes the structure; New version clones it under the
+ * same number; Retire withdraws it from the scheduling picker. Past inspections keep their version.
+ */
 export default function ChecklistDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const router = useRouter();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [confirm, setConfirm] = useState<Action | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const { data: checklist, isLoading } = useQuery({
     queryKey: ['hr', 'safety-checklist', id],
     queryFn: () => safetyChecklistService.getById(id),
     enabled: !!id,
   });
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ['hr', 'safety-checklist', id] });
+  const refreshList = () => qc.invalidateQueries({ queryKey: ['hr', 'safety-checklists'] });
+
+  const run = async () => {
+    if (!confirm || !checklist) return;
+    setBusy(true);
+    try {
+      switch (confirm) {
+        case 'publish': {
+          const c = await safetyChecklistService.publish(id);
+          toast({ title: 'Published', description: `${c.checklistNumber} v${c.version} is now offered for new inspections.` });
+          break;
+        }
+        case 'retire': {
+          const c = await safetyChecklistService.retire(id);
+          toast({ title: 'Retired', description: `${c.checklistNumber} v${c.version} stays on past inspections but is no longer offered.` });
+          break;
+        }
+        case 'newVersion': {
+          const c = await safetyChecklistService.createNewVersion(id);
+          toast({ title: 'New version created', description: `${c.checklistNumber} v${c.version} is a draft — edit it, then publish.` });
+          await refreshList();
+          setConfirm(null);
+          router.push(`/administration/safety/checklists/${c.id}`);
+          return;
+        }
+        case 'delete': {
+          await safetyChecklistService.remove(id);
+          toast({ title: 'Deleted', description: `${checklist.checklistNumber} v${checklist.version} removed.` });
+          await refreshList();
+          setConfirm(null);
+          router.push('/administration/safety/checklists');
+          return;
+        }
+      }
+      setConfirm(null);
+      await Promise.all([refresh(), refreshList()]);
+    } catch (e: any) {
+      toast({ title: 'Refused', description: e?.message || 'The action failed.', variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (isLoading || !checklist) {
     return (
@@ -63,112 +94,131 @@ export default function ChecklistDetailPage() {
     );
   }
 
+  const isDraft = checklist.status === 'Draft';
+  const dialogs: Record<Action, { title: string; description: string; confirmText: string; variant?: 'destructive' }> = {
+    publish: {
+      title: `Publish ${checklist.checklistNumber} v${checklist.version}?`,
+      description:
+        'The structure freezes: fields, sections, items, outcomes and signatories can no longer change. Any earlier published version of this number retires. The server checks the form is complete first.',
+      confirmText: 'Publish',
+    },
+    retire: {
+      title: `Retire ${checklist.checklistNumber} v${checklist.version}?`,
+      description: 'It stops being offered for new inspections. Inspections already run against it keep it.',
+      confirmText: 'Retire',
+    },
+    newVersion: {
+      title: `Create v${checklist.version + 1} of ${checklist.checklistNumber}?`,
+      description: 'A draft copy of this form. Edit it freely, then publish it to replace this version.',
+      confirmText: 'Create draft',
+    },
+    delete: {
+      title: `Delete ${checklist.checklistNumber} v${checklist.version}?`,
+      description: 'Refused if any inspection references it — retire instead in that case.',
+      confirmText: 'Delete',
+      variant: 'destructive',
+    },
+  };
+
   return (
     <div className="space-y-6 p-6">
       <PageHeader
-        title={`${checklist.checklistNumber} — ${checklist.name}`}
+        title={`${checklist.checklistNumber} v${checklist.version} — ${checklist.name}`}
         description={checklist.description ?? undefined}
         backHref="/administration/safety/checklists"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{checklist.typeName}</Badge>
-            <Badge variant="outline" className="tabular-nums">
-              v{checklist.version}
-            </Badge>
+            <StatusBadge status={checklist.statusName} />
             <StatusBadge status={checklist.isActive ? 'Active' : 'Inactive'} />
+            {isDraft ? (
+              <>
+                <Button onClick={() => setConfirm('publish')}>
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Publish
+                </Button>
+                <Button variant="outline" className="text-red-600" onClick={() => setConfirm('delete')}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={() => setConfirm('newVersion')}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  New version
+                </Button>
+                {checklist.status === 'Published' && (
+                  <Button variant="outline" onClick={() => setConfirm('retire')}>
+                    <Archive className="mr-2 h-4 w-4" />
+                    Retire
+                  </Button>
+                )}
+              </>
+            )}
           </div>
         }
       />
 
-      <ResourceCollectionTab<SheInspectionChecklistItem, ItemForm>
-        parentId={id}
-        title="items"
-        singular="item"
-        queryKey={['hr', 'safety-checklist', id, 'items']}
-        invalidateKeys={[['hr', 'safety-checklist', id]]}
-        list={async () => (await safetyChecklistService.getById(id)).items}
-        create={(checklistId, values) => {
-          const v = itemSchema.parse(values);
-          return safetyChecklistService.addItem(checklistId, {
-            checklistId,
-            itemOrder: v.itemOrder,
-            category: v.category,
-            itemDescription: v.itemDescription,
-            isMandatory: v.isMandatory,
-            regulatoryReference: blank(v.regulatoryReference),
-            associatedRiskLevel: v.associatedRiskLevel === '' ? null : v.associatedRiskLevel,
-          });
-        }}
-        update={(_checklistId, itemId, values) => {
-          const v = itemSchema.parse(values);
-          return safetyChecklistService.updateItem(itemId, {
-            id: itemId,
-            itemOrder: v.itemOrder,
-            category: v.category,
-            itemDescription: v.itemDescription,
-            isMandatory: v.isMandatory,
-            regulatoryReference: blank(v.regulatoryReference),
-            associatedRiskLevel: v.associatedRiskLevel === '' ? null : v.associatedRiskLevel,
-          });
-        }}
-        remove={(_checklistId, itemId) => safetyChecklistService.removeItem(itemId)}
-        columns={[
-          { header: '#', cell: (i) => <span className="tabular-nums">{i.itemOrder}</span> },
-          { header: 'Category', cell: (i) => i.category },
-          { header: 'Check', cell: (i) => i.itemDescription },
-          {
-            header: 'Mandatory',
-            cell: (i) => (i.isMandatory ? <Badge variant="secondary">Mandatory</Badge> : '—'),
-          },
-          { header: 'Reg. reference', cell: (i) => i.regulatoryReference ?? '—' },
-          {
-            header: 'Risk',
-            cell: (i) =>
-              i.associatedRiskLevel ? (
-                <RiskBadge level={i.associatedRiskLevel} label={i.associatedRiskLevelName ?? undefined} />
-              ) : (
-                '—'
-              ),
-          },
-        ]}
-        schema={itemSchema}
-        emptyForm={emptyItem}
-        toForm={(i) => ({
-          itemOrder: i.itemOrder,
-          category: i.category,
-          itemDescription: i.itemDescription,
-          isMandatory: i.isMandatory,
-          regulatoryReference: i.regulatoryReference ?? '',
-          associatedRiskLevel: i.associatedRiskLevel ?? '',
-        })}
-        renderFields={(f) => (
-          <>
-            <FieldRow>
-              <NumberField form={f} name="itemOrder" label="Order" required />
-              <TextField form={f} name="category" label="Category" required placeholder="e.g. Housekeeping" />
-            </FieldRow>
-            <TextareaField form={f} name="itemDescription" label="What is checked" rows={2} />
-            <FieldRow>
-              <TextField form={f} name="regulatoryReference" label="Regulatory reference" />
-              <SelectField
-                form={f}
-                name="associatedRiskLevel"
-                label="Associated risk"
-                allowEmpty
-                options={SHE_RISK_LEVEL_OPTIONS}
-              />
-            </FieldRow>
-            <SwitchField
-              form={f}
-              name="isMandatory"
-              label="Mandatory"
-              description="Mandatory items must be assessed on every inspection using this checklist."
-            />
-          </>
-        )}
-        getId={(i) => i.id}
-        emptyDescription="Add the checks this template walks through, in order."
-      />
+      {!isDraft && (
+        <p className="rounded-md bg-muted p-3 text-sm">
+          This version is <b>{checklist.statusName.toLowerCase()}</b>
+          {checklist.publishedAt ? ` (published ${new Date(checklist.publishedAt).toLocaleDateString()}${checklist.publishedByName ? ` by ${checklist.publishedByName}` : ''})` : ''}
+          . Its structure is locked so past inspections keep the form they were done on — create a new version to change it.
+          {checklist.previousVersionId ? (
+            <>
+              {' '}
+              <Link href={`/administration/safety/checklists/${checklist.previousVersionId}`} className="underline">
+                Previous version
+              </Link>
+            </>
+          ) : null}
+        </p>
+      )}
+
+      <Tabs defaultValue={isDraft ? 'sections' : 'preview'}>
+        <TabsList>
+          <TabsTrigger value="form">Form</TabsTrigger>
+          <TabsTrigger value="fields">Header fields ({checklist.fields.length})</TabsTrigger>
+          <TabsTrigger value="sections">Sections &amp; items ({checklist.itemCount})</TabsTrigger>
+          <TabsTrigger value="outcomes">Outcomes ({checklist.outcomes.length})</TabsTrigger>
+          <TabsTrigger value="signatories">Signatories ({checklist.signatories.length})</TabsTrigger>
+          <TabsTrigger value="preview">Preview</TabsTrigger>
+        </TabsList>
+        <TabsContent value="form" className="mt-4">
+          <ChecklistFormTab checklist={checklist} onSaved={() => Promise.all([refresh(), refreshList()])} />
+        </TabsContent>
+        <TabsContent value="fields" className="mt-4">
+          <ChecklistFieldsTab checklist={checklist} />
+        </TabsContent>
+        <TabsContent value="sections" className="mt-4">
+          <ChecklistSectionsTab checklist={checklist} />
+        </TabsContent>
+        <TabsContent value="outcomes" className="mt-4">
+          <ChecklistOutcomesTab checklist={checklist} />
+        </TabsContent>
+        <TabsContent value="signatories" className="mt-4">
+          <ChecklistSignatoriesTab checklist={checklist} />
+        </TabsContent>
+        <TabsContent value="preview" className="mt-4">
+          <div className="overflow-x-auto rounded-md border">
+            <ChecklistPrintForm checklist={checklist} className="mx-auto max-w-[210mm]" />
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {confirm && (
+        <ConfirmationDialog
+          open
+          onOpenChange={(open) => !open && !busy && setConfirm(null)}
+          title={dialogs[confirm].title}
+          description={dialogs[confirm].description}
+          confirmText={dialogs[confirm].confirmText}
+          variant={dialogs[confirm].variant}
+          isLoading={busy}
+          onConfirm={run}
+        />
+      )}
     </div>
   );
 }

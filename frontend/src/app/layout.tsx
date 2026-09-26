@@ -11,6 +11,7 @@ import '@syncfusion/ej2-dropdowns/styles/material.css';
 import '@syncfusion/ej2-splitbuttons/styles/material.css';
 import '@syncfusion/ej2-notifications/styles/material.css';
 import '@syncfusion/ej2-react-pdfviewer/styles/material.css';
+import './syncfusion-pdfviewer-overrides.css';
 import 'leaflet/dist/leaflet.css';
 import { ReactQueryProvider } from '../lib/react-query';
 import { TenantProvider } from '../contexts/TenantContext';
@@ -19,6 +20,7 @@ import { ThemeProvider } from '../contexts/ThemeContext';
 import { Toaster } from '../components/ui/toaster';
 import { Toaster as SonnerToaster } from 'sonner';
 import { PWAInit } from '../components/PWAInit';
+import { SyncfusionLicenseBootstrap } from '../components/SyncfusionLicenseBootstrap';
 import { NotificationProvider } from '../contexts/NotificationContext';
 import { NotificationToast } from '../components/notifications/NotificationToast';
 
@@ -71,6 +73,7 @@ export default function RootLayout({
             <SessionBlacklistProvider>
               <TenantProvider>
                 <NotificationProvider>
+                  <SyncfusionLicenseBootstrap />
                   {children}
                   <Toaster />
                   <SonnerToaster position="bottom-right" richColors />

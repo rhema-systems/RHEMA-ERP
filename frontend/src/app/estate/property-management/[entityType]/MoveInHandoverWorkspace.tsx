@@ -12,7 +12,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
-import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
@@ -30,6 +29,7 @@ import {
   propertyReference,
   sourceReference,
 } from './property-workspace-utils';
+import { useManagedAssetsPage } from './use-managed-assets-page';
 
 type HandoverAction = 'move-in' | 'move-out' | 'maintenance' | 'block';
 
@@ -39,48 +39,35 @@ export function MoveInHandoverWorkspace() {
   const prefillReference =
     searchParams.get('field_propertyUnit') || searchParams.get('referenceNumber');
   const initialSearch = prefillReference || '';
-  const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [searchDraft, setSearchDraft] = React.useState(initialSearch);
   const [search, setSearch] = React.useState(initialSearch);
   const [selectedAssetId, setSelectedAssetId] = React.useState('');
   const [action, setAction] = React.useState<HandoverAction>('move-in');
   const [actualDate, setActualDate] = React.useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = React.useState('');
-  const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-
-  const loadAssets = React.useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      setAssets(await estateLandManagementService.getManagedAssets({ search: search || undefined, take: 500 }));
-    } catch {
-      setAssets([]);
-      setLoadError('Unable to load handover records.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [search]);
-
-  React.useEffect(() => {
-    void loadAssets();
-  }, [loadAssets]);
-
-  const handoverAssets = React.useMemo(
-    () =>
-      assets.filter((asset) =>
-        [
-          EstateManagedAssetStatus.Reserved,
-          EstateManagedAssetStatus.Leased,
-          EstateManagedAssetStatus.Occupied,
-          EstateManagedAssetStatus.UnderMaintenance,
-          EstateManagedAssetStatus.Blocked,
-        ].includes(asset.status)
-      ),
-    [assets]
-  );
-  const handoverPages = usePaginatedItems(handoverAssets, 10);
+  const {
+    assets,
+    setAssets,
+    page,
+    setPage,
+    isLoading,
+    loadError,
+    loadAssets,
+    pageSize,
+    totalPages,
+    totalItems,
+  } = useManagedAssetsPage({
+    search: search || undefined,
+    statuses: [
+      EstateManagedAssetStatus.Reserved,
+      EstateManagedAssetStatus.Leased,
+      EstateManagedAssetStatus.Occupied,
+      EstateManagedAssetStatus.UnderMaintenance,
+      EstateManagedAssetStatus.Blocked,
+    ],
+    errorMessage: 'Unable to load handover records.',
+  });
 
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
 
@@ -162,7 +149,7 @@ export function MoveInHandoverWorkspace() {
                 Record possession actions, key/access handover, move-in, move-out, maintenance blocks, and billing/records handoff context.
               </CardDescription>
             </div>
-            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void loadAssets()}>
+            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void loadAssets(page)}>
               <RefreshCw className="h-4 w-4" />
             </Button>
           </div>
@@ -170,6 +157,7 @@ export function MoveInHandoverWorkspace() {
             className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_auto]"
             onSubmit={(event) => {
               event.preventDefault();
+              setPage(1);
               setSearch(searchDraft.trim());
             }}
           >
@@ -183,7 +171,7 @@ export function MoveInHandoverWorkspace() {
         <CardContent>
           {loadError ? <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{loadError}</div> : null}
           {isLoading ? <div className="flex justify-center gap-2 py-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading handovers</div> : null}
-          {!isLoading && handoverAssets.length > 0 ? (
+          {!isLoading && assets.length > 0 ? (
             <div className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
@@ -197,7 +185,7 @@ export function MoveInHandoverWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {handoverPages.items.map((asset) => (
+                  {assets.map((asset) => (
                     <TableRow key={asset.id} className={selectedAssetId === asset.id ? 'bg-muted/40' : ''}>
                       <TableCell><div className="font-medium">{asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(asset)}</div></TableCell>
                       <TableCell>{occupantName(asset)}</TableCell>
@@ -220,8 +208,8 @@ export function MoveInHandoverWorkspace() {
               </Table>
             </div>
           ) : null}
-          {handoverAssets.length > handoverPages.pageSize ? <Pagination currentPage={handoverPages.currentPage} totalPages={handoverPages.totalPages} totalItems={handoverPages.totalItems} pageSize={handoverPages.pageSize} onPageChange={handoverPages.setCurrentPage} /> : null}
-          {!isLoading && !loadError && handoverAssets.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No handover-ready records found.</div> : null}
+          {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
+          {!isLoading && !loadError && assets.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No handover-ready records found.</div> : null}
         </CardContent>
       </Card>
 

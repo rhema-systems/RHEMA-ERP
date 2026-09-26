@@ -21,6 +21,11 @@ import type {
   OfferLetter,
   OfferResponseChoice,
   OfferTokenValidation,
+  PublicCatalogueCurrency,
+  PublicCatalogueIdentificationType,
+  PublicCatalogueLanguage,
+  PublicCatalogueQualification,
+  PublicCatalogueSkill,
   PublicTenant,
   PublicVacancy,
   SaveCandidateProfilePayload,
@@ -80,6 +85,30 @@ class PublicCareersService {
 
   getVacancy(tenantId: string, id: string): Promise<PublicVacancy> {
     return publicFetch<PublicVacancy>(`/public/vacancies/${id}`, tenantId);
+  }
+
+  // ── catalogues the profile form picks from (round 3, lanes C1/C2) ────────
+  // ⚠ Always these anonymous routes, never the HR-gated `api/hr/*` ones: a candidate token is
+  // refused there, and every picker fed from them would render empty for exactly its users.
+
+  getCatalogueSkills(tenantId: string): Promise<PublicCatalogueSkill[]> {
+    return publicFetch<PublicCatalogueSkill[]>(`/public/catalogue/skills`, tenantId);
+  }
+
+  getCatalogueQualifications(tenantId: string): Promise<PublicCatalogueQualification[]> {
+    return publicFetch<PublicCatalogueQualification[]>(`/public/catalogue/qualifications`, tenantId);
+  }
+
+  getCatalogueLanguages(tenantId: string): Promise<PublicCatalogueLanguage[]> {
+    return publicFetch<PublicCatalogueLanguage[]>(`/public/catalogue/languages`, tenantId);
+  }
+
+  getCatalogueIdentificationTypes(tenantId: string): Promise<PublicCatalogueIdentificationType[]> {
+    return publicFetch<PublicCatalogueIdentificationType[]>(`/public/catalogue/identification-types`, tenantId);
+  }
+
+  getCatalogueCurrencies(tenantId: string): Promise<PublicCatalogueCurrency[]> {
+    return publicFetch<PublicCatalogueCurrency[]>(`/public/catalogue/currencies`, tenantId);
   }
 
   /** POST api/auth/register-candidate — assigns the Candidate role; activation is by SMS OTP. */
@@ -150,19 +179,17 @@ class CandidateService {
     return apiService.get<CandidateApplicationSummary[]>(`${this.baseUrl}/applications`);
   }
 
+  // ⚠ No hard-coded `source` any more (round 3, lane A). The server derives it from the advert
+  // the candidate came through (`jobPostingId`), or records the company website when there is
+  // none — every self-service application used to be filed as CompanyWebsite whatever the advert.
+
   /** Draft + submit in one call — the apply button. */
   apply(payload: ApplyPayload): Promise<CandidateApplicationSummary> {
-    return apiService.post<CandidateApplicationSummary>(`${this.baseUrl}/applications`, {
-      source: 'CompanyWebsite',
-      ...payload,
-    });
+    return apiService.post<CandidateApplicationSummary>(`${this.baseUrl}/applications`, payload);
   }
 
   saveDraft(payload: ApplyPayload): Promise<CandidateApplicationSummary> {
-    return apiService.post<CandidateApplicationSummary>(`${this.baseUrl}/applications/draft`, {
-      source: 'CompanyWebsite',
-      ...payload,
-    });
+    return apiService.post<CandidateApplicationSummary>(`${this.baseUrl}/applications/draft`, payload);
   }
 
   submitDraft(
@@ -188,9 +215,10 @@ class CandidateService {
   }
 
   // ⚠ Multipart through the controlled-upload gate — never a JSON filePath.
-  uploadDocument(file: File, documentType: string): Promise<CandidateDocument> {
+  uploadDocument(file: File, documentType: string, description?: string | null): Promise<CandidateDocument> {
     return hrDocumentService.upload<CandidateDocument>(`${this.baseUrl}/documents`, file, {
       documentType,
+      description: description?.trim() || undefined,
     });
   }
 
@@ -208,6 +236,11 @@ class CandidateService {
 
   uploadPhoto(file: File): Promise<{ url: string }> {
     return hrDocumentService.upload<{ url: string }>(`${this.baseUrl}/profile/photo`, file);
+  }
+
+  /** The gated route `useGatedImage` / `PhotoPanel` fetch the photograph from. */
+  photoUrl(): string {
+    return `${this.baseUrl}/profile/photo`;
   }
 
   downloadPhoto(): Promise<Blob> {

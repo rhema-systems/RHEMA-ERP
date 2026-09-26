@@ -66,9 +66,9 @@ describe('EstateAcquisitionService workflow requirements', () => {
   it('defines named required documents for every acquisition stage', () => {
     const stages = Object.values(STAGE_WORKFLOW_REQUIREMENTS);
 
-    expect(stages).toHaveLength(16);
+    expect(stages).toHaveLength(17);
     expect(stages.every((stage) => stage.documents.length > 0)).toBe(true);
-    expect(stages.flatMap((stage) => stage.documents)).toHaveLength(44);
+    expect(stages.flatMap((stage) => stage.documents)).toHaveLength(47);
   });
 
   it('keeps survey verification approval-only and clears overlap during ownership verification', () => {
@@ -107,7 +107,7 @@ describe('EstateAcquisitionService workflow requirements', () => {
       (step: any) => step.configuration?.qualityConfig?.qualityChecks || []
     );
 
-    expect(documentRequirements).toHaveLength(44);
+    expect(documentRequirements).toHaveLength(47);
     expect(approvalChecks.length).toBeGreaterThan(0);
     expect(approvalChecks.every((check: any) => check.requiresDocument === false)).toBe(true);
     expect(approvalChecks.some((check: any) => check.name.startsWith('Attach '))).toBe(false);

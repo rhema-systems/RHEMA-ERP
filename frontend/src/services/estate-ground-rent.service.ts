@@ -8,6 +8,9 @@ interface ApiResponse<T> {
 
 export interface GroundRentAssetOption {
   id: string;
+  assessmentAssetId?: string;
+  listingScope?: 'asset' | 'demarcation';
+  parentAssetId?: string;
   assetCode: string;
   name: string;
   location?: string;

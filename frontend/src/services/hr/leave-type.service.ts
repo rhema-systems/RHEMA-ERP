@@ -63,8 +63,13 @@ class LeaveTypeService {
 
   // ── Sub-types ─────────────────────────────────────────────────────────────────
 
-  getSubTypes(leaveTypeId: string): Promise<LeaveSubType[]> {
-    return apiService.get<LeaveSubType[]>(`${this.baseUrl}/${leaveTypeId}/sub-types`);
+  /**
+   * Sub-types of a leave type. `activeOnly` defaults to false so the rulebook tab keeps showing
+   * retired rows; anything that offers a choice passes true (closure plan L-34).
+   */
+  getSubTypes(leaveTypeId: string, activeOnly = false): Promise<LeaveSubType[]> {
+    const q = activeOnly ? '?activeOnly=true' : '';
+    return apiService.get<LeaveSubType[]>(`${this.baseUrl}/${leaveTypeId}/sub-types${q}`);
   }
 
   createSubType(data: LeaveSubTypeRequest): Promise<LeaveSubType> {

@@ -25,9 +25,9 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { COMPANY_ASSET_STATUSES } from '@/types/hr/assets';
 import type { AssetRegisterGroup } from '@/types/hr/assets';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 const ANY = '__any__';
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -122,10 +122,6 @@ export default function AssetRegisterReportPage() {
     queryKey: ['hr', 'assets', 'types'],
     queryFn: () => assetRegisterService.getTypes(),
   });
-  const { data: units = [] } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-  });
   const { data: locations = [] } = useQuery({
     queryKey: ['hr', 'locations'],
     queryFn: () => locationService.getAll(),
@@ -200,14 +196,13 @@ export default function AssetRegisterReportPage() {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Unit</Label>
-            <Select value={unitId} onValueChange={setUnitId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ANY}>All units</SelectItem>
-                {units.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <OrganizationUnitPicker
+              value={unitId === ANY ? '' : unitId}
+              onChange={(id) => setUnitId(id || ANY)}
+              allowNone="All units"
+              unitLabel="Unit"
+              idPrefix="report-unit"
+            />
           </div>
           <div className="space-y-2">
             <Label>Location</Label>

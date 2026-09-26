@@ -199,11 +199,13 @@ export function NumberField<T extends FieldValues>({
   placeholder,
   required,
   step,
-}: BaseProps<T> & { step?: string }) {
+  description,
+}: BaseProps<T> & { step?: string; description?: string }) {
   return (
     <div className="space-y-2">
       <FieldLabel htmlFor={name} label={label} required={required} />
       <Input id={name} type="number" step={step} placeholder={placeholder} {...form.register(name)} />
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
       <FieldError form={form} name={name} />
     </div>
   );
@@ -311,10 +313,13 @@ export function SelectField<T extends FieldValues>({
   /** Adds a "None" choice that maps to an empty string. */
   allowEmpty = false,
   emptyLabel = 'None',
+  description,
 }: BaseProps<T> & {
   options: { value: string; label: string }[];
   allowEmpty?: boolean;
   emptyLabel?: string;
+  /** A line under the control explaining what the choice changes. */
+  description?: string;
 }) {
   const raw = form.watch(name) as unknown as string | undefined;
   const value = raw ? String(raw) : allowEmpty ? NONE_VALUE : '';
@@ -340,6 +345,7 @@ export function SelectField<T extends FieldValues>({
           ))}
         </SelectContent>
       </Select>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
       <FieldError form={form} name={name} />
     </div>
   );

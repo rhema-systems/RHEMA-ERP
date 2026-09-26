@@ -157,9 +157,12 @@ public class EmolumentsController : ControllerBase
                 employeeId, leaveTypeId, asOf ?? DateOnly.FromDateTime(DateTime.UtcNow));
             return Ok(new EncashmentRateResult
             {
-                DailyRate = rate,
+                DailyRate = rate.Rate,
+                // The sentence travels with the figure so the form can show what produced it rather
+                // than a bare number the employee has no way to check.
+                Basis = rate.Basis,
                 Days = days,
-                Amount = Math.Round(rate * days, 2)
+                Amount = Math.Round(rate.Rate * days, 2)
             });
         }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
@@ -175,6 +178,10 @@ public class UpdatePositionPayComponentRequest
 public class EncashmentRateResult
 {
     public decimal DailyRate { get; set; }
+
+    /// <summary>How the rate was arrived at, in words. Built from the same divisor that produced it.</summary>
+    public string Basis { get; set; } = string.Empty;
+
     public decimal Days { get; set; }
     public decimal Amount { get; set; }
 }

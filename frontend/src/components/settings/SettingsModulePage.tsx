@@ -42,6 +42,27 @@ export function SettingsModulePage({ sectionKey, moduleKey }: SettingsModulePage
     );
   }, [moduleCard, query]);
 
+  /**
+   * One band per nav group, in the order the navigation declares them. A module whose links are
+   * ungrouped collapses to a single unheaded band, so this cannot make a flat module worse — but
+   * a module with fifty settings in one undifferentiated grid (Human Resources) becomes legible.
+   */
+  const linkGroups = useMemo(() => {
+    const groups: { title: string; links: typeof visibleLinks }[] = [];
+    visibleLinks.forEach(link => {
+      // trail is [module, ...groups, leaf]. A leaf with no group in between (trail length 2)
+      // must not band under its own title, so it falls into the unheaded band.
+      const title = link.trail.length > 2 ? link.trail[1] : '';
+      const existing = groups.find(group => group.title === title);
+      if (existing) {
+        existing.links.push(link);
+        return;
+      }
+      groups.push({ title, links: [link] });
+    });
+    return groups;
+  }, [visibleLinks]);
+
   if (!moduleCard) {
     return (
       <main className="min-h-screen bg-slate-50 p-6 dark:bg-[#101010]">
@@ -121,36 +142,52 @@ export function SettingsModulePage({ sectionKey, moduleKey }: SettingsModulePage
           </div>
 
           {visibleLinks.length > 0 ? (
-            <nav
-              aria-label={`${moduleCard.title} settings`}
-              className="mt-4 grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-3"
-            >
-              {visibleLinks.map(link => {
-                const LinkIcon = link.icon;
-                const context = link.trail.slice(1, -1).join(' / ');
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className="group flex min-h-16 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 transition hover:border-blue-300 hover:bg-blue-50 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30"
-                  >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 group-hover:text-blue-700 dark:bg-neutral-800 dark:text-slate-300 dark:ring-neutral-700 dark:group-hover:text-blue-300">
-                      <LinkIcon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-slate-800 group-hover:text-blue-800 dark:text-slate-100 dark:group-hover:text-blue-200">
-                        {link.title}
-                      </span>
-                      {context && (
-                        <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
-                          {context}
-                        </span>
-                      )}
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-blue-600" />
-                  </Link>
-                );
-              })}
+            <nav aria-label={`${moduleCard.title} settings`} className="mt-4 space-y-5">
+              {linkGroups.map(group => (
+                <div key={group.title || '__ungrouped'}>
+                  {group.title && (
+                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      {group.title}
+                    </h3>
+                  )}
+                  <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+                    {group.links.map(link => {
+                      const LinkIcon = link.icon;
+                      // The nav item's own one-liner if it has one; otherwise the ancestor path,
+                      // minus the band heading already printed above. A leaf with neither — no
+                      // description and no parent group — renders bare, which is the bug this
+                      // caption was silently hiding.
+                      const caption =
+                        link.description ?? link.trail.slice(2, -1).join(' / ');
+                      return (
+                        <Link
+                          key={link.href}
+                          href={link.href}
+                          className="group flex min-h-16 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 transition hover:border-blue-300 hover:bg-blue-50 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/30"
+                        >
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 group-hover:text-blue-700 dark:bg-neutral-800 dark:text-slate-300 dark:ring-neutral-700 dark:group-hover:text-blue-300">
+                            <LinkIcon className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-semibold text-slate-800 group-hover:text-blue-800 dark:text-slate-100 dark:group-hover:text-blue-200">
+                              {link.title}
+                            </span>
+                            {caption && (
+                              <span
+                                title={caption}
+                                className="mt-0.5 line-clamp-2 block text-xs text-slate-500 dark:text-slate-400"
+                              >
+                                {caption}
+                              </span>
+                            )}
+                          </span>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-blue-600" />
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </nav>
           ) : (
             <div className="mt-5 rounded-xl border border-dashed border-slate-300 px-6 py-12 text-center dark:border-neutral-700">

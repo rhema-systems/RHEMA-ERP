@@ -27,10 +27,23 @@ public class LeaveTypeDto
     public int? MinServiceMonthsToAccess { get; set; }
     public int? CarryOverExpiryMonths { get; set; }
     public int? ForfeitUnusedAfterMonths { get; set; }
+
+    /// <summary>⚠ Governs BOTH year-end acts — carry-over and forfeiture. Default <c>Granted</c>.</summary>
+    public LeaveYearEndBasis YearEndBasis { get; set; }
+
+    /// <summary>⚠ Refused together with an incremental accrual policy — the two deduct for the same months.</summary>
+    public bool ProRateFirstYearEntitlement { get; set; }
     public bool MandatoryAnnualLeave { get; set; }
     public EncashmentRateBasis EncashmentRateBasis { get; set; }
     public decimal? EncashmentRatePerDay { get; set; }
     public int EncashmentWorkingDaysPerMonth { get; set; }
+
+    /// <summary>Whether this leave type requires excuse duty (a medical certificate).</summary>
+    public bool RequiresMedicalCertificate { get; set; }
+    /// <summary>Days takeable on the employee's own word before a certificate is required.</summary>
+    public int SelfCertificationDays { get; set; }
+    /// <summary>Cumulative days in a year past which a medical board must sit. Null = never.</summary>
+    public int? MedicalBoardThresholdDays { get; set; }
     public bool IsActive { get; set; }
 }
 
@@ -60,17 +73,62 @@ public class CreateLeaveTypeDto
     public int? MinServiceMonthsToAccess { get; set; }
     public int? CarryOverExpiryMonths { get; set; }
     public int? ForfeitUnusedAfterMonths { get; set; }
+
+    /// <summary>⚠ Governs BOTH year-end acts — carry-over and forfeiture. Default <c>Granted</c>.</summary>
+    public LeaveYearEndBasis YearEndBasis { get; set; }
+
+    /// <summary>⚠ Refused together with an incremental accrual policy — the two deduct for the same months.</summary>
+    public bool ProRateFirstYearEntitlement { get; set; }
     public bool MandatoryAnnualLeave { get; set; }
     public EncashmentRateBasis EncashmentRateBasis { get; set; } = EncashmentRateBasis.DerivedFromEmoluments;
     public decimal? EncashmentRatePerDay { get; set; }
     public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+
+    /// <summary>
+    /// Whether this leave type requires excuse duty — a medical certificate — once the
+    /// self-certification period is passed. Defaults off, so no existing type starts refusing.
+    /// </summary>
+    public bool RequiresMedicalCertificate { get; set; } = false;
+
+    /// <summary>Days takeable on the employee's own word. ⚠ 3 is a starting value, not a rule.</summary>
+    [Range(0, 365)] public int SelfCertificationDays { get; set; } = 3;
+
+    /// <summary>
+    /// Cumulative days of this type in a year past which a medical board must sit. Null = never.
+    /// ⚠ Counted across the YEAR: a per-request threshold is defeated by splitting an absence.
+    /// </summary>
+    [Range(1, 365)] public int? MedicalBoardThresholdDays { get; set; } = 90;
+
     /// <summary>Allowance pay-component IDs whose value feeds this leave type's derived encashment rate.</summary>
     public List<Guid> AllowanceComponentIds { get; set; } = new();
 }
 
+/// <summary>
+/// Updating a leave type. ⚠ <b>A PUT here is a REPLACE</b>, as the verb says: every field sent
+/// becomes the new value and every field omitted becomes its default.
+/// </summary>
+/// <remarks>
+/// <para>⚠ <b>That is dangerous for the allowance links, and finding L-13 is about exactly this.</b>
+/// <c>LeaveTypeAllowance</c> rows decide what a day of encashed leave is <b>worth</b> — they feed
+/// the derived rate — and a caller who sent a partial body used to have every one of them silently
+/// deleted, changing people's money with no trace of what was removed.</para>
+///
+/// <para><b>So this one property is nullable and the others are not.</b> <c>null</c> means "I am not
+/// touching the allowances" and an empty list means "remove them all". A PUT that omits the field
+/// now leaves the links alone; a caller who genuinely wants none sends <c>[]</c> and says so. The
+/// replace-set semantics stay for every other field, because that is what PUT means and the screens
+/// send the whole object — but a flag reset to false is visible on the next read, whereas a deleted
+/// link is not.</para>
+/// </remarks>
 public class UpdateLeaveTypeDto : CreateLeaveTypeDto
 {
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// ⚠ <c>null</c> = leave the allowance links untouched. <c>[]</c> = remove them all.
+    /// Shadows the non-nullable property on the create DTO, deliberately.
+    /// </summary>
+    public new List<Guid>? AllowanceComponentIds { get; set; }
 }
 
 public class LeaveTypeDetailDto : LeaveTypeDto
@@ -204,7 +262,14 @@ public class LeaveBalanceDto
     public decimal CarriedOverDays { get; set; }
     public decimal AdjustmentDays { get; set; }
     public decimal EncashedDays { get; set; }
+    /// <summary>The policy figure: <c>Entitled + Carried + Adjustments − Used − Pending − Encashed</c>.</summary>
     public decimal AvailableDays { get; set; }
+    /// <summary>
+    /// The figure the create check actually enforces — the same sum with <see cref="AccruedToDateDays"/>
+    /// in place of <see cref="EntitledDays"/> for leave types that accrue. Mid-year the two differ by
+    /// whatever has not accrued yet, and a screen showing only the first invites a refused request.
+    /// </summary>
+    public decimal AccruedAvailableDays { get; set; }
 }
 
 // ─── Leave Adjustment ────────────────────────────────────────────────────────
@@ -292,7 +357,17 @@ public class LeaveBalanceDetailDto
     public decimal CarriedOverDays      { get; set; }
     public decimal AdjustmentDays       { get; set; }
     public decimal EncashedDays         { get; set; }
+    /// <summary>
+    /// The policy figure: <c>Entitled + Carried + Adjustments − Used − Pending − Encashed</c>.
+    /// </summary>
     public decimal AvailableDays        { get; set; }
+    /// <summary>
+    /// The figure the create check actually enforces: the same sum with <see cref="AccruedToDateDays"/>
+    /// in place of <see cref="EntitledDays"/> for leave types that accrue. On annual leave mid-year the
+    /// two differ by whatever has not accrued yet, and a screen that shows only the first one invites a
+    /// request the server will refuse (closure plan L-14).
+    /// </summary>
+    public decimal AccruedAvailableDays { get; set; }
     public bool    AllowCashConversion  { get; set; }
     public List<LeaveRequestDto>    Requests    { get; set; } = new();
     public List<LeaveEncashmentDto> Encashments { get; set; } = new();
@@ -340,6 +415,15 @@ public class LeavePlanDto
     public string? RejectionReason { get; set; }
 
     /// <summary>
+    /// The live leave request raised from this plan, if one has been. `LeaveRequest.LeavePlanId` has
+    /// existed since the port and nothing ever wrote it, so an approved plan dead-ended and the
+    /// employee re-keyed their own dates (closure plan L-9 / R-1). A cancelled or rejected request
+    /// does not count — the plan becomes raiseable again.
+    /// </summary>
+    public Guid? RaisedLeaveRequestId { get; set; }
+    public string? RaisedLeaveRequestNumber { get; set; }
+
+    /// <summary>
     /// Why the named reliever(s) may not actually be available over this plan's dates. Empty when
     /// nothing overlaps, or when no reliever is named. Advisory — a plan with clashes can still be
     /// saved and approved; what the register must never do is stay silent about them.
@@ -383,7 +467,10 @@ public class CreateLeavePlanDto
     // PlannedBy is an Employee foreign key stamped from the token (finish-plan lane 4). Both screens
     // used to send the LOGIN's user id here, which is never an employee id. On update the original
     // planner is kept.
-    public int Year { get; set; }
+    //
+    // Year is NOT here: it is derived from StartDate. The desk screen used to send the list filter's
+    // year, so a January plan raised from the December list was filed under the wrong year and then
+    // vanished from both (closure plan L-17). A plan's year is a property of its dates.
 }
 
 /// <summary>
@@ -411,6 +498,48 @@ public class RespondToLeaveSuggestionDto
 }
 
 // ─── Leave Request ────────────────────────────────────────────────────────────
+
+/// <summary>
+/// An approver sending a request back with dates of their own (status becomes
+/// <c>ChangesSuggested</c>). The mirror of <see cref="SuggestLeavePlanChangesDto"/>.
+/// The employee answers with <see cref="RespondToLeaveSuggestionDto"/>, which both sides share.
+/// </summary>
+public class SuggestLeaveRequestChangesDto
+{
+    public DateOnly SuggestedStartDate { get; set; }
+    public DateOnly SuggestedEndDate { get; set; }
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Moving an already-approved request to different dates, keeping its number and its history.
+/// </summary>
+/// <remarks>
+/// A reason is REQUIRED. The whole point of this path over cancel-and-re-key is that the record
+/// says why it moved; an unexplained reschedule is the thing it exists to prevent.
+/// </remarks>
+public class RescheduleLeaveRequestDto
+{
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Calls an employee back before their leave ends (residue plan R-14).
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="EffectiveDate"/> is <b>the first day the employee is expected back at work</b>, not
+/// the last day of their leave. That is the date a recall notice actually states, and naming it the
+/// other way round is a one-day error nobody would catch on a screen — the service takes the day
+/// before it as the new end date.
+/// <para>A reason is REQUIRED: a recall is the employer's act, and its record has to say why.</para>
+/// </remarks>
+public class RecallLeaveRequestDto
+{
+    public DateOnly EffectiveDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+}
 
 public class CreateLeaveRequestDto
 {
@@ -461,6 +590,69 @@ public class LeaveRequestDto
 
     public Guid? LeavePlanId { get; set; }
 
+    /// <summary>The number of the plan this request was raised from, when it came from one.</summary>
+    public string? LeavePlanReference { get; set; }
+
+    /// <summary>
+    /// Who finally approved the request and when, and why it was refused if it was.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ These three were on the ENTITY and on no DTO, so nothing could show who approved a piece
+    /// of leave or when — the one fact an approval exists to record. Found by the hr-leave suite,
+    /// which asserted an approval date after a successful approval and got nothing.
+    ///
+    /// On a two-stage ladder these carry the FINAL approval. The per-stage history is the workflow
+    /// engine's, and is read from the request's Workflow tab.
+    /// </remarks>
+    public Guid? ApprovedById { get; set; }
+    public DateTime? ApprovedDate { get; set; }
+    public string? RejectionReason { get; set; }
+
+    // Dates the approver sent back instead (status ChangesSuggested).
+    public DateOnly? SuggestedStartDate { get; set; }
+    public DateOnly? SuggestedEndDate { get; set; }
+    public string? ManagerSuggestionNotes { get; set; }
+
+    // Set once an approved request has been moved: what it used to say, who moved it, and why.
+    public DateOnly? OriginalStartDate { get; set; }
+    public DateOnly? OriginalEndDate { get; set; }
+    public DateTime? RescheduledDate { get; set; }
+    public Guid? RescheduledById { get; set; }
+    public string? RescheduledByName { get; set; }
+    public string? RescheduleReason { get; set; }
+    public int RescheduleCount { get; set; }
+
+    // Set when somebody answered "yes, this is still going ahead".
+    public DateTime? ObservanceConfirmedDate { get; set; }
+    public Guid? ObservanceConfirmedById { get; set; }
+    public string? ObservanceConfirmedByName { get; set; }
+
+    // Set when the employee was called back before their end date (residue plan R-14). The request
+    // keeps its number, its status and its approval — EndDate is simply earlier than it was, and
+    // PreRecallEndDate is what it used to be. A screen showing a recalled request should say both,
+    // or the leave looks like it was always this short.
+    /// <summary>
+    /// The medical board that ruled on this absence, when one sat. ⚠ A bare id across a module
+    /// boundary — leave reads the board and never writes it.
+    /// </summary>
+    public Guid? MedicalBoardId { get; set; }
+
+    public DateOnly? RecallEffectiveDate { get; set; }
+    public DateOnly? PreRecallEndDate { get; set; }
+    public DateTime? RecalledDate { get; set; }
+    public Guid? RecalledById { get; set; }
+    public string? RecalledByName { get; set; }
+    public string? RecallReason { get; set; }
+    public decimal? DaysRestored { get; set; }
+
+    /// <summary>
+    /// Attendance days recorded as <c>OnLeave</c> against this request. Filled on the single-request
+    /// read only. It should equal <see cref="TotalDays"/> once the request is approved; a smaller
+    /// number means some of those days already had attendance recorded and were left alone, and
+    /// those days will not reach the payroll export as leave (closure plan L-27).
+    /// </summary>
+    public int AttendanceDaysRecorded { get; set; }
+
     public DateTime? ClosureDate { get; set; }
     public string? ClosureNotes { get; set; }
     public DateTime? CancellationDate { get; set; }
@@ -485,6 +677,17 @@ public class MandatoryLeaveComplianceDto
 {
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
+
+    /// <summary>So a row can be found, and taken to the person it is about.</summary>
+    public string EmployeeNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The employee's organisation unit. ⚠ Added for finding L-22: the register listed
+    /// everybody with no way to narrow it, and outstanding mandatory leave is something a
+    /// DEPARTMENT acts on — it is the head who has to release people, not HR one name at a time.
+    /// </summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
     public int Year { get; set; }
@@ -524,6 +727,12 @@ public class LeaveRequestAttachmentDto
     public DateTime UploadedDate { get; set; }
     public Guid UploadedBy { get; set; }
     public string UploadedByName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the document is. ⚠ The evidence gate reads this, not the file name — `scan.pdf` is a
+    /// medical certificate or a holiday photograph with equal probability.
+    /// </summary>
+    public LeaveEvidenceKind EvidenceKind { get; set; }
 }
 
 // ─── Leave Encashment ─────────────────────────────────────────────────────────
@@ -539,6 +748,14 @@ public class LeaveEncashmentDto
     public int Year { get; set; }
     public decimal DaysEncashed { get; set; }
     public decimal AmountPaid { get; set; }
+
+    /// <summary>
+    /// How the amount was arrived at, in words. ⚠ Recorded at payout time, not recomputed — the
+    /// divisor behind it is a setting, so a figure that cannot name its own basis stops reconciling
+    /// the moment somebody edits it.
+    /// </summary>
+    public string? RateBasis { get; set; }
+
     public LeaveEncashmentStatus Status { get; set; }
     public DateTime? ProcessedDate { get; set; }
     public Guid? ProcessedByEmployeeId { get; set; }
@@ -564,9 +781,13 @@ public class CreateLeaveEncashmentDto
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// Marking an encashment paid. The actor is NOT taken from the body: <c>ProcessedByEmployeeId</c>
+/// is an <c>Employees</c> foreign key and is stamped from the caller's own employee id, the same
+/// house rule that adjustments and plans follow.
+/// </summary>
 public class ProcessLeaveEncashmentDto
 {
-    public Guid ProcessedByEmployeeId { get; set; }
     public string PaymentReference { get; set; } = string.Empty;
 }
 
@@ -579,4 +800,184 @@ public class RecalculateLeaveBalanceRequest
     public int   Year        { get; set; } = DateTime.UtcNow.Year;
     /// <summary>When null, all leave types for the employee are recalculated.</summary>
     public Guid? LeaveTypeId { get; set; }
+}
+
+// ─── Leave reminder engine (closure plan wave E, slice E2) ───────────────────
+
+public class LeaveReminderRunResultDto
+{
+    public Guid RunId { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public int RemindersQueued { get; set; }
+
+    /// <summary>How many candidates were found but already claimed by an earlier sweep.</summary>
+    public int AlreadySent { get; set; }
+}
+
+/// <summary>One thing a sweep would chase, whether or not it has been chased already.</summary>
+public class LeaveReminderPreviewItemDto
+{
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public Guid? EmployeeId { get; set; }
+    public string? EmployeeName { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public string DedupeKey { get; set; } = string.Empty;
+    public bool AlreadySent { get; set; }
+}
+
+public class LeaveReminderRunDto
+{
+    public Guid Id { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public int RemindersQueued { get; set; }
+}
+
+public class LeaveReminderLogEntryDto
+{
+    public Guid Id { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public Guid? EmployeeId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public DateTime SentAt { get; set; }
+}
+
+// ─── Leave calendar (closure plan wave E, slice E1) ──────────────────────────
+
+/// <summary>Whose leave a calendar read is about.</summary>
+/// <remarks>
+/// Decision D-9: one component, three entry points. The scope is what makes them different, and it
+/// is authorized differently for each — <c>Mine</c> needs nothing but a linked employee record,
+/// <c>Team</c> is the caller's own direct reports, and <c>Organisation</c> is the leave read tier.
+/// </remarks>
+public enum LeaveCalendarScope
+{
+    Mine = 0,
+    Team = 1,
+    Organisation = 2
+}
+
+/// <summary>One person's leave, as a band on a calendar.</summary>
+/// <remarks>
+/// ⚠ It carries no reason and no balance — a calendar is read by colleagues, and "Ama is on annual
+/// leave" is what a calendar is for. The same rule the reminder engine's templates follow.
+/// </remarks>
+public class LeaveCalendarEntryDto
+{
+    public Guid Id { get; set; }
+    public string RequestNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? OrganizationUnitName { get; set; }
+    public Guid LeaveTypeId { get; set; }
+    public string LeaveTypeName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The leave type's own <c>CalendarColor</c>. Null when the tenant has not set one, and the
+    /// screen falls back to a generated palette rather than showing nothing.
+    /// </summary>
+    public string? CalendarColor { get; set; }
+
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
+    public decimal TotalDays { get; set; }
+    public LeaveStatus Status { get; set; }
+
+    /// <summary>True when the leave is approved; a pending band is drawn as an outline.</summary>
+    public bool IsConfirmed { get; set; }
+}
+
+/// <summary>A non-working day drawn underneath the leave bands.</summary>
+public class LeaveCalendarHolidayDto
+{
+    public DateOnly Date { get; set; }
+    public string Name { get; set; } = string.Empty;
+}
+
+public class LeaveCalendarDto
+{
+    public DateOnly From { get; set; }
+    public DateOnly To { get; set; }
+    public LeaveCalendarScope Scope { get; set; }
+    public List<LeaveCalendarEntryDto> Entries { get; set; } = new();
+    public List<LeaveCalendarHolidayDto> Holidays { get; set; } = new();
+}
+
+// ─── Leave register (closure plan wave E, slice E3) ──────────────────────────
+
+/// <summary>
+/// Filters for the organisation-wide leave register.
+/// </summary>
+/// <remarks>
+/// Until this existed the only way to list leave requests was one employee at a time
+/// (<c>GET employee/{id}/history</c>), so "who is off in December" or "every rejected request this
+/// quarter" could not be asked at all (closure plan L-6). Every filter is optional; with none, the
+/// register is the whole tenant for the date range.
+/// </remarks>
+public class LeaveRegisterFilterDto
+{
+    /// <summary>Requests overlapping this window. Both ends optional.</summary>
+    public DateOnly? From { get; set; }
+    public DateOnly? To { get; set; }
+
+    public LeaveStatus? Status { get; set; }
+    public Guid? LeaveTypeId { get; set; }
+    public Guid? EmployeeId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+
+    /// <summary>Matches a request number or an employee's name.</summary>
+    public string? Search { get; set; }
+}
+
+// ─── Bulk decisions on the leave queue (closure plan wave E, slice E4) ───────
+
+/// <summary>
+/// Approve or reject several leave requests in one go.
+/// </summary>
+/// <remarks>
+/// A December approval queue is 200 rows, and deciding them one page-load at a time is what the
+/// UAT plan recorded as missing (closure plan R-12).
+/// </remarks>
+public class BulkLeaveDecisionDto
+{
+    public List<Guid> LeaveRequestIds { get; set; } = new();
+
+    /// <summary>Applied to every item — the shared-value shape from the bulk catalogue §4.3.</summary>
+    public string? Comments { get; set; }
+
+    /// <summary>Required when rejecting; ignored when approving.</summary>
+    public string? RejectionReason { get; set; }
+}
+
+/// <summary>
+/// The house bulk-result shape (bulk catalogue §4.2): a per-item reason, because the three items
+/// that failed are exactly what somebody deciding fifty needs to see.
+/// </summary>
+public class HrBulkActionResultDto
+{
+    public int RequestedCount { get; set; }
+    public int SucceededCount { get; set; }
+    public List<HrBulkActionItemResult> Results { get; set; } = new();
+}
+
+public class HrBulkActionItemResult
+{
+    public Guid Id { get; set; }
+    public bool Success { get; set; }
+
+    /// <summary>Why it did not go through. Null on success.</summary>
+    public string? Reason { get; set; }
 }

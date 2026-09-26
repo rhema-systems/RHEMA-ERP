@@ -38,6 +38,7 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
 import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { successionDevelopmentService } from '@/services/hr/succession.service';
 import type { SuccessionCandidate } from '@/types/hr/succession';
@@ -370,19 +371,14 @@ export function DevelopmentPanel({ candidate }: { candidate: SuccessionCandidate
             </FieldRow>
             <FieldRow>
               <NumberField form={form} name="estimatedCost" label="Estimated cost" />
-              <SelectField
+              {/* Finance owns this list. An unknown code is refused by the server. The shared
+                  picker renders `code — name` from the HR shape; the 2026-09-01 "undefined —
+                  undefined" bug (Finance's `currencyCode` read as `code` behind an `any`) cannot
+                  recur through a typed prop. */}
+              <CurrencyField
                 form={form}
                 name="currencyCode"
-                label="Currency"
-                // Finance owns this list. An unknown code is refused by the server.
-                // ⚠ `currencyCode`/`currencyName`, NOT `code`/`name`. This read `c.code` behind an
-                // `any` cast, so every option rendered "undefined — undefined" with an undefined
-                // value and TypeScript never objected. Found 2026-09-01 while copying this block
-                // for the guarantor surety, where a TYPED prop refused to compile.
-                options={(currencies ?? []).map((c) => ({
-                  value: c.code,
-                  label: `${c.code} — ${c.name}`,
-                }))}
+                options={currencies}
                 allowEmpty
                 emptyLabel="No cost recorded"
               />

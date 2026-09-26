@@ -4,7 +4,10 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Shared;
 using ErpSystem.Core.Interfaces.Common;
+using ErpSystem.Core.Services.HR.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -26,6 +29,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
     private readonly IEmolumentService _emolumentService;
     private readonly IGenericRepository<LeaveType> _leaveTypeRepository;
     private readonly IDateTimeProvider _clock;
+    private readonly ICompanyHrPolicyProvider _policyProvider;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     public LeaveEncashmentService(
         IGenericRepository<LeaveEncashment> encashmentRepository,
@@ -39,7 +44,9 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         ILeaveBalanceRecalculationService recalculationService,
         IEmolumentService emolumentService,
         IGenericRepository<LeaveType> leaveTypeRepository,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        ICompanyHrPolicyProvider policyProvider,
+        IHrFinancePostingAdapter financePosting)
     {
         _encashmentRepository = encashmentRepository;
         _leaveRepository = leaveRepository;
@@ -53,6 +60,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         _emolumentService = emolumentService;
         _leaveTypeRepository = leaveTypeRepository;
         _clock = clock;
+        _policyProvider = policyProvider;
+        _financePosting = financePosting;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -99,6 +108,21 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (leaveRequest.Encashment != null)
             throw new InvalidOperationException("This leave request has already been encashed.");
 
+        // ⚠ The tenant policy is asked FIRST, and the order matters. FR-HR-046 says leave is
+        // encashed "only on exit, no other route", while this path and the seeded
+        // AllowCashConversion flag say otherwise — both readings were live in the product at once
+        // (residue plan L-D8). The switch settles it per client rather than per requirement
+        // document, and it defaults OFF, which is FR-HR-046's reading.
+        //
+        // Asked before the leave type so the refusal names the real reason. A tenant with the route
+        // switched off should be told the route is closed, not sent away to change a flag on a leave
+        // type that would make no difference.
+        var policy = await _policyProvider.GetAsync();
+        if (!policy.AllowInServiceEncashment)
+            throw new InvalidOperationException(
+                "Leave is encashed only when an employee leaves, not while they are still employed. "
+                + "If that is not this organisation's policy, switch on in-service encashment in HR policy settings.");
+
         // The leave type must permit cash conversion before any encashment can be requested.
         var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         if (!leaveType.AllowCashConversion)
@@ -123,8 +147,19 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         // amount only if the derivation yields nothing (e.g. no rate configured).
         var asOf = leaveRequest.StartDate;
         var dailyRate = await _emolumentService.GetEncashmentDailyRateAsync(dto.EmployeeId, dto.LeaveTypeId, asOf);
-        var computedAmount = Math.Round(dailyRate * dto.DaysEncashed, 2);
+        var computedAmount = Math.Round(dailyRate.Rate * dto.DaysEncashed, 2);
         var amountPaid = computedAmount > 0 ? computedAmount : dto.AmountPaid;
+
+        // ⚠ The basis is stored WITH the payout, exactly as the final settlement already does. Leave
+        // encashment and a settlement compute a daily rate from deliberately different bases — 22
+        // working days a month here against 365 calendar days a year there, roughly 38% apart on the
+        // same salary — so an amount that cannot say which basis produced it is unauditable the
+        // moment either setting is edited. Recorded when the derivation is what paid; when the
+        // caller's own figure is used instead, the record says that rather than describing a
+        // calculation that did not happen.
+        var rateBasis = computedAmount > 0
+            ? dailyRate.Basis
+            : $"Amount entered by hand; no rate could be derived. ({dailyRate.Basis})";
 
         var entity = new LeaveEncashment
         {
@@ -135,6 +170,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
             Year = dto.Year,
             DaysEncashed = dto.DaysEncashed,
             AmountPaid = amountPaid,
+            RateBasis = rateBasis,
             Notes = dto.Notes,
             Status = LeaveEncashmentStatus.Submitted
         };
@@ -148,12 +184,15 @@ public class LeaveEncashmentService : ILeaveEncashmentService
             await _encashmentRepository.AddAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+            // Submitting must never approve — an encashment is a payment. Defence in depth; a
+            // LEAVE_ENCASHMENT definition is seeded. See HrWorkflowFallbackAuthority.
+            var (workflowResult, submitOutcome) =
+                await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
 
             if (workflowResult.ExecutionResult.Success)
             {
                 var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-                adapter.ApplySubmitOutcome(entity, workflowResult, GetCurrentUserId());
+                adapter.ApplySubmitOutcome(entity, submitOutcome, GetCurrentUserId());
                 await _encashmentRepository.UpdateAsync(entity);
                 await _unitOfWork.SaveChangesAsync(ct);
             }
@@ -165,6 +204,27 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         return (await GetWithIncludes(entity.Id))!.ToDto();
     }
 
+        /// <summary>
+    /// Refuses an approval by the very employee the record is about.
+    /// </summary>
+    /// <remarks>
+    /// This is the segregation the two-stage leave definition relies on, and it is done HERE rather
+    /// than with the engine's <c>PreventInitiatorApproval</c> on purpose. That flag guards the
+    /// INITIATOR; a leave record's conflicted party is its SUBJECT, and HR raises leave on other
+    /// people's behalf from the desk. On a tenant with one HR user the flag would strand every
+    /// desk-raised record at the HR stage with nobody able to clear it — trap 7 of
+    /// <c>HR-WORKFLOW-ENGINE-INTEGRATION.md</c>, and the area-9b mistake. Checking the subject
+    /// blocks the real conflict and cannot strand somebody else's record.
+    ///
+    /// It sits before the authority call so it holds on the fallback path too, not just the engine.
+    /// </remarks>
+    private void RefuseSelfApproval(Guid subjectEmployeeId, string what)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == subjectEmployeeId)
+            throw new InvalidOperationException(
+                $"You cannot approve your own {what}. It has to be approved by someone else.");
+    }
+
     public async Task<LeaveEncashmentDto> ApproveEncashmentAsync(Guid id)
     {
         var entity = await GetOwnedEncashmentAsync(id);
@@ -173,17 +233,14 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        RefuseSelfApproval(entity.EmployeeId, "leave encashment");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve", null);
-
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval.");
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Approve", null, "approve a leave encashment", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+        adapter.ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         await _encashmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -200,24 +257,33 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = !string.IsNullOrWhiteSpace(reason) ? reason : "Rejected";
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
 
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process rejection.");
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Reject", rejectionText, "reject a leave encashment", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+        adapter.ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _encashmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Leave encashment {id} rejected", id);
         return (await GetWithIncludes(id))!.ToDto();
+    }
+
+    /// <summary>
+    /// The acting employee for an actor column that is an <c>Employees</c> foreign key. A login id
+    /// is not an employee id; an unlinked account cannot be the actor and is refused with a message
+    /// rather than a constraint failure. Mirrors <c>LeaveService.RequireActingEmployeeId</c>.
+    /// </summary>
+    private Guid RequireActingEmployeeId(string purpose)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty)
+            return me;
+        throw new InvalidOperationException(
+            $"{purpose} requires your user account to be linked to an employee record. Please contact your administrator.");
     }
 
     public async Task<LeaveEncashmentDto> MarkAsProcessedAsync(Guid id, ProcessLeaveEncashmentDto dto)
@@ -227,20 +293,30 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (entity.Status != LeaveEncashmentStatus.Approved)
             throw new InvalidOperationException("Only approved encashments can be marked as processed.");
 
+        // ProcessedByEmployeeId is an Employees foreign key. The screen used to send the login's
+        // user id, which no employee has, so the action failed on the constraint every time — the
+        // same defect lane 4 fixed for adjustments and plans. The actor comes from the token.
+        var processedBy = RequireActingEmployeeId("Marking a leave encashment as paid");
+
         entity.Status = LeaveEncashmentStatus.Processed;
         entity.ProcessedDate = _clock.UtcNow;
-        entity.ProcessedByEmployeeId = dto.ProcessedByEmployeeId;
+        entity.ProcessedByEmployeeId = processedBy;
         entity.PaymentReference = dto.PaymentReference;
 
-        // Mark processed and recalculate the balance in one transaction. The balance's
-        // EncashedDays is derived from processed encashments by the recalculation service —
-        // the single source of truth — so we never mutate UsedDays directly here.
-        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        // Mark processed, recalculate the balance AND post to Finance in one transaction (HR
+        // finish plan lane 8, slice 2). The balance's EncashedDays is derived from processed
+        // encashments by the recalculation service — the single source of truth — so we never
+        // mutate UsedDays directly here. Whether in-service encashment exists at all is the policy
+        // flag AllowInServiceEncashment, checked long before this point; the posting only follows
+        // the event. The adapter owns the transaction that this method used to open itself.
+        var actedBy = Guid.TryParse(_currentUserService.UserId, out var actorUserId) ? actorUserId : Guid.Empty;
+        await _financePosting.RunAsync(async ct =>
         {
             await _encashmentRepository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);
             await _recalculationService.RecalculateAsync(entity.EmployeeId, entity.LeaveTypeId, entity.Year);
-        });
+            return HrFinancePostingCommandFactory.LeaveEncashmentProcessed(entity);
+        }, actedBy);
 
         _logger.LogInformation("Leave encashment {id} marked as processed with reference {ref}",
             id, dto.PaymentReference);

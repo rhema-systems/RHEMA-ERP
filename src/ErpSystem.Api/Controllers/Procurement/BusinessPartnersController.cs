@@ -46,6 +46,15 @@ public class BusinessPartnersController : ControllerBase
         }
     }
 
+    [HttpPost("{id:guid}/licenses")]
+    [Authorize(Roles = "SuperAdmin,TenantAdmin")]
+    public async Task<ActionResult<BusinessPartnerLicenseDto>> AddLicense(Guid id, CreateBusinessPartnerLicenseDto request)
+    {
+        try { return Ok(await _partnerService.AddLicenseAsync(id, request)); }
+        catch (UnauthorizedAccessException ex) { return Problem(statusCode: 403, detail: ex.Message); }
+        catch (InvalidOperationException ex) { return Problem(statusCode: 409, detail: ex.Message); }
+    }
+
     /// <summary>
     /// Gets a paginated list of business partners with optional filtering
     /// </summary>

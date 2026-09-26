@@ -40,6 +40,7 @@ export default function RemoteWorkRequestDetailPage() {
   };
 
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'RemoteWorkRequest',
     entityId: id,
     entityLabel: 'Remote Work Request',

@@ -45,6 +45,28 @@ export interface EmployeeDocument {
   createdAt: string;
 }
 
+/**
+ * A file pertaining to a GUARANTOR — the signed form, an ID scan, a payslip (round 2, lane A-6).
+ * Same vocabulary as the employee file, different subject.
+ */
+export interface EmployeeGuarantorDocument {
+  id: string;
+  guarantorId: string;
+  documentTypeId: string;
+  documentTypeName: string | null;
+  title: string | null;
+  description: string | null;
+  issuedOn: string | null;
+  expiresOn: string | null;
+  isExpired: boolean;
+  fileName: string | null;
+  mimeType: string | null;
+  fileSizeBytes: number | null;
+  uploadedById: string | null;
+  uploadedByName: string | null;
+  createdAt: string;
+}
+
 export interface PositionDocumentRequirement {
   id: string;
   positionId: string;

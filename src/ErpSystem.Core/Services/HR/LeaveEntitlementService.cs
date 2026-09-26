@@ -4,6 +4,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -23,6 +24,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     private readonly IGenericRepository<LeaveCategoryAllocation> _allocationRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IDateTimeProvider _clock;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeaveEntitlementService> _logger;
 
     public LeaveEntitlementService(
@@ -32,6 +34,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         IGenericRepository<LeaveCategoryAllocation> allocationRepository,
         ICurrentUserProvider currentUserProvider,
         IDateTimeProvider clock,
+        ILeaveYearContext leaveYear,
         ILogger<LeaveEntitlementService> logger)
     {
         _employeeRepository = employeeRepository;
@@ -40,6 +43,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         _allocationRepository = allocationRepository;
         _currentUserProvider = currentUserProvider;
         _clock = clock;
+        _leaveYear = leaveYear;
         _logger = logger;
     }
 
@@ -70,20 +74,34 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         var tenantId = GetTenantId();
         var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
 
+        // ⚠ The tenant's leave year, resolved ONCE for this method. Every arm of the precedence
+        // below and the pro-rating helper all need the same answer, and the context caches it for
+        // the request in any case (entitlement plan C1).
+        var startMonth = await _leaveYear.StartMonthAsync(ct);
+
+        // ⚠ Read once, applied to whichever arm of the precedence answers — a joiner's first year is
+        // scaled the same way whether the figure came from a sub-type cap, an allocation or the
+        // default. Fetched here so the three return paths below cannot disagree about it.
+        var hiredOn = await _employeeRepository
+            .GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.Id == employeeId)
+            .Select(e => e.DateEmployed)
+            .FirstOrDefaultAsync(ct);
+
         // 1) Sub-type cap takes precedence when set.
         if (leaveSubTypeId.HasValue)
         {
             var subType = await _leaveSubTypeRepository.GetByIdAsync(leaveSubTypeId.Value);
             if (subType?.TenantId == tenantId && subType.MaxDaysAllowed is int cap)
-                return ApplyCeiling(leaveType, cap);
+                return ApplyFirstYearProration(leaveType, ApplyCeiling(leaveType, cap), hiredOn, year, startMonth);
         }
 
         // 2) Effective-dated allocation for the employee's staff level.
         var staffLevelId = await GetEmployeeStaffLevelIdAsync(employeeId, tenantId, ct);
         if (staffLevelId.HasValue)
         {
-            var yearStart = new DateOnly(year, 1, 1);
-            var yearEnd = new DateOnly(year, 12, 31);
+            var yearStart = LeaveYear.StartOf(year, startMonth);
+            var yearEnd = LeaveYear.EndOf(year, startMonth);
 
             var allocation = await _allocationRepository
                 .GetQueryable()
@@ -97,11 +115,45 @@ public class LeaveEntitlementService : ILeaveEntitlementService
                 .FirstOrDefaultAsync(ct);
 
             if (allocation != null)
-                return ApplyCeiling(leaveType, allocation.AllocationDays);
+                return ApplyFirstYearProration(
+                    leaveType, ApplyCeiling(leaveType, allocation.AllocationDays), hiredOn, year, startMonth);
         }
 
         // 3) Fall back to the leave type default.
-        return ApplyCeiling(leaveType, leaveType.DefaultDaysPerYear);
+        return ApplyFirstYearProration(
+            leaveType, ApplyCeiling(leaveType, leaveType.DefaultDaysPerYear), hiredOn, year, startMonth);
+    }
+
+    /// <summary>
+    /// Scales a resolved entitlement to the part of <paramref name="year"/> the employee was here
+    /// for, when the leave type asks for it (entitlement plan B3, decision D-4).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Only in the year they were hired.</b> In every later year they were present
+    /// throughout and there is nothing to scale.</para>
+    ///
+    /// <para><b>Whole months from the hire month to December, over twelve.</b> Somebody who starts
+    /// on the 1st and somebody who starts on the 28th of the same month are treated alike, which is
+    /// the ordinary reading of "you joined in October, so you get a quarter of the year" and avoids
+    /// inventing a day-level rule nobody asked for.</para>
+    ///
+    /// <para>⚠ <b>It cannot combine with incremental accrual</b> — <c>LeaveTypeService</c> refuses
+    /// that pairing at the door. If it ever reached here, the same months would be deducted three
+    /// times: once by the accrual window opening at the hire date, once by this scaling, and once
+    /// more through the derived per-period rate, which is <i>this scaled figure</i> divided by the
+    /// periods in a year.</para>
+    /// </remarks>
+    private static decimal ApplyFirstYearProration(
+        LeaveType leaveType, decimal entitled, DateOnly? dateEmployed, int year, int startMonth)
+    {
+        if (!leaveType.ProRateFirstYearEntitlement) return entitled;
+        // ⚠ The leave year the hire date falls in, not its calendar year. Under an April start
+        // somebody hired in February 2026 joined during leave year 2025, and comparing
+        // calendar years would have silently skipped their pro-rating.
+        if (dateEmployed is not DateOnly hired || LeaveYear.For(hired, startMonth) != year) return entitled;
+
+        var monthsPresent = 12 - hired.Month + 1;
+        return Math.Round(entitled * monthsPresent / 12m, 2, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>
@@ -117,11 +169,19 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         var tenantId = GetTenantId();
         var annual = await ResolveAnnualEntitlementAsync(employeeId, leaveTypeId, leaveSubTypeId, year, ct);
 
+        // ⚠ Entitlement plan A2. This used to be a bare FirstOrDefault over the active policies,
+        // with no ordering — so a leave type carrying two of them accrued at whichever rate the
+        // database happened to return first, and the same balance could read differently between
+        // two calls. `LeaveTypeService` now refuses a second active policy at the door; this
+        // ordering is for the rows that predate that guard, so at least the wrong answer is the
+        // SAME wrong answer every time and a repair pass can be reasoned about.
         var policy = await _leaveTypeRepository
             .GetQueryable()
             .Where(lt => lt.TenantId == tenantId && lt.Id == leaveTypeId)
             .SelectMany(lt => lt.AccrualPolicies)
             .Where(p => p.IsActive && p.Frequency != AccrualFrequency.None)
+            .OrderBy(p => p.CreatedAt)
+            .ThenBy(p => p.Id)
             .FirstOrDefaultAsync(ct);
 
         // No active accrual policy → the full entitlement is available immediately (legacy behavior).
@@ -129,15 +189,33 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             return annual;
 
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
-        var dateEmployed = employee?.TenantId == tenantId ? employee.DateEmployed : null;
+        var isOwn = employee?.TenantId == tenantId;
+        var dateEmployed = isOwn ? employee!.DateEmployed : null;
+        var dateLeft = isOwn && employee!.TerminationDate is DateTime left
+            ? DateOnly.FromDateTime(left)
+            : (DateOnly?)null;
 
-        var yearStart = new DateOnly(year, 1, 1);
-        var yearEnd = new DateOnly(year, 12, 31);
+        var yearStart = LeaveYear.StartOf(year, await _leaveYear.StartMonthAsync());
+        var yearEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync());
 
         // Clamp the as-of date into the target year for within-year accrual.
         var effectiveAsOf = asOf ?? _clock.TodayUtc;
         if (effectiveAsOf > yearEnd) effectiveAsOf = yearEnd;
-        if (effectiveAsOf < yearStart) return 0m; // year hasn't started yet
+
+        // Pro-rate on exit: a leaver stops accruing on their last day, so the clock stops there
+        // rather than running to today or to year end. This is the mirror of ProRateOnJoin, which
+        // moves the START of the accrual window to the hire date — the two switches are a pair, and
+        // until now only one of them was read by anything (closure plan L-29).
+        //
+        // ⚠ It applies to incremental accrual only, exactly as ProRateOnJoin does. A policy set to
+        // FullGrantOnEligibility grants the whole year the moment eligibility is reached, and a
+        // "full grant" that is then reduced is no longer a full grant — so the two settings do not
+        // combine. If TDC wants a leaver's full grant scaled down, that is a different setting and
+        // it needs saying (decision D-6's neighbour; recorded in the closure ledger).
+        if (policy.ProRateOnExit && dateLeft is DateOnly exit && exit < effectiveAsOf)
+            effectiveAsOf = exit;
+
+        if (effectiveAsOf < yearStart) return 0m; // year hasn't started yet, or they left before it
 
         // Accrual eligibility date = hire date + the policy's minimum-service months.
         var eligibilityDate = dateEmployed?.AddMonths(policy.MinServiceMonths ?? 0) ?? yearStart;
@@ -148,11 +226,47 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             return annual;
 
         // AccrueIncrementally: credit AccrualRate per completed period from the accrual start.
-        var accrualStart = Max(yearStart, eligibilityDate);
-        if (policy.ProRateOnJoin && dateEmployed is DateOnly hired && hired > accrualStart && hired <= yearEnd)
-            accrualStart = hired;
+        //
+        // ⚠ Entitlement plan B1 / decision D-1. `ProRateOnJoin` decides where the accrual WINDOW
+        // opens, and until this it decided nothing at all: the guard read
+        // `hired > Max(yearStart, eligibilityDate)`, and since `eligibilityDate` is `hired` plus a
+        // non-negative number of months, that compares the hire date with something that is never
+        // earlier than the hire date. Unsatisfiable, for every employee and every policy. The
+        // pro-rating happened regardless — the eligibility date had already anchored the window to
+        // the hire date — so the switch could not be turned OFF, which is the half that was missing.
+        //
+        //   ON  — the window opens when the employee became eligible, so a mid-year joiner earns
+        //         only the part of the year they were here for. Identical to the behaviour before
+        //         this change: ⚠ deliberately so, because every existing row's value was arbitrary
+        //         while the field was inert, and an accrual figure must not move under a tenant
+        //         that never chose anything.
+        //
+        //   OFF — the window opens with the LEAVE YEAR. Once somebody qualifies at all, they accrue
+        //         on the company's calendar like everybody else. This is the reading the field name
+        //         promises and the one no client could previously have.
+        //
+        // ⚠ The service gate is a separate thing and still binds either way: the early return above
+        // gives 0 before `eligibilityDate`, so OFF cannot credit somebody for a year in which they
+        // were never eligible. What it does is stop docking them for the months before they arrived.
+        var accrualStart = policy.ProRateOnJoin
+            ? Max(yearStart, eligibilityDate)
+            : yearStart;
 
         var periodsPerYear = PeriodsPerYear(policy.Frequency);
+
+        // ⚠ Entitlement plan B4, and it is the least discoverable useful behaviour in this service.
+        //
+        // A rate of ZERO does not mean "accrues nothing". It means the rate is DERIVED from this
+        // employee's own annual entitlement — which came from the staff-level allocation — so one
+        // policy makes a junior on 15 days accrue 1.25 a month and a manager on 30 accrue 2.5.
+        // **That is how an accrual rate varies by staff level**, and nothing said so anywhere until
+        // the tab was made to explain it.
+        //
+        // ⚠ Setting an explicit rate DEFEATS it, and the failure is quiet in both directions:
+        // somebody entitled to less than the rate accumulates to reaches their cap early (the
+        // Math.Min below), and somebody entitled to more never reaches their full entitlement at
+        // all. The demo seed carried a flat 1.75 against allocations of 15, 21 and 30 for exactly
+        // that reason — it predated the allocations.
         var ratePerPeriod = policy.AccrualRate > 0 ? policy.AccrualRate : annual / periodsPerYear;
 
         var completedPeriods = CompletedPeriods(accrualStart, effectiveAsOf, policy.Frequency);

@@ -234,6 +234,19 @@ public sealed class FinanceClassificationManifestSeeder
         usdParallel.CurrencyTranslationReserveAccountId = translationReserve.Id;
         usdParallel.CurrencyRoundingAccountId = rounding.Id;
 
+        foreach (var mapping in existingMappings.Where(item => item.IsEnabled && IsUntouchedManifestOwnedMapping(item)))
+        {
+            var account = accounts.SingleOrDefault(item => item.Id == mapping.AccountId);
+            var book = books.SingleOrDefault(item => item.Id == mapping.AccountingBookId);
+            var classification = mapping.AccountClassificationId.HasValue
+                ? classifications.SingleOrDefault(item => item.Id == mapping.AccountClassificationId.Value)
+                : null;
+            if (account is null || book is null || classification is null || !IsBookPostingReady(book)
+                || classification.IsDeleted || classification.Status != AccountClassificationStatus.Active
+                || !classification.IsPostingClassification || classification.AccountingBookId != mapping.AccountingBookId
+                 || classification.CoreAccountType != account.AccountType)
+                mapping.IsEnabled = false;
+        }
         AssertEnabledMappingLineage(tenantId, accounts, books, classifications, existingMappings);
         await _db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Applied Finance classification manifest {ManifestVersion} for tenant {TenantId}.", ManifestVersion, tenantId);
@@ -244,7 +257,8 @@ public sealed class FinanceClassificationManifestSeeder
 
     public static bool IsUntouchedManifestOwnedMapping(AccountAccountingBook mapping) =>
         mapping.UpdatedBy is null
-        && mapping.CreatedBy is "System (FIN-CLASSIFICATION-1.0)"
+        && mapping.CreatedBy is "System"
+            or "System (FIN-CLASSIFICATION-1.0)"
             or "System (FIN-CLASSIFICATION-2.0)"
             or "System (FIN-CLASSIFICATION-3.0)"
             or "System (FIN-CLASSIFICATION-4.0)";
@@ -277,14 +291,17 @@ public sealed class FinanceClassificationManifestSeeder
                 && classification.IsPostingClassification && classification.TenantId == tenantId
                 && classification.AccountingBookId == mapping.AccountingBookId
                 && classification.CoreAccountType == account.AccountType;
-            return new { Mapping = mapping, IsValid = valid };
+            return new { Mapping = mapping, Account = account, Book = book, Classification = classification, IsValid = valid };
         }).FirstOrDefault(item => !item.IsValid);
 
         if (invalid is not null)
         {
             throw new InvalidOperationException(
                 $"FINANCE_CLASSIFICATION_ENABLED_MAPPING_LINEAGE_INVALID: mapping '{invalid.Mapping.Id}' " +
-                $"for tenant '{tenantId}' is not bound to one active posting book and compatible active posting classification.");
+                $"for tenant '{tenantId}' is not bound to one active posting book and compatible active posting classification. " +
+                $"Account='{invalid.Account?.AccountCode ?? "missing"}', book='{invalid.Book?.Code ?? "missing"}', " +
+                $"classification='{invalid.Classification?.Code ?? "missing"}', createdBy='{invalid.Mapping.CreatedBy ?? "missing"}', " +
+                $"updatedBy='{invalid.Mapping.UpdatedBy ?? "missing"}'.");
         }
     }
 

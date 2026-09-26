@@ -48,8 +48,20 @@ public interface IJobDescriptionService
     /// <summary>Rejects the current workflow step, returning the job description to its author.</summary>
     Task<bool> RejectViaWorkflowAsync(Guid jobDescriptionId, string? reason, CancellationToken cancellationToken = default);
     Task<JobDescriptionDto> CreateNewVersionAsync(CreateJobDescriptionVersionDto versionDto, Guid preparedById, CancellationToken cancellationToken = default);
-    /// <summary>Deep-copies a job description (and all its child sections) into a new Draft.</summary>
-    Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Deep-copies a job description (and all its child sections) into a new Draft. With
+    /// <paramref name="targetPositionId"/> (round 3, lane J1) the copy lands on ANOTHER position:
+    /// its title is kept, its staff level is the target's, its version line starts afresh, and the
+    /// reporting relationships — which belong to the original post — are not carried.
+    /// </summary>
+    Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, Guid? targetPositionId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Round 3, lane J1. Brings the position's effective skill and certification requirements
+    /// (individual rows and named sets alike) onto the description as competencies and
+    /// qualifications, skipping what is already there. Idempotent; Draft/UnderRevision only.
+    /// </summary>
+    Task<PositionRequirementsImportResultDto> ImportPositionRequirementsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Responsibility operations
@@ -120,7 +132,14 @@ public interface IJobDescriptionService
 
     // Job Evaluation / Valuation
     /// <summary>Computes the valuation summary and persists the estimated range + suggested grade.</summary>
+    /// <summary>Computes the valuation and returns it. Safe: changes nothing.</summary>
     Task<JobValuationSummaryDto> GetValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+
+    /// <summary>Computes the valuation and stores it on the job description. Refuses an approved one.</summary>
+    Task<JobValuationSummaryDto> RecalculateValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+
+    /// <summary>The author's proposed grade beside the suggestion (round 3, lane J2; D-11). Refuses an approved description and a stranger grade.</summary>
+    Task<JobValuationSummaryDto> SetProposedSalaryGradeAsync(Guid jobDescriptionId, SetProposedSalaryGradeDto dto, CancellationToken cancellationToken = default);
 
     // Responsibility KPI operations
     Task<JobResponsibilityKpiDto> AddResponsibilityKpiAsync(CreateJobResponsibilityKpiDto createDto, CancellationToken cancellationToken = default);
@@ -186,7 +205,39 @@ public interface IManpowerBudgetService
     Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// What the system knows about a unit's subtree before a budget is typed for it: serving
+    /// headcount, estimated salary cost, exits due in the period, and each post against its
+    /// establishment (round 2b, R2). See <see cref="ManpowerPlanningBaselineDto"/>.
+    /// </summary>
+    /// <summary>A Draft budget for a unit and year with one line per post, from the establishment (round 2b, R4a).</summary>
+    Task<ManpowerBudgetDetailDto> CreateFromEstablishmentAsync(CreateManpowerBudgetFromEstablishmentDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>Adds lines for posts in the budget's subtree not yet on it; never overwrites (R4a).</summary>
+    Task<AddLinesFromEstablishmentResultDto> AddLinesFromEstablishmentAsync(Guid budgetId, bool includeUnestablished, CancellationToken cancellationToken = default);
+
+    /// <summary>The budget's posts against the establishment, in the shape the Excel export renders (round 2b, R4b).</summary>
+    Task<ManpowerBudgetWorkbookModelDto> GetEstablishmentWorkbookModelAsync(Guid budgetId, CancellationToken cancellationToken = default);
+
+    /// <summary>Applies an edited establishment workbook onto a Draft/Rejected budget — all rows or none (round 2b, R4b).</summary>
+    Task<ManpowerBudgetWorkbookImportResultDto> ImportEstablishmentWorkbookAsync(Guid budgetId, ManpowerBudgetWorkbookImportDto import, CancellationToken cancellationToken = default);
+
+    /// <summary>Every position's establishment in one read — the admin screen's list (R4a).</summary>
+    Task<IEnumerable<PositionEstablishmentResultDto>> GetEstablishmentListAsync(Guid? organizationUnitId, CancellationToken cancellationToken = default);
+
+    /// <summary>Approved and pending recruitment costs against the budget's recruitment envelope (round 2b, R6).</summary>
+    Task<RecruitmentSpendDto> GetRecruitmentSpendAsync(Guid budgetId, CancellationToken cancellationToken = default);
+
+    Task<ManpowerPlanningBaselineDto> GetPlanningBaselineAsync(
+        Guid organizationUnitId, DateOnly periodStart, DateOnly periodEnd, CancellationToken cancellationToken = default);
+
     // Budget Line operations
+    /// <summary>The grade a position carries, if any, so a budget line can start from it (round 2b, R3).</summary>
+    Task<PositionSalaryReferenceDto> GetPositionSalaryReferenceAsync(Guid positionId, CancellationToken cancellationToken = default);
+
+    /// <summary>Approved budget lines a requisition for this position may draw down from, with what each has left (round 2b, R5).</summary>
+    Task<IEnumerable<BudgetLineForRequisitionDto>> GetLinesForPositionAsync(Guid positionId, int? fiscalYear, CancellationToken cancellationToken = default);
+
     Task<ManpowerBudgetLineDto> AddBudgetLineAsync(CreateManpowerBudgetLineDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<ManpowerBudgetLineDto>> GetBudgetLinesAsync(Guid budgetId, CancellationToken cancellationToken = default);
     Task<ManpowerBudgetLineDto> UpdateBudgetLineAsync(UpdateManpowerBudgetLineDto updateDto, CancellationToken cancellationToken = default);

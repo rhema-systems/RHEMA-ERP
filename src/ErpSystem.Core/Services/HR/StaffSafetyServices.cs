@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.Services.HR.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -354,6 +355,7 @@ public class SafetyIncidentService : ISafetyIncidentService
     private readonly ISafetyIncidentCorrectiveActionRepository _correctiveActionRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IHrFinancePostingAdapter _financePosting;
     private readonly ILogger<SafetyIncidentService> _logger;
 
     public SafetyIncidentService(
@@ -361,8 +363,10 @@ public class SafetyIncidentService : ISafetyIncidentService
         ISafetyIncidentCorrectiveActionRepository correctiveActionRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IHrFinancePostingAdapter financePosting,
         ILogger<SafetyIncidentService> logger)
     {
+        _financePosting = financePosting;
         _incidentRepository = incidentRepository;
         _correctiveActionRepository = correctiveActionRepository;
         _currentUserProvider = currentUserProvider;
@@ -734,17 +738,30 @@ public class SafetyIncidentService : ISafetyIncidentService
     {
         var entity = await GetOwnedIncidentAsync(dto.IncidentId);
 
-        entity.InsuranceClaimFiled = true;
-        entity.ClaimFiledDate = dto.ClaimFiledDate;
-        entity.ClaimReferenceNumber = dto.ClaimReferenceNumber;
-        entity.InsuranceProviderId = dto.InsuranceProviderId;
-        entity.ClaimAmount = dto.ClaimAmount;
-        entity.ClaimApproved = dto.ClaimApproved;
-        entity.AmountPaid = dto.AmountPaid;
-        Touch(entity, userId);
+        // The claim form is re-submittable (it is how the desk records the insurer's decision and
+        // payment as they arrive). Once the proceeds have posted to Finance the money on it is
+        // fixed: changing the paid amount or un-approving needs the register's reverse first.
+        var moneyChanged = entity.AmountPaid != dto.AmountPaid || entity.ClaimApproved != dto.ClaimApproved;
+        if (moneyChanged)
+            await _financePosting.EnsureNotPostedAsync(HrFinancePostingEventCatalog.SourceSafetyIncident, entity.Id, "change the insurance claim's approval or amount paid", cancellationToken);
 
-        await _incidentRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // Insurance proceeds received on an incident are income to Finance (lane 8, slice 5); a
+        // claim merely filed, or approved but unpaid, posts nothing yet and is recorded Skipped.
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.InsuranceClaimFiled = true;
+            entity.ClaimFiledDate = dto.ClaimFiledDate;
+            entity.ClaimReferenceNumber = dto.ClaimReferenceNumber;
+            entity.InsuranceProviderId = dto.InsuranceProviderId;
+            entity.ClaimAmount = dto.ClaimAmount;
+            entity.ClaimApproved = dto.ClaimApproved;
+            entity.AmountPaid = dto.AmountPaid;
+            Touch(entity, userId);
+
+            await _incidentRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return HrFinancePostingCommandFactory.SheInsuranceClaimReceived(entity);
+        }, userId, cancellationToken);
         return true;
     }
 

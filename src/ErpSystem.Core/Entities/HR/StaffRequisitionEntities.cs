@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Entities.HR.Recruitment;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR.Requisition;
@@ -91,6 +92,40 @@ public class StaffRequisition : TenantEntity
 	[MaxLength(50)]
     public string? BudgetCode { get; set; }
 
+    /// <summary>
+    /// The approved manpower budget line this requisition draws down from (round 2b, R5). Null =
+    /// not raised against a budget. When set, <see cref="IsBudgeted"/> is true and
+    /// <see cref="BudgetCode"/> holds the budget's number — <b>both derived by the service, never
+    /// typed</b>: before R5 the flag was a self-declared checkbox and the code a free-text box
+    /// with no reader anywhere.
+    /// </summary>
+    public Guid? ManpowerBudgetLineId { get; set; }
+
+    [ForeignKey(nameof(ManpowerBudgetLineId))]
+    public virtual ManpowerBudgetLine? ManpowerBudgetLine { get; set; }
+
+    /// <summary>
+    /// Why this requisition is raised without an approved budget line, or for a post with no
+    /// establishment gap (decision D-4). Required at submit whenever the budget check says
+    /// <c>ExceptionRequired</c> and enforcement is not Block; under Block an unlinked requisition
+    /// is refused outright.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? ExceptionJustification { get; set; }
+
+    /// <summary>
+    /// The establishment as it stood when the requisition was submitted (decision D-2): what the
+    /// approver is asked to decide against, kept even after the live figures move. The detail page
+    /// shows the live figures beside it and flags drift. Refreshed on every (re)submit.
+    /// </summary>
+    public DateTime? EstablishmentSnapshotOn { get; set; }
+    public bool? EstablishmentSnapshotIsEstablished { get; set; }
+    public int? EstablishmentSnapshotExpected { get; set; }
+    public int? EstablishmentSnapshotFilled { get; set; }
+
+    [MaxLength(50)]
+    public string? EstablishmentSnapshotSourceBudgetNumber { get; set; }
+
     // Recruitment Strategy
     public bool AllowInternalCandidates { get; set; }
     public bool AllowExternalCandidates { get; set; }
@@ -172,8 +207,53 @@ public class StaffRequisitionCost : TenantEntity
     [MaxLength(500)]
     public string? Description { get; set; }
 
+    /// <summary>
+    /// The voucher Finance paid it on. ⚠ Still a typed record (round 2b, R7): HR does not keep a
+    /// payment status, and the AP hand-off that would write this from Finance's own voucher is R8,
+    /// which waits on the Finance owner (`HANDOFF-FINANCE-HR-RECRUITMENT-COST-AP.md`).
+    /// </summary>
     [MaxLength(50)]
     public string? PaymentVoucherNumber { get; set; }
+
+    // ── Round 2b, R7: the money reads Finance's masters; HR approves its own cost ──────────
+
+    /// <summary>The day the money moved — the date the exchange rate is read for.</summary>
+    public DateOnly CostDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
+
+    /// <summary>
+    /// <c>Amount × ExchangeRate</c> at the time of recording, stored so the total does not move
+    /// when Finance's rate does. <c>ExchangeRate</c> is no longer typed by anyone: it is read from
+    /// Finance through <c>HrCurrencyBridge</c> — this was the last caller-supplied rate in HR
+    /// (entity sweep row 68, decision 14).
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal AmountBaseCurrency { get; set; }
+
+    /// <summary>
+    /// Who is paid: a Procurement <c>Supplier</c> (the same master the six travel booking rows point
+    /// at), or — when the payee is a person, a reimbursed candidate say — nobody, with the name in
+    /// <see cref="PayeeName"/>. A cost with no supplier cannot be handed to Finance AP (Q-R6).
+    /// </summary>
+    public Guid? SupplierId { get; set; }
+
+    [ForeignKey(nameof(SupplierId))]
+    public virtual Supplier? Supplier { get; set; }
+
+    /// <summary>The payee's name — snapshotted from the supplier, or typed when there is none.</summary>
+    [MaxLength(200)]
+    public string? PayeeName { get; set; }
+
+    public StaffRequisitionCostStatus Status { get; set; } = StaffRequisitionCostStatus.Recorded;
+
+    public Guid? ApprovedById { get; set; }
+
+    [ForeignKey(nameof(ApprovedById))]
+    public virtual Employee? ApprovedBy { get; set; }
+
+    public DateTime? ApprovedOn { get; set; }
+
+    [MaxLength(500)]
+    public string? ApprovalNote { get; set; }
 	
     public Guid RecordedById { get; set; }
 

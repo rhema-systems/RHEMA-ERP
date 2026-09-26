@@ -54,9 +54,17 @@ export default function RequisitionDetailPage() {
   const id = (params?.id as string) ?? '';
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { hasAnyRole } = useAuth();
+  // One read of the budget + establishment check for the panel and the card (R5).
+  const check = useQuery({
+    queryKey: ['hr', 'requisition-budget', id],
+    queryFn: () => staffRequisitionService.checkBudget(id),
+    enabled: !!id,
+  });
+  const { hasAnyPermission, user } = useAuth();
 
-  const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  // G-2.3's shape (2026-09-15): the API gates this screen's writes on HR.Recruitment.Write, which
+  // TenantAdmin, Admin and the legacy HR User role hold; the page asked for a role instead.
+  const isHr = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
 
   const [action, setAction] = useState<null | 'hold' | 'cancel' | 'fulfill'>(null);
   const [reason, setReason] = useState('');
@@ -86,8 +94,18 @@ export default function RequisitionDetailPage() {
    * drive it and then apply the resulting status through StaffRequisitionWorkflowStatusAdapter —
    * so this page never sets a status itself, it just refetches.
    *
-   * ⚠ Inoperable until a `StaffRequisition` workflow definition is published. The actions surface
-   * the engine's own error in that case, which is clearer than anything we could guess at here.
+   * ⚠ **This comment used to say "Inoperable until a `StaffRequisition` workflow definition is
+   * published", and that was exactly backwards** (G-4.1, corrected 2026-09-15). With no definition
+   * published, `WorkflowIntegrationService.SubmitAsync` returned `Approved` and the adapter mapped
+   * it straight to `StaffRequisitionStatus.Approved` — so Submit took a requisition Draft →
+   * Approved in one step, with no approver and no segregation-of-duties check, and the history row
+   * made it look deliberate afterwards. It was not inoperable; it auto-approved.
+   *
+   * What happens now, with no definition published: Submit lands the requisition at **Submitted**
+   * and it waits for a person. Approve and Reject then work, with authority falling to the
+   * recruitment administrators (`HR.Recruitment.Admin`) and the "you cannot approve what you
+   * raised yourself" rule still running. Publish a definition and the engine names the approver
+   * instead — none of the fallback runs. See `RecruitmentApprovalAuthority` for the reasoning.
    */
   const workflow = useWorkflowRecord({
     entityType: 'StaffRequisition',
@@ -97,11 +115,20 @@ export default function RequisitionDetailPage() {
     status: r?.status ?? 'Draft',
     canSubmit: r?.status === 'Draft' || r?.status === 'Rejected',
     canApproveReject: r?.status === 'Submitted' || r?.status === 'UnderReview',
+    // G-4.3: recall is the REQUESTER's act, not an approver's, so it gates on who raised it rather
+    // than on permissions. The service enforces the same rule — this only decides whether to draw
+    // a button that would otherwise refuse. Available exactly while it is awaiting a decision:
+    // before that there is nothing to take back, after it somebody has ruled.
+    canRecall:
+      (r?.status === 'Submitted' || r?.status === 'UnderReview') &&
+      !!user?.employeeId &&
+      r?.requestedById === user.employeeId,
     enabled: !!r,
     commands: {
       submit: () => staffRequisitionService.submit(id),
       approve: (ctx) => staffRequisitionService.approve(id, ctx.comments || null),
       reject: (ctx) => staffRequisitionService.reject(id, ctx.comments || 'Rejected'),
+      recall: (reason) => staffRequisitionService.recall(id, reason || null),
       afterAction: refresh,
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),
@@ -234,16 +261,43 @@ export default function RequisitionDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
-          {/* Shown before submit because in Block mode the server will refuse on exactly this. */}
-          {(r.status === 'Draft' || r.status === 'Rejected' || r.status === 'Submitted') && (
-            <BudgetCheckPanel requisitionId={id} />
-          )}
+          {/* At every status since R5: the approver a month later wants the same figures the
+              requester saw. In Block mode the server refuses on exactly this. */}
+          <BudgetCheckPanel requisitionId={id} data={check.data} />
 
           <InfoCard title="The role">
             <InfoRow label="Position" value={r.positionTitle} />
-            <InfoRow label="Job description" value={r.jobDescriptionTitle} />
-            <InfoRow label="Organisation unit" value={r.organizationUnitName} />
-            <InfoRow label="Location" value={r.locationName} />
+            <InfoRow
+              label="Job description"
+              value={
+                r.jobDescriptionId ? (
+                  <Link
+                    href={`/hr/job-descriptions/${r.jobDescriptionId}`}
+                    className="text-primary hover:underline"
+                  >
+                    {r.jobDescriptionTitle ?? 'Open job description'}
+                  </Link>
+                ) : (
+                  'None named'
+                )
+              }
+            />
+            <InfoRow
+              label="Organisation unit"
+              value={
+                r.organizationLevelName
+                  ? `${r.organizationUnitName ?? '—'} (${r.organizationLevelName})`
+                  : r.organizationUnitName
+              }
+            />
+            <InfoRow
+              label="Location"
+              value={
+                r.locationLevelName
+                  ? `${r.locationName ?? '—'} (${r.locationLevelName})`
+                  : r.locationName
+              }
+            />
             <InfoRow label="Type" value={humanizeEnum(r.type)} />
             <InfoRow label="Priority" value={r.priority} />
             <InfoRow
@@ -276,7 +330,7 @@ export default function RequisitionDetailPage() {
           {r.type === 'Replacement' && (
             <InfoCard title="Replacement">
               <InfoRow label="Outgoing employee" value={r.replacementForEmployeeName} />
-              <InfoRow label="Reason" value={r.replacementReason} />
+              <InfoRow label="Reason" value={r.replacementReason ? humanizeEnum(r.replacementReason) : null} />
               <InfoRow label="Departure date" value={formatDate(r.employeeDepartureDate)} />
             </InfoCard>
           )}
@@ -285,6 +339,10 @@ export default function RequisitionDetailPage() {
             <InfoRow label="Raised" value={formatDate(r.requestDate)} />
             <InfoRow label="Desired start" value={formatDate(r.desiredStartDate)} />
             <InfoRow label="Latest acceptable start" value={formatDate(r.latestAcceptableStartDate)} />
+            {r.targetStartDateReason && (
+              <InfoRow label="Why that start date" value={r.targetStartDateReason} />
+            )}
+            <InfoRow label="Expected offer date" value={formatDate(r.expectedOfferDate)} />
             <InfoRow label="Target fill date" value={formatDate(r.targetFillDate)} />
             <InfoRow label="Days to fill" value={r.daysToFill ?? '—'} />
             <InfoRow label="Fulfilled" value={formatDate(r.fulfilledDate)} />
@@ -295,6 +353,12 @@ export default function RequisitionDetailPage() {
               <CardTitle className="text-base">The case for it</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              {r.description && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Description</p>
+                  <p className="whitespace-pre-wrap text-sm">{r.description}</p>
+                </div>
+              )}
               <div>
                 <p className="text-xs text-muted-foreground">Business justification</p>
                 <p className="whitespace-pre-wrap text-sm">{r.businessJustification || '—'}</p>
@@ -314,9 +378,64 @@ export default function RequisitionDetailPage() {
             </CardContent>
           </Card>
 
-          <InfoCard title="Budget and people">
-            <InfoRow label="Budgeted" value={r.isBudgeted ? 'Yes' : 'No'} />
-            <InfoRow label="Budget code" value={r.budgetCode} />
+          {/* Round 2b, R5 (D-2): the establishment as it stood at submit is the record; the live
+              figure beside it is a courtesy, and a drift is shown, never used to refuse. */}
+          <InfoCard title="Budget and establishment">
+            <InfoRow
+              label="Budgeted"
+              value={
+                r.isBudgeted && r.budgetCode ? (
+                  check.data?.linkedBudgetId ? (
+                    <Link href={`/hr/manpower-budgets/${check.data.linkedBudgetId}`} className="text-primary hover:underline">
+                      Yes · {r.budgetCode}
+                    </Link>
+                  ) : (
+                    `Yes · ${r.budgetCode}`
+                  )
+                ) : (
+                  'No — not raised against an approved budget line'
+                )
+              }
+            />
+            {check.data?.hasBudgetLine && (
+              <InfoRow
+                label="Drawdown"
+                value={`${check.data.drawdown} requested by others · ${check.data.remaining ?? 0} left · this one asks for ${check.data.requestedPositions} of ${check.data.budgetedNewPosts ?? 0} budgeted`}
+              />
+            )}
+            {r.exceptionJustification && <InfoRow label="Exception justification" value={r.exceptionJustification} />}
+            {check.data?.exceptionRequired && !r.exceptionJustification && (
+              <InfoRow label="Exception" value={`Required to submit: ${check.data.exceptionReason}`} />
+            )}
+            <InfoRow
+              label="Establishment at submit"
+              value={
+                r.establishmentSnapshotOn
+                  ? r.establishmentSnapshotIsEstablished
+                    ? `${r.establishmentSnapshotExpected} authorised · ${r.establishmentSnapshotFilled} in post · gap ${Math.max(0, (r.establishmentSnapshotExpected ?? 0) - (r.establishmentSnapshotFilled ?? 0))}${r.establishmentSnapshotSourceBudgetNumber ? ` · set by ${r.establishmentSnapshotSourceBudgetNumber}` : ' · set by HR'} (${formatDate(r.establishmentSnapshotOn)})`
+                    : `Not established (${formatDate(r.establishmentSnapshotOn)})`
+                  : 'Not yet submitted'
+              }
+            />
+            {check.data?.establishment && (
+              <InfoRow
+                label="Establishment now"
+                value={
+                  <span>
+                    {check.data.establishment.isEstablished
+                      ? `${check.data.establishment.expectedHeadcount} authorised · ${check.data.establishment.filled} in post · gap ${check.data.establishment.gap}`
+                      : 'Not established'}
+                    {r.establishmentSnapshotOn && (
+                      (check.data.establishment.isEstablished !== r.establishmentSnapshotIsEstablished ||
+                        check.data.establishment.expectedHeadcount !== r.establishmentSnapshotExpected ||
+                        check.data.establishment.filled !== r.establishmentSnapshotFilled) && (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">changed since submit</span>
+                      )
+                    )}
+                  </span>
+                }
+              />
+            )}
             <InfoRow label="Raised by" value={r.requestedByName} />
             {r.cancelledByName && (
               <>

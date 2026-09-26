@@ -258,6 +258,8 @@ public interface IEmployeePositionRepository : IGenericRepository<EmployeePositi
 {
     Task<IEnumerable<EmployeePosition>> GetActivePositionsAsync();
     Task<IEnumerable<EmployeePosition>> GetByOrganizationUnitAsync(Guid organizationUnitId);
+    /// <summary>Positions in any of the given units, with the unit loaded — the reports-to option source.</summary>
+    Task<IEnumerable<EmployeePosition>> GetByOrganizationUnitsAsync(IReadOnlyCollection<Guid> organizationUnitIds);
     Task<IEnumerable<EmployeePosition>> GetByDepartmentAsync(Guid departmentId);
     Task<EmployeePosition?> GetByCodeAsync(string code);
     Task<EmployeePosition?> GetWithSkillRequirementsAsync(Guid id);

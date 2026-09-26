@@ -1,5 +1,7 @@
 'use client';
 
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -24,7 +26,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { OrganizationLevel, OrganizationUnitSummary } from '@/types/hr/organization';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
+import { CertificationPicker } from '@/components/hr/common/CertificationPicker';
+import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
+import { employeePositionService } from '@/services/hr/employee-position.service';
 import { SKILL_LEVEL_OPTIONS, type EmployeePosition } from '@/types/hr/position';
 import type { StaffLevelListItem } from '@/types/hr/staff-level';
 import type { SalaryGrade } from '@/types/hr/salary';
@@ -80,6 +85,14 @@ export const employeePositionSchema = z.object({
       priority: z.coerce.number().int().min(1),
     }),
   ),
+  // What the post must hold (round 2, lane C2 — P-2). Sent as the whole set, like the two above.
+  certificationRequirements: z.array(
+    z.object({
+      certificationId: z.string().min(1, 'Choose the certification'),
+      isMandatory: z.boolean(),
+      notes: z.string().max(500).optional().or(z.literal('')),
+    }),
+  ),
   positionBenefits: z.array(
     z.object({
       policyId: z.string().min(1, 'Select a benefit policy'),
@@ -89,9 +102,100 @@ export const employeePositionSchema = z.object({
       positionAmount: z.string().optional().or(z.literal('')),
     }),
   ),
+  // Named sets attached to the post (round 2, lane C3). Ids only: what each set contains is
+  // maintained on its own master screen, and the post follows it. Sent as the whole set.
+  benefitGroupIds: z.array(z.string()),
+  skillSetIds: z.array(z.string()),
+  certificationSetIds: z.array(z.string()),
 });
 
 export type EmployeePositionFormValues = z.infer<typeof employeePositionSchema>;
+
+/**
+ * A named set on offer, with what it contains (round 2, lane C3). The member ids are what lets the
+ * form grey out an item a set already provides, so the user never composes a save the server will
+ * refuse — the same courtesy `takenIds` already did for a policy chosen twice.
+ */
+export interface NamedSetOption {
+  id: string;
+  name: string;
+  code?: string | null;
+  isActive: boolean;
+  memberIds: string[];
+  memberCount: number;
+}
+
+/**
+ * The attach/detach strip that sits above each individual list (round 2, lane C3, plan § 6.4.3:
+ * "sets above individuals"). Deliberately a row of toggles rather than a dialog: the whole point of
+ * a set is that attaching it is one click, and seeing what is attached is the same glance.
+ */
+function SetAttachPanel({
+  label,
+  hint,
+  sets,
+  attachedIds,
+  memberNoun,
+  onToggle,
+}: {
+  label: string;
+  hint: string;
+  sets: NamedSetOption[];
+  attachedIds: string[];
+  memberNoun: string;
+  onToggle: (setId: string) => void;
+}) {
+  // A retired set already attached still shows, so it can be seen and detached; a retired set that
+  // is NOT attached is not offered, because the server refuses to attach one.
+  const offered = sets.filter((s) => s.isActive || attachedIds.includes(s.id));
+  if (offered.length === 0) return null;
+
+  return (
+    <div className="space-y-2 rounded-md border border-dashed p-3">
+      <div>
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</h5>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {offered.map((s) => {
+          const attached = attachedIds.includes(s.id);
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onToggle(s.id)}
+              aria-pressed={attached}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                attached
+                  ? 'border-primary bg-primary/10 font-medium text-primary'
+                  : 'border-input text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              {s.name}
+              <span className="ml-1 opacity-70">
+                ({s.memberCount} {memberNoun}
+                {s.memberCount === 1 ? '' : 's'})
+              </span>
+              {!s.isActive && <span className="ml-1 opacity-70">· retired</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Every item id the attached sets provide, and which set provides each. */
+function coverageOf(sets: NamedSetOption[], attachedIds: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const set of sets) {
+    if (!attachedIds.includes(set.id)) continue;
+    for (const memberId of set.memberIds) {
+      if (!map.has(memberId)) map.set(memberId, set.name);
+    }
+  }
+  return map;
+}
 
 export const emptyEmployeePosition: EmployeePositionFormValues = {
   title: '',
@@ -118,18 +222,30 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
   isActive: true,
   skillRequirements: [],
   positionBenefits: [],
+  certificationRequirements: [],
+  benefitGroupIds: [],
+  skillSetIds: [],
+  certificationSetIds: [],
 };
 
 interface EmployeePositionFormProps {
-  levels: OrganizationLevel[];
-  units: OrganizationUnitSummary[];
+  /** Every position in the tenant — the "show all positions" set for matrix / dotted-line cases. */
   positions: EmployeePosition[];
+  /** The position being edited; it is never offered as its own reports-to. */
+  excludeId?: string;
   staffLevels: StaffLevelListItem[];
   /** Defined in Payroll and mirrored into HR — read-only here. */
   salaryGrades: SalaryGrade[];
   skills: Skill[];
   /** Active benefit policies an entitlement can point at. */
   benefitPolicies: BenefitPolicySummary[];
+  /**
+   * The named sets on offer (round 2, lane C3). Attaching one is equivalent to attaching every
+   * item in it, so the individual pickers below exclude whatever an attached set already provides.
+   */
+  benefitGroups?: NamedSetOption[];
+  skillSets?: NamedSetOption[];
+  certificationSets?: NamedSetOption[];
   /**
    * Currencies FINANCE holds, for the guarantor requirement.
    * ⚠ A prop rather than a fetch, like every other list here: this form is presentational and its
@@ -144,13 +260,15 @@ interface EmployeePositionFormProps {
 }
 
 export function EmployeePositionForm({
-  levels,
-  units,
   positions,
+  excludeId,
   staffLevels,
   salaryGrades,
   skills,
   benefitPolicies,
+  benefitGroups = [],
+  skillSets = [],
+  certificationSets = [],
   currencies,
   defaultValues,
   onSubmit,
@@ -163,9 +281,52 @@ export function EmployeePositionForm({
     defaultValues,
   });
 
-  const levelId = form.watch('organizationLevelId');
+  // Round 2, lane C3 — what the attached sets already provide, recomputed as they are attached.
+  const attachedBenefitGroupIds = form.watch('benefitGroupIds') ?? [];
+  const attachedSkillSetIds = form.watch('skillSetIds') ?? [];
+  const attachedCertificationSetIds = form.watch('certificationSetIds') ?? [];
+  const benefitCoverage = coverageOf(benefitGroups, attachedBenefitGroupIds);
+  const skillCoverage = coverageOf(skillSets, attachedSkillSetIds);
+  const certificationCoverage = coverageOf(certificationSets, attachedCertificationSetIds);
+
+  /** Attach or detach one set, keeping the field a plain id array. */
+  const toggleSet = (
+    field: 'benefitGroupIds' | 'skillSetIds' | 'certificationSetIds',
+    setId: string,
+  ) => {
+    const current: string[] = form.getValues(field) ?? [];
+    const next = current.includes(setId) ? current.filter((x) => x !== setId) : [...current, setId];
+    form.setValue(field, next, { shouldDirty: true, shouldValidate: true });
+  };
+
   const unitId = form.watch('organizationUnitId');
   const reportsTo = form.watch('reportsToPositionId') || NONE;
+  const [showAllPositions, setShowAllPositions] = useState(false);
+
+  // Reports-to, narrowed to the chosen unit and everything above it (round 2, C1 / § 6.1.4). The
+  // server walks the parent chain; a matrix or dotted-line case widens to the whole tenant.
+  const { data: scopedPositions = [], isLoading: scopedLoading } = useQuery({
+    queryKey: ['hr', 'employee-positions', 'organization-unit', unitId, 'ancestors'],
+    queryFn: () => employeePositionService.getByOrganizationUnit(unitId, true),
+    enabled: !!unitId,
+    staleTime: 60 * 1000,
+  });
+
+  const reportsToOptions = useMemo(() => {
+    const source = showAllPositions ? positions : scopedPositions;
+    const current = form.getValues('reportsToPositionId');
+    const list = source.filter((p) => p.id !== excludeId && (p.isActive || p.id === current));
+    // The stored value is always offered, even when it sits outside the unit's ancestry — an edit
+    // form must show what is stored, and hiding it would silently clear the reporting line on save.
+    if (current && !list.some((p) => p.id === current)) {
+      const stored = positions.find((p) => p.id === current);
+      if (stored) list.push(stored);
+    }
+    return list.sort(
+      (a, b) => a.organizationUnitName.localeCompare(b.organizationUnitName) || a.title.localeCompare(b.title),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAllPositions, positions, scopedPositions, excludeId, reportsTo]);
   const workMode = form.watch('workMode');
   const requiresCertification = form.watch('requiresCertification');
   const requiresGuarantor = form.watch('requiresGuarantor');
@@ -185,21 +346,33 @@ export function EmployeePositionForm({
     remove: removeBenefit,
   } = useFieldArray({ control: form.control, name: 'positionBenefits' });
 
-  // Cascading selection: units are filtered to the chosen level.
-  const unitsForLevel = units.filter((u) => u.organizationLevelId === levelId);
+  const {
+    fields: certificationFields,
+    append: appendCertification,
+    remove: removeCertification,
+  } = useFieldArray({ control: form.control, name: 'certificationRequirements' });
+  const chosenCertificationIds = form
+    .watch('certificationRequirements')
+    .map((r) => r.certificationId)
+    .filter(Boolean);
+  const wantsCertifications = requiresCertification || requiresLicense;
+  const [certificationRuleError, setCertificationRuleError] = useState<string | null>(null);
 
-  const handleLevelChange = (value: string) => {
-    form.setValue('organizationLevelId', value, { shouldValidate: true });
-    // Clear the unit if it no longer belongs to the newly-selected level.
-    const stillValid = units.some((u) => u.id === unitId && u.organizationLevelId === value);
-    if (!stillValid) {
-      form.setValue('organizationUnitId', '', { shouldValidate: true });
+  // The server refuses a switched-on position that names nothing; saying it here saves the trip.
+  const submit = form.handleSubmit(async (values) => {
+    if ((values.requiresCertification || values.requiresLicense) && values.certificationRequirements.length === 0) {
+      setCertificationRuleError(
+        'This position requires a certification or licence, so say which one — add at least one required credential, or turn the switch off.',
+      );
+      return;
     }
-  };
+    setCertificationRuleError(null);
+    await onSubmit(values);
+  });
 
   return (
     <Card>
-      <form onSubmit={form.handleSubmit(onSubmit)}>
+      <form onSubmit={submit}>
         <CardHeader>
           <CardTitle>Position Details</CardTitle>
           <CardDescription>
@@ -224,82 +397,82 @@ export function EmployeePositionForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="organizationLevelId">Organization Level</Label>
-              <Select value={levelId || undefined} onValueChange={handleLevelChange}>
-                <SelectTrigger id="organizationLevelId">
-                  <SelectValue placeholder="Select a level" />
-                </SelectTrigger>
-                <SelectContent>
-                  {levels.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.name} (L{l.levelNumber})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.organizationLevelId && (
-                <p className="text-sm text-red-500">
-                  {form.formState.errors.organizationLevelId.message}
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="organizationUnitId">Organization Unit</Label>
-              <Select
-                value={unitId || undefined}
-                disabled={!levelId}
-                onValueChange={(value) =>
-                  form.setValue('organizationUnitId', value, { shouldValidate: true })
-                }
-              >
-                <SelectTrigger id="organizationUnitId">
-                  <SelectValue placeholder={levelId ? 'Select a unit' : 'Select a level first'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {unitsForLevel.length === 0 ? (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                      No units at this level.
-                    </div>
-                  ) : (
-                    unitsForLevel.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.organizationUnitId && (
-                <p className="text-sm text-red-500">
-                  {form.formState.errors.organizationUnitId.message}
-                </p>
-              )}
-            </div>
-          </div>
+          {/*
+            The level → unit cascade this form always had, now the shared picker (demo feedback
+            round 2, O-6). The position stores BOTH ids, so the level the user picks is captured
+            too; on edit the picker derives the level from the stored unit.
+          */}
+          <OrganizationUnitPicker
+            idPrefix="position-unit"
+            value={unitId || ''}
+            onChange={(id, unit) => {
+              form.setValue('organizationUnitId', id, { shouldValidate: true, shouldDirty: true });
+              if (unit) form.setValue('organizationLevelId', unit.organizationLevelId, { shouldValidate: true });
+            }}
+            onLevelChange={(levelId) =>
+              form.setValue('organizationLevelId', levelId, { shouldValidate: true, shouldDirty: true })
+            }
+            levelLabel="Organization Level"
+            unitLabel="Organization Unit"
+            error={
+              (form.formState.errors.organizationUnitId?.message as string | undefined) ??
+              (form.formState.errors.organizationLevelId?.message as string | undefined)
+            }
+          />
 
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="reportsToPositionId">Reports To</Label>
               <Select
                 value={reportsTo}
+                disabled={!unitId && !showAllPositions}
                 onValueChange={(value) =>
                   form.setValue('reportsToPositionId', value === NONE ? '' : value)
                 }
               >
                 <SelectTrigger id="reportsToPositionId">
-                  <SelectValue placeholder="None" />
+                  <SelectValue
+                    placeholder={
+                      !unitId && !showAllPositions
+                        ? 'Choose the unit first'
+                        : scopedLoading && !showAllPositions
+                          ? 'Loading…'
+                          : 'None'
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>None</SelectItem>
-                  {positions.map((p) => (
+                  {reportsToOptions.length === 0 && (unitId || showAllPositions) && !scopedLoading && (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                      {showAllPositions
+                        ? 'No other positions.'
+                        : 'No positions in this unit or above it — show all positions to pick one elsewhere.'}
+                    </div>
+                  )}
+                  {reportsToOptions.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.title}
+                      {p.title} · {p.organizationUnitName}
+                      {p.code ? ` · ${p.code}` : ''}
+                      {p.isActive ? '' : ' (inactive)'}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5"
+                  checked={showAllPositions}
+                  onChange={(e) => setShowAllPositions(e.target.checked)}
+                />
+                Show all positions (matrix or dotted-line reporting)
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {showAllPositions
+                  ? 'Every position in the organisation.'
+                  : 'Positions in the chosen unit and the units above it.'}
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="staffLevelId">Staff Level</Label>
@@ -436,7 +609,90 @@ export function EmployeePositionForm({
             />
           </div>
 
+          {wantsCertifications && (
+            <div className="space-y-3 rounded-md border p-4">
+              <SetAttachPanel
+                label="Certification sets"
+                hint="Attach a set and the post requires every credential in it — the regulator's bundle, maintained in one place."
+                sets={certificationSets}
+                attachedIds={attachedCertificationSetIds}
+                memberNoun="credential"
+                onToggle={(id) => toggleSet('certificationSetIds', id)}
+              />
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold">Required certifications and licences</h4>
+                  <p className="text-xs text-muted-foreground">
+                    The switches say the post needs one; these rows say which. Pick the certifying body,
+                    then the credential it issues.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => appendCertification({ certificationId: '', isMandatory: true, notes: '' })}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Add credential
+                </Button>
+              </div>
+
+              {certificationFields.length === 0 && (
+                <p className="text-sm text-destructive">Say which one — add at least one required credential.</p>
+              )}
+
+              {certificationFields.map((row, index) => (
+                <div key={row.id} className="space-y-3 rounded-md border bg-muted/30 p-3">
+                  <CertificationPicker
+                    idPrefix={`position-certification-${index}`}
+                    value={form.watch(`certificationRequirements.${index}.certificationId`)}
+                    onChange={(id) =>
+                      form.setValue(`certificationRequirements.${index}.certificationId`, id, {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      })
+                    }
+                    // Lane C3: what a set provides is excluded as well as what another row holds.
+                    excludeIds={[...chosenCertificationIds, ...certificationCoverage.keys()].filter(
+                      (id) => id !== form.watch(`certificationRequirements.${index}.certificationId`),
+                    )}
+                    error={
+                      form.formState.errors.certificationRequirements?.[index]?.certificationId?.message as
+                        | string
+                        | undefined
+                    }
+                  />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+                    <label className="flex items-center gap-2 text-sm">
+                      <Switch
+                        checked={form.watch(`certificationRequirements.${index}.isMandatory`)}
+                        onCheckedChange={(v) => form.setValue(`certificationRequirements.${index}.isMandatory`, v)}
+                      />
+                      Mandatory
+                    </label>
+                    <Input
+                      placeholder="Notes (optional)"
+                      {...form.register(`certificationRequirements.${index}.notes`)}
+                    />
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeCertification(index)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {certificationRuleError && <p className="text-sm text-red-500">{certificationRuleError}</p>}
+            </div>
+          )}
+
           <div className="space-y-3 rounded-md border p-4">
+            <SetAttachPanel
+              label="Skill sets"
+              hint="Attach a set and the post requires everything in it. Anything a set provides cannot also be listed individually below."
+              sets={skillSets}
+              attachedIds={attachedSkillSetIds}
+              memberNoun="skill"
+              onToggle={(id) => toggleSet('skillSetIds', id)}
+            />
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-semibold">Skill Requirements</h4>
@@ -475,12 +731,24 @@ export function EmployeePositionForm({
                           <SelectValue placeholder="Select a skill" />
                         </SelectTrigger>
                         <SelectContent>
-                          {skills.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {s.name}
-                              {s.category ? ` · ${s.category}` : ''}
-                            </SelectItem>
-                          ))}
+                          {skills
+                            .filter((s) => {
+                              // Already on another row (X-1 — the server used to keep the first
+                              // silently), or already provided by an attached set (lane C3's rule,
+                              // which the server now refuses). The row's own value always stays.
+                              const own = form.watch(`skillRequirements.${index}.skillId`);
+                              if (s.id === own) return true;
+                              const onAnotherRow = (form.watch('skillRequirements') ?? []).some(
+                                (r, i) => i !== index && r.skillId === s.id,
+                              );
+                              return !onAnotherRow && !skillCoverage.has(s.id);
+                            })
+                            .map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.name}
+                                {s.category ? ` · ${s.category}` : ''}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       {form.formState.errors.skillRequirements?.[index]?.skillId && (
@@ -541,6 +809,14 @@ export function EmployeePositionForm({
           </div>
 
           <div className="space-y-3 rounded-md border p-4">
+            <SetAttachPanel
+              label="Benefit groups"
+              hint="Attach a group and the post carries every benefit in it. A benefit needing its own amount is listed individually instead — not both."
+              sets={benefitGroups}
+              attachedIds={attachedBenefitGroupIds}
+              memberNoun="benefit"
+              onToggle={(id) => toggleSet('benefitGroupIds', id)}
+            />
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-semibold">Benefit Entitlements</h4>
@@ -597,7 +873,9 @@ export function EmployeePositionForm({
                           </SelectTrigger>
                           <SelectContent>
                             {benefitPolicies
-                              .filter((p) => !takenIds.has(p.id))
+                              // ⚠ Lane C3 widened this: a policy an attached GROUP already provides
+                              // is excluded too, because the server refuses to hold it both ways.
+                              .filter((p) => !takenIds.has(p.id) && !benefitCoverage.has(p.id))
                               .map((p) => (
                                 <SelectItem key={p.id} value={p.id}>
                                   {p.policyName}
@@ -681,24 +959,15 @@ export function EmployeePositionForm({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="requiredGuarantorCurrencyCode">Currency</Label>
-                  <Select
-                    value={form.watch('requiredGuarantorCurrencyCode') || NONE}
-                    onValueChange={(v) =>
-                      form.setValue('requiredGuarantorCurrencyCode', v === NONE ? '' : v)
-                    }
-                  >
-                    <SelectTrigger id="requiredGuarantorCurrencyCode">
-                      <SelectValue placeholder="HR default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>HR default</SelectItem>
-                      {(currencies ?? []).map((c) => (
-                        <SelectItem key={c.code} value={c.code}>
-                          {c.code} — {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <CurrencyPicker
+                    id="requiredGuarantorCurrencyCode"
+                    value={form.watch('requiredGuarantorCurrencyCode') || ''}
+                    onChange={(v) => form.setValue('requiredGuarantorCurrencyCode', v)}
+                    options={currencies}
+                    allowEmpty
+                    emptyLabel="HR default"
+                    placeholder="HR default"
+                  />
                 </div>
                 <p className="col-span-2 text-xs text-muted-foreground">
                   Each holder&apos;s Documents tab shows whether their guarantors meet this. Sureties

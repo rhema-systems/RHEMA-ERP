@@ -1,47 +1,31 @@
 'use client';
 
-import { Coins, Briefcase, ShieldPlus } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
-import { NavCardGrid, type NavCardItem } from '@/components/hr/common/NavCardGrid';
+import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
+import { hrSetupGroup } from '@/config/hr-setup-nav';
 
 /**
- * Setup for Compensation & Benefits. The operational side — an employee's resolved package and
- * their benefit enrolments — lives under `/hr`.
+ * Setup for Pay & Benefits. The operational side — an employee's resolved package and their
+ * benefit enrolments — lives under `/hr`.
  *
  * Salary grades are deliberately absent: payroll owns the salary structure and HR only mirrors
- * it, so there is no HR grade editor to link to.
+ * it, so there is no HR grade editor to link to. Payroll Setup itself is listed, because a
+ * lone "Payroll" card filed under its own heading on the HR hub told nobody where pay is
+ * configured.
+ *
+ * Cards come from `config/hr-setup-nav.ts` — see the note on the HR hub page.
  */
-const items: NavCardItem[] = [
-  {
-    title: 'Pay Components',
-    description:
-      'Allowances and deductions, mirrored from Payroll. Pension, tax treatment and effective dating are set here.',
-    href: '/administration/hr/compensation/pay-components',
-    icon: Coins,
-  },
-  {
-    title: 'Position Emoluments',
-    description: 'Components every holder of a position inherits, with per-position amounts.',
-    href: '/administration/hr/compensation/position-emoluments',
-    icon: Briefcase,
-  },
-  {
-    title: 'Benefit Policies',
-    description: 'Benefit schemes, their eligibility rules and per-grade values.',
-    href: '/administration/hr/compensation/benefit-policies',
-    icon: ShieldPlus,
-  },
-];
+const group = hrSetupGroup('Pay & Benefits');
 
 export default function CompensationSetupPage() {
   return (
     <div className="space-y-6 p-6">
       <PageHeader
-        title="Compensation & Benefits Setup"
-        description="Pay components, position emoluments and the benefit policies employees enrol in."
+        title="Pay & Benefits Setup"
+        description={group.description}
         backHref="/administration/hr"
       />
-      <NavCardGrid items={items} />
+      <NavCardGrid items={group.links} />
     </div>
   );
 }

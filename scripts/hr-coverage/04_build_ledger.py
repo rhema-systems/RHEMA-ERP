@@ -1,5 +1,5 @@
 """
-Builds docs/HR-CLOSURE-LEDGER.md — the checkable master list for the HR Closure Programme.
+Builds docs/HR/programme/HR-CLOSURE-LEDGER.md — the checkable master list for the HR Closure Programme.
 
 Machine-derived sections come from the instrument output so nothing is hand-missed; the
 disposition column is authored here (DISPOSITIONS below) because only a human can say whether
@@ -12,7 +12,7 @@ import os, re, json, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 OUT = os.path.join(HERE, "out")
-# ⚠ 2026-09-01: this script NO LONGER writes docs/HR-CLOSURE-LEDGER.md.
+# ⚠ 2026-09-01: this script NO LONGER writes docs/HR/programme/HR-CLOSURE-LEDGER.md.
 #
 # That file began as this script's output and has since been hand-curated by many sessions —
 # the C2 build checklists, the expanded D-entries, section E2's classification pass and the
@@ -23,7 +23,7 @@ OUT = os.path.join(HERE, "out")
 # So the curated ledger is now the artefact of record, and this script writes a COMPANION that
 # carries the fresh machine-derived numbers. Diff the two and merge deliberately; never copy the
 # companion over the ledger.
-CURATED = os.path.join(ROOT, "docs", "HR-CLOSURE-LEDGER.md")
+CURATED = os.path.join(ROOT, "docs", "HR", "programme", "HR-CLOSURE-LEDGER.md")
 LEDGER = os.path.join(ROOT, "scripts", "hr-coverage", "out", "HR-CLOSURE-LEDGER.generated.md")
 
 routes = json.load(open(os.path.join(OUT, "hr_routes.json")))

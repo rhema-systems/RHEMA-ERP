@@ -21,9 +21,16 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <para><b>Approval authority comes from the published <c>StaffRequisition</c> workflow
 /// definition, not from a role attribute.</b> <c>Approve</c> and <c>Reject</c> therefore carry no
 /// <c>[Authorize(Roles = …)]</c> — the service asks the engine whether the caller is an approver
-/// for the current step. Until a definition is published and
-/// <c>POST api/Workflow/entity-types/seed</c> has been re-run, submit and approve are inoperable
-/// <i>by design</i>.</para>
+/// for the current step.</para>
+///
+/// <para>⚠ <b>This used to claim that submit and approve are "inoperable by design" until a
+/// definition is published. They were not inoperable — submit auto-approved</b> (G-4.1, corrected
+/// 2026-09-15). With no definition the engine's "approval is not configured" signal reached the
+/// status adapter as <c>Approved</c>. The service now asks
+/// <c>HasActiveApprovalWorkflowAsync</c> first and lands an unconfigured submission at
+/// <c>Submitted</c>, where <c>ApproveAsync</c> — and the segregation-of-duties rule it carries —
+/// can do its job. Authority on that path falls to <c>HR.Recruitment.Admin</c>; see
+/// <c>RecruitmentApprovalAuthority</c>.</para>
 ///
 /// <para>Everything that is not an approval decision is gated here: retiring, parking, fulfilling
 /// and costing a requisition are HR's, while raising, editing, submitting and recalling one belong
@@ -131,6 +138,28 @@ public class StaffRequisitionsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// The budget and establishment check for a requisition that is still being typed (round 2b,
+    /// R5). Any internal user: the requester sees the consequence before saving, not after.
+    /// </summary>
+    [HttpPost("budget-check/preview")]
+    public async Task<ActionResult<RequisitionBudgetCheckDto>> PreviewBudgetCheck([FromBody] RequisitionBudgetCheckPreviewDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _service.PreviewBudgetCheckAsync(dto, ct));
+    }
+
+    /// <summary>Raises a Draft requisition drawing down what an approved budget line has left (round 2b, R5).</summary>
+    [HttpPost("from-budget-line/{lineId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<StaffRequisitionDto>> CreateFromBudgetLine(Guid lineId, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+        var created = await _service.CreateFromBudgetLineAsync(lineId, employeeId.Value, ct);
+        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
     [HttpGet("number/{requisitionNumber}")]
@@ -432,8 +461,28 @@ public class StaffRequisitionsController : ControllerBase
 
     [HttpGet("{id:guid}/costs/total")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
-    public async Task<ActionResult<decimal>> GetTotalCost(Guid id, CancellationToken ct)
-        => Ok(await _service.GetTotalCostAsync(id, ct));
+    public async Task<ActionResult<decimal>> GetTotalCost(Guid id, [FromQuery] StaffRequisitionCostStatus? status, CancellationToken ct)
+        => Ok(await _service.GetTotalCostAsync(id, status, ct));
+
+    /// <summary>HR approves a recorded cost (round 2b, R7). Not the person who recorded it.</summary>
+    [HttpPost("costs/{costId:guid}/approve")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<StaffRequisitionCostDto>> ApproveCost(Guid costId, [FromBody] DecideStaffRequisitionCostDto? dto, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+        return Ok(await _service.DecideCostAsync(costId, approve: true, dto?.Note, employeeId.Value, ct));
+    }
+
+    /// <summary>HR rejects a recorded cost (round 2b, R7).</summary>
+    [HttpPost("costs/{costId:guid}/reject")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<StaffRequisitionCostDto>> RejectCost(Guid costId, [FromBody] DecideStaffRequisitionCostDto? dto, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+        return Ok(await _service.DecideCostAsync(costId, approve: false, dto?.Note, employeeId.Value, ct));
+    }
 
     [HttpGet("{id:guid}/costs/category/{category}")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]

@@ -91,6 +91,17 @@ public class IdentificationTypeService : IIdentificationTypeService
         return identificationTypes.ToDtoList();
     }
 
+    public async Task<IEnumerable<IdentificationTypeDto>> GetActiveForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var identificationTypes = await _identificationTypeRepository.GetQueryable()
+            .Include(it => it.IssuingCountry)
+            .Where(it => it.TenantId == tenantId && it.IsActive)
+            .OrderBy(it => it.Name)
+            .ToListAsync(cancellationToken);
+
+        return identificationTypes.ToDtoList();
+    }
+
     public async Task<PagedResult<IdentificationTypeDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();

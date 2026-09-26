@@ -67,6 +67,39 @@ namespace ErpSystem.Core.DTOs.HR
         /// <summary>Planned headcount (positions dimension capacity planning).</summary>
         public int? ExpectedHeadcount { get; set; }
 
+        /// <summary>
+        /// Units dimension: established posts attached to this unit. Null on every other dimension.
+        /// </summary>
+        /// <remarks>
+        /// Added for the organogram redesign (2026-09-08) so the detail drawer can say what a unit
+        /// is made of, not only how many people sit in it. Counts posts, not establishment: a post
+        /// with an expected headcount of three is one post here.
+        /// </remarks>
+        public int? PositionCount { get; set; }
+
+        /// <summary>
+        /// Units dimension: posts in this unit that nobody on strength holds. Null elsewhere.
+        /// The same predicate as the positions dimension's "Vacant" badge, so the two views agree.
+        /// </summary>
+        public int? VacantPositionCount { get; set; }
+
+        /// <summary>
+        /// Positions dimension: the people on strength who hold this post, by full name, capped at
+        /// <see cref="HoldersCap"/>. Null on every other dimension; empty when the post is vacant.
+        /// </summary>
+        /// <remarks>
+        /// The positions view is open to every authenticated user, as the units view is; a name
+        /// against a post is what a printed org chart on a noticeboard already shows, and it
+        /// carries no contact detail. The cap keeps a post with a large establishment (a pool of
+        /// drivers, a typing pool) from turning the payload into a register.
+        /// </remarks>
+        public List<string>? Holders { get; set; }
+
+        /// <summary>Positions dimension: true when more holders exist than <see cref="Holders"/> lists.</summary>
+        public bool HoldersTruncated { get; set; }
+
+        public const int HoldersCap = 25;
+
         /// <summary>"solid" (default) or "dotted" for advisory / functional reporting lines.</summary>
         public string LineType { get; set; } = "solid";
 

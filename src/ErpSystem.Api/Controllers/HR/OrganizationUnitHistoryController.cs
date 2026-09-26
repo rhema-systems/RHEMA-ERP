@@ -12,9 +12,13 @@ namespace ErpSystem.Api.Controllers.HR;
 /// The organisation-unit change log: who a unit reported to, who headed it, and when each changed.
 /// </summary>
 /// <remarks>
-/// Read-only. Rows are written by <c>OrganizationUnitService</c> as a side effect of a restructure
-/// or a change of head — there is no endpoint that creates one directly, because an audit trail
-/// somebody can author by hand is not one.
+/// Rows are written by <c>OrganizationUnitService</c> as a side effect of a creation, a
+/// restructure or a change of head. Two admin-tier writes exist beside those since demo feedback
+/// round 2 (O-3b): a hand-recorded entry (moves nothing, appoints nobody, classifies as
+/// <c>Other</c>, must give a reason) and a correction of a row's dates, reason and notes. Neither
+/// can rewrite WHAT a row says changed, and there is still no delete — an audit trail somebody can
+/// author freely is not one, and these two doors are the narrowest that still let the user record
+/// a restructure with the date it really took effect.
 ///
 /// Gated because the log names the employees who have led each unit, which is org-structure
 /// information about identifiable people. W3 slice 13 converted the role gate to
@@ -160,6 +164,77 @@ public class OrganizationUnitHistoryController : ControllerBase
         {
             _logger.LogError(ex, "Error retrieving organization unit history for date range {StartDate} to {EndDate}", startDate, endDate);
             return StatusCode(500, "An error occurred while retrieving organization unit history");
+        }
+    }
+
+    /// <summary>
+    /// Records an entry by hand. Admin-tier; a reason is required.
+    /// </summary>
+    [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    [ProducesResponseType(typeof(OrganizationUnitHistoryDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Create([FromBody] CreateOrganizationUnitHistoryDto dto)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        try
+        {
+            var response = await _historyService.CreateManualEntryAsync(dto);
+            return CreatedAtAction(nameof(GetById), new { id = response.Id }, response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault — the same contract as the unit controller.
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error recording an organization unit history entry");
+            return StatusCode(500, "An error occurred while recording the organization unit history entry");
+        }
+    }
+
+    /// <summary>
+    /// Corrects a row's dates, reason and notes. Admin-tier. The ids that say what changed are not
+    /// on the body and cannot be altered.
+    /// </summary>
+    [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    [ProducesResponseType(typeof(OrganizationUnitHistoryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateOrganizationUnitHistoryDto dto)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        if (id != dto.Id)
+            return BadRequest(new { message = "The id in the route does not match the id in the body." });
+
+        try
+        {
+            var response = await _historyService.UpdateEntryAsync(dto);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error correcting organization unit history entry {Id}", id);
+            return StatusCode(500, "An error occurred while correcting the organization unit history entry");
         }
     }
 

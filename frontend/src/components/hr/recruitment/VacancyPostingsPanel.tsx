@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Loader2, Megaphone, Paperclip, Plus, Send, TimerOff, Trash2 } from 'lucide-react';
+import { ExternalLink, Link2, Loader2, Megaphone, Paperclip, Plus, Send, TimerOff, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { AttachmentsPanel } from '@/components/hr/common/AttachmentsPanel';
@@ -46,7 +47,32 @@ const blank = (): JobPostingForm => ({
   externalPostingId: '',
   publishDate: '',
   expiryDate: '',
+  // G-6.4: the print-advert composition block. See PRINT_CHANNELS below.
+  advertHeadline: '',
+  advertBody: '',
+  howToApply: '',
+  closingDateText: '',
+  showSalaryInAdvert: false,
+  contactDetails: '',
 });
+
+/**
+ * Channels where the six print-composition fields earn their place (G-6.4).
+ *
+ * ⚠ Six fields existed on the entity for composing a newspaper advert — `AdvertHeadline`,
+ * `AdvertBody`, `HowToApply`, `ClosingDateText`, `ShowSalaryInAdvert`, `ContactDetails`. They were
+ * carried on the create DTO, the update DTO and the read DTO, mapped in both directions, and
+ * declared in `types/hr/recruitment.ts` — and **no component read or wrote any of them**. So
+ * `Newspaper` was a supported channel with no way to compose the advert that would run in it, and
+ * this dialog offered only title, body, link and dates. Unusual among this module's unreachable
+ * features in being typed all the way to the browser before stopping.
+ *
+ * Shown only for print, deliberately: a job board takes the title and description it already has,
+ * and putting six more boxes on every advert would be noise on the common path. `ClosingDateText`
+ * is free text rather than a date because print copy says things like "two weeks from the date of
+ * this advertisement", which no date picker can express.
+ */
+const PRINT_CHANNELS: JobPostingChannel[] = ['Newspaper', 'Radio'];
 
 /**
  * The adverts for one vacancy, one row per channel.
@@ -95,6 +121,25 @@ export function VacancyPostingsPanel({
         externalPostingId: form.externalPostingId?.trim() || null,
         publishDate: form.publishDate || null,
         expiryDate: form.expiryDate || null,
+        // G-6.4: only meaningful for a print/broadcast channel, and cleared otherwise so switching
+        // the channel after typing does not file newspaper copy against a job board.
+        ...(PRINT_CHANNELS.includes(form.channel)
+          ? {
+              advertHeadline: form.advertHeadline?.trim() || null,
+              advertBody: form.advertBody?.trim() || null,
+              howToApply: form.howToApply?.trim() || null,
+              closingDateText: form.closingDateText?.trim() || null,
+              showSalaryInAdvert: form.showSalaryInAdvert ?? false,
+              contactDetails: form.contactDetails?.trim() || null,
+            }
+          : {
+              advertHeadline: null,
+              advertBody: null,
+              howToApply: null,
+              closingDateText: null,
+              showSalaryInAdvert: false,
+              contactDetails: null,
+            }),
       }),
     onSuccess: async () => {
       await refresh();
@@ -133,6 +178,18 @@ export function VacancyPostingsPanel({
   });
 
   const rows = postings.data ?? [];
+
+  /** `/careers/{vacancyId}?posting={postingId}` on this host — the advert's own apply link. */
+  const careersLink = (postingId: string) =>
+    `${typeof window !== 'undefined' ? window.location.origin : ''}/careers/${vacancyId}?posting=${postingId}`;
+  const copyCareersLink = async (postingId: string) => {
+    try {
+      await navigator.clipboard.writeText(careersLink(postingId));
+      toast({ title: 'Link copied', description: 'Paste it on the advert; applications made from it name this advert.' });
+    } catch {
+      toast({ title: careersLink(postingId) });
+    }
+  };
   const vacancyIsPublished = vacancyStatus === 'Published';
 
   return (
@@ -180,6 +237,7 @@ export function VacancyPostingsPanel({
                 <TableHead>Status</TableHead>
                 <TableHead>Published</TableHead>
                 <TableHead>Expires</TableHead>
+                <TableHead>Careers link</TableHead>
                 <TableHead className="text-right">Applications</TableHead>
                 <TableHead className="w-40" />
               </TableRow>
@@ -207,6 +265,19 @@ export function VacancyPostingsPanel({
                   </TableCell>
                   <TableCell>{formatDate(p.actualPublishDate ?? p.publishDate)}</TableCell>
                   <TableCell>{formatDate(p.expiryDate)}</TableCell>
+                  <TableCell>
+                    {/* Round 3, lane A: the link to put on THIS advert. An application made from
+                        it carries the posting and takes its source from the channel. */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      title={careersLink(p.id)}
+                      onClick={() => copyCareersLink(p.id)}
+                    >
+                      <Link2 className="mr-1 h-3.5 w-3.5" /> Copy link
+                    </Button>
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{p.applicationCount}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
@@ -387,6 +458,87 @@ export function VacancyPostingsPanel({
                 />
               </div>
             </div>
+
+            {/* G-6.4: the print-advert composition block, which existed on the entity, both write
+                DTOs, the read DTO and the TypeScript types — and had no UI at all. Shown only for
+                the channels where copy is actually composed. */}
+            {PRINT_CHANNELS.includes(form.channel) && (
+              <div className="space-y-4 rounded-md border p-3">
+                <p className="text-sm font-medium">
+                  Advert copy for {humanizeEnum(form.channel).toLowerCase()}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  What the advert itself says, as opposed to the title and description this record
+                  is filed under. Leave blank to run with the title and description above.
+                </p>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="advertHeadline">Headline</Label>
+                  <Input
+                    id="advertHeadline"
+                    value={form.advertHeadline ?? ''}
+                    onChange={(e) => setForm({ ...form, advertHeadline: e.target.value })}
+                    placeholder="The line set in large type"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="advertBody">Body copy</Label>
+                  <Textarea
+                    id="advertBody"
+                    rows={4}
+                    value={form.advertBody ?? ''}
+                    onChange={(e) => setForm({ ...form, advertBody: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="howToApply">How to apply</Label>
+                  <Textarea
+                    id="howToApply"
+                    rows={2}
+                    value={form.howToApply ?? ''}
+                    onChange={(e) => setForm({ ...form, howToApply: e.target.value })}
+                    placeholder="e.g. Send a CV and covering letter to…"
+                  />
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="closingDateText">Closing date, as printed</Label>
+                    <Input
+                      id="closingDateText"
+                      value={form.closingDateText ?? ''}
+                      onChange={(e) => setForm({ ...form, closingDateText: e.target.value })}
+                      placeholder="e.g. two weeks from the date of this advertisement"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Free text, because print copy often says this rather than a date.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="contactDetails">Contact details</Label>
+                    <Textarea
+                      id="contactDetails"
+                      rows={2}
+                      value={form.contactDetails ?? ''}
+                      onChange={(e) => setForm({ ...form, contactDetails: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="showSalaryInAdvert"
+                    checked={form.showSalaryInAdvert ?? false}
+                    onCheckedChange={(c) => setForm({ ...form, showSalaryInAdvert: c === true })}
+                  />
+                  <Label htmlFor="showSalaryInAdvert" className="font-normal">
+                    Print the salary range in this advert
+                  </Label>
+                </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -10,6 +11,8 @@ import {
   GitBranch,
   Loader2,
   Lock,
+  Calculator,
+  Pencil,
   Send,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,7 +20,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { EmptyState } from '@/components/hr/common/EmptyState';
 import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
 import { DutyItemsPanel } from '@/components/hr/job-analysis/DutyItemsPanel';
 import { EquipmentToolsPanel } from '@/components/hr/job-analysis/EquipmentToolsPanel';
@@ -26,12 +38,30 @@ import { MedicalRequirementsPanel } from '@/components/hr/job-analysis/MedicalRe
 import { PhysicalDemandsPanel } from '@/components/hr/job-analysis/PhysicalDemandsPanel';
 import { PpeRequirementsPanel } from '@/components/hr/job-analysis/PpeRequirementsPanel';
 import { QualificationsPanel } from '@/components/hr/job-analysis/QualificationsPanel';
+import { ProposedGradeCard } from '@/components/hr/job-analysis/ProposedGradeCard';
 import { ReportingRelationshipsPanel } from '@/components/hr/job-analysis/ReportingRelationshipsPanel';
 import { ResponsibilitiesPanel } from '@/components/hr/job-analysis/ResponsibilitiesPanel';
 import { WorkingConditionsPanel } from '@/components/hr/job-analysis/WorkingConditionsPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
+import { employeePositionService } from '@/services/hr/employee-position.service';
 import { workflowApiService } from '@/services/workflow-api.service';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   AUTHORABLE_JOB_DESCRIPTION_STATUSES,
   type JobDescriptionStatus,
@@ -57,8 +87,22 @@ export default function JobDescriptionDetailPage() {
   const qc = useQueryClient();
   const { hasAnyPermission, hasAnyRole } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
+  // Round 3, lane J1: "Duplicate" asks where the copy goes — this position (a "(Copy)" draft) or
+  // another one (title kept, staff level from the target, no reporting relationships).
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateTarget, setDuplicateTarget] = useState<string>('');
+  const { data: allPositions } = useQuery({
+    queryKey: ['positions', 'all'],
+    queryFn: () => employeePositionService.getAll(),
+    enabled: duplicateOpen,
+  });
 
-  const { data: jd, isLoading } = useQuery({
+  const {
+    data: jd,
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
     queryKey: ['job-description', id],
     queryFn: () => jobArchitectureService.getJobDescriptionDetail(id),
     enabled: !!id,
@@ -79,6 +123,34 @@ export default function JobDescriptionDetailPage() {
     enabled: !!id,
   });
 
+  /**
+   * What the role is worth as of now — the breakdown behind the stored figures.
+   *
+   * It reads freely because the GET is safe: it computes and returns and changes nothing. That was
+   * not true before 2026-09-07, when the same endpoint persisted its result, and a query like this
+   * one would have rewritten the record on every mount and refocus. Storing is now its own POST.
+   */
+  const { data: valuation } = useQuery({
+    queryKey: ['job-description', id, 'valuation'],
+    queryFn: () => jobArchitectureService.getValuation(id),
+    enabled: !!id,
+  });
+
+  /**
+   * Every version this position has had.
+   *
+   * ⚠ `getVersionHistory` and `getJobDescriptionsForPosition` had NO caller anywhere in the
+   * frontend — the screen talked about versions constantly (a version number in the header, "New
+   * version" in the toolbar, a supersession badge) and offered no way to see the others. The two
+   * endpoints also run the identical query: same filter, same ordering, both returning summaries.
+   */
+  const positionId = jd?.positionId;
+  const { data: versions } = useQuery({
+    queryKey: ['job-description', id, 'versions', positionId],
+    queryFn: () => jobArchitectureService.getVersionHistory(positionId as string),
+    enabled: !!positionId,
+  });
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['job-description', id] });
     qc.invalidateQueries({ queryKey: ['job-descriptions'] });
@@ -97,11 +169,35 @@ export default function JobDescriptionDetailPage() {
     }
   };
 
-  if (isLoading || !jd) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24 text-muted-foreground">
         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
         Loading…
+      </div>
+    );
+  }
+
+  /**
+   * ⚠ A failed read used to fall into the branch above and spin for ever — `isLoading || !jd` is
+   * true for a 404 and for a 500 alike, so the screen said "Loading…" about a request that had
+   * already come back and failed. Someone arriving here from the register reads that as a dead
+   * link rather than as an error they can act on, and it hides the one detail that matters: which
+   * request failed and why.
+   */
+  if (isError || !jd) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Job description" description="" backHref="/hr/job-descriptions" />
+        <EmptyState
+          icon={AlertTriangle}
+          title="Could not load this job description"
+          description={
+            error instanceof Error
+              ? error.message
+              : 'It may have been removed, or you may not have permission to read it.'
+          }
+        />
       </div>
     );
   }
@@ -140,6 +236,21 @@ export default function JobDescriptionDetailPage() {
     authorableStatus &&
     (hasAnyPermission(['HR.JobArchitecture.Admin']) || hasAnyRole(HR_ADMIN_ROLES));
 
+  /**
+   * Whether the estimate ON the record still matches what the job adds up to today.
+   *
+   * Worth showing rather than hiding behind the button: the stored figures are what every other
+   * screen and report reads, and a qualification added or re-valued this morning does not change
+   * them until someone stores a new valuation. Comparing the live computation with the stored one
+   * is only possible at all because the read no longer writes — before the split the two could
+   * never disagree, since reading rewrote the record to match.
+   */
+  const valuationIsStale =
+    !!valuation &&
+    ((valuation.estimatedSalaryLow ?? null) !== (jd.estimatedSalaryLow ?? null) ||
+      (valuation.estimatedSalaryHigh ?? null) !== (jd.estimatedSalaryHigh ?? null) ||
+      (valuation.suggestedSalaryGradeId ?? null) !== (jd.suggestedSalaryGradeId ?? null));
+
   const childProps = {
     jobDescriptionId: id,
     canAuthor,
@@ -155,6 +266,18 @@ export default function JobDescriptionDetailPage() {
         backHref="/hr/job-descriptions"
         actions={
           <div className="flex flex-wrap gap-2">
+            {/*
+              The title, summary, classification and valuation live on the record itself, not in the
+              tabs below — and until this button existed there was no way back to them. `canAuthor`
+              is the same gate the tabs use: Draft or UnderRevision, and Write.
+            */}
+            {canAuthor && (
+              <Button variant="outline" onClick={() => router.push(`/hr/job-descriptions/${id}/edit`)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit details
+              </Button>
+            )}
+
             {status === 'Draft' || status === 'UnderRevision' ? (
               <Button
                 onClick={() => run('submit', () => jobArchitectureService.submitJobDescription(id), 'Submitted for review')}
@@ -208,29 +331,100 @@ export default function JobDescriptionDetailPage() {
               </Button>
             )}
 
-            <Button
-              variant="outline"
-              onClick={async () => {
-                const clone = await jobArchitectureService.cloneJobDescription(id);
-                toast.success('Copied');
-                router.push(`/hr/job-descriptions/${clone.id}`);
-              }}
-              disabled={busy !== null}
-            >
+            {(status === 'Draft' || status === 'UnderRevision') && (
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  setBusy('import');
+                  try {
+                    const r = await jobArchitectureService.importPositionRequirements(id);
+                    const n = r.competenciesAdded + r.qualificationsAdded;
+                    toast.success(n > 0 ? `Brought in ${n} requirement${n === 1 ? '' : 's'} from the position` : 'Nothing to bring in — every requirement is already here');
+                    qc.invalidateQueries({ queryKey: ['job-descriptions', id] });
+                    qc.invalidateQueries({ queryKey: ['job-architecture'] });
+                  } catch (e: any) {
+                    toast.error(e?.message ?? 'Could not bring in the requirements');
+                  } finally {
+                    setBusy(null);
+                  }
+                }}
+                disabled={busy !== null}
+              >
+                Bring in the position&apos;s requirements
+              </Button>
+            )}
+
+            <Button variant="outline" onClick={() => { setDuplicateTarget(''); setDuplicateOpen(true); }} disabled={busy !== null}>
               <Copy className="mr-2 h-4 w-4" />
               Duplicate
             </Button>
+
+            <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
+              <DialogContent className="sm:max-w-[520px]">
+                <DialogHeader>
+                  <DialogTitle>Duplicate this job description</DialogTitle>
+                  <DialogDescription>
+                    On the same position it becomes a &quot;(Copy)&quot; draft. On another position it keeps
+                    its title, takes that position&apos;s staff level, starts its own version line, and
+                    carries no reporting relationships.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-1.5 py-2">
+                  <Label>Copy onto</Label>
+                  <Select value={duplicateTarget || '__same__'} onValueChange={(v) => setDuplicateTarget(v === '__same__' ? '' : v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="This position" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__same__">This position (a copy)</SelectItem>
+                      {(allPositions ?? [])
+                        .filter((p) => p.id !== jd.positionId)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.title}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setDuplicateOpen(false)}>Cancel</Button>
+                  <Button
+                    onClick={async () => {
+                      setBusy('clone');
+                      try {
+                        const clone = await jobArchitectureService.cloneJobDescription(id, duplicateTarget || null);
+                        toast.success(duplicateTarget ? 'Copied onto the other position' : 'Copied');
+                        setDuplicateOpen(false);
+                        router.push(`/hr/job-descriptions/${clone.id}`);
+                      } catch (e: any) {
+                        toast.error(e?.message ?? 'Could not copy');
+                      } finally {
+                        setBusy(null);
+                      }
+                    }}
+                    disabled={busy !== null}
+                  >
+                    Duplicate
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         }
       />
 
       <div className="flex flex-wrap items-center gap-2">
         <Badge className={STATUS_TONE[status] ?? 'bg-slate-100 text-slate-700'}>{status}</Badge>
+        {/* The record names its successor, so the badge is a way there rather than a dead end:
+            someone told their description is superseded needs the one that replaced it. */}
         {jd.supersededByVersionId && (
-          <Badge variant="outline" className="gap-1">
-            <AlertTriangle className="h-3 w-3" />
-            Superseded by a later version
-          </Badge>
+          <Link href={`/hr/job-descriptions/${jd.supersededByVersionId}`}>
+            <Badge variant="outline" className="gap-1 hover:bg-muted">
+              <AlertTriangle className="h-3 w-3" />
+              Superseded — open the version that replaced it
+            </Badge>
+          </Link>
         )}
         {hasWorkflow && workflow?.currentStepName && (
           <Badge variant="outline">Awaiting: {workflow.currentStepName}</Badge>
@@ -250,8 +444,27 @@ export default function JobDescriptionDetailPage() {
               <Field label="Career level" value={jd.jobLevelName} />
               <Field label="Staff level" value={jd.staffLevelName} />
               <Field label="Occupation code" value={jd.occupationCode} />
+              {/* The only place engagement type is recorded at all — the position has no such column. */}
+              <Field label="Employment type" value={jd.intendedEmploymentType} />
+              {/* ⚠ The FLAG, not just the union. `IsBargainingUnitRole` routes the approval and
+                  prints the offer letter's bargaining-unit clause, and a role can carry it with no
+                  union named — in which case showing only the union showed nothing at all. */}
+              <Field
+                label="Bargaining unit"
+                value={jd.isBargainingUnitRole ? 'Covered by a CBA' : 'Not covered'}
+              />
               <Field label="Union" value={jd.unionName} />
             </dl>
+
+            {/* Settable since the port, displayed nowhere until now. It is the ADA-shaped
+                statement — what the role cannot be performed without — so it belongs beside the
+                summary rather than buried in a tab. */}
+            {jd.essentialFunctionsSummary && (
+              <div>
+                <div className="text-xs text-muted-foreground">Essential functions</div>
+                <p className="whitespace-pre-wrap text-sm">{jd.essentialFunctionsSummary}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -265,11 +478,20 @@ export default function JobDescriptionDetailPage() {
               <Field label="Reviewed by" value={jd.reviewedByName} sub={fmtDate(jd.reviewedDate)} />
               <Field label="Approved by" value={jd.approvedByName} sub={fmtDate(jd.approvalDate)} />
               <Field label="Effective" value={fmtDate(jd.effectiveDate)} />
+              {/* Null until it is superseded — or until someone sets an expiry deliberately. Past
+                  this date the description is no longer the position's current one. */}
+              <Field
+                label="Expires"
+                value={jd.expiryDate ? fmtDate(jd.expiryDate) : 'Does not expire'}
+              />
               <Field
                 label="Next review"
                 value={fmtDate(jd.nextReviewDate)}
                 sub={`every ${jd.reviewCycleMonths} months`}
               />
+              {/* Why this version exists. Set by "New version" and editable afterwards — and the
+                  one field on the record that explains the version number beside it. */}
+              <Field label="Reason for this version" value={jd.revisionReason} />
             </dl>
           </CardContent>
         </Card>
@@ -321,6 +543,7 @@ export default function JobDescriptionDetailPage() {
             Medical ({jd.medicalRequirements?.length ?? 0})
           </TabsTrigger>
           <TabsTrigger value="valuation">Valuation</TabsTrigger>
+          <TabsTrigger value="versions">Versions ({versions?.length ?? 0})</TabsTrigger>
         </TabsList>
 
         {/*
@@ -370,11 +593,59 @@ export default function JobDescriptionDetailPage() {
           <MedicalRequirementsPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="valuation">
+        <TabsContent value="valuation" className="space-y-4 pt-4">
+          {/*
+            What the valuation is FOR: the money entered against each qualification and competency,
+            plus the role's intrinsic value, blended with any industry benchmark, banded at ±10%
+            and matched to a salary grade. Until this button existed the endpoint that does it had
+            no caller anywhere, so the estimated range below could never be anything but a dash and
+            the monetary values the panels collect fed nothing at all.
+
+            ⚠ Offered only to an author of a draft. The API gates it on Read even though it WRITES
+            the result onto the record — so a read-only user could overwrite the stored figures of
+            an in-force document. This is the narrower rule the server ought to be holding.
+          */}
+          {canAuthor && (
+            <div
+              className={`flex flex-wrap items-center justify-between gap-3 rounded-md border p-4 ${
+                valuationIsStale ? 'border-amber-200 bg-amber-50' : 'bg-muted/40'
+              }`}
+            >
+              <p className={`text-sm ${valuationIsStale ? 'text-amber-900' : 'text-muted-foreground'}`}>
+                {valuationIsStale
+                  ? 'The figures above are not what the job now adds up to — the qualifications, competencies or values have changed since the estimate was stored.'
+                  : 'The stored estimate matches what the job currently adds up to.'}
+              </p>
+              <Button
+                variant="outline"
+                disabled={busy !== null}
+                onClick={() =>
+                  run(
+                    'store the valuation',
+                    () => jobArchitectureService.recalculateValuation(id),
+                    'Valuation stored on the job description',
+                  )
+                }
+              >
+                {busy === 'store the valuation' ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Calculator className="mr-2 h-4 w-4" />
+                )}
+                {valuationIsStale ? 'Store the new estimate' : 'Recalculate'}
+              </Button>
+            </div>
+          )}
+
           <Card>
             <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
               <Field label="Criticality" value={jd.roleCriticalityName ?? jd.roleCriticality} />
-              <Field label="Intrinsic value" value={fmtMoney(jd.roleIntrinsicValue)} />
+              {/* Round 3, lane J2 (D-9): derived from the job's own rows — the live figure, not a typed one. */}
+              <Field
+                label="Intrinsic value (derived)"
+                value={fmtMoney(valuation?.roleIntrinsicValue)}
+                sub="Σ qualification values + Σ competency values"
+              />
               <Field label="Benchmark salary" value={fmtMoney(jd.industryBenchmarkSalary)} />
               <Field
                 label="Estimated range"
@@ -384,11 +655,18 @@ export default function JobDescriptionDetailPage() {
                     : `${fmtMoney(jd.estimatedSalaryLow)} – ${fmtMoney(jd.estimatedSalaryHigh)}`
                 }
               />
-              {/* Payroll owns the grade store; this is a suggestion, never an assignment. */}
+              {/* Payroll owns the grade store; three grades, kept apart (D-11): suggested, proposed, actual. */}
               <Field label="Suggested salary grade" value={jd.suggestedSalaryGradeName} />
+              <Field
+                label="Proposed salary grade"
+                value={jd.proposedSalaryGradeName}
+                sub={jd.proposedSalaryGradeNote ?? undefined}
+              />
+              <Field label="Grade on the position" value={jd.positionSalaryGradeName} />
               <Field label="Autonomy" value={jd.autonomyLevel} />
               <Field label="Decision scope" value={jd.decisionMakingScope} />
               <Field label="Financial authority" value={fmtMoney(jd.financialAuthorityLimit)} />
+              <Field label="Approval authority" value={jd.approvalAuthorityNotes} />
               {jd.valuationNotes && (
                 <div className="sm:col-span-2">
                   <div className="text-xs text-muted-foreground">Notes</div>
@@ -397,8 +675,134 @@ export default function JobDescriptionDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {valuation && (
+            <ProposedGradeCard
+              jobDescriptionId={id}
+              valuation={valuation}
+              canAuthor={canAuthor}
+              onSaved={refresh}
+            />
+          )}
+
+          {/* Where the figures above came from — shown only for a valuation this screen just ran,
+              because the breakdown is not stored on the record. */}
+          {valuation && (
+            <Card>
+              <CardHeader>
+                <CardTitle>How that was worked out</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <dl className="grid gap-3 sm:grid-cols-4">
+                  <Field label="Qualifications" value={fmtMoney(valuation.totalQualificationValue)} />
+                  <Field label="Competencies" value={fmtMoney(valuation.totalCompetencyValue)} />
+                  <Field label="Derived intrinsic value" value={fmtMoney(valuation.roleIntrinsicValue)} />
+                  <Field label="Total" value={fmtMoney(valuation.totalEstimatedValue)} />
+                </dl>
+
+                {valuation.legacyTypedIntrinsicValue != null && valuation.legacyTypedIntrinsicValue > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    A typed intrinsic value of {fmtMoney(valuation.legacyTypedIntrinsicValue)} is still on the
+                    record from before the value became derived; it is no longer counted.
+                  </p>
+                )}
+
+                <ValuationLines title="Qualifications" lines={valuation.qualificationLines} />
+                <ValuationLines title="Competencies" lines={valuation.competencyLines} />
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="versions" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Every version of this position&rsquo;s job description</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-0">Version</TableHead>
+                    <TableHead>Number</TableHead>
+                    <TableHead>Job title</TableHead>
+                    <TableHead>Effective</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(versions ?? []).map((v) => {
+                    const vStatus = (v.statusName ?? v.status) as JobDescriptionStatus;
+                    const isThisOne = v.id === id;
+                    return (
+                      <TableRow
+                        key={v.id}
+                        className={isThisOne ? 'bg-muted/50' : 'cursor-pointer'}
+                        onClick={isThisOne ? undefined : () => router.push(`/hr/job-descriptions/${v.id}`)}
+                      >
+                        <TableCell className="font-mono">v{v.versionNumber}</TableCell>
+                        <TableCell className="font-mono text-xs">{v.jobDescriptionNumber}</TableCell>
+                        <TableCell className="font-medium">{v.jobTitle}</TableCell>
+                        <TableCell>{fmtDate(v.effectiveDate)}</TableCell>
+                        <TableCell>
+                          <Badge className={STATUS_TONE[vStatus] ?? 'bg-slate-100 text-slate-700'}>
+                            {vStatus}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {/* "In force" is read off the status rather than off supersession: the
+                              summary projection carries no SupersededByVersionId. Two rows showing
+                              it at once is not a rendering bug — it is the supersession defect
+                              OfferLetterService trips over, and worth seeing. */}
+                          {isThisOne && <span className="font-medium text-foreground">You are here</span>}
+                          {!isThisOne && (vStatus === 'Approved' || vStatus === 'Active') && 'In force'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+
+              {(versions ?? []).length <= 1 && (
+                <p className="pt-4 text-sm text-muted-foreground">
+                  This is the only description the position has ever had. Approving a successor
+                  retires it automatically.
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+/**
+ * The rows a valuation added up. A line carrying no money is shown as such rather than skipped —
+ * a qualification nobody has valued is exactly why a total comes out lower than expected.
+ */
+function ValuationLines({
+  title,
+  lines,
+}: {
+  title: string;
+  lines: { id: string; name: string; monetaryValue?: number | null }[];
+}) {
+  if (!lines.length) return null;
+  return (
+    <div>
+      <div className="mb-1 text-xs text-muted-foreground">{title}</div>
+      <ul className="divide-y rounded-md border text-sm">
+        {lines.map((l) => (
+          <li key={l.id} className="flex items-center justify-between px-3 py-2">
+            <span>{l.name}</span>
+            <span className={l.monetaryValue == null ? 'text-muted-foreground' : 'font-medium'}>
+              {l.monetaryValue == null ? 'not valued' : fmtMoney(l.monetaryValue)}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -12,18 +12,63 @@ namespace ErpSystem.Core.Services.HR;
 public class EmployeePositionService : IEmployeePositionService
 {
     private readonly IEmployeePositionRepository _positionRepository;
+    private readonly IOrganizationUnitRepository _unitRepository;
+    private readonly ICertificationService _certifications;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeePositionService> _logger;
 
     public EmployeePositionService(
         IEmployeePositionRepository positionRepository,
+        IOrganizationUnitRepository unitRepository,
+        ICertificationService certifications,
+        IPositionNamedSetService namedSets,
         ICurrentUserProvider currentUserProvider,
         ILogger<EmployeePositionService> logger)
     {
         _positionRepository = positionRepository;
+        _unitRepository = unitRepository;
+        _certifications = certifications;
+        _namedSets = namedSets;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
+
+    /// <summary>
+    /// The required credentials and the attached named sets ride on the single read and the write
+    /// responses, not the lists (round 2, lanes C2 and C3).
+    /// </summary>
+    private async Task<EmployeePositionDto> WithCertificationRequirementsAsync(EmployeePositionDto dto)
+    {
+        dto.CertificationRequirements = (await _certifications.GetPositionRequirementsAsync(dto.Id)).ToList();
+
+        var attached = await _namedSets.GetAttachedAsync(dto.Id, GetTenantId());
+        dto.BenefitGroups = attached.BenefitGroups;
+        dto.SkillSets = attached.SkillSets;
+        dto.CertificationSets = attached.CertificationSets;
+        return dto;
+    }
+
+    /// <summary>
+    /// The rule of § 6.4.2 for every position write. ⚠ Runs BEFORE anything is written, and before
+    /// the individual collections are built, so a refusal stores nothing and leaves the tracked
+    /// entity as it was.
+    /// </summary>
+    private Task ValidateNamedSetsAsync(
+        Guid? positionId,
+        ICollection<CreatePositionSkillRequirementDto>? skills,
+        ICollection<CreateEmployeePositionBenefitDto>? benefits,
+        ICollection<CreatePositionCertificationRequirementDto>? certifications,
+        ICollection<Guid>? skillSetIds,
+        ICollection<Guid>? benefitGroupIds,
+        ICollection<Guid>? certificationSetIds)
+        => _namedSets.ValidateAsync(GetTenantId(), positionId, new NamedSetRuleInput(
+            BenefitPolicyIds: benefits?.Select(x => x.PolicyId).ToList(),
+            BenefitGroupIds: benefitGroupIds?.ToList(),
+            SkillIds: skills?.Select(x => x.SkillId).ToList(),
+            SkillSetIds: skillSetIds?.ToList(),
+            CertificationIds: certifications?.Select(x => x.CertificationId).ToList(),
+            CertificationSetIds: certificationSetIds?.ToList()));
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant
     // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
@@ -39,7 +84,7 @@ public class EmployeePositionService : IEmployeePositionService
     public async Task<EmployeePositionDto?> GetByIdAsync(Guid id)
     {
         var position = await _positionRepository.GetWithSkillRequirementsAsync(id);
-        return position == null ? null : MapToDto(position);
+        return position == null ? null : await WithCertificationRequirementsAsync(MapToDto(position));
     }
 
     public async Task<IEnumerable<EmployeePositionDto>> GetAllAsync()
@@ -57,10 +102,80 @@ public class EmployeePositionService : IEmployeePositionService
         return positions.Where(p => p.TenantId == tenantId).OrderBy(p => p.Title).Select(MapToDto);
     }
 
-    public async Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId)
+    /// <inheritdoc />
+    /// <remarks>
+    /// The ancestry is walked over <c>ParentUnitId</c> (<c>GetAncestorsAsync</c>), NOT read off the
+    /// unit's <c>Path</c> as § 6.1.4 first proposed — lane B1 measured every seeded unit's path
+    /// EMPTY, so a path read would have offered nothing above the unit for the whole live tree.
+    /// </remarks>
+    public async Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, bool includeAncestors = false)
     {
-        var positions = await _positionRepository.GetByOrganizationUnitAsync(organizationUnitId);
-        return positions.Select(MapToDto);
+        var tenantId = GetTenantId();
+        if (!includeAncestors)
+        {
+            var positions = await _positionRepository.GetByOrganizationUnitAsync(organizationUnitId);
+            return positions.Where(p => p.TenantId == tenantId).Select(MapToDto);
+        }
+
+        var unitIds = new List<Guid> { organizationUnitId };
+        unitIds.AddRange((await _unitRepository.GetAncestorsAsync(organizationUnitId)).Select(u => u.Id));
+        var scoped = await _positionRepository.GetByOrganizationUnitsAsync(unitIds);
+        return scoped.Where(p => p.TenantId == tenantId).Select(MapToDto);
+    }
+
+    /// <summary>
+    /// The reports-to rules: the target exists in this tenant, is not the position itself, and
+    /// reporting to it would not close a loop. Existence is an <see cref="ArgumentException"/>
+    /// (the not-found idiom); the other two are <see cref="InvalidOperationException"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Demo feedback round 2, C1 (P-1). Until this slice the server checked NOTHING about
+    /// <c>ReportsToPositionId</c> — a position could report to itself, to a position that did
+    /// not exist, or to its own subordinate, and the organogram's position view would then loop.
+    /// The only guard was the edit page dropping the position from its own dropdown.</para>
+    /// <para>The unit is deliberately NOT enforced (Q-2, soft): matrix and dotted-line reporting
+    /// exist, so the form narrows the offer to the unit's ancestry and lets the user widen it.</para>
+    /// <para>The walk is bounded. A loop that already exists in the data (written before this
+    /// rule) must not hang a save; after the bound it is reported as a cycle, which it is.</para>
+    /// </remarks>
+    private async Task ValidateReportsToAsync(Guid? reportsToPositionId, Guid? selfId, string selfTitle)
+    {
+        if (!reportsToPositionId.HasValue)
+            return;
+
+        var tenantId = GetTenantId();
+
+        if (selfId.HasValue && reportsToPositionId.Value == selfId.Value)
+            throw new InvalidOperationException("A position cannot report to itself.");
+
+        var target = await _positionRepository.GetByIdAsync(reportsToPositionId.Value);
+        if (target == null || target.TenantId != tenantId)
+            throw new ArgumentException($"Reports-to position '{reportsToPositionId}' was not found.");
+
+        if (!selfId.HasValue)
+            return; // A position that does not exist yet cannot be on anyone's chain.
+
+        var chain = new List<string> { selfTitle, target.Title };
+        var visited = new HashSet<Guid> { target.Id };
+        var current = target;
+        const int bound = 100;
+        for (var hops = 0; current.ReportsToPositionId.HasValue; hops++)
+        {
+            var nextId = current.ReportsToPositionId.Value;
+            if (nextId == selfId.Value)
+                throw new InvalidOperationException(
+                    $"That would create a reporting cycle: {string.Join(" → ", chain)} → {selfTitle}.");
+
+            if (!visited.Add(nextId) || hops >= bound)
+                throw new InvalidOperationException(
+                    $"The reporting line above '{target.Title}' already loops; it must be corrected before anything can report into it.");
+
+            var next = await _positionRepository.GetByIdAsync(nextId);
+            if (next == null)
+                break; // A dangling link above the target is not this save's fault.
+            chain.Add(next.Title);
+            current = next;
+        }
     }
 
     public async Task<IEnumerable<EmployeePositionDto>> GetByDepartmentAsync(Guid departmentId)
@@ -81,6 +196,8 @@ public class EmployeePositionService : IEmployeePositionService
         {
             throw new InvalidOperationException($"Position code '{createDto.Code}' already exists.");
         }
+
+        await ValidateReportsToAsync(createDto.ReportsToPositionId, selfId: null, createDto.Title);
 
         var position = new EmployeePosition
         {
@@ -109,11 +226,23 @@ public class EmployeePositionService : IEmployeePositionService
             IsActive = true
         };
 
+        // Round 2, lane C3. ⚠ BEFORE the collections are built: a duplicate row, or a row a
+        // requested set already provides, is REFUSED here and nothing is stored. The
+        // GroupBy(...).First() that used to sit on each of the two collections below silently kept
+        // the first and threw the rest away (X-1, X-2) — a second row naming the same skill with a
+        // different required level simply vanished on reload, with no message.
+        await ValidateNamedSetsAsync(
+            positionId: null,
+            skills: createDto.SkillRequirements,
+            benefits: createDto.PositionBenefits,
+            certifications: createDto.CertificationRequirements,
+            skillSetIds: createDto.SkillSetIds,
+            benefitGroupIds: createDto.BenefitGroupIds,
+            certificationSetIds: createDto.CertificationSetIds);
+
         if (createDto.SkillRequirements is { Count: > 0 })
         {
             position.SkillRequirements = createDto.SkillRequirements
-                .GroupBy(x => x.SkillId)
-                .Select(g => g.First())
                 .Select(x => new PositionSkillRequirement
                 {
                     TenantId = GetTenantId(),
@@ -128,8 +257,6 @@ public class EmployeePositionService : IEmployeePositionService
         if (createDto.PositionBenefits is { Count: > 0 })
         {
             position.PositionBenefits = createDto.PositionBenefits
-                .GroupBy(x => x.PolicyId)
-                .Select(g => g.First())
                 .Select(x => new EmployeePositionBenefit
                 {
                     TenantId = GetTenantId(),
@@ -140,12 +267,26 @@ public class EmployeePositionService : IEmployeePositionService
                 .ToList();
         }
 
+        // Round 2, lane C2: the required credentials, and the rule that a switched-on position names
+        // at least one. Runs before the save, so a refusal stores nothing.
+        // Round 2, lane C3a: the credentials the ATTACHING sets will provide count towards C2's
+        // "say which one" rule. On create the attachments cannot be written yet (they need the
+        // position's id), so the intended set ids are counted directly.
+        var setCredentials = await _namedSets.CountCredentialsFromSetsAsync(
+            GetTenantId(), null, createDto.CertificationSetIds?.ToList());
+        await _certifications.SyncPositionRequirementsAsync(position, createDto.CertificationRequirements, default, setCredentials);
+
         var created = await _positionRepository.AddAsync(position);
+        await _positionRepository.SaveChangesAsync();
+
+        // Round 2, lane C3. After the save: the attachment rows need the position's id, and the
+        // rule that governs them has already passed above.
+        await _namedSets.SyncAsync(created, createDto.BenefitGroupIds, createDto.SkillSetIds, createDto.CertificationSetIds);
         await _positionRepository.SaveChangesAsync();
         _logger.LogInformation("Employee position created: {PositionId} ({Code})", created.Id, created.Code);
 
         var createdWithUnit = await _positionRepository.GetWithSkillRequirementsAsync(created.Id);
-        return createdWithUnit == null ? MapToDto(created) : MapToDto(createdWithUnit);
+        return await WithCertificationRequirementsAsync(createdWithUnit == null ? MapToDto(created) : MapToDto(createdWithUnit));
     }
 
     public async Task<EmployeePositionDto> UpdatePositionAsync(Guid id, UpdateEmployeePositionDto updateDto)
@@ -164,6 +305,10 @@ public class EmployeePositionService : IEmployeePositionService
             }
             position.Code = updateDto.Code;
         }
+
+        // Validated against the stored graph BEFORE the reassignment below, so a refused save leaves
+        // the tracked entity as it was.
+        await ValidateReportsToAsync(updateDto.ReportsToPositionId, selfId: position.Id, updateDto.Title);
 
         position.Title = updateDto.Title;
         position.Description = updateDto.Description;
@@ -187,8 +332,25 @@ public class EmployeePositionService : IEmployeePositionService
         position.NoticePeriodMonths = updateDto.NoticePeriodMonths;
         position.IsActive = updateDto.IsActive;
 
+        // Round 2, lane C3 — the rule first, so a refusal writes nothing.
+        await ValidateNamedSetsAsync(
+            positionId: position.Id,
+            skills: updateDto.SkillRequirements,
+            benefits: updateDto.PositionBenefits,
+            certifications: updateDto.CertificationRequirements,
+            skillSetIds: updateDto.SkillSetIds,
+            benefitGroupIds: updateDto.BenefitGroupIds,
+            certificationSetIds: updateDto.CertificationSetIds);
+
+        await _namedSets.SyncAsync(position, updateDto.BenefitGroupIds, updateDto.SkillSetIds, updateDto.CertificationSetIds);
         await SyncSkillRequirementsAsync(position, updateDto.SkillRequirements);
         await SyncPositionBenefitsAsync(position, updateDto.PositionBenefits);
+        // Round 2, lane C2. The switches above are already reassigned, so the rule sees the new
+        // intent; and lane C3a's SyncAsync ran just above, so the attachments are in place and the
+        // credentials they provide count towards the rule.
+        var setCredentialsOnUpdate = await _namedSets.CountCredentialsFromSetsAsync(
+            GetTenantId(), position.Id, updateDto.CertificationSetIds?.ToList());
+        await _certifications.SyncPositionRequirementsAsync(position, updateDto.CertificationRequirements, default, setCredentialsOnUpdate);
 
         // Don't call UpdateAsync (which calls _dbSet.Update) — the entity graph is already
         // tracked by EF. Calling Update() forces all navigation entities (including newly
@@ -199,7 +361,7 @@ public class EmployeePositionService : IEmployeePositionService
         _logger.LogInformation("Employee position updated: {PositionId} ({Code})", position.Id, position.Code);
 
         var updatedWithUnit = await _positionRepository.GetWithSkillRequirementsAsync(position.Id);
-        return updatedWithUnit == null ? MapToDto(position) : MapToDto(updatedWithUnit);
+        return await WithCertificationRequirementsAsync(updatedWithUnit == null ? MapToDto(position) : MapToDto(updatedWithUnit));
     }
 
     public async Task<bool> DeletePositionAsync(Guid id)
@@ -270,8 +432,7 @@ public class EmployeePositionService : IEmployeePositionService
                     PolicyId = x.PolicyId,
                     PolicyName = x.BenefitPolicy?.PolicyName ?? string.Empty,
                     ExpiryDate = x.ExpiryDate,
-                    PositionAmount = x.PositionAmount,
-                    IsActive = true
+                    PositionAmount = x.PositionAmount
                 })
                 .ToList()
         };
@@ -281,10 +442,10 @@ public class EmployeePositionService : IEmployeePositionService
     {
         desired ??= new List<CreatePositionSkillRequirementDto>();
 
+        // ⚠ NOT deduplicated any more (X-1): a duplicate is refused by the rule before this runs.
+        // Distinct() here would have made the refusal unreachable.
         var desiredDistinct = desired
             .Where(x => x.SkillId != Guid.Empty)
-            .GroupBy(x => x.SkillId)
-            .Select(g => g.First())
             .ToList();
 
         // Read through a filter-ignoring query for the same reason as the benefits sync: an
@@ -339,10 +500,9 @@ public class EmployeePositionService : IEmployeePositionService
     {
         desired ??= new List<CreateEmployeePositionBenefitDto>();
 
+        // ⚠ NOT deduplicated any more (X-2) — see the note on the skill sync above.
         var desiredDistinct = desired
             .Where(x => x.PolicyId != Guid.Empty)
-            .GroupBy(x => x.PolicyId)
-            .Select(g => g.First())
             .ToList();
 
         // Soft-deleted entries are re-activated rather than re-inserted, which would violate the

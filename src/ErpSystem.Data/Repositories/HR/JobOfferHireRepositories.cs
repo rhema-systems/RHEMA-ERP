@@ -79,12 +79,40 @@ public class JobOfferRepository : GenericRepository<JobOffer>, IJobOfferReposito
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Offers that need chasing: sent, unanswered, and running out within
+    /// <paramref name="daysAhead"/> days.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-2.4 / G-15.2 (2026-09-15). This query feeds the landing page's *Offers expiring
+    /// soon* tile and the dashboard's *Offers expiring* card, and it had <b>no lower bound</b> — an
+    /// offer whose expiry passed six months ago satisfied <c>ExpiryDate &lt;= now + 7 days</c> just
+    /// as well as one expiring tomorrow. Combined with the fact that <c>JobOfferStatus.Expired</c>
+    /// was never written by anything in the solution, a lapsed offer stayed <c>Sent</c> for ever
+    /// and accumulated here permanently. The tile is labelled "Within 7 days" and was in practice
+    /// "every offer ever sent that was not answered"; its amber tone became permanent the moment
+    /// the first offer lapsed.</para>
+    ///
+    /// <para>Two things fix it and both are deliberate. The nightly sweep now writes
+    /// <c>Expired</c>, so lapsed offers leave <c>Sent</c> — and this query is bounded anyway, so a
+    /// sweep that does not run (a host down overnight, a tenant added between runs) cannot inflate
+    /// the tile again. The failure mode being designed against is silence: nobody noticed the
+    /// absence of that job for the life of the module.</para>
+    ///
+    /// <para><c>IsLatestVersion</c> filters out superseded versions. <c>ReviseOfferAsync</c> now
+    /// moves those to <c>Superseded</c> (G-10.2), but every offer revised before that shipped is
+    /// still sitting in <c>Sent</c>, and chasing a candidate about terms that have been replaced is
+    /// the wrong conversation.</para>
+    /// </remarks>
     public async Task<IEnumerable<JobOffer>> GetExpiringOffersAsync(int daysAhead = 3)
     {
-        var threshold = DateTime.UtcNow.AddDays(daysAhead);
+        var now = DateTime.UtcNow;
+        var threshold = now.AddDays(daysAhead);
         return await WithSummaryNavigations()
             .Where(o => o.OfferStatus == JobOfferStatus.Sent
+                     && o.IsLatestVersion
                      && o.ExpiryDate != null
+                     && o.ExpiryDate >= now
                      && o.ExpiryDate <= threshold
                      && !o.IsDeleted)
             .OrderBy(o => o.ExpiryDate)

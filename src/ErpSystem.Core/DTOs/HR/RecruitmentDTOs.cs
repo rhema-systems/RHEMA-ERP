@@ -83,6 +83,28 @@ public class JobVacancyDto : BaseDto
     public decimal? AutoShortlistMinScore { get; set; }
     public bool AutoShortlistRequireAllMandatory { get; set; }
 
+    /// <summary>
+    /// Derived (round 3, lane K; decision D-7): the vacancy carries a Gender or Age criterion. Such a
+    /// criterion may inform a score, never disqualify — the screen says so wherever this is true.
+    /// </summary>
+    public bool UsesProtectedCharacteristicCriterion { get; set; }
+
+    /// <summary>
+    /// The statuses this vacancy may legally move to from where it is now.
+    /// </summary>
+    /// <remarks>
+    /// <para>Derived from the service's own <c>AllowedTransitions</c> map, so the screen and the
+    /// server cannot disagree (G-5.7, 2026-09-15). The "Advance to…" picker previously held a
+    /// hardcoded list of the five hiring stages and offered all of them minus the current one from
+    /// any non-terminal status — so a Draft vacancy was offered <i>Filled</i> and a Published one
+    /// <i>Interviewing</i>, both refused on arrival.</para>
+    ///
+    /// <para>Sending the map rather than mirroring it in TypeScript is the point: a mirrored
+    /// constant is a second source of truth that drifts silently the first time the real map
+    /// changes, and this one just did change — <c>OnHold</c> became reachable (G-5.3).</para>
+    /// </remarks>
+    public List<JobVacancyStatus> AllowedNextStatuses { get; set; } = new();
+
     public Guid? WorkflowInstanceId { get; set; }
 
     // Shortlist approval
@@ -118,6 +140,18 @@ public class JobVacancySummaryDto
     public bool AllowExternalCandidates { get; set; }
     public int ApplicationCount { get; set; }
     public int ShortlistedCount { get; set; }
+
+    /// <summary>
+    /// How many of this vacancy's candidates have reached the interview stage.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-09-15 for G-15.1. The entity has always maintained it — the same stage movement
+    /// that maintains the three counts around it — but the summary DTO omitted it, so the
+    /// dashboard's Pipeline card had no people-count for the middle of its funnel and used a count
+    /// of interview <i>sessions</i> instead, on a shared scale beside three counts of people.
+    /// </remarks>
+    public int InterviewCount { get; set; }
+
     public int OfferCount { get; set; }
     public DateTime CreatedAt { get; set; }
 }
@@ -176,6 +210,31 @@ public class CreateJobVacancyDto : CreateDtoBase
     /// </summary>
     public bool IsBlindScreeningEnabled { get; set; }
 
+    /// <summary>
+    /// Weight (0–100) given to test scores in the composite shortlist score. 0 ignores them.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-5.2 (2026-09-15). This and <see cref="InternalCandidateBoostPoints"/> appeared on
+    /// <c>JobVacancyDto</c> — the <b>read</b> DTO — and nowhere else. Neither the create DTO nor
+    /// the update DTO carried them, and no frontend file mentioned either name, so both defaulted
+    /// to 0 and could not be changed by any means. Since the scoring algorithm's step 5 requires
+    /// <c>TestScoreWeight &gt; 0</c> and step 6 requires <c>InternalCandidateBoostPoints &gt; 0</c>,
+    /// two documented, implemented branches of it could never execute.</para>
+    ///
+    /// <para>The visible consequence: the form's *Requires a written test* and *Requires a
+    /// practical test* checkboxes recorded a requirement whose results could never affect a score,
+    /// and <c>JobApplicantTestResult</c> rows were captured and never weighed.</para>
+    /// </remarks>
+    [Range(0, 100)]
+    public int TestScoreWeight { get; set; }
+
+    /// <summary>
+    /// Flat point bonus (0–20) added to an internal candidate's composite score. 0 disables it.
+    /// </summary>
+    /// <remarks>See <see cref="TestScoreWeight"/> — same gap, same fix.</remarks>
+    [Range(0, 20)]
+    public int InternalCandidateBoostPoints { get; set; }
+
     public Guid? RecruitmentPipelineId { get; set; }
     public decimal? AutoShortlistMinScore { get; set; }
     public bool AutoShortlistRequireAllMandatory { get; set; } = true;
@@ -210,6 +269,15 @@ public class UpdateJobVacancyDto : UpdateDtoBase
     public bool RequiresWrittenTest { get; set; }
     public bool RequiresPracticalTest { get; set; }
     public bool IsBlindScreeningEnabled { get; set; }
+
+    /// <inheritdoc cref="CreateJobVacancyDto.TestScoreWeight"/>
+    [Range(0, 100)]
+    public int TestScoreWeight { get; set; }
+
+    /// <inheritdoc cref="CreateJobVacancyDto.InternalCandidateBoostPoints"/>
+    [Range(0, 20)]
+    public int InternalCandidateBoostPoints { get; set; }
+
     public DateTime? PublishDate { get; set; }
     public Guid? RecruitmentPipelineId { get; set; }
     public decimal? AutoShortlistMinScore { get; set; }
@@ -249,6 +317,15 @@ public class TransitionJobVacancyDto
     public bool RequiresWrittenTest { get; set; }
     public bool RequiresPracticalTest { get; set; }
     public bool IsBlindScreeningEnabled { get; set; }
+
+    /// <inheritdoc cref="CreateJobVacancyDto.TestScoreWeight"/>
+    [Range(0, 100)]
+    public int TestScoreWeight { get; set; }
+
+    /// <inheritdoc cref="CreateJobVacancyDto.InternalCandidateBoostPoints"/>
+    [Range(0, 20)]
+    public int InternalCandidateBoostPoints { get; set; }
+
     public DateTime? PublishDate { get; set; }
     public Guid? RecruitmentPipelineId { get; set; }
     public decimal? AutoShortlistMinScore { get; set; }
@@ -477,6 +554,9 @@ public class JobPostingDto : BaseDto
 public class JobPostingSummaryDto
 {
     public Guid Id { get; set; }
+    /// <summary>The vacancy this advert belongs to — an advert has no page of its own; its detail is the vacancy's Adverts tab.</summary>
+    public Guid JobVacancyId { get; set; }
+    public string? VacancyNumber { get; set; }
     public JobPostingChannel Channel { get; set; }
     public string ChannelName => Channel.ToString();
     public string Title { get; set; } = string.Empty;
@@ -745,6 +825,55 @@ public class JobShortlistingCriteriaDto : BaseDto
     public int Weight { get; set; }
     public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
     public string? ComparisonOperatorName => ComparisonOperator?.ToString();
+    /// <summary>The accepted values, one row each (round 3, lane K). <c>RequiredValue</c> above mirrors their labels.</summary>
+    public List<JobShortlistingCriteriaValueDto> Values { get; set; } = new();
+}
+
+/// <summary>One accepted value on a criterion (round 3, lane K; register row R-8).</summary>
+public class JobShortlistingCriteriaValueDto
+{
+    public Guid Id { get; set; }
+    public ShortlistingValueKind Kind { get; set; }
+    public string KindName => Kind.ToString();
+    /// <summary>The catalogue row for a catalogue kind; null for Gender and Text.</summary>
+    public Guid? ReferenceId { get; set; }
+    /// <summary>The catalogue name (mirrored), the gender member, or the typed text.</summary>
+    public string Label { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+}
+
+/// <summary>
+/// An accepted value on the criterion save: a catalogue id (its name is mirrored), a gender
+/// member's name, or typed text. The kind follows the criterion's type; the server resolves it.
+/// </summary>
+public class ShortlistingCriteriaValueInputDto
+{
+    public Guid? ReferenceId { get; set; }
+
+    [MaxLength(200)]
+    public string? Label { get; set; }
+}
+
+/// <summary>
+/// What a criterion type is made of — served by <c>GET api/job-vacancies/criteria/shapes</c>
+/// (round 3, lane K; plan § 5.4) so the panel and the service agree on one table.
+/// </summary>
+public class ShortlistingCriteriaShapeDto
+{
+    public JobShortlistingCriteriaType Type { get; set; }
+    public string TypeName => Type.ToString();
+    public string Label { get; set; } = string.Empty;
+    public ShortlistingValueKind? ValueKind { get; set; }
+    public string? ValueKindName => ValueKind?.ToString();
+    public bool IsList { get; set; }
+    public bool IsNumeric { get; set; }
+    public bool RequiresValues { get; set; }
+    public bool AllowsMandatory { get; set; }
+    public bool IsProtectedCharacteristic { get; set; }
+    public bool IsAutoEvaluated { get; set; }
+    public List<string> Operators { get; set; } = new();
+    public string Hint { get; set; } = string.Empty;
+    public string? MandatoryRefusal { get; set; }
 }
 
 public class CreateJobShortlistingCriteriaDto : CreateDtoBase
@@ -780,6 +909,13 @@ public class CreateJobShortlistingCriteriaDto : CreateDtoBase
     public int Weight { get; set; } = 1;
 
     public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
+
+    /// <summary>
+    /// The accepted values, as the whole set (round 3, lane K). Null keeps the legacy shape: the
+    /// comma-separated <c>RequiredValue</c> is split into text values. An empty list on a type that
+    /// needs values is refused — a blank criterion passes every candidate.
+    /// </summary>
+    public List<ShortlistingCriteriaValueInputDto>? Values { get; set; }
 }
 
 public class UpdateJobShortlistingCriteriaDto : UpdateDtoBase
@@ -812,6 +948,9 @@ public class UpdateJobShortlistingCriteriaDto : UpdateDtoBase
     public int Weight { get; set; }
 
     public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
+
+    /// <summary>The accepted values, as the whole set (round 3, lane K). Null keeps the legacy comma-separated shape.</summary>
+    public List<ShortlistingCriteriaValueInputDto>? Values { get; set; }
 }
 
 #endregion
@@ -866,9 +1005,20 @@ public class JobCandidateDto : BaseDto
     // Compliance
     public ErpSystem.Core.Enums.WorkAuthorizationStatus WorkAuthorizationStatus { get; set; }
     public string WorkAuthorizationStatusName => WorkAuthorizationStatus.ToString();
+    // National identity (round 3, lane C1) — the employee's trio
+    public Guid? NationalIdTypeId { get; set; }
+    public string? NationalIdTypeName { get; set; }
+    public string? NationalIdNumber { get; set; }
+    public DateTime? NationalIdExpiryDate { get; set; }
     // Documents
     public string? CvFilePath { get; set; }
     public string? ProfilePhotoUrl { get; set; }
+    /// <summary>
+    /// Whether a photograph is on file (round 3, lane C2). Derived from the gated upload record, or
+    /// the legacy URL on rows written before photos went private; the screen fetches
+    /// <c>GET /{id}/photo</c> only when this is true.
+    /// </summary>
+    public bool HasPhoto { get; set; }
     public int ApplicationCount { get; set; }
 }
 
@@ -882,6 +1032,8 @@ public class JobCandidateSummaryDto
     public string City { get; set; } = string.Empty;
     public string CountryName { get; set; } = string.Empty;
     public bool IsInTalentPool { get; set; }
+    /// <summary>Round 3, lane C2 — the list shows a face beside the name when one is on file.</summary>
+    public bool HasPhoto { get; set; }
     public int ApplicationCount { get; set; }
 }
 
@@ -939,8 +1091,36 @@ public class CreateJobCandidateDto : CreateDtoBase
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
 
-    [Required]
-    public Guid CountryId { get; set; }
+    /// <summary>
+    /// The candidate's nationality, as free text.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-7.3 (2026-09-15). This field exists on the entity and is rendered on the Personal
+    /// card, but appeared on the <b>read</b> DTO only — no create DTO, no update DTO, no form field,
+    /// and no candidate-portal path wrote it. The <b>only</b> assignment anywhere in the solution
+    /// was <c>TdcDemoRecruitmentHistorySeeder</c>, which sets <c>"Ghanaian"</c>.</para>
+    ///
+    /// <para>So on a real tenant the Nationality row always read "—", and on the demo tenant it
+    /// always read "Ghanaian": a field that looked populated in every walkthrough and was
+    /// unreachable in production. Appendix C's fourth pattern — when a field looks fine on the demo
+    /// tenant, check who writes it before concluding it works.</para>
+    ///
+    /// <para>Free text rather than a lookup, deliberately. Nationality is not the same question as
+    /// <see cref="CountryId"/>, which is where the candidate is; a dual national or a stateless
+    /// applicant is not served by a single foreign key into the country table.</para>
+    /// </remarks>
+    [MaxLength(100)]
+    public string? Nationality { get; set; }
+
+    /// <summary>
+    /// The candidate's country. <b>Optional</b>, matching the entity: the FK was made nullable on
+    /// 2026-08-27 (<c>MakeJobCandidateCountryOptional</c>) because "a country is a requirement the
+    /// foreign key invented". ⚠ This was <c>[Required] Guid</c> until 2026-09-14 — and
+    /// <c>[Required]</c> on a non-nullable <c>Guid</c> is a NO-OP, so an omitted country posted
+    /// <c>Guid.Empty</c> and the insert died on the foreign key with a 500. A supplied country is
+    /// checked against the tenant's live list; <c>Guid.Empty</c> is read as "none".
+    /// </summary>
+    public Guid? CountryId { get; set; }
 
     [MaxLength(200)]
     public string? LinkedInProfile { get; set; }
@@ -950,6 +1130,15 @@ public class CreateJobCandidateDto : CreateDtoBase
 
     [MaxLength(200)]
     public string? GitHubUrl { get; set; }
+
+    // National identity (round 3, lane C1). The type must be an active IdentificationType of the
+    // tenant; the service refuses an unknown one.
+    public Guid? NationalIdTypeId { get; set; }
+
+    [MaxLength(50)]
+    public string? NationalIdNumber { get; set; }
+
+    public DateTime? NationalIdExpiryDate { get; set; }
 
     public bool IsInTalentPool { get; set; }
 }
@@ -995,8 +1184,36 @@ public class UpdateJobCandidateDto : UpdateDtoBase
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
 
-    [Required]
-    public Guid CountryId { get; set; }
+    /// <summary>
+    /// The candidate's nationality, as free text.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-7.3 (2026-09-15). This field exists on the entity and is rendered on the Personal
+    /// card, but appeared on the <b>read</b> DTO only — no create DTO, no update DTO, no form field,
+    /// and no candidate-portal path wrote it. The <b>only</b> assignment anywhere in the solution
+    /// was <c>TdcDemoRecruitmentHistorySeeder</c>, which sets <c>"Ghanaian"</c>.</para>
+    ///
+    /// <para>So on a real tenant the Nationality row always read "—", and on the demo tenant it
+    /// always read "Ghanaian": a field that looked populated in every walkthrough and was
+    /// unreachable in production. Appendix C's fourth pattern — when a field looks fine on the demo
+    /// tenant, check who writes it before concluding it works.</para>
+    ///
+    /// <para>Free text rather than a lookup, deliberately. Nationality is not the same question as
+    /// <see cref="CountryId"/>, which is where the candidate is; a dual national or a stateless
+    /// applicant is not served by a single foreign key into the country table.</para>
+    /// </remarks>
+    [MaxLength(100)]
+    public string? Nationality { get; set; }
+
+    /// <summary>
+    /// The candidate's country. <b>Optional</b>, matching the entity: the FK was made nullable on
+    /// 2026-08-27 (<c>MakeJobCandidateCountryOptional</c>) because "a country is a requirement the
+    /// foreign key invented". ⚠ This was <c>[Required] Guid</c> until 2026-09-14 — and
+    /// <c>[Required]</c> on a non-nullable <c>Guid</c> is a NO-OP, so an omitted country posted
+    /// <c>Guid.Empty</c> and the insert died on the foreign key with a 500. A supplied country is
+    /// checked against the tenant's live list; <c>Guid.Empty</c> is read as "none".
+    /// </summary>
+    public Guid? CountryId { get; set; }
 
     [MaxLength(200)]
     public string? LinkedInProfile { get; set; }
@@ -1006,6 +1223,15 @@ public class UpdateJobCandidateDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? GitHubUrl { get; set; }
+
+    // National identity (round 3, lane C1). The type must be an active IdentificationType of the
+    // tenant; the service refuses an unknown one.
+    public Guid? NationalIdTypeId { get; set; }
+
+    [MaxLength(50)]
+    public string? NationalIdNumber { get; set; }
+
+    public DateTime? NationalIdExpiryDate { get; set; }
 
     public bool IsInTalentPool { get; set; }
 }
@@ -1150,6 +1376,10 @@ public class JobCandidateRefereeDto : BaseDto
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The catalogue row behind <see cref="Relationship"/>, for re-opening the dropdown.</summary>
+    public Guid? RelationshipTypeId { get; set; }
+
     public int YearsKnown { get; set; }
 }
 
@@ -1179,9 +1409,20 @@ public class CreateJobCandidateRefereeDto : CreateDtoBase
     [MaxLength(20)]
     public string Phone { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The tie, as words. Overwritten when <see cref="RelationshipTypeId"/> names a catalogue row.
+    /// </summary>
     [Required]
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ PROFESSIONAL and OTHER only. A candidate may name a pastor or a family friend (both
+    /// other); they may not name their mother. Null on the update CLEARS the link — every field on
+    /// these DTOs is full-replace.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     [Range(0, 60)]
     public int YearsKnown { get; set; }
@@ -1210,9 +1451,20 @@ public class UpdateJobCandidateRefereeDto : UpdateDtoBase
     [MaxLength(20)]
     public string Phone { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The tie, as words. Overwritten when <see cref="RelationshipTypeId"/> names a catalogue row.
+    /// </summary>
     [Required]
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ PROFESSIONAL and OTHER only. A candidate may name a pastor or a family friend (both
+    /// other); they may not name their mother. Null on the update CLEARS the link — every field on
+    /// these DTOs is full-replace.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     [Range(0, 60)]
     public int YearsKnown { get; set; }
@@ -1234,6 +1486,9 @@ public class JobCandidateSkillDto : BaseDto
     public int? YearsOfExperience { get; set; }
     public bool IsCertified { get; set; }
     public string? CertificationName { get; set; }
+    public string? CertificationNumber { get; set; }
+    public string? CertifyingBody { get; set; }
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 public class CreateJobCandidateSkillDto : CreateDtoBase
@@ -1256,6 +1511,15 @@ public class CreateJobCandidateSkillDto : CreateDtoBase
 
     [MaxLength(200)]
     public string? CertificationName { get; set; }
+
+    // Round 3, lane C1. Ignored (cleared) unless IsCertified is true.
+    [MaxLength(100)]
+    public string? CertificationNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? CertifyingBody { get; set; }
+
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 public class UpdateJobCandidateSkillDto : UpdateDtoBase
@@ -1275,6 +1539,15 @@ public class UpdateJobCandidateSkillDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? CertificationName { get; set; }
+
+    // Round 3, lane C1. Ignored (cleared) unless IsCertified is true.
+    [MaxLength(100)]
+    public string? CertificationNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? CertifyingBody { get; set; }
+
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 #endregion
@@ -1318,6 +1591,8 @@ public class JobCandidateDocumentDto : BaseDto
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public DateTime UploadDate { get; set; }
+    /// <summary>What the file is, in the uploader's words (round 3, lane C1).</summary>
+    public string? Description { get; set; }
 }
 
 // CreateJobCandidateDocumentDto is deliberately absent. It carried a caller-supplied FilePath, so the
@@ -1387,6 +1662,8 @@ public class JobApplicationDto : BaseDto
     public string SourceName => Source.ToString();
     public Guid? JobPostingId { get; set; }
     public string? JobPostingChannel { get; set; }
+    /// <summary>The advert's own title (round 3, lane A), so the detail can say which posting it came through.</summary>
+    public string? JobPostingTitle { get; set; }
     public int? YearsOfExperience { get; set; }
     public DateTime? AvailableFrom { get; set; }
     public string? CoverLetter { get; set; }
@@ -1513,6 +1790,18 @@ public class InternalSubmitDraftDto
 
     [MaxLength(5000)]
     public string? CoverLetter { get; set; }
+}
+
+/// <summary>
+/// HR corrects how an application arrived (round 3, lane A; register row R-4): the source, and
+/// the advert it came through — which must belong to the application's vacancy.
+/// </summary>
+public class UpdateJobApplicationSourceDto
+{
+    [Required]
+    public ApplicationSource Source { get; set; }
+
+    public Guid? JobPostingId { get; set; }
 }
 
 public class CreateJobApplicationDto : CreateDtoBase
@@ -2887,6 +3176,18 @@ public class JobOfferSummaryDto
     public DateTime? OfferDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public int Version { get; set; }
+
+    /// <summary>
+    /// False when a revision has replaced this version.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-09-15 for G-10.2 / G-15.2. <c>Version</c> alone cannot answer "is this the live
+    /// offer?" — a v1 is the live offer until a v2 exists — so every reader that wanted to exclude
+    /// superseded offers had to load the whole chain or guess. The dashboard's "offers pending
+    /// response" guessed, and counted them.
+    /// </remarks>
+    public bool IsLatestVersion { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }
 
@@ -3306,6 +3607,8 @@ public class PreEmploymentCheckItemDto : BaseDto
     public string? Name { get; set; }
     public string DisplayName => !string.IsNullOrEmpty(Name) ? Name : CheckTypeName;
     public string? ServiceProviderName { get; set; }
+    /// <summary>The supplier behind the provider name, when it is one (round 3, lane G; D-14).</summary>
+    public Guid? ServiceProviderSupplierId { get; set; }
     public CheckItemStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public DateTime? RequestedDate { get; set; }
@@ -3340,8 +3643,12 @@ public class CreatePreEmploymentCheckItemDto : CreateDtoBase
     [MaxLength(200)]
     public string? Name { get; set; }
 
+    /// <summary>Typed when the provider is not a supplier on file; mirrored from the supplier when one is named.</summary>
     [MaxLength(200)]
     public string? ServiceProviderName { get; set; }
+
+    /// <summary>A Procurement supplier (round 3, lane G; D-14) — must be the tenant's, live; refused otherwise.</summary>
+    public Guid? ServiceProviderSupplierId { get; set; }
 
     [MaxLength(2000)]
     public string? Instructions { get; set; }
@@ -3366,6 +3673,9 @@ public class UpdatePreEmploymentCheckItemDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? ServiceProviderName { get; set; }
+
+    /// <summary>A Procurement supplier (round 3, lane G; D-14); null keeps the typed name only.</summary>
+    public Guid? ServiceProviderSupplierId { get; set; }
 
     public CheckItemStatus Status { get; set; }
     public DateTime? RequestedDate { get; set; }
@@ -3526,6 +3836,36 @@ public class PreEmploymentCheckTemplateDetailDto : PreEmploymentCheckTemplateDto
     public List<PreEmploymentCheckTemplateItemDto> Items { get; set; } = new();
 }
 
+/// <summary>
+/// A supplier that provides one kind of pre-employment check (round 3, lane G; register row R-7;
+/// decision D-14). The check-type → provider cascade on the check and template screens reads these.
+/// </summary>
+public class PreEmploymentCheckProviderServiceDto : BaseDto
+{
+    public Guid TenantId { get; set; }
+    public Guid SupplierId { get; set; }
+    public string SupplierCode { get; set; } = string.Empty;
+    public string SupplierName { get; set; } = string.Empty;
+    public bool SupplierIsActive { get; set; }
+    public PreEmploymentCheckType CheckType { get; set; }
+    public string CheckTypeName => CheckType.ToString();
+    public string? Notes { get; set; }
+    public bool IsActive { get; set; }
+}
+
+/// <summary>One supplier, the check types it provides — one row is written per type; an existing pairing is kept.</summary>
+public class CreatePreEmploymentCheckProviderServicesDto
+{
+    [Required]
+    public Guid SupplierId { get; set; }
+
+    [Required, MinLength(1)]
+    public List<PreEmploymentCheckType> CheckTypes { get; set; } = new();
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
 public class PreEmploymentCheckTemplateItemDto : BaseDto
 {
     public Guid TenantId { get; set; }
@@ -3533,6 +3873,8 @@ public class PreEmploymentCheckTemplateItemDto : BaseDto
     public PreEmploymentCheckType CheckType { get; set; }
     public string CheckTypeName => CheckType.ToString();
     public string? DefaultServiceProvider { get; set; }
+    /// <summary>The supplier behind the default provider, when it is one (round 3, lane G; D-14).</summary>
+    public Guid? DefaultServiceProviderSupplierId { get; set; }
     public string? Instructions { get; set; }
     public bool IsMandatory { get; set; }
     public bool IsBlockingOnFail { get; set; }
@@ -3572,6 +3914,9 @@ public class CreatePreEmploymentCheckTemplateItemDto : CreateDtoBase
     [MaxLength(200)]
     public string? DefaultServiceProvider { get; set; }
 
+    /// <summary>A Procurement supplier (round 3, lane G; D-14) — the tenant's, live; refused otherwise.</summary>
+    public Guid? DefaultServiceProviderSupplierId { get; set; }
+
     [MaxLength(2000)]
     public string? Instructions { get; set; }
 
@@ -3590,6 +3935,9 @@ public class UpdatePreEmploymentCheckTemplateItemDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? DefaultServiceProvider { get; set; }
+
+    /// <summary>A Procurement supplier (round 3, lane G; D-14) — the tenant's, live; refused otherwise.</summary>
+    public Guid? DefaultServiceProviderSupplierId { get; set; }
 
     [MaxLength(2000)]
     public string? Instructions { get; set; }
@@ -4519,7 +4867,13 @@ public class CreateJobOfferNoteDto : CreateDtoBase
 public class ApplicationAutoScoreDto
 {
     public Guid ApplicationId { get; set; }
-    public decimal AutoScore { get; set; }
+    /// <summary>
+    /// Null when the vacancy has no criteria (round 3, lane K): nothing was measured, so nothing is
+    /// scored — and an unscored application is never auto-shortlisted. It used to be 100.
+    /// </summary>
+    public decimal? AutoScore { get; set; }
+    /// <summary>False when the vacancy has no criteria to score against.</summary>
+    public bool HasCriteria { get; set; } = true;
     public DateTime ScoredAt { get; set; }
     public bool AllMandatoryPassed { get; set; }
     public decimal TotalWeight { get; set; }
@@ -4538,6 +4892,11 @@ public class CriterionScoreResult
     public decimal RawScore { get; set; }
     public decimal WeightedScore { get; set; }
     public string? Notes { get; set; }
+    /// <summary>
+    /// False for a criterion the engine does not score (Other): it contributes nothing and its
+    /// weight is left out of the total, so it neither lifts nor lowers anybody (round 3, lane K).
+    /// </summary>
+    public bool AutoEvaluated { get; set; } = true;
 }
 
 /// <summary>
@@ -5109,6 +5468,21 @@ public class PublicVacancyDto
 
     /// <summary>Pre-computed description for the public job advert (rich text / markdown).</summary>
     public string? JobDescription            { get; set; }
+
+    /// <summary>
+    /// The vacancy's live adverts (round 3, lane A): a posting link carries one of these ids as
+    /// <c>?posting=</c>, and an application made through it records the posting and takes its
+    /// source from the channel.
+    /// </summary>
+    public List<PublicVacancyPostingDto> Postings { get; set; } = new();
+}
+
+public class PublicVacancyPostingDto
+{
+    public Guid Id { get; set; }
+    public JobPostingChannel Channel { get; set; }
+    public string ChannelName => Channel.ToString();
+    public string Title { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -5325,6 +5699,15 @@ public class ExternalSkillDto
 
     [MaxLength(200)]
     public string? CertificationName { get; set; }
+
+    // Round 3, lane C1. Ignored (cleared) unless IsCertified is true.
+    [MaxLength(100)]
+    public string? CertificationNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? CertifyingBody { get; set; }
+
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 /// <summary>A language spoken/written by an external candidate.</summary>
@@ -5333,9 +5716,12 @@ public class ExternalLanguageDto
     /// <summary>Guid.Empty for new records; existing DB row Id for updates.</summary>
     public Guid Id { get; set; }
 
-    [Required]
+    /// <summary>Catalogue row (round 3, lane C1). Either this or <see cref="LanguageName"/> is required.</summary>
+    public Guid? LanguageId { get; set; }
+
+    /// <summary>Free text when no catalogue row fits; mirrored from the catalogue when <see cref="LanguageId"/> is set.</summary>
     [MaxLength(100)]
-    public string LanguageName { get; set; } = string.Empty;
+    public string? LanguageName { get; set; }
 
     public ErpSystem.Core.Enums.LanguageProficiency Proficiency { get; set; } = ErpSystem.Core.Enums.LanguageProficiency.ProfessionalWorking;
 }
@@ -5345,9 +5731,38 @@ public class JobCandidateLanguageDto : BaseDto
 {
     public Guid TenantId { get; set; }
     public Guid JobCandidateId { get; set; }
+    public Guid? LanguageId { get; set; }
+    public string? LanguageCode { get; set; }
     public string LanguageName { get; set; } = string.Empty;
     public ErpSystem.Core.Enums.LanguageProficiency Proficiency { get; set; }
     public string ProficiencyName => Proficiency.ToString();
+}
+
+/// <summary>
+/// HR-side write of a candidate language (round 3, lane C1). Either the catalogue id or a name;
+/// with an id the name is mirrored from the catalogue and any name sent is ignored.
+/// </summary>
+public class CreateJobCandidateLanguageDto : CreateDtoBase
+{
+    [Required]
+    public Guid JobCandidateId { get; set; }
+
+    public Guid? LanguageId { get; set; }
+
+    [MaxLength(100)]
+    public string? LanguageName { get; set; }
+
+    public ErpSystem.Core.Enums.LanguageProficiency Proficiency { get; set; } = ErpSystem.Core.Enums.LanguageProficiency.ProfessionalWorking;
+}
+
+public class UpdateJobCandidateLanguageDto : UpdateDtoBase
+{
+    public Guid? LanguageId { get; set; }
+
+    [MaxLength(100)]
+    public string? LanguageName { get; set; }
+
+    public ErpSystem.Core.Enums.LanguageProficiency Proficiency { get; set; }
 }
 
 /// <summary>
@@ -5465,9 +5880,16 @@ public class CandidatePortalProfileDto
     public string? ExpectedSalaryCurrency { get; set; }
     // Compliance
     public ErpSystem.Core.Enums.WorkAuthorizationStatus WorkAuthorizationStatus { get; set; }
+    // National identity (round 3, lane C1)
+    public Guid? NationalIdTypeId { get; set; }
+    public string? NationalIdTypeName { get; set; }
+    public string? NationalIdNumber { get; set; }
+    public DateTime? NationalIdExpiryDate { get; set; }
     // Documents
     public string? CvFilePath { get; set; }
     public string? ProfilePhotoUrl { get; set; }
+    /// <summary>Round 3, lane C2: whether a photograph is on file — the profile page fetches it through <c>GET profile/photo</c> only then.</summary>
+    public bool HasPhoto { get; set; }
     public bool IsInTalentPool { get; set; }
     public List<JobCandidateWorkHistoryDto> WorkHistories { get; set; } = new();
     public List<JobCandidateQualificationDto> Qualifications { get; set; } = new();
@@ -5494,7 +5916,13 @@ public class UpdateCandidatePortalProfileDto
     public ErpSystem.Core.Enums.Gender? Gender { get; set; }
     [MaxLength(100)]
     public string? City { get; set; }
-    public Guid CountryId { get; set; }
+    /// <summary>
+    /// Optional, matching the entity. ⚠ Until 2026-09-14 this was a non-nullable <c>Guid</c> and
+    /// the careers page sent <c>Guid.Empty</c> as a sentinel meaning "no country" — a handshake
+    /// codified in <c>types/hr/careers.ts</c>. The sentinel is retired: send null, or omit it.
+    /// A supplied country is checked against the tenant's live list, which this door never did.
+    /// </summary>
+    public Guid? CountryId { get; set; }
     [MaxLength(200)]
     public string? PostalAddress { get; set; }
     [MaxLength(30)]
@@ -5530,6 +5958,11 @@ public class UpdateCandidatePortalProfileDto
     public string? ExpectedSalaryCurrency { get; set; }
     // Compliance
     public ErpSystem.Core.Enums.WorkAuthorizationStatus WorkAuthorizationStatus { get; set; }
+    // National identity (round 3, lane C1)
+    public Guid? NationalIdTypeId { get; set; }
+    [MaxLength(50)]
+    public string? NationalIdNumber { get; set; }
+    public DateTime? NationalIdExpiryDate { get; set; }
     // Documents
     // ⚠ No ProfilePhotoUrl. The candidate sets their photo by uploading it through the gate,
     // which stores a scanned upload record and leaves the legacy public URL null. Accepting a
@@ -5589,7 +6022,13 @@ public class CandidatePortalSaveDraftDto
     public string? CoverLetter { get; set; }
     public int? YearsOfExperience { get; set; }
     public DateTime? AvailableFrom { get; set; }
+    /// <summary>
+    /// ⚠ Not read (round 3, lane A). The careers surface is the company website; an application made
+    /// from a posting link takes its source from the posting's channel. Kept so old clients bind.
+    /// </summary>
     public ErpSystem.Core.Enums.ApplicationSource Source { get; set; } = ErpSystem.Core.Enums.ApplicationSource.CompanyWebsite;
+    /// <summary>The advert the candidate came through (`/careers/{vacancyId}?posting={id}`); must belong to the vacancy.</summary>
+    public Guid? JobPostingId { get; set; }
     public bool AddToTalentPool { get; set; }
 }
 
@@ -5627,7 +6066,21 @@ public class CandidateTalentSegmentDto : BaseDto
     public string? Description { get; set; }
     public string? Color       { get; set; }
     public bool   IsActive    { get; set; }
+    /// <summary>
+    /// Live memberships. ⚠ Only correct when the segment was read with its <c>Memberships</c>
+    /// included — every read path before round 3 lane V answered 0 here for that reason.
+    /// </summary>
     public int    MemberCount { get; set; }
+
+    // ── Ownership and intent (round 3, lane V; D-6) ──────────────────────────
+    public Guid?   OwnerEmployeeId      { get; set; }
+    /// <summary>Resolved from the navigation; null when no owner is named.</summary>
+    public string? OwnerEmployeeName    { get; set; }
+    public string? Purpose              { get; set; }
+    public Guid?   TargetPositionId     { get; set; }
+    public string? TargetPositionTitle  { get; set; }
+    public Guid?   JobFamilyId          { get; set; }
+    public string? JobFamilyName        { get; set; }
 }
 
 public class CreateCandidateTalentSegmentDto
@@ -5638,8 +6091,33 @@ public class CreateCandidateTalentSegmentDto
     public string? Description { get; set; }
     [MaxLength(30)]
     public string? Color       { get; set; }
+
+    // Lane V (D-6). All optional; each is refused unless it is this tenant's live row.
+    public Guid?   OwnerEmployeeId  { get; set; }
+    [MaxLength(1000)]
+    public string? Purpose          { get; set; }
+    public Guid?   TargetPositionId { get; set; }
+    public Guid?   JobFamilyId      { get; set; }
 }
 
+/// <summary>
+/// Updating a talent segment.
+/// </summary>
+/// <remarks>
+/// <para>⚠ <b>This is a whole-record payload, not a patch (G-13.4).</b> Every field is assigned
+/// unconditionally by <c>UpdateEntity</c>, so <b>a field you omit is a field you clear</b> —
+/// including <c>OwnerEmployeeId</c>, <c>Purpose</c>, <c>TargetPositionId</c> and
+/// <c>JobFamilyId</c>. That is deliberate: clearing a segment's owner on the form has to be
+/// possible, and a null that means "leave it alone" cannot also mean "remove it".</para>
+///
+/// <para>The risk is a client that does not know. The talent-pool page handles this correctly and
+/// says why, but the contract lived only in that page's comment — so any other caller, or a future
+/// partial-update screen, would silently wipe a segment's owner and purpose while changing its
+/// colour. Stated here because this is what a new client reads.</para>
+///
+/// <para><b>Always send every field.</b> Load the segment, change what you mean to change, send
+/// the whole thing back. Same convention as the other replace-set payloads in this module.</para>
+/// </remarks>
 public class UpdateCandidateTalentSegmentDto
 {
     [Required]
@@ -5651,6 +6129,13 @@ public class UpdateCandidateTalentSegmentDto
     [MaxLength(30)]
     public string? Color       { get; set; }
     public bool   IsActive    { get; set; }
+
+    // Lane V (D-6). Sent every time: a null clears the owner / target, it does not mean "leave it".
+    public Guid?   OwnerEmployeeId  { get; set; }
+    [MaxLength(1000)]
+    public string? Purpose          { get; set; }
+    public Guid?   TargetPositionId { get; set; }
+    public Guid?   JobFamilyId      { get; set; }
 }
 
 public class CandidateSegmentMembershipDto : BaseDto
@@ -5841,6 +6326,12 @@ public class TalentPoolVacancyMatchResultDto
     public string?  PreferredWorkArrangementName  { get; set; }
     public DateTime? AvailableFrom  { get; set; }
     public int      MatchScore      { get; set; }
+
+    /// <summary>The highest score the rubric can award, so a reader knows what 65 means (G-13.2).</summary>
+    /// <remarks>The score was rendered bare, with no denominator and no unit, so nobody could tell
+    /// whether it was out of 90 or 100 or what a good one looked like. Sent rather than hardcoded
+    /// client-side: the weights live in the service and a mirrored constant would drift.</remarks>
+    public int      MatchScoreMax   { get; set; } = 90;
     public List<string> MatchReasons { get; set; } = new();
 }
 
@@ -5856,6 +6347,9 @@ public class CandidateVacancyMatchResultDto
     public string?   HiringManagerName  { get; set; }
     public int       NumberOfPositions  { get; set; }
     public int       MatchScore         { get; set; }
+
+    /// <inheritdoc cref="TalentPoolVacancyMatchResultDto.MatchScoreMax"/>
+    public int       MatchScoreMax      { get; set; } = 90;
     public List<string> MatchReasons    { get; set; } = new();
 }
 

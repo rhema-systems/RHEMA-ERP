@@ -30,8 +30,11 @@
     "DatabaseConnectionTimeoutSeconds": 5,
     "MigrationTimeoutSeconds": 120,
     "FailFastOnDatabaseInitializationError": false,
-    "SeedDevelopmentData": true,
+    "SeedDevelopmentData": false,
     "FailFastOnDevelopmentSeedError": false
+  },
+  "BackgroundServices": {
+    "Enabled": false
   },
   "Application": {
     "Environment": "Development",

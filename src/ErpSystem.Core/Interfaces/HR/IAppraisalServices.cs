@@ -160,7 +160,11 @@ public interface IPerformanceImprovementPlanService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Approval workflow — Draft → PendingApproval → Active on the generic workflow engine.
-    // ⚠ Inoperable until a PerformanceImprovementPlan workflow definition has been published.
+    // ⚠ This used to say "Inoperable until a PerformanceImprovementPlan workflow definition has
+    // been published". It was NOT inoperable — it auto-approved, putting an unreviewed plan into
+    // force against the employee (corrected 2026-09-15). With no definition published, submitting
+    // now lands the plan at PendingApproval and a HR.Performance.Admin holder rules on it. See
+    // HrWorkflowFallbackAuthority.
     Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default);
     Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default);
     Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default);

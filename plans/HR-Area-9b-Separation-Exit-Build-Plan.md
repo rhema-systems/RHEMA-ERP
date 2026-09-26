@@ -205,7 +205,7 @@ screens; exit analytics.
 **Out of scope, deliberately:**
 
 - **GL posting of the settlement.** Per [[hr-finance-integration-split]], every money event is
-  registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` and posted in the one comprehensive sweep
+  registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` and posted in the one comprehensive sweep
   after the whole HR module. Do **not** invent an HR-side posting mechanism here.
 - **Computing payroll figures.** Per [[payroll-ownership-boundary]], payroll is another developer's
   module: HR reads gross/net, loans and advances read-only and never modifies them. See D2.
@@ -453,7 +453,7 @@ settlement could ever be paid. This is the fourth instance of the area's recurri
 correct rule with no data behind it — but unlike retirement ages or `DateEmployed` the fix is an
 **administrative act, not a data migration**: somebody must be granted the role. Build the feature,
 mint the role in the harness so it is genuinely tested, and put the grant to TDC as an operational
-prerequisite. Recorded in `docs/HR-OPEN-QUESTIONS-FOR-TDC.md`.
+prerequisite. Recorded in `docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md`.
 
 ### How FR-HR-092's exception is expressed
 
@@ -577,7 +577,7 @@ another on a financial report. ⚠ Note there are **three** default-currency set
 
 ⚠ **An assumption to put to TDC, not bury:** the daily rate is *monthly salary × 12 ÷ 365*, stated
 in words on every computed line. A 30-day-month or working-day basis gives different money. Raised
-in `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` **with the arithmetic worked through** — GHS 6,000/month over
+in `docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md` **with the arithmetic worked through** — GHS 6,000/month over
 16 days' notice is 3,156 calendar / 3,200 on a 30-day month / 4,364 on working days.
 
 **Slice 5 landed 2026-08-20 — 75/75 twice; full area regression green (67 + 44 + 50 + 64 + 75 =
@@ -585,7 +585,7 @@ in `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` **with the arithmetic worked through** �
 
 Built: `SeparationSettlements` + `SeparationSettlementLines`, prepared from `ClearanceCompleted`,
 finalised into `SettlementUnderReview` for slice 6. Money events registered in
-`docs/HR-FINANCE-INTEGRATION-BACKLOG.md`; **nothing posts to the GL.**
+`docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`; **nothing posts to the GL.**
 
 Rules the harness holds down:
 
@@ -1229,7 +1229,7 @@ Measured both ways round:
 | below the default | `isProcedural = true` | HR approval | Managing Director approval |
 | above the default | `isProcedural = false` | Managing Director approval | HR approval |
 
-Recorded in `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §3 rather than fixed — the workflow
+Recorded in `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §3 rather than fixed — the workflow
 engine is shared infrastructure and four call sites would need changing together. The conditional
 definition is preserved behind `publishSeparationDefinition`'s `useConditionalRouting` flag so
 whoever fixes it has a ready test.

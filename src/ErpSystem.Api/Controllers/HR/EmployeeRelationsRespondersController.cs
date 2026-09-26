@@ -22,7 +22,7 @@ namespace ErpSystem.Api.Controllers.HR;
 ///
 /// <para>This is the fourth requirement to hit that wall (FR-HR-080, FR-HR-173, FR-HR-181, now
 /// FR-HR-084), and rather than work around it a fourth time slice 5 builds the alternative already
-/// put to TDC in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4.</para>
+/// put to TDC in <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4.</para>
 ///
 /// <para>⚠ <b>This matrix is also what would unblock FR-HR-080</b> — the rule that a head of
 /// department may issue only verbal warnings, which area 9 built correctly and left inert because

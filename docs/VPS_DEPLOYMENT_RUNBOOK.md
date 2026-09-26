@@ -6,9 +6,9 @@ This note captures the VPS deployment details that have caused repeat failures. 
 
 ## Current VPS Shape
 
-- Public app URL: `https://149.102.145.190:8443`
-- Public API entrypoint for browsers: `https://149.102.145.190:8443/api`
-- SSH endpoint: `149.102.145.190:2222`
+- Public app URL: `https://63.141.230.56`
+- Public API entrypoint for browsers: `https://63.141.230.56/api`
+- SSH endpoint: `63.141.230.56:2222`
 - SSH user: `Administrator`
 - Working SSH identity from the deployment workstation: `%USERPROFILE%\.ssh\id_rsa`
 - Windows deployment root: `C:\RhemaERP`
@@ -22,7 +22,7 @@ This note captures the VPS deployment details that have caused repeat failures. 
 - Windows services:
   - `RhemaERPAPI`
   - `RhemaERPFrontend`
-  - `RhemaERPHTTPSIPProxy`
+  - `RhemaERPCaddy`
 
 The browser must never be sent to `http://localhost:5000`, `https://localhost:53484`, or `https://localhost:7095` in a deployed build.
 
@@ -146,7 +146,7 @@ ssh `
     -o BatchMode=yes `
     -o ConnectTimeout=15 `
     -o StrictHostKeyChecking=yes `
-    Administrator@149.102.145.190 whoami
+    Administrator@63.141.230.56 whoami
 ```
 
 The RSA identity above is the verified working key. Do not assume the Ed25519 identity works without testing it.
@@ -207,10 +207,10 @@ The frontend package contains only:
 
 - `.next`, excluding `.next\cache`;
 - `public`;
-- root `server.js` copied from `.next\standalone\server.js`;
-- `package.json`.
+- `package.json`, `package-lock.json`, and `next.config.js`;
+- production `node_modules` restored from the lock file with lifecycle scripts disabled.
 
-Do not package `.next\standalone\node_modules`; this made earlier packages unnecessarily large.
+The VPS frontend service runs `npm start -- -p 3001`, so the release uses the regular Next.js build. It does not require a standalone `server.js`.
 
 ### 4. Hash and upload packages
 
@@ -229,7 +229,7 @@ scp `
     -o StrictHostKeyChecking=yes `
     "artifacts\deployment-vps-<short-sha>\rhema-erp-api-<short-sha>.zip" `
     "artifacts\deployment-vps-<short-sha>\rhema-erp-frontend-<short-sha>.zip" `
-    Administrator@149.102.145.190:C:/RhemaERP/packages/
+    Administrator@63.141.230.56:C:/RhemaERP/packages/
 ```
 
 Recompute both hashes on the VPS before extracting anything. Stop if either hash differs.
@@ -252,8 +252,13 @@ For the current test VPS:
 ```text
 StartupInitialization__SeedDevelopmentData=true
 StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment=true
-CorsSettings__AllowedOrigins__0=https://149.102.145.190:8443
+CorsSettings__AllowedOrigins__0=https://63.141.230.56
+ALLOWED_ORIGINS=https://63.141.230.56
 ```
+
+`ALLOWED_ORIGINS` currently takes precedence in the API. Keep it identical to
+`CorsSettings__AllowedOrigins__0`; the deployment helper reconciles both before
+restarting the API.
 
 Syncfusion licensing is held in the protected API service configuration, not
 in a deployed `appsettings.json` or `.env` file. The service XML must contain a
@@ -285,7 +290,7 @@ Rules:
   accepting unscanned content. Do not replace it with the no-op scanner to
   obtain a green health response.
 - Preserve the existing database, JWT, email/SMS, NextAuth, and other secrets.
-- `Security__RequireHttps=false` is expected behind the current TLS-terminating proxy; browser traffic is still HTTPS at port `8443`.
+- `Security__RequireHttps=false` is expected behind the current TLS-terminating Caddy service; browser traffic is HTTPS on port `443`.
 
 ### 7. Deploy in service order
 
@@ -304,16 +309,16 @@ Frontend:
 1. Validate the staged build ID and service-worker version.
 2. Stop `RhemaERPFrontend`.
 3. Replace live `.next` and `public` as complete directory sets.
-4. Replace root `server.js` and `package.json`.
+4. Replace `node_modules`, `package.json`, `package-lock.json`, and `next.config.js` from the same package.
 5. Start `RhemaERPFrontend`.
 6. Verify `http://127.0.0.1:3001/login` returns HTTP 200.
 
 Do not copy into a running `.next` directory. A mixed old/new Next.js tree causes missing chunks and unstyled pages.
 
-The HTTPS proxy normally stays running. After both app services pass locally, verify all three services are `Running`:
+Caddy normally stays running and is preserved by application deployments. After both app services pass locally, verify all three services are `Running`:
 
 ```powershell
-Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy
+Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPCaddy
 ```
 
 ### 8. Verify the database, not only the services
@@ -342,14 +347,19 @@ Do not declare success if a migration is missing or a required foreign key is di
 
 Required public checks:
 
-- `/health`, `/health/ready`, and `/health/live`;
-- `/api/tenant` and `/api/auth/security-settings`;
+- `/api/tenant` and `/api/auth/security-settings` through Caddy;
 - `/login` and `/supplier-application`;
 - `/sw.js` contains the new cache version;
 - every Next.js JS/CSS asset referenced by the tested pages returns HTTP 200;
 - compiled JavaScript contains the expected VPS API origin and no development API URLs;
-- CORS preflight returns `Access-Control-Allow-Origin: https://149.102.145.190:8443`;
-- direct public `http://149.102.145.190:5000/health` is refused.
+- CORS preflight returns `Access-Control-Allow-Origin: https://63.141.230.56`;
+- direct public `http://63.141.230.56:5000/health` is refused.
+
+On the first dry run after moving from the retired port-8443 origin to Caddy,
+`CONFIG_DRIFT` may be reported for CORS, candidate-portal, and frontend URL
+settings. The normal backed-up apply stage reconciles those settings to
+`https://63.141.230.56` before it restarts the API; post-deployment smoke still
+requires the exact CORS origin.
 
 Required browser assertions:
 
@@ -369,19 +379,19 @@ ssh `
     -o BatchMode=yes `
     -o ExitOnForwardFailure=yes `
     -N `
-    -L 8443:127.0.0.1:8443 `
-    Administrator@149.102.145.190
+    -L 443:127.0.0.1:443 `
+    Administrator@63.141.230.56
 ```
 
 Launch the smoke browser with:
 
 ```text
---host-resolver-rules=MAP 149.102.145.190 127.0.0.1
+--host-resolver-rules=MAP 63.141.230.56 127.0.0.1
 --no-proxy-server
 --ignore-certificate-errors
 ```
 
-The page origin remains `https://149.102.145.190:8443`, so the production CORS rule is genuinely tested. Stop the tunnel immediately after the smoke and confirm no local listener/process remains.
+The page origin remains `https://63.141.230.56`, so the production CORS rule is genuinely tested. Stop the tunnel immediately after the smoke and confirm no local listener/process remains.
 
 ### 10. Roll back
 
@@ -405,9 +415,9 @@ Restore the database backup only when migration/data rollback is required and ex
    cd frontend
    Remove-Item -LiteralPath .next -Recurse -Force -ErrorAction SilentlyContinue
    $env:NODE_ENV = 'production'
-   $env:NEXT_PUBLIC_API_URL = 'https://149.102.145.190:8443/api'
-   $env:API_URL = 'https://149.102.145.190:8443/api'
-   $env:NEXTAUTH_URL = 'https://149.102.145.190:8443'
+   $env:NEXT_PUBLIC_API_URL = 'https://63.141.230.56/api'
+   $env:API_URL = 'https://63.141.230.56/api'
+   $env:NEXTAUTH_URL = 'https://63.141.230.56'
    $env:NEXT_TELEMETRY_DISABLED = '1'
    npm run build
    ```
@@ -427,13 +437,13 @@ Restore the database backup only when migration/data rollback is required and ex
 
    Do not precache app pages such as `/`, `/login`, `/dashboard`, `/mobile`, or authenticated module routes. Cache hashed static assets only. Precaching pages can leave browsers with HTML that points to CSS/JS chunks from an older build, which makes the app render as unstyled HTML after a deployment.
 
-4. Route through the HTTPS proxy only.
+4. Route through Caddy only.
 
-   The API service should bind locally on `http://127.0.0.1:5000`. Public direct access to `http://149.102.145.190:5000` should be refused. Browsers should use the HTTPS proxy on port `8443`.
+   The API service binds locally on `http://127.0.0.1:5000`. Public direct access to `http://63.141.230.56:5000` must be refused. Browsers use Caddy on `https://63.141.230.56` port `443`.
 
-5. The HTTPS proxy must route health paths to the API.
+5. Preserve the existing Caddy gateway.
 
-   In `C:\RhemaERP\proxy\https-ip-proxy.js`, `/api`, `/health`, and `/health/*` must proxy to the API. Otherwise `/health/ready` and `/health/live` may hit the frontend and fail even when the API is healthy.
+   `RhemaERPCaddy` owns the public certificate and routes `/api/*` to `127.0.0.1:5000`; remaining paths go to `127.0.0.1:3001`. Check API health directly on loopback because the current Caddyfile does not expose `/health*` publicly.
 
 6. Deploy API and frontend together when DTOs or browser-facing contracts change.
 
@@ -474,12 +484,12 @@ The deployed frontend package should contain:
 
 - `.next`
 - `public`
-- `server.js`
 - `package.json`
+- `package-lock.json`
+- `next.config.js`
+- production `node_modules`
 
-In this repo, `server.js` is generated under `.next\standalone\server.js`. Put that file at the package root if the deployment script expects `server.js` beside `.next`.
-
-Avoid packaging `.next\cache` and `.next\standalone\node_modules`; the VPS already has runtime dependencies and including them can turn a small deployment into a very large zip.
+The NSSM service runs `npm start -- -p 3001`. Package the regular `.next` output and the exact production dependencies restored from `package-lock.json`. Exclude `.next\cache`.
 
 Before packaging, verify the build and middleware IDs match and neither is `development`:
 
@@ -495,14 +505,14 @@ if ($buildId -eq 'development' -or $buildId -ne $middlewareBuildId) {
 Do not live-mirror `.next` over SMB while the frontend service is running. Use the package-and-apply flow instead:
 
 1. Build locally with the production API variables.
-2. Stage `.next`, `public`, root `server.js` from `.next\standalone\server.js`, and `package.json`.
+2. Stage `.next`, `public`, `package.json`, `package-lock.json`, `next.config.js`, and production `node_modules`.
 3. Copy the package to `C:\RhemaERP\packages`.
 4. Stop `RhemaERPFrontend`.
 5. Apply the package on the VPS or copy the staged tree as one consistent set.
 6. Start `RhemaERPFrontend`.
 7. Verify `http://127.0.0.1:3001/login` on the VPS, then verify the live HTML and every CSS file referenced by that HTML.
 
-If a browser reports a missing old CSS chunk after deployment, first verify the live `/login` HTML. If live HTML no longer references that old chunk, add a temporary compatibility copy only as a bridge for already-cached browser pages, then restart `RhemaERPFrontend` so the standalone server sees the copied file.
+If a browser reports a missing old CSS chunk after deployment, first verify the live `/login` HTML. If live HTML no longer references that old chunk, add a temporary compatibility copy only as a bridge for already-cached browser pages, then restart `RhemaERPFrontend` so Next.js sees the copied file.
 
 The deployed API package should be copied over `C:\RhemaERP\api` while preserving:
 
@@ -521,20 +531,20 @@ Do not mirror-delete the API folder unless those preserved files and folders hav
 Run these after every VPS deployment:
 
 ```powershell
-$base = 'https://149.102.145.190:8443'
+$base = 'https://63.141.230.56'
 Invoke-WebRequest -Uri "$base/api/tenant" -SkipCertificateCheck -UseBasicParsing
-Invoke-WebRequest -Uri "$base/health" -SkipCertificateCheck -UseBasicParsing
-Invoke-WebRequest -Uri "$base/health/ready" -SkipCertificateCheck -UseBasicParsing
+Invoke-WebRequest -Uri 'http://127.0.0.1:5000/health' -UseBasicParsing
+Invoke-WebRequest -Uri 'http://127.0.0.1:5000/health/ready' -UseBasicParsing
 Invoke-WebRequest -Uri "$base/login" -SkipCertificateCheck -UseBasicParsing
 Invoke-WebRequest -Uri "$base/sw.js" -SkipCertificateCheck -UseBasicParsing
-Invoke-WebRequest -Uri 'http://149.102.145.190:5000/health' -UseBasicParsing -TimeoutSec 10
+Invoke-WebRequest -Uri 'http://63.141.230.56:5000/health' -UseBasicParsing -TimeoutSec 10
 ```
 
 Expected results:
 
 - `/api/tenant` returns HTTP 200.
-- `/health` returns `Healthy`.
-- `/health/ready` returns `Healthy`.
+- Local `/health` returns `Healthy`.
+- Local `/health/ready` returns `Healthy`.
 - `/login` returns HTTP 200.
 - `/sw.js` contains the latest cache version.
 - Direct `:5000/health` is refused or unreachable from outside.
@@ -555,7 +565,7 @@ For deployed login assets, fetch `/login`, request the referenced `/_next/static
 For CSS, parse the live HTML and check each referenced stylesheet:
 
 ```powershell
-$base = 'https://149.102.145.190:8443'
+$base = 'https://63.141.230.56'
 foreach ($route in @('/login', '/dashboard')) {
   $html = (Invoke-WebRequest -Uri "$base$route" -SkipCertificateCheck -UseBasicParsing).Content
   [regex]::Matches($html, 'href="([^"]+\.css[^"]*)"') |
@@ -577,25 +587,24 @@ Symptom:
 Cause:
 
 - A frontend build shipped localhost API fallbacks into client chunks.
-- The deployed API was meant to be accessed through `https://149.102.145.190:8443/api`, not directly through localhost or public port `5000`.
+- The deployed API was meant to be accessed through `https://63.141.230.56/api`, not directly through localhost or public port `5000`.
 
 Fix applied:
 
-- Frontend production env set to `https://149.102.145.190:8443/api`.
+- Frontend production env set to `https://63.141.230.56/api`.
 - Shared API fallback changed to `/api`.
 - SignalR and token-refresh fallbacks changed away from localhost.
 - Service-worker cache names bumped.
-- HTTPS proxy routes `/api`, `/health`, and `/health/*` to the API.
+- Caddy routes `/api/*` to the API and other public paths to the frontend.
 - API service bound locally on `127.0.0.1:5000`; direct public `:5000` access verified refused.
 
 Verification from that fix:
 
-- `https://149.102.145.190:8443/api/tenant` returned HTTP 200.
-- `https://149.102.145.190:8443/health` returned `Healthy`.
-- `https://149.102.145.190:8443/health/ready` returned `Healthy`.
-- `https://149.102.145.190:8443/login` returned HTTP 200.
+- `https://63.141.230.56/api/tenant` returned HTTP 200.
+- local API `/health` and `/health/ready` returned healthy results.
+- `https://63.141.230.56/login` returned HTTP 200.
 - 22 login-loaded scripts were scanned and had zero localhost API URL matches.
-- `http://149.102.145.190:5000/health` was refused from outside.
+- `http://63.141.230.56:5000/health` was refused from outside.
 
 ## 2026-07-28 Verified Test Deployment
 
@@ -626,7 +635,7 @@ Runtime result:
 
 - `RhemaERPAPI`: Running
 - `RhemaERPFrontend`: Running
-- `RhemaERPHTTPSIPProxy`: Running
+- `RhemaERPCaddy`: Running
 - Frontend local `/login`: HTTP 200
 - CORS: HTTPS origin only
 - Development-data seeding: enabled because this is a test server

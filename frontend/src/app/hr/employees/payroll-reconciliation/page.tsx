@@ -30,6 +30,7 @@ const ISSUE_ORDER: PayrollReconciliationIssue[] = [
   'StillActiveInPayroll',
   'AwaitingPayrollSetup',
   'InactiveInPayroll',
+  'BasicPayMismatch',
   'NoPayBasis',
 ];
 
@@ -42,6 +43,8 @@ const ISSUE_HINT: Record<PayrollReconciliationIssue, string> = {
     'HR says on payroll; Payroll has switched their profile off. One side is stale — agree which.',
   NoPayBasis:
     'On payroll with no salary and no graded notch on either side. A run skips a zero basis silently, so this is the case nobody notices until payday.',
+  BasicPayMismatch:
+    "On the salary scale and placed on a notch, but Payroll's active basis is a different amount — the run pays Payroll's figure while HR's placement says another, every month until one side is corrected. Not raised for negotiated pay, where Payroll's figure is the basis.",
 };
 
 const money = (v?: number | null) =>
@@ -70,6 +73,7 @@ export default function PayrollReconciliationPage() {
     AwaitingPayrollSetup: data?.awaitingPayrollSetup ?? 0,
     InactiveInPayroll: data?.inactiveInPayroll ?? 0,
     NoPayBasis: data?.noPayBasis ?? 0,
+    BasicPayMismatch: data?.basicPayMismatch ?? 0,
   };
 
   return (
@@ -84,7 +88,7 @@ export default function PayrollReconciliationPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-7">
         <Tile label="On payroll (HR)" value={data?.onPayrollCount} active={false} />
         <Tile label="Not on payroll (HR)" value={data?.offPayrollCount} active={false} />
         {ISSUE_ORDER.map((issue) => (

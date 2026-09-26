@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Entities.Procedures;
 
@@ -26,6 +27,10 @@ public class ProcedureCase : TenantEntity
 
     [StringLength(100)]
     public string? SourceDepartment { get; set; }
+
+    public Guid? OrganizationLevelId { get; set; }
+
+    public Guid? OrganizationUnitId { get; set; }
 
     public DateTime? ReceivedDate { get; set; }
 
@@ -58,6 +63,12 @@ public class ProcedureCase : TenantEntity
     public Guid? LastActionById { get; set; }
 
     public DateTime? CompletedAt { get; set; }
+
+    [ForeignKey(nameof(OrganizationLevelId))]
+    public virtual OrganizationLevel? OrganizationLevel { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
 
     public virtual ICollection<ProcedureCaseField> Fields { get; set; } = new List<ProcedureCaseField>();
     public virtual ICollection<ProcedureCaseChecklistItem> ChecklistItems { get; set; } = new List<ProcedureCaseChecklistItem>();

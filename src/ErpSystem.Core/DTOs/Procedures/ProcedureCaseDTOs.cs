@@ -14,7 +14,13 @@ public sealed record ProcedureCaseSummaryDto(
     bool UsesConfiguredWorkflow,
     Guid? WorkflowInstanceId,
     DateTime CreatedAt,
-    DateTime? UpdatedAt);
+    DateTime? UpdatedAt)
+{
+    public Guid? OrganizationLevelId { get; init; }
+    public string? OrganizationLevelName { get; init; }
+    public Guid? OrganizationUnitId { get; init; }
+    public string? OrganizationUnitName { get; init; }
+}
 
 public sealed record ProcedureCaseDetailDto(
     Guid Id,
@@ -38,7 +44,13 @@ public sealed record ProcedureCaseDetailDto(
     IReadOnlyList<ProcedureCaseFieldDto> Fields,
     IReadOnlyList<ProcedureCaseChecklistItemDto> ChecklistItems,
     IReadOnlyList<ProcedureCaseDocumentDto> Documents,
-    IReadOnlyList<ProcedureCaseActivityDto> Activities);
+    IReadOnlyList<ProcedureCaseActivityDto> Activities)
+{
+    public Guid? OrganizationLevelId { get; init; }
+    public string? OrganizationLevelName { get; init; }
+    public Guid? OrganizationUnitId { get; init; }
+    public string? OrganizationUnitName { get; init; }
+}
 
 public sealed record ProcedureCaseFieldDto(
     Guid Id,
@@ -65,6 +77,14 @@ public sealed record ProcedureCaseDocumentDto(
     bool IsMandatory,
     string? FileName,
     string? FileUrl,
+    Guid? CentralDocumentRecordId,
+    Guid? CentralDocumentVersionId,
+    string? CentralDocumentVersion,
+    string? CentralDocumentRepositoryPath,
+    string? CentralDocumentRenditionPath,
+    string? CentralDocumentContentType,
+    string? CentralDocumentAnnotationStateJson,
+    bool CanUploadAtCurrentStage,
     string? Notes,
     Guid? UploadedById,
     DateTime? UploadedAt);
@@ -97,7 +117,14 @@ public sealed record CreateProcedureCaseRequest(
     string? SourceDepartment,
     DateTime? ReceivedDate,
     string? Description,
-    IDictionary<string, string?>? FieldValues);
+    IDictionary<string, string?>? FieldValues)
+{
+    public Guid? OrganizationLevelId { get; init; }
+    public Guid? OrganizationUnitId { get; init; }
+    public bool HasIntakeAttachment { get; init; }
+}
+
+public sealed record AttachCentralDocumentToProcedureCaseRequest(Guid CaseId, Guid DocumentId);
 
 public sealed record CreateLinkedLegalMatterRequest(
     string MatterType,
@@ -109,7 +136,11 @@ public sealed record UpdateProcedureCaseFieldsRequest(
     string? ApplicantName,
     string? SourceDepartment,
     DateTime? ReceivedDate,
-    string? Description);
+    string? Description)
+{
+    public Guid? OrganizationLevelId { get; init; }
+    public Guid? OrganizationUnitId { get; init; }
+}
 
 public sealed record UpdateProcedureCaseChecklistRequest(bool IsCompleted);
 

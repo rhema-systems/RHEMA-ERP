@@ -107,6 +107,31 @@ public class EmployeeDocumentDto
     public DateTime CreatedAt { get; set; }
 }
 
+/// <summary>
+/// A file pertaining to a guarantor (demo feedback round 2, lane A-6). Same shape as an employee
+/// document, same vocabulary, different subject — see <c>EmployeeGuarantorDocument</c>.
+/// </summary>
+/// <remarks>⚠ No create DTO, for the same reason as the employee document: the row exists only as
+/// the result of an upload through the gate.</remarks>
+public class EmployeeGuarantorDocumentDto
+{
+    public Guid Id { get; set; }
+    public Guid GuarantorId { get; set; }
+    public Guid DocumentTypeId { get; set; }
+    public string? DocumentTypeName { get; set; }
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public DateOnly? IssuedOn { get; set; }
+    public DateOnly? ExpiresOn { get; set; }
+    public bool IsExpired { get; set; }
+    public string? FileName { get; set; }
+    public string? MimeType { get; set; }
+    public long? FileSizeBytes { get; set; }
+    public Guid? UploadedById { get; set; }
+    public string? UploadedByName { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
 /// <summary>Corrects the METADATA on a document. The file itself is replaced by uploading again.</summary>
 public class UpdateEmployeeDocumentDto : UpdateDtoBase
 {

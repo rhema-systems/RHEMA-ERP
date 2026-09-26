@@ -43,6 +43,7 @@ export function IdentificationTab({ employeeId }: { employeeId: string }) {
       employeeId={employeeId}
       title="identification documents"
       singular="identification document"
+      itemLabel={(c) => c.identificationTypeName || c.cardTypeName}
       queryKey="identification-cards"
       getId={(c) => c.id}
       list={employeeService.getIdentificationCards.bind(employeeService)}

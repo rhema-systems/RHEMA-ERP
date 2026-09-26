@@ -16,6 +16,12 @@ import type {
   SafetyInspectionHazardActionUpdateRequest,
   SafetyInspectionDocument,
   SafetyInspectionDocumentCreateRequest,
+  SafetyInspectionResponse,
+  SafetyInspectionFieldValueWrite,
+  SafetyInspectionScore,
+  SafetyInspectionCompleteRequest,
+  SafetyInspectionSignature,
+  SafetyInspectionSignatureCreateRequest,
   SheInspectionType,
   SheInspectionCategory,
   SheInspectionStatus,
@@ -174,6 +180,44 @@ class SafetyInspectionService {
 
   removeDocument(documentId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/documents/${documentId}`);
+  }
+
+  // ── Checklist run (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ────────────
+
+  /** Loads a published template's items onto an inspection that has none yet (422 otherwise). */
+  applyChecklist(inspectionId: string, checklistId: string): Promise<SafetyInspection> {
+    return apiService.post<SafetyInspection>(`${this.baseUrl}/${inspectionId}/apply-checklist`, {
+      checklistId,
+    });
+  }
+
+  /** Bulk answer — the walk saved in one call. Refused once the inspection is completed. */
+  saveResponses(inspectionId: string, responses: SafetyInspectionResponse[]): Promise<SafetyInspection> {
+    return apiService.put<SafetyInspection>(`${this.baseUrl}/${inspectionId}/responses`, responses);
+  }
+
+  /** Replace-set of the header field values: a field missing from the body is cleared. */
+  saveFieldValues(inspectionId: string, values: SafetyInspectionFieldValueWrite[]): Promise<SafetyInspection> {
+    return apiService.put<SafetyInspection>(`${this.baseUrl}/${inspectionId}/field-values`, values);
+  }
+
+  /** The live score over the current answers, without persisting. */
+  getScore(inspectionId: string): Promise<SafetyInspectionScore> {
+    return apiService.get<SafetyInspectionScore>(`${this.baseUrl}/${inspectionId}/score`);
+  }
+
+  /** Gate + persist: refused (422) while items are unassessed, required fields empty, or the outcome is wrong. */
+  complete(inspectionId: string, data: SafetyInspectionCompleteRequest): Promise<SafetyInspection> {
+    return apiService.post<SafetyInspection>(`${this.baseUrl}/${inspectionId}/complete`, data);
+  }
+
+  /** System-user signatories sign as the logged-in employee; external ones need a typed name. */
+  addSignature(inspectionId: string, data: SafetyInspectionSignatureCreateRequest): Promise<SafetyInspectionSignature> {
+    return apiService.post<SafetyInspectionSignature>(`${this.baseUrl}/${inspectionId}/signatures`, data);
+  }
+
+  removeSignature(signatureId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/signatures/${signatureId}`);
   }
 }
 

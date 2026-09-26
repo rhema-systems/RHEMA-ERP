@@ -27,7 +27,10 @@ public static class OrganizationUnitChangeTypes
     /// <summary>The unit got a different head, or lost the one it had.</summary>
     public const string LeadershipChange = "Leadership Change";
 
-    /// <summary>Neither — a row no current writer produces, kept so a legacy row still classifies.</summary>
+    /// <summary>
+    /// Neither: a unit created at the top of its structure, or an entry recorded by hand
+    /// (<c>CreateOrganizationUnitHistoryDto</c>). Until demo feedback round 2 no writer produced one.
+    /// </summary>
     public const string Other = "Other";
 
     public static readonly IReadOnlyList<string> All = new[] { Restructure, LeadershipChange, Other };
@@ -51,6 +54,21 @@ public static class OrganizationUnitChangeTypes
     /// as an <c>Expression</c> rather than a method group for the reason slice 4 found the hard way:
     /// a static predicate called inside <c>Where</c> compiles, reads correctly and throws at runtime.
     /// </remarks>
+    /// <summary>
+    /// The one date rule every history writer shares: a period cannot end before it begins.
+    /// </summary>
+    /// <remarks>
+    /// Lives beside the classification so the unit service (system-written rows) and the history
+    /// service (hand-written rows and corrections) cannot drift apart on it — the same reason
+    /// <see cref="Classify"/> and <see cref="Predicate"/> sit together.
+    /// </remarks>
+    public static void EnsurePeriod(DateOnly effectiveFrom, DateOnly? effectiveTo)
+    {
+        if (effectiveTo.HasValue && effectiveTo.Value < effectiveFrom)
+            throw new InvalidOperationException(
+                $"The effective-to date ({effectiveTo.Value:yyyy-MM-dd}) cannot be before the effective-from date ({effectiveFrom:yyyy-MM-dd}).");
+    }
+
     public static Expression<Func<OrganizationUnitHistory, bool>> Predicate(string changeType) => changeType switch
     {
         Restructure => h => h.PreviousParentId != h.NewParentId,
@@ -288,6 +306,7 @@ public static class OrganizationStructureMappingExtensions
             Name = entity.Name,
             Code = entity.Code,
             AccountCode = entity.AccountCode,
+            FinanceAccountId = entity.FinanceAccountId,
             Description = entity.Description,
             OrganizationLevelId = entity.OrganizationLevelId,
             LevelName = entity.OrganizationLevel?.Name,
@@ -314,8 +333,13 @@ public static class OrganizationStructureMappingExtensions
             Code = entity.Code,
             OrganizationLevelId = entity.OrganizationLevelId,
             LevelName = entity.OrganizationLevel?.Name,
+            // Both come off the level navigation, which GetAllSummaryAsync includes. A caller that
+            // maps a bare entity gets 0 / Guid.Empty — visibly wrong rather than quietly plausible.
+            LevelNumber = entity.OrganizationLevel?.LevelNumber ?? 0,
+            StructureId = entity.OrganizationLevel?.StructureId ?? Guid.Empty,
             ParentUnitId = entity.ParentUnitId,
             ParentUnitName = entity.ParentUnit?.Name,
+            Path = entity.Path,
             IsActive = entity.IsActive
         };
     }
@@ -329,6 +353,7 @@ public static class OrganizationStructureMappingExtensions
             Name = entity.Name,
             Code = entity.Code,
             AccountCode = entity.AccountCode,
+            FinanceAccountId = entity.FinanceAccountId,
             Description = entity.Description,
             OrganizationLevelId = entity.OrganizationLevelId,
             LevelName = entity.OrganizationLevel?.Name,
@@ -464,6 +489,7 @@ public static class OrganizationStructureMappingExtensions
             EffectiveFrom = entity.EffectiveFrom,
             EffectiveTo = entity.EffectiveTo,
             ChangeReason = entity.ChangeReason,
+            Notes = entity.Notes,
             ChangeType = OrganizationUnitChangeTypes.Classify(entity),
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
@@ -500,6 +526,7 @@ public static class OrganizationStructureMappingExtensions
             EffectiveFrom = entity.EffectiveFrom,
             EffectiveTo = entity.EffectiveTo,
             ChangeReason = entity.ChangeReason,
+            Notes = entity.Notes,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,

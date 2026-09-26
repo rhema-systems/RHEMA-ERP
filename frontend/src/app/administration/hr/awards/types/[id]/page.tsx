@@ -42,9 +42,9 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { awardsService } from '@/services/hr/awards.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import type { AwardTypeTarget } from '@/types/hr/awards';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 const fmtMoney = (v?: number | null) =>
   v === null || v === undefined ? '—' : v.toLocaleString(undefined, { minimumFractionDigits: 2 });
@@ -153,11 +153,6 @@ export default function AwardTypeDetailPage() {
     enabled: kind === 'StaffLevel',
   });
 
-  const { data: orgUnits } = useQuery({
-    queryKey: ['award-scope-org-units'],
-    queryFn: () => organizationUnitService.getAll(),
-    enabled: kind === 'OrganizationUnit',
-  });
 
   const addLevel = useMutation({
     mutationFn: () => {
@@ -681,6 +676,14 @@ export default function AwardTypeDetailPage() {
                     value={targetForm.targetId || null}
                     onChange={(v) => setTargetForm({ ...targetForm, targetId: v ?? '' })}
                   />
+                ) : targetForm.kind === 'OrganizationUnit' ? (
+                  <OrganizationUnitPicker
+                    value={targetForm.targetId}
+                    onChange={(id) => setTargetForm({ ...targetForm, targetId: id })}
+                    levelLabel="Level"
+                    unitLabel="Unit"
+                    idPrefix="award-target-unit"
+                  />
                 ) : (
                   <Select
                     value={targetForm.targetId}
@@ -696,10 +699,6 @@ export default function AwardTypeDetailPage() {
                         ))}
                       {targetForm.kind === 'StaffLevel' &&
                         (staffLevels ?? []).map((o) => (
-                          <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
-                        ))}
-                      {targetForm.kind === 'OrganizationUnit' &&
-                        (orgUnits ?? []).map((o) => (
                           <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
                         ))}
                     </SelectContent>

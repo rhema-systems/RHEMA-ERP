@@ -60,6 +60,7 @@ namespace ErpSystem.Web.Services
         private readonly CivilEngineeringStatutoryReportSeeder? _civilEngineeringStatutoryReportSeeder;
         private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
+        private readonly string? _operationalUatSharedPassword;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
             new List<WorkflowApprovalStageSeed>
@@ -175,6 +176,7 @@ namespace ErpSystem.Web.Services
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
                 false) ?? false;
+            _operationalUatSharedPassword = configuration?["UatBootstrap:SharedPassword"];
         }
 
         public Task SeedAsync() => SeedCoreAsync(applyMigrations: true);
@@ -435,6 +437,8 @@ namespace ErpSystem.Web.Services
             await EnsureEstateSopWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring HR workflows are seeded...");
             await EnsureHrWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring HR leave workflows are seeded...");
+            await EnsureLeaveWorkflowsSeededAsync();
 
             _logger.LogInformation("Ensuring Legal procedure workflows are seeded...");
             await EnsureLegalProcedureWorkflowsSeededAsync();
@@ -498,9 +502,8 @@ namespace ErpSystem.Web.Services
 
                 var specs = new (string Code, string Name, string Definition, string Description, string[] Roles)[]
                 {
-                    ("LEAVE_REQUEST", "Leave Request", "Leave Approval", "Leave request: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
-                    ("LEAVE_PLAN", "Leave Plan", "Leave Plan Approval", "Annual leave plan: Draft -> PendingApproval -> Approved.", staffRaised),
-                    ("LEAVE_ENCASHMENT", "Leave Encashment", "Leave Encashment Approval", "Encashment of unused leave: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    // ⚠ The three LEAVE types are NOT here. They are TWO-stage — line manager, then
+                    // HR — and are seeded below by EnsureLeaveWorkflowsSeededAsync. See its remarks.
                     ("STAFF_OVERTIME_REQUEST", "Staff Overtime Request", "Overtime Approval", "Pre-approval of overtime: Draft -> PendingApproval (line manager) -> Approved.", staffRaised),
                     ("REMOTE_WORK_REQUEST", "Remote Work Request", "Remote Work Approval", "Remote-working request: Draft -> PendingApproval (line manager) -> Approved.", staffRaised),
                     ("STAFF_ATTENDANCE_REGULARIZATION", "Staff Attendance Regularization", "Attendance Regularisation Approval", "Missed-punch and attendance corrections: Draft -> PendingApproval -> Approved.", staffRaised),
@@ -523,6 +526,18 @@ namespace ErpSystem.Web.Services
                     ("EMPLOYEE_SEPARATION", "Employee Separation", "Separation Approval", "Resignation, retirement or termination: Draft -> PendingApproval (Managing Director, FR-HR-092) -> Approved.", mdOnly),
                     ("JOB_DESCRIPTION", "Job Description", "Job Description Approval", "Authoring or revising a job description: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
                     ("APPRAISAL_TEMPLATE", "Appraisal Template", "Appraisal Template Approval", "Appraisal template publication: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    // Round 2, lane F3. Q-8 answered "the owning unit's head, falling back to HR" —
+                    // which is a fact about the RECORD (which unit does this committee serve), not a
+                    // role, and conditional routing does not route (cross-module defect #3). So the
+                    // definition names the roles a unit head could hold and TeamActivityService
+                    // narrows to the head of THIS team's unit, falling back to HR when the team
+                    // serves no unit or the unit has no head. Same division the seeding note above
+                    // describes for "the line manager approves".
+                    ("HR_TEAM_TERMS_OF_REFERENCE", "HR Team Terms Of Reference", "Committee Charter Approval", "A committee's terms of reference: Draft -> PendingApproval (owning unit's head, or HR) -> Approved.", staffRaised),
+                    ("HR_TEAM_OBJECTIVE", "HR Team Objective", "Team Objective Approval", "What a team undertakes to deliver: Draft -> PendingApproval (owning unit's head, or HR) -> Active.", staffRaised),
+                    // Round 3, lane S. A pay change is an executive decision; the service applies it
+                    // to HR and to payroll the moment the engine says Approved.
+                    ("HR_EMPLOYEE_SALARY_CHANGE_REQUEST", "HR Employee Salary Change Request", "Salary Change Approval", "A change to an employee's pay: Draft -> PendingApproval (HR, Managing Director) -> Approved, then applied to HR and payroll.", executive),
                 };
 
                 foreach (var tenant in tenants)
@@ -543,6 +558,96 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed HR workflows");
+            }
+        }
+
+        /// <summary>
+        /// The three leave entity types, on a TWO-stage ladder: the line manager approves, then HR
+        /// confirms and records the final dates.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why leave is different from its siblings.</b> TDC described the flow as
+        /// <i>"staff submitting their suggested leave dates … supervisor reviewing for approval …
+        /// hr getting the final leave dates"</i>. Until 2026-09-17 the seeded definition was ONE
+        /// approval step on which Manager <b>or</b> HR could sign, and one signature finished it —
+        /// so "the supervisor approves and then HR confirms" was not what the product did. It is
+        /// configuration, not code, which is why this is a seeder change and nothing else.
+        /// (Leave closure plan decision D-3 / open question L-D3.)</para>
+        ///
+        /// <para><b>Stage 1 is the line manager, expressed as a role.</b> Conditional routing does
+        /// not route (cross-module defect #3), so "this employee's own manager" cannot be a routing
+        /// rule. The stage names the Manager role and the service's own checks narrow it, the same
+        /// division <see cref="EnsureHrWorkflowsSeededAsync"/> describes. TenantAdmin sits on both
+        /// stages as the operational backstop every other HR definition also carries.</para>
+        ///
+        /// <para><b>⚠ <c>PreventInitiatorApproval</c> is deliberately FALSE, and the segregation is
+        /// done properly instead.</b> The plan called for the engine flag; it is the wrong control
+        /// here, for the reason recorded as trap 7 in <c>HR-WORKFLOW-ENGINE-INTEGRATION.md</c>. That
+        /// flag guards the <i>initiator</i>, but a leave request's conflicted party is its
+        /// <i>subject</i> — and HR raises requests on other people's behalf from the desk. On a
+        /// tenant with one HR user (the demo tenant is exactly that: <c>hr.head</c> is the only
+        /// holder of the HR role) the flag would strand every desk-raised request at stage 2 with
+        /// nobody able to clear it, which is the area-9b mistake repeated. So the engine does not
+        /// block the initiator, and each leave service refuses an approval where the actor IS the
+        /// employee the record is about. That targets the real conflict and cannot strand a third
+        /// party's request.</para>
+        ///
+        /// <para>Idempotent and additive like its siblings, via
+        /// <see cref="EnsureSequentialWorkflowDefinitionSeededAsync"/>, which also deactivates the
+        /// superseded single-stage rows so a tenant is never left choosing between two active
+        /// definitions for one type (trap 9).</para>
+        /// </remarks>
+        private async Task EnsureLeaveWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants
+                    .Where(t => !t.IsDeleted && t.Status == TenantStatus.Active)
+                    .ToListAsync();
+
+                var lineManager = new[] { Constants.Roles.Manager, Constants.Roles.TenantAdmin };
+                var hrDesk = new[] { Constants.Roles.Hr, Constants.Roles.TenantAdmin };
+
+                var specs = new (string Code, string Name, string Definition, string Description, string Stage1, string Stage1Desc, string Stage2, string Stage2Desc)[]
+                {
+                    ("LEAVE_REQUEST", "Leave Request", "Leave Approval",
+                     "Leave request: Draft -> line manager approval -> HR confirmation -> Approved.",
+                     "Line manager approval", "The employee's supervisor reviews the dates and approves, rejects, or sends them back with different ones.",
+                     "HR confirmation", "HR records the final dates and confirms the leave."),
+
+                    ("LEAVE_PLAN", "Leave Plan", "Leave Plan Approval",
+                     "Annual leave plan: Draft -> line manager approval -> HR confirmation -> Approved.",
+                     "Line manager approval", "The supervisor reviews the year's planned dates and may suggest different ones.",
+                     "HR confirmation", "HR records the agreed plan for the year."),
+
+                    ("LEAVE_ENCASHMENT", "Leave Encashment", "Leave Encashment Approval",
+                     "Encashment of unused leave: Draft -> line manager approval -> HR confirmation -> Approved.",
+                     "Line manager approval", "The supervisor confirms the days are genuinely untaken.",
+                     "HR confirmation", "Money leaves the company only on HR's signature."),
+                };
+
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in specs)
+                    {
+                        await EnsureSequentialWorkflowDefinitionSeededAsync(
+                            tenant.Id,
+                            entityCode: spec.Code,
+                            entityName: spec.Name,
+                            entityClassName: null,
+                            definitionName: spec.Definition,
+                            description: spec.Description,
+                            approvalStages: new[]
+                            {
+                                new WorkflowApprovalStageSeed(spec.Stage1, lineManager, spec.Stage1Desc),
+                                new WorkflowApprovalStageSeed(spec.Stage2, hrDesk, spec.Stage2Desc),
+                            });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed HR leave workflows");
             }
         }
 
@@ -1209,16 +1314,16 @@ namespace ErpSystem.Web.Services
                                 "Legal review note"
                             ]),
                         LegalStep(
-                            "Head of Legal Release",
+                            "Head of Legal Signature",
                             WorkflowStepType.Approval,
                             "Head of Legal",
                             [
                                 "Confirm Legal Officer recommendation",
-                                "Record release decision",
-                                "Return approved reference to Property Management"
+                                "Record Head of Legal signature",
+                                "Dispatch signed agreement to the customer portal"
                             ],
                             [
-                                "Approved / released agreement"
+                                "Head of Legal signed agreement"
                             ])
                     ])
             ];
@@ -7477,6 +7582,13 @@ namespace ErpSystem.Web.Services
         {
             _logger.LogInformation("Seeding test users...");
 
+            // The explicit operational-UAT bootstrap supplies this value from a process-scoped
+            // secret. Normal development seeding keeps the established Finance123! default.
+            // Existing accounts are never reset by CreateTestUserAsync.
+            var financeSeedPassword = string.IsNullOrWhiteSpace(_operationalUatSharedPassword)
+                ? "Finance123!"
+                : _operationalUatSharedPassword;
+
             await SeedRolesAsync();
             await SeedRolePermissionAssignmentsAsync();
             await SeedDefaultTenantAsync();
@@ -7515,36 +7627,36 @@ namespace ErpSystem.Web.Services
             await SeedLandAcquisitionTestUsersAsync(defaultTenant);
             await EnsurePropertyManagementTestRoleAssignmentsAsync();
 
-            await CreateTestUserAsync("finance.clerk", "finance.clerk@default.com", "Finance123!",
+            await CreateTestUserAsync("finance.clerk", "finance.clerk@default.com", financeSeedPassword,
                 "Ama", "Mensah", defaultTenant.Id, "Finance Clerk", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("accounts.officer", "accounts.officer@default.com", "Finance123!",
+            await CreateTestUserAsync("accounts.officer", "accounts.officer@default.com", financeSeedPassword,
                 "Kofi", "Boateng", defaultTenant.Id, "Accounts Officer", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("ap.officer", "ap.officer@default.com", "Finance123!",
+            await CreateTestUserAsync("ap.officer", "ap.officer@default.com", financeSeedPassword,
                 "Akua", "Owusu", defaultTenant.Id, "Accounts Payable Officer", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("ar.officer", "ar.officer@default.com", "Finance123!",
+            await CreateTestUserAsync("ar.officer", "ar.officer@default.com", financeSeedPassword,
                 "Kwame", "Asante", defaultTenant.Id, "Accounts Receivable Officer", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("senior.accountant", "senior.accountant@default.com", "Finance123!",
+            await CreateTestUserAsync("senior.accountant", "senior.accountant@default.com", financeSeedPassword,
                 "Efua", "Addo", defaultTenant.Id, "Senior Accountant", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("finance.manager", "finance.manager@default.com", "Finance123!",
+            await CreateTestUserAsync("finance.manager", "finance.manager@default.com", financeSeedPassword,
                 "Yaw", "Osei", defaultTenant.Id, "Finance Manager", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("financial.controller", "financial.controller@default.com", "Finance123!",
+            await CreateTestUserAsync("financial.controller", "financial.controller@default.com", financeSeedPassword,
                 "Abena", "Dapaah", defaultTenant.Id, "Financial Controller", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("chief.accountant", "chief.accountant@default.com", "Finance123!",
+            await CreateTestUserAsync("chief.accountant", "chief.accountant@default.com", financeSeedPassword,
                 "Nana", "Adu", defaultTenant.Id, "Chief Accountant", AuthenticationProvider.Local);
 
             // The development account lets the conditional executive stage be exercised without
             // granting broad tenant-administrator privileges to an approval actor.
-            await CreateTestUserAsync("managing.director", "managing.director@default.com", "Finance123!",
+            await CreateTestUserAsync("managing.director", "managing.director@default.com", financeSeedPassword,
                 "TDC", "Managing Director", defaultTenant.Id, "Managing Director", AuthenticationProvider.Local);
 
-            await CreateTestUserAsync("budget.officer", "budget.officer@default.com", "Finance123!",
+            await CreateTestUserAsync("budget.officer", "budget.officer@default.com", financeSeedPassword,
                 "Kojo", "Nkrumah", defaultTenant.Id, "Budget Officer", AuthenticationProvider.Local);
 
             _logger.LogInformation("Test users seeding completed");
@@ -10394,6 +10506,8 @@ namespace ErpSystem.Web.Services
             services.AddScoped<QuantitySurveyConfigurationProfileSeeder>();
             services.AddScoped<QuantitySurveyStatutoryReportSeeder>();
             services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
+            services.AddScoped<FinanceDataSeeder>();
+            services.AddScoped<ErpSystem.Api.Services.OperationalUatBaselineSeeder>();
             return services;
         }
 

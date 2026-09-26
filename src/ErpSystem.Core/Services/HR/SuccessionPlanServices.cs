@@ -9,6 +9,7 @@ using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Application.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -414,13 +415,18 @@ public class SuccessionPlanService : ISuccessionPlanService
             throw new SuccessionValidationException(
                 "Only draft or rejected succession plans can be submitted for approval.");
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        // Submitting must never approve. With no published definition the engine returns Approved
+        // and the adapter maps it to an approved plan — naming a person as the intended successor
+        // to a post, and raising the active-version flag, with nobody having decided. Defence in
+        // depth; a SUCCESSION_PLAN definition is seeded. See HrWorkflowFallbackAuthority.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(
                 workflowResult.ExecutionResult.Message ?? "Failed to start the succession plan approval workflow.");
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         await _planRepository.UpdateAsync(entity);
         await CreateSnapshotAsync(entity, submittedByUserId, "Submitted for approval", null, cancellationToken);
@@ -457,17 +463,13 @@ public class SuccessionPlanService : ISuccessionPlanService
         // The engine resolves approvers by ApplicationUser; everything the entity stores is an
         // Employee FK. See hr-attendance-actor-conventions for why these are two different ids.
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Reject", rejectDto.RejectionReason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, entity.Id, actingUserId,
+            "Reject", rejectDto.RejectionReason, "reject a succession plan", HrPermissions.ApproveSuccession);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId, rejectDto.RejectionReason);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, actingUserId, rejectDto.RejectionReason);
 
         entity.ReviewedById = rejectedByEmployeeId;
         entity.ReviewDate = DateTime.UtcNow;
@@ -493,17 +495,16 @@ public class SuccessionPlanService : ISuccessionPlanService
         // The engine resolves approvers by ApplicationUser; the entity's ApprovedById is an
         // Employee FK. Two different ids for the same human — see hr-attendance-actor-conventions.
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Approve", approveDto.ApprovalNotes);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        // ⚠ HR.Succession.Approve is NOT granted to the HR desk — see HrStaffGrants. Approving
+        // names the intended successor to a post, which the permission map records as a management
+        // act rather than record-keeping. On an unseeded tenant this stalls, deliberately.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, entity.Id, actingUserId,
+            "Approve", approveDto.ApprovalNotes, "approve a succession plan", HrPermissions.ApproveSuccession);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, actingUserId);
 
         // ⚠ A multi-step definition leaves the plan at UnderReview after an intermediate approval.
         // Superseding the previous version and raising the active-version flag are consequences of

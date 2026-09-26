@@ -63,6 +63,18 @@ public interface IEmployeeDocumentService
     Task<EmployeeReferee> AttachRefereeLetterAsync(Guid refereeId, Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, string? fileName, string? mimeType, long? fileSizeBytes, CancellationToken ct = default);
     Task<EmployeeReferee?> GetRefereeAsync(Guid id, CancellationToken ct = default);
 
+    // Documents that pertain to a GUARANTOR — many per row, each with a kind (demo feedback round
+    // 2, lane A-6). Same vocabulary as the employee file; different subject, different table.
+    Task<IEnumerable<EmployeeGuarantorDocumentDto>> GetGuarantorDocumentsAsync(Guid guarantorId, CancellationToken ct = default);
+    Task<EmployeeGuarantorDocument?> GetGuarantorDocumentEntityAsync(Guid id, CancellationToken ct = default);
+    Task<EmployeeGuarantorDocumentDto> AttachGuarantorDocumentAsync(
+        Guid guarantorId, Guid documentTypeId, string? title, string? description,
+        DateOnly? issuedOn, DateOnly? expiresOn,
+        Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, string? mimeType, long? fileSizeBytes,
+        Guid? uploadedByEmployeeId, CancellationToken ct = default);
+    Task DeleteGuarantorDocumentAsync(Guid id, CancellationToken ct = default);
+
     // Position requirements.
     Task<IEnumerable<PositionDocumentRequirementDto>> GetRequirementsAsync(Guid positionId, CancellationToken ct = default);
     Task<PositionDocumentRequirementDto> AddRequirementAsync(CreatePositionDocumentRequirementDto dto, CancellationToken ct = default);

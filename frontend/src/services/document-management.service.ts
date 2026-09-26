@@ -1,5 +1,6 @@
 import { apiService as rawApiService } from './api.service';
 import { compatibleApiService as apiService } from './compatibleApiService';
+import type { ProcedureCaseDetail } from './procedure-case.service';
 
 export interface CentralDocumentWorkspaceItem {
   title: string;
@@ -223,6 +224,7 @@ export interface CentralDocumentAnnotationReview {
   reviewNotes?: string | null;
   annotationStateJson?: string | null;
   createdAt: string;
+  updatedAt?: string | null;
 }
 
 export interface CentralDocumentRecordDetail {
@@ -629,12 +631,41 @@ class DocumentManagementService {
     return response.data || [];
   }
 
-  async getRecords(module?: string): Promise<CentralDocumentRecord[]> {
+  async getRecords(
+    module?: string,
+    options?: { documentReference?: string; search?: string; take?: number }
+  ): Promise<CentralDocumentRecord[]> {
     const response = await apiService.get<ApiResponse<CentralDocumentRecord[]>>(
       '/document-management/records',
-      module ? { module } : undefined
+      {
+        ...(module ? { module } : {}),
+        ...(options?.documentReference
+          ? { documentReference: options.documentReference }
+          : {}),
+        ...(options?.search ? { search: options.search } : {}),
+        ...(options?.take ? { take: options.take } : {}),
+      }
     );
     return response.data || [];
+  }
+
+  async attachRecordToCase(recordId: string, caseId: string, documentId: string): Promise<ProcedureCaseDetail> {
+    const response = await apiService.post<ApiResponse<ProcedureCaseDetail>>(
+      `/document-management/records/${recordId}/attach-to-case`,
+      { caseId, documentId }
+    );
+    return response.data;
+  }
+
+  async getRecordByDocumentReference(
+    documentReference: string,
+    module?: string
+  ): Promise<CentralDocumentRecord | null> {
+    const records = await this.getRecords(module, {
+      documentReference,
+      take: 1,
+    });
+    return records[0] || null;
   }
 
   async getRecord(id: string): Promise<CentralDocumentRecordDetail | null> {
@@ -732,12 +763,14 @@ class DocumentManagementService {
 
   async generateVersionRendition(
     recordId: string,
-    versionId: string
+    versionId: string,
+    force = false
   ): Promise<CentralDocumentVersion> {
+    const query = force ? '?force=true' : '';
     const response = await apiService.post<ApiResponse<CentralDocumentVersion>>(
       `/document-management/records/${encodeURIComponent(
         recordId
-      )}/versions/${encodeURIComponent(versionId)}/rendition/generate`
+      )}/versions/${encodeURIComponent(versionId)}/rendition/generate${query}`
     );
     return response.data;
   }

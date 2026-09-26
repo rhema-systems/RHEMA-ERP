@@ -49,7 +49,7 @@ export default function QuantitySurveyConfigurationPage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<CreateQsProfileRequest>({
     name: 'TDC Quantity Survey Configuration',
-    effectiveFrom: new Date().toISOString().slice(0, 10),
+    effectiveFrom: new Date().toISOString().slice(0, 19),
     isDefault: true,
   });
   const profiles = useQuery({
@@ -75,7 +75,7 @@ export default function QuantitySurveyConfigurationPage() {
       });
       toast({
         title: 'QS draft created',
-        description: 'All 17 controlled decisions were initialized.',
+        description: 'Choose and configure the QS processes you use.',
         variant: 'success',
       });
       router.push(
@@ -167,8 +167,7 @@ export default function QuantitySurveyConfigurationPage() {
         <div>
           <h1 className="text-3xl font-bold">Quantity survey configuration</h1>
           <p className="mt-1 text-muted-foreground">
-            Versioned, effective-dated policy controls for QS-CFG-001 through
-            QS-CFG-017.
+            Configure the QS processes you use, with version history and approval.
           </p>
         </div>
         <div className="flex gap-2">
@@ -264,9 +263,10 @@ export default function QuantitySurveyConfigurationPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Effective from</Label>
+              <Label>Effective from (UTC)</Label>
               <Input
-                type="date"
+                type="datetime-local"
+                step="1"
                 value={form.effectiveFrom}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -277,9 +277,10 @@ export default function QuantitySurveyConfigurationPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Effective to (optional)</Label>
+              <Label>Effective to (UTC, optional)</Label>
               <Input
-                type="date"
+                type="datetime-local"
+                step="1"
                 value={form.effectiveTo ?? ''}
                 onChange={(event) =>
                   setForm((current) => ({

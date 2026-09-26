@@ -63,7 +63,7 @@ export default function VendorInvoiceDetailsPage() {
     const { summary: workflowSummary, visibility: workflowVisibility, error: workflowError, refresh: refreshWorkflow } =
         useWorkflowSummary({ entityType: 'VendorInvoice', entityId: id });
 
-    const { data: invoice, isLoading } = useQuery({
+    const { data: invoice, isLoading, error: invoiceError, refetch: refetchInvoice } = useQuery({
         queryKey: ['vendor-invoice', id],
         queryFn: () => accountsPayableService.getInvoice(id),
     });
@@ -170,7 +170,11 @@ export default function VendorInvoiceDetailsPage() {
     if (!invoice) {
         return (
             <div className="p-8 text-center">
-                <h2 className="text-xl font-semibold">Vendor Invoice not found</h2>
+                <h2 className="text-xl font-semibold">{invoiceError ? 'Unable to load vendor invoice' : 'Vendor Invoice not found'}</h2>
+                {invoiceError && <>
+                    <p role="alert" className="my-4 text-sm text-destructive">{invoiceError.message}</p>
+                    <Button variant="outline" onClick={() => void refetchInvoice()}>Retry</Button>
+                </>}
                 <Button variant="link" onClick={() => router.push('/finance/ap/invoices')}>
                     Return to list
                 </Button>

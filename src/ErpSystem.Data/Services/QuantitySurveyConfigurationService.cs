@@ -187,10 +187,16 @@ public sealed class QuantitySurveyConfigurationService : IQuantitySurveyConfigur
     {
         var profile = await FindProfileAsync(id, false, cancellationToken); var decisions = await _db.QuantitySurveyConfigurationDecisions.AsNoTracking().Where(x => x.TenantId == _user.TenantId && x.ProfileId == id && !x.IsDeleted).ToListAsync(cancellationToken); var errors = new List<QuantitySurveyValidationIssueDto>();
         if (profile.EffectiveTo.HasValue && profile.EffectiveTo < profile.EffectiveFrom) Error(errors, "PROFILE_PERIOD", "Effective to cannot be before effective from.");
-        foreach (var definition in QuantitySurveyConfigurationDecisionRegistry.Definitions)
+        var configured = decisions.Where(x => QuantitySurveyArchitectureScope.HasConfiguration(x.ValueJson)).ToList();
+        if (configured.Count == 0) Error(errors, "EMPTY_PROFILE", "Configure at least one QS process before publishing.");
+        foreach (var decision in configured)
         {
-            var decision = decisions.SingleOrDefault(x => x.DecisionKey == definition.DecisionKey); if (decision is null) { Error(errors, "MISSING_DECISION", "The required decision is missing.", definition.DecisionKey); continue; }
-            var typed = QuantitySurveyConfigurationDecisionRegistry.Validate(decision.DecisionKey, decision.SchemaVersion, QuantitySurveyConfigurationDecisionRegistry.ParseValue(decision.ValueJson)); foreach (var message in typed.Errors) Error(errors, "INVALID_VALUE", message, decision.DecisionKey);
+            try
+            {
+                var typed = QuantitySurveyConfigurationDecisionRegistry.Validate(decision.DecisionKey, decision.SchemaVersion, QuantitySurveyConfigurationDecisionRegistry.ParseValue(decision.ValueJson));
+                foreach (var message in typed.Errors) Error(errors, "INVALID_VALUE", message, decision.DecisionKey);
+            }
+            catch (JsonException) { Error(errors, "INVALID_VALUE", "The saved configuration is not valid JSON.", decision.DecisionKey); }
             if (decision.Status != QuantitySurveyConfigurationDecisionStatus.Approved || decision.ApprovalStatus != QuantitySurveyConfigurationApprovalStatus.Approved) Error(errors, "NOT_APPROVED", "The decision must be approved.", decision.DecisionKey);
             if (decision.EvidenceStatus != QuantitySurveyConfigurationEvidenceStatus.Verified) Error(errors, "EVIDENCE_NOT_VERIFIED", "Central-DMS evidence must be verified by the approver.", decision.DecisionKey);
             else if (!await HasCurrentPublishedEvidenceAsync(decision.Id, cancellationToken)) Error(errors, "EVIDENCE_NOT_CURRENT", "At least one verified evidence link must still reference the current published central-DMS version.", decision.DecisionKey);
@@ -202,7 +208,9 @@ public sealed class QuantitySurveyConfigurationService : IQuantitySurveyConfigur
     public async Task<QuantitySurveyProfileDto> PublishProfileAsync(Guid id, QuantitySurveyLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default)
     {
         var reason = RequiredReason(request.Reason, "publishing a QS configuration profile");
-        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken); var profile = await FindProfileAsync(id, true, cancellationToken); QuantitySurveyConfigurationLifecyclePolicy.EnsureEditable(profile); CheckVersion(profile.RowVersion, request.RowVersion, "profile");
+        // Publication, retirement and the audit revision are persisted by one SaveChanges.
+        // EF owns that atomic transaction so SQL Server's retry strategy can execute it.
+        var profile = await FindProfileAsync(id, true, cancellationToken); QuantitySurveyConfigurationLifecyclePolicy.EnsureEditable(profile); CheckVersion(profile.RowVersion, request.RowVersion, "profile");
         var validation = await ValidateProfileAsync(id, cancellationToken); if (!validation.IsValid) throw new QuantitySurveyConfigurationValidationException("The profile is not ready to publish.", validation);
         var existing = await _db.QuantitySurveyConfigurationProfiles.Where(x => x.TenantId == _user.TenantId && x.ProfileKey == profile.ProfileKey && x.Id != id && !x.IsDeleted && x.LifecycleStatus == QuantitySurveyConfigurationProfileStatus.Published).OrderByDescending(x => x.Version).ToListAsync(cancellationToken);
         foreach (var current in existing)
@@ -212,7 +220,7 @@ public sealed class QuantitySurveyConfigurationService : IQuantitySurveyConfigur
             if (profile.EffectiveFrom <= DateTime.UtcNow) { current.LifecycleStatus = QuantitySurveyConfigurationProfileStatus.Retired; current.RetiredAt = DateTime.UtcNow; current.RetiredById = _user.UserId; }
         }
         if (profile.IsDefault) foreach (var other in await _db.QuantitySurveyConfigurationProfiles.Where(x => x.TenantId == _user.TenantId && x.Id != id && x.IsDefault && !x.IsDeleted).ToListAsync(cancellationToken)) other.IsDefault = false;
-        var before = Snapshot(profile); profile.LifecycleStatus = QuantitySurveyConfigurationProfileStatus.Published; profile.PublishedAt = DateTime.UtcNow; profile.PublishedById = _user.UserId; Touch(profile); AddRevision(id, null, QuantitySurveyAuditEventMap.PublishProfile, correlationId, reason, before, Snapshot(profile)); await SaveAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return await GetProfileAsync(id, cancellationToken);
+        var before = Snapshot(profile); profile.LifecycleStatus = QuantitySurveyConfigurationProfileStatus.Published; profile.PublishedAt = DateTime.UtcNow; profile.PublishedById = _user.UserId; Touch(profile); AddRevision(id, null, QuantitySurveyAuditEventMap.PublishProfile, correlationId, reason, before, Snapshot(profile)); await SaveAsync(cancellationToken); return await GetProfileAsync(id, cancellationToken);
     }
 
     public async Task<QuantitySurveyProfileDto> RetireProfileAsync(Guid id, QuantitySurveyLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default)
@@ -283,7 +291,7 @@ public sealed class QuantitySurveyConfigurationService : IQuantitySurveyConfigur
                 (_, _) => true)
             .AnyAsync(token);
 
-    private static QuantitySurveyProfileSummaryDto MapSummary(QuantitySurveyConfigurationProfile p, IEnumerable<QuantitySurveyConfigurationDecision> decisions) { var list = decisions.ToList(); return new() { Id = p.Id, ProfileKey = p.ProfileKey, ProfileCode = p.ProfileCode, Name = p.Name, Version = p.Version, LifecycleStatus = p.LifecycleStatus, EffectiveFrom = p.EffectiveFrom, EffectiveTo = p.EffectiveTo, IsDefault = p.IsDefault, CompleteDecisionCount = list.Count(Complete), TotalDecisionCount = list.Count, UpdatedAt = p.UpdatedAt ?? p.CreatedAt, RowVersion = Encode(p.RowVersion) }; }
+    private static QuantitySurveyProfileSummaryDto MapSummary(QuantitySurveyConfigurationProfile p, IEnumerable<QuantitySurveyConfigurationDecision> decisions) { var list = decisions.Where(d => QuantitySurveyArchitectureScope.HasConfiguration(d.ValueJson)).ToList(); return new() { Id = p.Id, ProfileKey = p.ProfileKey, ProfileCode = p.ProfileCode, Name = p.Name, Version = p.Version, LifecycleStatus = p.LifecycleStatus, EffectiveFrom = p.EffectiveFrom, EffectiveTo = p.EffectiveTo, IsDefault = p.IsDefault, CompleteDecisionCount = list.Count(Complete), TotalDecisionCount = list.Count, UpdatedAt = p.UpdatedAt ?? p.CreatedAt, RowVersion = Encode(p.RowVersion) }; }
     private static QuantitySurveyEvidenceDto MapEvidence(QuantitySurveyConfigurationEvidenceLink x, CentralDocumentRecord? record, CentralDocumentVersion? version) => new() { Id = x.Id, DecisionId = x.DecisionId, EvidenceType = x.EvidenceType, CentralDocumentRecordId = x.CentralDocumentRecordId, CentralDocumentVersionId = x.CentralDocumentVersionId, DocumentReference = record?.DocumentReference, DocumentTitle = record?.Title, VersionNumber = version?.VersionNumber, ExternalReference = x.ExternalReference, Checksum = x.Checksum, LinkedAt = x.LinkedAt, LinkedById = x.LinkedById };
     private static QuantitySurveyRevisionDto MapRevision(QuantitySurveyConfigurationRevision x)
     {

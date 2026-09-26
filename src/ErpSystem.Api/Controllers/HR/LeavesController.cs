@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Models;
 using ErpSystem.Data;
@@ -28,6 +30,7 @@ namespace ErpSystem.Api.Controllers.HR
         private readonly ICentralDocumentRepositoryFileService _centralDocuments;
         private readonly ApplicationDbContext _db;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IWorkflowIntegrationService _workflowIntegrationService;
         private readonly IAuthorizationService _authorization;
         private readonly ILogger<LeavesController> _logger;
 
@@ -39,6 +42,7 @@ namespace ErpSystem.Api.Controllers.HR
             ICentralDocumentRepositoryFileService centralDocuments,
             ApplicationDbContext db,
             ICurrentUserService currentUserService,
+            IWorkflowIntegrationService workflowIntegrationService,
             IAuthorizationService authorization,
             ILogger<LeavesController> logger)
         {
@@ -49,6 +53,7 @@ namespace ErpSystem.Api.Controllers.HR
             _centralDocuments = centralDocuments;
             _db = db;
             _currentUserService = currentUserService;
+            _workflowIntegrationService = workflowIntegrationService;
             _authorization = authorization;
             _logger = logger;
         }
@@ -85,6 +90,40 @@ namespace ErpSystem.Api.Controllers.HR
                 if (mine) return true;
             }
             return await HoldsLeavePolicyAsync(policy);
+        }
+
+        /// <summary>
+        /// Self-or-permission, OR the person the workflow engine is currently asking to decide.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why the third arm exists.</b> The read gates here were written as deliberately
+        /// NOT self-or-manager, on the reasoning that a line manager's part in leave is approval and
+        /// that reaches them through the engine's own assignee check rather than through read access
+        /// to a report's file. That was coherent while the Manager stage was optional and HR did the
+        /// approving in practice.</para>
+        ///
+        /// <para>The two-stage ladder made it incoherent: stage 1 routes to the <c>Manager</c> role,
+        /// which holds no HR permission at all, so the approver could act on a request they could not
+        /// open — and the approvals queue listed it for them, so the screen offered a row that 403'd
+        /// on click. Found by the hr-leave suite, which asserted that the person who is supposed to
+        /// do the thing can.</para>
+        ///
+        /// <para><b>It is narrower than granting the role a permission.</b> This opens exactly one
+        /// request, to exactly the person being asked to decide it, for exactly as long as it is at
+        /// their step — the engine answers false the moment the request moves on. Granting
+        /// <c>HR.Leave.Read</c> to <c>Manager</c> would instead open every employee's whole leave
+        /// history to every manager, permanently.</para>
+        /// </remarks>
+        private async Task<bool> CanReadRequestAsync(Guid leaveRequestId)
+        {
+            if (await CanActOnRequestAsync(leaveRequestId, HrPermissions.LeaveReadPolicy))
+                return true;
+
+            if (!Guid.TryParse(_currentUserService.UserId, out var userId) || userId == Guid.Empty)
+                return false;
+
+            return await _workflowIntegrationService.CanUserApproveAsync(
+                "LeaveRequest", leaveRequestId, userId);
         }
 
         /// <summary>
@@ -168,8 +207,9 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<LeaveRequestDto>> GetLeaveApplicationById(Guid id)
         {
-            // W3: the request's owner, or holders of the leave read tier.
-            if (!await CanActOnRequestAsync(id, HrPermissions.LeaveReadPolicy))
+            // W3: the request's owner, holders of the leave read tier, or whoever the engine is
+            // currently asking to decide it — see CanReadRequestAsync.
+            if (!await CanReadRequestAsync(id))
                 return Forbid();
 
             try
@@ -208,7 +248,8 @@ namespace ErpSystem.Api.Controllers.HR
             }
 
             // W3: ownership is only knowable after the lookup — the number is not a capability.
-            if (!await CanActForEmployeeAsync(application.EmployeeId, HrPermissions.LeaveReadPolicy))
+            // Same three arms as the by-id read.
+            if (!await CanReadRequestAsync(application.Id))
                 return Forbid();
 
             return Ok(application);
@@ -229,7 +270,8 @@ namespace ErpSystem.Api.Controllers.HR
             Guid employeeId,
             [FromQuery] int year = 0,
             [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 20)
+            [FromQuery] int pageSize = 20,
+            [FromQuery] LeaveStatus? status = null)
         {
             // W3: own history, or the leave read tier.
             if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
@@ -240,7 +282,7 @@ namespace ErpSystem.Api.Controllers.HR
                 year = DateTime.Today.Year;
             }
 
-            var result = await _leaveService.GetEmployeeLeaveHistoryAsync(employeeId, year, pageNumber, pageSize);
+            var result = await _leaveService.GetEmployeeLeaveHistoryAsync(employeeId, year, pageNumber, pageSize, status);
 
             return Ok(result);
         }
@@ -464,8 +506,36 @@ namespace ErpSystem.Api.Controllers.HR
         }
 
         /// <summary>
+        /// Leave requests awaiting YOUR decision
+        /// </summary>
+        /// <remarks>
+        /// <para>The queue the approvals screen reads. It asks the workflow engine which requests
+        /// the caller may actually decide, rather than inferring it from the reporting line — the
+        /// closure plan's L-10. Under the two-stage ladder that difference matters: after the line
+        /// manager approves, the request stays <c>Pending</c> while the engine sits at the HR step,
+        /// so a reporting-line query keeps showing it to the manager who already decided and never
+        /// shows it to HR, who is nobody's manager.</para>
+        ///
+        /// <para>No approver parameter, deliberately: the answer is only ever about the caller, so
+        /// there is nothing here to point at somebody else's queue.</para>
+        /// </remarks>
+        /// <response code="200">Requests awaiting your decision</response>
+        [HttpGet("my-approvals")]
+        [ProducesResponseType(typeof(PagedResult<LeaveRequestDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<PagedResult<LeaveRequestDto>>> GetMyApprovals(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 20,
+            CancellationToken ct = default)
+            => Ok(await _leaveService.GetMyPendingApprovalsAsync(pageNumber, pageSize, ct));
+
+        /// <summary>
         /// Get pending leave approvals for a manager
         /// </summary>
+        /// <remarks>
+        /// ⚠ SUPERSEDED by <c>my-approvals</c> above, and kept only because existing callers use
+        /// it. It answers "this manager's direct reports' Pending requests", which is not the same
+        /// question as "what is waiting on this manager" — see L-10.
+        /// </remarks>
         /// <param name="managerId">Manager's employee ID</param>
         /// <param name="pageNumber">Page number (default: 1)</param>
         /// <param name="pageSize">Page size (default: 20)</param>
@@ -612,6 +682,474 @@ namespace ErpSystem.Api.Controllers.HR
         }
 
         /// <summary>
+        /// Approve several leave requests at once
+        /// </summary>
+        /// <remarks>
+        /// Deliberately NOT permission-gated, exactly like the single approve: the approver is
+        /// whoever the workflow engine assigned, and the service refuses anyone else PER REQUEST.
+        /// A batch cannot smuggle through a request the caller was never assigned, because each
+        /// item runs the same check the single-item endpoint runs (bulk catalogue §4.1).
+        /// </remarks>
+        /// <response code="200">Per-item results, including why any were skipped</response>
+        /// <response code="400">More than 50 at a time</response>
+        [HttpPost("bulk-approve")]
+        [ProducesResponseType(typeof(HrBulkActionResultDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<HrBulkActionResultDto>> BulkApprove(
+            [FromBody] BulkLeaveDecisionDto dto, CancellationToken ct)
+        {
+            try
+            {
+                return Ok(await _leaveService.BulkDecideAsync(dto, approve: true, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Reject several leave requests at once, with one shared reason.</summary>
+        [HttpPost("bulk-reject")]
+        [ProducesResponseType(typeof(HrBulkActionResultDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<HrBulkActionResultDto>> BulkReject(
+            [FromBody] BulkLeaveDecisionDto dto, CancellationToken ct)
+        {
+            try
+            {
+                return Ok(await _leaveService.BulkDecideAsync(dto, approve: false, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// The organisation-wide leave register
+        /// </summary>
+        /// <remarks>
+        /// Until this existed the only listing was one employee at a time, so "who is off in
+        /// December" or "every rejected request this quarter" could not be asked at all (closure
+        /// plan L-6). Org-wide, so it sits on the leave READ tier rather than self-or-permission —
+        /// an employee's own history is still served by <c>employee/{id}/history</c>.
+        /// </remarks>
+        [HttpGet("register")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        [ProducesResponseType(typeof(PagedResult<LeaveRequestDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<PagedResult<LeaveRequestDto>>> GetRegister(
+            [FromQuery] DateOnly? from,
+            [FromQuery] DateOnly? to,
+            [FromQuery] LeaveStatus? status,
+            [FromQuery] Guid? leaveTypeId,
+            [FromQuery] Guid? employeeId,
+            [FromQuery] Guid? organizationUnitId,
+            [FromQuery] string? search,
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 25,
+            CancellationToken ct = default)
+        {
+            var filter = new LeaveRegisterFilterDto
+            {
+                From = from, To = to, Status = status, LeaveTypeId = leaveTypeId,
+                EmployeeId = employeeId, OrganizationUnitId = organizationUnitId, Search = search,
+            };
+            return Ok(await _leaveService.GetRegisterAsync(filter, pageNumber, pageSize, ct));
+        }
+
+        /// <summary>The register as a CSV, with the same filters.</summary>
+        [HttpGet("register/export")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        public async Task<IActionResult> ExportRegister(
+            [FromQuery] DateOnly? from,
+            [FromQuery] DateOnly? to,
+            [FromQuery] LeaveStatus? status,
+            [FromQuery] Guid? leaveTypeId,
+            [FromQuery] Guid? employeeId,
+            [FromQuery] Guid? organizationUnitId,
+            [FromQuery] string? search,
+            CancellationToken ct = default)
+        {
+            var filter = new LeaveRegisterFilterDto
+            {
+                From = from, To = to, Status = status, LeaveTypeId = leaveTypeId,
+                EmployeeId = employeeId, OrganizationUnitId = organizationUnitId, Search = search,
+            };
+            var csv = await _leaveService.ExportRegisterCsvAsync(filter, ct);
+            return File(csv, "text/csv", $"leave-register-{DateTime.UtcNow:yyyyMMdd}.csv");
+        }
+
+        /// <summary>The balances register as a CSV.</summary>
+        [HttpGet("balances/export")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        public async Task<IActionResult> ExportBalances(
+            [FromQuery] int year,
+            [FromQuery] Guid? employeeId,
+            [FromQuery] Guid? leaveTypeId,
+            CancellationToken ct = default)
+        {
+            if (year == 0) year = DateTime.Today.Year;
+            var csv = await _leaveService.ExportBalancesCsvAsync(year, employeeId, leaveTypeId, ct);
+            return File(csv, "text/csv", $"leave-balances-{year}.csv");
+        }
+
+        /// <summary>The mandatory-leave compliance register as a CSV.</summary>
+        [HttpGet("compliance/export")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        public async Task<IActionResult> ExportCompliance(
+            [FromQuery] int year, CancellationToken ct = default)
+        {
+            if (year == 0) year = DateTime.Today.Year;
+            var csv = await _leaveService.ExportComplianceCsvAsync(year, ct);
+            return File(csv, "text/csv", $"leave-compliance-{year}.csv");
+        }
+
+        /// <summary>
+        /// Leave drawn as time rather than rows
+        /// </summary>
+        /// <remarks>
+        /// <para>One endpoint, three audiences (decision D-9). The SCOPE decides who is visible and
+        /// how the caller is authorized for it — which is the whole reason this is not three
+        /// endpoints or one unguarded one:</para>
+        /// <list type="bullet">
+        /// <item><c>Mine</c> — the caller's own leave. Needs a linked employee record and nothing
+        /// else; every member of staff can see their own year.</item>
+        /// <item><c>Team</c> — the caller's own direct reports, plus the caller. Needs a linked
+        /// employee record. This is the one place leave deliberately DOES read down the reporting
+        /// line: a manager arranging cover has to see who is away, and a calendar band carries a
+        /// name, a leave type and dates — no reason, no balance, nothing the rest of the module
+        /// keeps behind self-or-permission.</item>
+        /// <item><c>Organisation</c> — everybody. The leave READ tier, like every other org-wide
+        /// leave surface.</item>
+        /// </list>
+        /// </remarks>
+        /// <response code="200">The calendar for the range</response>
+        /// <response code="400">The range is backwards or longer than 400 days</response>
+        /// <response code="403">Organisation scope without the leave read tier, or no linked employee record</response>
+        [HttpGet("calendar")]
+        [ProducesResponseType(typeof(LeaveCalendarDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<ActionResult<LeaveCalendarDto>> GetCalendar(
+            [FromQuery] DateOnly from,
+            [FromQuery] DateOnly to,
+            [FromQuery] LeaveCalendarScope scope = LeaveCalendarScope.Mine,
+            [FromQuery] Guid? leaveTypeId = null,
+            [FromQuery] Guid? organizationUnitId = null,
+            CancellationToken ct = default)
+        {
+            try
+            {
+                Guid? subject = null;
+
+                if (scope == LeaveCalendarScope.Organisation)
+                {
+                    if (!await HoldsLeavePolicyAsync(HrPermissions.LeaveReadPolicy))
+                        return Forbid();
+                }
+                else
+                {
+                    // Both personal scopes resolve from the token, never from a query parameter —
+                    // otherwise "my team" would take an employee id and become a way to read
+                    // anybody's reporting line.
+                    if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty)
+                        return Forbid();
+                    subject = me;
+                }
+
+                return Ok(await _leaveService.GetCalendarAsync(
+                    from, to, scope, subject, leaveTypeId, organizationUnitId, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building the leave calendar");
+                return StatusCode(500, "An error occurred while building the leave calendar");
+            }
+        }
+
+        /// <summary>
+        /// Send a submitted leave request back to the employee with dates of your own
+        /// </summary>
+        /// <remarks>
+        /// The third decision verb beside approve and reject, and TDC's "sending back for
+        /// correction with suggested dates". Leave PLANS have had it since the port; the request —
+        /// the record that actually books the days — did not.
+        /// </remarks>
+        /// <response code="200">Sent back; the request is now ChangesSuggested</response>
+        /// <response code="400">Not a submitted request, or the dates are the wrong way round</response>
+        /// <response code="401">You are not an approver for this request, or it is your own</response>
+        /// <response code="404">Leave application not found</response>
+        // W3: same as approve and reject — the workflow assignee's act, validated per request.
+        [HttpPut("{id}/suggest-changes")]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveRequestDto>> SuggestChanges(
+            Guid id, [FromBody] SuggestLeaveRequestChangesDto dto)
+        {
+            try
+            {
+                return Ok(await _leaveService.SuggestChangesAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error suggesting changes on leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while sending the leave request back");
+            }
+        }
+
+        /// <summary>
+        /// Accept the suggested dates, or counter with your own; either way the request re-submits
+        /// </summary>
+        /// <response code="200">Answered; the request is back in approval</response>
+        /// <response code="400">Nothing to respond to, or the dates fail a check</response>
+        /// <response code="403">Not your request</response>
+        /// <response code="404">Leave application not found</response>
+        [HttpPut("{id}/respond-suggestion")]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveRequestDto>> RespondToSuggestion(
+            Guid id, [FromBody] RespondToLeaveSuggestionDto dto)
+        {
+            try
+            {
+                // Answering a suggestion is the EMPLOYEE's act — it is their leave and their dates.
+                // Self-or-leave-write, the same shape every other per-employee write here uses.
+                var owner = await _leaveService.GetLeaveRequestByIdAsync(id);
+                if (!await CanActForEmployeeAsync(owner.EmployeeId, HrPermissions.LeaveWritePolicy))
+                    return Forbid();
+
+                return Ok(await _leaveService.RespondToSuggestionAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error responding to the suggestion on leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while answering the suggested dates");
+            }
+        }
+
+        /// <summary>
+        /// Move an approved leave request to different dates, keeping its number and its history
+        /// </summary>
+        /// <remarks>
+        /// TDC's "possible shifting of the leave to a different day even after the planning is
+        /// done". The alternative was cancel-and-re-key, which loses the number, the approval and
+        /// the history. ⚠ Moving the dates RE-OPENS the approval (decision D-5): an approval is an
+        /// approval of dates, and carrying it across to different ones would be a lie.
+        /// </remarks>
+        /// <response code="200">Moved; the request is back in approval on its new dates</response>
+        /// <response code="400">Not approved, already closed, no reason given, or the new dates fail a check</response>
+        /// <response code="403">Not your request and you do not hold the leave write tier</response>
+        /// <response code="404">Leave application not found</response>
+        [HttpPut("{id}/reschedule")]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveRequestDto>> Reschedule(
+            Guid id, [FromBody] RescheduleLeaveRequestDto dto)
+        {
+            try
+            {
+                // Decision D-5: HR may move it, and the employee may move their own. Both then go
+                // back through approval, so neither can move a date past an approver.
+                var owner = await _leaveService.GetLeaveRequestByIdAsync(id);
+                if (!await CanActForEmployeeAsync(owner.EmployeeId, HrPermissions.LeaveWritePolicy))
+                    return Forbid();
+
+                return Ok(await _leaveService.RescheduleAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error rescheduling leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while moving the leave request");
+            }
+        }
+
+        /// <summary>
+        /// Recall an employee from leave before their end date
+        /// </summary>
+        /// <remarks>
+        /// Curtailment (residue plan R-14). The leave is <b>truncated</b>: days up to the recall
+        /// stand as taken, days after are restored to the balance, and the request keeps its number,
+        /// its status and its approval — because it was validly approved and then interrupted.
+        ///
+        /// <para>⚠ <c>effectiveDate</c> is <b>the first day the employee is back at work</b>, not
+        /// the last day of their leave.</para>
+        ///
+        /// <para>⚠ <b>Gated on the write policy outright, not self-or-HR</b>, unlike reschedule
+        /// beside it. A recall is the employer's act: an employee may ask to move their own leave,
+        /// but may not call themselves back and hand themselves the days. The service refuses the
+        /// subject a second time, so this holds even for an HR user recalling themselves.</para>
+        /// </remarks>
+        /// <response code="200">The truncated request</response>
+        /// <response code="400">Not approved, already closed, no reason, or a date that gives nothing back</response>
+        [HttpPut("{id}/recall")]
+        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveRequestDto>> Recall(
+            Guid id, [FromBody] RecallLeaveRequestDto dto)
+        {
+            try
+            {
+                return Ok(await _leaveService.RecallAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error recalling leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while recalling the employee from leave");
+            }
+        }
+
+        /// <summary>
+        /// Point this request at the medical board that ruled on the absence
+        /// </summary>
+        /// <remarks>
+        /// Residue plan G4. Pass a null id to unlink.
+        ///
+        /// <para>⚠ A board that is only REQUESTED or CONVENED can be linked — a board is usually
+        /// asked for before it sits, and the request should be able to say which one it is waiting
+        /// on. The evidence gate is what insists on <b>Concluded</b>: linking records intent, the
+        /// gate enforces the rule.</para>
+        ///
+        /// <para>⚠ The board must be about the same employee.</para>
+        ///
+        /// <para>⚠ <b>An empty body means unlink</b>, and that is not decoration. The frontend's
+        /// shared <c>apiService.put</c> drops a <c>null</c> body rather than serialising it, so the
+        /// Unlink button sends a PUT with no body at all. Bound strictly that is a <b>400</b> from
+        /// model binding — <i>"A non-empty request body is required"</i>, measured against a
+        /// deliberately strict sibling endpoint — and the button does nothing. The endpoint would
+        /// work from curl and fail in the product, which is precisely the class of defect this slice
+        /// was fixing. <c>EmptyBodyBehavior.Allow</c> makes
+        /// "no board named" and "no body sent" the same request, which is also what a nullable
+        /// parameter ought to mean.</para>
+        /// </remarks>
+        [HttpPut("{id}/medical-board")]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<ActionResult<LeaveRequestDto>> LinkMedicalBoard(
+            Guid id,
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Guid? medicalBoardId)
+        {
+            try
+            {
+                // Self-or-desk, like the other things done TO a request: an employee may attach
+                // their own evidence, and HR may do it for anybody.
+                if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
+                    return Forbid();
+
+                return Ok(await _leaveService.LinkMedicalBoardAsync(id, medicalBoardId));
+            }
+            catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error linking medical board to leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while linking the medical board");
+            }
+        }
+
+        /// <summary>
+        /// Record that approved leave is still going ahead
+        /// </summary>
+        /// <remarks>
+        /// The answer to the reminder that asks. It moves no days and changes no status — it
+        /// records that somebody was asked and answered, which is what was missing between an
+        /// approval and the day the leave starts.
+        /// </remarks>
+        /// <response code="200">Confirmed</response>
+        /// <response code="400">Not approved, or already closed</response>
+        /// <response code="403">Not your request and you do not hold the leave write tier</response>
+        /// <response code="404">Leave application not found</response>
+        [HttpPut("{id}/confirm-observance")]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveRequestDto>> ConfirmObservance(Guid id)
+        {
+            try
+            {
+                var owner = await _leaveService.GetLeaveRequestByIdAsync(id);
+                if (!await CanActForEmployeeAsync(owner.EmployeeId, HrPermissions.LeaveWritePolicy))
+                    return Forbid();
+
+                return Ok(await _leaveService.ConfirmObservanceAsync(id));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error confirming leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while confirming the leave");
+            }
+        }
+
+        /// <summary>
         /// Cancel a leave application
         /// </summary>
         /// <param name="id">Leave application ID</param>
@@ -689,6 +1227,94 @@ namespace ErpSystem.Api.Controllers.HR
         /// Recalculate leave balance(s) from source data (admin operation).
         /// If LeaveTypeId is provided only that type is recalculated; otherwise all leave types for the employee are recalculated.
         /// </summary>
+        /// <summary>
+        /// Recalculate EVERY balance in the tenant for a year (admin operation)
+        /// </summary>
+        /// <remarks>
+        /// <para>⚠ <b>Finding L-19.</b> Recalculation was one employee at a time, which is right for
+        /// the ordinary case — it runs after every approval, cancellation and adjustment. But a
+        /// policy correction reaches everybody: change an accrual rule, fix an entitlement, or land
+        /// the <c>UsedDays</c> correction that G1 shipped, and nine hundred balances are stale with
+        /// no route through the UI to put them right.</para>
+        ///
+        /// <para><b>Safe to run and safe to re-run.</b> It DERIVES the counters from requests and
+        /// adjustments that already exist, never invents a figure, and never touches
+        /// <c>EntitledDays</c> or <c>CarriedOverDays</c>. That is why it has no dry run, unlike the
+        /// year-end jobs — there is nothing to preview when running twice gives the same answer as
+        /// running once.</para>
+        ///
+        /// <para>⚠ <b>Admin tier</b>, a step above the per-employee call beside it: this one walks
+        /// the whole tenant and is heavy.</para>
+        /// </remarks>
+        /// <response code="200">What it did, including any employee it could not finish</response>
+        [HttpPost("balances/recalculate-all")]
+        [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
+        [ProducesResponseType(typeof(LeaveBulkRecalculationResult), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<LeaveBulkRecalculationResult>> RecalculateAllBalances(
+            [FromQuery] int year, [FromQuery] Guid? leaveTypeId = null, CancellationToken ct = default)
+        {
+            if (year < 2000)
+                return BadRequest(new { message = "A valid year is required." });
+
+            try
+            {
+                return Ok(await _recalculationService.RecalculateTenantAsync(year, leaveTypeId, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Re-derive stored entitlements from the rulebook, or preview what that would change
+        /// </summary>
+        /// <remarks>
+        /// <para>Entitlement plan A3. <c>EntitledDays</c> is written when a balance row is created
+        /// and never refreshed, so an allocation corrected mid-year does not reach the balances that
+        /// already exist — and a balance opened by posting an adjustment used to record the leave
+        /// type's DEFAULT days rather than the employee's staff-level allocation (A1). Fixing the
+        /// creation site helps nobody who is already wrong; this is the pass that does.</para>
+        ///
+        /// <para>⚠ <b>Unlike the recalculation beside it, this OVERWRITES a stored figure</b> from
+        /// configuration that may have moved since. That is why it has a dry run and that one does
+        /// not: the preview names every row and both figures, so a person decides.</para>
+        ///
+        /// <para>⚠ <b>It does not revisit a carry-over already run for the year</b> — that was
+        /// computed from the old entitlement. The result counts those rows separately rather than
+        /// silently correcting them, because re-running carry-over is a decision of its own.</para>
+        ///
+        /// <para><b>Admin tier</b>, like the year-end jobs and for the same reason: it changes what
+        /// people are owed, in bulk.</para>
+        /// </remarks>
+        /// <param name="dryRun">⚠ Compute and report, write nothing.</param>
+        /// <response code="200">What changed, or what would have</response>
+        [HttpPost("balances/repair-entitlements")]
+        [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
+        [ProducesResponseType(typeof(LeaveEntitlementRepairResult), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<LeaveEntitlementRepairResult>> RepairEntitlements(
+            [FromQuery] int year,
+            [FromQuery] Guid? leaveTypeId = null,
+            [FromQuery] Guid? employeeId = null,
+            [FromQuery] bool dryRun = false,
+            CancellationToken ct = default)
+        {
+            if (year < 2000)
+                return BadRequest(new { message = "A valid year is required." });
+
+            try
+            {
+                return Ok(await _recalculationService.RepairEntitlementsAsync(
+                    year, leaveTypeId, employeeId, dryRun, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("balances/recalculate")]
         [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(StatusCodes.Status200OK)]
@@ -739,7 +1365,10 @@ namespace ErpSystem.Api.Controllers.HR
         [HttpPost("{id:guid}/attachments")]
         [ProducesResponseType(typeof(LeaveRequestAttachmentDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> UploadAttachment(Guid id, IFormFile file, CancellationToken ct = default)
+        public async Task<IActionResult> UploadAttachment(
+            Guid id, IFormFile file,
+            [FromQuery] LeaveEvidenceKind evidenceKind = LeaveEvidenceKind.Other,
+            CancellationToken ct = default)
         {
             // W3: evidence goes onto your own request; the HR desk attaches for anyone.
             if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
@@ -798,7 +1427,11 @@ namespace ErpSystem.Api.Controllers.HR
                 var dto = await _leaveService.UploadAttachmentAsync(
                     id, uploadedById, document.OriginalFileName, string.Empty,
                     document.ContentType, document.FileSize,
-                    document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId);
+                    document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                    // ⚠ What the document IS, which is what the R-15a evidence gate reads. Defaults to
+                    // Other, so an existing caller that does not send it uploads a plain supporting
+                    // document rather than silently satisfying a medical-certificate requirement.
+                    evidenceKind);
 
                 return Ok(dto);
             }

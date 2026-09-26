@@ -202,7 +202,7 @@ with no consumer yet.
 `ManpowerBudgets` carries `SalaryBudget`, `BenefitsBudget`, `RecruitmentBudget`,
 `TrainingBudget`, `TotalBudget`, `ActualSpent`, `Variance`. Per
 [[hr-finance-integration-split]]: **no GL posting in this area** — register every one of these
-in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the single post-HR sweep, and read Finance
+in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` for the single post-HR sweep, and read Finance
 `Currency` / `ExchangeRate` if the budget needs a currency at all (today it does not carry one —
 see D-5).
 
@@ -766,7 +766,7 @@ so an empty one would approve an establishment of nothing.
   repeatable until it has been run twice in a row; "green" on a first run proves less than it
   looks.**
 
-**Money events registered** in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, including two findings for
+**Money events registered** in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`, including two findings for
 the sweep rather than for a slice: `ManpowerBudget` carries **no currency at all**, and
 `ActualSpent`/`Variance` **have no writer anywhere** — they can only come from Finance actuals, and
 a budget's variance is permanently zero until the sweep decides who fills them. Also a **three-way**
@@ -856,7 +856,7 @@ answer rather than a coincidence.
 ⚠ **Deliberately not built, and asserted as absent so it reads as a decision rather than an
 oversight: budget variance.** `ManpowerBudget.ActualSpent` and `.Variance` have no writer anywhere;
 they can only come from Finance actuals. A variance chart would report zero and call it news. It is
-registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-HR sweep.
+registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-HR sweep.
 
 **Two of my own mistakes, both the same shape as the defects this area keeps finding:**
 
@@ -1028,6 +1028,6 @@ FR-HR-173 rule is promoted from advisory to a block wherever an establishment wa
 authorised. Both were found by running **other areas' harnesses**, not this one's.
 
 **Still open, recorded not forgotten:** `ManpowerBudget` carries no currency and nothing writes
-`ActualSpent`/`Variance` — both registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the
+`ActualSpent`/`Variance` — both registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` for the
 post-HR sweep, along with a three-way training double-count. D-6's cleanup (43 residue job
 descriptions and ten `E2E RecD Band` salary grades from area 6) is listed there too.

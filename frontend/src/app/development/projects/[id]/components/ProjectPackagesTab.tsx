@@ -22,10 +22,11 @@ import { QuantitySurveyEstimateVersionsDialog } from '@/components/quantity-surv
 import { QuantitySurveyCostReconciliationDialog } from '@/components/quantity-survey/QuantitySurveyCostReconciliationDialog';
 import { QuantitySurveyMeasurementsDialog } from '@/components/quantity-survey/QuantitySurveyMeasurementsDialog';
 import { QuantitySurveyJointMeasurementsDialog } from '@/components/quantity-survey/QuantitySurveyJointMeasurementsDialog';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
 import { useAuth } from '@/hooks/use-auth';
 import { getQuantitySurveyWorkspaceAccess } from '@/lib/quantity-survey-workspace-access';
 import type { BusinessPartnerDto } from '@/services/businessPartnerService';
-import type { ContractDto } from '@/services/contractService';
+import type { ProjectContractLookupDto } from '@/services/projectService';
 import type {
   InventoryItemDto,
   UnitOfMeasureDto,
@@ -53,7 +54,7 @@ type ProjectPackagesTabProps = {
   editingBoqItemId: string | null;
   setBoqDraft: Dispatch<SetStateAction<CreateProjectBoqItemDto>>;
   activeBusinessPartners: BusinessPartnerDto[];
-  activeContracts: ContractDto[];
+  activeContracts: ProjectContractLookupDto[];
   tenders: ProjectTenderLookupDto[];
   procurementPlanItems: ProjectProcurementPlanItemLookupDto[];
   purchaseRequisitions: ProjectPurchaseRequisitionLookupDto[];
@@ -619,8 +620,14 @@ export function ProjectPackagesTab({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <QuantitySurveyMeasurementsDialog projectId={project.id} />
-              <QuantitySurveyJointMeasurementsDialog projectId={project.id} />
+              <QuantitySurveyMeasurementsDialog
+                key={project.id}
+                projectId={project.id}
+                projectSite={project.developmentProfile?.siteName || project.developmentProfile?.siteAddress}
+              />
+              {isQsOptionalFeatureEnabled('joint-measurements') && (
+                <QuantitySurveyJointMeasurementsDialog projectId={project.id} />
+              )}
               <QuantitySurveyCostReconciliationDialog projectId={project.id} />
               <QuantitySurveyEstimateVersionsDialog projectId={project.id} />
               <QuantitySurveyBoqVersionActions projectId={project.id} />

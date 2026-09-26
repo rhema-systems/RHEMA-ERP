@@ -101,7 +101,7 @@ figures [[hr-deferred-modules]] recorded on 2026-08-16:
 HOD rungs from org data would resolve to nobody for **94% of staff**. This is the fourth
 requirement to hit this wall (FR-HR-080, FR-HR-173, FR-HR-181, now FR-HR-084). Decision D-3 below
 stops working around it and builds the explicit alternative we recommended to TDC in
-`docs/HR-OPEN-QUESTIONS-FOR-TDC.md` §4.
+`docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md` §4.
 
 ### 3.3 Adjacent surfaces this area will read or extend
 
@@ -1349,7 +1349,7 @@ the API with no way to use it is half delivered.
   withholding HR's reading from the person being asked to answer would defeat FR-HR-181; and a
   respondent gets nothing, since being complained about confers no right to read. But whether HR's
   interpretation is an internal note is **TDC's policy, not ours**, so it is now a numbered question
-  in `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` — the only place in this module where we chose transparency
+  in `docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md` — the only place in this module where we chose transparency
   on their behalf.
 - **No Finance backlog entry is owed**: the area has no monetary field. A settlement's remedy is
   free text.

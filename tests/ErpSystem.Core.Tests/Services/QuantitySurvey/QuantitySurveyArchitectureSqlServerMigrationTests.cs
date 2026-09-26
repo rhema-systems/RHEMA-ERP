@@ -10,12 +10,12 @@ using Xunit;
 namespace ErpSystem.Core.Tests.Services.QuantitySurvey;
 
 /// <summary>
-/// Applies the production migration chain to an isolated SQL Server database.
+/// Applies the current fresh-development migration chain to an isolated SQL Server database.
 /// Set RHEMA_TEST_SQLSERVER to a SQL Server login that may create and drop databases.
 /// </summary>
 public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
 {
-    private const string InitialBaselineMigrationId = "20260313114533_InitialBaseline";
+    private const string InitialBaselineMigrationId = "20260916132000_DisposableDevelopmentCurrentModelBaseline";
 
     [SqlServerFact]
     [Trait("Category", "SqlServerIntegration")]
@@ -56,7 +56,7 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
     [FullSqlServerFact]
     [Trait("Category", "SqlServerIntegration")]
     [Trait("Batch", "TDC-QS-ARCHITECTURE")]
-    public async Task Production_migrations_from_supported_initial_baseline_create_a_trusted_complete_quantity_survey_schema()
+    public async Task Current_development_migrations_create_a_trusted_complete_quantity_survey_schema()
     {
         await using var database = await DisposableSqlDatabase.CreateAsync();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -121,33 +121,10 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
         ApplicationDbContext context,
         DisposableSqlDatabase database)
     {
-        // Four legacy migrations pre-date the repository's consolidated InitialBaseline.
-        // They are upgrade-only deltas against schemas that already existed and cannot be
-        // executed against an empty database. A supported fresh-chain probe must therefore
-        // materialize InitialBaseline first, then stamp it and its superseded predecessors
-        // before applying every forward production migration through normal EF migration APIs.
-        var sqlGenerator = context.GetService<IMigrationsSqlGenerator>();
-        var baseline = new InitialBaseline();
-        // Fast Debug builds intentionally omit historical target models. The
-        // migration operations already carry their DDL types; the finalized
-        // current model supplies mappings needed only by seed-data operations.
-        var commands = sqlGenerator.Generate(baseline.UpOperations, context.Model);
-
-        foreach (var command in commands)
-            await database.ExecuteSqlAsync(command.CommandText);
-
-        var historyRepository = context.GetService<IHistoryRepository>();
-        await database.ExecuteSqlAsync(historyRepository.GetCreateIfNotExistsScript());
-
-        var productVersion = typeof(DbContext).Assembly.GetName().Version?.ToString(3) ?? "8.0.0";
-        var migrationsAssembly = context.GetService<IMigrationsAssembly>();
-        foreach (var migrationId in migrationsAssembly.Migrations.Keys
-                     .Where(id => string.CompareOrdinal(id, InitialBaselineMigrationId) <= 0)
-                     .OrderBy(id => id, StringComparer.Ordinal))
-        {
-            await database.ExecuteSqlAsync(
-                historyRepository.GetInsertScript(new HistoryRow(migrationId, productVersion)));
-        }
+        // Finance PR #219 replaced the archived upgrade history with a fresh-database
+        // baseline. Exercise that real chain without stamping synthetic history rows.
+        // DisposableSqlDatabase always creates a new random database for this test.
+        await context.GetService<IMigrator>().MigrateAsync(InitialBaselineMigrationId);
     }
 
     [SqlServerFact]
@@ -294,6 +271,31 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
             WHERE object_id=OBJECT_ID(N'dbo.SupplierDebitNotes') AND [name]=N'ExchangeRate';
             """);
         exchangeRateScale.Should().Equal("6");
+    }
+
+    [SqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task Audit_idempotency_repair_preserves_history_and_enforces_per_tenant_retries()
+    {
+        await using var database = await DisposableSqlDatabase.CreateAsync();
+        await database.ExecuteSqlAsync("""
+            CREATE TABLE dbo.AuditLogs (Id int NOT NULL PRIMARY KEY, TenantId uniqueidentifier NOT NULL);
+            INSERT dbo.AuditLogs VALUES (1,'00000000-0000-0000-0000-000000000001');
+            """);
+        await database.ExecuteSqlAsync(ReconcileAuditLogIdempotencyForExistingDatabases.ReconciliationSql);
+        await database.ExecuteSqlAsync(ReconcileAuditLogIdempotencyForExistingDatabases.ReconciliationSql);
+        await database.ExecuteSqlAsync("""
+            INSERT dbo.AuditLogs VALUES
+                (2,'00000000-0000-0000-0000-000000000001',NULL),
+                (3,'00000000-0000-0000-0000-000000000001',N'retry'),
+                (4,'00000000-0000-0000-0000-000000000002',N'retry');
+            """);
+        (await database.QueryNamesAsync("SELECT CONVERT(nvarchar(10),Id) FROM dbo.AuditLogs ORDER BY Id;"))
+            .Should().Equal("1", "2", "3", "4");
+        Func<Task> duplicate = () => database.ExecuteSqlAsync("""
+            INSERT dbo.AuditLogs VALUES (5,'00000000-0000-0000-0000-000000000001',N'retry');
+            """);
+        (await duplicate.Should().ThrowAsync<SqlException>()).Which.Number.Should().BeOneOf(2601, 2627);
     }
 
     private sealed class SqlServerFactAttribute : FactAttribute

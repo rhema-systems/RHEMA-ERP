@@ -13,8 +13,14 @@ $temporaryRoots = [System.Collections.Generic.List[string]]::new()
 $priorPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
 
 function Invoke-Refusal([string]$name, [string]$expected, [string[]]$arguments) {
-    $output = & pwsh -NoProfile -File $script -Mode ResetDisposableDevelopment @arguments 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0) { throw "Safety case '$name' unexpectedly succeeded." }
+    $priorErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & pwsh -NoProfile -File $script -Mode ResetDisposableDevelopment @arguments 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $priorErrorActionPreference }
+    if ($exitCode -eq 0) { throw "Safety case '$name' unexpectedly succeeded." }
     if ($output -notmatch [regex]::Escape($expected)) {
         throw "Safety case '$name' did not return '$expected'. Output: $output"
     }
@@ -144,13 +150,16 @@ try {
     Write-Host 'PASS: actual pre-dispatch backup reservation helper is available and refuses collisions'
 
     $migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
-    foreach ($functionName in @('ConvertTo-SanitizedEvidenceLine','Get-SqlEvidenceTokens',
+    foreach ($functionName in @('Replace-OrdinalIgnoreCase','ConvertTo-SanitizedEvidenceLine','Get-SqlEvidenceTokens',
         'Assert-UniqueOrderedSqlEvidenceTokens','Invoke-Native','Assert-SqlcmdOutputWidth','Invoke-Sql',
-        'Invoke-SqlWithSanitizedEvidence','Get-DisposableBackupFileName','Join-DisposableBackupPath',
+        'Invoke-SqlWithSanitizedEvidence','Write-AtomicNativeCommandEvidence','Invoke-NativeWithEvidence',
+        'Get-DisposableBackupFileName','Join-DisposableBackupPath',
         'Write-AtomicTextFile','Write-MigrationHistoryEvidence','Read-MigrationHistoryEvidence',
         'Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
-        'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
+        'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Test-LocalMachineIpAddress',
+        'Assert-DisposableServerSideLocality',
         'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState',
+        'Get-BoundedApiBuildArguments','Move-AtomicEvidenceFile',
         'Get-DisposableTargetMigrationState')) {
         $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
             $node.Name -eq $functionName }, $true))
@@ -159,6 +168,32 @@ try {
         }
         . ([ScriptBlock]::Create($functionAst[0].Extent.Text))
     }
+    if ((Get-TextSha256 'abc') -cne 'BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD') {
+        throw 'Windows PowerShell-compatible SHA-256 helper returned an unexpected digest.'
+    }
+    Write-Host 'PASS: text SHA-256 helper returns the standard digest without modern static crypto APIs'
+    $script:sensitiveEvidenceTokens = [System.Collections.Generic.List[string]]::new()
+    $failedNativeEvidence = Join-Path (New-ExternalEvidencePath 'FAILED_NATIVE') 'failed-native.log'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $failedNativeEvidence) | Out-Null
+    $failedNativeRefused = $false
+    $failedNativeFailure = ''
+    try {
+        $null = Invoke-NativeWithEvidence 'cmd.exe' @('/d','/c','echo expected-native-stderr 1>&2 & exit /b 17') `
+            $failedNativeEvidence
+    }
+    catch {
+        $failedNativeRefused = $true
+        $failedNativeFailure = $_.Exception.Message
+    }
+    if (-not (Test-Path -LiteralPath $failedNativeEvidence -PathType Leaf)) {
+        throw "Failed native command did not retain its evidence artifact: $failedNativeFailure"
+    }
+    $failedNativeLines = @(Get-Content -LiteralPath $failedNativeEvidence | ForEach-Object { $_.Trim() })
+    if (-not $failedNativeRefused -or $failedNativeLines -notcontains 'expected-native-stderr' -or
+        $failedNativeLines -notcontains 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=17|COMMAND=cmd.exe') {
+        throw 'Failed native command did not retain sanitized output and its exact failure marker.'
+    }
+    Write-Host 'PASS: failed native command retains evidence before enforcing its exit code'
     $historyRoot = New-ExternalEvidencePath 'MIGRATION_HISTORY'
     New-Item -ItemType Directory -Path $historyRoot | Out-Null
     $emptyHistoryPath = Join-Path $historyRoot 'source-migration-history.txt'
@@ -467,12 +502,32 @@ exit 0
     Write-Host 'PASS: actual recovery helper preserves phase-04 hash and marks mutated current bytes unverified'
 
     Assert-DisposableServerSideLocality 'localhost' 'LOCALHOST' '' 'LOCALHOST' '' '' 'localhost'
+    Assert-DisposableServerSideLocality 'tcp:localhost,1433' 'LOCALHOST' '' 'LOCALHOST' '127.0.0.1' '1433' 'localhost'
+    $localUnicastAddress = @([System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+        ForEach-Object { $_.GetIPProperties().UnicastAddresses } |
+        ForEach-Object { $_.Address } |
+        Where-Object { -not [System.Net.IPAddress]::IsLoopback($_) } |
+        Select-Object -First 1)
+    if ($localUnicastAddress.Count -eq 1) {
+        Assert-DisposableServerSideLocality 'tcp:localhost,1433' 'LOCALHOST' '' 'LOCALHOST' `
+            $localUnicastAddress[0].ToString() '1433' 'localhost'
+    }
+    if (Test-LocalMachineIpAddress 'not-an-ip-address') {
+        throw 'Malformed SQL endpoint address was accepted as local.'
+    }
+    $remoteDocumentationAddress = @('192.0.2.1','198.51.100.1','203.0.113.1') |
+        Where-Object { -not (Test-LocalMachineIpAddress $_) } |
+        Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($remoteDocumentationAddress)) {
+        throw 'Could not select a nonlocal documentation address for the locality refusal test.'
+    }
     foreach ($case in @(
         @('remote engine','localhost','REMOTEHOST','','REMOTEHOST','','','LOCALHOST'),
         @('named-instance drift','localhost\SQLEXPRESS','LOCALHOST','','LOCALHOST','','','LOCALHOST'),
         @('server-name alias drift','localhost','LOCALHOST','','STALE_ALIAS','','','LOCALHOST'),
         @('port-forward drift','localhost,1433','LOCALHOST','','LOCALHOST','127.0.0.1','1555','LOCALHOST'),
-        @('non-loopback endpoint','tcp:localhost,1433','LOCALHOST','','LOCALHOST','10.10.1.20','1433','LOCALHOST'))) {
+        @('remote endpoint','tcp:localhost,1433','LOCALHOST','','LOCALHOST',$remoteDocumentationAddress,'1433','LOCALHOST'),
+        @('malformed endpoint','tcp:localhost,1433','LOCALHOST','','LOCALHOST','not-an-ip-address','1433','LOCALHOST'))) {
         $refused = $false
         try { Assert-DisposableServerSideLocality $case[1] $case[2] $case[3] $case[4] $case[5] $case[6] $case[7] }
         catch { $refused = $true }
@@ -489,7 +544,7 @@ exit 0
         "446|20260902140000_Good|1|9|28`nsecret")) {
         if (Test-DisposableSourceFingerprint $invalidFingerprint) { throw 'Invalid source fingerprint was accepted.' }
     }
-    Write-Host 'PASS: server-side host/instance/endpoint and restricted fingerprint helpers refuse synthetic ambiguity'
+    Write-Host 'PASS: server-side host/instance/local-address endpoint and restricted fingerprint helpers refuse synthetic ambiguity'
 
     $start = $text.IndexOf('function Invoke-DisposableDevelopmentReset', [StringComparison]::Ordinal)
     $end = $text.IndexOf("if (`$Mode -eq 'ResetDisposableDevelopment')", $start, [StringComparison]::Ordinal)
@@ -531,6 +586,11 @@ exit 0
         'DISPOSABLE_RESET_FINAL_HISTORY_DRIFT',
         'DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT',
         'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT',
+        'requires the current baseline as the first compiled migration',
+        'requires an exact, unique, ordered compiled migration set before DROP',
+        '$script:authoritativeMigrationCount = $repositoryMigrations.Count',
+        '$script:authoritativeLatestMigration = $repositoryLatest',
+        'Get-BoundedApiBuildArguments',
         'RHEMAERP_DISPOSABLE_DEVELOPMENT_RESET',
         "Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'",
         'Get-DisposableTargetMigrationState $evidenceDirectory $repositoryMigrations',
@@ -541,12 +601,28 @@ exit 0
     )) {
         if (-not $reset.Contains($required)) { throw "Disposable reset contract is missing: $required" }
     }
+    foreach ($boundedBuildToken in @('--disable-build-servers','/maxcpucount:1','/nodeReuse:false','/p:UseSharedCompilation=false')) {
+        if (-not $text.Contains($boundedBuildToken)) {
+            throw "Bounded build helper contract is missing: $boundedBuildToken"
+        }
+    }
     if ([regex]::Matches($reset, 'DROP DATABASE \[RhemaERP\]').Count -ne 1 -or
         $reset -match '(?i)retry\s*\(' -or $reset -match 'Remove-Item[^\r\n]+backup') {
         throw 'Disposable reset contains an extra destructive, retry, or backup-cleanup path.'
     }
+    $baselineCheck = $reset.IndexOf("`$repositoryMigrations[0] -ne '20260916132000_DisposableDevelopmentCurrentModelBaseline'", [StringComparison]::Ordinal)
+    $dropIndex = $reset.IndexOf('DROP DATABASE [RhemaERP]', [StringComparison]::Ordinal)
+    if ($baselineCheck -lt 0 -or $baselineCheck -ge $dropIndex) {
+        throw 'Disposable reset does not verify that the compiled migration chain starts with the disposable-development baseline before DROP.'
+    }
     if (-not $text.Contains("server = '<REDACTED_LOCAL_SERVER>'")) {
         throw 'Disposable reset status does not redact the local machine/server identity.'
+    }
+    if (-not $text.Contains('function Replace-OrdinalIgnoreCase') -or
+        $text -match '\.Replace\([^\r\n]+,[^\r\n]+,[^\r\n]+\)' -or
+        $text -match '\.Contains\([^\r\n]+,\s*\[StringComparison\]' -or
+        $text -match '\[System\.IO\.File\]::Move\([^\r\n]+,[^\r\n]+,[^\r\n]+\)') {
+        throw 'Disposable reset retains a PowerShell 7-only API call that cannot run on the VPS Windows PowerShell runtime.'
     }
     $resetStartedIndex = $reset.IndexOf("Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'", [StringComparison]::Ordinal)
     $invokeBoundaryIndex = $reset.IndexOf("Invoke-SqlWithSanitizedEvidence `$databaseTarget.Builder 'master' '' `$destructiveSqlPath", [StringComparison]::Ordinal)
@@ -554,9 +630,23 @@ exit 0
         throw 'Durable RESET_STARTED phase is not atomically written before the destructive SQL call.'
     }
     $singleUserIndex = $reset.IndexOf('ALTER DATABASE [RhemaERP] SET SINGLE_USER', [StringComparison]::Ordinal)
+    $destructiveSqlStart = $reset.IndexOf('$destructiveSql = @"', [StringComparison]::Ordinal)
+    $destructiveSqlEnd = $reset.IndexOf('"@', $destructiveSqlStart, [StringComparison]::Ordinal)
+    if ($destructiveSqlStart -lt 0 -or $destructiveSqlEnd -le $destructiveSqlStart) {
+        throw 'Could not isolate the disposable reset destructive SQL boundary.'
+    }
+    $destructiveSqlContract = $reset.Substring($destructiveSqlStart, $destructiveSqlEnd - $destructiveSqlStart)
+    foreach ($serverIdentityProperty in @("SERVERPROPERTY('MachineName')","SERVERPROPERTY('InstanceName')","SERVERPROPERTY('ServerName')")) {
+        if (-not $destructiveSqlContract.Contains($serverIdentityProperty)) {
+            throw "Destructive SQL boundary does not recheck $serverIdentityProperty."
+        }
+    }
+    if ($destructiveSqlContract.Contains("CONNECTIONPROPERTY('local_net_address')") -or
+        $destructiveSqlContract.Contains("CONNECTIONPROPERTY('local_tcp_port')")) {
+        throw 'Destructive SQL boundary compares transport-specific connection properties across different clients.'
+    }
     $finalHistoryIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_HISTORY_DRIFT', [StringComparison]::Ordinal)
     $finalFingerprintIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT', [StringComparison]::Ordinal)
-    $dropIndex = $reset.IndexOf('DROP DATABASE [RhemaERP]', [StringComparison]::Ordinal)
     if ($singleUserIndex -lt 0 -or $finalHistoryIndex -le $singleUserIndex -or
         $finalFingerprintIndex -le $finalHistoryIndex -or $dropIndex -le $finalFingerprintIndex) {
         throw 'Final history/fingerprint checks are not inside the quiescent destructive SQL boundary immediately before DROP.'

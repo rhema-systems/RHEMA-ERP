@@ -36,7 +36,7 @@ public sealed record TravelBudgetSpend(decimal Committed, decimal Actual);
 /// GL posting waits for the comprehensive Finance sweep after the HR module is complete, and that
 /// sweep may well redefine what "actual travel spend" means once advances, direct vendor payment and
 /// claims are reconciled in one place. Until then this is travel's own honest arithmetic over its
-/// own records, and it is registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
+/// own records, and it is registered in <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
 ///
 /// <para><b>Currency.</b> Figures are summed <b>as recorded</b>, without conversion. A budget and its
 /// bookings are normally costed in one currency; where they are not, the sum is meaningless and

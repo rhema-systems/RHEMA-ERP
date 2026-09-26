@@ -5,8 +5,36 @@ namespace ErpSystem.Core.Interfaces.HR;
 /// </summary>
 public class LeaveYearEndResult
 {
+    /// <summary>
+    /// How many balances the run LOOKED AT. ⚠ Not how many it changed.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>The name reads as "did something to", and finding L-26 is about that.</b> A run
+    /// that examined 900 balances and changed 12 reported "900 processed", which is true of the
+    /// loop and false of the work. It is kept under this name because callers use it, and
+    /// <see cref="BalancesSkipped"/> now sits beside it so the two numbers cannot be confused.
+    /// </remarks>
     public int BalancesProcessed { get; set; }
+
+    /// <summary>How many balances the run actually changed.</summary>
     public int BalancesAffected { get; set; }
+
+    /// <summary>
+    /// Examined but left alone — the leave type does not allow carry-over, there was nothing
+    /// remaining, or no rule applied. Always <c>BalancesProcessed - BalancesAffected</c>.
+    /// </summary>
+    public int BalancesSkipped { get; set; }
+
+    /// <summary>
+    /// ⚠ <b>True when NOTHING WAS WRITTEN.</b> The run computed exactly what it would have done
+    /// and rolled nothing into the database (finding L-24).
+    /// </summary>
+    /// <remarks>
+    /// Carry-over and forfeiture both move people's balances in bulk and there is no undo for
+    /// either. A preview is the difference between finding a misconfigured leave type before the
+    /// run and finding it in nine hundred balances afterwards.
+    /// </remarks>
+    public bool IsDryRun { get; set; }
     public decimal TotalDaysCarriedOver { get; set; }
     public decimal TotalDaysForfeited { get; set; }
     public List<string> Notes { get; set; } = new();
@@ -25,7 +53,8 @@ public interface ILeaveYearEndService
     /// Only applies to leave types with <c>AllowCarryOver</c>. Idempotent: re-running recomputes
     /// the carried-over figure rather than stacking it.
     /// </summary>
-    Task<LeaveYearEndResult> ProcessCarryOverAsync(int fromYear, Guid? employeeId = null, CancellationToken ct = default);
+    /// <param name="dryRun">⚠ Compute and report, write nothing.</param>
+    Task<LeaveYearEndResult> ProcessCarryOverAsync(int fromYear, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default);
 
     /// <summary>
     /// For leave types configured with <c>ForfeitUnusedAfterMonths</c>, once the cut-off date
@@ -33,5 +62,6 @@ public interface ILeaveYearEndService
     /// a negative "Forfeiture" adjustment. Also zeroes carried-over days whose
     /// <c>CarryOverExpiryMonths</c> window has elapsed. Idempotent per balance.
     /// </summary>
-    Task<LeaveYearEndResult> ProcessForfeitureAsync(int year, DateOnly? asOf = null, Guid? employeeId = null, CancellationToken ct = default);
+    /// <param name="dryRun">⚠ Compute and report, write nothing.</param>
+    Task<LeaveYearEndResult> ProcessForfeitureAsync(int year, DateOnly? asOf = null, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default);
 }

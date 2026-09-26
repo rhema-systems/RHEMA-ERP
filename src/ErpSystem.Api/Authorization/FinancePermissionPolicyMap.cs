@@ -4,6 +4,7 @@ namespace ErpSystem.Api.Authorization;
 
 public static class FinancePermissionPolicyMap
 {
+    public const string ProjectCurrencyLookupPolicy = "Finance.Policy.ProjectCurrencyLookup";
     private static readonly HashSet<string> ReadOnlyActions = new(StringComparer.OrdinalIgnoreCase)
     {
         "GetAll",
@@ -380,6 +381,11 @@ public static class FinancePermissionPolicyMap
 
     private static IReadOnlyList<string> CurrencyPolicy(string action, IReadOnlyCollection<string> methods)
     {
+        if (action is "GetActive" or "GetBaseCurrency" && methods.All(method => method == "GET"))
+        {
+            return One(ProjectCurrencyLookupPolicy);
+        }
+
         if (IsRead(action, methods) || IsValidationAction(action))
         {
             return One(FinancePermissions.ViewFinance);

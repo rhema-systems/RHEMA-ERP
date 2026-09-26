@@ -24,6 +24,10 @@ class ResizeObserverMock {
 
 vi.stubGlobal('ResizeObserver', ResizeObserverMock);
 
+vi.mock('../../../../contexts/TenantContext', () => ({
+  useTenant: () => ({ currentTenant: { id: 'tenant-qs-test' } }),
+}));
+
 vi.mock('../../../../services/admin-api.service', () => ({
   adminApiService: {
     getUsers: mocks.getUsers,
@@ -131,6 +135,27 @@ describe('Security user role editing', () => {
     mocks.getRoles.mockResolvedValue(availableRoles);
     mocks.getTenants.mockResolvedValue([]);
     mocks.updateUser.mockResolvedValue(user);
+  });
+
+  it('requires an entered password when creating a user and sends the selected roles', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+    fireEvent.change(screen.getByLabelText('Username *'), { target: { value: 'qs-preparer-test' } });
+    fireEvent.change(screen.getByLabelText('Email *'), { target: { value: 'qs-preparer@example.test' } });
+    fireEvent.change(screen.getByLabelText('Phone Number'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'short' } });
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Assign Procurement User' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create User' }));
+    expect(await screen.findByText('Password must be at least 8 characters')).toBeInTheDocument();
+    expect(mocks.createUser).not.toHaveBeenCalled();
+
+    const testPassword = 'Only-a-test-value-93!';
+    expect(screen.getByLabelText('Password *')).toHaveAttribute('type', 'password');
+    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: testPassword } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create User' }));
+    await waitFor(() => expect(mocks.createUser).toHaveBeenCalledWith(expect.objectContaining({
+      username: 'qs-preparer-test', password: testPassword, roles: ['Procurement User'], tenantId: 'tenant-qs-test',
+    })));
   });
 
   it('preserves every existing role when another role is added', async () => {

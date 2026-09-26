@@ -57,7 +57,8 @@ param(
     [string]$UserId = 'sa',
     [string]$Password,
     [switch]$SkipVerify,
-    [switch]$VerifyOnly
+    [switch]$VerifyOnly,
+    [switch]$UseRunningApi
 )
 
 $ErrorActionPreference = 'Stop'
@@ -130,11 +131,27 @@ try {
     }
 
     # ── 2. the API ──────────────────────────────────────────────────────────────────────────────
+    # !! NEVER adopt an API this script did not start unless it PROVES it serves $Database.
+    # On 2026-09-07 a development API left running on 5000 was adopted on the strength of a health
+    # answer. Every SQL read went to UAT and every API write went to the development database: the
+    # rebuild reported 28 of 34 scenarios "ok" while UAT stayed empty and 5,579 demo rows landed in
+    # dev. The probe reads an employee id from $Database and asks the API for it -- ids are minted
+    # per rebuild, so only the right database answers 200. Even then, adoption is opt-in.
     $health = "http://localhost:$Port/health"
-    if (Test-Http $health) {
-        Write-Host "  -> An API is already serving $health; using it. (It must be pointed at $Database -- this script cannot check.)" -ForegroundColor Yellow
+    if (Test-PortListening $Port) {
+        . (Join-Path $PSScriptRoot 'ErpApiProbe.ps1')
+        $probe = Test-ErpApiServesDatabase -Port $Port -Database $Database -Server $Server -UserId $UserId -Password $Password
+        $verdict = if ($probe.Serves) { "an API that DOES serve $Database" } else { "something that does NOT serve $Database -- $($probe.Reason)" }
+        if (-not $UseRunningApi) {
+            throw ("Port $Port is already in use by $verdict. This script refuses to adopt an API it did not start. " +
+                   "Stop it (Book 0 section 6 has the one-liner), or pass -Port to use a free port, or -- only after " +
+                   "scripts/Test-ErpApiDatabase.ps1 says YES -- pass -UseRunningApi.")
+        }
+        if (-not $probe.Serves) {
+            throw "Refusing -UseRunningApi: port $Port is $verdict"
+        }
+        Write-Host "  -> Using the API already on port $Port; verified: $($probe.Reason)" -ForegroundColor Yellow
     } else {
-        if (Test-PortListening $Port) { throw "Port $Port is in use but /health does not answer. Stop whatever holds it, or pass -Port." }
 
         # Staging has no user-secrets, so the JWT signing key has to be passed in or every login
         # 400s with 'IDX10703: key length is zero' -- the same lookup Start-ErpApi.ps1 does.
@@ -152,17 +169,28 @@ try {
         $env:ASPNETCORE_ENVIRONMENT = 'Staging'
         $env:ASPNETCORE_URLS = "http://localhost:$Port"
         $log = Join-Path $HarnessDir 'out\api-rebuild.log'
+        $errLog = Join-Path $HarnessDir 'out\api-rebuild.err.log'
         New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
-        # Start-Process inherits the environment set above. Output goes to a file so a crash is
-        # readable afterwards rather than lost with the window.
-        $apiProcess = Start-Process dotnet -ArgumentList "`"$dll`"" -WorkingDirectory $apiDir -WindowStyle Minimized -RedirectStandardOutput $log -PassThru
+        # Start-Process inherits the environment set above. BOTH streams go to files: an unhandled
+        # .NET exception is written to standard error, and on 2026-09-07 an API death during
+        # startup left nothing behind because only standard output had been captured.
+        $apiProcess = Start-Process dotnet -ArgumentList "`"$dll`"" -WorkingDirectory $apiDir -WindowStyle Minimized `
+            -RedirectStandardOutput $log -RedirectStandardError $errLog -PassThru
 
-        $deadline = (Get-Date).AddSeconds(150)
+        # A cold start on this machine can take two to three minutes: database initialisation
+        # against the full model, then every module's startup seeding. 150 s was measured too tight
+        # on 2026-09-07; five minutes gives it room without hiding a genuine hang for long.
+        $deadline = (Get-Date).AddSeconds(300)
         while (-not (Test-Http $health) -and (Get-Date) -lt $deadline) {
-            if ($apiProcess.HasExited) { throw "The API exited before it was healthy. See $log" }
+            if ($apiProcess.HasExited) {
+                Write-Host "  !! The API exited before it was healthy (exit code $($apiProcess.ExitCode)). Last lines:" -ForegroundColor Red
+                Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Last 6 | ForEach-Object { Write-Host "     $_" -ForegroundColor DarkRed }
+                Get-Content $errLog -ErrorAction SilentlyContinue | Select-Object -Last 12 | ForEach-Object { Write-Host "     $_" -ForegroundColor DarkRed }
+                throw "The API exited before it was healthy. Full output: $log and $errLog"
+            }
             Start-Sleep -Seconds 2
         }
-        if (-not (Test-Http $health)) { throw "The API did not answer $health within 150 s. See $log" }
+        if (-not (Test-Http $health)) { throw "The API did not answer $health within 300 s. See $log and $errLog" }
         Write-Host "     API is up." -ForegroundColor DarkGray
     }
   }
@@ -182,6 +210,33 @@ try {
             & node scenarios.mjs 2>&1 | Tee-Object -FilePath (Join-Path $HarnessDir 'out\scenarios-last-run.log') | ForEach-Object { Write-Host "     $_" }
             $scenarioFailures = $LASTEXITCODE
             if ($scenarioFailures -ne 0) { Write-Host "  !! $scenarioFailures scenario(s) failed -- see above." -ForegroundColor Red }
+
+            # ── 4. second seeder pass ───────────────────────────────────────────────────────────
+            # Three demo tables hang off rows the scenarios create (training budgets, staff
+            # movements, probation periods); their seeder steps find nothing on the first pass and
+            # skip. Every other step's guard makes this pass a no-op. It lives HERE rather than in
+            # New-UatDatabase.ps1 so that re-running this script on its own -- the recovery path
+            # Book 0 gives -- also completes them. Verified on the database before it is checked.
+            Write-Host ""
+            Write-Host "  -> Second seeder pass: demo tables that depend on scenario rows" -ForegroundColor Green
+            $prevConn = $env:ConnectionStrings__DefaultConnection
+            $prevEnv = $env:ASPNETCORE_ENVIRONMENT
+            try {
+                $env:ConnectionStrings__DefaultConnection = "Server=$Server;Database=$Database;User Id=$UserId;Password=$Password;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True"
+                $env:ASPNETCORE_ENVIRONMENT = 'Development'
+                Push-Location $apiDir
+                try {
+                    $seedOut = & dotnet $dll seed-hr-demo 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        $seedOut | Select-Object -Last 15 | ForEach-Object { Write-Host "      $_" -ForegroundColor DarkRed }
+                        Write-Host "  !! The second seeder pass failed (exit $LASTEXITCODE)." -ForegroundColor Red
+                        $scenarioFailures++
+                    }
+                } finally { Pop-Location }
+            } finally {
+                $env:ConnectionStrings__DefaultConnection = $prevConn
+                $env:ASPNETCORE_ENVIRONMENT = $prevEnv
+            }
         }
 
         if (-not $SkipVerify) {
@@ -196,6 +251,17 @@ try {
                 Write-Host "  -> Runbooks: every record the books name exists?" -ForegroundColor Green
                 & node verify-runbook.mjs 2>&1 | ForEach-Object { Write-Host "     $_" }
                 $runbookGaps = $LASTEXITCODE
+            }
+
+            # Are the commands in the books still typeable? A Windows path loses a backslash every
+            # time an editing pass goes through a shell or a template literal, and neither of the
+            # checks above can see it: they read the database, not the page. Found on 2026-09-07,
+            # when a rewrite turned `cd "D:\Rhema\..."` into `cd "D:Rhema..."`.
+            if (Test-Path (Join-Path $HarnessDir 'verify-paths.mjs')) {
+                Write-Host ""
+                Write-Host "  -> Books: are the commands in them typeable?" -ForegroundColor Green
+                & node verify-paths.mjs 2>&1 | ForEach-Object { Write-Host "     $_" }
+                if ($LASTEXITCODE -ne 0) { $runbookGaps += $LASTEXITCODE }
             }
         }
     } finally { Pop-Location }

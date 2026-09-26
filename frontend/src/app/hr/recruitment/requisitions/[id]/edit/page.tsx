@@ -47,6 +47,7 @@ export default function EditRequisitionPage() {
     if (!data) return;
     setForm({
       positionId: data.positionId,
+      jobDescriptionId: data.jobDescriptionId ?? '',
       locationId: data.locationId ?? '',
       type: data.type,
       priority: data.priority,
@@ -62,8 +63,8 @@ export default function EditRequisitionPage() {
       targetFillDate: dateInput(data.targetFillDate),
       businessJustification: data.businessJustification,
       impactIfNotFilled: data.impactIfNotFilled ?? '',
-      isBudgeted: data.isBudgeted,
-      budgetCode: data.budgetCode ?? '',
+      manpowerBudgetLineId: data.manpowerBudgetLineId ?? '',
+      exceptionJustification: data.exceptionJustification ?? '',
       allowInternalCandidates: data.allowInternalCandidates,
       allowExternalCandidates: data.allowExternalCandidates,
       notes: data.notes ?? '',
@@ -77,6 +78,7 @@ export default function EditRequisitionPage() {
       staffRequisitionService.update(id, {
         id,
         positionId: form.positionId,
+        jobDescriptionId: form.jobDescriptionId || null,
         organizationUnitId: position?.organizationUnitId ?? null,
         organizationLevelId: position?.organizationLevelId ?? null,
         locationId: form.locationId || null,
@@ -93,8 +95,8 @@ export default function EditRequisitionPage() {
         targetFillDate: form.targetFillDate || null,
         businessJustification: form.businessJustification.trim(),
         impactIfNotFilled: form.impactIfNotFilled.trim() || null,
-        isBudgeted: form.isBudgeted,
-        budgetCode: form.budgetCode.trim() || null,
+        manpowerBudgetLineId: form.manpowerBudgetLineId || null,
+        exceptionJustification: form.exceptionJustification.trim() || null,
         allowInternalCandidates: form.allowInternalCandidates,
         allowExternalCandidates: form.allowExternalCandidates,
         notes: form.notes.trim() || null,
@@ -132,6 +134,10 @@ export default function EditRequisitionPage() {
     !!form.requisitionTitle.trim() &&
     !!form.businessJustification.trim() &&
     !!form.desiredStartDate &&
+    // G-4.7 (2026-09-15): the *new* page has always required this and *edit* did not. The server
+    // carries [Range(1, 100)] on both DTOs so the write was refused either way — but on edit it
+    // surfaced as a raw ModelState 400 instead of a disabled button.
+    form.numberOfPositions >= 1 &&
     audienceChosen;
 
   return (
@@ -148,10 +154,13 @@ export default function EditRequisitionPage() {
         }
       />
 
+      {/* ⚠ Until 2026-09-15 this sentence was advice for a control that did not exist (G-4.3):
+          recall was built server-side, had a client method, and had no button anywhere in the
+          frontend. It is now on the requisition's own page, for the person who raised it. */}
       {!editable && (
         <EmptyState
           title={`A ${data.status} requisition cannot be edited`}
-          description="Only drafts and rejected requisitions can be changed. Recall it first if it is still awaiting approval."
+          description="Only drafts and rejected requisitions can be changed. If it is still awaiting approval, open it and use Recall to take it back."
         />
       )}
 
@@ -161,6 +170,7 @@ export default function EditRequisitionPage() {
             value={form}
             onChange={setForm}
             positionLocked={!!data.jobVacancyId}
+            requisitionId={id}
           />
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => router.push(`/hr/recruitment/requisitions/${id}`)}>

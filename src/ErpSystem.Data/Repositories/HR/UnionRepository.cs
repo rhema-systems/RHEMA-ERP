@@ -12,7 +12,8 @@ public class UnionRepository : GenericRepository<Union>, IUnionRepository
     {
         return await _dbSet
             .Where(u => u.TenantId == tenantId)
-            .Include(u => u.Agreements)
+            .Include(u => u.Agreements).ThenInclude(a => a.Documents)
+            .Include(u => u.Contacts).ThenInclude(c => c.Employee)
             .OrderBy(u => u.Name)
             .ToListAsync();
     }
@@ -20,7 +21,10 @@ public class UnionRepository : GenericRepository<Union>, IUnionRepository
     public async Task<Union?> GetByIdWithAgreementsAsync(Guid id, Guid tenantId)
     {
         return await _dbSet
-            .Include(u => u.Agreements)
+            .Include(u => u.Agreements).ThenInclude(a => a.Documents)
+            .Include(u => u.Contacts).ThenInclude(c => c.Employee)
+            .Include(u => u.Documents).ThenInclude(d => d.UploadedBy)
+            .Include(u => u.Documents).ThenInclude(d => d.Agreement)
             .FirstOrDefaultAsync(u => u.Id == id && u.TenantId == tenantId);
     }
 
@@ -30,7 +34,8 @@ public class UnionRepository : GenericRepository<Union>, IUnionRepository
     {
         return await _dbSet
             .Where(u => u.TenantId == tenantId && u.IsActive)
-            .Include(u => u.Agreements)
+            .Include(u => u.Agreements).ThenInclude(a => a.Documents)
+            .Include(u => u.Contacts).ThenInclude(c => c.Employee)
             .OrderBy(u => u.Name)
             .ToListAsync();
     }
@@ -44,6 +49,7 @@ public class CollectiveBargainingAgreementRepository : GenericRepository<Collect
     {
         return await _dbSet
             .Include(a => a.Union)
+            .Include(a => a.Documents)
             .Where(a => a.UnionId == unionId && a.TenantId == tenantId)
             .OrderByDescending(a => a.EffectiveDate)
             .ToListAsync();
@@ -53,6 +59,7 @@ public class CollectiveBargainingAgreementRepository : GenericRepository<Collect
     {
         return await _dbSet
             .Include(a => a.Union)
+            .Include(a => a.Documents)
             .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId);
     }
 }

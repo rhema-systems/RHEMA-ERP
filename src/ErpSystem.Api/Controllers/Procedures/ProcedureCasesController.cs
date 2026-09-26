@@ -24,6 +24,18 @@ public sealed class ProcedureCasesController : ControllerBase
         return Ok(new { success = true, data = cases });
     }
 
+    [HttpGet("paged")]
+    public async Task<IActionResult> GetCasesPage(
+        [FromQuery] string? module,
+        [FromQuery] string? entityType,
+        [FromQuery] bool mineOnly = false,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10)
+    {
+        var cases = await _procedureCaseService.GetCasesPageAsync(module, entityType, mineOnly, page, pageSize);
+        return Ok(new { success = true, data = cases });
+    }
+
     [HttpGet("submission-document-requirements")]
     public async Task<IActionResult> GetSubmissionDocumentRequirements(
         [FromQuery] string module,
@@ -175,6 +187,15 @@ public sealed class ProcedureCasesController : ControllerBase
         [FromBody] SignProcedureCaseDocumentRequest request)
     {
         return await ExecuteUpdate(() => _procedureCaseService.SignLegalTransferExecutedDocumentAsync(id, documentId, request));
+    }
+
+    [HttpPost("{id:guid}/documents/{documentId:guid}/property-agreement-signature")]
+    public async Task<IActionResult> SignPropertyAgreement(
+        Guid id,
+        Guid documentId,
+        [FromBody] SignProcedureCaseDocumentRequest request)
+    {
+        return await ExecuteUpdate(() => _procedureCaseService.SignPropertyAgreementAsync(id, documentId, request));
     }
 
     [HttpPost("{id:guid}/complete-stage")]

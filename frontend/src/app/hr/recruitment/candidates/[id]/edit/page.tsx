@@ -52,12 +52,17 @@ export default function EditCandidatePage() {
       postalAddress: data.postalAddress ?? null,
       digitalAddress: data.digitalAddress ?? null,
       city: data.city,
+      // G-7.3: seeded so an edit that does not touch it does not clear it.
+      nationality: data.nationality ?? null,
       // Optional on the read since slice 13b (internal shadow candidates carry no country), but
       // still required on this form — HR filling in a candidate record must name one.
       countryId: data.countryId ?? '',
       linkedInProfile: data.linkedInProfile ?? null,
       portfolioUrl: data.portfolioUrl ?? null,
       gitHubUrl: data.gitHubUrl ?? null,
+      nationalIdTypeId: data.nationalIdTypeId ?? null,
+      nationalIdNumber: data.nationalIdNumber ?? null,
+      nationalIdExpiryDate: data.nationalIdExpiryDate?.slice(0, 10) ?? null,
       isInTalentPool: data.isInTalentPool,
     });
   }, [data, form]);
@@ -72,9 +77,14 @@ export default function EditCandidatePage() {
         alternatePhone: values.alternatePhone || null,
         postalAddress: values.postalAddress || null,
         digitalAddress: values.digitalAddress || null,
+        // '' does not bind to a Guid? — it is a 400 before the service ever runs.
+        countryId: values.countryId || null,
         linkedInProfile: values.linkedInProfile || null,
         portfolioUrl: values.portfolioUrl || null,
         gitHubUrl: values.gitHubUrl || null,
+        nationalIdTypeId: values.nationalIdTypeId || null,
+        nationalIdNumber: values.nationalIdNumber?.trim() || null,
+        nationalIdExpiryDate: values.nationalIdExpiryDate || null,
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['hr', 'candidate', id] });

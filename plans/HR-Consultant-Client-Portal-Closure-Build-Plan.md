@@ -3,7 +3,7 @@
 > The closure programme's consultant-client block: retire the last tenant of the bespoke
 > `PortalBearer` scheme and rebuild the client surface on the main scheme inside the
 > external-portal shell — the candidate-portal recipe, second run. Canonical plan; the ledger
-> (`docs/HR-CLOSURE-LEDGER.md`) carries the queue rows this closes.
+> (`docs/HR/programme/HR-CLOSURE-LEDGER.md`) carries the queue rows this closes.
 
 **Status: ✅ COMPLETE 2026-08-31.** All three slices delivered in one pass: retirement +
 identity + rebuilt API (slice 1), the four frontend surfaces (slice 2), harness + ledger

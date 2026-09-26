@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -58,7 +59,19 @@ public sealed class DashboardApplicationDto
 public sealed class DashboardInterviewDto
 {
     public Guid     InterviewId       { get; set; }
-    public string   CandidateName     { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Null — an interview is a session that can hold several candidates, so there is no single
+    /// name to give. Use <see cref="CandidateCount"/>.
+    /// </summary>
+    /// <remarks>
+    /// Made nullable 2026-09-15 (G-15.3), when it stopped carrying the literal text "Round N".
+    /// Kept on the DTO rather than removed because this shape mirrors the view model the frontend
+    /// deserializes into; dropping a property is a client change, and the defect was the nonsense
+    /// value, not the field.
+    /// </remarks>
+    public string?  CandidateName     { get; set; }
+
     public string   VacancyTitle      { get; set; } = string.Empty;
     public DateTime InterviewDateTime { get; set; }
     public string   InterviewType     { get; set; } = string.Empty;
@@ -118,9 +131,16 @@ public sealed class DashboardDeadlineVacancyDto
 /// applications, upcoming interviews, offers and hires starting soon — the same PII shape that
 /// <see cref="JobApplicationController"/> restricts to HR, so a bare <c>[Authorize]</c> here would
 /// have let any authenticated employee read it.
+///
+/// <para>The <c>InternalOnly</c> pairing was added 2026-09-15 (G-15.5). Nothing was exposed
+/// without it — <c>HR.Recruitment.Read</c> is held by no external role — but every other
+/// recruitment controller pairs its permission policy with the blocklist, and this one stood
+/// alone. Defence in depth is only a pattern if it is applied everywhere; a later change to the
+/// permission map would have had one fewer thing standing in its way here.</para>
 /// </summary>
 [ApiController]
 [Route("api/recruitment-dashboard")]
+[Authorize(Policy = "InternalOnly")]
 [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
 public class RecruitmentDashboardController : ControllerBase
 {
@@ -130,6 +150,8 @@ public class RecruitmentDashboardController : ControllerBase
     private readonly IJobHireService        _hireService;
     private readonly IJobApplicationService _applicationService;
     private readonly IRecruitmentAnalyticsService _analyticsService;
+    private readonly IRecruitmentLifecycleSweepService _sweepService;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<RecruitmentDashboardController> _logger;
 
     public RecruitmentDashboardController(
@@ -139,6 +161,8 @@ public class RecruitmentDashboardController : ControllerBase
         IJobHireService        hireService,
         IJobApplicationService applicationService,
         IRecruitmentAnalyticsService analyticsService,
+        IRecruitmentLifecycleSweepService sweepService,
+        ICurrentUserService currentUser,
         ILogger<RecruitmentDashboardController> logger)
     {
         _vacancyService     = vacancyService;
@@ -147,6 +171,8 @@ public class RecruitmentDashboardController : ControllerBase
         _hireService        = hireService;
         _applicationService = applicationService;
         _analyticsService   = analyticsService;
+        _sweepService       = sweepService;
+        _currentUser        = currentUser;
         _logger             = logger;
     }
 
@@ -165,7 +191,17 @@ public class RecruitmentDashboardController : ControllerBase
             // concurrent queries on the same scoped instance cause concurrency errors.
             var activeVacancies        = (await _vacancyService.GetActiveVacanciesAsync(ct)).ToList();
             var interviews              = (await _interviewService.GetByDateRangeAsync(today, today.AddDays(7), ct)).ToList();
-            var pendingOffers          = (await _offerService.GetByStatusAsync(JobOfferStatus.Sent, ct)).ToList();
+            // ⚠ G-15.2 (2026-09-15): "Offers pending response" was a bare count of everything at
+            // Sent, with no IsLatestVersion filter and no expiry bound — so it included offers
+            // whose expiry passed long ago (because nothing ever wrote Expired, G-2.4) and v1
+            // offers left in Sent by a revision (because ReviseOfferAsync never changed their
+            // status, G-10.2). A tile labelled "pending response" grew monotonically and never
+            // fell. Both writers are fixed, and the reader filters as well, because the analytics
+            // screen — the one reader that got this right — is right precisely because it does not
+            // trust the statuses.
+            var pendingOffers          = (await _offerService.GetByStatusAsync(JobOfferStatus.Sent, ct))
+                                            .Where(o => o.IsLatestVersion)
+                                            .ToList();
             var expiringOffers         = (await _offerService.GetExpiringOffersAsync(7, ct)).ToList();
             var recentApps             = (await _applicationService.GetPagedAsync(1, 10, null, ct)).Items.ToList();
             var hires                  = (await _hireService.GetWithStartDateApproachingAsync(14, ct)).ToList();
@@ -173,24 +209,47 @@ public class RecruitmentDashboardController : ControllerBase
 
             var todayOnly = DateOnly.FromDateTime(today);
 
-            // Pipeline stages derived from active vacancy aggregates
+            // ── G-15.1 (2026-09-15): four bars, one unit, one window ──────────────────────────
+            // The Interviewing bar used to be `interviews.Count` — a count of interview SESSIONS,
+            // drawn on a shared scale beside three counts of PEOPLE. An interview is a session that
+            // can hold many candidates, so the middle of the funnel counted something different in
+            // kind from its neighbours. The window differed too: three bars were all-time totals on
+            // currently-active vacancies while this one was sessions scheduled in the next seven
+            // days, so a vacancy that interviewed forty people last month contributed nothing.
+            //
+            // It now uses the vacancy's own InterviewCount aggregate, which is maintained by the
+            // same stage movement that maintains ApplicationCount, ShortlistedCount and OfferCount.
+            // All four are now people, all-time, on the same set of vacancies — which is what makes
+            // the shape of the funnel mean anything, and the shape is the card's entire purpose.
             var pipeline = new List<DashboardPipelineStageDto>
             {
                 new() { StageName = "Applied",     Count = activeVacancies.Sum(v => v.ApplicationCount) },
                 new() { StageName = "Shortlisted", Count = activeVacancies.Sum(v => v.ShortlistedCount) },
-                new() { StageName = "Interviewing",Count = interviews.Count },
+                new() { StageName = "Interviewing",Count = activeVacancies.Sum(v => v.InterviewCount) },
                 new() { StageName = "Offer",       Count = activeVacancies.Sum(v => v.OfferCount) },
             };
 
-            // SLA alerts: active vacancies whose ApplicationDeadline has passed
+            // ── G-15.4 (2026-09-15): the SLA card fires on the deadline it is named for ───────
+            // The heading reads "Shortlisting SLA breached" and each row says "Deadline was {date}",
+            // and the condition was `v.ApplicationDeadline < today` — the date applications CLOSE,
+            // not the date shortlisting is due. A vacancy carries a separate ShortlistingDeadline,
+            // which the screening screen already uses.
+            //
+            // So the card fired the day applications closed, on every open vacancy, whether or not
+            // shortlisting was actually late — and stayed lit for the rest of the vacancy's life,
+            // since the deadline only recedes further into the past. It is the loudest element on
+            // the page and it was measuring the wrong date.
+            //
+            // A vacancy with no shortlisting deadline set now raises no alert at all, which is
+            // right: an SLA nobody agreed cannot be breached.
             var slaAlerts = activeVacancies
-                .Where(v => v.ApplicationDeadline.HasValue && v.ApplicationDeadline.Value < today)
+                .Where(v => v.ShortlistingDeadline.HasValue && v.ShortlistingDeadline.Value < today)
                 .Select(v => new DashboardSlaAlertDto
                 {
                     VacancyId           = v.Id,
                     VacancyNumber       = v.VacancyNumber,
                     JobTitle            = v.JobTitle,
-                    ApplicationDeadline = v.ApplicationDeadline,
+                    ApplicationDeadline = v.ShortlistingDeadline,
                 })
                 .ToList();
 
@@ -219,7 +278,19 @@ public class RecruitmentDashboardController : ControllerBase
                 UpcomingInterviews = interviews.Take(5).Select(i => new DashboardInterviewDto
                 {
                     InterviewId       = i.Id,
-                    CandidateName     = $"Round {i.Round}",
+                    // ⚠ G-15.3 (2026-09-15): this read `CandidateName = $"Round {i.Round}"` — a
+                    // round number in a name field, with the round ALSO carried correctly in
+                    // `Round` just below. Nothing was visibly wrong because the page's table is
+                    // Vacancy / Round / Type / When and has no Candidate column, so the value was
+                    // never rendered. But the payload was wrong, any future consumer reading
+                    // CandidateName got nonsense, and the controller's own docstring cites
+                    // "candidate names on… upcoming interviews" as part of the justification for
+                    // the HR gate — which, for this list, is not what it carried.
+                    //
+                    // An interview is a session that can hold several candidates, so there is no
+                    // single candidate name to give. Null is the honest answer; CandidateCount
+                    // already tells the reader how many people are in the session.
+                    CandidateName     = null,
                     VacancyTitle      = i.JobTitle,
                     InterviewDateTime = i.ScheduledDate.ToDateTime(TimeOnly.MinValue) + i.StartTime,
                     InterviewType     = i.TypeName,
@@ -288,6 +359,43 @@ public class RecruitmentDashboardController : ControllerBase
         {
             _logger.LogError(ex, "Error building recruitment analytics for year {Year}", year);
             return StatusCode(500, "An error occurred while loading recruitment analytics.");
+        }
+    }
+
+    /// <summary>
+    /// Runs the recruitment lifecycle sweep now, for the caller's tenant.
+    /// </summary>
+    /// <remarks>
+    /// <para>The same code the nightly host runs — the host/processor split every other HR engine
+    /// uses. It exists for three reasons: so the sweep can be proved to work without waiting a day,
+    /// so a tenant that has been drifting can be brought current on demand, and so a harness has
+    /// something deterministic to assert against.</para>
+    ///
+    /// <para>Gated on <c>Admin</c> rather than <c>Write</c>: it changes the status of records
+    /// across the whole tenant at once, which is an administrative act even though each individual
+    /// write is one the clock would have made anyway.</para>
+    /// </remarks>
+    [HttpPost("sweep")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
+    [ProducesResponseType(typeof(RecruitmentSweepResultDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RunSweep(CancellationToken ct)
+    {
+        var tenantId = _currentUser.TenantId;
+        if (tenantId == null) return BadRequest(new { message = "Tenant context could not be resolved." });
+
+        try
+        {
+            // EmployeeId, not UserId: LastModifiedById on these records is an Employee FK
+            // throughout this area (see hr-attendance-actor-conventions). The scheduled run passes
+            // null, which is the honest answer for a write nobody made.
+            var result = await _sweepService.RunSweepForTenantAsync(
+                tenantId.Value, "Manual", _currentUser.EmployeeId, ct);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error running the recruitment lifecycle sweep");
+            return StatusCode(500, "An error occurred while running the recruitment sweep.");
         }
     }
 }

@@ -18,7 +18,7 @@ namespace ErpSystem.Data.Migrations
     /// both WORSE than the same measurement six weeks earlier. A derived hierarchy resolves to
     /// nobody for 94% of staff. This is the fourth requirement to hit that wall (FR-HR-080,
     /// FR-HR-173, FR-HR-181, now FR-HR-084), and rather than work around it a fourth time this is
-    /// the explicit alternative already put to TDC in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4.
+    /// the explicit alternative already put to TDC in <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §4.
     /// ⚠ If reporting lines are ever genuinely maintained, this table does not need removing — it
     /// is the override layer a derived lookup would need anyway.
     /// </para>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Briefcase, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ const ALL = '__all__';
 const PAGE_SIZE = 20;
 
 export default function JobVacanciesPage() {
+  const router = useRouter();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string>(ALL);
 
@@ -112,7 +114,11 @@ export default function JobVacanciesPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((v) => (
-                  <TableRow key={v.id}>
+<TableRow
+                    key={v.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/vacancies/${v.id}`)}
+                  >
                     <TableCell className="font-medium">
                       <Link href={`/hr/recruitment/vacancies/${v.id}`} className="hover:underline">
                         {v.vacancyNumber}
@@ -124,6 +130,7 @@ export default function JobVacanciesPage() {
                     <TableCell>
                       <Link
                         href={`/hr/recruitment/requisitions/${v.staffRequisitionId}`}
+                        onClick={(e) => e.stopPropagation()}
                         className="text-primary hover:underline"
                       >
                         {v.requisitionNumber || '—'}
@@ -165,6 +172,16 @@ export default function JobVacanciesPage() {
             Next
           </Button>
         </div>
+      )}
+
+      {/* G-4.6 / G-5.8: choosing a status switches to a dedicated endpoint that is not paged and
+          returns every matching row. The applications list already disclosed this; copying the
+          disclosure beats pretending the view is bounded when it is not. */}
+      {status !== ALL && rows.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Filtering by status uses an unpaged endpoint — all {rows.length} matching vacancies are
+          shown.
+        </p>
       )}
     </div>
   );

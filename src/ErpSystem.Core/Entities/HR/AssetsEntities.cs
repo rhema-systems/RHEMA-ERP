@@ -861,7 +861,7 @@ public class AssetTransfer : TenantEntity
 /// <c>InstalmentCount</c> and <c>RecoveryStartDate</c> are a <i>declaration to payroll</i>, and
 /// <see cref="AssetSurchargeRecovery"/> records what was actually collected. Payroll owns the
 /// deduction; the exit settlement (FR-HR-184) applies whatever is still outstanding. No GL posting
-/// happens here — it is registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the one
+/// happens here — it is registered in <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the one
 /// comprehensive sweep after the module.</para>
 /// </remarks>
 public class AssetSurcharge : TenantEntity

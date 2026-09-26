@@ -24,6 +24,7 @@ export enum EstateManagedAssetSourceType {
   Manual = 0,
   LandAcquisition = 1,
   ProjectUnit = 2,
+  Imported = 3,
 }
 
 export interface EstateManagedAsset {
@@ -101,6 +102,8 @@ export interface EstateManagedAsset {
   externalListingPrice?: number;
   externalSalePrice?: number;
   externalMonthlyRent?: number;
+  externalGroundRentRequired?: boolean | null;
+  externalPremiumChargeRequired?: boolean | null;
   rentBillingActivatedAt?: string;
   nextRentBillingDate?: string;
   lastRentInvoiceId?: string;
@@ -187,6 +190,9 @@ export interface EstateLandDemarcation {
   allocatedCost?: number | null;
   costPerAcre?: number | null;
   targetSalePrice?: number | null;
+  groundRentPayable?: number | null;
+  groundRentRatePerAcre?: number | null;
+  groundRentComputed?: number | null;
   parentLandAssetReference?: string | null;
   parentFixedAssetReference?: string | null;
   childFixedAssetReference?: string | null;
@@ -199,6 +205,8 @@ export interface EstateLandDemarcation {
   externalListingPrice?: number | null;
   externalSalePrice?: number | null;
   externalMonthlyRent?: number | null;
+  externalGroundRentRequired?: boolean | null;
+  externalPremiumChargeRequired?: boolean | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
@@ -237,6 +245,8 @@ export interface UpdateEstateLandDemarcationDisposition {
   externalListingPrice?: number | null;
   externalSalePrice?: number | null;
   externalMonthlyRent?: number | null;
+  externalGroundRentRequired?: boolean | null;
+  externalPremiumChargeRequired?: boolean | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
@@ -301,6 +311,8 @@ export interface UpdateEstateManagedAssetListing {
   externalListingPrice?: number | null;
   externalSalePrice?: number | null;
   externalMonthlyRent?: number | null;
+  externalGroundRentRequired?: boolean | null;
+  externalPremiumChargeRequired?: boolean | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
@@ -329,11 +341,26 @@ export interface UpdateEstateManagedAssetOccupancy {
 export interface EstateManagedAssetQuery {
   assetType?: EstateManagedAssetType;
   status?: EstateManagedAssetStatus;
+  statuses?: EstateManagedAssetStatus[];
   search?: string;
   availableForLease?: boolean;
   availableForSale?: boolean;
   portalListingCandidates?: boolean;
+  publishedToExternalPortal?: boolean;
+  skip?: number;
   take?: number;
+}
+
+export interface EstateAssetImportInspection {
+  headers: string[];
+  fields: { key: string; label: string }[];
+  suggestions: Record<string, string>;
+}
+
+export interface EstateAssetImportPreview {
+  success: boolean;
+  rowCount: number;
+  errors: string[];
 }
 
 const assetTypeNames: Record<EstateManagedAssetType, string> = {
@@ -400,6 +427,7 @@ const normalizeManagedAsset = (
       [EstateManagedAssetSourceType.Manual]: 'Manual',
       [EstateManagedAssetSourceType.LandAcquisition]: 'LandAcquisition',
       [EstateManagedAssetSourceType.ProjectUnit]: 'ProjectUnit',
+      [EstateManagedAssetSourceType.Imported]: 'Imported',
     },
     EstateManagedAssetSourceType.Manual
   ),
@@ -411,10 +439,17 @@ const assetMatchesQuery = (
 ) =>
   enumMatches(asset.assetType, query.assetType, assetTypeNames) &&
   enumMatches(asset.status, query.status, assetStatusNames) &&
+  (query.statuses === undefined ||
+    query.statuses.length === 0 ||
+    query.statuses.some((status) =>
+      enumMatches(asset.status, status, assetStatusNames)
+    )) &&
   (query.availableForLease === undefined ||
     asset.isAvailableForLease === query.availableForLease) &&
   (query.availableForSale === undefined ||
-    asset.isAvailableForSale === query.availableForSale);
+    asset.isAvailableForSale === query.availableForSale) &&
+  (query.publishedToExternalPortal === undefined ||
+    asset.isPublishedToExternalPortal === query.publishedToExternalPortal);
 
 const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
   search: query.search || undefined,
@@ -422,13 +457,51 @@ const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
     query.assetType === undefined ? undefined : assetTypeNames[query.assetType],
   status:
     query.status === undefined ? undefined : assetStatusNames[query.status],
+  statuses: query.statuses?.map((status) => assetStatusNames[status]),
   availableForLease: query.availableForLease,
   availableForSale: query.availableForSale,
   portalListingCandidates: query.portalListingCandidates,
+  publishedToExternalPortal: query.publishedToExternalPortal,
+  skip: query.skip,
   take: query.take || 250,
 });
 
 export class EstateLandManagementService {
+  async inspectAssetImport(file: File): Promise<EstateAssetImportInspection> {
+    const form = new FormData();
+    form.append('file', file);
+    const response = await rawApiService.request<EstateAssetImportInspection & { success: boolean }>(
+      '/estate/managed-assets/imports/inspect',
+      { method: 'POST', body: form }
+    );
+    return response;
+  }
+
+  async previewAssetImport(file: File, mapping: Record<string, string>): Promise<EstateAssetImportPreview> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('mapping', JSON.stringify(mapping));
+    return rawApiService.request<EstateAssetImportPreview>(
+      '/estate/managed-assets/imports/preview',
+      { method: 'POST', body: form }
+    );
+  }
+
+  async commitAssetImport(file: File, mapping: Record<string, string>): Promise<number> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('mapping', JSON.stringify(mapping));
+    const response = await rawApiService.request<{ success: boolean; importedCount: number }>(
+      '/estate/managed-assets/imports/commit',
+      { method: 'POST', body: form }
+    );
+    return response.importedCount;
+  }
+
+  async downloadAssetImportTemplate(type: 'land' | 'property'): Promise<Blob> {
+    return rawApiService.downloadBlob(`/estate/managed-assets/imports/template?type=${type}`);
+  }
+
   async getLandBank(search?: string): Promise<EstateManagedAsset[]> {
     const query: EstateManagedAssetQuery = {
       search,
@@ -464,13 +537,16 @@ export class EstateLandManagementService {
   }
 
   async getPortalListingDemarcations(
-    search?: string
+    search?: string,
+    skip = 0,
+    take = 300
   ): Promise<EstateManagedAsset[]> {
     const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
       '/estate/managed-assets/portal-listing-demarcations',
       {
         search: search || undefined,
-        take: 300,
+        skip,
+        take,
       }
     );
 

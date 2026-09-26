@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { isQsExtensionDecision } from '@/lib/quantity-survey-architecture-scope';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -86,6 +87,7 @@ export default function QuantitySurveyConfigurationDetailPage() {
   const canApprove = hasPermission('quantity-survey.configuration.approve');
   const canAudit = hasPermission('quantity-survey.audit.read');
   const [decisionKey, setDecisionKey] = useState<string>();
+  const [showOptionalDecisions, setShowOptionalDecisions] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [lifecycleAction, setLifecycleAction] = useState<LifecycleAction>(null);
@@ -149,7 +151,7 @@ export default function QuantitySurveyConfigurationDetailPage() {
           ? 'Validation passed'
           : 'Validation needs attention',
         description: result.isValid
-          ? 'All 17 publication gates passed.'
+          ? 'All configured decisions passed publication validation.'
           : `${result.errors.length} blocking issue(s) remain.`,
         variant: result.isValid ? 'success' : 'destructive',
       });
@@ -284,8 +286,8 @@ export default function QuantitySurveyConfigurationDetailPage() {
   const openEditor = () => {
     setEditForm({
       name: profile.name,
-      effectiveFrom: profile.effectiveFrom.slice(0, 10),
-      effectiveTo: profile.effectiveTo?.slice(0, 10),
+      effectiveFrom: profile.effectiveFrom.slice(0, 19),
+      effectiveTo: profile.effectiveTo?.slice(0, 19),
       changeSummary: profile.changeSummary,
       isDefault: profile.isDefault,
       rowVersion: profile.rowVersion,
@@ -486,40 +488,57 @@ export default function QuantitySurveyConfigurationDetailPage() {
         <TabsContent value="decisions">
           <Card>
             <CardHeader>
-              <CardTitle>Controlled decision register</CardTitle>
+              <CardTitle>QS configuration</CardTitle>
               <CardDescription>
-                Typed values, accountable owners, independent approval,
-                effective dates and central-DMS evidence.
+                Configure the processes you use. Unconfigured decisions do not
+                prevent publication. Configured decisions still require approval
+                and supporting evidence.
               </CardDescription>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={showOptionalDecisions}
+                  onChange={(event) =>
+                    setShowOptionalDecisions(event.target.checked)
+                  }
+                />
+                Show optional configuration
+              </label>
             </CardHeader>
             <CardContent className="divide-y p-0">
-              {profile.decisions.map((decision) => (
-                <button
-                  key={decision.id}
-                  className="flex w-full flex-col gap-3 px-6 py-4 text-left hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
-                  onClick={() => setDecisionKey(decision.decisionKey)}
-                >
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-primary">
-                        {decision.decisionKey}
-                      </span>
-                      <span className="font-medium">
-                        {decision.displayName}
-                      </span>
+              {profile.decisions
+                .filter(
+                  (decision) =>
+                    showOptionalDecisions ||
+                    !isQsExtensionDecision(decision.decisionKey)
+                )
+                .map((decision) => (
+                  <button
+                    key={decision.id}
+                    className="flex w-full flex-col gap-3 px-6 py-4 text-left hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
+                    onClick={() => setDecisionKey(decision.decisionKey)}
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs font-semibold text-primary">
+                          {decision.decisionKey}
+                        </span>
+                        <span className="font-medium">
+                          {decision.displayName}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {decision.ownerGroup} · approval{' '}
+                        {decision.approvalStatus.toLowerCase()} · evidence{' '}
+                        {decision.evidenceStatus.toLowerCase()}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {decision.ownerGroup} · approval{' '}
-                      {decision.approvalStatus.toLowerCase()} · evidence{' '}
-                      {decision.evidenceStatus.toLowerCase()}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {decisionBadge(decision)}
-                    <Eye className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                </button>
-              ))}
+                    <div className="flex items-center gap-2">
+                      {decisionBadge(decision)}
+                      <Eye className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </button>
+                ))}
             </CardContent>
           </Card>
         </TabsContent>
@@ -530,7 +549,7 @@ export default function QuantitySurveyConfigurationDetailPage() {
               <CheckCircle2 className="h-4 w-4" />
               <AlertTitle>Publication validation passed</AlertTitle>
               <AlertDescription>
-                All 17 decision gates currently pass.
+                All configured decisions currently pass.
               </AlertDescription>
             </Alert>
           )}
@@ -688,7 +707,7 @@ export default function QuantitySurveyConfigurationDetailPage() {
           <DialogHeader>
             <DialogTitle>Edit configuration draft</DialogTitle>
             <DialogDescription>
-              Changing profile dates revalidates every decision period.
+              Changing profile dates revalidates each configured decision period.
             </DialogDescription>
           </DialogHeader>
           {editForm && (
@@ -706,9 +725,10 @@ export default function QuantitySurveyConfigurationDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Effective from</Label>
+                <Label>Effective from (UTC)</Label>
                 <Input
-                  type="date"
+                  type="datetime-local"
+                  step="1"
                   value={editForm.effectiveFrom}
                   onChange={(event) =>
                     setEditForm(
@@ -722,9 +742,10 @@ export default function QuantitySurveyConfigurationDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Effective to (optional)</Label>
+                <Label>Effective to (UTC, optional)</Label>
                 <Input
-                  type="date"
+                  type="datetime-local"
+                  step="1"
                   value={editForm.effectiveTo ?? ''}
                   onChange={(event) =>
                     setEditForm(
@@ -806,15 +827,16 @@ export default function QuantitySurveyConfigurationDetailPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Effective from</Label>
+              <Label>Effective from (UTC)</Label>
               <Input
-                type="date"
+                type="datetime-local"
+                step="1"
                 value={cloneDate}
                 onChange={(event) => setCloneDate(event.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                A future date schedules the replacement without disabling the
-                current effective version.
+                Choose a time after the preceding version starts, including for
+                same-day revisions. A future time schedules the replacement.
               </p>
             </div>
             <div className="space-y-2">
@@ -862,6 +884,11 @@ export default function QuantitySurveyConfigurationDetailPage() {
                   : 'The soft-deleted version remains reserved for version sequencing and audit integrity.'}
             </DialogDescription>
           </DialogHeader>
+          {lifecycle.error && (
+            <Alert variant="destructive">
+              <AlertDescription>{errorMessage(lifecycle.error)}</AlertDescription>
+            </Alert>
+          )}
           <div className="space-y-2">
             <Label>Reason *</Label>
             <Textarea

@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -321,12 +322,17 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         // Ensure the template is structurally valid before it goes to HR.
         await ValidateTemplateWeightsAsync(id, cancellationToken);
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        // Submitting must never approve — with no published definition the engine returns Approved
+        // and the adapter maps it to an approved template, publishing an appraisal template nobody
+        // reviewed. Defence in depth; an APPRAISAL_TEMPLATE definition is seeded. See
+        // HrWorkflowFallbackAuthority.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start the template approval workflow.");
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         entity.SubmittedById = submittedByEmployeeId == Guid.Empty ? null : submittedByEmployeeId;
         entity.SubmittedDate = DateTime.UtcNow;
@@ -343,19 +349,17 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, id, userId,
+            "Approve", null, "approve an appraisal template", HrPermissions.ApprovePerformance);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         // Only stamp the approver once the engine says the whole chain has passed; an
-        // intermediate step leaves the template Pending and unattributed.
-        if (workflowResult.Outcome == WorkflowOutcome.Approved)
+        // intermediate step leaves the template Pending and unattributed. On the no-workflow path
+        // there is no chain, so a single approval is the whole of it and this stamps.
+        if (approvalOutcome == WorkflowOutcome.Approved)
             entity.ApprovedById = approvedByEmployeeId == Guid.Empty ? null : approvedByEmployeeId;
 
         await _templateRepository.UpdateAsync(entity);
@@ -370,16 +374,14 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         var entity = await GetOwnedAsync(id);
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, id, userId,
+            "Reject", rejectionText, "reject an appraisal template", HrPermissions.ApprovePerformance);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _templateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -401,9 +403,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Only a template still awaiting approval can be recalled.");
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, id, userId);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the template.");
+        // Skipped when nothing is published; the adapter returns the template to Draft either way.
+        await HrWorkflowFallbackAuthority.RecallAsync(_workflowIntegrationService, EntityType, id, userId);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId);
 

@@ -84,6 +84,10 @@ export default function NewVacancyPage() {
     isBlindScreeningEnabled: false,
     autoShortlistMinScore: '',
     autoShortlistRequireAllMandatory: true,
+    // G-5.2: both default to 0, which switches the two scoring branches off — the same default the
+    // entity has always had. What changed is that they can now be turned on.
+    testScoreWeight: '',
+    internalCandidateBoostPoints: '',
   });
 
   const [seeded, setSeeded] = useState(false);
@@ -122,6 +126,8 @@ export default function NewVacancyPage() {
         isBlindScreeningEnabled: form.isBlindScreeningEnabled,
         autoShortlistMinScore: form.autoShortlistMinScore ? Number(form.autoShortlistMinScore) : null,
         autoShortlistRequireAllMandatory: form.autoShortlistRequireAllMandatory,
+        testScoreWeight: Number(form.testScoreWeight) || 0,
+        internalCandidateBoostPoints: Number(form.internalCandidateBoostPoints) || 0,
       }),
     onSuccess: (created) => {
       toast({
@@ -506,6 +512,45 @@ export default function NewVacancyPage() {
                   <Label htmlFor="autoShortlistRequireAllMandatory" className="font-normal">
                     Require every mandatory criterion to pass
                   </Label>
+                </div>
+              </div>
+
+              {/* G-5.2: two inputs the scoring algorithm has always read and nothing could ever
+                  set. Both default to 0, which is "off" — the behaviour every vacancy had before
+                  2026-09-15, so an untouched form scores exactly as it used to. */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="testScoreWeight">Weight given to test scores (%)</Label>
+                  <Input
+                    id="testScoreWeight"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={form.testScoreWeight}
+                    onChange={(e) => setForm({ ...form, testScoreWeight: e.target.value })}
+                    placeholder="0 — ignore test scores"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Blends written and practical test results into the shortlist score. At 0 the
+                    tests are still recorded but count for nothing.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="internalCandidateBoostPoints">Internal candidate bonus</Label>
+                  <Input
+                    id="internalCandidateBoostPoints"
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={form.internalCandidateBoostPoints}
+                    onChange={(e) =>
+                      setForm({ ...form, internalCandidateBoostPoints: e.target.value })
+                    }
+                    placeholder="0 — no preference"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Flat points added to an existing employee&apos;s score, up to 20.
+                  </p>
                 </div>
               </div>
             </CardContent>

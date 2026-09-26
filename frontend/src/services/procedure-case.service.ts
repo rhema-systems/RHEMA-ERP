@@ -8,6 +8,10 @@ export interface ProcedureCaseSummary {
   title: string;
   referenceNumber?: string | null;
   applicantName?: string | null;
+  organizationLevelId?: string | null;
+  organizationLevelName?: string | null;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
   status: string;
   currentStageIndex: number;
   currentStageName: string;
@@ -46,6 +50,14 @@ export interface ProcedureCaseDocument {
   isMandatory: boolean;
   fileName?: string | null;
   fileUrl?: string | null;
+  centralDocumentRecordId?: string | null;
+  centralDocumentVersionId?: string | null;
+  centralDocumentVersion?: string | null;
+  centralDocumentRepositoryPath?: string | null;
+  centralDocumentRenditionPath?: string | null;
+  centralDocumentContentType?: string | null;
+  centralDocumentAnnotationStateJson?: string | null;
+  canUploadAtCurrentStage: boolean;
   notes?: string | null;
   uploadedById?: string | null;
   uploadedAt?: string | null;
@@ -86,6 +98,47 @@ interface ApiResponse<T> {
   message?: string;
 }
 
+export interface LegalPropertyCaseContext {
+  sourceCase: {
+    id: string; title: string; referenceNumber?: string | null; description?: string | null;
+    applicantName?: string | null; status: string; currentStageName: string;
+    fields: { label: string; value: string }[];
+    documents: { id: string; name: string; fileName: string; notes?: string | null; uploadedAt?: string | null; dmsUrl?: string | null }[];
+    activities: { action: string; stageName?: string | null; details?: string | null; performedAt: string }[];
+  };
+  asset?: {
+    id: string; assetCode: string; name: string; assetType: string | number; status: string | number;
+    location?: string | null; region?: string | null; district?: string | null; town?: string | null;
+    areaValue?: number | null; areaUnit?: string | null; surveyPlanNumber?: string | null;
+    propertyFileReference?: string | null; valuationAmount?: number | null; currency: string;
+  } | null;
+  assetDocuments: { id: string; documentName?: string | null; documentType: string; fileName: string;
+    centralDocumentRecordId?: string | null; centralDocumentReference?: string | null }[];
+  opportunity?: { id: string; name: string; description?: string | null; stage: string; amount: number; currency: string;
+    expectedCloseDate?: string | null; actualCloseDate?: string | null; leadSource?: string | null;
+    opportunityType?: string | null; notes?: string | null } | null;
+  salesActivities: { id: string; subject: string; activityType: string; description?: string | null;
+    activityDate: string; activityStatus: string; outcome?: string | null; notes?: string | null }[];
+  inquiry: {
+    ticket?: { id: string; ticketNumber: string; subject?: string | null; description: string;
+      status: string | number; source: string | number; priority: string | number;
+      createdAt: string; resolutionSummary?: string | null } | null;
+    messages: { id: string; body: string; isInternal: boolean; createdAt: string }[];
+    ticketHistory: { fromStatus?: string | number | null; toStatus: string | number; notes?: string | null; createdAt: string }[];
+    ticketAttachments: { id: string; fileName: string; isInternal: boolean }[];
+  };
+}
+
+export interface PagedResult<T> {
+  items: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrevious?: boolean;
+  hasNext?: boolean;
+}
+
 interface CreateCasePayload {
   module: string;
   entityType: string;
@@ -93,12 +146,30 @@ interface CreateCasePayload {
   referenceNumber?: string;
   applicantName?: string;
   sourceDepartment?: string;
+  organizationLevelId?: string;
+  organizationUnitId?: string;
   receivedDate?: string;
   description?: string;
   fieldValues?: Record<string, string | null>;
+  hasIntakeAttachment?: boolean;
 }
 
 class ProcedureCaseService {
+  async getLegalPropertyContext(legalCaseId: string): Promise<LegalPropertyCaseContext> {
+    const response = await apiService.get<ApiResponse<LegalPropertyCaseContext>>(
+      `/legal/property-cases/${legalCaseId}/context`
+    );
+    return response.data;
+  }
+
+  async downloadLegalSourceDocument(legalCaseId: string, documentId: string): Promise<Blob> {
+    return rawApiService.downloadBlob(`/legal/property-cases/${legalCaseId}/context/source-documents/${documentId}`);
+  }
+
+  async downloadLegalInquiryAttachment(legalCaseId: string, attachmentId: string): Promise<Blob> {
+    return rawApiService.downloadBlob(`/legal/property-cases/${legalCaseId}/context/inquiry-attachments/${attachmentId}`);
+  }
+
   async getSubmissionDocumentRequirements(
     module: string,
     entityType: string
@@ -116,6 +187,35 @@ class ProcedureCaseService {
       entityType,
     });
     return response.data || [];
+  }
+
+  async listCasesPage(
+    module: string,
+    entityType: string,
+    page = 1,
+    pageSize = 10,
+    mineOnly = false
+  ): Promise<PagedResult<ProcedureCaseSummary>> {
+    const response = await apiService.get<ApiResponse<PagedResult<ProcedureCaseSummary>>>(
+      '/procedure-cases/paged',
+      {
+        module,
+        entityType,
+        page,
+        pageSize,
+        mineOnly,
+      }
+    );
+
+    return (
+      response.data || {
+        items: [],
+        totalCount: 0,
+        page,
+        pageSize,
+        totalPages: 1,
+      }
+    );
   }
 
   async listModuleCases(module: string, mineOnly = false): Promise<ProcedureCaseSummary[]> {
@@ -155,6 +255,8 @@ class ProcedureCaseService {
       referenceNumber?: string | null;
       applicantName?: string | null;
       sourceDepartment?: string | null;
+      organizationLevelId?: string | null;
+      organizationUnitId?: string | null;
       receivedDate?: string | null;
       description?: string | null;
     }
@@ -235,6 +337,21 @@ class ProcedureCaseService {
       {
         method: 'POST',
         body: JSON.stringify(payload),
+        signal: new AbortController().signal,
+      }
+    );
+    return response.data;
+  }
+
+  async signPropertyAgreement(
+    id: string,
+    documentId: string
+  ): Promise<ProcedureCaseDetail> {
+    const response = await rawApiService.request<ApiResponse<ProcedureCaseDetail>>(
+      `/procedure-cases/${id}/documents/${documentId}/property-agreement-signature`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ signatureRole: 'Head of Legal' }),
         signal: new AbortController().signal,
       }
     );

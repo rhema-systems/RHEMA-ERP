@@ -1,11 +1,21 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from './CentralDocumentViewerDialog';
 import { apiService } from '@/services/api.service';
+import { documentManagementService } from '@/services/document-management.service';
+import { savePdfCopy } from '@/lib/save-pdf-copy';
 
-vi.mock('next/dynamic', () => ({ default: () => (props: { fileData?: Uint8Array; fileName?: string }) =>
-  <div data-testid="pdf-bytes">{props.fileName}:{Array.from(props.fileData || []).join(',')}</div> }));
+const { exportAnnotationState, exportAnnotatedPdfBlob } = vi.hoisted(() => ({
+  exportAnnotationState: vi.fn(), exportAnnotatedPdfBlob: vi.fn(),
+}));
+vi.mock('next/dynamic', () => ({ default: () => React.forwardRef(function PdfMock(
+  props: { fileData?: Uint8Array; fileName?: string }, ref: React.Ref<unknown>
+) {
+  React.useImperativeHandle(ref, () => ({ exportAnnotationState, exportAnnotatedPdfBlob }));
+  return <div data-testid="pdf-bytes">{props.fileName}:{Array.from(props.fileData || []).join(',')}</div>;
+}) }));
+vi.mock('@/lib/save-pdf-copy', () => ({ savePdfCopy: vi.fn() }));
 vi.mock('@/services/api.service', () => ({ apiService: { downloadBlob: vi.fn() } }));
 vi.mock('@/services/document-management.service', () => ({ documentManagementService: { downloadVersionFile: vi.fn(), downloadRecordContent: vi.fn() } }));
 const bytes = new Uint8Array([37, 80, 68, 70]);
@@ -42,5 +52,57 @@ describe('central PDF preview byte source', () => {
     render(<CentralDocumentViewerDialog open file={{ ...generated, pdfData: new Uint8Array() }} onOpenChange={vi.fn()} />);
     expect(screen.getByText('No viewable file linked')).toBeInTheDocument();
     expect(screen.queryByTestId('pdf-bytes')).not.toBeInTheDocument();
+  });
+  it('saves annotations through DMS while keeping local save-copy unavailable in edit mode', async () => {
+    const secured = { ...generated, documentRecordId: 'record-1', versionId: 'version-1' };
+    const annotatedPdf = new Blob(['annotated'], { type: 'application/pdf' });
+    vi.mocked(documentManagementService.downloadVersionFile).mockResolvedValue({ arrayBuffer: async () => bytes.buffer } as Blob);
+    exportAnnotationState.mockResolvedValue('{"annotations":[]}');
+    exportAnnotatedPdfBlob.mockResolvedValue(annotatedPdf);
+    const onSaveAnnotations = vi.fn().mockResolvedValue(undefined);
+    render(<CentralDocumentViewerDialog open file={secured} onOpenChange={vi.fn()} enableSaveCopy onSaveAnnotations={onSaveAnnotations} />);
+    await screen.findByTestId('pdf-bytes');
+    fireEvent.click(screen.getByRole('button', { name: 'Save annotations' }));
+    await waitFor(() => expect(onSaveAnnotations).toHaveBeenCalledWith(secured, '{"annotations":[]}', annotatedPdf));
+    expect(screen.queryByRole('button', { name: 'Save PDF as...' })).not.toBeInTheDocument();
+    expect(savePdfCopy).not.toHaveBeenCalled();
+  });
+  it('saves a read-only QS copy without invoking annotation persistence', async () => {
+    vi.mocked(savePdfCopy).mockResolvedValue('saved');
+    const onSaveAnnotations = vi.fn();
+    render(<CentralDocumentViewerDialog open file={generated} onOpenChange={vi.fn()} enableSaveCopy enableAnnotations={false} onSaveAnnotations={onSaveAnnotations} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Save PDF as...' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('PDF saved successfully.');
+    expect(savePdfCopy).toHaveBeenCalledWith(bytes, 'PO-1.pdf');
+    expect(onSaveAnnotations).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Save annotations' })).not.toBeInTheDocument();
+  });
+  it('shows the saved version immediately without re-fetching the old preview', async () => {
+    vi.mocked(apiService.downloadBlob).mockResolvedValue(
+      { arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer } as Blob
+    );
+    exportAnnotationState.mockResolvedValue('{}');
+    exportAnnotatedPdfBlob.mockResolvedValue(
+      { arrayBuffer: async () => new Uint8Array([9, 8, 7]).buffer } as Blob
+    );
+    const onSaveAnnotations = vi.fn().mockImplementation(async (file: CentralDocumentViewerFile) => ({
+      ...file,
+      versionId: 'version-2',
+      version: '2',
+      repositoryPath: '/api/document-management/records/record-1/versions/version-2/content',
+    }));
+    render(
+      <CentralDocumentViewerDialog
+        open
+        file={{ documentRecordId: 'record-1', versionId: 'version-1', title: 'Agreement', fileName: 'Agreement.pdf', repositoryPath: '/api/document-management/records/record-1/versions/version-1/content' }}
+        onOpenChange={vi.fn()}
+        onSaveAnnotations={onSaveAnnotations}
+      />
+    );
+    expect(await screen.findByTestId('pdf-bytes')).toHaveTextContent('1,2,3');
+    fireEvent.click(screen.getByRole('button', { name: 'Save annotations' }));
+    await waitFor(() => expect(screen.getByTestId('pdf-bytes')).toHaveTextContent('9,8,7'));
+    expect(screen.getByText('Annotations saved as 2.')).toBeInTheDocument();
+    expect(apiService.downloadBlob).toHaveBeenCalledTimes(1);
   });
 });

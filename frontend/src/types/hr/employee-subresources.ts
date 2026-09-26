@@ -113,6 +113,13 @@ export interface EmployeeContact {
   region?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  /**
+   * The administrative area this address sits in (round 2, lane D2).
+   *
+   * ⚠ When it is set, `city` and `region` above are SNAPSHOTS the server wrote from the tree, not
+   * values a caller decides. Read it to re-open the cascade.
+   */
+  geoAreaId?: string | null;
   isPrimary: boolean;
 }
 
@@ -125,6 +132,11 @@ export interface CreateEmployeeContactRequest {
   region?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  /**
+   * The area. Supplying it rewrites `city` and `region` from the tree and fills in `countryId`;
+   * an area outside a stated country is refused with a 400.
+   */
+  geoAreaId?: string | null;
   isPrimary: boolean;
 }
 
@@ -149,11 +161,26 @@ export interface EmployeeEmergencyContact {
   emailAddress?: string | null;
   address?: string | null;
   city?: string | null;
+  region?: string | null;
   countryId?: string | null;
+  /**
+   * The administrative area this address sits in (round 2, lane D2).
+   *
+   * ⚠ When it is set, `city` and `region` above are SNAPSHOTS the server wrote from the tree, not
+   * values a caller decides. Read it to re-open the cascade.
+   */
+  geoAreaId?: string | null;
   digitalAddress?: string | null;
   isPrimary: boolean;
   isActive: boolean;
   notes?: string | null;
+  /**
+   * The catalogue row behind `relationship` (round 2, lane D2).
+   *
+   * ⚠ `relationship` already carries the row's NAME — the server mirrors it on every save. This is
+   * for re-opening the dropdown, not for display.
+   */
+  relationshipTypeId?: string | null;
 }
 
 export interface CreateEmployeeEmergencyContactRequest {
@@ -168,11 +195,19 @@ export interface CreateEmployeeEmergencyContactRequest {
   emailAddress?: string | null;
   address?: string | null;
   city?: string | null;
+  region?: string | null;
   countryId?: string | null;
+  /**
+   * The area. Supplying it rewrites `city` and `region` from the tree and fills in `countryId`;
+   * an area outside a stated country is refused with a 400.
+   */
+  geoAreaId?: string | null;
   digitalAddress?: string | null;
   isPrimary: boolean;
   isActive: boolean;
   notes?: string | null;
+  /** The catalogue row. ⚠ FAMILIAL and OTHER only — a next of kin is not a former manager. */
+  relationshipTypeId?: string | null;
 }
 
 export interface UpdateEmployeeEmergencyContactRequest
@@ -195,13 +230,22 @@ export interface EmployeeDependent {
   gender?: Gender | null;
   hasDisability: boolean;
   disabilityDescription?: string | null;
+  /** Round 3, lane P2. */
+  disabilityTypeId?: string | null;
+  disabilityTypeName?: string | null;
   ghanaCardNumber?: string | null;
   phone?: string | null;
   digitalAddress?: string | null;
   occupation?: string | null;
   isEligibleForBenefits: boolean;
   isDeceased: boolean;
+  /** LEGACY caller-supplied location, kept so ported images still resolve. Prefer `hasPhoto`. */
   picturePath?: string | null;
+  // ⚠ Read-only: the photograph arrives through POST employee-documents/dependants/{id}/photo.
+  hasPhoto?: boolean;
+  photoFileName?: string | null;
+  photoMimeType?: string | null;
+  photoFileSizeBytes?: number | null;
   notes?: string | null;
 }
 
@@ -216,6 +260,7 @@ export interface CreateEmployeeDependentRequest {
   gender?: Gender | null;
   hasDisability: boolean;
   disabilityDescription?: string | null;
+  disabilityTypeId?: string | null;
   ghanaCardNumber?: string | null;
   phone?: string | null;
   digitalAddress?: string | null;
@@ -327,6 +372,12 @@ export interface EmployeeSkill {
   isVerified: boolean;
   isCertificationExpired: boolean;
   notes?: string | null;
+  /** The credential on the certification tab that evidences this skill (round 2, lane C2). */
+  employeeCertificationId?: string | null;
+  employeeCertificationName?: string | null;
+  requiresCertification: boolean;
+  /** False when the skill requires certification and nothing valid evidences it. Flagged, not refused. */
+  isCompliant: boolean;
 }
 
 export interface CreateEmployeeSkillRequest {
@@ -339,6 +390,8 @@ export interface CreateEmployeeSkillRequest {
   certificationNumber?: string | null;
   certifyingBody?: string | null;
   certifyingBodyId?: string | null;
+  /** A credential the employee holds that evidences this skill. */
+  employeeCertificationId?: string | null;
   notes?: string | null;
 }
 
@@ -357,6 +410,8 @@ export interface UpdateEmployeeSkillRequest {
    * one is always sent and null genuinely means "no catalogued body".
    */
   certifyingBodyId?: string | null;
+  /** Same rule as certifyingBodyId: always sent, applied unconditionally, null clears it. */
+  employeeCertificationId?: string | null;
   notes?: string | null;
   isVerified?: boolean;
 }
@@ -419,6 +474,18 @@ export interface EmployeeWorkHistory {
   startDate: string;
   endDate?: string | null;
   companyAddress?: string | null;
+  // The employer's address, round 2 lane D2 (register row E-6). ⚠ city and region are SNAPSHOTS
+  // written from geoAreaId, not values a caller decides.
+  countryId?: string | null;
+  city?: string | null;
+  region?: string | null;
+  /**
+   * The administrative area this address sits in (round 2, lane D2).
+   *
+   * ⚠ When it is set, `city` and `region` above are SNAPSHOTS the server wrote from the tree, not
+   * values a caller decides. Read it to re-open the cascade.
+   */
+  geoAreaId?: string | null;
   jobDescription?: string | null;
   salary?: number | null;
   reasonForLeaving?: string | null;
@@ -431,6 +498,14 @@ export interface CreateEmployeeWorkHistoryRequest {
   employeeId: string;
   companyName: string;
   companyAddress?: string | null;
+  countryId?: string | null;
+  city?: string | null;
+  region?: string | null;
+  /**
+   * The area. Supplying it rewrites `city` and `region` from the tree and fills in `countryId`;
+   * an area outside a stated country is refused with a 400.
+   */
+  geoAreaId?: string | null;
   jobTitle: string;
   jobDescription?: string | null;
   startDate: string;
@@ -454,9 +529,23 @@ export interface EmployeeContract {
   employeeId: string;
   contractNumber: string;
   employmentType: EmploymentType;
+  /** The tenant's own name for this kind of engagement. Not the same axis as employmentType. */
+  contractTypeId?: string | null;
+  contractTypeName?: string | null;
   /** DateOnly */
   startDate: string;
+  /**
+   * The day these terms took effect — what the list is ordered on and what supersession runs on.
+   *
+   * ⚠ Reads `0001-01-01` on rows added through this tab before 2026-09-09: the writer never set it.
+   */
+  effectiveDate: string;
+  /** When the engagement ACTUALLY ended. Null while it is running. */
   endDate?: string | null;
+  /** When the engagement is SCHEDULED to end. Null for permanent employment. */
+  contractEndDate?: string | null;
+  /** Whether these are the terms in force today. At most one contract per employee carries it. */
+  isCurrent: boolean;
   salary: number;
   payFrequency: string;
   payFrequencyType?: PayFrequency | null;
@@ -466,8 +555,7 @@ export interface EmployeeContract {
   isTaxExempt?: boolean | null;
   contractStatus?: ContractStatus | null;
   workingHoursPerWeek: number;
-  vacationDaysPerYear: number;
-  sickDaysPerYear: number;
+  // Round 3, lane P3 (D-5): the three leave figures are gone from the contract; see the leave module.
   /**
    * The probation term and the date it was passed.
    *
@@ -503,17 +591,25 @@ export interface CreateEmployeeContractRequest {
   employeeId: string;
   contractNumber: string;
   employmentType: EmploymentType;
+  contractTypeId?: string | null;
   startDate: string;
+  /** Defaults to `startDate` when omitted. */
+  effectiveDate?: string | null;
   endDate?: string | null;
-  salary: number;
-  payFrequency: PayFrequency;
-  taxTreatmentType: TaxTreatmentType;
+  /** Defaults from the contract type's duration when a kind is named and no date is given. */
+  contractEndDate?: string | null;
+  /**
+   * ⚠ Optional since lane E1 (§ 6.5.4): basic pay and its tax treatment are payroll's, hosted on
+   * the Salary tab, and the contract dialog no longer captures them. The columns stay on the
+   * entity for the rows that hold them; an omitted value leaves a row's figure untouched.
+   */
+  salary?: number;
+  payFrequency?: PayFrequency;
+  taxTreatmentType?: TaxTreatmentType;
   withholdingTaxRate?: number | null;
-  isPensionApplicable: boolean;
-  isTaxExempt: boolean;
+  isPensionApplicable?: boolean;
+  isTaxExempt?: boolean;
   workingHoursPerWeek: number;
-  vacationDaysPerYear: number;
-  sickDaysPerYear: number;
   probationPeriodDays?: number | null;
   confirmationDate?: string | null;
   terms?: string | null;
@@ -669,7 +765,18 @@ export interface EmployeeSalaryAssignment {
   effectiveDate: string;
   effectiveTo?: string | null;
   reason?: string | null;
+  /** In force TODAY: taken effect, not ended, not withdrawn. */
   isActive: boolean;
+  /** Dated forward and not withdrawn — it has not taken effect yet. */
+  isScheduled: boolean;
+  /**
+   * Withdrawn rather than superseded or run to its end.
+   *
+   * ⚠ A placement withdrawn before its start date has NO end date — it was never in force, so it
+   * has no window. This is the only thing that marks it, and every as-of read excludes it.
+   */
+  withdrawnAt?: string | null;
+  withdrawnReason?: string | null;
   amount?: number | null;
   assignmentReason?: string;
 }
@@ -699,6 +806,13 @@ export interface EmployeeReferee {
   organization?: string | null;
   positionOrTitle?: string | null;
   relationship: string;
+  /**
+   * The catalogue row behind `relationship` (round 2, lane D2).
+   *
+   * ⚠ `relationship` already carries the row's NAME — the server mirrors it on every save. This is
+   * for re-opening the dropdown, not for display.
+   */
+  relationshipTypeId?: string | null;
   phoneNumber: string;
   emailAddress?: string | null;
   isPrimary: boolean;
@@ -707,6 +821,12 @@ export interface EmployeeReferee {
   /** DateTime */
   contactedDate?: string | null;
   referenceNotes?: string | null;
+  // ⚠ Read-only: the written reference arrives through POST employee-documents/referees/{id}/letter
+  // and the gate fills these in. On the LIST projection since round 2 so the tab can show it.
+  hasLetter?: boolean;
+  letterFileName?: string | null;
+  letterMimeType?: string | null;
+  letterFileSizeBytes?: number | null;
 }
 
 export interface CreateEmployeeRefereeRequest {
@@ -716,6 +836,13 @@ export interface CreateEmployeeRefereeRequest {
   organization?: string | null;
   positionOrTitle?: string | null;
   relationship: string;
+  /**
+   * The catalogue row.
+   *
+   * ⚠ What is accepted depends on `refereeType`: a PERSONAL referee may be a relative or a family
+   * friend (familial, other); a PROFESSIONAL or ACADEMIC one may not (professional, other).
+   */
+  relationshipTypeId?: string | null;
   phoneNumber: string;
   emailAddress?: string | null;
   isPrimary: boolean;
@@ -727,6 +854,8 @@ export interface UpdateEmployeeRefereeRequest extends Partial<CreateEmployeeRefe
   isContacted?: boolean;
   contactedDate?: string | null;
   referenceNotes?: string | null;
+  /** A null id means "not supplied" on this DTO, so unlinking has to say so explicitly. */
+  clearRelationshipType?: boolean;
 }
 
 // ── Guarantors ──────────────────────────────────────────────────────────────────
@@ -749,9 +878,19 @@ export interface EmployeeGuarantor {
   /** DateOnly */
   dateOfBirth?: string | null;
   address?: string;
+  // ⚠ city and region are SNAPSHOTS written from geoAreaId, not values a caller decides.
   city?: string | null;
+  region?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  geoAreaId?: string | null;
+  /**
+   * The catalogue row behind `relationship` (round 2, lane D2).
+   *
+   * ⚠ `relationship` already carries the row's NAME — the server mirrors it on every save. This is
+   * for re-opening the dropdown, not for display.
+   */
+  relationshipTypeId?: string | null;
   phoneNumber?: string | null;
   emailAddress?: string | null;
   jobTitle?: string | null;
@@ -765,12 +904,19 @@ export interface EmployeeGuarantor {
   amountGuaranteedCurrencyCode?: string | null;
   /** How the guarantor describes their gender, where gender is Other. */
   genderDescription?: string | null;
+  /** Free-text kind, for rows recorded before the catalogue link. Prefer `nationalIdTypeId`. */
   nationalIdType?: string | null;
+  /** The kind from the identification-type catalogue (round 2, E-13). On the list projection. */
+  nationalIdTypeId?: string | null;
+  nationalIdTypeName?: string | null;
+  /** How many documents pertain to this guarantor. On the list projection. */
+  documentCount?: number;
   /** The detail projection masks the ID number; writes use nationalIdNumber. */
   nationalIdNumberMasked?: string | null;
   nationalIdExpiryDate?: string | null;
   hasSignedGuarantorForm?: boolean;
   dateFormSigned?: string | null;
+  /** LEGACY, read-only. The signed form is now a guarantor document through the gate. */
   guarantorFormPath?: string | null;
   isVerified: boolean;
   /** DateTime */
@@ -793,8 +939,16 @@ export interface CreateEmployeeGuarantorRequest {
   dateOfBirth?: string | null;
   address: string;
   city?: string | null;
+  region?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  /**
+   * The area. Supplying it rewrites `city` and `region` from the tree and fills in `countryId`;
+   * an area outside a stated country is refused with a 400.
+   */
+  geoAreaId?: string | null;
+  /** The catalogue row. ⚠ ALL THREE categories — a guarantor may be anyone. */
+  relationshipTypeId?: string | null;
   phoneNumber?: string | null;
   emailAddress?: string | null;
   jobTitle?: string | null;
@@ -809,17 +963,25 @@ export interface CreateEmployeeGuarantorRequest {
   /** How the guarantor describes their gender, where gender is Other. */
   genderDescription?: string | null;
   nationalIdType?: string | null;
+  /** The catalogue kind. Refused if unknown or inactive. */
+  nationalIdTypeId?: string | null;
   nationalIdNumber?: string | null;
   nationalIdExpiryDate?: string | null;
   hasSignedGuarantorForm: boolean;
   dateFormSigned?: string | null;
-  guarantorFormPath?: string | null;
+  // ⚠ No guarantorFormPath: removed in round 2. The signed form is uploaded as a document.
   notes?: string | null;
   isActive: boolean;
 }
 
 export interface UpdateEmployeeGuarantorRequest extends Partial<CreateEmployeeGuarantorRequest> {
   id: string;
+  /** A null id means "not supplied" on the update DTO, so unlinking has to say so explicitly. */
+  clearNationalIdType?: boolean;
+  /** Same convention, for the area. */
+  clearGeoArea?: boolean;
+  /** Same convention, for the relationship catalogue row. */
+  clearRelationshipType?: boolean;
 }
 
 /** Body for POST .../guarantors/{id}/verify. verifiedDate is a DateTime. */
@@ -869,4 +1031,6 @@ export interface CreateEmployeeBankDetailRequest {
 export interface UpdateEmployeeBankDetailRequest extends Partial<CreateEmployeeBankDetailRequest> {
   id: string;
   isActive?: boolean;
+  /** Unlinks the catalogue bank and branch so typed names stand alone (null id = "not supplied"). */
+  clearBankLink?: boolean;
 }

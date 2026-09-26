@@ -13,7 +13,7 @@ namespace ErpSystem.Data.Migrations
     /// <b>Why they are settings at all.</b> <c>GrievanceRungChaseDays</c> was a <c>const</c> in
     /// <c>DisciplineReminderService</c>. FR-HR-181 names the escalation route and sets <b>no time
     /// limit at any rung</b>, so five days is OUR assumption — raised with TDC in
-    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered. As a constant, their answer
+    /// <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered. As a constant, their answer
     /// would have cost a code change and a deploy. It now costs a settings edit.
     /// </para>
     /// <para>

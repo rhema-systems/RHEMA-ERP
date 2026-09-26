@@ -73,6 +73,47 @@ public class LeaveType : TenantEntity
     public int? ForfeitUnusedAfterMonths { get; set; }
 
     /// <summary>
+    /// ⚠ <b>What the year-end runs COUNT as unused</b> — the days the year granted, or the days the
+    /// employee actually earned (entitlement plan B2, decision D-2).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>It governs BOTH year-end acts</b>, carry-over and forfeiture, which is why it is not
+    /// called <c>CarryOverBasis</c>: a name that covers half of what a setting does is the kind of
+    /// thing this plan exists to stop.</para>
+    ///
+    /// <para><b>Why it is a choice and not a fix.</b> Both readings are ordinary employer policy.
+    /// Under <see cref="LeaveYearEndBasis.Granted"/> — the default, and the behaviour before this
+    /// existed — carry-over is computed from <c>LeaveBalance.AvailableDays</c>, which is built on the
+    /// whole year's <c>EntitledDays</c>. So somebody who joined in October, accrued 3.5 days and took
+    /// none carries the full cap. Under <see cref="LeaveYearEndBasis.Earned"/> they carry 3.5.</para>
+    ///
+    /// <para>⚠ <b>The default is Granted deliberately.</b> It is today's behaviour, and the year-end
+    /// runs have no undo — a default that silently reduced people's carried days on the next run
+    /// would be worse than the inconsistency it corrects. The same reasoning gave
+    /// <c>AllowInServiceEncashment</c> its conservative default.</para>
+    /// </remarks>
+    public LeaveYearEndBasis YearEndBasis { get; set; } = LeaveYearEndBasis.Granted;
+
+    /// <summary>
+    /// ⚠ <b>Scales the first year's entitlement to the part of the year the employee was here for</b>
+    /// (entitlement plan B3, decision D-4). Default <c>false</c> — today's behaviour, where a
+    /// December joiner's <c>EntitledDays</c> reads the full annual figure.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>It cannot be combined with incremental accrual, and the service refuses the
+    /// combination rather than ignoring one of them.</b> Incremental accrual already limits a joiner
+    /// to the part of the year they were present for — it opens the accrual window at their hire
+    /// date. Scaling the entitlement as well deducts for the same months twice, and because the
+    /// derived per-period rate is itself <c>entitlement ÷ periods</c>, it would deduct a third time
+    /// through the rate.</para>
+    ///
+    /// <para>So this is for leave types that <b>grant</b> rather than accrue: no accrual policy, or
+    /// one set to full-grant-on-eligibility. That is the mirror of <c>ProRateOnExit</c>, which
+    /// applies to incremental accrual <i>only</i>.</para>
+    /// </remarks>
+    public bool ProRateFirstYearEntitlement { get; set; }
+
+    /// <summary>
     /// Marks the leave type as mandatory-to-take within the year (force leave). Surfaced to HR
     /// and used by the forfeiture routine.
     /// </summary>
@@ -94,6 +135,59 @@ public class LeaveType : TenantEntity
 
     /// <summary>Working-days-per-month divisor used to turn a monthly emolument into a daily rate.</summary>
     public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+
+    // ── Medical evidence (residue plan R-15a) ────────────────────────────────────────────────
+    //
+    // Excuse duty, and the medical board. Raised by stakeholders; nothing existed before this —
+    // sick leave was an ordinary leave type with optional untyped attachments, so no rule could be
+    // written about what had to be produced or when.
+    //
+    // ⚠ All three live on the LEAVE TYPE, not on the tenant, because they are rules about A KIND OF
+    // LEAVE. Sick leave needs a certificate; annual leave does not. A tenant-wide setting could not
+    // express that, and every client has both kinds.
+    //
+    // ⚠ The numbers below are DEFAULTS, not rules from any authority. They are inert until
+    // RequiresMedicalCertificate is switched on, and each client sets what its own policy says. The
+    // same reasoning as CompanyHrPolicySettings.GrievanceRungChaseDays: a working assumption that
+    // costs a settings edit to change rather than a release.
+
+    /// <summary>
+    /// Whether this leave type requires a medical certificate — <b>excuse duty</b> — once the
+    /// self-certification period is passed.
+    /// </summary>
+    /// <remarks>
+    /// Defaults <b>false</b>, so no existing leave type starts refusing requests that were fine
+    /// yesterday. Turn it on for sick leave and its relatives; leave it off for everything else.
+    /// </remarks>
+    public bool RequiresMedicalCertificate { get; set; } = false;
+
+    /// <summary>
+    /// Days an employee may take on their own word before <see cref="RequiresMedicalCertificate"/>
+    /// bites. A request of this length or shorter needs no certificate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>3 is a starting value, not a rule.</b> Two to three days is common Ghanaian practice and
+    /// it is what the residue plan inferred; TDC has not confirmed it and neither has anyone else.
+    /// Set 0 to require a certificate for even a single day.
+    /// </remarks>
+    [Range(0, 365)]
+    public int SelfCertificationDays { get; set; } = 3;
+
+    /// <summary>
+    /// Cumulative days of this leave type, in one leave year, beyond which a <b>medical board</b>
+    /// recommendation must be attached. Null means no board is ever required.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Cumulative across the year, not per request</b>, and that is the whole point — a
+    /// per-request threshold is defeated by splitting one long absence into several short ones. The
+    /// same reasoning that made the sub-type cap annual in the closure build (decision D-2).</para>
+    ///
+    /// <para>⚠ 90 days is a starting value inferred from general practice, not a figure any
+    /// authority has given us. It is logged for TDC as <b>L-D10</b>. Null it out if a client has no
+    /// board at all.</para>
+    /// </remarks>
+    [Range(1, 365)]
+    public int? MedicalBoardThresholdDays { get; set; } = 90;
 
     public bool IsActive { get; set; } = true;
 
@@ -436,6 +530,99 @@ public class LeaveRequest : TenantEntity
 
     public LeaveStatus Status { get; set; } = LeaveStatus.Pending;
 
+    // ── Send back with different dates (status ChangesSuggested) ─────────────────────────────
+    // The mirror of LeavePlan's three fields. A leave PLAN could always be sent back with the
+    // manager's own dates; a leave REQUEST — the record that actually books the days — could only
+    // be approved or rejected outright, so TDC's "sending back for correction with suggested dates"
+    // had nowhere to happen (closure plan R-3 / decision D-1).
+    public DateOnly? SuggestedStartDate { get; set; }
+    public DateOnly? SuggestedEndDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? ManagerSuggestionNotes { get; set; }
+
+    // ── Rescheduling an already-approved request ─────────────────────────────────────────────
+    // TDC asked for "possible shifting of the leave to a different day even after the planning is
+    // done". The only route used to be cancel-and-re-key, which loses the number, the approval and
+    // the history (closure plan R-8 / decision D-5). These record the move rather than hide it;
+    // moving the dates re-opens the approval, so the record never claims an approval of dates
+    // nobody approved.
+    //
+    // ⚠ No navigation properties on the two actor columns, deliberately. They match ApprovedById
+    // above, which is also a bare Guid: an unpaired navigation to Employee mints a shadow
+    // `EmployeeId1` column on the other side. Names are resolved in the read that needs them.
+    public DateOnly? OriginalStartDate { get; set; }
+    public DateOnly? OriginalEndDate { get; set; }
+    public DateTime? RescheduledDate { get; set; }
+    public Guid? RescheduledById { get; set; }
+
+    [MaxLength(500)]
+    public string? RescheduleReason { get; set; }
+
+    /// <summary>How many times the approved dates have been moved. Zero for a request never moved.</summary>
+    public int RescheduleCount { get; set; }
+
+    // ── "Is this still going ahead?" ─────────────────────────────────────────────────────────
+    // An approved request used to go quiet between approval and its start date: nobody was asked
+    // whether the person was still going, and nothing recorded the answer (closure plan R-7 /
+    // decision D-4). The reminder that asks is the leave reminder service; this is where the answer
+    // lands. Deferring is not a separate state — it is a reschedule, above.
+    public DateTime? ObservanceConfirmedDate { get; set; }
+    public Guid? ObservanceConfirmedById { get; set; }
+
+    // ── Recall from leave (curtailment) ──────────────────────────────────────────────────────
+    // The employer calls somebody back before their end date (residue plan R-14). Deliberately NOT
+    // a cancellation, NOT an amendment and NOT a reschedule, because none of those record the fact:
+    //
+    //   Cancel     releases every day, including the ones already taken.
+    //   Close      refuses before the end date.
+    //   Reschedule says the leave MOVED. Recalled leave did not move — it was interrupted.
+    //
+    // So curtailment TRUNCATES: days up to the recall stand as taken, days after are restored to
+    // the balance, and the request keeps its number and its approval, because the leave was validly
+    // granted and then cut short. That distinction is not pedantry — restored days are often
+    // protected from the normal carry-over expiry, and recall costs can be reimbursable, and
+    // neither rule can be written against a record that says "cancelled".
+    //
+    // ⚠ The pre-recall end date is its own column rather than reusing OriginalEndDate above.
+    // OriginalEndDate means "the dates before the first reschedule"; conflating a move with an
+    // interruption would make both unreadable, and a request can be rescheduled AND later recalled.
+    //
+    // ⚠ No navigation on RecalledById — same reason as RescheduledById and ApprovedById above.
+    public DateOnly? RecallEffectiveDate { get; set; }
+
+    /// <summary>The end date the request carried before it was recalled. Null if never recalled.</summary>
+    public DateOnly? PreRecallEndDate { get; set; }
+
+    public DateTime? RecalledDate { get; set; }
+    public Guid? RecalledById { get; set; }
+
+    [MaxLength(500)]
+    public string? RecallReason { get; set; }
+
+    /// <summary>
+    /// The medical board that ruled on this absence, when one sat (residue plan G4).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>A bare Guid across a module boundary, with no navigation and no foreign key.</b>
+    /// The board is a Medical-module record and the bridge is <b>by reference, one way</b>: leave
+    /// READS it to satisfy the board rule, and never writes to it. A navigation would make the board
+    /// part of leave's object graph, and an EF fixup would then be able to modify a clinical record
+    /// through a leave save — which is exactly the coupling the SHE↔Medical boundary exists to
+    /// prevent.</para>
+    ///
+    /// <para>The typed <c>MedicalBoardRecommendation</c> attachment remains the other way to satisfy
+    /// the rule, for clients who hold their boards on paper.</para>
+    /// </remarks>
+    public Guid? MedicalBoardId { get; set; }
+
+    /// <summary>
+    /// Days handed back to the balance by the recall. Recorded rather than derived: the balance
+    /// re-derives itself from <see cref="TotalDays"/>, but "how many days did this recall return"
+    /// is a fact about the event that nothing else preserves once the dates are truncated.
+    /// </summary>
+    public decimal? DaysRestored { get; set; }
+
     // Workflow integration
     public Guid? WorkflowInstanceId { get; set; }
     public Guid? ApprovedById { get; set; }
@@ -507,6 +694,19 @@ public class LeaveRequestAttachment : TenantEntity
 
     public long? FileSizeBytes { get; set; }
 
+    /// <summary>
+    /// What this document is — a supporting file, excuse duty, or a medical board recommendation
+    /// (residue plan R-15a).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Without this, the evidence gate could not exist. A rule saying "a certificate must be
+    /// attached" needs to distinguish a certificate from any other file, and a filename cannot do
+    /// it: <c>scan.pdf</c> is a medical certificate or a holiday photograph with equal probability.
+    /// <para>Defaults to <see cref="LeaveEvidenceKind.Other"/>, which is what every attachment
+    /// uploaded before this column existed genuinely was.</para>
+    /// </remarks>
+    public LeaveEvidenceKind EvidenceKind { get; set; } = LeaveEvidenceKind.Other;
+
     public DateTime UploadedDate { get; set; }
 
     public Guid UploadedBy { get; set; }
@@ -545,6 +745,22 @@ public class LeaveEncashment : TenantEntity
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal AmountPaid { get; set; }
+
+    /// <summary>
+    /// How <see cref="AmountPaid"/> was arrived at, in words — the monthly figure, the divisor, the
+    /// resulting daily rate, and where that divisor came from.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Stored rather than derived on read, and that is the point. Leave encashment and a final
+    /// settlement use deliberately different bases — working days per month here, calendar days per
+    /// year there, roughly 38% apart on the same salary — and either can be re-configured at any
+    /// time. A payout that cannot say which basis produced it becomes unauditable the moment
+    /// somebody edits a setting, because the figure no longer reconciles with the live rule and
+    /// nothing records the rule that was live when it was paid. The final settlement has recorded
+    /// its basis this way since FR-HR-184; leave does now too (residue plan G2).
+    /// </remarks>
+    [MaxLength(500)]
+    public string? RateBasis { get; set; }
 
     public LeaveEncashmentStatus Status { get; set; } = LeaveEncashmentStatus.Draft;
 
@@ -596,4 +812,89 @@ public class EmployeeReliever : TenantEntity
 
     [ForeignKey(nameof(RelieverEmployeeId))]
     public virtual Employee RelieverEmployee { get; set; } = null!;
+}
+
+// ─── Leave reminder engine (closure plan wave E, slice E2) ───────────────────
+
+/// <summary>
+/// One execution of the leave reminder sweep.
+/// </summary>
+/// <remarks>
+/// HR has eleven of these engines — assets, certifications, discipline, ID expiry, probation,
+/// separation, SHE, movements, travel, teams, attendance — and leave, the module with more dates
+/// that matter than any of them, had none. Nothing was raised when leave was about to start, when
+/// approved leave was never closed, when mandatory leave went untaken, or when carry-over was about
+/// to expire (closure plan R-6 / R-10 / L-23).
+/// </remarks>
+public class LeaveReminderRun : TenantEntity
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int RemindersQueued { get; set; }
+
+    public virtual ICollection<LeaveReminderDispatchLog> DispatchLogs { get; set; }
+        = new List<LeaveReminderDispatchLog>();
+}
+
+/// <summary>
+/// One reminder actually dispatched by a leave sweep.
+/// </summary>
+/// <remarks>
+/// <para>The unique <c>(TenantId, DedupeKey)</c> index is the send-once guarantee: a key encodes
+/// the record, the reminder kind, the date it is about and the escalation tier reached, so each
+/// rung fires exactly once — and moving a date produces fresh keys, which re-arms the ladder. That
+/// is deliberate: leave that has been rescheduled genuinely is a new thing to chase.</para>
+///
+/// <para>⚠ Nothing here carries a reason for leave, a diagnosis, or a balance. A reminder travels
+/// further than the record it is about — into notification lists and email — and "Ama's leave
+/// starts on Monday" is actionable without saying why she is going. Sick leave makes this a
+/// medical-confidentiality matter, not just a style preference: the same reasoning governs the
+/// travel engine's note about passport numbers.</para>
+/// </remarks>
+public class LeaveReminderDispatchLog : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual LeaveReminderRun Run { get; set; } = null!;
+
+    /// <summary>
+    /// Machine kind: "LeaveStartingSoon", "LeaveNotClosed", "MandatoryLeaveOutstanding",
+    /// "CarryOverExpiring", "RequestAwaitingDecision".
+    /// </summary>
+    [MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item, e.g. "Leave request", "Carry-over".</summary>
+    [MaxLength(100)]
+    public string ItemType { get; set; } = string.Empty;
+
+    /// <summary>Id of the swept record. No FK — the target table varies by kind.</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>The employee the reminder is about, so a feed can be scoped to a person.</summary>
+    public Guid? EmployeeId { get; set; }
+
+    /// <summary>What the notification shows: a request number and a leave type, and nothing more.</summary>
+    [MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time; negative when overdue.</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 for a due-soon rung; 1, 2 or 3 for an overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string DedupeKey { get; set; } = string.Empty;
 }

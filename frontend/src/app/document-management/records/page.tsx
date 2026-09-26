@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Eye,
-  FileText,
   Filter,
   Loader2,
   Search,
@@ -24,6 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { usePaginatedItems } from '@/hooks/use-paginated-items';
+import { getStatusBadgeClassName } from '@/lib/status-badge';
 import {
   Select,
   SelectContent,
@@ -128,18 +128,10 @@ export default function CentralDocumentRecordsPage() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
-            <Badge variant="outline" className="w-fit">
-              Central DMS register
-            </Badge>
             <div>
               <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
                 Document Records
               </h1>
-              <p className="mt-2 max-w-4xl text-sm text-muted-foreground">
-                Central records published from source modules into DMS, with
-                source labels, repository state, versions, annotations, access,
-                and retention status.
-              </p>
             </div>
           </div>
           <Button asChild variant="outline">
@@ -150,39 +142,37 @@ export default function CentralDocumentRecordsPage() {
           </Button>
         </div>
 
-        <Card className="border-border bg-card text-card-foreground">
-          <CardContent className="grid gap-3 pt-6 md:grid-cols-[260px_1fr]">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Filter className="h-4 w-4" />
-                Source module
-              </div>
-              <Select value={moduleFilter} onValueChange={setModuleFilter}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {moduleFilters.map((module) => (
-                    <SelectItem key={module} value={module}>
-                      {module}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <div className="grid gap-3 md:grid-cols-[260px_1fr]">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Filter className="h-4 w-4" />
+              Source module
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Search className="h-4 w-4" />
-                Search register
-              </div>
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search reference, title, source, template, or record"
-              />
+            <Select value={moduleFilter} onValueChange={setModuleFilter}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {moduleFilters.map((module) => (
+                  <SelectItem key={module} value={module}>
+                    {module}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Search className="h-4 w-4" />
+              Search register
             </div>
-          </CardContent>
-        </Card>
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search reference, title, source, template, or record"
+            />
+          </div>
+        </div>
 
         {isLoading ? (
           <Card className="border-border bg-card text-card-foreground">
@@ -193,107 +183,148 @@ export default function CentralDocumentRecordsPage() {
           </Card>
         ) : null}
 
-        <div className="space-y-3">
-          {!isLoading && visibleRecords.length === 0 ? (
-            <Card className="border-border bg-card text-card-foreground">
-              <CardHeader>
-                <CardTitle>No DMS records found</CardTitle>
-              </CardHeader>
-            </Card>
-          ) : null}
+        <Card className="border-0 bg-transparent shadow-none">
+          <CardHeader className="px-0">
+            <CardTitle>Records register</CardTitle>
+          </CardHeader>
+          <CardContent className="px-0">
+            {!isLoading && visibleRecords.length === 0 ? (
+              <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+                No DMS records found
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[980px] text-sm">
+                  <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Reference</th>
+                      <th className="px-3 py-2 font-medium">Title</th>
+                      <th className="px-3 py-2 font-medium">Source</th>
+                      <th className="px-3 py-2 font-medium">Metadata</th>
+                      <th className="px-3 py-2 font-medium">Repository</th>
+                      <th className="px-3 py-2 font-medium">Version</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {recordPages.items.map((record) => {
+                      const metadataCompleteness = record.metadataCompleteness;
 
-          {recordPages.items.map((record) => {
-            const metadataCompleteness = record.metadataCompleteness;
-
-            return (
-              <Card
-                key={record.id}
-                className="border-border bg-card text-card-foreground"
-              >
-                <CardContent className="p-4">
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <FileText className="h-4 w-4 text-primary" />
-                        <Badge variant="outline">
-                          {record.documentReference}
-                        </Badge>
-                        <Badge variant="secondary">{record.sourceModule}</Badge>
-                      </div>
-                      <h2 className="mt-3 text-base font-semibold">
-                        {record.title}
-                      </h2>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {record.sourceRecordReference ||
-                          record.sourceRecordId ||
-                          'No source record reference'}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {record.sourceLabel}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 xl:justify-end">
-                      <Badge variant="outline">
-                        {record.metadataTemplateCode || 'No template'}
-                      </Badge>
-                      <Badge
-                        variant={metadataBadgeVariant(
-                          metadataCompleteness?.status
-                        )}
-                      >
-                        Metadata:{' '}
-                        {metadataCompleteness
-                          ? `${metadataCompleteness.status} ${metadataCompleteness.percentage}%`
-                          : 'Not checked'}
-                      </Badge>
-                      <Badge variant="outline">{record.repositoryStatus}</Badge>
-                      <Badge variant="outline">
-                        {record.currentVersion || 'No version'}
-                      </Badge>
-                      <Badge variant="outline">{record.annotationStatus}</Badge>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setViewerFile({
-                            title: record.title,
-                            fileName:
-                              record.currentVersion || record.documentReference,
-                            repositoryPath: record.repositoryPath,
-                            externalDocumentUrl: record.externalDocumentUrl,
-                            sourceLabel: record.sourceLabel,
-                            version: record.currentVersion,
-                          })
-                        }
-                      >
-                        <Eye className="mr-2 h-4 w-4" />
-                        View
-                      </Button>
-                      <Button asChild size="sm">
-                        <Link
-                          href={`/document-management/records/${record.id}`}
-                        >
-                          Open record
-                          <ArrowRight className="ml-2 h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-          {visibleRecords.length > recordPages.pageSize ? (
-            <Pagination
-              currentPage={recordPages.currentPage}
-              totalPages={recordPages.totalPages}
-              totalItems={recordPages.totalItems}
-              pageSize={recordPages.pageSize}
-              onPageChange={recordPages.setCurrentPage}
-            />
-          ) : null}
-        </div>
+                      return (
+                        <tr key={record.id}>
+                          <td className="px-3 py-3 align-top">
+                            <Badge variant="outline">
+                              {record.documentReference}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <div className="font-medium">{record.title}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {record.sourceRecordReference ||
+                                record.sourceRecordId ||
+                                'No source record reference'}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <Badge variant="secondary">
+                              {record.sourceModule}
+                            </Badge>
+                            <div className="mt-1 max-w-[16rem] truncate text-xs text-muted-foreground">
+                              {record.sourceLabel}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <Badge
+                              variant={metadataBadgeVariant(
+                                metadataCompleteness?.status
+                              )}
+                              className={getStatusBadgeClassName(
+                                metadataCompleteness?.status
+                              )}
+                            >
+                              {metadataCompleteness
+                                ? `${metadataCompleteness.status} ${metadataCompleteness.percentage}%`
+                                : 'Not checked'}
+                            </Badge>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {record.metadataTemplateCode || 'No template'}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <Badge
+                              variant="outline"
+                              className={getStatusBadgeClassName(
+                                record.repositoryStatus
+                              )}
+                            >
+                              {record.repositoryStatus}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <Badge
+                              variant="outline"
+                              className={getStatusBadgeClassName(
+                                record.currentVersion || 'No version'
+                              )}
+                            >
+                              {record.currentVersion || 'No version'}
+                            </Badge>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {record.annotationStatus}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-right align-top">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  setViewerFile({
+                                    title: record.title,
+                                    fileName:
+                                      record.currentVersion ||
+                                      record.documentReference,
+                                    repositoryPath: record.repositoryPath,
+                                    externalDocumentUrl:
+                                      record.externalDocumentUrl,
+                                    sourceLabel: record.sourceLabel,
+                                    version: record.currentVersion,
+                                  })
+                                }
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                View
+                              </Button>
+                              <Button asChild size="sm">
+                                <Link
+                                  href={`/document-management/records/${record.id}`}
+                                >
+                                  Open
+                                  <ArrowRight className="ml-2 h-4 w-4" />
+                                </Link>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {visibleRecords.length > recordPages.pageSize ? (
+              <Pagination
+                currentPage={recordPages.currentPage}
+                totalPages={recordPages.totalPages}
+                totalItems={recordPages.totalItems}
+                pageSize={recordPages.pageSize}
+                onPageChange={recordPages.setCurrentPage}
+              />
+            ) : null}
+          </CardContent>
+        </Card>
       </div>
     </>
   );

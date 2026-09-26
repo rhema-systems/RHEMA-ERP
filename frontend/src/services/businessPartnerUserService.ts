@@ -93,9 +93,6 @@ export async function getUserByUserId(userId: string): Promise<BusinessPartnerUs
 
 // Create new user
 export async function createUser(data: CreateBusinessPartnerUserDto): Promise<BusinessPartnerUserDto> {
-  console.log('Creating user with data:', data);
-  console.log('JSON payload:', JSON.stringify(data));
-
   const response = await fetch(`${API_BASE_URL}/procurement/business-partner-users`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -109,6 +106,15 @@ export async function createUser(data: CreateBusinessPartnerUserDto): Promise<Bu
   }
 
   return response.json();
+}
+
+export async function linkExistingExternalUser(businessPartnerId: string, userId: string): Promise<BusinessPartnerUserDto> {
+  const response = await fetch(`${API_BASE_URL}/procurement/business-partner-users/business-partner/${businessPartnerId}/link/${userId}`, {
+    method: 'POST', headers: getAuthHeaders(),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.detail || result.message || 'Unable to link the portal account.');
+  return result;
 }
 
 // Update user

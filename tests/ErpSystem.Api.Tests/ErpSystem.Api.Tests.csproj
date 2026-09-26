@@ -53,6 +53,9 @@
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\WorkflowEvidenceControllerTests.cs" />
     <Compile Include="Controllers\DocumentManagement\PaymentDocumentScopeTests.cs" />
+    <Compile Include="Services\DocumentManagement\CentralDocumentWordConversionTests.cs" />
+    <Compile Include="Controllers\Estate\EstateManagedAssetImportTests.cs" />
+    <Compile Include="Controllers\Estate\LegalPropertyCaseContextTests.cs" />
     <Compile Include="Controllers\WorkflowApprovalResponseTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementLegacyRoleAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
@@ -152,11 +155,14 @@
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
     <Compile Include="Services\DatabaseSeedingWorkflowPreservationTests.cs" />
     <Compile Include="Services\DatabaseSeedingDependencyGraphTests.cs" />
+    <Compile Include="Services\OperationalUatBaselineSeederTests.cs" />
     <Compile Include="Services\UnitOfWorkTransactionLockTests.cs" />
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesDutyRosterScheduleTests.cs" />
+    <Compile Include="Services\Estate\EstateRecurringBillingServiceTests.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\AccountCurrencyLinkPersistenceTests.cs" />
@@ -351,6 +357,11 @@
     <Compile Include="Services\Finance\ExchangeRateScheduleLifecycleTests.cs" />
     <Compile Include="Services\Finance\FinanceAdHocReportBuilderTests.cs" />
     <Compile Include="Services\HR\PayrollJournalPostingTransactionTests.cs" />
+    <!-- HR -> Finance posting (HR finish plan lane 8): the HR consumer contract on FIN-INT-001. Both
+         classes are in the Finance integration gate's api_filter; this project disables implicit
+         compile items, so a file that is not listed here silently vanishes from the gate. -->
+    <Compile Include="Services\HR\HrFinancePostingAdapterTests.cs" />
+    <Compile Include="Services\HR\HrFinancePostingCatalogueTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />
     <Compile Include="Services\Finance\AllocationRunBatchServiceTests.cs" />

@@ -237,6 +237,56 @@ public enum ContractStatus
     Terminated = 3
 }
 
+/// <summary>
+/// Where an employee's probation term came from, recorded so a screen can say it rather than
+/// present a number with no provenance.
+/// </summary>
+/// <remarks>
+/// <para>⚠ Null on every row that predates lane D1 (2026-09-09), and that is the honest answer:
+/// those terms were typed into a free field and nobody knows whether they agreed with the post.
+/// A default of <see cref="Position"/> would have claimed a provenance the data does not have.</para>
+///
+/// <para>The term itself is resolved the way <c>ProbationService.BuildPolicy</c> already resolved
+/// it — the position first, the company policy default second — so this records a decision the
+/// system was already making silently.</para>
+/// </remarks>
+public enum ProbationSource
+{
+    /// <summary>Taken from <c>EmployeePosition.ProbationPeriodMonths</c> — the normal case.</summary>
+    Position = 1,
+
+    /// <summary>The position is silent, so <c>CompanyHrPolicySettings.DefaultProbationMonths</c> applied.</summary>
+    PolicyDefault = 2,
+
+    /// <summary>Neither: a length was supplied for this person, against a silent position.</summary>
+    Override = 3
+}
+
+/// <summary>
+/// Which kind of tie a <c>RelationshipType</c> describes, so a screen can offer only the values
+/// that make sense on it.
+/// </summary>
+/// <remarks>
+/// <para>The demo feedback asked for this in as many words (register row E-11b): "differentiate
+/// familial from professional relationships, to know which values to populate". A next-of-kin
+/// dropdown offering "Former manager" and a referee dropdown offering "Nephew" are the same
+/// defect — a list that is technically complete and practically useless.</para>
+///
+/// <para><b>Other</b> is not a dumping ground. It is the tie that is neither blood nor work —
+/// family friend, landlord, pastor — and both the next-of-kin and the referee screens accept it,
+/// which is the whole reason it is a third value rather than a null.</para>
+///
+/// <para>Stored as an int; members are APPENDED and never renumbered.</para>
+/// </remarks>
+public enum RelationshipCategory
+{
+    Familial = 1,
+
+    Professional = 2,
+
+    Other = 3
+}
+
 public enum DependentRelationship
 {
     Spouse = 1,
@@ -476,6 +526,145 @@ public enum TeamMemberRole
     TeamLead = 3,
     Coordinator = 4,
     Secretary = 5
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//  Teams and committees — the activity sub-module (round 2, lane F; plan § 1.4, § 6.6).
+//
+//  ⚠ These sit on the EXISTING Team record, whose TeamType already distinguishes a Committee from
+//  a project team. SafetyCommittee and AwardCommittee stay separate on purpose: they are bounded
+//  contexts with their own rules (meeting quorum, scoring), and merging them would break two
+//  closed areas.
+//
+//  Every member is APPENDED and never renumbered — an existing row's meaning must not shift.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Where a team's terms of reference are in their life.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="Approved"/> is IMMUTABLE. Changing approved terms means a new version — the row is
+/// cloned to <c>Draft</c> at version + 1 and the old one becomes <see cref="Superseded"/> when the
+/// new one is approved. Editing in place would rewrite what a committee was actually chartered to
+/// do, which is the one thing terms of reference exist to record.
+/// </remarks>
+public enum TeamTorStatus
+{
+    Draft = 1,
+
+    PendingApproval = 2,
+
+    Approved = 3,
+
+    Superseded = 4
+}
+
+/// <summary>What a team has undertaken to achieve, and where it has got to.</summary>
+public enum TeamObjectiveStatus
+{
+    Draft = 1,
+
+    PendingApproval = 2,
+
+    Active = 3,
+
+    OnHold = 4,
+
+    Completed = 5,
+
+    Cancelled = 6
+}
+
+/// <summary>
+/// Whether an objective's progress is counted from its tasks or typed by hand.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="FromTasks"/> makes <c>ProgressPercent</c> a DERIVED column the service recomputes
+/// on every task change — a caller cannot set it. <see cref="Manual"/> is for an objective whose
+/// progress is not a count of anything ("stakeholder confidence restored"), and there the typed
+/// figure is the only truth there is.
+/// </remarks>
+public enum TeamObjectiveProgressMode
+{
+    FromTasks = 1,
+
+    Manual = 2
+}
+
+public enum TeamTaskPriority
+{
+    Low = 1,
+
+    Normal = 2,
+
+    High = 3,
+
+    Urgent = 4
+}
+
+/// <summary>
+/// Where a team task stands.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="Blocked"/> requires a reason. A board full of blocked cards that cannot say what
+/// is blocking them tells a lead nothing, and the whole point of the monitoring half of this
+/// sub-module is that the lead can see where the work has stopped.
+/// </remarks>
+public enum TeamTaskStatus
+{
+    NotStarted = 1,
+
+    InProgress = 2,
+
+    Blocked = 3,
+
+    Completed = 4,
+
+    Cancelled = 5
+}
+
+/// <summary>What kind of gathering a team record is describing.</summary>
+/// <remarks>
+/// ⚠ A committee's work does not all happen in a meeting. A site visit and a workshop produce
+/// decisions and action items exactly as a meeting does, and filing them as "Meeting" would make
+/// the minute book lie about what actually happened.
+/// </remarks>
+public enum TeamMeetingKind
+{
+    Meeting = 1,
+
+    Workshop = 2,
+
+    SiteVisit = 3,
+
+    Other = 99
+}
+
+public enum TeamMeetingStatus
+{
+    Scheduled = 1,
+
+    Held = 2,
+
+    Cancelled = 3
+}
+
+/// <summary>
+/// Where a periodic review of a team stands.
+/// </summary>
+/// <remarks>
+/// ⚠ A SUBMITTED review is immutable, and the lead acknowledges it rather than approving it. A
+/// review is a record of what somebody found, not a request for permission — which is why this is
+/// not on the workflow engine (plan § 6.6.2). Acknowledgement says it was read, and nothing about
+/// whether the lead agreed.
+/// </remarks>
+public enum TeamReviewStatus
+{
+    Draft = 1,
+
+    Submitted = 2,
+
+    Acknowledged = 3
 }
 
 public enum WorkMode
@@ -764,7 +953,16 @@ public enum LeaveStatus
 
     InProgress = 5,
 
-    Completed = 6
+    Completed = 6,
+
+    /// <summary>
+    /// The approver reviewed the request and proposed different dates; it is back with the employee,
+    /// who accepts them or counters with their own. The mirror of
+    /// <see cref="LeavePlanStatus.ChangesSuggested"/>, which leave PLANS have had since the port —
+    /// requests did not, so TDC's *"sending back for correction with suggested dates"* had nowhere
+    /// to happen on the record that actually books the days (closure plan R-3 / decision D-1).
+    /// </summary>
+    ChangesSuggested = 7
 }
 
 public enum LeaveEligibilityType
@@ -845,6 +1043,29 @@ public enum AccrualFrequency
     Quarterly = 4,     // Every 3 months
 
     SemiAnnual = 5     // Every 6 months
+}
+
+/// <summary>
+/// What the year-end runs count as a person's unused days (entitlement plan B2, decision D-2).
+/// </summary>
+/// <remarks>
+/// ⚠ Both readings are ordinary employer policy, which is why this is a setting and not a fix. The
+/// product answered the question silently — as <see cref="Granted"/> — until 2026-09-18.
+/// </remarks>
+public enum LeaveYearEndBasis
+{
+    /// <summary>
+    /// What the YEAR OWED them: entitlement + carry-over + adjustments, less taken, pending and
+    /// encashed. ⚠ The default, because it is the behaviour that predates the setting and the
+    /// year-end runs have no undo.
+    /// </summary>
+    Granted = 0,
+
+    /// <summary>
+    /// What they actually EARNED: the same sum with accrued-to-date in place of entitlement. A
+    /// mid-year joiner carries what they built up, not what the full year would have given them.
+    /// </summary>
+    Earned = 1
 }
 
 /// <summary>
@@ -2138,6 +2359,32 @@ public enum ValueMatchStrategy
 }
 
 /// <summary>
+/// What one accepted value on a shortlisting criterion refers to (round 3, lane K; register row
+/// R-8). A catalogue kind carries the row id and its name; Gender carries the enum member's name;
+/// Text is a typed label (a city for Location, anything for Other).
+/// </summary>
+public enum ShortlistingValueKind
+{
+    [Description("Text")]
+    Text = 0,
+
+    [Description("Skill")]
+    Skill = 1,
+
+    [Description("Qualification")]
+    Qualification = 2,
+
+    [Description("Certification")]
+    Certification = 3,
+
+    [Description("Language")]
+    Language = 4,
+
+    [Description("Gender")]
+    Gender = 5,
+}
+
+/// <summary>
 /// Approval state of the completed shortlist before candidates are contacted.
 /// </summary>
 public enum ShortlistApprovalStatus
@@ -2208,7 +2455,33 @@ public enum JobOfferStatus
     /// <summary>All blocking pre-employment checks have passed; hire record may now be created.</summary>
     ChecksCleared = 12,
     /// <summary>Offer was rejected by an approver during the approval workflow. The preparer must revise and resubmit.</summary>
-    Rejected = 13
+    Rejected = 13,
+
+    /// <summary>
+    /// This version of the offer has been replaced by a revision. Terminal: the terms it carries
+    /// are no longer on the table, and the live offer is the one at <c>IsLatestVersion = true</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added for G-2.4/G-10.2 (2026-09-15). <c>ReviseOfferAsync</c> set
+    /// <c>original.IsLatestVersion = false</c> and <b>did not change the status</b>, so v1 stayed
+    /// <c>Sent</c> or <c>Negotiating</c> for ever — and since nothing filtered on
+    /// <c>IsLatestVersion</c>, superseded versions were listed by <c>GET /offers/status/Sent</c>,
+    /// counted as chasable by <c>GET /offers/expiring</c>, inflated the landing page's "offers
+    /// expiring soon" tile permanently, and inflated the dashboard's "offers pending response".
+    /// Every revision added one more row to a chase list that could never fall.</para>
+    ///
+    /// <para><b>Why not reuse <see cref="Withdrawn"/>.</b> Withdrawing is a decision somebody makes
+    /// about a live offer — the organisation taking the terms back. Being superseded is what
+    /// happens to a version when better terms replace it; nobody revoked anything. Collapsing the
+    /// two would answer "how many offers did we withdraw this year?" wrongly, which is the same
+    /// class of reporting defect this programme is closing.</para>
+    ///
+    /// <para>⚠ Appended as 14, after <see cref="Rejected"/>. This column is a plain int, so
+    /// appending is schema-safe and needs no migration — but members must be APPENDED, never
+    /// renumbered, or existing rows silently change meaning. Same call as
+    /// <c>EmployeeTerminationType.SummaryDismissal</c>.</para>
+    /// </remarks>
+    Superseded = 14
 }
 
 public enum EmploymentType
@@ -2222,6 +2495,27 @@ public enum EmploymentType
     Temporary = 7,
     Consultant = 8,
     Freelance = 9
+}
+
+/// <summary>
+/// How an employee's basic pay is arrived at: read off the salary scale, or agreed for the person.
+/// </summary>
+/// <remarks>
+/// <para>HR's fact, because the scale is HR's concept — <c>EmployeeSalaryAssignment</c> places a
+/// person on a <c>SalaryNotch</c> whose amount is the pay — while payroll is already amount-based
+/// and never reads the placement. Round-2 lane E1 (docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 6.5.2).</para>
+///
+/// <para>⚠ Independent of <c>EmploymentType</c> and of <c>IsOnPayroll</c>. A permanent employee can
+/// be negotiated (a retained specialist) and a contractor can be on the scale; the feedback's
+/// "distinguish contract from permanent" is answered by two axes, not one.</para>
+/// </remarks>
+public enum PayBasis
+{
+    /// <summary>Basic pay is the amount of the notch the person is placed on. Placement expected; its absence is reported, not blocked.</summary>
+    SalaryScale = 1,
+
+    /// <summary>Basic pay is an amount agreed for this person. Placement on the scale is REFUSED while this stands.</summary>
+    Negotiated = 2,
 }
 
 /// <summary>
@@ -4519,6 +4813,53 @@ public enum MedicalReferralStatus
     Expired = 6
 }
 
+/// <summary>
+/// Where a medical board has got to (residue plan G4 / R-15b).
+/// </summary>
+/// <remarks>
+/// ⚠ A board is <b>convened for one employee about one question</b>, so its lifecycle is a case's,
+/// not a committee's. A standing panel that sits repeatedly on different people would need a
+/// different model, and TDC has not described one.
+/// </remarks>
+public enum MedicalBoardStatus
+{
+    /// <summary>Somebody has asked for a board. Nobody has been appointed to it yet.</summary>
+    [Description("Requested")]
+    Requested = 1,
+
+    /// <summary>Members appointed; it may now sit. Its recommendation is not yet given.</summary>
+    [Description("Convened")]
+    Convened = 2,
+
+    /// <summary>It has reported. ⚠ The only status leave and separation will act on.</summary>
+    [Description("Concluded")]
+    Concluded = 3,
+
+    [Description("Cancelled")]
+    Cancelled = 4
+}
+
+/// <summary>What a person is doing on a medical board.</summary>
+/// <remarks>
+/// ⚠ A member may be a registered <c>Physician</c> or somebody named only here — a board commonly
+/// includes a doctor from outside the organisation who is in nobody's register. Both are recorded,
+/// and the entity requires one or the other rather than pretending every member is on file.
+/// </remarks>
+public enum MedicalBoardMemberRole
+{
+    [Description("Chair")]
+    Chair = 1,
+
+    [Description("Member")]
+    Member = 2,
+
+    [Description("Secretary")]
+    Secretary = 3,
+
+    [Description("Observer")]
+    Observer = 4
+}
+
 public enum MedicalAppointmentStatus
 {
     [Description("Draft")]
@@ -5519,7 +5860,23 @@ public enum ProficiencyLevel
     Expert = 5
 }
 
-public enum RelationshipType
+/// <summary>
+/// The reach of a working relationship on a job description — who the post deals with, and how far
+/// outside the organisation that reaches.
+/// </summary>
+/// <remarks>
+/// <para>⚠ <b>Renamed from <c>RelationshipType</c> in round 2 lane D2.</b> It collided with the new
+/// <c>Entities.HR.RelationshipType</c> table (how one PERSON is tied to another — a next of kin, a
+/// referee, a guarantor), and the two are unrelated ideas that would have forced a <c>using</c>
+/// alias into every file touching either. Renaming was free: this enum had <b>no typed consumer
+/// anywhere</b> — no property, no parameter, no column, no frontend reference — so nothing was
+/// serialized against the old name and no data carries it. Verified 2026-09-10.</para>
+///
+/// <para>The name it has now is what its members actually describe. Job descriptions record their
+/// working relationships through <see cref="ReportingRelationshipType"/> instead, which is why
+/// this one was never wired up.</para>
+/// </remarks>
+public enum WorkingRelationshipScope
 {
     [Description("Internal - Same Department")]
     InternalSameDepartment = 1,
@@ -5621,6 +5978,29 @@ public enum ManpowerBudgetStatus
     Closed = 7
 }
 
+/// <summary>
+/// Where a manpower budget line's planned average salary came from (round 2b, R3, decision D-1).
+/// </summary>
+/// <remarks>
+/// ⚠ <c>Manual</c> is deliberately the highest member and the entity default, and the migration's
+/// column default is 4, not the scaffolded 0 — every line that exists when R3 lands was typed by
+/// hand. A zero here would be a value that is not a member (the lane E1/G trap, fourth time).
+/// </remarks>
+public enum PlannedSalarySource
+{
+    [Description("Notch on the scale")]
+    Notch = 1,
+
+    [Description("Level mid-point")]
+    LevelMidpoint = 2,
+
+    [Description("Grade minimum")]
+    GradeMinimum = 3,
+
+    [Description("Entered by hand")]
+    Manual = 4
+}
+
 public enum BudgetPriority
 {
     [Description("Critical")]
@@ -5667,6 +6047,53 @@ public enum CompanyLegalForm
 /// <c>CompanyHrPolicySettings</c>. Enforcement only ever applies when a budget line actually
 /// exists for the requisition's position — an unbudgeted position is never blocked.
 /// </summary>
+/// <summary>
+/// How many tiers the tenant's salary scale has. Decides what screens show and what a placement
+/// needs; it does not change the schema.
+/// </summary>
+/// <remarks>
+/// <para>HR's tables are three-tier (grade → level → notch) with a notch required to hang off a
+/// level. A two-tier scale is represented losslessly as a grade with exactly ONE level, and that is
+/// what the payroll projection has synthesised since lane 3a — so two-tier is the schema's
+/// degenerate case, not a second schema. This setting says which case the tenant is in, so the
+/// level step can be hidden where it is a phantom and required where it is real.</para>
+/// <para>Lane G (salary structure tiers and source), 2026-09-09.</para>
+/// </remarks>
+public enum SalaryStructureTiers
+{
+    /// <summary>Grade → notch. Each grade has one implicit level, never shown, resolved server-side.</summary>
+    [Description("Two-tier: grade and notch")]
+    GradeAndNotch = 2,
+
+    /// <summary>Grade → level → notch. The level is a real band within the grade and is chosen.</summary>
+    [Description("Three-tier: grade, level and notch")]
+    GradeLevelAndNotch = 3,
+}
+
+/// <summary>
+/// Who maintains the tenant's salary scale — the payroll module, or HR itself.
+/// </summary>
+/// <remarks>
+/// <para><b>Payroll</b> is the standing decision of 2026-08-02: payroll's grades and notches are the
+/// source of truth and HR mirrors them by projection; HR's own structure writes answer 409. Payroll
+/// is two-tier and has no level concept, so a tenant on this source cannot be three-tier — the
+/// switch is refused with a sentence, and a level tier in payroll is recorded as an ask to the
+/// payroll owner (round-2 plan § 7.1).</para>
+/// <para><b>Hr</b> is the option decided 2026-09-09 for tenants that do not run this payroll
+/// module: the projection stops, HR's dormant grade/level/notch CRUD opens, and the scale may be
+/// three-tier. Nothing payroll holds is touched by the switch; nothing HR authors is pushed to it.</para>
+/// </remarks>
+public enum SalaryStructureSource
+{
+    /// <summary>Defined in Payroll (Administration → HR → Payroll → Grades Setup); HR is a read-only mirror.</summary>
+    [Description("Payroll")]
+    Payroll = 1,
+
+    /// <summary>Defined in HR (Administration → HR → Pay &amp; Benefits → Salary Structure); the projection is off.</summary>
+    [Description("HR")]
+    Hr = 2,
+}
+
 public enum BudgetEnforcementMode
 {
     /// <summary>No budget checking — requisitions proceed regardless of the manpower budget.</summary>
@@ -6288,6 +6715,23 @@ public enum StaffReplacementReason
 
     [Description("Other")]
     Other = 8
+}
+
+/// <summary>
+/// HR's own approval of a recruitment cost (round 2b, R7). ⚠ This is a fact about HR's approval,
+/// NOT a payment status: nothing here says paid or unpaid. Whether Finance has paid it is Finance's
+/// to say (the R8 AP hand-off, when agreed) and is never recorded HR-side.
+/// </summary>
+public enum StaffRequisitionCostStatus
+{
+    [Description("Recorded")]
+    Recorded = 1,
+
+    [Description("Approved")]
+    Approved = 2,
+
+    [Description("Rejected")]
+    Rejected = 3
 }
 
 public enum StaffRequisitionCostCategory
@@ -9508,6 +9952,47 @@ public enum EncashmentRateBasis
     Manual = 1
 }
 
+/// <summary>
+/// What a document attached to a leave request actually IS (residue plan R-15a).
+/// </summary>
+/// <remarks>
+/// <para><b>Why typing them matters.</b> Leave attachments were untyped — a file name and a path —
+/// so nothing could ask *"is the required evidence present?"*. A gate can check that a document of
+/// the right kind is attached; it cannot check that against a list of filenames, because
+/// <c>scan.pdf</c> is indistinguishable from a holiday photograph.</para>
+///
+/// <para>⚠ <b><see cref="ExcuseDuty"/> and "medical certificate" are the same document.</b> Excuse
+/// duty is the term TDC's stakeholders used and the one Ghanaian practice uses; medical certificate
+/// is the generic name, and it is what <c>LeaveType.RequiresMedicalCertificate</c> calls it. Both
+/// names appear deliberately: the setting reads as a policy, the attachment reads as the thing an
+/// employee is holding.</para>
+///
+/// <para>⚠ Values are persisted. <see cref="Other"/> is 0 so every attachment that existed before
+/// this enum keeps meaning exactly what it meant — an untyped supporting document — rather than
+/// silently becoming a medical certificate nobody uploaded.</para>
+/// </remarks>
+public enum LeaveEvidenceKind
+{
+    /// <summary>A supporting document of no particular kind. The default, and what every pre-existing row is.</summary>
+    [Description("Supporting document")]
+    Other = 0,
+
+    /// <summary>
+    /// A medical certificate excusing the employee from duty — "excuse duty". What a leave type
+    /// with <c>RequiresMedicalCertificate</c> demands once the self-certification period is passed.
+    /// </summary>
+    [Description("Excuse duty (medical certificate)")]
+    ExcuseDuty = 1,
+
+    /// <summary>
+    /// A medical board's recommendation, required once cumulative sick leave passes the leave
+    /// type's board threshold. ⚠ The board itself is a Medical-module record; this is the document
+    /// the leave request carries to show one has sat.
+    /// </summary>
+    [Description("Medical board recommendation")]
+    MedicalBoardRecommendation = 2
+}
+
 #endregion
 
 #region Employee Profile Change Requests (area 25 slice 12 — decision D6)
@@ -9771,3 +10256,122 @@ public enum CompanySealAssetKind
 }
 
 #endregion
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Demo feedback round 2, lane C2 — the certification model (plan § 6.3)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// <summary>What kind of credential a catalogue row is.</summary>
+public enum CertificationKind
+{
+    Certification = 0,
+    Licence = 1,
+    Permit = 2,
+    Registration = 3
+}
+
+/// <summary>
+/// The computed state of a credential a person holds. Only <c>Revoked</c> is stored; the rest fall
+/// out of the expiry date and the lead days at read time.
+/// </summary>
+public enum EmployeeCertificationStatus
+{
+    Valid = 0,
+    ExpiringSoon = 1,
+    Expired = 2,
+    Revoked = 3
+}
+
+/// <summary>What a salary change request changes (round 3, lane S).</summary>
+public enum SalaryChangeKind
+{
+    /// <summary>A new grade / level / notch for somebody already paid on the scale.</summary>
+    Placement = 1,
+    /// <summary>A new agreed figure for somebody paid off the scale.</summary>
+    NegotiatedAmount = 2,
+    /// <summary>Scale ↔ negotiated, carrying whichever figure the new basis needs.</summary>
+    PayBasisSwitch = 3
+}
+
+/// <summary>Lifecycle of a salary change request. Recall returns to Draft.</summary>
+public enum SalaryChangeRequestStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    /// <summary>Decided, HR's half not yet through (see the request's ApplyFailure).</summary>
+    Approved = 3,
+    Rejected = 4,
+    Applied = 5,
+    /// <summary>HR's half written; payroll's monthly basic could not be — a retry re-runs only that.</summary>
+    AwaitingPayrollEntry = 6
+}
+
+/// <summary>
+/// Who is asking a pay door to write (round 3, lane S). <c>Direct</c> is a caller at the door —
+/// refused when the tenant requires approval; <c>Approved</c> is a record the engine has already
+/// approved (a salary change request, a staff movement), which the gate lets through.
+/// </summary>
+public enum SalaryChangeAuthority
+{
+    Direct = 0,
+    Approved = 1
+}
+
+/// <summary>
+/// What a file on a union's record is (round 3, lane U; register row U-2; decision D-17's cousin).
+/// A <see cref="CollectiveAgreement"/> row carries the agreement it is the signed copy of.
+/// </summary>
+public enum UnionDocumentKind
+{
+    [Description("Collective agreement")]
+    CollectiveAgreement = 1,
+
+    [Description("Constitution")]
+    Constitution = 2,
+
+    [Description("Correspondence")]
+    Correspondence = 3,
+
+    [Description("Membership list")]
+    MembershipList = 4,
+
+    [Description("Other")]
+    Other = 9
+}
+
+/// <summary>
+/// The axis a disability type is grouped on (round 3, lane P2; register row E-5). Grouping, not a
+/// medical classification: it is what a dropdown is sectioned by and what a headcount report counts.
+/// </summary>
+public enum DisabilityCategory
+{
+    [Description("Physical / mobility")]
+    Physical = 1,
+
+    [Description("Visual")]
+    Visual = 2,
+
+    [Description("Hearing")]
+    Hearing = 3,
+
+    [Description("Speech")]
+    Speech = 4,
+
+    [Description("Intellectual / learning")]
+    Intellectual = 5,
+
+    [Description("Psychosocial / mental health")]
+    Psychosocial = 6,
+
+    [Description("Neurological")]
+    Neurological = 7,
+
+    [Description("Chronic health condition")]
+    ChronicHealth = 8,
+
+    [Description("Multiple")]
+    Multiple = 9,
+
+    [Description("Other")]
+    Other = 99
+}

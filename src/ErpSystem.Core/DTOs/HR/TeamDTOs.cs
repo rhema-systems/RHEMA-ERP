@@ -40,6 +40,13 @@ public class TeamDto : BaseDto
     public string? ShiftName { get; set; }
 
     public string? CostCenterCode { get; set; }
+
+    /// <summary>
+    /// The chart-of-accounts row this team's costs are charged to (round 2, lane B2).
+    /// <c>CostCenterCode</c> above is its snapshot.
+    /// </summary>
+    public Guid? FinanceAccountId { get; set; }
+
     public string? ProjectCode { get; set; }
     public string? TeamEmail { get; set; }
 
@@ -111,6 +118,13 @@ public class CreateTeamDto : CreateDtoBase
     [MaxLength(100)]
     public string? CostCenterCode { get; set; }
 
+    /// <summary>
+    /// The chart-of-accounts row to charge this team to (round 2, lane B2). When set, the
+    /// service overwrites <c>CostCenterCode</c> with the account's own code.
+    /// </summary>
+    public Guid? FinanceAccountId { get; set; }
+
+
     [MaxLength(50)]
     public string? ProjectCode { get; set; }
 
@@ -158,6 +172,13 @@ public class UpdateTeamDto : UpdateDtoBase
 
     [MaxLength(100)]
     public string? CostCenterCode { get; set; }
+
+    /// <summary>
+    /// The chart-of-accounts row to charge this team to (round 2, lane B2). When set, the
+    /// service overwrites <c>CostCenterCode</c> with the account's own code.
+    /// </summary>
+    public Guid? FinanceAccountId { get; set; }
+
 
     [MaxLength(50)]
     public string? ProjectCode { get; set; }

@@ -4,8 +4,11 @@ using ErpSystem.Core.Enums;
 namespace ErpSystem.Core.Interfaces.HR;
 
 /// <summary>
-/// Read/manage the position vacancies that <c>PositionVacancyInterceptor</c> logs automatically, and
-/// drive the "raise a requisition from a vacancy" and reconcile flows.
+/// Read/manage the position vacancies that <c>PositionVacancyLog.LogDepartureAsync</c> writes from
+/// the exit paths, and drive the "raise a requisition from a vacancy" and reconcile flows.
+///
+/// <para>⚠ This used to name a <c>PositionVacancyInterceptor</c> that did not exist (G-3.2,
+/// corrected 2026-09-15) — see <c>PositionVacancy</c>'s own remarks.</para>
 /// </summary>
 public interface IPositionVacancyService
 {

@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR.Assets;
+using ErpSystem.Core.Services.HR.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -38,6 +39,10 @@ public class SeparationService : ISeparationService
     private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ICurrencyService _currencies;
     private readonly IEmployeeService _employeeService;
+
+    // What the person is paid, resolved the one way HR resolves it (lane E1) — not read off a
+    // contract row the Salary tab no longer maintains.
+    private readonly IPayrollMembershipService _payrollMembership;
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
 
@@ -50,6 +55,7 @@ public class SeparationService : ISeparationService
     /// why the query lives over there rather than being restated here.
     /// </remarks>
     private readonly AssetCustodyClearanceBridge _assetCustody;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     private readonly ILogger<SeparationService> _logger;
 
@@ -66,11 +72,14 @@ public class SeparationService : ISeparationService
         ICompanyHrPolicyProvider policyProvider,
         ICurrencyService currencies,
         IEmployeeService employeeService,
+        IPayrollMembershipService payrollMembership,
         IWorkflowIntegrationService workflow,
         IWorkflowStatusAdapterRegistry workflowAdapters,
         AssetCustodyClearanceBridge assetCustody,
-        ILogger<SeparationService> logger)
+        ILogger<SeparationService> logger,
+        IHrFinancePostingAdapter financePosting)
     {
+        _payrollMembership = payrollMembership;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _policyProvider = policyProvider;
@@ -80,6 +89,7 @@ public class SeparationService : ISeparationService
         _workflowAdapters = workflowAdapters;
         _assetCustody = assetCustody;
         _logger = logger;
+        _financePosting = financePosting;
     }
 
     private Guid GetTenantId()
@@ -503,13 +513,24 @@ public class SeparationService : ISeparationService
         await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var submitted = await _workflow.SubmitAsync(EntityType, entity.Id);
+        // ⚠ Submitting must never approve, and here that is the whole of FR-HR-092.
+        //
+        // With no published definition the engine returns WorkflowOutcome.Approved, and the
+        // adapter maps it to SeparationStatus.Approved — so Submit ENDED SOMEONE'S EMPLOYMENT with
+        // nobody having signed it. Worse, it did so by never reaching ApproveAsync, which is where
+        // RequireDecisionAuthority lives: the Managing Director's signature was not refused, it was
+        // never asked for. That is the single most consequential instance of this defect in HR.
+        //
+        // Defence in depth — an EMPLOYEE_SEPARATION definition IS seeded (mdOnly), so this bites
+        // only on a tenant where seeding has not run. See HrWorkflowFallbackAuthority.
+        var (submitted, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflow, EntityType, entity.Id);
         if (!submitted.ExecutionResult.Success)
             throw new InvalidOperationException(
                 submitted.ExecutionResult.Message ?? "Failed to start the separation approval workflow.");
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, submitted.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         if (!string.IsNullOrWhiteSpace(dto.Notes))
         {
@@ -521,12 +542,85 @@ public class SeparationService : ISeparationService
         await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // ── G-3.6: an ANTICIPATED vacancy, which nothing in the solution had ever written ────────
+        // PositionVacancyStatus.Anticipated was set by no service, IsAnticipated was only ever
+        // assigned false, and ExpectedVacancyDate was never written at all — so the establishment
+        // screen's Anticipated tile read 0 unless a human had manually overridden a row into it,
+        // despite the entity carrying two fields for exactly this.
+        //
+        // Notice given with a future end date is precisely the condition those fields describe: the
+        // seat is not empty yet, and HR knows the day it will be. Logging it here — at submission,
+        // when the date is first derived and frozen — is what gives succession and recruitment the
+        // lead time the register exists to provide. ApplySeparationOutcomeAsync later logs the real
+        // departure, and PositionVacancyLog promotes this row from Anticipated to Open rather than
+        // opening a second one.
+        //
+        // Deliberately not gated on approval: an exit that is later rejected leaves an anticipated
+        // row that reconcile closes once the seat is seen to be occupied, which is the cheaper
+        // error. Telling HR late about a departure is the expensive one.
+        // EffectiveDate is a DateOnly; PositionVacancy dates the register in DateTime, so the
+        // comparison is made in DateOnly and the value converted once, at the call.
+        if (entity.EffectiveDate is { } expectedVacancy &&
+            expectedVacancy > DateOnly.FromDateTime(DateTime.UtcNow))
+        {
+            var expectedVacancyOn = expectedVacancy.ToDateTime(TimeOnly.MinValue);
+
+            var separatingEmployee = await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+                .Where(e => e.Id == entity.EmployeeId && e.TenantId == tenantId)
+                .Select(e => new { e.PositionId })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (separatingEmployee is not null)
+            {
+                await PositionVacancyLog.LogDepartureAsync(
+                    _unitOfWork,
+                    tenantId,
+                    entity.EmployeeId,
+                    separatingEmployee.PositionId,
+                    VacancyReasonForSeparation(entity.SeparationType),
+                    expectedVacancyOn,
+                    _currentUserProvider.UserId,
+                    isAnticipated: true,
+                    expectedVacancyDate: expectedVacancyOn,
+                    note: $"Notified by separation {entity.SeparationNumber}.",
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+        }
+
         _logger.LogInformation(
             "Separation {Number} submitted for approval (effective {Effective:yyyy-MM-dd})",
             entity.SeparationNumber, entity.EffectiveDate);
 
         return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
     }
+
+    /// <summary>
+    /// Translates the separation type into why the seat will be empty (G-3.4 / G-3.6).
+    /// </summary>
+    /// <remarks>
+    /// The three involuntary types and the two dismissals all map to <c>Termination</c>: the
+    /// establishment register records that the post emptied by termination, not how gravely. Only
+    /// redundancy is different in kind, because a redundant post is a restructure from the
+    /// establishment's point of view rather than a seat to refill — and classifying it that way is
+    /// what stops reconcile treating an abolished post as a gap.
+    /// </remarks>
+    private static VacancyReason VacancyReasonForSeparation(EmployeeTerminationType type) => type switch
+    {
+        EmployeeTerminationType.VoluntaryResignation   => VacancyReason.Resignation,
+        EmployeeTerminationType.VoluntaryRetirement    => VacancyReason.Retirement,
+        EmployeeTerminationType.CompulsoryRetirement   => VacancyReason.Retirement,
+        EmployeeTerminationType.MedicalRetirement      => VacancyReason.Retirement,
+        EmployeeTerminationType.Death                  => VacancyReason.Death,
+        EmployeeTerminationType.InvoluntaryRedundancy  => VacancyReason.Restructure,
+        EmployeeTerminationType.InvoluntaryForCause    => VacancyReason.Termination,
+        EmployeeTerminationType.InvoluntaryPerformance => VacancyReason.Termination,
+        EmployeeTerminationType.SummaryDismissal       => VacancyReason.Termination,
+        EmployeeTerminationType.MutualAgreement        => VacancyReason.Termination,
+        EmployeeTerminationType.ContractExpiry         => VacancyReason.Termination,
+        _                                              => VacancyReason.Other,
+    };
 
     // ── FR-HR-092: the decision ───────────────────────────────────────────────
 
@@ -602,18 +696,41 @@ public class SeparationService : ISeparationService
         // definition assigned. A definition can express the same procedural split for assignment,
         // but the guarantee lives in the service.
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current step of this separation.");
 
-        var approval = await _workflow.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Approve", dto.Notes);
-        if (!approval.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                approval.ExecutionResult.Message ?? "Failed to process the separation approval.");
+        // ⚠ NO PERMISSION GATE ON THE NO-WORKFLOW BRANCH, and that is deliberate.
+        //
+        // Everywhere else in this programme the fallback authority is an HR.<Module>.Approve
+        // permission. Here it must not be, because **RequireDecisionAuthority above already IS the
+        // authority** — it is FR-HR-092 itself, it is role-based (the MD signs any exit; HR only a
+        // procedural one), and its own comment says it holds "even if the definition is missing or
+        // wrong". It is stronger than a permission check and it has already run.
+        //
+        // Adding HR.Separation.Approve on top would BLOCK THE MANAGING DIRECTOR, who holds only
+        // ViewSeparation by design (ApprovalReaderGrants: "the authority to decide is not a
+        // permission at all, it is read off the record"). The gate that exists is the right one;
+        // a second gate here would refuse the very person the requirement names.
+        WorkflowOutcome approvalOutcome;
+        if (await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException(
+                    "You are not assigned as an approver for the current step of this separation.");
+
+            var approval = await _workflow.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Approve", dto.Notes);
+            if (!approval.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    approval.ExecutionResult.Message ?? "Failed to process the separation approval.");
+
+            approvalOutcome = approval.Outcome;
+        }
+        else
+        {
+            approvalOutcome = WorkflowOutcome.Approved;
+        }
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, approval.Outcome, actingUserId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, actingUserId);
 
         // The engine names the ApplicationUser who acted; the record wants the Employee, because
         // ApprovedById is an Employee FK and "who signed this exit" is a person, not a login.
@@ -749,20 +866,32 @@ public class SeparationService : ISeparationService
 
         RequireDecisionAuthority(entity);
 
-        // Same two gates as approving, same order and for the same reasons.
+        // Same two gates as approving, same order and for the same reasons — and the same absence
+        // of a permission gate on the no-workflow branch, for the reason given there.
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current step of this separation.");
 
-        var refusal = await _workflow.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Reject", dto.Reason);
-        if (!refusal.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                refusal.ExecutionResult.Message ?? "Failed to process the separation refusal.");
+        WorkflowOutcome refusalOutcome;
+        if (await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException(
+                    "You are not assigned as an approver for the current step of this separation.");
+
+            var refusal = await _workflow.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Reject", dto.Reason);
+            if (!refusal.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    refusal.ExecutionResult.Message ?? "Failed to process the separation refusal.");
+
+            refusalOutcome = refusal.Outcome;
+        }
+        else
+        {
+            refusalOutcome = WorkflowOutcome.Rejected;
+        }
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, refusal.Outcome, actingUserId, dto.Reason);
+            .ApplyApprovalOutcome(entity, refusalOutcome, actingUserId, dto.Reason);
 
         entity.RejectedById = actorEmployeeId;
         entity.RejectedOn = DateTime.UtcNow;
@@ -1154,6 +1283,8 @@ public class SeparationService : ISeparationService
                     EmployeeNumber = d.Employee.EmployeeNumber,
                     PositionTitle = d.Employee.Position?.Title,
                     OrganizationUnitName = d.Employee.OrganizationUnit?.Name,
+                    OrganizationUnitId = d.Employee.OrganizationUnitId,
+                    PositionId = d.Employee.PositionId,
                     DateOfBirth = d.Employee.DateOfBirth,
                     CurrentAge = HrPolicyCalculations.Age(d.Employee.DateOfBirth),
                     RetirementAge = HrPolicyCalculations.EffectiveRetirementAge(settings, d.Employee.Gender),
@@ -1821,7 +1952,7 @@ public class SeparationService : ISeparationService
     /// ⚠ <b>A policy assumption, stated rather than buried.</b> Calendar days: monthly × 12 ÷ 365.
     /// A 30-day-month or working-day basis gives different money on the same facts, and TDC has not
     /// said which it uses — so the basis is written onto every computed line in words, and the
-    /// question is recorded in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Do not change this quietly.
+    /// question is recorded in <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Do not change this quietly.
     /// </remarks>
     /// <remarks>
     /// ⚠ The figure in force is <c>CompanyHrPolicySettings.SettlementDaysPerYear</c>; this seeds it.
@@ -1872,24 +2003,38 @@ public class SeparationService : ISeparationService
     private async Task<(decimal? Rate, string Basis)> DailyRateAsync(
         Guid tenantId, Guid employeeId, string currency, CancellationToken cancellationToken)
     {
-        var contract = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
-            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.EmployeeId == employeeId && c.Salary > 0)
-            .OrderByDescending(c => c.IsActive)
-            .ThenByDescending(c => c.StartDate)
-            .FirstOrDefaultAsync(cancellationToken);
+        // ⚠ E-8 (round-2 plan § 6.5.4). This read the salary off the newest contract row — a
+        // figure that stopped being maintained the day the Salary tab took the pay fields off the
+        // contract dialog. The pay basis is now resolved the one way every HR reader resolves it:
+        // notch, level, or record figure on the scale; payroll's basis when negotiated. The
+        // contract is the fallback for the rows that predate that, so an old settlement still
+        // computes rather than printing "no salary on record" for somebody who plainly has one.
+        var (monthly, source) = await _payrollMembership.ResolveMonthlyBasicPayAsync(employeeId, cancellationToken);
 
-        if (contract is null)
-            return (null, "No salary is on record for this employee, so amounts based on pay cannot be computed.");
+        if (monthly is not > 0m)
+        {
+            var contract = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+                .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.EmployeeId == employeeId && c.Salary > 0)
+                .OrderByDescending(c => c.IsCurrent)
+                .ThenByDescending(c => c.EffectiveDate)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (contract is null)
+                return (null, $"No salary is on record for this employee, so amounts based on pay cannot be computed. ({source})");
+
+            monthly = contract.Salary;
+            source = $"contract {contract.ContractNumber}";
+        }
 
         // ⚠ The divisor and the SENTENCE come from the same number, so the words on the settlement
         // can never describe a basis other than the one that produced the figure beside them.
         var policy = await _policyProvider.GetAsync(cancellationToken);
         decimal daysPerYear = policy.SettlementDaysPerYear;
 
-        var rate = Math.Round(contract.Salary * 12m / daysPerYear, 4, MidpointRounding.AwayFromZero);
+        var rate = Math.Round(monthly.Value * 12m / daysPerYear, 4, MidpointRounding.AwayFromZero);
         return (rate,
-            $"{currency} {contract.Salary:N2} per month × 12 ÷ {daysPerYear:N0} days = "
-            + $"{currency} {rate:N4} per day (contract {contract.ContractNumber}).");
+            $"{currency} {monthly.Value:N2} per month × 12 ÷ {daysPerYear:N0} days = "
+            + $"{currency} {rate:N4} per day ({source}).");
     }
 
     /// <inheritdoc />
@@ -2234,6 +2379,8 @@ public class SeparationService : ISeparationService
         ArgumentNullException.ThrowIfNull(dto);
         var tenantId = GetTenantId();
         var settlement = await RequireEditableSettlementAsync(tenantId, separationId, cancellationToken);
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Adding a settlement line", cancellationToken);
 
         if (string.IsNullOrWhiteSpace(dto.Description))
             throw new InvalidOperationException("Describe what the line is for.");
@@ -2291,6 +2438,8 @@ public class SeparationService : ISeparationService
         var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
             .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
             ?? throw new ArgumentException("The settlement this line belongs to was not found.");
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Changing a settlement line", cancellationToken);
 
         RequireEditable(await RequireAsync(tenantId, settlement.SeparationId, cancellationToken));
 
@@ -2346,6 +2495,8 @@ public class SeparationService : ISeparationService
         var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
             .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
             ?? throw new ArgumentException("The settlement this line belongs to was not found.");
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Changing a settlement line", cancellationToken);
 
         RequireEditable(await RequireAsync(tenantId, settlement.SeparationId, cancellationToken));
 
@@ -2450,16 +2601,51 @@ public class SeparationService : ISeparationService
         var tenantId = GetTenantId();
         var (separation, settlement) = await RequireSettlementUnderReviewAsync(tenantId, separationId, cancellationToken);
 
-        settlement.ReviewOutcome = SettlementReviewOutcome.Approved;
-        settlement.ReviewedById = actorEmployeeId;
-        settlement.ReviewedOn = DateTime.UtcNow;
-        settlement.ReviewNotes = string.IsNullOrWhiteSpace(dto?.Notes) ? null : dto!.Notes.Trim();
+        // Internal Audit's approval IS the release (FR-HR-185): there is no later pay step. The
+        // approval and Finance's journal commit together (HR finish plan lane 8, slice 3) — a
+        // settlement Finance refuses is not released. Finalising alone posts nothing: the register
+        // said "do not post on finalise", and it does not.
+        var lines = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .Where(l => l.TenantId == tenantId && l.SettlementId == settlement.Id && !l.IsDeleted)
+            .OrderBy(l => l.SortOrder)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
 
-        separation.Status = SeparationStatus.SettlementApproved;
+        // A deduction that recovers an asset surcharge Finance already holds as a receivable must
+        // credit that receivable, not recoveries income a second time (slice 4). The line points at
+        // its clearance item, the item at the surcharge, and the register says whether it posted.
+        var recoveringPosted = new HashSet<Guid>();
+        var clearanceItemIds = lines.Where(l => l.IsDeduction && l.SourceClearanceItemId.HasValue).Select(l => l.SourceClearanceItemId!.Value).Distinct().ToList();
+        if (clearanceItemIds.Count > 0)
+        {
+            var surchargeByItem = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+                .Where(i => i.TenantId == tenantId && clearanceItemIds.Contains(i.Id) && i.SourceSurchargeId != null)
+                .AsNoTracking()
+                .Select(i => new { i.Id, SurchargeId = i.SourceSurchargeId!.Value })
+                .ToListAsync(cancellationToken);
+            foreach (var pair in surchargeByItem)
+            {
+                if (await _financePosting.IsPostedAsync(HrFinancePostingEventCatalog.AssetSurchargeApproved, pair.SurchargeId, cancellationToken))
+                    foreach (var line in lines.Where(l => l.SourceClearanceItemId == pair.Id)) recoveringPosted.Add(line.Id);
+            }
+        }
 
-        await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
-        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _financePosting.RunAsync(async ct =>
+        {
+            settlement.ReviewOutcome = SettlementReviewOutcome.Approved;
+            settlement.ReviewedById = actorEmployeeId;
+            settlement.ReviewedOn = DateTime.UtcNow;
+            settlement.ReviewNotes = string.IsNullOrWhiteSpace(dto?.Notes) ? null : dto!.Notes.Trim();
+
+            separation.Status = SeparationStatus.SettlementApproved;
+
+            await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
+            await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return HrFinancePostingCommandFactory.SeparationSettlementReleased(
+                settlement, lines, separation.SeparationNumber, separation.EmployeeId, recoveringPosted);
+        }, _currentUserProvider.UserId, cancellationToken);
 
         _logger.LogInformation(
             "Settlement for separation {Number} reviewed and approved by Internal Audit; payment may be released",
@@ -2482,6 +2668,8 @@ public class SeparationService : ISeparationService
 
         var tenantId = GetTenantId();
         var (separation, settlement) = await RequireSettlementUnderReviewAsync(tenantId, separationId, cancellationToken);
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Returning this settlement", cancellationToken);
 
         settlement.ReviewOutcome = SettlementReviewOutcome.Returned;
         settlement.ReviewedById = actorEmployeeId;
