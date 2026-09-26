@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "probes": [
+    {
+      "sqlFile": "FinanceCanonicalMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260921154920_AccountingBookModelV2",
+          "sourceSha256": "604BE0D8F58CEE0ACDDDC3E1C24611700607B846C7C94BEA51FAAC09BCDDD9FB"
+        },
+        {
+          "id": "20260924045510_CanonicalVendorInvoiceBusinessPartnerIdentity",
+          "sourceSha256": "C06C431595AFDB8A0612BBE985B989DE677C315D20F767AF1D64E585792CBB50"
+        },
+        {
+          "id": "20260924095137_CanonicalApSettlementBusinessPartnerIdentity",
+          "sourceSha256": "69139E8ABE7B6E0871E78DB71FFA6FBC1F3342F399650EF1B52CA23E5B237D0E"
+        },
+        {
+          "id": "20260924104115_CanonicalWhtBusinessPartnerIdentity",
+          "sourceSha256": "57018F7A543E72E7475DFCB4E1F33F4DBEAD335B1B5D86E405355BE50D14A43F"
+        },
+        {
+          "id": "20260924152654_CanonicalSubledgerAdjustmentBusinessPartnerIdentity",
+          "sourceSha256": "0BBE3D5CAC299750B3BD2655C9609AD09044999E1453409B0BA4267721A61B9A"
+        },
+        {
+          "id": "20260924175355_CanonicalCustomerPaymentBusinessPartnerIdentity",
+          "sourceSha256": "05091296A96FFAFAFEE6940FC8F921C19B5C9242CC71CAF84B2E8B25C65B27CC"
+        },
+        {
+          "id": "20260924190500_CanonicalInvoiceBusinessPartnerEvidence",
+          "sourceSha256": "CEDA92C63D778F428DE7564CB7931759B6518C5645D954B6A5572BE5281D24D7"
+        },
+        {
+          "id": "20260925051637_CanonicalCollectionBusinessPartnerIdentity",
+          "sourceSha256": "F0A04FCE76A61BB6F7CC76DE185E14EB405251402D9D7D5DA50A1E73A6499E7F"
+        }
+      ]
+    },
+    {
+      "sqlFile": "ProcurementCanonicalMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260924190000_ReceiptItemWeightSnapshots",
+          "sourceSha256": "65C85F56B6119A4B399AB46E1D73175FA39307A65D5D19A3EE60F2137D1633DE"
+        },
+        {
+          "id": "20260924210000_LandedCostReceiptWeights",
+          "sourceSha256": "E975E5CB7CA15C1FAD2D8FF3CF0A8D5A160C57839CB50712C977D63BB1017B58"
+        },
+        {
+          "id": "20260924220000_LandedCostSupplierDocuments",
+          "sourceSha256": "CA57C94CAA633B154F243EC2FF7BA6E4DF7A01536C291DD2B32D37D46DEFB051"
+        },
+        {
+          "id": "20260924230000_ProcurementAutoInvoiceReceipts",
+          "sourceSha256": "466E6B032631BE215A97567583A495AD2787002031416641A1C025B23B8E1C2E"
+        },
+        {
+          "id": "20260924233000_BusinessPartnerRoleCompatibility",
+          "sourceSha256": "0E69E174DBA27283B0AFCC0B54DC8EAA30060149A01C8513107E4CEC26A89162"
+        },
+        {
+          "id": "20260925110645_CustomerPostingAccounts",
+          "sourceSha256": "B3E1B85C8FD4B5CB82180D977B4011264B835CF4D82297D085D6B54C0588FAF5"
+        },
+        {
+          "id": "20260925180442_SupplierInvoiceTaxFallback",
+          "sourceSha256": "AD31F9749FA4BE4F74C13593356A895B11E2ABFD4F4ED70C1C80B133AAB6F2E3"
+        },
+        {
+          "id": "20260925220000_CustomerAdjustmentPostingAccounts",
+          "sourceSha256": "6766EC1F8C6C95CEC733A04241B9A11974C686AF108C7B94D1ACAC350D09EABB"
+        },
+        {
+          "id": "20260925230000_ProcurementInvoiceDistributionDraft",
+          "sourceSha256": "F79798710FFB7E045EBA0E5F1924584B5C063ADEF731611A26F28A4E797F7812"
+        },
+        {
+          "id": "20260926210000_EstateSupplierInvoiceLineage",
+          "sourceSha256": "E354F3770C7043B14AC7BB833967AB7553C8DFBAD6724EB25A9970CB87907CC7"
+        }
+      ]
+    },
+    {
+      "sqlFile": "CanonicalTriggerPeriodMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20260925190000_CanonicalProcurementFinanceTriggers",
+          "sourceSha256": "03726DB4E30B101D2038FD0BF2C6BFB78563E3A47907E87FC5FEA01B9AABA8AD"
+        },
+        {
+          "id": "20260925210000_ReconcileAccountingBookPeriodInitializationSchema",
+          "sourceSha256": "09AC36D49E7231CFB30FE8299FA3B376534944FAA0230387741F9D330DDA347E"
+        }
+      ]
+    }
+  ]
+}
