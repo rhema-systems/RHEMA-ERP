@@ -1354,6 +1354,24 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         if (request.Status == EstateManagedAssetStatus.Available
             && request.ReleaseOccupant == true)
         {
+            var groundRentAccount = await _unitOfWork.Repository<EstateGroundRentAccount>()
+                .FirstOrDefaultAsync(item => item.EstateManagedAssetId == asset.Id
+                    && item.TenantId == _currentUserProvider.TenantId
+                    && !item.IsDeleted
+                    && item.Status != "Closed");
+            if (groundRentAccount is not null)
+            {
+                groundRentAccount.Status = "Closed";
+                groundRentAccount.UpdatedAt = DateTime.UtcNow;
+                groundRentAccount.UpdatedBy = _currentUserProvider.Username;
+                var closureNote = $"Closed after occupancy release on {request.ActualDate!.Value:yyyy-MM-dd}";
+                var previousNotes = groundRentAccount.Notes;
+                groundRentAccount.Notes = string.IsNullOrWhiteSpace(previousNotes)
+                    ? closureNote
+                    : $"{previousNotes[..Math.Min(previousNotes.Length, 1000 - closureNote.Length - 3)]} | {closureNote}";
+                await _unitOfWork.Repository<EstateGroundRentAccount>().UpdateAsync(groundRentAccount);
+            }
+
             var releaseHistory = string.Join(
                 " | ",
                 new[]

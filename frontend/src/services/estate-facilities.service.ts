@@ -299,9 +299,9 @@ class EstateFacilitiesService {
     await apiService.post('/estate/facilities/ar-billing/results', request);
   }
 
-  async getDutyRoster(): Promise<EstateFacilityDutyRosterItem[]> {
+  async getDutyRoster(date?: string): Promise<EstateFacilityDutyRosterItem[]> {
     const response = await apiService.get<ApiResponse<EstateFacilityDutyRosterItem[]>>(
-      '/estate/facilities/duty-roster'
+      `/estate/facilities/duty-roster${date ? `?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}` : ''}`
     );
     return response.data || [];
   }
@@ -312,6 +312,17 @@ class EstateFacilitiesService {
     const response = await apiService.post<ApiResponse<EstateFacilityDutyRosterItem>>(
       '/estate/facilities/duty-roster',
       request
+    );
+    return response.data;
+  }
+
+  async updateDutyRosterItem(
+    id: string,
+    request: UpsertEstateFacilityDutyRosterRequest,
+  ): Promise<EstateFacilityDutyRosterItem> {
+    const response = await apiService.put<ApiResponse<EstateFacilityDutyRosterItem>>(
+      `/estate/facilities/duty-roster/${encodeURIComponent(id)}`,
+      request,
     );
     return response.data;
   }

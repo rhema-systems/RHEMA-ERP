@@ -1979,7 +1979,7 @@ export const navigationItems: NavItem[] = [
             icon: BarChart3,
           },
           {
-            title: 'SOP Procedures',
+            title: 'Workspaces',
             href: '/development/planning',
             icon: ClipboardList,
           },

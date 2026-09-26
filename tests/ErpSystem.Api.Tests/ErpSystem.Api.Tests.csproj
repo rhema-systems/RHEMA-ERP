@@ -166,6 +166,8 @@
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesDutyRosterScheduleTests.cs" />
+    <Compile Include="Services\Estate\EstateRecurringBillingServiceTests.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\AccountCurrencyLinkPersistenceTests.cs" />

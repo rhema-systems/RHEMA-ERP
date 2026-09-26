@@ -121,7 +121,10 @@ public sealed record CreateProcedureCaseRequest(
 {
     public Guid? OrganizationLevelId { get; init; }
     public Guid? OrganizationUnitId { get; init; }
+    public bool HasIntakeAttachment { get; init; }
 }
+
+public sealed record AttachCentralDocumentToProcedureCaseRequest(Guid CaseId, Guid DocumentId);
 
 public sealed record CreateLinkedLegalMatterRequest(
     string MatterType,

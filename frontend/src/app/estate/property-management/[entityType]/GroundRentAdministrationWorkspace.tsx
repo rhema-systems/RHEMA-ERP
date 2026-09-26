@@ -469,6 +469,7 @@ export function GroundRentAdministrationWorkspace() {
       estateManagedAssetId: assetId,
       customerBusinessPartnerId: asset?.customerBusinessPartnerId || '',
       currencyCode: asset?.currencyCode || current.currencyCode,
+      calculationMethod: asset?.approvedAnnualGroundRent ? 'ApprovedAssessment' : 'FixedAnnualAmount',
       annualAmount: asset?.approvedAnnualGroundRent ?? current.annualAmount,
       ratePerAcre: asset?.approvedRatePerAcre ?? current.ratePerAcre,
     }));
@@ -481,7 +482,7 @@ export function GroundRentAdministrationWorkspace() {
       !setupForm.groundRentIncomeAccountId
     ) {
       toast.error(
-        'Select a land lease with a linked lessee and a ground-rent income account.'
+        'Select a property with a linked customer and a ground-rent income account.'
       );
       return;
     }
@@ -1349,8 +1350,8 @@ export function GroundRentAdministrationWorkspace() {
                 value={setupForm.estateManagedAssetId}
                 onValueChange={selectAsset}
               >
-                <SelectTrigger aria-label="Ground rent land lease">
-                  <SelectValue placeholder="Select a land lease with a linked lessee" />
+                <SelectTrigger aria-label="Ground rent property">
+                  <SelectValue placeholder="Select a property with a linked customer" />
                 </SelectTrigger>
                 <SelectContent>
                   {groundRentLeaseAssets.map((asset) => (
@@ -1363,8 +1364,7 @@ export function GroundRentAdministrationWorkspace() {
               </Select>
               {groundRentLeaseAssets.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  No land lease records with linked lessees are ready for
-                  ground-rent setup.
+                  No eligible properties with linked customers are ready for ground-rent setup.
                 </p>
               ) : null}
               {selectedAsset ? (
@@ -1737,11 +1737,10 @@ export function GroundRentAdministrationWorkspace() {
               />
               <div>
                 <Label htmlFor="ground-rent-auto-post">
-                  Automatically post generated invoices to Finance GL
+                  Automatically release invoices to customer
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Leave disabled when Finance must review draft invoices before
-                  posting.
+                  Finance approval rules still apply. Leave off to review drafts in Finance before release.
                 </p>
               </div>
             </div>

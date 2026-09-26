@@ -117,12 +117,13 @@ export default function DocumentManagementWorkspacePage() {
   const refreshQueues = React.useCallback(async () => {
     setIsQueueLoading(true);
     try {
-      const [integrationQueue, versionQueue, records, templates] = await Promise.all([
-        documentManagementService.getIntegrationQueue(),
-        documentManagementService.getVersionQueue(),
-        documentManagementService.getRecords(),
-        documentManagementService.getMetadataTemplates(),
-      ]);
+      const [integrationQueue, versionQueue, records, templates] =
+        await Promise.all([
+          documentManagementService.getIntegrationQueue(),
+          documentManagementService.getVersionQueue(),
+          documentManagementService.getRecords(),
+          documentManagementService.getMetadataTemplates(),
+        ]);
       setQueueItems(integrationQueue);
       setVersionItems(versionQueue);
       setGovernanceItems(
@@ -278,7 +279,8 @@ export default function DocumentManagementWorkspacePage() {
     status: 'Current' | 'Legal hold' | 'Archived'
   ) => {
     await documentManagementService.updateLifecycleControls(record.id, {
-      retentionStatus: status === 'Current' ? 'Current' : record.retentionStatus,
+      retentionStatus:
+        status === 'Current' ? 'Current' : record.retentionStatus,
       lifecycleStatus: status,
     });
     await refreshQueues();
@@ -392,9 +394,6 @@ export default function DocumentManagementWorkspacePage() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
-            <Badge variant="outline" className="w-fit">
-              {workspace.workspace.source}
-            </Badge>
             <div>
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-md border bg-muted">
@@ -413,41 +412,24 @@ export default function DocumentManagementWorkspacePage() {
                 Central DMS
               </Link>
             </Button>
-            <Button asChild>
-              <Link href="/administration/workflow?q=Document%20Management">
-                Workflow Setup
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
           </div>
         </div>
 
-        {workspace.stages.length === 0 ? (
-          <Card className="border-dashed border-border bg-muted/40">
-            <CardHeader>
-              <CardTitle className="text-base">Workflow not configured</CardTitle>
-              <CardDescription>
-                No DMS stages, checklists, fields, outputs, or handoffs are
-                predefined here. Configure and publish the workflow in
-                Administration &gt; Workflow Setup for this DMS entity type.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        ) : null}
-
         {workspace.workspace.entityType === 'CentralDocumentVersion' ? (
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+          <section className="space-y-3">
+            <header>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle>Version Publication Queue</CardTitle>
+                  <h2 className="text-base font-semibold">
+                    Version Publication Queue
+                  </h2>
                 </div>
                 <Badge variant="secondary" className="w-fit">
                   {pendingVersionCount} pending
                 </Badge>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
+            </header>
+            <div className="space-y-3">
               {versionItems.length > versionPages.pageSize ? (
                 <Pagination
                   currentPage={versionPages.currentPage}
@@ -457,146 +439,155 @@ export default function DocumentManagementWorkspacePage() {
                   onPageChange={versionPages.setCurrentPage}
                 />
               ) : null}
-              {versionPages.items.map((item) => {
-                const isPending =
-                  item.status === 'Pending Publication' ||
-                  item.status === 'Submitted' ||
-                  item.status === 'Published';
-                const versionFile: CentralDocumentViewerFile = {
-                  documentRecordId: item.documentRecordId,
-                  versionId: item.version.id,
-                  fileUploadRecordId: item.version.fileUploadRecordId,
-                  title: `${item.title} / ${item.requestedVersion}`,
-                  fileName: item.version.fileName || item.title,
-                  repositoryPath:
-                    item.version.repositoryPath || item.document.repositoryPath,
-                  renditionPath: item.version.renditionPath,
-                  externalDocumentUrl: item.document.externalDocumentUrl,
-                  contentType: item.version.contentType,
-                  sourceLabel: item.sourceLabel,
-                  version: item.requestedVersion,
-                };
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[920px] text-sm">
+                  <thead className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Document</th>
+                      <th className="px-3 py-2 font-medium">Version</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 font-medium">Reason</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {versionPages.items.map((item) => {
+                      const isPending =
+                        item.status === 'Pending Publication' ||
+                        item.status === 'Submitted' ||
+                        item.status === 'Published';
+                      const versionFile: CentralDocumentViewerFile = {
+                        documentRecordId: item.documentRecordId,
+                        versionId: item.version.id,
+                        fileUploadRecordId: item.version.fileUploadRecordId,
+                        title: `${item.title} / ${item.requestedVersion}`,
+                        fileName: item.version.fileName || item.title,
+                        repositoryPath:
+                          item.version.repositoryPath ||
+                          item.document.repositoryPath,
+                        renditionPath: item.version.renditionPath,
+                        externalDocumentUrl: item.document.externalDocumentUrl,
+                        contentType: item.version.contentType,
+                        sourceLabel: item.sourceLabel,
+                        version: item.requestedVersion,
+                      };
 
-                return (
-                  <div
-                    key={item.id}
-                    className="rounded-md border bg-background p-4"
-                  >
-                    <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{item.id}</Badge>
-                          <Badge variant={isPending ? 'secondary' : 'default'}>
-                            {item.status}
-                          </Badge>
-                          <Badge variant="outline">
-                            {`${item.currentVersion} -> ${item.requestedVersion}`}
-                          </Badge>
-                          {item.workflow ? (
-                            <Badge variant="outline">
-                              {item.workflow.status === 'Completed'
-                                ? 'Workflow approved'
-                                : item.workflow.currentStageName}
+                      return (
+                        <tr key={item.id}>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium">{item.title}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {item.documentReference}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            {item.currentVersion} to {item.requestedVersion}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Badge
+                              variant={isPending ? 'secondary' : 'default'}
+                            >
+                              {item.status}
                             </Badge>
-                          ) : null}
-                        </div>
-                        <div>
-                          <div className="font-medium">{item.title}</div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.documentReference} / {item.sourceModule}
-                          </p>
-                          <p className="mt-2 text-sm text-muted-foreground">
+                          </td>
+                          <td className="max-w-[200px] px-3 py-2 text-muted-foreground">
                             {item.reason}
-                          </p>
-                          {item.workflow?.currentAssignedRole ? (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Assigned to {item.workflow.currentAssignedRole}
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2 xl:justify-end">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setViewerFile(versionFile)}
-                        >
-                          <Eye className="mr-2 h-4 w-4" />
-                          View Document
-                        </Button>
-                        {item.workflow && item.workflow.status !== 'Completed' ? (
-                          <Button asChild size="sm" variant="outline">
-                            <Link href="/workflow/inbox">
-                              <Workflow className="mr-2 h-4 w-4" />
-                              Workflow task
-                            </Link>
-                          </Button>
-                        ) : null}
-                        <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
-                          {uploadActionId === item.documentRecordId ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : null}
-                          Upload edited Word
-                          <input
-                            type="file"
-                            accept=".doc,.docx,.rtf,.pdf"
-                            className="sr-only"
-                            disabled={uploadActionId === item.documentRecordId}
-                            onChange={(event) => {
-                              void uploadVersionFile(
-                                item.documentRecordId,
-                                event.target.files?.[0]
-                              );
-                              event.target.value = '';
-                            }}
-                          />
-                        </label>
-                        <Button
-                          size="sm"
-                          onClick={() => void publishVersion(item, 'Current')}
-                          disabled={
-                            !isPending ||
-                            Boolean(
-                              item.workflow &&
-                                item.workflow.status !== 'Completed'
-                            )
-                          }
-                        >
-                          {versionActionId === `${item.id}-Current` ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                          )}
-                          Final publish
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void publishVersion(item, 'Returned')}
-                          disabled={!isPending}
-                        >
-                          {versionActionId === `${item.id}-Returned` ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <RotateCcw className="mr-2 h-4 w-4" />
-                          )}
-                          Return
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            void publishVersion(item, 'Superseded')
-                          }
-                          disabled={!isPending}
-                        >
-                          Supersede
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setViewerFile(versionFile)}
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                View Document
+                              </Button>
+                              {item.workflow &&
+                              item.workflow.status !== 'Completed' ? (
+                                <Button asChild size="sm" variant="outline">
+                                  <Link href="/workflow/inbox">
+                                    <Workflow className="mr-2 h-4 w-4" />
+                                    Workflow task
+                                  </Link>
+                                </Button>
+                              ) : null}
+                              <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                                {uploadActionId === item.documentRecordId ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : null}
+                                Upload edited Word
+                                <input
+                                  type="file"
+                                  accept=".doc,.docx,.rtf,.pdf"
+                                  className="sr-only"
+                                  disabled={
+                                    uploadActionId === item.documentRecordId
+                                  }
+                                  onChange={(event) => {
+                                    void uploadVersionFile(
+                                      item.documentRecordId,
+                                      event.target.files?.[0]
+                                    );
+                                    event.target.value = '';
+                                  }}
+                                />
+                              </label>
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  void publishVersion(item, 'Current')
+                                }
+                                disabled={
+                                  !isPending ||
+                                  Boolean(
+                                    item.workflow &&
+                                      item.workflow.status !== 'Completed'
+                                  )
+                                }
+                              >
+                                {versionActionId === `${item.id}-Current` ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                                )}
+                                Final publish
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  void publishVersion(item, 'Returned')
+                                }
+                                disabled={!isPending}
+                              >
+                                {versionActionId === `${item.id}-Returned` ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="mr-2 h-4 w-4" />
+                                )}
+                                Return
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  void publishVersion(item, 'Superseded')
+                                }
+                                disabled={!isPending}
+                              >
+                                Supersede
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
               {isQueueLoading ? (
                 <div className="flex items-center gap-2 rounded-md border bg-background p-3 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -609,23 +600,25 @@ export default function DocumentManagementWorkspacePage() {
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         ) : null}
 
         {workspace.workspace.entityType === 'CentralDocumentGovernance' ? (
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+          <section className="space-y-3">
+            <header>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle>Access & Retention Review Queue</CardTitle>
+                  <h2 className="text-base font-semibold">
+                    Access & Retention Review Queue
+                  </h2>
                 </div>
                 <Badge variant="secondary" className="w-fit">
                   {pendingGovernanceCount} pending
                 </Badge>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
+            </header>
+            <div className="space-y-3">
               {governanceItems.length > governancePages.pageSize ? (
                 <Pagination
                   currentPage={governancePages.currentPage}
@@ -635,94 +628,113 @@ export default function DocumentManagementWorkspacePage() {
                   onPageChange={governancePages.setCurrentPage}
                 />
               ) : null}
-              {governancePages.items.map((item) => {
-                const isPending = item.retentionStatus !== 'Current';
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Document</th>
+                      <th className="px-3 py-2 font-medium">Access</th>
+                      <th className="px-3 py-2 font-medium">Review date</th>
+                      <th className="px-3 py-2 font-medium">Retention</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {governancePages.items.map((item) => {
+                      const isPending = item.retentionStatus !== 'Current';
 
-                return (
-                  <div
-                    key={item.id}
-                    className="rounded-md border bg-background p-4"
-                  >
-                    <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">
-                            {item.documentReference}
-                          </Badge>
-                          <Badge variant={isPending ? 'secondary' : 'default'}>
-                            {item.lifecycleStatus}
-                          </Badge>
-                          <Badge variant="outline">
+                      return (
+                        <tr key={item.id}>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium">{item.title}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {item.documentReference}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">{item.accessProfile}</td>
+                          <td className="px-3 py-2">
                             {item.reviewDate
                               ? new Date(item.reviewDate).toLocaleDateString()
-                              : 'No review date'}
-                          </Badge>
-                        </div>
-                        <div>
-                          <div className="font-medium">{item.title}</div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.sourceModule} / {item.sourceLabel}
-                          </p>
-                        </div>
-                        <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
-                          <span>Access: {item.accessProfile}</span>
-                          <span>Retention: {item.retentionStatus}</span>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2 xl:justify-end">
-                        <Button
-                          size="sm"
-                          onClick={() => void updateGovernanceStatus(item, 'Current')}
-                          disabled={!isPending}
-                        >
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void updateGovernanceStatus(item, 'Legal hold')}
-                          disabled={!isPending}
-                        >
-                          Legal Hold
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void updateGovernanceStatus(item, 'Archived')}
-                          disabled={!isPending}
-                        >
-                          Archive
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                              : 'Not set'}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Badge
+                              variant={isPending ? 'secondary' : 'default'}
+                            >
+                              {item.retentionStatus}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  void updateGovernanceStatus(item, 'Current')
+                                }
+                                disabled={!isPending}
+                              >
+                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  void updateGovernanceStatus(
+                                    item,
+                                    'Legal hold'
+                                  )
+                                }
+                                disabled={!isPending}
+                              >
+                                Legal Hold
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  void updateGovernanceStatus(item, 'Archived')
+                                }
+                                disabled={!isPending}
+                              >
+                                Archive
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
               <Button asChild variant="outline">
                 <Link href="/administration/document-management/access-retention">
                   Manage Access & Retention Setup
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         ) : null}
 
         {workspace.workspace.entityType ===
         'CentralDocumentMetadataTemplate' ? (
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+          <section className="space-y-3">
+            <header>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle>Metadata Template Approval Queue</CardTitle>
+                  <h2 className="text-base font-semibold">
+                    Metadata Template Approval Queue
+                  </h2>
                 </div>
                 <Badge variant="secondary" className="w-fit">
                   {draftTemplateCount} drafts
                 </Badge>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
+            </header>
+            <div className="space-y-3">
               {metadataTemplateItems.length > templatePages.pageSize ? (
                 <Pagination
                   currentPage={templatePages.currentPage}
@@ -732,67 +744,83 @@ export default function DocumentManagementWorkspacePage() {
                   onPageChange={templatePages.setCurrentPage}
                 />
               ) : null}
-              {templatePages.items.map((item) => {
-                const isDraft = !item.isActive;
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[620px] text-sm">
+                  <thead className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Template</th>
+                      <th className="px-3 py-2 font-medium">Module</th>
+                      <th className="px-3 py-2 font-medium">Required fields</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {templatePages.items.map((item) => {
+                      const isDraft = !item.isActive;
 
-                return (
-                  <div
-                    key={item.id || item.templateCode}
-                    className="rounded-md border bg-background p-4"
-                  >
-                    <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{item.templateCode}</Badge>
-                          <Badge variant={isDraft ? 'secondary' : 'default'}>
-                            {item.isActive ? 'Active' : 'Inactive'}
-                          </Badge>
-                        </div>
-                        <div>
-                          <div className="font-medium">{item.documentType}</div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.module} / {item.sourceLabel}
-                          </p>
-                          <p className="mt-2 text-sm text-muted-foreground">
-                            {item.requiredFields.length} required metadata fields.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2 xl:justify-end">
-                        <Button asChild size="sm" variant="outline">
-                          <Link href="/administration/document-management/metadata-templates">
-                            Open Setup
-                          </Link>
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                      return (
+                        <tr key={item.id || item.templateCode}>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium">
+                              {item.documentType}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {item.templateCode}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">{item.module}</td>
+                          <td className="px-3 py-2 tabular-nums">
+                            {item.requiredFields.length}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Badge variant={isDraft ? 'secondary' : 'default'}>
+                              {item.isActive ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex justify-end">
+                              <Button asChild size="sm" variant="outline">
+                                <Link href="/administration/document-management/metadata-templates">
+                                  Open Setup
+                                </Link>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
               <Button asChild variant="outline">
                 <Link href="/administration/document-management/metadata-templates">
                   Open Metadata Setup
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         ) : null}
 
         {workspace.workspace.entityType ===
         'CentralDocumentIntegrationQueue' ? (
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+          <section className="space-y-3">
+            <header>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle>Incoming Module Packages</CardTitle>
+                  <h2 className="text-base font-semibold">
+                    Incoming Module Packages
+                  </h2>
                 </div>
                 <Badge variant="secondary" className="w-fit">
                   {pendingQueueCount} pending
                 </Badge>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
+            </header>
+            <div className="space-y-3">
               {queueItems.length > integrationPages.pageSize ? (
                 <Pagination
                   currentPage={integrationPages.currentPage}
@@ -802,90 +830,81 @@ export default function DocumentManagementWorkspacePage() {
                   onPageChange={integrationPages.setCurrentPage}
                 />
               ) : null}
-              {integrationPages.items.map((item) => {
-                const isPending = item.status === 'Pending Review';
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[780px] text-sm">
+                  <thead className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Document</th>
+                      <th className="px-3 py-2 font-medium">Module</th>
+                      <th className="px-3 py-2 font-medium">Received</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {integrationPages.items.map((item) => {
+                      const isPending = item.status === 'Pending Review';
 
-                return (
-                  <div
-                    key={item.id}
-                    className="rounded-md border bg-background p-4"
-                  >
-                    <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{item.id}</Badge>
-                          <Badge variant={isPending ? 'secondary' : 'default'}>
-                            {item.status}
-                          </Badge>
-                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Clock className="h-3.5 w-3.5" />
+                      return (
+                        <tr key={item.id}>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium">
+                              {item.documentType}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {item.sourceRecord}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">{item.sourceModule}</td>
+                          <td className="px-3 py-2">
                             {new Date(item.receivedAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                        <div>
-                          <div className="font-medium">{item.documentType}</div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.sourceRecord}
-                          </p>
-                        </div>
-                        <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
-                          <div>
-                            <span className="font-medium text-foreground">
-                              Source:
-                            </span>{' '}
-                            {item.sourceLabel}
-                          </div>
-                          <div>
-                            <span className="font-medium text-foreground">
-                              Template:
-                            </span>{' '}
-                            {item.templateCode}
-                          </div>
-                          <div>
-                            <span className="font-medium text-foreground">
-                              Module:
-                            </span>{' '}
-                            {item.sourceModule}
-                          </div>
-                          <div>
-                            <span className="font-medium text-foreground">
-                              Queue note:
-                            </span>{' '}
-                            {item.issue}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2 xl:justify-end">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            setViewerFile(viewerFileFromRecord(item.document))
-                          }
-                        >
-                          <Eye className="mr-2 h-4 w-4" />
-                          View Document
-                        </Button>
-                        <Button asChild size="sm" variant="outline">
-                          <Link
-                            href={`/document-management/records/${item.document.id}`}
-                          >
-                            Open Record
-                          </Link>
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => void refreshQueues()}
-                          disabled={!isPending}
-                        >
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          Refresh
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Badge
+                              variant={isPending ? 'secondary' : 'default'}
+                            >
+                              {item.status}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  setViewerFile(
+                                    viewerFileFromRecord(item.document)
+                                  )
+                                }
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                View Document
+                              </Button>
+                              <Button asChild size="sm" variant="outline">
+                                <Link
+                                  href={`/document-management/records/${item.document.id}`}
+                                >
+                                  Open Record
+                                </Link>
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => void refreshQueues()}
+                                disabled={!isPending}
+                              >
+                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                Refresh
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
               <div className="flex flex-wrap gap-2 pt-2">
                 <Button asChild variant="outline">
                   <Link href="/document-management/records">
@@ -900,8 +919,8 @@ export default function DocumentManagementWorkspacePage() {
                   </Link>
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         ) : null}
       </div>
     </>

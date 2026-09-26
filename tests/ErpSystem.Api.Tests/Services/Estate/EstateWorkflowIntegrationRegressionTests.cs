@@ -7,6 +7,23 @@ namespace ErpSystem.Api.Tests.Services.Estate;
 public sealed class EstateWorkflowIntegrationRegressionTests
 {
     [Fact]
+    public void PublishedWorkflowDocuments_ReplaceCatalogRequirements_AndCatalogStagesRemainFallback()
+    {
+        var service = ReadSource("src", "ErpSystem.Api", "Services", "ProcedureCaseService.cs");
+        var workspace = Slice(service,
+            "private async Task<WorkspaceSeed> BuildWorkspaceSeedAsync",
+            "private static IReadOnlyList<string> BuildConfiguredWorkflowChecklist");
+
+        workspace.Should().Contain("documents = await BuildWorkflowDocumentSeedsAsync(workflowDefinitionId);");
+        workspace.Should().Contain("\"Legal\" => _legalCatalog.GetProcedureWorkspace(entityType)?.Stages");
+        workspace.Should().Contain("\"PropertyManagement\" => _propertyManagementCatalog.GetProcedureWorkspace(entityType)?.Stages");
+        workspace.Should().Contain("\"Facilities\" => _facilitiesCatalog.GetProcedureWorkspace(entityType)?.Stages");
+        workspace.Should().Contain("\"Planning\" => _planningCatalog.GetProcedureWorkspace(entityType)?.Stages");
+        service.Should().Contain("if (request.HasIntakeAttachment)");
+        service.Should().Contain("CanManageOwnIntakeAttachment(procedureCase, document)");
+    }
+
+    [Fact]
     public void PropertyListingRequests_PersistPortalMetadataAndExposeApprovalFields()
     {
         var workspace = new PropertyManagementProcedureCatalogService()
@@ -953,6 +970,8 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         updateOccupancy.Should().Contain("Occupancy released on");
         updateOccupancy.Should().Contain("asset.CustomerBusinessPartnerId = null;");
         updateOccupancy.Should().Contain("asset.PropertyFileReference = null;");
+        updateOccupancy.Should().Contain("groundRentAccount.Status = \"Closed\";");
+        updateOccupancy.Should().Contain("Closed after occupancy release on");
     }
 
     [Fact]
@@ -1048,7 +1067,11 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         completion.Should().Contain("invoice.Status, \"Paid\"");
         completion.Should().Contain("legalConveyanceStatus");
         completion.Should().Contain("\"Completed by Legal\"");
+        completion.Should().Contain("item.EntityType == \"LegalTransfer\"");
+        completion.Should().Contain("item.Status == \"Completed\"");
         completion.Should().Contain("asset.Status = EstateManagedAssetStatus.Sold;");
+        completion.Should().Contain("asset.OwnershipHistoryJson = JsonSerializer.Serialize(ownerHistory);");
+        completion.Should().Contain("This property is already sold to another customer.");
         completion.Should().Contain("asset.IsPublishedToExternalPortal = false;");
         completion.Should().Contain("estate.property.sale-completed");
 

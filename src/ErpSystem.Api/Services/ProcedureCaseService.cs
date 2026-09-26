@@ -246,6 +246,22 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         {
             EnsureCanCreateProcedureCase(module);
         }
+        if (module == "Legal" && request.FieldValues is { } legalFields)
+        {
+            if (legalFields.TryGetValue("estateManagedAssetId", out var assetValue)
+                && !string.IsNullOrWhiteSpace(assetValue)
+                && (!Guid.TryParse(assetValue, out var assetId)
+                    || !await _db.EstateManagedAssets.AnyAsync(item => item.Id == assetId
+                        && item.TenantId == tenantId && !item.IsDeleted)))
+                throw new InvalidOperationException("Select an existing property for this Legal matter.");
+            if (legalFields.TryGetValue("customerBusinessPartnerId", out var customerValue)
+                && !string.IsNullOrWhiteSpace(customerValue)
+                && (!Guid.TryParse(customerValue, out var customerId)
+                    || !await _db.BusinessPartners.AnyAsync(item => item.Id == customerId
+                        && item.TenantId == tenantId && !item.IsDeleted && item.IsActive
+                        && (item.PartnerType == "Customer" || item.PartnerType == "Both"))))
+                throw new InvalidOperationException("Select an active customer for this Legal matter.");
+        }
         var workspace = await BuildWorkspaceSeedAsync(module, entityType);
         var firstStage = workspace.Stages.FirstOrDefault() ?? new StageSeed(0, "Open", null, null, null, []);
         var organizationScope = await ResolveProcedureOrganizationScopeAsync(
@@ -330,6 +346,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 RequiredFrom = document.RequiredFrom,
                 ProvidedBy = ResolveDocumentProvider(document.Name, document.ProvidedBy),
                 IsMandatory = document.IsMandatory,
+                CreatedById = userId,
+                CreatedAt = now
+            });
+        }
+
+        if (request.HasIntakeAttachment)
+        {
+            procedureCase.Documents.Add(new ProcedureCaseDocument
+            {
+                TenantId = tenantId,
+                Name = "Case intake attachment",
+                RequiredFrom = firstStage.Name,
+                ProvidedBy = "Internal",
+                IsMandatory = false,
                 CreatedById = userId,
                 CreatedAt = now
             });
@@ -544,7 +574,27 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var sourceReference = FirstNonBlank(sourceCase.ReferenceNumber, FieldValue(sourceCase, "applicationReference"), sourceCase.Id.ToString())!;
         var propertyReference = FirstNonBlank(FieldValue(sourceCase, "propertyUnit"), FieldValue(sourceCase, "listingReference"));
+        var listingReference = FieldValue(sourceCase, "listingReference");
         var applicant = FirstNonBlank(FieldValue(sourceCase, "customerName"), sourceCase.ApplicantName);
+        Guid? linkedAssetId = null;
+        if (!string.IsNullOrWhiteSpace(listingReference) || !string.IsNullOrWhiteSpace(propertyReference))
+        {
+            linkedAssetId = await _db.EstateManagedAssets.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && ((listingReference != null && item.AssetCode == listingReference)
+                        || (propertyReference != null
+                            && (item.AssetCode == propertyReference || item.ProjectUnitCode == propertyReference))))
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync();
+        }
+        var linkedCustomerId = Guid.TryParse(FieldValue(sourceCase, "sourceReference"), out var sourceCustomerId)
+            ? await _db.BusinessPartners.AsNoTracking()
+                .Where(item => item.Id == sourceCustomerId && item.TenantId == tenantId
+                    && !item.IsDeleted && item.IsActive
+                    && (item.PartnerType == "Customer" || item.PartnerType == "Both"))
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync()
+            : null;
         var legalReference = $"LEG-{DateTime.UtcNow:yyyy}-{Guid.NewGuid():N}"[..17].ToUpperInvariant();
         var legalCase = await CreateCaseCoreAsync(new CreateProcedureCaseRequest(
             "Legal",
@@ -567,6 +617,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 ["sourceDepartment"] = "Property Management",
                 ["propertyFileReference"] = FirstNonBlank(FieldValue(sourceCase, "finalSignedAgreementReference"), FieldValue(sourceCase, "generatedAgreementReference"), sourceReference),
                 ["propertyNumber"] = propertyReference,
+                ["estateManagedAssetId"] = linkedAssetId?.ToString(),
+                ["customerBusinessPartnerId"] = linkedCustomerId?.ToString(),
                 ["applicantName"] = applicant,
                 ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 ["instrumentType"] = matter.Purpose == "ConveyanceRegistration" && IsLeaseListingApplication(sourceCase)
@@ -819,6 +871,41 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             tenantId,
             userId,
             isUpload: false);
+    }
+
+    public async Task<ProcedureCaseDetailDto?> LinkCentralDocumentAsync(Guid id, Guid documentId, Guid recordId)
+    {
+        var procedureCase = await LoadCaseAsync(id, asTracking: false);
+        var document = procedureCase?.Documents.FirstOrDefault(item => item.Id == documentId);
+        if (procedureCase is null || document is null)
+        {
+            return null;
+        }
+        EnsureCanModifyDocument(procedureCase, document);
+
+        var tenantId = RequireTenantId();
+        var record = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .Include(item => item.Versions.Where(version => !version.IsDeleted))
+            .FirstOrDefaultAsync(item => item.Id == recordId && item.TenantId == tenantId && !item.IsDeleted);
+        var version = record is null ? null : ResolveCurrentDocumentVersion(record);
+        if (record is null || (string.IsNullOrWhiteSpace(record.ExternalDocumentUrl)
+            && (version is null || (string.IsNullOrWhiteSpace(version.RepositoryPath)
+                && string.IsNullOrWhiteSpace(version.RenditionPath)
+                && !version.FileUploadRecordId.HasValue))))
+        {
+            throw new InvalidOperationException("Select a DMS document with an available file.");
+        }
+
+        return await UpdateDocumentAttachmentAsync(
+            procedureCase,
+            document,
+            version?.FileName ?? record.Title,
+            $"/document-management/records/{record.Id}",
+            document.Notes,
+            tenantId,
+            RequireUserId(),
+            isUpload: true);
     }
 
     private async Task<ProcedureCaseDetailDto> UpdateDocumentAttachmentAsync(
@@ -4386,11 +4473,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var workflowStage = stages.FirstOrDefault(stage => stage.WorkflowDefinitionId.HasValue);
         if (workflowStage?.WorkflowDefinitionId is { } workflowDefinitionId)
         {
-            var workflowDocuments = await BuildWorkflowDocumentSeedsAsync(workflowDefinitionId);
-            if (workflowDocuments.Count > 0)
-            {
-                documents = workflowDocuments;
-            }
+            documents = await BuildWorkflowDocumentSeedsAsync(workflowDefinitionId);
         }
 
         return new WorkspaceSeed(title, stages, fields, documents, workflowStage?.WorkflowDefinitionId, workflowStage?.WorkflowDefinitionName);
@@ -5323,6 +5406,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
     private void EnsureCanModifyDocument(ProcedureCase procedureCase, ProcedureCaseDocument document)
     {
+        if (CanManageOwnIntakeAttachment(procedureCase, document))
+        {
+            return;
+        }
         EnsureCanEdit(procedureCase);
 
         if (!IsDocumentRequiredInCurrentStage(procedureCase, document))
@@ -5361,7 +5448,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     }
 
     private bool CanModifyDocumentInCurrentStage(ProcedureCase procedureCase, ProcedureCaseDocument document)
-        => CanEdit(procedureCase) && IsDocumentRequiredInCurrentStage(procedureCase, document);
+        => CanManageOwnIntakeAttachment(procedureCase, document)
+            || (CanEdit(procedureCase) && IsDocumentRequiredInCurrentStage(procedureCase, document));
+
+    private bool CanManageOwnIntakeAttachment(ProcedureCase procedureCase, ProcedureCaseDocument document)
+        => document.Name == "Case intake attachment"
+            && procedureCase.CurrentStageIndex == 0
+            && !IsCompleted(procedureCase)
+            && UserOwnsCase(procedureCase)
+            && IsDocumentRequiredInCurrentStage(procedureCase, document);
 
     private static bool IsDocumentRequiredInCurrentStage(ProcedureCase procedureCase, ProcedureCaseDocument document)
         => string.IsNullOrWhiteSpace(document.RequiredFrom)

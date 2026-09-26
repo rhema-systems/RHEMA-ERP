@@ -89,7 +89,7 @@ export default function PlanningDashboardPage() {
 
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <Card><CardHeader className="pb-2"><CardDescription>Procedures</CardDescription><CardTitle>{stats.procedureCount}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>SOP Stages</CardDescription><CardTitle>{stats.stageCount}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Stages</CardDescription><CardTitle>{stats.stageCount}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Open Cases</CardDescription><CardTitle>{stats.openCases}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Completed</CardDescription><CardTitle>{stats.completedCases}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-2"><CardDescription>Workflow Cases</CardDescription><CardTitle>{stats.workflowCases}</CardTitle></CardHeader></Card>
@@ -102,7 +102,7 @@ export default function PlanningDashboardPage() {
             <div className="flex items-center justify-between gap-3">
               <CardTitle>Stage Queue</CardTitle>
               <Button asChild variant="outline" size="sm">
-                <Link href="/development/planning">Procedures</Link>
+                <Link href="/development/planning">Workspaces</Link>
               </Button>
             </div>
           </CardHeader>

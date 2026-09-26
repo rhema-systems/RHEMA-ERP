@@ -10,6 +10,7 @@
         "ASPNETCORE_ENVIRONMENT": "Development",
         "DOTNET_ENVIRONMENT": "Development",
         "BackgroundServices__Enabled": "false",
+        "EstateRecurringBilling__Enabled": "true",
         "StartupInitialization__SeedDevelopmentData": "false"
       }
     }

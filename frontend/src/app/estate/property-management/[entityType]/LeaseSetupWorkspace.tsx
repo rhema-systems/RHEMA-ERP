@@ -152,6 +152,7 @@ function buildProcedurePrefillHref(
     field_applicantName: asset.lesseeName || '',
     field_propertyReference: propertyReference,
     field_propertyUnit: propertyReference,
+    field_estateManagedAssetId: asset.id,
     field_leaseReference: sourceReference,
     field_sourceWorkspace: 'Lease Management',
     field_sourceReference: sourceReference,

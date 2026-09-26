@@ -343,7 +343,7 @@ export default function FileUploadPoliciesPage() {
                 <Switch checked={form.requireVirusScan} onCheckedChange={(v) => setForm((f) => ({ ...f, requireVirusScan: !!v }))} />
                 <div className="text-slate-600">{form.requireVirusScan ? 'Required' : 'Not required'}</div>
               </div>
-              <div className="text-xs text-slate-500">Default provider is a no-op; integrate AV later.</div>
+              <div className="text-xs text-slate-500">Uploads are rejected if ClamAV cannot return a clean scan.</div>
             </div>
           </div>
 

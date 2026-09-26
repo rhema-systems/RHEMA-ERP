@@ -212,6 +212,23 @@ class EstatePropertyManagementService {
     );
   }
 
+  async updateRentSchedule(
+    assetId: string,
+    request: { monthlyRent: number; nextBillingDate: string; enabled: boolean },
+  ): Promise<{ message: string }> {
+    return apiService.put<{ message: string }>(
+      `/estate/property-management/ar-billing/rent/${encodeURIComponent(assetId)}/schedule`,
+      request,
+    );
+  }
+
+  async runRecurringBilling(): Promise<{ groundRentInvoices: number; rentInvoices: number; failures: number }> {
+    return apiService.post(
+      '/estate/property-management/ar-billing/recurring/run',
+      {},
+    );
+  }
+
   async createPremiumChargeInvoice(
     procedureCaseId: string,
   ): Promise<EstatePremiumChargeInvoiceResult> {
