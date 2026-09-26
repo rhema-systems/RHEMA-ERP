@@ -281,24 +281,22 @@ it was decided, and "who decided" is that sitting's attendance.** Incapacity fol
 compensation pattern: the board records a **medical assessment**, a rule turns it into an
 **indicative** amount, and the money is Finance's and payroll's — as lane L does for the leaver's days.
 
-**K-II-0 — The statute, verified first.** Nothing is seeded until PNDCL 187 has been read in a
-primary copy (the Ministry's link served the Constitution on 2026-09-26; Parliament's repository
-redirects). What a secondary copy (ghanalegal.com) says, to be confirmed section by section:
+**K-II-0 — The statute, verified first · DONE 2026-09-26.** Read page by page in the primary text —
+Parliament's revised edition, *PNDCL 187 Rev Ed.pdf* (VII-4451 to 4476), a scan with no text layer —
+and recorded in **`docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md`**, the seed source for
+K-II-b: every section K-II relies on, both statutory boards, and the First and Third Schedules in full.
+**The secondary copy the plan was drafted from was wrong in three places, and missed five things:**
 
-| Section | What it provides | What K-II does with it |
+| The draft said | The Act says | What changes in K-II |
 |---|---|---|
-| s.2 | The employer is liable to pay compensation | The amount is the employer's to pay; the system computes it indicatively |
-| s.3 | Death: 60 months' earnings | Not a board matter — noted, not built |
-| s.5 | Permanent total incapacity: 96 months' earnings | Setting, default 96 |
-| s.6 | Permanent partial incapacity: the Third Schedule's percentage of the s.5 amount; partial loss of use of a member rated at 50 % of its total-loss percentage | The percentage on the case; the schedule as a reference table |
-| s.7 | Temporary incapacity: periodical payments, at most 24 months (+6 by the Chief Labour Officer) | Recorded on the case; the payments are payroll's |
-| s.8 | Disputes about incapacity resolved by a **medical board appointed by the Chief Labour Officer** — three practitioners (the Minister's, the employer's, optionally the employee's) | A board's kind: the employer's own, or statutory |
-| s.9 | Monthly earnings = the rate over the previous twelve months | The earnings basis, read from payroll (read-only) and shown |
-| s.12 | Notice of the accident and the claim within six months | Shown on an injury case; not enforced |
-| s.14 | The employer arranges free medical examination | The case's examination link (K3) |
-| s.17 | Periodical payments reviewed by the court on a medical certificate | Noted, not built |
-| s.35 | The labour officer notifies the employer of the amount; payable within three months | The notified amount and its due date recorded on the case |
-| Third Schedule | Injuries and the percentage loss of earning capacity (e.g. loss of two limbs 100, arm at the shoulder 80, sight of one eye 40) | Seeded per tenant, editable, each row naming its source |
+| s.8: a medical board appointed by the chief labour officer resolves incapacity disputes | That board is in the **First Schedule's note** — disfigurement disputes only (chairman nominated by the Minister, one by the employer, one by the employee if they wish). A **second** board, **appointed by the Minister**, rates internal-organ injuries (Third Schedule note). s.8 itself: disfigurement compensation set by a medical practitioner recognised by the Government | A board's **kind**: the employer's own · statutory (disfigurement, chief labour officer) · statutory (internal organ, Minister) |
+| s.6: partial loss of use is 50 % | In the **Third Schedule's notes**, with more: total loss of use = loss of the member; the non-dominant arm or hand at 90 %; several parts of a hand ≤ the whole hand | The assessment carries *loss of use* and *hand dominance* |
+| Arm at the shoulder 80 % | **100 %** (80 % is between elbow and shoulder) | — |
+| — | **s.6(2), s.8(3)**: several injuries from one accident are **aggregated, capped at the permanent-total amount**; **s.38**: 100 % or more *is* permanent total | A case carries **one or more injuries**; the total caps at 100 % |
+| — | **s.2(3)**: an attending medical officer's assessment sets the compensation | The case's assessment is the figure's basis |
+| — | **s.11(3)**: compensation under s.5/6 and s.7 lump sums are **paid to the Court** | ⚠ Never shown as money HR pays the employee |
+| — | **s.27**: no claim may be **set off** against compensation | ⚠ Never on a settlement beside its deductions |
+| — | **s.36**: compensation is calculated on at most **25,000 cedis of a year's earnings**, revisable by legislative instrument — a pre-2007 figure (GH₵2.50 after redenomination); no revision found | A ceiling **setting with no default in force**; TDC / counsel to confirm (R5-Q5) |
 
 **K-II-a — The case split.**
 - **`MedicalBoardCase`**: the board, the employee (**unique per board**), purpose, reason, requested
@@ -308,8 +306,8 @@ redirects). What a secondary copy (ghanalegal.com) says, to be confirmed section
   recommendation, concluded by and on, withdrawn by, on and why. Lane K's rules carry over per case
   (purpose required, the subject's own examination, outcome required, a sitting and a member present).
 - **`MedicalBoard`** keeps the panel: number, status, convened, facility, members, sittings, documents
-  (a document may name a case), and a **kind** — the employer's own board, or a statutory board under
-  s.8. Its lifecycle: Requested → Convened → **Closed** once every case is concluded or withdrawn;
+  (a document may name a case), and a **kind** — the employer's own board, or one of the two statutory
+  boards (K-II-0). Its lifecycle: Requested → Convened → **Closed** once every case is concluded or withdrawn;
   cancel and dissolve as now.
 - **Attendance**: which members sat at each sitting. A case concludes at a sitting with at least
   **`MedicalBoardQuorum`** medical members present — a company setting, **default 1** (today's rule),
@@ -326,20 +324,28 @@ redirects). What a secondary copy (ghanalegal.com) says, to be confirmed section
   an attendance tick-list per sitting; the register lists cases beside boards; the leave panel and
   picker read the employee's case.
 
-**K-II-b — Incapacity and compensation.**
+**K-II-b — Incapacity and compensation** *(corrected to the Act, 2026-09-26)*.
 - **On the case**: incapacity kind (*none · temporary total · temporary partial · permanent partial ·
-  permanent total*), percentage (0–100; required for permanent partial, 100 for permanent total), basis
-  (*a schedule item* — named — or *the panel's clinical judgement*), assessed on, review date.
-- **`IncapacityScheduleItem`**: a per-tenant reference table seeded from the Third Schedule once K-II-0
-  has verified it; editable; each row names its source, so a client that uses another schedule can.
+  permanent total*), and **one or more assessed injuries**, each a schedule row (First or Third
+  Schedule, named) or the panel's own assessment of lost earning capacity (s.6(1)(b)), with *loss of
+  use* (total = the member; partial = 50 %) and *non-dominant hand or arm* (90 %) where the Schedule
+  says so; the case's percentage is their sum, **capped at 100 %** (s.6(2)); 100 % or more is
+  permanent total (s.38). Assessed on, by whom (s.2(3): the attending medical officer), review date.
+  Also: *compensation not payable* and why (s.2(5), (7), (8)).
+- **`IncapacityScheduleItem`**: per tenant, seeded from the catalogue (48 Third Schedule rows, 6 First
+  Schedule rows), editable, each naming its schedule and source, so a client using another schedule can.
 - **Settings** (`CompanyHrPolicySettings`): `PermanentTotalIncapacityMonths` (default 96, empty = not
-  computed) and `TemporaryIncapacityMaxMonths` (default 24). Guarded migration with the real defaults.
-- **The indicative amount**: percentage × permanent-total months × monthly earnings (s.9 basis from
-  payroll, read-only per the payroll boundary; the basis shown beside the figure). Marked
-  **indicative**. The labour officer's notified amount (s.35) and its due date are recorded when they
-  arrive; paying is Finance's — a hand-off note, as in L2. Temporary incapacity's periodical payments
-  are payroll's; the absence itself is Occupational Injury Leave.
-- An injury case asks for the SHE incident and shows the s.12 six-month notice date.
+  computed), `TemporaryIncapacityMaxMonths` (default 24), and **`CompensationEarningsCeiling`**
+  (s.36; **no default** — empty means the figure is shown uncapped and says the ceiling is unknown).
+  Guarded migration with the real defaults.
+- **The indicative amount**: the case's percentage × permanent-total months × monthly earnings (s.9:
+  the previous twelve months, from payroll read-only; the basis shown), within the s.36 ceiling when
+  one is set. Marked **indicative — payable to the Court (s.11(3)), notified by the labour officer
+  (s.35)**. The notified amount, its due date, and an agreed amount (s.15, never below the Act's) are
+  recorded when they arrive. ⚠ **Never placed on a separation settlement** (s.27: no set-off) — a
+  medical retirement's settlement names the case, it does not carry the money. Temporary incapacity's
+  periodical payments are payroll's; the absence is Occupational Injury Leave (s.2(2)).
+- An injury case asks for the SHE incident and shows the s.12 six-month notice and claim dates.
 
 **Suites**: `run-round5-k2a.mjs`, `run-round5-k2b.mjs`; `run-round5-k.mjs` and slice 8 re-based onto
 cases. **Docs**: guide § 7b, explainer § 14, register rows for the three settings, R5-Q5 reframed.

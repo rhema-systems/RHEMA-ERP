@@ -714,7 +714,13 @@ notifies is recorded when it arrives. Please confirm or change:
 | **1** | **One** medical member must be present at the sitting that decides a case | or TDC's number (the statutory board has three) |
 | **2** | Compensation for permanent total incapacity is **96 months' earnings** (PNDCL 187 s.5), and a partial one the schedule's percentage of it (s.6) | or TDC pays more |
 | **3** | The **law's schedule** of injuries and percentages | or TDC's own |
-| **4** | TDC holds **its own** board, and the statutory board (s.8, appointed by the Chief Labour Officer) is recorded when one sits | or TDC relies on the statutory board only |
+| **4** | TDC holds **its own** board; the two statutory boards are recorded when one sits — for a disputed disfigurement, appointed by the Chief Labour Officer (First Schedule), and for an internal-organ injury, appointed by the Minister (Third Schedule) | or TDC relies on the statutory boards only |
+| **5** | ⚠ **The earnings ceiling (s.36).** The Act computes compensation on at most **25,000 cedis a year** of earnings, revisable by legislative instrument. That figure predates the 2007 redenomination, and we found no revision. **Until TDC or counsel names the ceiling in force, the system shows the figure without it and says so** | the ceiling in force, and its source |
+
+*(Checked 2026-09-26 against the Act's primary text, Parliament's revised edition — recorded in
+`docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md`. Compensation under the Act is paid to the
+Court (s.11(3)) and nothing may be set off against it (s.27), so the system never shows it as money
+HR pays out or nets it against a leaver's settlement.)*
 
 **Meanwhile:** boards have a purpose, physicians as members, documents, and a clear cancel/dissolve
 (built 2026-09-26). Cases, incapacity and compensation are built next, on the defaults above.
