@@ -10,6 +10,17 @@ namespace ErpSystem.Core.Tests.Services.Workflow;
 public class WorkflowApprovalGuardValidatorTests
 {
     [Fact]
+    public void Validate_ExplicitProcurementPolicyDisableAllowsSameActorWithoutChangingWorkflowConfiguration()
+    {
+        var actor = Guid.NewGuid();
+        var config = new WorkflowApprovalConfigDto { PreventInitiatorApproval = true, RequireDistinctApprovers = true, MinApprovalsRequired = 2 };
+        var approvals = new[] { new WorkflowApproval { Status = WorkflowApprovalStatus.Approved, ProcessedById = actor } };
+        WorkflowApprovalGuardValidator.Validate(config, actor, approvals, actor, enforceSeparation: false).Should().BeEmpty();
+        config.MinApprovalsRequired.Should().Be(2);
+        WorkflowApprovalGuardValidator.Validate(config, actor, approvals, actor).Should().HaveCount(2);
+    }
+
+    [Fact]
     public void Validate_BlocksWorkflowInitiator_WhenConfigured()
     {
         var userId = Guid.NewGuid();

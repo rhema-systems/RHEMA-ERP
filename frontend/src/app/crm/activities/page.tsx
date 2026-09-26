@@ -1,5 +1,6 @@
 'use client';
 
+import { hasCustomerRole } from '@/lib/business-partner-roles';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -571,8 +572,7 @@ export default function CrmActivitiesPage() {
           .filter((partner) => partner.status !== 'Inactive')
           .filter(
             (partner) =>
-              partner.partnerType === 'Customer' ||
-              partner.partnerType === 'Both' ||
+              hasCustomerRole(partner.partnerType) ||
               !!partner.customerType
           )
           .sort((left, right) =>

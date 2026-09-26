@@ -17,19 +17,22 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
     private readonly IProcurementSodGuardService _sodGuard;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly ILogger<ProcurementInvoicePaymentSodService> _logger;
+    private readonly IProcurementSodPolicy _sodPolicy;
 
     public ProcurementInvoicePaymentSodService(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUser,
         IProcurementSodGuardService sodGuard,
         IProcurementControlEventService controlEvents,
-        ILogger<ProcurementInvoicePaymentSodService> logger)
+        ILogger<ProcurementInvoicePaymentSodService> logger,
+        IProcurementSodPolicy? sodPolicy = null)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _sodGuard = sodGuard;
         _controlEvents = controlEvents;
         _logger = logger;
+        _sodPolicy = sodPolicy ?? new ProcurementSodPolicy(unitOfWork);
     }
 
     public Task<ProcurementInvoicePaymentSodReadinessDto> GetPaymentReadinessAsync(
@@ -80,29 +83,19 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
                 .ToListAsync(cancellationToken);
 
         var coverage = await _sodGuard.GetCoverageAsync(DateTime.UtcNow, cancellationToken);
-        return new ProcurementInvoicePaymentSodQueueReadinessDto
-        {
-            Payments = payments.ToDictionary(
-                payment => payment.Id,
-                payment => BuildQueueReadiness(
-                    ProcurementInvoicePaymentSodRules.PaymentSourceType,
-                    payment.Id,
-                    payment.PaymentNumber,
-                    GetEffectiveAllocations(payment.Allocations)
-                        .Select(allocation => allocation.VendorInvoice)
-                        .ToList(),
-                    coverage)),
-            Batches = batches.ToDictionary(
-                batch => batch.Id,
-                batch => BuildQueueReadiness(
-                    ProcurementInvoicePaymentSodRules.BatchSourceType,
-                    batch.Id,
-                    batch.BatchNumber,
-                    batch.Items.SelectMany(item => item.Invoices)
-                        .Select(item => item.VendorInvoice)
-                        .ToList(),
-                    coverage))
-        };
+        var paymentResults = new Dictionary<Guid, ProcurementInvoicePaymentSodReadinessDto>();
+        var batchResults = new Dictionary<Guid, ProcurementInvoicePaymentSodReadinessDto>();
+        foreach (var payment in payments)
+            paymentResults[payment.Id] = BuildQueueReadiness(
+                ProcurementInvoicePaymentSodRules.PaymentSourceType, payment.Id, payment.PaymentNumber,
+                GetEffectiveAllocations(payment.Allocations).Select(allocation => allocation.VendorInvoice).ToList(), coverage,
+                await _sodPolicy.IsRequiredForSourceAsync(TenantId, ProcurementInvoicePaymentSodRules.PaymentSourceType, payment.Id, cancellationToken));
+        foreach (var batch in batches)
+            batchResults[batch.Id] = BuildQueueReadiness(
+                ProcurementInvoicePaymentSodRules.BatchSourceType, batch.Id, batch.BatchNumber,
+                batch.Items.SelectMany(item => item.Invoices).Select(item => item.VendorInvoice).ToList(), coverage,
+                await _sodPolicy.IsRequiredForSourceAsync(TenantId, ProcurementInvoicePaymentSodRules.BatchSourceType, batch.Id, cancellationToken));
+        return new ProcurementInvoicePaymentSodQueueReadinessDto { Payments = paymentResults, Batches = batchResults };
     }
 
     public Task<ProcurementInvoicePaymentSodReadinessDto> EnforcePaymentApprovalAsync(
@@ -226,7 +219,8 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
         Guid sourceId,
         string sourceReference,
         IReadOnlyCollection<VendorInvoice> sourceInvoices,
-        ProcurementSodCoverageDto coverage)
+        ProcurementSodCoverageDto coverage,
+        bool enforceSeparation)
     {
         var actorId = CurrentActorId;
         var invoices = sourceInvoices
@@ -241,7 +235,7 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
                 InvoiceProcessorUserId = item.SubmittedById,
                 SubmittedAtUtc = item.SubmittedDate,
                 ProcessorLineagePresent = item.SubmittedById.HasValue && item.SubmittedById.Value != Guid.Empty,
-                ConflictsWithCurrentActor = ProcurementInvoicePaymentSodRules.HasConflict(item.SubmittedById, actorId)
+                ConflictsWithCurrentActor = enforceSeparation && ProcurementInvoicePaymentSodRules.HasConflict(item.SubmittedById, actorId)
             })
             .ToList();
         var missingLineage = invoices.Any(item => !item.ProcessorLineagePresent);
@@ -257,6 +251,12 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             allowed = false;
             code = ProcurementInvoicePaymentSodRules.LineageCode;
             message = "Every selected invoice must retain its server-owned submitting processor before payment approval.";
+        }
+        else if (!enforceSeparation)
+        {
+            allowed = true;
+            code = "SOD_DISABLED";
+            message = "Actor separation is disabled for this procurement payment. Invoice lineage and payment approvals remain required.";
         }
         else if (control == null || !control.IsConfigured || !control.IsEffective || !control.IsHardStop)
         {
@@ -339,6 +339,7 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
     {
         var actorId = CurrentActorId;
         var evaluatedAtUtc = DateTime.UtcNow;
+        var enforceSeparation = await _sodPolicy.IsRequiredForSourceAsync(TenantId, sourceType, sourceId, cancellationToken);
         var invoices = sourceInvoices
             .Where(item => item != null && !item.IsDeleted)
             .GroupBy(item => item.Id)
@@ -351,7 +352,7 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
                 InvoiceProcessorUserId = item.SubmittedById,
                 SubmittedAtUtc = item.SubmittedDate,
                 ProcessorLineagePresent = item.SubmittedById.HasValue && item.SubmittedById.Value != Guid.Empty,
-                ConflictsWithCurrentActor = ProcurementInvoicePaymentSodRules.HasConflict(item.SubmittedById, actorId)
+                ConflictsWithCurrentActor = enforceSeparation && ProcurementInvoicePaymentSodRules.HasConflict(item.SubmittedById, actorId)
             })
             .ToList();
 
@@ -376,6 +377,12 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             allowed = false;
             code = ProcurementInvoicePaymentSodRules.LineageCode;
             message = "Every selected invoice must retain its server-owned submitting processor before payment approval.";
+        }
+        else if (!enforceSeparation)
+        {
+            allowed = true;
+            code = "SOD_DISABLED";
+            message = "Actor separation is disabled for this procurement payment. Invoice lineage and payment approvals remain required.";
         }
         else if (processors.Count == 0)
         {
@@ -510,8 +517,9 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
         if (!approverUserId.HasValue || approverUserId.Value == Guid.Empty || !controlEventId.HasValue)
             throw BlockedEvidence(sourceType, sourceId, sourceReference, approverUserId);
 
+        var enforceSeparation = await _sodPolicy.IsRequiredForSourceAsync(TenantId, sourceType, sourceId, cancellationToken);
         if (invoices.Any(item => !item.SubmittedById.HasValue || item.SubmittedById.Value == Guid.Empty) ||
-            invoices.Any(item => ProcurementInvoicePaymentSodRules.HasConflict(item.SubmittedById, approverUserId.Value)))
+            (enforceSeparation && invoices.Any(item => ProcurementInvoicePaymentSodRules.HasConflict(item.SubmittedById, approverUserId.Value))))
             throw BlockedEvidence(sourceType, sourceId, sourceReference, approverUserId);
 
         var eventValid = await _unitOfWork.Repository<ProcurementControlEvent>()

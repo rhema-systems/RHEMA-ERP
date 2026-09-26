@@ -1,5 +1,10 @@
 'use client';
 
+import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
+import type { BusinessPartnerReceivablesDefaults } from '@/services/businessPartnerService';
+import { BusinessPartnerReceivablesFields } from '@/components/procurement/BusinessPartnerReceivablesFields';
+
+
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Save } from 'lucide-react';
@@ -78,6 +83,7 @@ export default function EditBusinessPartnerPage() {
   const [allPartners, setAllPartners] = useState<BusinessPartnerDto[]>([]);
   const [formData, setFormData] = useState<UpdateBusinessPartnerDto>(emptyForm);
   const [creditLimit, setCreditLimit] = useState('');
+  const [receivablesDefaults, setReceivablesDefaults] = useState<BusinessPartnerReceivablesDefaults>({ defaultArAccountId: null });
   const [postingDefaults, setPostingDefaults] = useState(
     emptyBusinessPartnerPostingDefaults
   );
@@ -101,6 +107,7 @@ export default function EditBusinessPartnerPage() {
         setAllPartners(partners.filter((candidate) => candidate.id !== id));
         setPriceLists(lists);
         setFormData({
+          partnerType: data.partnerType,
           partnerName: data.partnerName || data.companyName || '',
           tradingName: data.tradingName || '',
           registrationNumber: data.registrationNumber || '',
@@ -121,6 +128,7 @@ export default function EditBusinessPartnerPage() {
           priceList: data.priceList || '',
           parentId: data.parentId || '',
         });
+        setReceivablesDefaults(data.receivablesDefaults ?? { defaultArAccountId: null });
         setCreditLimit(
           data.creditLimit == null ? '' : String(data.creditLimit)
         );
@@ -166,6 +174,7 @@ export default function EditBusinessPartnerPage() {
         ...formData,
         creditLimit: creditLimit === '' ? null : Number(creditLimit),
         postingDefaults,
+        receivablesDefaults: hasCustomerRole(formData.partnerType) ? receivablesDefaults : undefined,
       });
       toast.success('Business partner updated successfully');
       router.push(`/procurement/business-partners/${id}`);
@@ -221,6 +230,8 @@ export default function EditBusinessPartnerPage() {
       </div>
     );
 
+  const hasPayables = hasSupplierRole(formData.partnerType) || hasContractorRole(formData.partnerType);
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -259,14 +270,26 @@ export default function EditBusinessPartnerPage() {
         <Card>
           <CardContent className="p-4">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className={`grid h-auto w-full ${hasCustomerRole(formData.partnerType) && hasPayables ? 'grid-cols-5' : 'grid-cols-4'}`}>
                 <TabsTrigger value="details">Details</TabsTrigger>
                 <TabsTrigger value="contact">Contact</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
-                <TabsTrigger value="accounts">Accounts</TabsTrigger>
+                {hasPayables && <TabsTrigger value="accounts">Accounts Payable</TabsTrigger>}
+                {hasCustomerRole(formData.partnerType) && <TabsTrigger value="receivables">Accounts Receivable</TabsTrigger>}
               </TabsList>
               <div className="h-[min(620px,calc(100vh-250px))] min-h-80 overflow-y-auto px-1">
+                <TabsContent value="receivables" className="py-4"><BusinessPartnerReceivablesFields value={receivablesDefaults} onChange={setReceivablesDefaults} accounts={catalogues.accounts} disabled={saving || catalogues.loading} /></TabsContent>
                 <TabsContent value="details" className="space-y-5 py-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="partner-role">Partner roles</Label>
+                    <Select value={formData.partnerType} disabled={saving} onValueChange={(partnerType) => setFormData(previous => ({ ...previous, partnerType }))}>
+                      <SelectTrigger id="partner-role"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={partner.partnerType}>{partner.partnerType === 'CustomerAndSupplier' ? 'Supplier & Customer' : partner.partnerType}</SelectItem>
+                        {['Supplier', 'Vendor', 'Manufacturer', 'Customer'].includes(partner.partnerType) && <SelectItem value="CustomerAndSupplier">Supplier & Customer</SelectItem>}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {textField('partnerName', 'Company Name *')}
                     {textField('tradingName', 'Trading Name')}
@@ -284,6 +307,9 @@ export default function EditBusinessPartnerPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
+                          {partner.status && !['Active', 'Inactive', 'Suspended'].includes(partner.status) && (
+                            <SelectItem value={partner.status}>{partner.status}</SelectItem>
+                          )}
                           {['Active', 'Inactive', 'Suspended'].map((status) => (
                             <SelectItem key={status} value={status}>
                               {status}
@@ -328,6 +354,7 @@ export default function EditBusinessPartnerPage() {
                     </div>
                   </div>
                   <PartnerTaxDefaultsFields
+                    partnerType={formData.partnerType}
                     value={postingDefaults}
                     onChange={setPostingDefaults}
                     taxGroups={catalogues.taxGroups}
@@ -470,7 +497,7 @@ export default function EditBusinessPartnerPage() {
                     </div>
                   </div>
                 </TabsContent>
-                <TabsContent value="accounts" className="py-3">
+                {hasPayables && <TabsContent value="accounts" className="py-3">
                   <PartnerAccountsFields
                     value={postingDefaults}
                     onChange={setPostingDefaults}
@@ -478,7 +505,7 @@ export default function EditBusinessPartnerPage() {
                     bankAccounts={catalogues.bankAccounts}
                     disabled={saving}
                   />
-                </TabsContent>
+                </TabsContent>}
               </div>
             </Tabs>
           </CardContent>

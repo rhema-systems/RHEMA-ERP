@@ -48,6 +48,7 @@ export default function CompanyInformation({
               <SelectItem value="Supplier">Supplier</SelectItem>
               <SelectItem value="Contractor">Contractor</SelectItem>
               <SelectItem value="Both">Both (Supplier & Contractor)</SelectItem>
+              <SelectItem value="CustomerAndSupplier">Supplier & Customer</SelectItem>
             </SelectContent>
           </Select>
         </div>

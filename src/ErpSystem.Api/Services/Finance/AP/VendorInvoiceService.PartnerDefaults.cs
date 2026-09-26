@@ -24,14 +24,19 @@ public partial class VendorInvoiceService
                 candidate.Id == supplierId && candidate.TenantId == TenantId && !candidate.IsDeleted)
                 .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
             if (supplier == null) throw new KeyNotFoundException("The selected supplier was not found in the current tenant.");
+            var linkedPartnerIds = await _unitOfWork.Repository<ApSupplierIdentityLink>().GetQueryable(link =>
+                link.TenantId == TenantId && !link.IsDeleted && link.SupplierId == supplier.Id)
+                .Select(link => link.BusinessPartnerId).Distinct().ToListAsync(cancellationToken);
             var matches = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(candidate =>
                 candidate.TenantId == TenantId && !candidate.IsDeleted &&
-                (candidate.Id == supplier.Id ||
+                (linkedPartnerIds.Contains(candidate.Id) || candidate.Id == supplier.Id ||
                  (!string.IsNullOrWhiteSpace(supplier.SupplierCode) && candidate.PartnerCode == supplier.SupplierCode)))
                 .Include(candidate => candidate.PaymentTerm).AsNoTracking().Take(2).ToListAsync(cancellationToken);
             if (matches.Count > 1)
                 throw new InvalidOperationException("The supplier maps to multiple business partners. Resolve the supplier mapping before applying defaults.");
             partner = matches.SingleOrDefault();
+            if (linkedPartnerIds.Count > 0 && (partner == null || linkedPartnerIds.Any(id => id != partner.Id)))
+                throw new InvalidOperationException("The supplier's saved business partner link is inconsistent. Resolve the supplier mapping before applying defaults.");
         }
 
         if (purchaseOrderId.HasValue)
@@ -221,15 +226,31 @@ public partial class VendorInvoiceService
     /// Explicit account, term, tax, exemption and no-default selections are retained.
     /// Supplier withholding has its own automatic create hook and does not use this opt-in.
     /// </summary>
-    private async Task<int?> ApplyBusinessPartnerCreateDefaultsAsync(
+    private async Task<(int? PaymentTermsDays, Guid? TaxFallbackAccountId)> ApplyBusinessPartnerCreateDefaultsAsync(
         VendorInvoiceCreateDto dto, Supplier supplier, CancellationToken cancellationToken)
     {
-        if (dto.ApplyBusinessPartnerDefaults != true || dto.IsOpeningBalance) return null;
+        if (dto.ApplyBusinessPartnerDefaults != true || dto.IsOpeningBalance) return (null, null);
         var source = await GetSupplierDefaultsAsync(dto.SupplierId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
-        if (source == null) return null;
+        if (source == null) return (null, null);
         var defaults = source.PostingDefaults;
         dto.ApAccountId ??= defaults.DefaultApAccountId;
         dto.ExpenseAccountId ??= defaults.DefaultExpenseAccountId;
+        if (defaults.DefaultTaxAccountId.HasValue)
+            await ValidateSupplierTaxFallbackAsync(defaults.DefaultTaxAccountId.Value, dto.InvoiceDate, cancellationToken);
+
+        // Capture typed charges on the draft. Later master-data changes must not
+        // redirect an approved invoice, and receipt/landed-cost clearing owns its accounts.
+        foreach (var line in dto.LineItems.Where(line => !line.GLAccountId.HasValue &&
+            !line.PurchaseOrderItemId.HasValue && !line.LandedCostItemId.HasValue && !line.FixedAssetId.HasValue))
+        {
+            line.GLAccountId = line.LineItemType?.Trim().ToUpperInvariant() switch
+            {
+                "FREIGHT" => defaults.DefaultFreightAccountId,
+                "MISCELLANEOUS" => defaults.DefaultMiscellaneousAccountId,
+                "FINANCECHARGE" => defaults.DefaultFinanceChargesAccountId,
+                _ => line.GLAccountId
+            };
+        }
 
         int? capturedDays = null;
         // The old DTO uses 30 as its default. Preserve explicit timing before
@@ -257,6 +278,6 @@ public partial class VendorInvoiceService
                 line.TaxGroupId = defaults.DefaultTaxGroupId;
             }
         }
-        return capturedDays;
+        return (capturedDays, defaults.DefaultTaxAccountId);
     }
 }

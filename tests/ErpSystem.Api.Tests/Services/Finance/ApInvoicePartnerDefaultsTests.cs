@@ -485,7 +485,9 @@ public sealed class ApInvoicePartnerDefaultsTests
     [Fact]
     public async Task NewFinanceSupplierIdentityCopiesPartnerAccounts()
     {
-        await using var fixture = new Fixture();
+        await using var fixture = new Fixture(withIdentityBridge: true);
+        fixture.Partner.ApprovalStatus = "Approved";
+        fixture.Partner.RegistrationStatus = "Active";
         fixture.Partner.DefaultTaxGroupId = null;
         fixture.Context.BusinessPartners.Add(fixture.Partner);
         await fixture.Context.SaveChangesAsync();
@@ -536,7 +538,7 @@ public sealed class ApInvoicePartnerDefaultsTests
         public Tax WithholdingTax { get; }
         public Mock<ITaxCalculationEngine> TaxEngine { get; } = new();
         public VendorInvoiceService Service { get; }
-        public Fixture()
+        public Fixture(bool withIdentityBridge = false)
         {
             Context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
@@ -566,8 +568,20 @@ public sealed class ApInvoicePartnerDefaultsTests
             numbering.Setup(service => service.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
                 It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync("VI-DEFAULTS-TEST");
+            IApSupplierIdentityService? identityBridge = null;
+            if (withIdentityBridge)
+            {
+                // InMemory has no SQL transaction locks; retain the real identity bridge
+                // and database writes while supplying its ambient lock boundary.
+                var identityUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
+                identityUnitOfWork.SetupGet(unit => unit.HasActiveTransaction).Returns(true);
+                identityUnitOfWork.Setup(unit => unit.AcquireTransactionLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .Returns(Task.CompletedTask);
+                identityBridge = new ApSupplierIdentityService(Context, identityUnitOfWork.Object, current.Object);
+            }
             Service = new VendorInvoiceService(new UnitOfWork(Context), current.Object, Mock.Of<IInventoryValuationService>(),
-                NullLogger<VendorInvoiceService>.Instance, numbering.Object, Mock.Of<IWorkflowService>(), taxEngine: TaxEngine.Object);
+                NullLogger<VendorInvoiceService>.Instance, numbering.Object, Mock.Of<IWorkflowService>(), taxEngine: TaxEngine.Object,
+                apSupplierIdentityService: identityBridge);
         }
         public async Task SeedAsync()
         {
@@ -581,9 +595,13 @@ public sealed class ApInvoicePartnerDefaultsTests
             InvoiceDate = new DateTime(2026, 9, 13),
             CurrencyCode = "GHS", LineItems = [new() { Description = "Goods", Quantity = 1, UnitPrice = 100 }]
         };
-        public Task<int?> ApplyAsync(VendorInvoiceCreateDto request) =>
-            (Task<int?>)typeof(VendorInvoiceService).GetMethod("ApplyBusinessPartnerCreateDefaultsAsync",
-                BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(Service, [request, Supplier, CancellationToken.None])!;
+        public async Task<int?> ApplyAsync(VendorInvoiceCreateDto request)
+        {
+            var result = await (Task<(int? PaymentTermsDays, Guid? TaxFallbackAccountId)>)typeof(VendorInvoiceService)
+                .GetMethod("ApplyBusinessPartnerCreateDefaultsAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(Service, [request, Supplier, CancellationToken.None])!;
+            return result.PaymentTermsDays;
+        }
         public VendorInvoiceCreateDto WhtRequest()
         {
             var request = Request(); request.ApplyBusinessPartnerDefaults = false; return request;

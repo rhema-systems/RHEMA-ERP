@@ -1,3 +1,4 @@
+import { throwProcurementResponseError } from '@/lib/procurement-api-error';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
@@ -10,6 +11,8 @@ function getAuthHeaders(): HeadersInit {
 }
 
 export interface ProcurementSettingsDto {
+  autoCloseTenders: boolean;
+  enforceSegregationOfDuties: boolean;
   id: string;
   tenantId: string;
   autoCreateInventoryItems: boolean;
@@ -36,6 +39,8 @@ export interface ProcurementSettingsDto {
 }
 
 export interface UpdateProcurementSettingsDto {
+  autoCloseTenders?: boolean;
+  enforceSegregationOfDuties?: boolean;
   autoCreateInventoryItems: boolean;
   autoCreateSupplierItems: boolean;
   allowNonInventoryItems: boolean;
@@ -80,8 +85,7 @@ export const procurementSettingsService = {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to update procurement settings');
+      await throwProcurementResponseError(response, 'Failed to update procurement settings');
     }
     return response.json();
   },

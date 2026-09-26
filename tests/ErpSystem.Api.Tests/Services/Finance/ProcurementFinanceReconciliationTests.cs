@@ -25,6 +25,43 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class ProcurementFinanceReconciliationTests
 {
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task ConsolidatedInvoiceAndPaymentAreAttributedOnceAcrossTheirPurchaseOrders(bool filterFirstOrder)
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedBalancedScenario(db, tenant);
+        var invoice = db.ChangeTracker.Entries<VendorInvoice>().Single().Entity;
+        invoice.PurchaseOrderId = null;
+        invoice.AutoInvoiceRequestId = Guid.NewGuid();
+        invoice.AutoInvoiceRequestHash = new string('a', 64);
+        var other = new PurchaseOrder { TenantId = tenant, OrderNumber = "PO-CONSOLIDATED", BusinessPartnerId = fixture.PurchaseOrder.BusinessPartnerId,
+            OrderDate = new DateTime(2026, 7, 1), CreatedAt = new DateTime(2026, 7, 1), Status = "Approved", ApprovedAt = new DateTime(2026, 7, 1), TotalAmount = 40m, Currency = "GHS" };
+        var otherItem = new PurchaseOrderItem { TenantId = tenant, PurchaseOrderId = other.Id, ItemDescription = "Second PO", OrderedQuantity = 4, UnitPrice = 10 };
+        other.Items.Add(otherItem); db.PurchaseOrders.Add(other);
+        invoice.LineItems.Add(new VendorInvoiceLineItem { TenantId = tenant, VendorInvoiceId = invoice.Id,
+            PurchaseOrderItemId = fixture.PurchaseOrder.Items.Single().Id, Quantity = 6, UnitPrice = 10 });
+        invoice.LineItems.Add(new VendorInvoiceLineItem { TenantId = tenant, VendorInvoiceId = invoice.Id,
+            PurchaseOrderItemId = otherItem.Id, Quantity = 4, UnitPrice = 10 });
+        db.Set<VendorInvoiceLineItem>().AddRange(invoice.LineItems);
+        await db.SaveChangesAsync();
+        // Restore the historical creation date after the context's insert audit stamp.
+        other.CreatedAt = new DateTime(2026, 7, 1);
+        await db.SaveChangesAsync();
+        var report = await CreateService(db, tenant).GetProcurementFinanceReconciliationAsync(new DateTime(2026, 8, 31), filterFirstOrder ? fixture.PurchaseOrder.Id : null);
+        var first = report.Rows.Single(row => row.PurchaseOrderId == fixture.PurchaseOrder.Id);
+        first.InvoiceAmount.Should().Be(60); first.SettledAmount.Should().Be(60);
+        first.InvoicePostedAmount.Should().Be(60); first.PaymentPostedAmount.Should().Be(60);
+        if (!filterFirstOrder)
+        {
+            report.Rows.Sum(row => row.InvoiceAmount).Should().Be(100);
+            report.Rows.Sum(row => row.SettledAmount).Should().Be(100);
+            report.Rows.Sum(row => row.InvoicePostedAmount).Should().Be(100);
+            report.Rows.Sum(row => row.PaymentPostedAmount).Should().Be(100);
+        }
+    }
+
     [Fact]
     [Trait("Batch", "TDC-0508")]
     public void ReportEndpoints_ShouldRequireExistingFinanceReportPermissions()

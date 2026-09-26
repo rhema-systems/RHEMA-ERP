@@ -46,6 +46,11 @@ public sealed class InventoryItemProfileService : IInventoryItemProfileService
         if (!Enum.IsDefined(item.ValuationMethod))
             throw Invalid("ITEM_VALUATION_METHOD_INVALID", "Valuation method is invalid.");
 
+        if (item.Weight.HasValue)
+            ReceiptItemWeight.Validate(item.Weight.Value);
+        if (item.WeightUnit != null && item.WeightUnit is not ("kg" or "g" or "lb"))
+            throw Invalid("ITEM_WEIGHT_UNIT_INVALID", "Weight unit must be kg, g or lb.");
+
         NonNegative(item.MinimumLevel, "ITEM_MINIMUM_LEVEL_INVALID", "Minimum level");
         NonNegative(item.MaximumLevel, "ITEM_MAXIMUM_LEVEL_INVALID", "Maximum level");
         NonNegative(item.ReorderLevel, "ITEM_REORDER_LEVEL_INVALID", "Reorder level");

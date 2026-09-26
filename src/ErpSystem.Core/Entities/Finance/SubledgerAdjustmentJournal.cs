@@ -26,6 +26,9 @@ public static class SubledgerAdjustmentPurposes
 {
     public const string StandardAdjustment = "StandardAdjustment";
     public const string OpeningBalance = "OpeningBalance";
+    public const string FinanceCharge = "FinanceCharge";
+    public const string Writeoff = "Writeoff";
+    public const string OverpaymentWriteoff = "OverpaymentWriteoff";
 }
 
 public class SubledgerAdjustmentJournal : TenantEntity
@@ -72,6 +75,7 @@ public class SubledgerAdjustmentJournal : TenantEntity
 
     [Required]
     public Guid ContraAccountId { get; set; }
+    public Guid? ControlAccountId { get; set; }
     public virtual Account ContraAccount { get; set; } = null!;
 
     public Guid? JournalEntryId { get; set; }

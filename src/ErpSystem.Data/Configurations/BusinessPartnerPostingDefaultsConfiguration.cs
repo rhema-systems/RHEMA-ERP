@@ -8,6 +8,8 @@ public static class BusinessPartnerPostingDefaultsConfiguration
 {
     public static void Configure(ModelBuilder builder)
     {
+        builder.Entity<SubledgerAdjustmentJournal>().HasOne<Account>().WithMany()
+            .HasForeignKey(x => x.ControlAccountId).OnDelete(DeleteBehavior.Restrict);
         builder.Entity<VendorInvoice>().Property(invoice => invoice.WithholdingDecisionPending).HasDefaultValue(false);
         builder.Entity<BusinessPartner>(entity =>
         {
@@ -27,6 +29,14 @@ public static class BusinessPartnerPostingDefaultsConfiguration
             entity.HasOne<Account>().WithMany().HasForeignKey(x => x.DefaultWriteoffAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Account>().WithMany().HasForeignKey(x => x.DefaultAccruedPurchasesAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Account>().WithMany().HasForeignKey(x => x.DefaultPurchasePriceVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(x => x.CustomerSalesAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(x => x.CustomerCostOfSalesAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(x => x.CustomerInventoryAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(x => x.CustomerTermsDiscountsTakenAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(x => x.CustomerSalesReturnsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(x => x.CustomerFinanceChargesAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(x => x.CustomerWriteoffAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(x => x.CustomerOverpaymentWriteoffAccountId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

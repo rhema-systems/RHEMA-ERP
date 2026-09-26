@@ -476,7 +476,7 @@ export default function SubmitBidPage() {
     }
   };
 
-  const handleDocumentUpload = async (file: File, documentType: string) => {
+  const handleDocumentUpload = async (file: File, documentType: string, tenderItemId?: string) => {
     if (!createdBidId) {
       toast.error('Please save the bid as draft first');
       return;
@@ -487,7 +487,8 @@ export default function SubmitBidPage() {
         createdBidId,
         file,
         documentType,
-        file.name
+        file.name,
+        tenderItemId
       );
       setUploadedDocuments((prev) => [...prev, uploadedDoc]);
     } catch (error) {
@@ -752,12 +753,6 @@ export default function SubmitBidPage() {
                             </Label>
                           </div>
                           <div className="text-right">
-                            {lot.estimatedValue && (
-                              <div className="font-medium text-sm">
-                                {lot.currency || 'USD'}{' '}
-                                {lot.estimatedValue.toLocaleString()}
-                              </div>
-                            )}
                             <Badge
                               variant={
                                 selectedLotIds.includes(lot.id)

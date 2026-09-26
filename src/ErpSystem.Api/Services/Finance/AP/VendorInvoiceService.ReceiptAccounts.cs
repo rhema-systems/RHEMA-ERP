@@ -36,6 +36,23 @@ public partial class VendorInvoiceService
                 throw new InvalidOperationException("The posted invoice's original accrual journal is unavailable. Historical accounts cannot be recalculated from current receipts.");
             return new();
         }
+        if (invoice.AutoInvoiceRequestId.HasValue)
+        {
+            var ids = invoice.LineItems.Where(l => !l.IsDeleted && l.PurchaseOrderItemId.HasValue).Select(l => l.PurchaseOrderItemId!.Value).ToArray();
+            var items = await _unitOfWork.Repository<PurchaseOrderItem>().GetQueryable(p => p.TenantId == TenantId && !p.IsDeleted && ids.Contains(p.Id))
+                .AsNoTracking().ToListAsync(ct);
+            var combined = new Dictionary<Guid, List<ReceiptAccrualShare>>();
+            foreach (var order in items.GroupBy(p => p.PurchaseOrderId))
+            {
+                var orderItems = order.Select(p => p.Id).ToHashSet();
+                var scoped = new VendorInvoice { Id = invoice.Id, TenantId = invoice.TenantId, PurchaseOrderId = order.Key,
+                    LineItems = invoice.LineItems.Where(l => l.PurchaseOrderItemId.HasValue && orderItems.Contains(l.PurchaseOrderItemId.Value)).ToList() };
+                foreach (var entry in await ResolveProcurementAccrualAccountsAsync(scoped, ct)) combined.Add(entry.Key, entry.Value);
+            }
+            if (invoice.LineItems.Where(HasReceiptAccrualAmount).Any(l => !combined.ContainsKey(l.Id)))
+                throw new InvalidOperationException("A consolidated invoice line has no original PO accrual authority.");
+            return combined;
+        }
         var receiptIds = await _unitOfWork.Repository<PurchaseOrderReceipt>().GetQueryable(value =>
             value.TenantId == TenantId && value.PurchaseOrderId == invoice.PurchaseOrderId && !value.IsDeleted)
             .Select(value => value.Id).ToListAsync(ct);
@@ -86,7 +103,8 @@ public partial class VendorInvoiceService
         }
 
         var previous = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(value => value.TenantId == TenantId &&
-            !value.IsDeleted && value.Id != invoice.Id && value.PurchaseOrderId == invoice.PurchaseOrderId &&
+            !value.IsDeleted && value.Id != invoice.Id && (value.PurchaseOrderId == invoice.PurchaseOrderId ||
+                (value.AutoInvoiceRequestId.HasValue && value.LineItems.Any(l => l.PurchaseOrderItem != null && l.PurchaseOrderItem.PurchaseOrderId == invoice.PurchaseOrderId))) &&
             value.Status != VendorInvoiceStatus.Voided && value.JournalEntryId.HasValue)
             .Include(value => value.LineItems).AsNoTracking().ToListAsync(ct);
         var clearings = await LoadApAccrualClearingsAsync(previous, includeReversed: false, ct);
@@ -94,9 +112,14 @@ public partial class VendorInvoiceService
             .Select(line => new { Journal = value.JournalEntryId!.Value, Line = line }))
             .ToDictionary(value => (value.Journal, value.Line.Id), value => value.Line);
         var clearingUnattributed = false;
+        var scopedClearedAmount = 0m;
         foreach (var clearing in clearings)
         {
             var previousLine = clearing.SourceDocumentLineId.HasValue ? previousLines.GetValueOrDefault((clearing.JournalEntryId, clearing.SourceDocumentLineId.Value)) : null;
+            if (previousLine?.PurchaseOrderItemId is Guid previousItem && !poItems.ContainsKey(previousItem)) continue;
+            if (previousLine == null && previous.Any(i => i.JournalEntryId == clearing.JournalEntryId && i.AutoInvoiceRequestId.HasValue))
+                throw new InvalidOperationException("A consolidated invoice clearing has no provable PO line authority. Reconcile its original journal before another invoice.");
+            scopedClearedAmount += clearing.DebitAmount - clearing.CreditAmount;
             var item = previousLine is null ? null : ItemId(previousLine);
             if (item.HasValue) Add(item.Value, clearing.AccountId, -(clearing.DebitAmount - clearing.CreditAmount));
             else if (credits.Select(value => value.AccountId).Distinct().Count() > 1)
@@ -128,7 +151,7 @@ public partial class VendorInvoiceService
                 .OrderBy(value => value.AccountId).ToList() : new List<ReceiptAccrualShare>();
             if (legacyUnattributed || clearingUnattributed || (shares.Count == 0 && accounts.Length == 1 && !itemId.HasValue))
             {
-                var outstanding = credits.Sum(value => value.CreditAmount - value.DebitAmount) - clearings.Sum(value => value.DebitAmount - value.CreditAmount);
+                var outstanding = credits.Sum(value => value.CreditAmount - value.DebitAmount) - scopedClearedAmount;
                 shares = outstanding > 0m ? new() { new(accounts[0], outstanding) } : new();
             }
             if (shares.Count == 0)

@@ -20,6 +20,7 @@ public class BusinessPartnerService : IBusinessPartnerService
     private readonly IPaymentTermRepository _paymentTermRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<BusinessPartnerService> _logger;
+    private readonly IProcurementAccessControlService? _accessControl;
 
     public BusinessPartnerService(
         IBusinessPartnerRepository partnerRepository,
@@ -29,7 +30,8 @@ public class BusinessPartnerService : IBusinessPartnerService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IPaymentTermRepository paymentTermRepository,
         ILogger<BusinessPartnerService> logger,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IProcurementAccessControlService? accessControl = null)
     {
         _partnerRepository = partnerRepository;
         _contactRepository = contactRepository;
@@ -39,6 +41,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         _paymentTermRepository = paymentTermRepository;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _accessControl = accessControl;
     }
 
     public async Task<BusinessPartnerPostingOptionsDto> GetPostingOptionsAsync(string? partnerType = null)
@@ -108,6 +111,8 @@ public class BusinessPartnerService : IBusinessPartnerService
 
     public async Task<BusinessPartnerDetailDto?> GetByUserIdAsync(Guid userId)
     {
+        if (_currentUserProvider.IsExternalUser && userId != _currentUserProvider.UserId)
+            throw new UnauthorizedAccessException("Suppliers can only access their own business partner account.");
         var partner = await _partnerRepository.GetByUserIdAsync(userId);
         if (partner == null)
         {
@@ -119,6 +124,11 @@ public class BusinessPartnerService : IBusinessPartnerService
 
     public async Task<BusinessPartnerDetailDto> CreateAsync(CreateBusinessPartnerDto dto)
     {
+        BusinessPartnerRoles.Validate(dto.PartnerType);
+        if (dto.ReceivablesDefaults != null || dto.PostingDefaults != null)
+            await EnsureAccountingConfigurationAccessAsync();
+        if (dto.ReceivablesDefaults != null)
+            await BusinessPartnerPostingDefaultValidation.ValidateReceivablesAsync(dto.ReceivablesDefaults, dto.PartnerType, _unitOfWork, _currentUserProvider);
         if (_currentUserProvider.IsExternalUser && dto.CreditLimit.HasValue)
             throw new UnauthorizedAccessException("Credit limits are maintained by internal business-partner administrators.");
         ValidateCreditLimit(dto.CreditLimit);
@@ -165,8 +175,10 @@ public class BusinessPartnerService : IBusinessPartnerService
         partner.CreditLimit = dto.CreditLimit;
         if (dto.PostingDefaults != null) BusinessPartnerPostingDefaults.Apply(partner, dto.PostingDefaults);
 
+        if (dto.ReceivablesDefaults != null) BusinessPartnerReceivablesDefaults.Apply(partner, dto.ReceivablesDefaults);
+
         // Set customer-specific fields if partner type is Customer
-        if (dto.PartnerType == "Customer")
+        if (BusinessPartnerRoles.HasCustomer(dto.PartnerType))
         {
             partner.CustomerType = dto.CustomerType;
             partner.DefaultDiscount = dto.DefaultDiscount;
@@ -191,11 +203,21 @@ public class BusinessPartnerService : IBusinessPartnerService
         var partner = await _partnerRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Business partner with ID {id} not found");
         if (partner.TenantId != _currentUserProvider.TenantId)
             throw new UnauthorizedAccessException("Business partner belongs to another tenant.");
+        var requestedType = dto.PartnerType ?? partner.PartnerType;
+        if (requestedType != partner.PartnerType || dto.ReceivablesDefaults != null || dto.PostingDefaults != null)
+            await EnsureAccountingConfigurationAccessAsync();
+        if (requestedType != partner.PartnerType && _currentUserProvider.IsExternalUser)
+            throw new UnauthorizedAccessException("Partner roles are maintained by internal business-partner administrators.");
+        BusinessPartnerRoles.ValidateRoleChange(partner.PartnerType, requestedType);
+        if (dto.ReceivablesDefaults != null)
+            await BusinessPartnerPostingDefaultValidation.ValidateReceivablesAsync(dto.ReceivablesDefaults, requestedType, _unitOfWork, _currentUserProvider);
         if (_currentUserProvider.IsExternalUser && dto.CreditLimit.HasValue && dto.CreditLimit != partner.CreditLimit)
             throw new UnauthorizedAccessException("Credit limits are maintained by internal business-partner administrators.");
         ValidateCreditLimit(dto.CreditLimit);
         if (dto.PostingDefaults != null)
-            await ValidatePostingDefaultsAsync(dto.PostingDefaults, partner.PartnerType);
+            await ValidatePostingDefaultsAsync(dto.PostingDefaults, requestedType, partner.DefaultTaxAccountId);
+        partner.PartnerType = requestedType;
+        if (dto.ReceivablesDefaults != null) BusinessPartnerReceivablesDefaults.Apply(partner, dto.ReceivablesDefaults);
         partner.PartnerName = dto.PartnerName;
         partner.LegalName = dto.PartnerName;
         partner.BusinessRegistrationNumber = dto.RegistrationNumber;
@@ -235,7 +257,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         }
 
         // Update customer-specific fields if partner type is Customer
-        if (partner.PartnerType == "Customer")
+        if (BusinessPartnerRoles.HasCustomer(partner.PartnerType))
         {
             partner.CustomerType = dto.CustomerType;
             partner.DefaultDiscount = dto.DefaultDiscount;
@@ -835,6 +857,7 @@ public class BusinessPartnerService : IBusinessPartnerService
     {
         var dto = new BusinessPartnerDetailDto
         {
+            ReceivablesDefaults = BusinessPartnerReceivablesDefaults.FromPartner(partner),
             PostingDefaults = BusinessPartnerPostingDefaults.FromPartner(partner),
             Id = partner.Id,
             PartnerCode = partner.PartnerCode,
@@ -1010,6 +1033,22 @@ public class BusinessPartnerService : IBusinessPartnerService
         return dto;
     }
 
+    private async Task EnsureAccountingConfigurationAccessAsync()
+    {
+        if (_currentUserProvider.IsExternalUser || !_currentUserProvider.IsAuthenticated ||
+            _currentUserProvider.TenantId == Guid.Empty || _currentUserProvider.UserId == Guid.Empty)
+            throw new UnauthorizedAccessException("An authenticated internal supplier administrator is required to configure partner roles and accounts.");
+        if (_currentUserProvider.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin)) return;
+        if (_accessControl == null)
+            throw new UnauthorizedAccessException("Supplier management authorization is unavailable.");
+        var decision = await _accessControl.EnforceCapabilityAsync(new()
+        {
+            PermissionCode = "procurement.supplier.manage", SourceType = "BusinessPartner",
+            SourceReference = "RolesAndPostingDefaults"
+        }, Guid.NewGuid().ToString("N"));
+        if (!decision.Allowed) throw new UnauthorizedAccessException(decision.Message);
+    }
+
     private static List<string> MapCategoryNames(BusinessPartner partner)
     {
         return partner.Categories
@@ -1062,8 +1101,9 @@ private static void ValidateCreditLimit(decimal? creditLimit)
         if (creditLimit < 0) throw new InvalidOperationException("Credit limit cannot be negative.");
     }
 
-    private Task ValidatePostingDefaultsAsync(BusinessPartnerPostingDefaultsDto defaults, string partnerType) =>
-        BusinessPartnerPostingDefaultValidation.ValidateAsync(defaults, partnerType, _unitOfWork, _currentUserProvider);
+    private Task ValidatePostingDefaultsAsync(BusinessPartnerPostingDefaultsDto defaults, string partnerType,
+        Guid? existingTaxAccountId = null) =>
+        BusinessPartnerPostingDefaultValidation.ValidateAsync(defaults, partnerType, _unitOfWork, _currentUserProvider, existingTaxAccountId);
 
     private async Task<BusinessPartner> GetPartnerEntityAsync(Guid partnerId)
     {

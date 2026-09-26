@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Finance;
+﻿using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
@@ -10,130 +10,39 @@ namespace ErpSystem.Api.Services.Finance.AP;
 
 public partial class VendorInvoiceService
 {
-    // One operator action, two durable stages. Inventory commits first; a retry only
-    // completes the invoice handoff. AP remains the owner of numbering, drafts and tax.
-    public async Task<PostLandedCostResultDto> PostLandedCostAsync(Guid landedCostId,
+    // Kept as an explicit rejection for older internal callers. Final posting belongs to AP.
+    public Task<PostLandedCostResultDto> PostLandedCostAsync(Guid landedCostId,
+        PostLandedCostDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException("Final landed-cost posting has moved to the supplier Invoice page. Prepare invoice drafts, then review and post them in AP.");
+
+    public async Task<PostLandedCostResultDto> PrepareLandedCostInvoicesAsync(Guid landedCostId,
         PostLandedCostDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default)
     {
-        EnsureVendorInvoiceRoute(producer);
-        if (_landedCosts == null) throw new InvalidOperationException("Landed-cost posting is not configured.");
-        if (_unitOfWork.HasActiveTransaction) throw new InvalidOperationException("Start posting outside another transaction.");
-        if (dto == null || dto.InvoiceDate == default || dto.Charges == null || dto.Charges.Count is < 1 or > 100 ||
-            dto.Charges.Any(c => c == null || c.CostItemId == Guid.Empty || c.SupplierId == Guid.Empty ||
-                string.IsNullOrWhiteSpace(c.SupplierInvoiceNumber) || c.SupplierInvoiceNumber.Trim().Length > 100) ||
-            dto.Charges.Select(c => c.CostItemId).Distinct().Count() != dto.Charges.Count)
-            throw new ArgumentException("Enter the invoice date, supplier and invoice reference for every charge before posting. Tax is completed later in AP.");
-
-        var wasPosted = false;
-        // Retain billing metadata before the first posting. Refresh/retry can recover it
-        // even if the browser closes between inventory posting and invoice creation.
-        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        if (dto == null || dto.Charges == null || dto.Charges.Any(c => c == null)) throw new ArgumentException("Provide the supplier billing details.");
+        var invoices = await CreateFromLandedCostAsync(landedCostId, new CreateLandedCostInvoicesDto
         {
-            _unitOfWork.ClearTrackedChanges();
-            await _unitOfWork.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
-            try
-            {
-                await _unitOfWork.AcquireTransactionLockAsync($"InventoryLandedCost:{landedCostId:N}", cancellationToken);
-                await _unitOfWork.AcquireTransactionLockAsync($"LandedCostInvoice:{TenantId:N}:{landedCostId:N}", cancellationToken);
-                var cost = await _unitOfWork.Repository<LandedCost>().GetQueryable(c =>
-                    c.Id == landedCostId && c.TenantId == TenantId && !c.IsDeleted).Include(c => c.Items).SingleOrDefaultAsync(cancellationToken)
-                    ?? throw new ArgumentException("Landed-cost voucher not found in this company.");
-                if (cost.Status is not ("Allocated" or "Approved" or "Posted"))
-                    throw new InvalidOperationException("Allocate the landed costs before posting.");
-                wasPosted = cost.Status == "Posted";
-                var items = cost.Items.Where(i => !i.IsDeleted && i.TenantId == TenantId).ToDictionary(i => i.Id);
-                if (items.Count != dto.Charges.Count || dto.Charges.Any(c => !items.ContainsKey(c.CostItemId)))
-                    throw new ArgumentException("Include every charge from this voucher; refresh if its costs have changed.");
-                var settings = await GetFinanceSettingsAsync(cancellationToken);
-                if (!string.Equals(settings.BaseCurrency, cost.Currency, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("The voucher must use the company's functional currency for accrual clearing.");
-                var itemIds = items.Keys.ToArray();
-                var links = await _unitOfWork.Repository<VendorInvoiceLineItem>().GetQueryable(l =>
-                    l.TenantId == TenantId && !l.IsDeleted && l.LandedCostItemId.HasValue && itemIds.Contains(l.LandedCostItemId.Value))
-                    .Include(l => l.VendorInvoice).ToListAsync(cancellationToken);
-                var canonicalSuppliers = new Dictionary<Guid, Guid>();
-                foreach (var id in dto.Charges.Select(c => c.SupplierId).Distinct().OrderBy(id => id))
-                {
-                    await _unitOfWork.AcquireTransactionLockAsync($"LandedCostSupplier:{TenantId:N}:{id:N}", cancellationToken);
-                    var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
-                        p.Id == id && p.TenantId == TenantId && !p.IsDeleted).SingleOrDefaultAsync(cancellationToken);
-                    if (partner == null || !partner.IsActive || partner.IsBlacklisted ||
-                        partner.RegistrationStatus is not ("Active" or "Approved") || partner.PartnerType == "Customer")
-                        throw new InvalidOperationException("Every charge needs an active, approved cost supplier in this company.");
-                    var supplier = await ResolveSupplierIdentityForInvoiceAsync(id, true, cancellationToken);
-                    if (supplier.IsBlacklisted) throw new InvalidOperationException("The cost supplier is blacklisted.");
-                    canonicalSuppliers[id] = supplier.Id;
-                    foreach (var charge in dto.Charges.Where(c => c.SupplierId == id))
-                    {
-                        var item = items[charge.CostItemId];
-                        var linked = links.SingleOrDefault(l => l.LandedCostItemId == item.Id);
-                        if (linked != null)
-                        {
-                            if (linked.VendorInvoice.IsDeleted || linked.VendorInvoice.Status == VendorInvoiceStatus.Voided ||
-                                linked.VendorInvoice.SupplierId != supplier.Id || linked.VendorInvoice.SupplierInvoiceNumber != charge.SupplierInvoiceNumber.Trim())
-                                throw new InvalidOperationException("A charge already belongs to another invoice. Open its existing invoice instead.");
-                            continue;
-                        }
-                        if (!string.IsNullOrWhiteSpace(item.InvoiceNumber))
-                            throw new InvalidOperationException("A charge is already linked to a saved invoice. Review that link before posting.");
-                        item.SupplierId = id; item.SupplierName = partner.PartnerName;
-                        item.ReferenceNumber = charge.SupplierInvoiceNumber.Trim(); item.InvoiceDate = dto.InvoiceDate.Date;
-                        item.UpdatedAt = DateTime.UtcNow; item.LastModifiedById = CurrentUserId;
-                    }
-                }
-                foreach (var group in dto.Charges.GroupBy(c => (Supplier: canonicalSuppliers[c.SupplierId],
-                    Currency: items[c.CostItemId].Currency.Trim().ToUpperInvariant(), Reference: c.SupplierInvoiceNumber.Trim())))
-                {
-                    if (group.Select(c => items[c.CostItemId].ExchangeRate).Distinct().Count() != 1 ||
-                        group.Any(c => items[c.CostItemId].ExchangeRate <= 0 || items[c.CostItemId].Amount <= 0))
-                        throw new InvalidOperationException("One supplier bill must use positive charges and one exchange rate.");
-                    var linkedCount = group.Count(c => links.Any(l => l.LandedCostItemId == c.CostItemId));
-                    if (linkedCount != 0 && linkedCount != group.Count())
-                        throw new InvalidOperationException("Some charges on this bill are already invoiced. Review the existing invoice before continuing.");
-                    if (linkedCount == 0 && await IsDuplicateAsync(group.Key.Supplier, group.Key.Reference, dto.InvoiceDate.Date, null, cancellationToken))
-                        throw new InvalidOperationException($"Supplier invoice reference '{group.Key.Reference}' already exists. Review the existing invoice before posting.");
-                }
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                await _unitOfWork.CommitAsync(cancellationToken);
-            }
-            catch
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken); _unitOfWork.ClearTrackedChanges(); throw;
-            }
-        }, cancellationToken);
-
-        _unitOfWork.ClearTrackedChanges();
-        if (!wasPosted && !await _landedCosts.PostToInventoryAsync(landedCostId, CurrentUserId))
-            throw new InvalidOperationException("Inventory posting did not complete. No supplier invoices were created.");
-        try
-        {
-            var invoices = await CreateFromLandedCostAsync(landedCostId, new CreateLandedCostInvoicesDto
-            {
-                InvoiceDate = dto.InvoiceDate.Date, UseSavedBillingDetails = true,
-                Charges = dto.Charges.Select(c => new LandedCostInvoiceChargeDto
-                {
-                    CostItemId = c.CostItemId, SupplierId = c.SupplierId, SupplierInvoiceNumber = c.SupplierInvoiceNumber.Trim()
-                }).ToList()
-            }, producer, cancellationToken);
-            return new() { InventoryPosted = true, Invoices = invoices, Message = "Inventory posted. Supplier invoice drafts are ready for tax review in AP." };
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "Inventory posted but supplier invoice handoff is pending for landed cost {LandedCostId}", landedCostId);
-            return new() { InventoryPosted = true, InvoicesPending = true,
-                Message = "Inventory is posted; supplier invoices are still pending. Retry Post to finish invoice creation only. " +
-                    (ex is ArgumentException or InvalidOperationException ? ex.Message : "Invoice creation failed; contact your administrator if retry fails.") };
-        }
+            InvoiceDate = dto.InvoiceDate, RequireAllVoucherCharges = true,
+            Charges = dto.Charges.Select(c => new LandedCostInvoiceChargeDto { CostItemId = c.CostItemId,
+                SupplierId = c.SupplierId, SupplierInvoiceNumber = c.SupplierInvoiceNumber }).ToList()
+        }, producer, cancellationToken);
+        var posted = await _unitOfWork.Repository<LandedCost>().GetQueryable(c => c.Id == landedCostId &&
+            c.TenantId == TenantId && !c.IsDeleted).Select(c => c.Status == "Posted").SingleAsync(cancellationToken);
+        return new PostLandedCostResultDto { InventoryPosted = posted, Invoices = invoices,
+            Message = "Supplier invoice drafts are ready. Review taxes, approve and post from Invoices." };
     }
 
     private static void EnsureLandedCostTaxReviewed(VendorInvoice invoice)
     {
         if (invoice.WithholdingDecisionPending)
             throw new InvalidOperationException("AP_WHT_CONFIRMATION_REQUIRED: Choose Yes or No for withholding in Edit invoice before submitting or posting.");
-        if (invoice.LineItems.Any(l => !l.IsDeleted && l.LandedCostItemId.HasValue &&
+        if (invoice.LineItems.Any(l => !l.IsDeleted && (invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue || l.LandedCostItemId.HasValue) &&
             (!Enum.IsDefined(l.TaxTreatment) || l.TaxTreatment == TaxTreatment.PendingReview ||
                 (l.TaxTreatment == TaxTreatment.Standard && !l.TaxGroupId.HasValue))))
-            throw new InvalidOperationException("Complete the tax treatment for every landed-cost invoice line in Edit invoice before submitting, approving or posting.");
+            throw new InvalidOperationException(invoice.EstateAcquisitionId.HasValue
+                ? "Complete the tax treatment for every Estate supplier invoice line in Edit invoice before submitting, approving or posting."
+                : invoice.AutoInvoiceRequestId.HasValue
+                ? "Complete the tax treatment for every receipt invoice line in Edit invoice before submitting, approving or posting."
+                : "Complete the tax treatment for every landed-cost invoice line in Edit invoice before submitting, approving or posting.");
     }
 
     private Task InInvoiceTransactionAsync(Func<CancellationToken, Task> action, CancellationToken token)
@@ -167,18 +76,21 @@ public partial class VendorInvoiceService
             try
             {
                 await _unitOfWork.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync($"InventoryLandedCost:{landedCostId:N}", cancellationToken);
                 await _unitOfWork.AcquireTransactionLockAsync($"LandedCostInvoice:{TenantId:N}:{landedCostId:N}", cancellationToken);
                 var cost = await _unitOfWork.Repository<LandedCost>().GetQueryable(c =>
                         c.Id == landedCostId && c.TenantId == TenantId && !c.IsDeleted)
                     .Include(c => c.Items).SingleOrDefaultAsync(cancellationToken)
                     ?? throw new ArgumentException("Landed-cost voucher not found in this company.");
-                var accrual = await GetPostedLandedCostAccrualAsync(cost, cancellationToken);
+                var accrual = await GetLandedCostPreparationAccrualAsync(cost, cancellationToken);
                 var items = cost.Items.Where(i => !i.IsDeleted).ToDictionary(i => i.Id);
+                if (dto.RequireAllVoucherCharges && dto.Charges.Count != items.Count)
+                    throw new ArgumentException("Include every charge from this voucher; refresh if its costs have changed.");
                 if (dto.Charges.Any(c => !items.ContainsKey(c.CostItemId)))
                     throw new ArgumentException("Every selected charge must belong to this voucher.");
                 if (dto.UseSavedBillingDetails && dto.Charges.Any(c => items[c.CostItemId].SupplierId != c.SupplierId ||
                     items[c.CostItemId].ReferenceNumber != c.SupplierInvoiceNumber.Trim()))
-                    throw new InvalidOperationException("Billing details changed. Refresh the voucher before retrying Post.");
+                    throw new InvalidOperationException("Billing details changed. Refresh the voucher before retrying preparation.");
 
                 var requestedIds = dto.Charges.Select(c => c.CostItemId).ToArray();
                 var existing = await _unitOfWork.Repository<VendorInvoiceLineItem>()
@@ -234,7 +146,7 @@ public partial class VendorInvoiceService
                         InvoiceDate = dto.InvoiceDate.Date, CurrencyCode = group.Key.Currency, ExchangeRate = rates[0],
                         MatchingType = InvoiceMatchingType.None,
                         Reference = cost.LandedCostNumber,
-                        Notes = $"Supplier charges from landed-cost voucher {cost.LandedCostNumber}. Clears its posted accrual; no second inventory capitalization.",
+                        Notes = $"Supplier charges from landed-cost voucher {cost.LandedCostNumber}. Final posting clears its accrual and capitalizes an unposted voucher once.",
                         LineItems = group.Select(c =>
                         {
                             var item = items[c.CostItemId];
@@ -257,6 +169,8 @@ public partial class VendorInvoiceService
                     output.Add(invoice);
                 }
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await EnsureLandedCostSupplierDocumentsAsync(cost, dto.Charges.Select(c => items[c.CostItemId]).ToList(), cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
                 return output;
             }
@@ -267,6 +181,38 @@ public partial class VendorInvoiceService
                 throw;
             }
         }, cancellationToken);
+    }
+
+    private async Task<(Guid AccountId, string Currency)> GetLandedCostPreparationAccrualAsync(LandedCost cost, CancellationToken token)
+    {
+        if (cost.Status == "Posted") return await GetPostedLandedCostAccrualAsync(cost, token);
+        if (cost.TenantId != TenantId || cost.IsDeleted || cost.Status is not ("Allocated" or "Approved"))
+            throw new InvalidOperationException("Allocate the voucher before preparing supplier invoices.");
+        var settings = await GetFinanceSettingsAsync(token);
+        if (!string.Equals(settings.BaseCurrency, cost.Currency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The voucher must use the company's functional currency for accrual clearing.");
+        return (settings.ControlAccountGRVAccrualId ?? throw new InvalidOperationException("GRV Accrual Control Account is not configured in Finance Settings."), cost.Currency);
+    }
+
+    private async Task PostInvoiceLandedCostsAsync(VendorInvoice invoice, CancellationToken token)
+    {
+        if (!IsLandedCostInvoice(invoice)) return;
+        if (!_unitOfWork.HasActiveTransaction || _landedCosts == null)
+            throw new InvalidOperationException("Landed-cost invoice posting requires the shared transaction and valuation service.");
+        var ids = invoice.LineItems.Where(l => !l.IsDeleted && l.LandedCostItemId.HasValue).Select(l => l.LandedCostItemId!.Value).ToArray();
+        var voucherIds = await _unitOfWork.Repository<LandedCostItem>().GetQueryable(i =>
+            i.TenantId == TenantId && !i.IsDeleted && ids.Contains(i.Id)).Select(i => i.LandedCostId).Distinct().OrderBy(id => id).ToListAsync(token);
+        foreach (var id in voucherIds) await _unitOfWork.AcquireTransactionLockAsync($"InventoryLandedCost:{id:N}", token);
+        // Validate the immutable supplier/amount/currency/account links before any valuation.
+        // A later tax, dimension, period or AP failure rolls the complete transaction back.
+        await ResolveLandedCostClearingAccountsAsync(invoice, token);
+        foreach (var id in voucherIds)
+        {
+            var posted = await _unitOfWork.Repository<LandedCost>().GetQueryable(c => c.Id == id && c.TenantId == TenantId && !c.IsDeleted)
+                .Select(c => c.Status == "Posted").SingleAsync(token);
+            if (!posted && !await _landedCosts.PostToInventoryAsync(id, CurrentUserId))
+                throw new InvalidOperationException("Landed-cost valuation did not complete. The invoice has not been posted.");
+        }
     }
 
     private async Task<(Guid AccountId, string Currency)> GetPostedLandedCostAccrualAsync(LandedCost cost, CancellationToken token)
@@ -325,10 +271,10 @@ public partial class VendorInvoiceService
                 line.FixedAssetId.HasValue || line.InventoryItemId.HasValue || line.PurchaseOrderItemId.HasValue || line.BudgetEntryId.HasValue ||
                 !string.Equals(item.Currency, invoice.CurrencyCode, StringComparison.OrdinalIgnoreCase) ||
                 invoice.ExchangeRate != item.ExchangeRate || RoundMoney(item.Amount * invoice.ExchangeRate) != item.AmountInBaseCurrency)
-                throw new InvalidOperationException("Landed-cost invoice amounts, currency and source quantities must match the posted charges.");
+                throw new InvalidOperationException("Landed-cost invoice amounts, currency and source quantities must match the source charges.");
             if (!voucherAccounts.TryGetValue(item.LandedCostId, out var account))
             {
-                account = (await GetPostedLandedCostAccrualAsync(item.LandedCost, token)).AccountId;
+                account = (await GetLandedCostPreparationAccrualAsync(item.LandedCost, token)).AccountId;
                 voucherAccounts.Add(item.LandedCostId, account);
             }
             if (line.GLAccountId != account)

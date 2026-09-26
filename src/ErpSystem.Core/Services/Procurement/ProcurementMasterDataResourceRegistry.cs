@@ -32,7 +32,7 @@ public static class ProcurementMasterDataResourceRegistry
                     "PhysicalAddress", "PhysicalCity", "PhysicalState", "PhysicalCountry", "PhysicalPostalCode",
                     "MailingAddress", "MailingCity", "MailingState", "MailingCountry", "MailingPostalCode",
                     "IndustryClassification", "CompanySize", "GeographicCoverage", "IsPreferred", "PaymentTermId", "Currency", "Notes",
-                    "CreditLimit", "DefaultApAccountId", "DefaultExpenseAccountId",
+                    "CreditLimit", "DefaultApAccountId", "DefaultArAccountId", "DefaultExpenseAccountId",
                     "DefaultTermsDiscountsAvailableAccountId", "DefaultTermsDiscountsTakenAccountId", "DefaultFinanceChargesAccountId", "DefaultTradeDiscountAccountId", "DefaultMiscellaneousAccountId", "DefaultFreightAccountId", "DefaultWriteoffAccountId", "DefaultAccruedPurchasesAccountId", "DefaultPurchasePriceVarianceAccountId"),
                 [ProcurementMasterDataTargetKind.LegacySupplier] = Fields(
                     "Name", "Description", "SupplierType", "Address", "City", "State", "ZipCode", "Country", "Phone", "Email", "Website",
@@ -96,7 +96,7 @@ public static class ProcurementMasterDataResourceRegistry
                 "Barcode", "AlternateBarcode", "QRCode",
                 "ValuationMethod", "IsValuationLocked", "IsProjectApplicable", "IsCostCentreApplicable", "DailyRentalRate", "StandardCost", "SalePrice", "MinimumLevel", "MaximumLevel", "ReorderLevel",
                 "ReorderQuantity", "SafetyStock", "LeadTimeDays", "SafetyLeadTimeDays", "ItemType", "ABCClass", "Status", "DefaultTaxGroupId",
-                "ShippingWeight", "Weight", "Length", "Width", "Height", "Volume", "IsSerialTracked", "IsLotTracked", "IsBatchTracked", "IsManufactureDateTracked", "IsExpirationTracked",
+                "ShippingWeight", "Weight", "WeightUnit", "Length", "Width", "Height", "Volume", "IsSerialTracked", "IsLotTracked", "IsBatchTracked", "IsManufactureDateTracked", "IsExpirationTracked",
                 "IsLocationTracked", "RequiresInspection", "ShelfLifeDays", "PrimarySupplier", "SupplierItemCode", "CustomFields",
                 "InventoryAccountId", "InventoryOffsetAccountId", "CostOfGoodsSoldAccountId", "SalesAccountId", "MarkdownsAccountId", "SalesReturnsAccountId", "InUseAccountId", "InServiceAccountId", "DamagedAccountId", "VarianceAccountId", "DropShipItemsAccountId", "PurchasePriceVarianceAccountId", "UnrealisedPurchasePriceVarianceAccountId", "InventoryReturnsAccountId", "AssemblyVarianceAccountId", "StandardCostRevaluationAccountId"))),
         Define(
@@ -142,7 +142,7 @@ public static class ProcurementMasterDataResourceRegistry
                 "AutoCreateInventoryItems", "AutoCreateSupplierItems", "AllowNonInventoryItems", "DefaultItemCategoryId", "DefaultUnitOfMeasureId",
                 "DefaultValuationMethod", "PurchaseRequisitionNumberFormat", "PurchaseOrderNumberFormat", "PurchaseOrderReceiptNumberFormat",
                 "RequireApprovalForPO", "AutoApprovalThreshold", "AllowBackorders", "RequireDeliveryDate", "EnforceSupplierCatalog",
-                "AllowMultipleSuppliersPerItem", "ValidateBudgetBeforePO", "RequireContractForPO", "Notes")), true)
+                "AllowMultipleSuppliersPerItem", "ValidateBudgetBeforePO", "RequireContractForPO", "AutoCloseTenders", "EnforceSegregationOfDuties", "Notes")), true)
     ];
 
     public static ProcurementMasterDataResourceDefinition Get(ProcurementMasterDataResourceType resourceType) =>

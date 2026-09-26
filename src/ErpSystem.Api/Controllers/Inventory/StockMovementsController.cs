@@ -95,9 +95,9 @@ public class StockMovementsController : ControllerBase
             if (string.IsNullOrWhiteSpace(referenceNumber))
             {
                 var effectiveStartDate = startDate ?? DateTime.UtcNow.AddDays(-30);
-                var effectiveEndDate = endDate ?? DateTime.UtcNow;
-                stockQuery = stockQuery.Where(sm => sm.MovementDate >= effectiveStartDate && sm.MovementDate <= effectiveEndDate);
-                invQuery = invQuery.Where(m => m.MovementDate >= effectiveStartDate && m.MovementDate <= effectiveEndDate);
+                var effectiveEndDate = endDate?.Date.AddDays(1) ?? DateTime.UtcNow;
+                stockQuery = stockQuery.Where(sm => sm.MovementDate >= effectiveStartDate && sm.MovementDate < effectiveEndDate);
+                invQuery = invQuery.Where(m => m.MovementDate >= effectiveStartDate && m.MovementDate < effectiveEndDate);
             }
             else
             {
@@ -108,8 +108,9 @@ public class StockMovementsController : ControllerBase
                 }
                 if (endDate.HasValue)
                 {
-                    stockQuery = stockQuery.Where(sm => sm.MovementDate <= endDate.Value);
-                    invQuery = invQuery.Where(m => m.MovementDate <= endDate.Value);
+                    var endExclusive = endDate.Value.Date.AddDays(1);
+                    stockQuery = stockQuery.Where(sm => sm.MovementDate < endExclusive);
+                    invQuery = invQuery.Where(m => m.MovementDate < endExclusive);
                 }
 
                 var lowerRef = referenceNumber.Trim().ToLower();

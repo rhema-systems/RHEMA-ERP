@@ -24,7 +24,7 @@ export function LandedCostInvoiceLink({ voucherId, item, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
-  if (item.invoiceId) return <Link className="text-primary underline" href={`/finance/ap/invoices/${item.invoiceId}`}>{item.invoiceNumber}</Link>;
+  if (item.invoiceId) return <Link className="text-primary underline" href={`/procurement/supplier-invoices/${item.invoiceId}`}>{item.invoiceNumber}</Link>;
   if (item.invoiceNumber) return <span>{item.invoiceNumber} (unavailable)</span>;
   if (!canLink) return <span className="text-muted-foreground">Not linked</span>;
   async function find() {

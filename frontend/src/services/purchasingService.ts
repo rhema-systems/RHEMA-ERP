@@ -1032,6 +1032,10 @@ export interface ProcurementReceiptSourceEvidenceOverviewDto {
 }
 
 export interface PurchaseOrderReceiptItemDto {
+  unitWeightKg?: number;
+  weightStockUom?: string;
+  weightOverridden?: boolean;
+
   id: string;
   receiptId: string;
   purchaseOrderItemId: string;
@@ -1275,6 +1279,8 @@ export interface ReceivePurchaseOrderDto {
 }
 
 export interface ReceivePurchaseOrderItemDto {
+  unitWeightKg?: number;
+
   purchaseOrderItemId: string;
   receivedQuantity: number;
   acceptedQuantity: number;

@@ -3119,7 +3119,10 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (discountAllowed > 0m)
             {
-                var discountAccountId = settings.DiscountAllowedAccountId
+                var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
+                    _unitOfWork, tenantId, payment.JournalEntryId, "CustomerPayment", payment.Id, cancellationToken);
+                var discountAccountId = originalAccounts?.Account("AR-Discount")
+                    ?? customer.CustomerTermsDiscountsTakenAccountId ?? settings.DiscountAllowedAccountId
                     ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
                 await ResolveReceiptPostingAccountAsync(discountAccountId, "sales discount allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
@@ -3498,7 +3501,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
             await ResolveReceiptPostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
-            var salesReturnsAccountId = settings.DiscountAllowedAccountId
+            var salesReturnsAccountId = customer.CustomerSalesReturnsAccountId ?? settings.DiscountAllowedAccountId
                 ?? throw new InvalidOperationException("Sales returns/allowance account is not configured for this tenant.");
             await ResolveReceiptPostingAccountAsync(salesReturnsAccountId, "sales returns/allowance account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
@@ -3559,7 +3562,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     p.TenantId == TenantId &&
                     p.Id == payment.CustomerId &&
                     !p.IsDeleted &&
-                    (p.PartnerType == "Customer" || p.PartnerType == "Both"))
+                    BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType))
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (customer == null)
@@ -4124,7 +4127,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     p.TenantId == TenantId &&
                     p.Id == customerId &&
                     !p.IsDeleted &&
-                    (p.PartnerType == "Customer" || p.PartnerType == "Both"));
+                    BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType));
         }
 
         private async Task CreateCashTransactionForReceiptAsync(CustomerPayment payment, BusinessPartner customer, CancellationToken cancellationToken)

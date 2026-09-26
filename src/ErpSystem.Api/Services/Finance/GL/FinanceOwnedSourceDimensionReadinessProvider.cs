@@ -248,7 +248,7 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
 
         return invoices.Select(invoice =>
         {
-            var clearsGrv = grvInvoices.Contains(invoice.Id)
+            var clearsGrv = grvInvoices.Contains(invoice.Id) || invoice.AutoInvoiceRequestId.HasValue
                 || (invoice.PurchaseOrderId.HasValue
                     && invoice.AcceptedSupplyKind == ProcurementAcceptedSupplyKind.GoodsReceiptInspection
                     && invoice.AcceptedSupplySourceId == invoice.PurchaseOrderId);

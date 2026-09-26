@@ -270,12 +270,7 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
             item.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
             (item.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
              item.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
-            (item.PartnerType == "Supplier" ||
-             item.PartnerType == "Vendor" ||
-             item.PartnerType == "Manufacturer" ||
-             item.PartnerType == "Contractor" ||
-             item.PartnerType == "Both" ||
-             item.PartnerType == "CustomerAndSupplier") &&
+            BusinessPartnerRoles.ProcurementTypes.Contains(item.PartnerType) &&
             (item.Id == supplierId ||
              (!string.IsNullOrWhiteSpace(supplierCode) && item.PartnerCode == supplierCode)));
 

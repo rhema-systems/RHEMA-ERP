@@ -619,6 +619,14 @@ public class PurchaseOrderReceipt : TenantEntity
 /// </summary>
 public class PurchaseOrderReceiptItem : TenantEntity
 {
+    /// <summary>Kilograms per stock base unit captured for this receipt, never read from the live master for allocation.</summary>
+    [Column(TypeName = "decimal(22,6)")]
+    public decimal? UnitWeightKg { get; set; }
+    [MaxLength(20)]
+    public string? WeightStockUom { get; set; }
+    public bool WeightOverridden { get; set; }
+
+
     [Required]
     public Guid ReceiptId { get; set; }
   

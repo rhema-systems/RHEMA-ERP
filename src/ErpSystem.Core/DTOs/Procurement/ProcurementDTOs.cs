@@ -433,6 +433,10 @@ public class PurchaseOrderReceiptDto
 /// </summary>
 public class PurchaseOrderReceiptItemDto
 {
+    public decimal? UnitWeightKg { get; set; }
+    public string? WeightStockUom { get; set; }
+    public bool WeightOverridden { get; set; }
+
     public Guid Id { get; set; }
     public Guid ReceiptId { get; set; }
     public Guid PurchaseOrderItemId { get; set; }
@@ -487,6 +491,10 @@ public class ReceivePurchaseOrderDto
 /// </summary>
 public class ReceivePurchaseOrderItemDto
 {
+    /// <summary>Optional transaction override in kg per stock base unit; omission copies the item master.</summary>
+    [Range(typeof(decimal), "0", "9999999999999999.999999")]
+    public decimal? UnitWeightKg { get; set; }
+
     [Required]
     public Guid PurchaseOrderItemId { get; set; }
 

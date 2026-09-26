@@ -5,11 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { InvoiceThreeWayMatchControl } from './InvoiceThreeWayMatchControl';
 
 describe('InvoiceThreeWayMatchControl', () => {
-  it('renders the hard stop, configured tolerances and complete decision lineage', () => {
+  it.each([false, true])('retains matching issues and tolerances (compact: %s)', (compact) => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={client}>
         <InvoiceThreeWayMatchControl
+          compact={compact}
           invoiceId="invoice-0504"
           canEvaluate={false}
           initialReadiness={{
@@ -51,15 +52,15 @@ describe('InvoiceThreeWayMatchControl', () => {
       </QueryClientProvider>
     );
 
-    expect(markup).toContain('Mandatory three-way matching');
+    expect(markup).toContain(compact ? 'Invoice matching' : 'Mandatory three-way matching');
     expect(markup).toContain('Approval blocked');
     expect(markup).toContain('Price tolerance');
     expect(markup).toContain('Cumulative quantity tolerance');
-    expect(markup).toContain('TDC-PROCUREMENT v1');
     expect(markup).toContain('Exception eligible');
-    expect(markup).toContain('TDC-0507');
-    expect(markup).toContain('DEC-001');
-    expect(markup).toContain('DEC-014');
+    for (const internalText of ['TDC-PROCUREMENT v1', 'TDC-0507', 'DEC-001', 'DEC-014']) {
+      if (compact) expect(markup).not.toContain(internalText);
+      else expect(markup).toContain(internalText);
+    }
     expect(markup).not.toContain('Re-evaluate');
   });
 });

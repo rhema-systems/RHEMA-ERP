@@ -385,7 +385,8 @@ public class TenderAwardService : ITenderAwardService
         if (!string.Equals(award.Status, "PendingApproval", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 $"Only a pending award recommendation can be approved (current status: '{award.Status}').");
-        if (award.CreatedById == _currentUserProvider.UserId)
+        if (award.CreatedById == _currentUserProvider.UserId &&
+            await _unitOfWork.IsProcurementSodEnabledAsync(_currentUserProvider.TenantId, cancellationToken))
             throw new UnauthorizedAccessException(
                 "The award recommendation creator cannot approve the same award.");
 
@@ -470,7 +471,8 @@ public class TenderAwardService : ITenderAwardService
         if (!string.Equals(award.Status, "PendingApproval", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 $"Only a pending award recommendation can be rejected (current status: '{award.Status}').");
-        if (award.CreatedById == _currentUserProvider.UserId)
+        if (award.CreatedById == _currentUserProvider.UserId &&
+            await _unitOfWork.IsProcurementSodEnabledAsync(_currentUserProvider.TenantId, cancellationToken))
             throw new UnauthorizedAccessException(
                 "The award recommendation creator cannot reject the same award.");
         if (string.IsNullOrWhiteSpace(dto.Reason))

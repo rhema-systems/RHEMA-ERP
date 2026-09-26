@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -60,6 +61,7 @@ import {
   ClipboardPlus,
   Gavel,
   ShoppingCart,
+  Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -206,6 +208,29 @@ export default function ProcurementPlanDetailPage() {
   const planId = Array.isArray(params?.id) ? params.id[0] : (params?.id ?? '');
 
   const [plan, setPlan] = useState<ProcurementPlanDetailDto | null>(null);
+  const exportPlanLines = () => {
+    if (!plan?.items.length) return;
+    const sheet = XLSX.utils.json_to_sheet(plan.items.map((item) => ({
+      'Plan Number': plan.planNumber,
+      'Line Reference': item.referenceNumber,
+      'Item Code': item.inventoryItemCode ?? '',
+      Description: item.itemDescription,
+      Quantity: item.estimatedQuantity,
+      'Unit of Measure': item.unitOfMeasure,
+      'Estimated Unit Price': item.estimatedUnitPrice,
+      'Estimated Total': item.estimatedTotalCost,
+      Currency: item.currency,
+      'Budget ID': item.procurementBudgetId ?? '',
+      'Budget Allocation ID': item.procurementBudgetAllocationId ?? '',
+      'Budget Line Code': item.budgetLineCode ?? '',
+      'Budget Category': item.budgetCategoryName ?? '',
+      'Approved Budget': item.approvedBudgetAmount ?? '',
+      Status: item.status,
+    })));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Plan Lines');
+    XLSX.writeFile(workbook, `${plan.planNumber.replace(/[^a-zA-Z0-9_-]/g, '_')}-lines.xlsx`);
+  };
   const [loading, setLoading] = useState(true);
   const [linkedBudget, setLinkedBudget] =
     useState<ProcurementBudgetDetailDto | null>(null);
@@ -1752,12 +1777,18 @@ export default function ProcurementPlanDetailPage() {
                   Items included in this procurement plan
                 </CardDescription>
               </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={exportPlanLines} disabled={!plan.items?.length}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Lines
+                </Button>
               {plan.status === 'Draft' && (
                 <Button onClick={handleOpenAddItemDialog}>
                   <Plus className="h-4 w-4 mr-2" />
                   Add Item
                 </Button>
               )}
+              </div>
             </CardHeader>
             <CardContent>
               {plan.items && plan.items.length > 0 ? (
@@ -1887,6 +1918,7 @@ export default function ProcurementPlanDetailPage() {
                             <TableCell className="font-medium">
                               <div>
                                 {item.itemDescription}
+                                <div className="mt-1 break-all font-mono text-xs text-muted-foreground">{item.referenceNumber}</div>
                                 {linkedRequisition && (
                                   <button
                                     type="button"

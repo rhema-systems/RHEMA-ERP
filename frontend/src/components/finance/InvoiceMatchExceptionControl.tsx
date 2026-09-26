@@ -22,6 +22,7 @@ import { invoiceThreeWayMatchQueryKey } from './InvoiceThreeWayMatchControl';
 interface InvoiceMatchExceptionControlProps {
     invoiceId: string;
     initialOverview?: VendorInvoiceMatchExceptionOverview;
+    compact?: boolean;
 }
 
 type EvidenceDraft = VendorInvoiceMatchExceptionEvidenceRequest & { referenceId: string };
@@ -41,6 +42,7 @@ export const invoiceMatchExceptionQueryKey = (invoiceId: string) =>
 export function InvoiceMatchExceptionControl({
     invoiceId,
     initialOverview,
+    compact = false,
 }: InvoiceMatchExceptionControlProps) {
     const queryClient = useQueryClient();
     const [showRequest, setShowRequest] = useState(false);
@@ -149,7 +151,7 @@ export function InvoiceMatchExceptionControl({
         return (
             <Card aria-label="Invoice match exception control">
                 <CardContent className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading AP-006 exception control…
+                    <Loader2 className="h-4 w-4 animate-spin" /> {compact ? 'Loading matching exceptions…' : 'Loading AP-006 exception control…'}
                 </CardContent>
             </Card>
         );
@@ -158,7 +160,7 @@ export function InvoiceMatchExceptionControl({
         return (
             <Alert variant="destructive" aria-label="Invoice match exception unavailable">
                 <AlertCircle className="h-4 w-4" />
-                <AlertTitle>AP-006 control unavailable</AlertTitle>
+                <AlertTitle>{compact ? 'Matching exceptions unavailable' : 'AP-006 control unavailable'}</AlertTitle>
                 <AlertDescription>{(overview.error as Error)?.message || 'Exception history could not be loaded.'}</AlertDescription>
             </Alert>
         );
@@ -168,6 +170,7 @@ export function InvoiceMatchExceptionControl({
     if (!data.matchingReadiness.isRequired) return null;
     const active = data.active;
     const correctiveActionItem = data.correctiveActionItem;
+    if (compact && !active && !data.canRequest && !correctiveActionItem && data.history.length === 0) return null;
 
     const submitRequest = () => requestException.mutate({
         rootCauseCategory: rootCauseCategory.trim(),
@@ -182,16 +185,16 @@ export function InvoiceMatchExceptionControl({
     });
 
     return (
-        <Card aria-label="Invoice match exception control" className="border-amber-300">
+        <Card aria-label="Invoice match exception control" className={compact ? '' : 'border-amber-300'}>
             <CardHeader>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <CardTitle className="flex items-center gap-2 text-lg">
-                            <ShieldAlert className="h-5 w-5" /> AP-006 match-exception register
+                            <ShieldAlert className="h-5 w-5" /> {compact ? 'Matching exceptions' : 'AP-006 match-exception register'}
                         </CardTitle>
-                        <CardDescription>
+                        {!compact && <CardDescription>
                             Controlled tolerance exception only. It does not create, allocate, authorize, or post a supplier payment.
-                        </CardDescription>
+                        </CardDescription>}
                     </div>
                     <div className="flex gap-2">
                         {active && <Badge variant="outline">{active.status}</Badge>}
@@ -212,7 +215,7 @@ export function InvoiceMatchExceptionControl({
                     </Alert>
                 )}
 
-                {!active && !data.canRequest && (
+                {!compact && !active && !data.canRequest && (
                     <Alert>
                         <FileCheck2 className="h-4 w-4" />
                         <AlertTitle>No eligible exception request</AlertTitle>
@@ -349,9 +352,9 @@ export function InvoiceMatchExceptionControl({
                     </div>
                 )}
 
-                <div className="flex flex-wrap gap-1" aria-label="AP-006 decision lineage">
+                {!compact && <div className="flex flex-wrap gap-1" aria-label="AP-006 decision lineage">
                     {data.decisionKeys.map(key => <Badge key={key} variant="outline">{key}</Badge>)}
-                </div>
+                </div>}
             </CardContent>
         </Card>
     );

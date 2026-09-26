@@ -899,7 +899,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             item.Id == vendorId &&
             !item.IsDeleted &&
             item.IsActive &&
-            (item.PartnerType == "Supplier" || item.PartnerType == "Contractor" || item.PartnerType == "Both"),
+            BusinessPartnerRoles.ProcurementTypes.Contains(item.PartnerType),
             cancellationToken);
         return vendor ?? throw new KeyNotFoundException("Active supplier business partner was not found for this tenant.");
     }
@@ -996,6 +996,11 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         {
             if (dto.Quantity <= 0m || dto.UnitPrice <= 0m)
                 throw new InvalidOperationException("Supplier debit-note quantity and unit price must be positive.");
+            var isWriteoff = string.Equals(dto.LineItemType, "Writeoff", StringComparison.OrdinalIgnoreCase);
+            if (isWriteoff && (invoice != null || dto.OriginalVendorInvoiceLineItemId.HasValue ||
+                dto.TaxGroupId.HasValue || dto.TaxRate != 0m || dto.TaxAmount.GetValueOrDefault() != 0m ||
+                dto.DiscountAmount.GetValueOrDefault() != 0m || dto.DiscountPercentage != 0m))
+                throw new InvalidOperationException("AP_WRITEOFF_SETTLEMENT_ONLY: a supplier writeoff must be standalone, without invoice source lines, tax or discounts.");
             if (invoice != null)
             {
                 if (!dto.OriginalVendorInvoiceLineItemId.HasValue ||
@@ -1017,13 +1022,21 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 continue;
             }
 
-            if (!dto.GLAccountId.HasValue)
+            var lineItemType = RequireLineItemType(dto.LineItemType, dto.Description);
+            var effectiveAccountId = dto.GLAccountId;
+            if (isWriteoff && !effectiveAccountId.HasValue)
+            {
+                var vendor = await GetVendorAsync(note.VendorId, cancellationToken);
+                effectiveAccountId = vendor.DefaultWriteoffAccountId;
+            }
+            if (!effectiveAccountId.HasValue)
             {
                 throw new InvalidOperationException($"Standalone debit-note line '{dto.Description}' requires a GL account.");
             }
 
-            var lineItemType = RequireLineItemType(dto.LineItemType, dto.Description);
-            var account = await RequireStandaloneAccountAsync(dto.GLAccountId.Value, note.DebitNoteDate, dto.Description, cancellationToken);
+            var account = await RequireStandaloneAccountAsync(effectiveAccountId.Value, note.DebitNoteDate, dto.Description, cancellationToken);
+            if (isWriteoff && account.AccountType is not (AccountType.Revenue or AccountType.Expense))
+                throw new InvalidOperationException("Supplier writeoffs require a Revenue or Expense GL account.");
 
             var gross = Round(dto.Quantity * dto.UnitPrice);
             var calculatedDiscount = dto.DiscountAmount ?? Round(gross * Math.Max(dto.DiscountPercentage, 0m) / 100m);
@@ -1057,7 +1070,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     : Guid.NewGuid(),
                 TenantId = TenantId,
                 SupplierDebitNoteId = note.Id,
-                GLAccountId = dto.GLAccountId,
+                GLAccountId = effectiveAccountId,
                 ResolvedCreditAccountId = account.Id,
                 LineItemType = lineItemType,
                 Description = RequiredText(dto.Description, "Debit-note line description"),
@@ -1213,9 +1226,12 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 item.SourceDocumentLineId == sourceLine.Id &&
                 item.DebitAmount > 0m &&
                 !IsTaxTransaction(item))
-            .ToList();
-        if (baseTransactions.Count != 1)
-            throw SourceLineageUnavailable(sourceLine, "exactly one posted base transaction was not found");
+            .OrderBy(item => item.LineNumber).ThenBy(item => item.Id).ToList();
+        if (baseTransactions.Count == 0)
+            throw SourceLineageUnavailable(sourceLine, "no posted base transactions were found");
+        if (baseTransactions.Select(item => item.TransactionTag).Distinct().Count() != 1 ||
+            baseTransactions.Select(item => item.ExchangeRateId).Distinct().Count() != 1)
+            throw SourceLineageUnavailable(sourceLine, "posted base splits do not share the same accounting purpose and exchange-rate evidence");
         var originalTransaction = baseTransactions[0];
         var ratio = sourceLine.Quantity <= 0m ? 0m : dto.Quantity / sourceLine.Quantity;
         var gross = Round(dto.Quantity * sourceLine.UnitPrice);
@@ -1334,10 +1350,13 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             .Where(item => item.HasValue)
             .Select(item => item!.Value)
             .ToHashSet();
+        var originalJournalId = linkedInvoice?.JournalEntryId;
         var originalTransactions = lineageIds.Count == 0
             ? new Dictionary<Guid, AccountTransaction>()
             : await _db.AccountTransactions.AsNoTracking()
-                .Where(item => item.TenantId == TenantId && lineageIds.Contains(item.Id) && !item.IsDeleted)
+                .Where(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    (lineageIds.Contains(item.Id) || (originalJournalId.HasValue &&
+                        item.JournalEntryId == originalJournalId.Value)))
                 .ToDictionaryAsync(item => item.Id, cancellationToken);
 
         AccountTransaction? originalApControl = null;
@@ -1373,6 +1392,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             decimal principalAmount;
             Guid accountId;
             Guid? exchangeRateId = null;
+            List<AccountTransaction>? baseSplits = null;
             if (linkedInvoice != null)
             {
                 if (!line.OriginalVendorInvoiceLineItemId.HasValue ||
@@ -1384,7 +1404,13 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     line.ResolvedCreditAccountId != sourceTransaction.AccountId)
                     throw SourceLineageUnavailable(sourceLine, "the frozen base transaction no longer reconciles to the source line");
                 var ratio = sourceLine.Quantity <= 0m ? 0m : line.Quantity / sourceLine.Quantity;
-                principalAmount = Round(SourceDebitAmount(sourceTransaction) * ratio);
+                baseSplits = originalTransactions.Values.Where(item => item.JournalEntryId == linkedInvoice.JournalEntryId &&
+                    item.SourceDocumentLineId == sourceLine.Id && item.DebitAmount > 0m && !IsTaxTransaction(item))
+                    .OrderBy(item => item.LineNumber).ThenBy(item => item.Id).ToList();
+                if (baseSplits.Count == 0 || baseSplits.Any(item => item.TransactionTag != sourceTransaction.TransactionTag ||
+                    item.ExchangeRateId != sourceTransaction.ExchangeRateId))
+                    throw SourceLineageUnavailable(sourceLine, "posted base splits no longer reconcile to the source line");
+                principalAmount = Round(baseSplits.Sum(SourceDebitAmount) * ratio);
                 accountId = sourceTransaction.AccountId;
                 exchangeRateId = sourceTransaction.ExchangeRateId;
             }
@@ -1392,6 +1418,12 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             {
                 accountId = line.ResolvedCreditAccountId
                     ?? throw new InvalidOperationException($"Debit-note line '{line.Description}' is missing its server-resolved posting account.");
+                if (string.Equals(line.LineItemType, "Writeoff", StringComparison.OrdinalIgnoreCase))
+                {
+                    var writeoffAccount = await RequireStandaloneAccountAsync(accountId, note.DebitNoteDate, line.Description, cancellationToken);
+                    if (writeoffAccount.AccountType is not (AccountType.Revenue or AccountType.Expense))
+                        throw new InvalidOperationException("Supplier writeoffs require a Revenue or Expense GL account.");
+                }
                 principalAmount = Round(line.LineTotal - line.TaxAmount);
             }
 
@@ -1407,7 +1439,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 note.DebitNoteDate,
                 note.DebitNoteNumber,
                 lineNumber++,
-                "AP-SupplierDebitNote-Line",
+                string.Equals(line.LineItemType, "Writeoff", StringComparison.OrdinalIgnoreCase)
+                    ? "AP-Writeoff" : "AP-SupplierDebitNote-Line",
                 line.Id,
                 exchangeRateId,
                 linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null);
@@ -1415,7 +1448,23 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 ? dimensionValues
                 : Array.Empty<FinancePostingDimensionValueDto>();
             principalLine.Dimensions = inheritedDimensions;
-            lines.Add(principalLine);
+            if (baseSplits is { Count: > 1 })
+            {
+                lineNumber--; // The aggregate principal line is replaced by its account splits.
+                var amounts = MonetaryAllocation.Allocate(baseSplits.Select(SourceDebitAmount).ToArray(), principalAmount);
+                for (var splitIndex = 0; splitIndex < baseSplits.Count; splitIndex++)
+                {
+                    if (amounts[splitIndex] == 0m) continue;
+                    var splitLine = PostingLine(baseSplits[splitIndex].AccountId, principalLine.Description!,
+                        0m, Functional(amounts[splitIndex], currency, functionalCurrency, rate), amounts[splitIndex],
+                        currency, functionalCurrency, rate, note.DebitNoteDate, note.DebitNoteNumber,
+                        lineNumber++, principalLine.TransactionTag!, line.Id, baseSplits[splitIndex].ExchangeRateId,
+                        "Original AP invoice exchange-rate snapshot");
+                    splitLine.Dimensions = inheritedDimensions;
+                    lines.Add(splitLine);
+                }
+            }
+            else lines.Add(principalLine);
 
             if (linkedInvoice != null
                 && !IsNetPostedSourceTransaction(originalTransactions[line.OriginalAccountTransactionId!.Value])
@@ -1703,6 +1752,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         string? description,
         bool sourceLineage = false)
     {
+        if (!sourceLineage && string.Equals(value, "Writeoff", StringComparison.OrdinalIgnoreCase))
+            return "Writeoff";
         if (string.Equals(value, "Expense", StringComparison.OrdinalIgnoreCase))
             return "Expense";
         if (string.Equals(value, "Service", StringComparison.OrdinalIgnoreCase))
@@ -1726,7 +1777,14 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
     {
         var sourceLineage = note.OriginalVendorInvoiceId.HasValue;
         foreach (var line in note.LineItems.Where(item => !item.IsDeleted))
+        {
             _ = RequireLineItemType(line.LineItemType, line.Description, sourceLineage);
+            if (string.Equals(line.LineItemType, "Writeoff", StringComparison.OrdinalIgnoreCase) &&
+                (line.OriginalVendorInvoiceLineItemId.HasValue || line.TaxGroupId.HasValue ||
+                 line.TaxAmount != 0m || line.TaxRate != 0m || line.TaxComponents.Any(component => !component.IsDeleted) ||
+                 line.DiscountAmount != 0m || line.DiscountPercentage != 0m))
+                throw new InvalidOperationException("AP_WRITEOFF_SETTLEMENT_ONLY: saved supplier writeoff evidence contains invoice source lines, tax or discounts.");
+        }
     }
 
     private static void EnsureOptionalAmountMatches(decimal? supplied, decimal calculated, string description, string label)

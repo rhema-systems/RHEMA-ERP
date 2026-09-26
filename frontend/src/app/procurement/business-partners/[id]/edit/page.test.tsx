@@ -97,6 +97,61 @@ async function openTab(name: string) {
 }
 
 describe('business partner edit defaults', () => {
+  it.each(['Approved', 'PendingApproval'])('displays and preserves the stored %s registration status when saving accounts', async (status) => {
+    vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({
+      ...saved, partnerType: 'Customer', status, approvalStatus: 'Approved',
+      receivablesDefaults: { defaultArAccountId: 'ar' },
+    });
+    render(<EditBusinessPartnerPage />);
+    await screen.findByLabelText('Company Name *');
+    expect(screen.getByRole('combobox', { name: 'Status', exact: true })).toHaveTextContent(status);
+    await openTab('Accounts Receivable');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith(
+      'partner-1', expect.objectContaining({ status, receivablesDefaults: { defaultArAccountId: 'ar' } })
+    ));
+  });
+
+  it('hides AP settings for customer-only records without clearing stored mappings', async () => {
+    vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({
+      ...saved, partnerType: 'Customer', receivablesDefaults: { defaultArAccountId: 'ar' },
+    });
+    render(<EditBusinessPartnerPage />);
+    await screen.findByLabelText('Company Name *');
+    expect(screen.queryByRole('switch', { name: 'Subject To Withholding Deduction' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('WHT Rate (%)')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'WHT Configuration' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Tax', exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Accounts Payable' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Accounts Receivable' })).toBeInTheDocument();
+    expect(screen.getByRole('tablist')).toHaveClass('grid-cols-4');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith(
+      'partner-1', expect.objectContaining({ postingDefaults: saved.postingDefaults,
+        receivablesDefaults: { defaultArAccountId: 'ar' } })
+    ));
+  });
+
+  it('reopens and saves all customer accounts independently of supplier accounts when catalogues are unavailable', async () => {
+    const receivablesDefaults = {
+      defaultArAccountId: 'ar', salesAccountId: 'sales', costOfSalesAccountId: 'cogs',
+      inventoryAccountId: 'stock', termsDiscountsTakenAccountId: 'discounts', salesReturnsAccountId: 'returns',
+    };
+    vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({
+      ...saved, partnerType: 'CustomerAndSupplier', receivablesDefaults,
+    });
+    render(<EditBusinessPartnerPage />);
+    await screen.findByLabelText('Company Name *');
+    await openTab('Accounts Receivable');
+    for (const name of ['Accounts Receivable control account', 'Sales', 'Cost of Sales', 'Inventory', 'Terms Discounts Taken', 'Sales Order Returns']) {
+      expect(screen.getByRole('combobox', { name, exact: true })).toHaveTextContent('Saved account unavailable');
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith(
+      'partner-1', expect.objectContaining({ receivablesDefaults, postingDefaults: saved.postingDefaults })
+    ));
+  });
+
   it('reopens stored WHT values and keeps Options and Accounts in equal-width tabs', async () => {
     render(<EditBusinessPartnerPage />);
     expect(await screen.findByLabelText('WHT Rate (%)')).toHaveValue(7.5);
@@ -105,8 +160,8 @@ describe('business partner edit defaults', () => {
     await openTab('Options');
     expect(screen.getByLabelText('TIN')).toHaveValue('TIN-001');
     expect(screen.getByLabelText('Credit Limit')).toHaveValue(1500);
-    await openTab('Accounts');
-    expect(screen.getByLabelText('Accounts Payable')).toHaveTextContent(
+    await openTab('Accounts Payable');
+    expect(screen.getByRole('combobox', { name: 'Accounts Payable' })).toHaveTextContent(
       'Saved account unavailable'
     );
   });

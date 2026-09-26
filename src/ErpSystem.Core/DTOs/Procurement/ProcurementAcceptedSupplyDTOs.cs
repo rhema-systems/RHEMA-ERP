@@ -34,6 +34,26 @@ public sealed class ProcurementAcceptedSupplyLineDto
     public decimal UnitPrice { get; init; }
 }
 
+/// <summary>Approved inspection quantities in PO units, with dispatched supplier returns deducted.</summary>
+public sealed class ProcurementAcceptedReceiptLineDto
+{
+    public Guid PurchaseOrderId { get; init; }
+    public Guid PurchaseOrderItemId { get; init; }
+    public Guid PurchaseOrderReceiptId { get; init; }
+    public Guid PurchaseOrderReceiptItemId { get; init; }
+    public Guid InspectionCaseId { get; init; }
+    public Guid? GoodsReceiptNoteId { get; init; }
+    public Guid? GoodsReceiptNoteItemId { get; init; }
+    public string ReceiptNumber { get; init; } = string.Empty;
+    public DateTime ReceiptDate { get; init; }
+    public decimal AcceptedQuantity { get; init; }
+    public decimal ReturnedQuantity { get; init; }
+    public decimal NetAcceptedQuantity => Math.Max(0m, AcceptedQuantity - ReturnedQuantity);
+    public decimal UnitPrice { get; init; }
+    public string InspectionIntegrityHash { get; init; } = string.Empty;
+    public DateTime AcceptedAtUtc { get; init; }
+}
+
 public sealed class ProcurementAcceptedSupplyResolutionDto
 {
     public ProcurementAcceptedSupplyKind Kind { get; init; }

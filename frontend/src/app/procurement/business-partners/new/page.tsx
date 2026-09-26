@@ -1,5 +1,10 @@
 'use client';
 
+import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
+import type { BusinessPartnerReceivablesDefaults } from '@/services/businessPartnerService';
+import { BusinessPartnerReceivablesFields } from '@/components/procurement/BusinessPartnerReceivablesFields';
+
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -70,7 +75,7 @@ import {
   useBusinessPartnerPostingCatalogues,
 } from '@/components/procurement/BusinessPartnerPostingFields';
 
-type PartnerType = 'Supplier' | 'Contractor' | 'Customer' | 'Both' | '';
+type PartnerType = 'Supplier' | 'Contractor' | 'Customer' | 'Both' | 'CustomerAndSupplier' | '';
 
 interface FormData {
   // Common fields
@@ -146,6 +151,7 @@ const initialFormData: FormData = {
 };
 
 const partnerTypeOptions = [
+  { value: 'CustomerAndSupplier', label: 'Supplier & Customer', icon: Building2, description: 'One partner with separate payable and receivable accounts' },
   {
     value: 'Supplier',
     label: 'Supplier',
@@ -216,6 +222,7 @@ export default function NewBusinessPartnerPage() {
   const [priceLists, setPriceLists] = useState<PriceListDto[]>([]);
   const [allPartners, setAllPartners] = useState<BusinessPartnerDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [receivablesDefaults, setReceivablesDefaults] = useState<BusinessPartnerReceivablesDefaults>({ defaultArAccountId: null });
   const [postingDefaults, setPostingDefaults] = useState(
     emptyBusinessPartnerPostingDefaults
   );
@@ -310,10 +317,11 @@ export default function NewBusinessPartnerPage() {
             ? undefined
             : Number(formData.creditLimit),
         postingDefaults,
+        receivablesDefaults: hasCustomerRole(formData.partnerType) ? receivablesDefaults : undefined,
       };
 
       // Add customer-specific fields if partner type is Customer
-      if (formData.partnerType === 'Customer') {
+      if (hasCustomerRole(formData.partnerType)) {
         createData.customerType = formData.customerType || undefined;
         createData.defaultDiscount = formData.defaultDiscount
           ? parseFloat(formData.defaultDiscount)
@@ -344,7 +352,8 @@ export default function NewBusinessPartnerPage() {
     }
   };
 
-  const isCustomer = formData.partnerType === 'Customer';
+  const isCustomer = hasCustomerRole(formData.partnerType);
+  const hasPayables = hasSupplierRole(formData.partnerType) || hasContractorRole(formData.partnerType);
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
@@ -445,7 +454,7 @@ export default function NewBusinessPartnerPage() {
               <TabsList
                 className={
                   isCustomer
-                    ? 'grid w-full grid-cols-6'
+                    ? hasPayables ? 'grid w-full grid-cols-7' : 'grid w-full grid-cols-6'
                     : 'grid w-full grid-cols-5'
                 }
               >
@@ -453,7 +462,8 @@ export default function NewBusinessPartnerPage() {
                 <TabsTrigger value="contact">Contact</TabsTrigger>
                 <TabsTrigger value="banking">Banking</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
-                <TabsTrigger value="accounts">Accounts</TabsTrigger>
+                {hasPayables && <TabsTrigger value="accounts">Accounts Payable</TabsTrigger>}
+                {isCustomer && <TabsTrigger value="receivables">Accounts Receivable</TabsTrigger>}
                 {isCustomer && (
                   <TabsTrigger value="customer">Customer Details</TabsTrigger>
                 )}
@@ -540,6 +550,7 @@ export default function NewBusinessPartnerPage() {
                   </div>
 
                   <PartnerTaxDefaultsFields
+                    partnerType={formData.partnerType}
                     value={postingDefaults}
                     onChange={setPostingDefaults}
                     taxGroups={catalogues.taxGroups}
@@ -757,7 +768,8 @@ export default function NewBusinessPartnerPage() {
                     disabled={saving}
                   />
                 </TabsContent>
-                <TabsContent value="accounts" className="py-4">
+                <TabsContent value="receivables" className="py-4"><BusinessPartnerReceivablesFields value={receivablesDefaults} onChange={setReceivablesDefaults} accounts={catalogues.accounts} disabled={saving || catalogues.loading} /></TabsContent>
+                {hasPayables && <TabsContent value="accounts" className="py-4">
                   <PartnerAccountsFields
                     value={postingDefaults}
                     onChange={setPostingDefaults}
@@ -765,7 +777,7 @@ export default function NewBusinessPartnerPage() {
                     bankAccounts={catalogues.bankAccounts}
                     disabled={saving}
                   />
-                </TabsContent>
+                </TabsContent>}
 
                 {/* Customer Details Tab */}
                 {isCustomer && (

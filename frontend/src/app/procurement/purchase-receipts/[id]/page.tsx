@@ -50,6 +50,7 @@ import { ReceiptDocumentControl } from '@/components/procurement/ReceiptDocument
 import { ReceiptSourceEvidenceControl } from '@/components/procurement/ReceiptSourceEvidenceControl';
 import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
 import { ReceiptLandedCostEntry } from '@/components/procurement/ReceiptLandedCostEntry';
+import { LandedCostReceiptWeights } from '@/components/procurement/LandedCostReceiptWeights';
 import { PurchaseReceiptDistribution } from '@/components/procurement/PurchaseReceiptDistribution';
 
 const GRNStatuses = [
@@ -533,6 +534,7 @@ export default function PurchaseReceiptDetailPage() {
                           <TableCell className="font-medium">{item.itemCode}</TableCell>
                           <TableCell>
                             <div>{item.itemName}</div>
+                            <div className="text-xs text-muted-foreground">Weight: {item.unitWeightKg != null ? `${item.unitWeightKg} kg / ${item.weightStockUom || 'stock unit'}${item.weightOverridden ? ' (receipt override)' : ''}` : 'Not captured'}</div>
                             {item.notes && (
                               <div className="text-xs text-muted-foreground mt-1">
                                 {item.notes}
@@ -683,7 +685,7 @@ export default function PurchaseReceiptDetailPage() {
                     onBusyChange={setLandedCostPosting} onCreated={() => {
                       void fetchLandedCosts(false);
                       void inventoryManagementService.getLandedCostById(landedCostDetail.id).then(setLandedCostDetail)
-                        .catch(() => toast.error('Posting response received. Refresh to load the latest voucher and invoice links.'));
+                        .catch(() => toast.error('Preparation response received. Refresh to load the latest voucher and invoice links.'));
                     }} />}
                 </div>
               </div>
@@ -756,6 +758,8 @@ export default function PurchaseReceiptDetailPage() {
                     </Card>
                   </div>
 
+                  <LandedCostReceiptWeights key={landedCostDetail.id} voucher={landedCostDetail} onSaved={setLandedCostDetail}
+                    disabled={landedCostLoading || landedCostAllocating || landedCostPosting} />
                   {/* Cost Lines */}
                   <Card>
                     <CardHeader>
@@ -787,7 +791,7 @@ export default function PurchaseReceiptDetailPage() {
                                     <div className="text-xs font-normal text-muted-foreground">{ci.purchaseOrderItemId ? receipt.items?.find(i => i.purchaseOrderItemId === ci.purchaseOrderItemId)?.itemName || 'Specific received item' : 'All received stock items'}</div>
                                   </TableCell>
                                   <TableCell>{ci.supplierName || '-'}</TableCell>
-                                  <TableCell>{ci.description}<div className="mt-2 text-xs"><LandedCostInvoiceLink voucherId={landedCostDetail.id} item={ci}
+                                  <TableCell>{ci.description}{ci.supplierDocumentNumber && <div className="text-xs text-muted-foreground">Supplier document {ci.supplierDocumentNumber}</div>}<div className="mt-2 text-xs"><LandedCostInvoiceLink voucherId={landedCostDetail.id} item={ci}
                                     onChanged={() => { void inventoryManagementService.getLandedCostById(landedCostDetail.id).then(setLandedCostDetail); }} /></div></TableCell>
                                   <TableCell className="text-right">
                                     {new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(ci.amount)}

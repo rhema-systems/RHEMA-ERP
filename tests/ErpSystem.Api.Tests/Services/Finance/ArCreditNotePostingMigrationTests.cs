@@ -35,13 +35,25 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class ArCreditNotePostingMigrationTests
 {
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
-    public async Task GovernedSalesCreditNote_PreparesNeutralIntentWithoutAutoApprovalOrOwnerMutation()
+    public async Task GovernedSalesCreditNote_PreparesNeutralIntentWithoutAutoApprovalOrOwnerMutation(bool customerAccount)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, taxAmount: 20m);
+        var returnsAccountId = fixture.SalesReturnsAccount.Id;
+        if (customerAccount)
+        {
+            var returnsAccount = SeedAccount(db, tenantId, "CUSTOMER-RETURNS", AccountType.Expense);
+            returnsAccountId = returnsAccount.Id;
+            await db.SaveChangesAsync();
+            var saved = await CustomerPostingSettingsFixture.SaveAndReloadAsync(db, tenantId, fixture.BusinessPartner.Id,
+                new() { SalesReturnsAccountId = returnsAccount.Id });
+            saved.SalesReturnsAccountId.Should().Be(returnsAccount.Id);
+        }
         var producer = new Mock<IFinanceProducerIntentService>();
         var execution = new Mock<IFinanceProducerApprovedExecutionService>();
         var reversal = new Mock<IFinanceProducerReversalPreparationService>();
@@ -62,6 +74,7 @@ public sealed class ArCreditNotePostingMigrationTests
         captured.PostingRequest.PostingAction.Should().Be("Post");
         captured.PostingRequest.IdempotencyKey.Should().Be($"AR:SalesCreditNote:{tenantId:N}:{fixture.CreditNote.Id:N}:Post");
         captured.PostingRequest.Lines.Should().HaveCount(3);
+        captured.PostingRequest.Lines.Should().Contain(line => line.AccountId == returnsAccountId && line.DebitAmount == 100m);
         captured.PostingRequest.Lines.Sum(line => line.DebitAmount).Should().Be(120m);
         captured.PostingRequest.Lines.Sum(line => line.CreditAmount).Should().Be(120m);
         result.JournalEntryId.Should().BeNull();

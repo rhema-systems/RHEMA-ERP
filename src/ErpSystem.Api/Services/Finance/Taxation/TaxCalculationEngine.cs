@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.Procurement;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -238,7 +239,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                         c.Id == request.CustomerId.Value &&
                         c.TenantId == TenantId &&
                         !c.IsDeleted &&
-                        (c.PartnerType == "Customer" || c.PartnerType == "Both"),
+                        BusinessPartnerRoles.CustomerTypes.Contains(c.PartnerType),
                         cancellationToken);
                 customerType = customer?.CustomerType;
             }

@@ -39,6 +39,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     private readonly ApplicationDbContext _db;
+    private readonly IProcurementSodPolicy _sodPolicy;
     private readonly ICurrentUserProvider _currentUser;
     private readonly IProcurementAccessControlService _access;
     private readonly IProcurementConfigurationService _configuration;
@@ -59,9 +60,11 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
         IFileStorageService storage,
         IProcurementControlEventService controlEvents,
         INotificationTopicPublisher notifications,
-        ILogger<PurchaseOrderReceiptDocumentService> logger)
+        ILogger<PurchaseOrderReceiptDocumentService> logger,
+        IProcurementSodPolicy? sodPolicy = null)
     {
         _db = db;
+        _sodPolicy = sodPolicy ?? new ProcurementSodPolicy(new UnitOfWork(db));
         _currentUser = currentUser;
         _access = access;
         _configuration = configuration;
@@ -242,7 +245,8 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             throw new ProcurementReceiptDocumentAuthorizationException($"The current user is not assigned the required {role} role.");
         if (document.Signatures.Any(item => string.Equals(item.RequiredRole, role, StringComparison.OrdinalIgnoreCase)))
             throw Conflict("RCV_DOCUMENT_ALREADY_SIGNED", $"The {role} signature has already been recorded.");
-        if (document.Signatures.Any(item => item.SignedByUserId == _currentUser.UserId))
+        if (document.Signatures.Any(item => item.SignedByUserId == _currentUser.UserId) &&
+            await _sodPolicy.IsEnabledAsync(_currentUser.TenantId, cancellationToken))
             throw Conflict("RCV_DOCUMENT_SIGNATORY_SOD", "One person cannot satisfy more than one configured signatory role on the same receipt document.");
 
         var now = DateTime.UtcNow;

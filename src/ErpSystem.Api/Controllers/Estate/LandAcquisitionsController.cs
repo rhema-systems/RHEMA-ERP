@@ -2625,8 +2625,10 @@ public class LandAcquisitionsController : ControllerBase
             .FirstOrDefaultAsync(item =>
                 item.TenantId == acquisition.TenantId &&
                 !item.IsDeleted &&
-                item.Reference == sourceReference,
+                (item.EstateAcquisitionId == acquisition.Id && item.EstatePayableKind == EstatePayableKind.SurveyorFee || item.Reference == sourceReference),
                 cancellationToken);
+        if (invoice != null && (invoice.EstateAcquisitionId != acquisition.Id || invoice.EstatePayableKind != EstatePayableKind.SurveyorFee))
+            throw new InvalidOperationException("An existing invoice uses this Estate reference without verified source lineage. Finance must reconcile it; a duplicate will not be created.");
         var debitAccountId = invoice?.JournalEntryId.HasValue == true
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
@@ -2640,6 +2642,7 @@ public class LandAcquisitionsController : ControllerBase
 
             var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
             {
+                EstateAcquisitionId = acquisition.Id, EstatePayableKind = EstatePayableKind.SurveyorFee,
                 SupplierInvoiceNumber = BuildSurveyorPaymentInvoiceNumber(acquisition.ProjectReference),
                 SupplierId = supplier.Id,
                 InvoiceDate = DateTime.UtcNow,
@@ -2661,7 +2664,7 @@ public class LandAcquisitionsController : ControllerBase
                         Quantity = 1m,
                         UnitPrice = feeAmount.Value,
                         GLAccountId = debitAccountId,
-                        TaxTreatment = TaxTreatment.OutOfScope,
+                        TaxTreatment = TaxTreatment.PendingReview,
                         Unit = "Survey"
                     }
                 }
@@ -2788,7 +2791,8 @@ public class LandAcquisitionsController : ControllerBase
         var surveyorPayment = activeAllocation?.VendorPayment;
         var completedPayment = completedAllocations.FirstOrDefault()?.VendorPayment;
         var payableAmount = SnapshotDecimal(surveySnapshot, "surveyorFeeAmount") ?? invoice.TotalAmount;
-        var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
+        var invoiceAmountMatches = EstateSourceAmountMatches(invoice, payableAmount);
+        if (invoice.EstateAcquisitionId.HasValue) payableAmount = invoice.TotalAmount;
         var amountPaid = completedAllocations.Sum(allocation => allocation.AllocatedAmount);
         var balanceAmount = Math.Max(0m, invoice.TotalAmount - amountPaid);
         var isPaid = invoice.Status is VendorInvoiceStatus.Approved or VendorInvoiceStatus.PartiallyPaid or VendorInvoiceStatus.Paid
@@ -2928,8 +2932,10 @@ public class LandAcquisitionsController : ControllerBase
             .FirstOrDefaultAsync(item =>
                 item.TenantId == acquisition.TenantId &&
                 !item.IsDeleted &&
-                item.Reference == sourceReference,
+                (item.EstateAcquisitionId == acquisition.Id && item.EstatePayableKind == EstatePayableKind.VendorConsideration || item.Reference == sourceReference),
                 cancellationToken);
+        if (invoice != null && (invoice.EstateAcquisitionId != acquisition.Id || invoice.EstatePayableKind != EstatePayableKind.VendorConsideration))
+            throw new InvalidOperationException("An existing invoice uses this Estate reference without verified source lineage. Finance must reconcile it; a duplicate will not be created.");
         var landDebitAccountId = invoice?.JournalEntryId.HasValue == true
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
@@ -2944,6 +2950,7 @@ public class LandAcquisitionsController : ControllerBase
             var dueDate = SnapshotDate(negotiationSnapshot, "agreementPaymentDueDate") ?? DateTime.UtcNow;
             var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
             {
+                EstateAcquisitionId = acquisition.Id, EstatePayableKind = EstatePayableKind.VendorConsideration,
                 SupplierInvoiceNumber = acquisition.Agreement?.BoardApprovalReference ?? SnapshotText(approvalSnapshot, "boardApprovalReference") ?? acquisition.ProjectReference,
                 SupplierId = supplier.Id,
                 InvoiceDate = DateTime.UtcNow,
@@ -2965,7 +2972,7 @@ public class LandAcquisitionsController : ControllerBase
                         Quantity = 1m,
                         UnitPrice = agreedAmount.Value,
                         GLAccountId = landDebitAccountId,
-                        TaxTreatment = TaxTreatment.OutOfScope,
+                        TaxTreatment = TaxTreatment.PendingReview,
                         Unit = "Agreement"
                     }
                 }
@@ -3073,8 +3080,10 @@ public class LandAcquisitionsController : ControllerBase
             .FirstOrDefaultAsync(item =>
                 item.TenantId == acquisition.TenantId &&
                 !item.IsDeleted &&
-                item.Reference == sourceReference,
+                (item.EstateAcquisitionId == acquisition.Id && item.EstatePayableKind == EstatePayableKind.StampDuty || item.Reference == sourceReference),
                 cancellationToken);
+        if (invoice != null && (invoice.EstateAcquisitionId != acquisition.Id || invoice.EstatePayableKind != EstatePayableKind.StampDuty))
+            throw new InvalidOperationException("An existing invoice uses this Estate reference without verified source lineage. Finance must reconcile it; a duplicate will not be created.");
         var stampDutyDebitAccountId = invoice?.JournalEntryId.HasValue == true
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
@@ -3120,6 +3129,7 @@ public class LandAcquisitionsController : ControllerBase
 
             var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
             {
+                EstateAcquisitionId = acquisition.Id, EstatePayableKind = EstatePayableKind.StampDuty,
                 SupplierInvoiceNumber = assessment.AssessmentReference,
                 SupplierId = supplier.Id,
                 InvoiceDate = assessment.AssessmentDate ?? DateTime.UtcNow,
@@ -3141,7 +3151,7 @@ public class LandAcquisitionsController : ControllerBase
                         Quantity = 1m,
                         UnitPrice = assessment.DutyAmount,
                         GLAccountId = stampDutyDebitAccountId,
-                        TaxTreatment = TaxTreatment.OutOfScope,
+                        TaxTreatment = TaxTreatment.PendingReview,
                         Unit = "Assessment"
                     }
                 }
@@ -3253,8 +3263,10 @@ public class LandAcquisitionsController : ControllerBase
             .FirstOrDefaultAsync(item =>
                 item.TenantId == acquisition.TenantId &&
                 !item.IsDeleted &&
-                item.Reference == sourceReference,
+                (item.EstateAcquisitionId == acquisition.Id && item.EstatePayableKind == EstatePayableKind.OtherAcquisitionCosts || item.Reference == sourceReference),
                 cancellationToken);
+        if (invoice != null && (invoice.EstateAcquisitionId != acquisition.Id || invoice.EstatePayableKind != EstatePayableKind.OtherAcquisitionCosts))
+            throw new InvalidOperationException("An existing invoice uses this Estate reference without verified source lineage. Finance must reconcile it; a duplicate will not be created.");
         var debitAccountId = invoice?.JournalEntryId.HasValue == true
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
@@ -3269,6 +3281,7 @@ public class LandAcquisitionsController : ControllerBase
                 .Min();
             var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
             {
+                EstateAcquisitionId = acquisition.Id, EstatePayableKind = EstatePayableKind.OtherAcquisitionCosts,
                 SupplierInvoiceNumber = $"OTHER-{acquisition.ProjectReference}",
                 SupplierId = supplier.Id,
                 InvoiceDate = DateTime.UtcNow,
@@ -3288,7 +3301,7 @@ public class LandAcquisitionsController : ControllerBase
                     Quantity = 1m,
                     UnitPrice = service.Amount,
                     GLAccountId = debitAccountId,
-                    TaxTreatment = TaxTreatment.OutOfScope,
+                    TaxTreatment = TaxTreatment.PendingReview,
                     Unit = "Service"
                 }).ToList()
             }, cancellationToken);
@@ -3384,7 +3397,7 @@ public class LandAcquisitionsController : ControllerBase
             paidAmount = invoice.PaidAmount;
         }
 
-        var payableAmount = SnapshotDecimal(paymentSnapshot, "otherAmountDue") ?? invoice.TotalAmount;
+        var payableAmount = invoice.EstateAcquisitionId.HasValue ? invoice.TotalAmount : SnapshotDecimal(paymentSnapshot, "otherAmountDue") ?? invoice.TotalAmount;
         var balanceAmount = Math.Max(0m, payableAmount - paidAmount);
         var isPaid = completedPayment != null && balanceAmount <= 0.01m;
         var paymentNotes = vendorPayment == null
@@ -3416,6 +3429,8 @@ public class LandAcquisitionsController : ControllerBase
         VendorInvoice invoice,
         CancellationToken cancellationToken)
     {
+        if (invoice.EstateAcquisitionId.HasValue && invoice.LineItems.Any(line => !line.IsDeleted && line.TaxTreatment == TaxTreatment.PendingReview))
+            return;
         if (invoice.Status == VendorInvoiceStatus.Draft)
         {
             await _vendorInvoiceService.SubmitForApprovalAsync(invoice.Id, cancellationToken);
@@ -3549,7 +3564,8 @@ public class LandAcquisitionsController : ControllerBase
         var vendorPayment = activeAllocation?.VendorPayment;
         var completedPayment = completedAllocations.FirstOrDefault()?.VendorPayment;
         var payableAmount = SnapshotDecimal(paymentSnapshot, "agreedAmount") ?? invoice.TotalAmount;
-        var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
+        var invoiceAmountMatches = EstateSourceAmountMatches(invoice, payableAmount);
+        if (invoice.EstateAcquisitionId.HasValue) payableAmount = invoice.TotalAmount;
         var amountPaid = completedAllocations.Sum(allocation => allocation.AllocatedAmount);
         var balanceAmount = Math.Max(0m, invoice.TotalAmount - amountPaid);
         var isPaid = invoice.Status is VendorInvoiceStatus.Approved or VendorInvoiceStatus.PartiallyPaid or VendorInvoiceStatus.Paid
@@ -3601,6 +3617,9 @@ public class LandAcquisitionsController : ControllerBase
         => status is VendorPaymentStatus.Processed
             or VendorPaymentStatus.Cleared
             or VendorPaymentStatus.Reconciled;
+
+    private static bool EstateSourceAmountMatches(VendorInvoice invoice, decimal sourceAmount)
+        => AmountsMatch(invoice.EstateAcquisitionId.HasValue ? invoice.SubTotal : invoice.TotalAmount, sourceAmount);
 
     private static bool AmountsMatch(decimal left, decimal right)
         => Math.Abs(left - right) < 0.01m;
@@ -3678,7 +3697,8 @@ public class LandAcquisitionsController : ControllerBase
         var payableAmount = stampDutyAmount > 0m
             ? stampDutyAmount
             : invoice.TotalAmount;
-        var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
+        var invoiceAmountMatches = EstateSourceAmountMatches(invoice, payableAmount);
+        if (invoice.EstateAcquisitionId.HasValue) payableAmount = invoice.TotalAmount;
         var amountPaid = completedAllocations.Sum(allocation => allocation.AllocatedAmount);
         var balanceAmount = Math.Max(0m, invoice.TotalAmount - amountPaid);
         var isPaid = invoice.Status is VendorInvoiceStatus.Approved or VendorInvoiceStatus.PartiallyPaid or VendorInvoiceStatus.Paid

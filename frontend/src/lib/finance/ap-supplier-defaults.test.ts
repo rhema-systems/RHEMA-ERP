@@ -13,6 +13,25 @@ const values = (): ApSupplierDefaultValues => ({ paymentTermId: '', apAccountId:
 const taxes = new Set(['vat']);
 
 describe('visible AP supplier-default assignments', () => {
+  it('routes typed supplier charges while preserving explicit line accounts', () => {
+    const current = values();
+    current.lineItems = [
+      { sourceLineId: 'freight', lineItemType: 'Freight', glAccountId: 'old-purchases' },
+      { sourceLineId: 'misc', lineItemType: 'Miscellaneous' },
+      { sourceLineId: 'interest', lineItemType: 'FinanceCharge', glAccountId: 'manual-account' },
+    ];
+    const source = { ...defaults, postingDefaults: { ...defaults.postingDefaults,
+      defaultFreightAccountId: 'freight-expense', defaultMiscellaneousAccountId: 'misc-expense',
+      defaultFinanceChargesAccountId: 'interest-expense' } };
+    const plan = planApSupplierDefaults(current, source, new Set(['interest:glAccountId']), taxes);
+    expect(plan.assignments).toContainEqual({ field: 'lineItems.0.glAccountId', value: 'freight-expense' });
+    expect(plan.assignments).toContainEqual({ field: 'lineItems.1.glAccountId', value: 'misc-expense' });
+    expect(plan.assignments).not.toContainEqual(expect.objectContaining({ field: 'lineItems.2.glAccountId' }));
+    current.lineItems[0].lineItemType = 'Expense';
+    expect(planApSupplierDefaults(current, source, new Set(), taxes).assignments)
+      .toContainEqual({ field: 'lineItems.0.glAccountId', value: 'purchases' });
+  });
+
   it('fills visible header accounts/payment/tax and applicable lines, but never invents a WHT tax ID', () => {
     const plan = planApSupplierDefaults(values(), defaults, new Set(), taxes);
     expect(plan.assignments).toContainEqual({ field: 'paymentTermId', value: 'net30' });

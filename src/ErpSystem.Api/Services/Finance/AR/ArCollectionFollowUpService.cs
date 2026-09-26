@@ -210,7 +210,7 @@ public sealed class ArCollectionFollowUpService : IArCollectionFollowUpService
                 partner.TenantId == tenantId &&
                 !partner.IsDeleted &&
                 exposurePartnerIds.Contains(partner.Id) &&
-                (partner.PartnerType == "Customer" || partner.PartnerType == "Both"))
+                BusinessPartnerRoles.CustomerTypes.Contains(partner.PartnerType))
             .Select(partner => partner.Id)
             .ToListAsync(cancellationToken))
             .ToHashSet();

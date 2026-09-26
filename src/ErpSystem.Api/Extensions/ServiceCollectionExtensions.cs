@@ -1346,6 +1346,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPolicyService, ErpSystem.Core.Services.Procurement.ProcurementPolicyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementComplianceDecisionService, ErpSystem.Core.Services.Procurement.ProcurementComplianceDecisionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSodGuardService, ErpSystem.Core.Services.Procurement.ProcurementSodGuardService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSodPolicy, ErpSystem.Core.Services.Procurement.ProcurementSodPolicy>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAccessControlService, ErpSystem.Core.Services.Procurement.ProcurementAccessControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementControlEventService, ErpSystem.Core.Services.Procurement.ProcurementControlEventService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditRecordProvider, ErpSystem.Core.Services.Audit.PlatformAuditLogRecordProvider>();
@@ -1490,6 +1491,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Notification dispatcher background service - sends pending notifications on schedule with dead-letter support
             services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.ProcurementCalendarBackgroundService>();
+            services.AddScoped<ErpSystem.Core.Services.Procurement.ProcurementTenderClosingProcessor>();
+            services.AddHostedService<ErpSystem.Api.Services.ProcurementTenderClosingBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.ProcurementSupplierDueDiligenceBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.ProcurementSupplierAvlBackgroundService>();
 

@@ -130,8 +130,10 @@ public sealed class SupplierDebitNoteFoundationTests
     public void MigrationRepairsHistoricalTablesAndCreatesApplicationConstraints()
     {
         using var context = CreateContext();
-        context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+        var activeMigrations = context.GetService<IMigrationsAssembly>().Migrations.Keys;
+        activeMigrations.Should().Contain("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+        activeMigrations.Should().NotContain(new[] { MigrationId, PrecisionMigrationId, HardeningMigrationId },
+            "archived supplier migrations must not replay, while later additive migrations remain active");
         var sql = ArchivedMigrationSource.Read("20260818103000_AddSupplierDebitNoteLifecycleAndApplications.cs");
 
         sql.Should().Contain("OBJECT_ID(N'[dbo].[SupplierDebitNotes]', N'U') IS NULL");

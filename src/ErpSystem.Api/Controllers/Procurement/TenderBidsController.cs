@@ -286,6 +286,10 @@ public class TenderBidsController : ControllerBase
             var bid = await _bidService.UpdateBidAsync(id, dto);
             return Ok(bid);
         }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(BidDocumentProblem(ex));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -525,8 +529,15 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
+            var bid = await _bidService.GetBidByIdAsync(bidId);
+            if (bid is null || !await CanAccessBidAsync(bid) || !bid.Items.Any(item => item.Id == itemId))
+                return NotFound();
             await _bidService.DeleteBidItemAsync(itemId);
             return NoContent();
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(BidDocumentProblem(ex));
         }
         catch (InvalidOperationException ex)
         {
@@ -548,7 +559,8 @@ public class TenderBidsController : ControllerBase
         Guid id,
         IFormFile file,
         [FromForm] string documentType,
-        [FromForm] string? documentName = null)
+        [FromForm] string? documentName = null,
+        [FromForm] Guid? tenderItemId = null)
     {
         try
         {
@@ -563,7 +575,8 @@ public class TenderBidsController : ControllerBase
                 return NotFound("Bid not found");
             }
 
-            var normalizedType = documentType?.Trim();
+            await _bidService.ValidateBidDocumentChangeAsync(id, tenderItemId);
+            var normalizedType = tenderItemId.HasValue ? "TechnicalItemSupportingDocument" : documentType?.Trim();
             if (string.IsNullOrWhiteSpace(normalizedType) || normalizedType.Length > 50)
                 return BadRequest("A valid document type is required.");
             var safeName = Path.GetFileName(file.FileName);
@@ -631,6 +644,7 @@ public class TenderBidsController : ControllerBase
             // Create DTO
             var dto = new UploadBidDocumentDto
             {
+                TenderItemId = tenderItemId,
                 DocumentName = normalizedName,
                 DocumentType = normalizedType
             };
@@ -651,6 +665,18 @@ public class TenderBidsController : ControllerBase
                 throw;
             }
             return Created($"/api/procurement/TenderBids/{id}/documents/{document.Id}", document);
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(BidDocumentProblem(ex));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden, Title = "Bid document access denied", Detail = ex.Message,
+                Extensions = { ["code"] = "BID_DOCUMENT_FORBIDDEN" }
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -740,8 +766,20 @@ public class TenderBidsController : ControllerBase
         {
             var bid = await _bidService.GetBidByIdAsync(bidId);
             if (bid is null || !await CanAccessBidAsync(bid)) return NotFound();
-            await _bidService.DeleteBidDocumentAsync(documentId);
+            await _bidService.DeleteBidDocumentAsync(documentId, bidId);
             return NoContent();
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(BidDocumentProblem(ex));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new ProblemDetails
+            {
+                Status = StatusCodes.Status403Forbidden, Title = "Bid document access denied", Detail = ex.Message,
+                Extensions = { ["code"] = "BID_DOCUMENT_FORBIDDEN" }
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -1060,8 +1098,16 @@ public class TenderBidsController : ControllerBase
     {
         try
         {
+            var lot = await _bidService.GetBidLotByIdAsync(bidLotId);
+            if (lot is null) return NotFound();
+            var bid = await _bidService.GetBidByIdAsync(lot.TenderBidId);
+            if (bid is null || !await CanAccessBidAsync(bid)) return NotFound();
             await _bidService.DeleteBidLotAsync(bidLotId);
             return NoContent();
+        }
+        catch (TenderBidInitiationValidationException ex)
+        {
+            return UnprocessableEntity(BidDocumentProblem(ex));
         }
         catch (InvalidOperationException ex)
         {
@@ -1119,6 +1165,15 @@ public class TenderBidsController : ControllerBase
     }
 
     #endregion
+
+    private ProblemDetails BidDocumentProblem(TenderBidInitiationValidationException exception) => new()
+    {
+        Status = StatusCodes.Status422UnprocessableEntity,
+        Title = "Bid document change rejected",
+        Detail = exception.Message,
+        Instance = HttpContext.Request.Path,
+        Extensions = { ["code"] = exception.Code, ["correlationId"] = HttpContext.TraceIdentifier }
+    };
 
     private ProblemDetails PaymentAdmissionProblem(TenderBidInitiationValidationException exception) => new()
     {

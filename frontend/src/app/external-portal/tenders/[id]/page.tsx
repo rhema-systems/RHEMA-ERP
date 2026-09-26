@@ -246,7 +246,7 @@ export default function ExternalTenderDetailPage() {
       )}
 
       {/* Quick Info */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-500">Tender Type</CardTitle>
@@ -261,16 +261,7 @@ export default function ExternalTenderDetailPage() {
             </p>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Estimated Value</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xl font-bold text-green-600">
-              {tender.currency} {tender.estimatedValue?.toLocaleString() || 'N/A'}
-            </p>
-          </CardContent>
-        </Card>
+
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-500">Submission Deadline</CardTitle>
@@ -378,9 +369,6 @@ export default function ExternalTenderDetailPage() {
                             )}
                           </div>
                           <div className="text-right text-sm">
-                            {lot.estimatedValue && (
-                              <p className="font-medium">{lot.currency || 'USD'} {lot.estimatedValue.toLocaleString()}</p>
-                            )}
                             <p className="text-gray-500">{lot.items?.length || 0} item(s)</p>
                           </div>
                         </div>

@@ -17,7 +17,7 @@ export type PeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
 export type RevaluationFrequency = 'None' | 'Monthly' | 'Quarterly' | 'Annually';
 export type SubledgerModule = 'AR' | 'AP';
 export type SubledgerAdjustmentType = 'Debit' | 'Credit';
-export type SubledgerAdjustmentPurpose = 'StandardAdjustment' | 'OpeningBalance';
+export type SubledgerAdjustmentPurpose = 'StandardAdjustment' | 'OpeningBalance' | 'FinanceCharge' | 'Writeoff' | 'OverpaymentWriteoff';
 export type SubledgerAdjustmentStatus = 'Posted' | 'Reversed';
 
 // ============================================
@@ -1130,6 +1130,7 @@ export interface SubledgerAdjustmentJournal {
 }
 
 export interface CreateSubledgerAdjustmentJournalDto {
+    requestId?: string;
     module: SubledgerModule;
     purpose?: SubledgerAdjustmentPurpose;
     customerId?: string;

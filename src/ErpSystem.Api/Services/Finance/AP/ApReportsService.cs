@@ -502,13 +502,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .GetQueryable(item =>
                     item.TenantId == tenantId &&
                     !item.IsDeleted &&
-                    item.PurchaseOrderId.HasValue &&
-                    selectedPoIds.Contains(item.PurchaseOrderId.Value) &&
+                    ((item.PurchaseOrderId.HasValue && selectedPoIds.Contains(item.PurchaseOrderId.Value)) ||
+                     (item.AutoInvoiceRequestId.HasValue && item.LineItems.Any(line => !line.IsDeleted && line.TenantId == tenantId &&
+                         line.PurchaseOrderItem != null && selectedPoIds.Contains(line.PurchaseOrderItem.PurchaseOrderId)))) &&
                     item.InvoiceDate < cutoffExclusive &&
                     item.SubmittedDate.HasValue &&
                     item.SubmittedDate.Value < cutoffExclusive &&
                     item.ApprovedDate.HasValue &&
                     item.ApprovedDate.Value < cutoffExclusive)
+                .Include(item => item.LineItems.Where(line => !line.IsDeleted))
+                    .ThenInclude(line => line.PurchaseOrderItem)
                 .ToListAsync(cancellationToken);
             var invoiceIds = allInvoices.Select(item => item.Id).ToList();
             var invoiceResourceIds = invoiceIds.Select(item => item.ToString()).ToList();
@@ -666,8 +669,19 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var commercialState = purchaseOrderCommercialStates[purchaseOrder.Id];
                 var currency = NormalizeCurrency(commercialState.Currency, "GHS");
                 var poInvoices = allInvoices
-                    .Where(item => item.PurchaseOrderId == purchaseOrder.Id)
+                    .Where(item => item.PurchaseOrderId == purchaseOrder.Id || (item.AutoInvoiceRequestId.HasValue &&
+                        item.LineItems.Any(line => line.PurchaseOrderItem?.PurchaseOrderId == purchaseOrder.Id)))
                     .ToList();
+                // Payments settle the whole supplier bill. Attribute consolidated bills and
+                // their settlement to each PO by the invoice's fixed gross line amounts.
+                var invoiceShares = poInvoices.ToDictionary(item => item.Id, item =>
+                {
+                    if (!item.AutoInvoiceRequestId.HasValue) return 1m;
+                    var gross = item.LineItems.Sum(line => line.LineTotal - line.DiscountAmount + line.TaxAmount);
+                    if (gross <= 0m) return 0m;
+                    return item.LineItems.Where(line => line.PurchaseOrderItem?.PurchaseOrderId == purchaseOrder.Id)
+                        .Sum(line => line.LineTotal - line.DiscountAmount + line.TaxAmount) / gross;
+                });
                 var poInvoiceIds = poInvoices.Select(item => item.Id).ToHashSet();
                 var poAllocations = allocations
                     .Where(item => poInvoiceIds.Contains(item.VendorInvoiceId))
@@ -766,14 +780,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var acceptedReceiptAmount = RoundMoney(acceptedReceiptValue);
                 var settledAmount = RoundMoney(effectivePoAllocations
                     .Where(item => IsAllocationPostedAsOf(item, poPostings))
-                    .Sum(item => item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount));
+                    .Sum(item => (item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount) * invoiceShares[item.VendorInvoiceId]));
                 var invoicePostedAmount = RoundMoney(poPostings
                     .Where(item =>
                         item.SourceDocumentType == "VendorInvoice" &&
                         item.PostingAction == "Post" &&
                         activeInvoiceIds.Contains(item.SourceDocumentId) &&
                         GetActivePostingAsOf(poPostings, "VendorInvoice", item.SourceDocumentId)?.Id == item.Id)
-                    .Sum(item => GetTransactionDebit(item, currency)));
+                    .Sum(item => GetTransactionDebit(item, currency) * invoiceShares[item.SourceDocumentId]));
                 var activePoAllocations = effectivePoAllocations
                     .Where(item => IsAllocationPostedAsOf(item, poPostings))
                     .ToList();
@@ -797,7 +811,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                                         allocationId);
                                 return applicationPosting == null
                                     ? 0m
-                                    : GetTransactionDebit(applicationPosting, currency);
+                                    : GetTransactionDebit(applicationPosting, currency) * invoiceShares[group.Single(item => item.Id == allocationId).VendorInvoiceId];
                             });
                         }
 
@@ -811,7 +825,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             .GetValueOrDefault(payment.Id);
                         if (paymentSettlement <= 0m) return 0m;
                         var orderSettlement = RoundMoney(group.Sum(item =>
-                            item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount));
+                            (item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount) * invoiceShares[item.VendorInvoiceId]));
                         return RoundMoney(
                             GetTransactionDebit(paymentPosting, currency) * orderSettlement / paymentSettlement);
                     }));
@@ -830,7 +844,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         .Sum(item => item.ReservedAmount)),
                     CommitmentGroupOrderAmount = RoundMoney(commitmentGroupOrders.Sum(item => item.TotalAmount)),
                     AcceptedReceiptAmount = acceptedReceiptAmount,
-                    InvoiceAmount = RoundMoney(activeInvoices.Sum(item => item.TotalAmount)),
+                    InvoiceAmount = RoundMoney(activeInvoices.Sum(item => item.TotalAmount * invoiceShares[item.Id])),
                     SettledAmount = settledAmount,
                     InvoicePostedAmount = invoicePostedAmount,
                     PaymentPostedAmount = paymentPostedAmount,
@@ -2721,7 +2735,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var partners = await _unitOfWork.Repository<BusinessPartner>()
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
-                    (p.PartnerType == "Supplier" || p.PartnerType == "Contractor" || p.PartnerType == "Both"))
+                    BusinessPartnerRoles.ProcurementTypes.Contains(p.PartnerType))
                 .ToListAsync(cancellationToken);
 
             var identityLinks = await _unitOfWork.Repository<ApSupplierIdentityLink>()

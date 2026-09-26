@@ -8,6 +8,12 @@ namespace ErpSystem.Core.Entities.Procurement;
 /// </summary>
 public class ProcurementSettings : TenantEntity
 {
+    /// <summary>Actor separation for the procurement transaction chain. Other ERP modules retain their own controls.</summary>
+    public bool EnforceSegregationOfDuties { get; set; } = true;
+
+    /// <summary>Close published tenders at their UTC submission deadline; statutory opening remains a separate controlled action.</summary>
+    public bool AutoCloseTenders { get; set; } = false;
+
     // Item Creation Settings
     /// <summary>
     /// When enabled, prompt users to create inventory items for new item names

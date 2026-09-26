@@ -19,6 +19,53 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class BusinessPartnerPostingDefaultsTests
 {
     [Fact]
+    public async Task UnrelatedPartnerEditPreservesAnUnchangedLegacyTaxExpenseAccount()
+    {
+        var partner = Partner();
+        var fixture = Fixture(partner);
+        var account = new Account { TenantId = partner.TenantId, AccountType = AccountType.Expense,
+            Status = AccountStatus.Active, AllowDirectPosting = true };
+        partner.DefaultTaxAccountId = account.Id;
+        fixture.Accounts.Setup(repository => repository.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        var result = await fixture.Service.UpdateAsync(partner.Id, new UpdateBusinessPartnerDto
+        {
+            PartnerName = "Renamed supplier", PostingDefaults = new() { DefaultTaxAccountId = account.Id }
+        });
+        result.PartnerName.Should().Be("Renamed supplier");
+        result.PostingDefaults.DefaultTaxAccountId.Should().Be(account.Id);
+        partner.DefaultTaxAccountId.Should().Be(account.Id);
+    }
+
+    [Theory]
+    [InlineData(AccountType.Asset, true)]
+    [InlineData(AccountType.Liability, true)]
+    [InlineData(AccountType.Expense, false)]
+    [InlineData(AccountType.Revenue, false)]
+    public async Task SupplierInputTaxFallbackRequiresBalanceSheetPostingAccount(AccountType type, bool accepted)
+    {
+        var partner = Partner();
+        var fixture = Fixture(partner);
+        var account = new Account { TenantId = partner.TenantId, AccountType = type,
+            Status = AccountStatus.Active, IsControlAccount = accepted, AllowDirectPosting = !accepted };
+        fixture.Accounts.Setup(repository => repository.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        var update = () => fixture.Service.UpdateAsync(partner.Id, new UpdateBusinessPartnerDto
+        {
+            PartnerName = partner.PartnerName,
+            PostingDefaults = new() { DefaultTaxAccountId = account.Id }
+        });
+        if (accepted)
+        {
+            var result = await update();
+            result.PostingDefaults.DefaultTaxAccountId.Should().Be(account.Id);
+        }
+        else
+        {
+            await update.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Input tax fallback*");
+            partner.DefaultTaxAccountId.Should().BeNull();
+        }
+    }
+
+    [Fact]
     public void WithholdingMigrationUsesTheMappedInvoiceAndTaxTablesAndPreservesLegacyRows()
     {
         // Use production relational conventions for table attributes. InMemory
@@ -443,6 +490,104 @@ public sealed class BusinessPartnerPostingDefaultsTests
             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.Invoke(null,
             [partner, resource, ProcurementMasterDataTargetKind.BusinessPartner, payload])!;
 
+    [Theory]
+    [InlineData("Supplier")]
+    [InlineData("Customer")]
+    public async Task AddingSecondRoleKeepsIdentityAndIndependentAccounts(string originalRole)
+    {
+        var partner = Partner();
+        partner.PartnerType = originalRole;
+        partner.DefaultApAccountId = Guid.NewGuid();
+        partner.DefaultArAccountId = Guid.NewGuid();
+        var id = partner.Id;
+        var code = partner.PartnerCode;
+        var ap = partner.DefaultApAccountId;
+        var ar = partner.DefaultArAccountId;
+        var fixture = Fixture(partner);
+
+        var result = await fixture.Service.UpdateAsync(id, new UpdateBusinessPartnerDto
+        {
+            PartnerName = partner.PartnerName, PartnerType = BusinessPartnerRoles.CustomerAndSupplier
+        });
+
+        result.Id.Should().Be(id);
+        result.PartnerCode.Should().Be(code);
+        result.PostingDefaults.DefaultApAccountId.Should().Be(ap);
+        result.ReceivablesDefaults.DefaultArAccountId.Should().Be(ar);
+        BusinessPartnerRoles.HasCustomer(result.PartnerType).Should().BeTrue();
+        BusinessPartnerRoles.HasSupplier(result.PartnerType).Should().BeTrue();
+        fixture.Partners.Verify(x => x.CreateAsync(It.IsAny<BusinessPartner>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReceivablesEditDoesNotOverwritePayables()
+    {
+        var partner = Partner();
+        partner.PartnerType = BusinessPartnerRoles.CustomerAndSupplier;
+        partner.DefaultApAccountId = Guid.NewGuid();
+        var ap = partner.DefaultApAccountId;
+        var fixture = Fixture(partner);
+        var ar = new Account { Id = Guid.NewGuid(), TenantId = partner.TenantId,
+            AccountType = AccountType.Asset, Status = AccountStatus.Active, IsControlAccount = true };
+        fixture.Accounts.Setup(x => x.GetByIdAsync(ar.Id)).ReturnsAsync(ar);
+
+        await fixture.Service.UpdateAsync(partner.Id, new UpdateBusinessPartnerDto
+        {
+            PartnerName = partner.PartnerName,
+            ReceivablesDefaults = new() { DefaultArAccountId = ar.Id }
+        });
+        partner.DefaultArAccountId.Should().Be(ar.Id);
+        partner.DefaultApAccountId.Should().Be(ap);
+        BusinessPartnerPostingDefaults.Apply(partner, new() { DefaultApAccountId = Guid.NewGuid() });
+        partner.DefaultArAccountId.Should().Be(ar.Id);
+    }
+
+    [Fact]
+    public async Task ExternalUsersCannotChangeRolesOrReceivablesDefaultsOrReadAnotherUser()
+    {
+        var partner = Partner();
+        var fixture = Fixture(partner, external: true);
+        var role = () => fixture.Service.UpdateAsync(partner.Id, new UpdateBusinessPartnerDto
+            { PartnerName = partner.PartnerName, PartnerType = BusinessPartnerRoles.CustomerAndSupplier });
+        await role.Should().ThrowAsync<UnauthorizedAccessException>();
+        partner.PartnerType.Should().Be("Supplier");
+        var defaults = () => fixture.Service.UpdateAsync(partner.Id, new UpdateBusinessPartnerDto
+            { PartnerName = partner.PartnerName, ReceivablesDefaults = new() });
+        await defaults.Should().ThrowAsync<UnauthorizedAccessException>();
+        var lookup = () => fixture.Service.GetByUserIdAsync(Guid.NewGuid());
+        await lookup.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Theory]
+    [InlineData("foreign")]
+    [InlineData("liability")]
+    [InlineData("inactive")]
+    public async Task ReceivablesAccountMustBeEligibleTenantAsset(string invalid)
+    {
+        var partner = Partner();
+        partner.PartnerType = BusinessPartnerRoles.CustomerAndSupplier;
+        var fixture = Fixture(partner);
+        var account = new Account { Id = Guid.NewGuid(), TenantId = invalid == "foreign" ? Guid.NewGuid() : partner.TenantId,
+            AccountType = invalid == "liability" ? AccountType.Liability : AccountType.Asset,
+            Status = invalid == "inactive" ? AccountStatus.Inactive : AccountStatus.Active, IsControlAccount = true };
+        fixture.Accounts.Setup(x => x.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        var update = () => fixture.Service.UpdateAsync(partner.Id, new UpdateBusinessPartnerDto
+            { PartnerName = partner.PartnerName, ReceivablesDefaults = new() { DefaultArAccountId = account.Id } });
+        await update.Should().ThrowAsync<InvalidOperationException>();
+        partner.DefaultArAccountId.Should().BeNull();
+    }
+
+    [Fact]
+    public void RoleRemovalIsRejectedAndLegacyRolesKeepTheirMeaning()
+    {
+        var remove = () => BusinessPartnerRoles.ValidateRoleChange(BusinessPartnerRoles.CustomerAndSupplier, "Supplier");
+        remove.Should().Throw<InvalidOperationException>();
+        BusinessPartnerRoles.HasCustomer("Supplier").Should().BeFalse();
+        BusinessPartnerRoles.HasSupplier("Customer").Should().BeFalse();
+        BusinessPartnerRoles.CanProcure("Contractor").Should().BeTrue();
+        BusinessPartnerRoles.HasCustomer("Both").Should().BeTrue("legacy AR eligibility remains compatible");
+    }
+
     private static BusinessPartner Partner() => new()
     {
         Id = Guid.NewGuid(), TenantId = Guid.NewGuid(), PartnerName = "Test supplier",
@@ -457,6 +602,11 @@ public sealed class BusinessPartnerPostingDefaultsTests
         var current = new Mock<ICurrentUserProvider>();
         current.SetupGet(x => x.TenantId).Returns(partner.TenantId);
         current.SetupGet(x => x.IsExternalUser).Returns(external);
+        current.SetupGet(x => x.IsAuthenticated).Returns(true);
+        current.SetupGet(x => x.UserId).Returns(Guid.NewGuid());
+        var access = new Mock<IProcurementAccessControlService>();
+        access.Setup(x => x.EnforceCapabilityAsync(It.IsAny<ProcurementAccessCapabilityRequest>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = true });
         var accounts = new Mock<IAccountRepository>();
         var banks = new Mock<IGenericRepository<BankAccount>>();
         var taxes = new Mock<IGenericRepository<TaxGroup>>();
@@ -470,7 +620,7 @@ public sealed class BusinessPartnerPostingDefaultsTests
         unit.Setup(x => x.Repository<Tax>()).Returns(withholdingTaxes.Object);
         var service = new BusinessPartnerService(partners.Object, Mock.Of<IBusinessPartnerContactRepository>(),
             current.Object, Mock.Of<IWorkflowIntegrationService>(), Mock.Of<IWorkflowStatusAdapterRegistry>(),
-            Mock.Of<IPaymentTermRepository>(), NullLogger<BusinessPartnerService>.Instance, unit.Object);
+            Mock.Of<IPaymentTermRepository>(), NullLogger<BusinessPartnerService>.Instance, unit.Object, access.Object);
         return new(service, partners, accounts, banks, taxes, withholdingTaxes);
     }
 

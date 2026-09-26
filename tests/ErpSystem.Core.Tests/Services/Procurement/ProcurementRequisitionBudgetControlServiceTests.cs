@@ -21,6 +21,16 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementRequisitionBudgetControlServiceTests
 {
     [Fact]
+    public async Task UnregisteredTenantAdministratorCannotReadProcurementBudgetRecords()
+    {
+        await using var fixture = new Fixture();
+        fixture.SwitchRoles("TenantAdmin");
+        var action = () => fixture.Service.GetReadinessAsync(Guid.NewGuid());
+        await action.Should().ThrowAsync<ProcurementRequisitionBudgetAuthorizationException>()
+            .WithMessage("*records read permission*");
+    }
+
+    [Fact]
     public async Task ApprovedAvailableBudgetIsReservedWithSnapshotAndImmutableAuditLineage()
     {
         await using var fixture = new Fixture();
@@ -672,7 +682,7 @@ public sealed class ProcurementRequisitionBudgetControlServiceTests
     {
         private readonly UnitOfWork _unitOfWork;
         private readonly Mock<ICurrentUserProvider> _currentUser;
-        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase) { "TenantAdmin" };
+        private readonly HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase) { "TDC_FINANCE_REVIEWER" };
 
         public Fixture()
         {

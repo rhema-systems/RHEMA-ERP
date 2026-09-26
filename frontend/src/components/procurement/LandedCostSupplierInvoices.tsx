@@ -13,6 +13,7 @@ import type { LandedCostDetailDto } from '@/services/inventoryManagementService'
 import type { VendorInvoice } from '@/types/ap';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
 import { groupLandedCostsBySupplier } from '@/lib/landed-cost-suppliers';
 
 type Charge = LandedCostInvoiceRequest['charges'][number];
@@ -44,9 +45,9 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
     setLoading(true); setSetupError('');
     try {
       const partners = await businessPartnerService.getAllPartnersForDropdown();
-      setSuppliers(partners.filter(s => ['Supplier', 'Both', 'Contractor'].includes(s.partnerType) &&
+      setSuppliers(partners.filter(s => (hasSupplierRole(s.partnerType) || hasContractorRole(s.partnerType)) &&
         (s.isActive ?? s.status === 'Active') && !s.isBlacklisted && s.approvalStatus === 'Approved'));
-    } catch { setSetupError('Could not load cost suppliers. Retry before posting.'); }
+    } catch { setSetupError('Could not load cost suppliers. Retry before preparing invoices.'); }
     finally { setLoading(false); }
   };
   const start = () => {
@@ -62,29 +63,28 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
     }
     submitting.current = true; setBusy(true); onBusyChange?.(true); setError('');
     try {
-      const result = await landedCostInvoiceService.post(voucher.id, { invoiceDate,
+      const result = await landedCostInvoiceService.prepare(voucher.id, { invoiceDate,
         charges: charges.map(c => ({ ...c, supplierInvoiceNumber: c.supplierInvoiceNumber.trim() })) });
       setInventoryPosted(result.inventoryPosted);
-      if (result.invoicesPending) setError(result.message || 'Inventory posted; invoice creation is pending. Retry Post to finish invoices only.');
-      else setCreated(result.invoices);
+      setCreated(result.invoices);
       onCreated();
-    } catch (e) { setError(getProcurementProblemMessage(e, 'Posting could not be confirmed. Your entries are retained; retry safely. Already posted inventory will not be posted twice.')); }
+    } catch (e) { setError(getProcurementProblemMessage(e, 'Invoice preparation could not be confirmed. Your entries are retained; retry to recover the existing drafts.')); }
     finally { submitting.current = false; setBusy(false); onBusyChange?.(false); }
   };
-  if (!pending.length && !open) return <span className="self-center text-sm text-muted-foreground">Posted · Supplier invoices linked</span>;
+  if (!pending.length && !open) return <span className="self-center text-sm text-muted-foreground">Supplier invoices linked · Post from Invoices</span>;
   return <div className="space-y-1">
     <Button type="button" disabled={disabled || !canCreate || !['Allocated', 'Approved', 'Posted'].includes(voucher.status)} onClick={start}
-      title={!canCreate ? 'Receiving permission and warehouse access are required.' : 'Allocate first, then post inventory and create supplier invoice drafts.'}>
-      {voucher.status === 'Posted' ? 'Retry Post' : 'Post'}
+      title={!canCreate ? 'Receiving permission and warehouse access are required.' : 'Allocate first, then prepare supplier documents and invoice drafts.'}>
+      Prepare supplier invoices
     </Button>
     <Dialog open={open} onOpenChange={value => { if (!busy && !loading) setOpen(value); }}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" onInteractOutside={e => e.preventDefault()}>
-        <DialogHeader><DialogTitle>Post landed costs · {voucher.landedCostNumber}</DialogTitle>
-          <DialogDescription>{inventoryPosted ? 'Inventory is already posted. This completes supplier invoices only.' : 'Post allocated costs to inventory and create supplier invoice drafts in one action.'} Tax is completed later in AP.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>Prepare supplier invoices · {voucher.landedCostNumber}</DialogTitle>
+          <DialogDescription>{inventoryPosted ? 'This voucher was already posted; its existing valuation is retained.' : 'Prepare supplier documents and invoice drafts. Final posting happens from Invoices.'} Review taxes on each draft.</DialogDescription></DialogHeader>
         {created.length ? <div className="space-y-3">
-          <p>Inventory posted. {created.length} supplier invoice{created.length === 1 ? '' : 's'} linked. Open each draft in AP to complete tax review. No invoice approval or financial posting was performed.</p>
+          <p>{created.length} supplier invoice{created.length === 1 ? '' : 's'} linked. Open each draft to review taxes, approve and post.</p>
           {created.map(invoice => <div key={invoice.id} className="rounded-md border p-3 text-sm">
-            <Link className="text-primary underline" href={`/finance/ap/invoices/${invoice.id}`}>{invoice.invoiceNumber} · {invoice.supplierName}</Link>
+            <Link className="text-primary underline" href={`/procurement/supplier-invoices/${invoice.id}`}>{invoice.invoiceNumber} · {invoice.supplierName}</Link>
             <p>{invoice.currencyCode} {invoice.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} · {invoice.status}</p>
           </div>)}
           <Button type="button" onClick={() => setOpen(false)}>Close</Button>
@@ -113,7 +113,7 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
           </div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="button" disabled={busy || loading || Boolean(setupError) || !charges.length} onClick={() => void save()}>{busy ? 'Posting…' : inventoryPosted ? 'Finish invoice drafts' : 'Confirm Post'}</Button></DialogFooter>
+            <Button type="button" disabled={busy || loading || Boolean(setupError) || !charges.length} onClick={() => void save()}>{busy ? 'Preparing…' : 'Prepare drafts'}</Button></DialogFooter>
         </>}
       </DialogContent>
     </Dialog>

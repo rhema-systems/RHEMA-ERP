@@ -175,6 +175,8 @@ public class BusinessPartnersController : ControllerBase
     [HttpGet("user/{userId:guid}")]
     public async Task<ActionResult<BusinessPartnerDetailDto>> GetPartnerByUserId(Guid userId)
     {
+        if (_currentUserProvider.IsExternalUser && userId != _currentUserProvider.UserId)
+            return Problem(statusCode: StatusCodes.Status403Forbidden, detail: "Suppliers can only access their own business partner account.");
         try
         {
             var partner = await _partnerService.GetByUserIdAsync(userId);
@@ -190,6 +192,14 @@ public class BusinessPartnersController : ControllerBase
             _logger.LogError(ex, "Error retrieving business partner by user ID {UserId}", userId);
             return StatusCode(500, "An error occurred while retrieving the business partner");
         }
+    }
+
+    [HttpGet("my-account")]
+    public async Task<IActionResult> GetMyAccount()
+    {
+        var partner = await _partnerService.GetByUserIdAsync(_currentUserProvider.UserId);
+        if (partner == null) return NotFound();
+        return Ok(new { partner.Id, partner.PartnerCode, partner.PartnerName });
     }
 
     /// <summary>

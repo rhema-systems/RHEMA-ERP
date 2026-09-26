@@ -97,7 +97,7 @@ const invoiceSchema = z.object({
     supplierId: z.string().min(1, 'Supplier is required'),
     supplierInvoiceNumber: z.string().optional(),
     purchaseOrderId: z.string().optional(),
-    acceptedSupplyKind: z.enum(['GoodsReceiptInspection', 'ServiceCompletion', 'WorksPaymentCertificate']).optional(),
+    acceptedSupplyKind: z.enum(['GoodsReceiptInspection', 'ServiceCompletion', 'WorksPaymentCertificate', 'GoodsReceiptConsolidation']).optional(),
     acceptedSupplySourceId: z.string().optional(),
     invoiceDate: z.date(),
     dueDate: z.date(),

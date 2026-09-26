@@ -27,7 +27,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ArReceiptPostingMigrationTests
+public sealed partial class ArReceiptPostingMigrationTests
 {
     [Theory]
     [InlineData(InvoiceStatus.Draft)]

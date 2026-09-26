@@ -406,7 +406,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             // source field null would make later list, trace, and approval scope decisions depend on
             // a setting that could change after the payment was created.
             var effectiveBankAccountId = await ResolveBankAccountIdForScopeAsync(
-                dto.BankAccountId,
+                dto.BankAccountId ?? await GetPartnerPaymentBankDefaultAsync(supplier, cancellationToken),
                 cancellationToken);
             await _financeAccessScopeService.EnsureBankAccountAccessAsync(
                 effectiveBankAccountId,
@@ -4536,7 +4536,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ? new InvoiceMatchingResultDto
                 {
                     VendorInvoiceId = invoice.Id,
-                    IsRequired = ProcurementInvoiceThreeWayMatchRules.IsRequired(
+                    IsRequired = invoice.AutoInvoiceRequestId.HasValue || ProcurementInvoiceThreeWayMatchRules.IsRequired(
                         invoice.PurchaseOrderId, invoice.IsOpeningBalance),
                     Message = "The authoritative invoice matching service is not registered.",
                     DecisionKeys = ProcurementPaymentReadinessRules.DecisionKeys.ToList(),
@@ -5399,8 +5399,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (activeAllocations.Any(a => a.DiscountAmount > 0m))
             {
-                var discountAccountId = settings.DiscountReceivedAccountId
-                    ?? throw new InvalidOperationException("Purchase discount received account is not configured for this tenant.");
+                var discountAccountId = await ResolvePaymentDiscountAccountAsync(payment, supplier, settings, cancellationToken);
                 await ResolvePaymentPostingAccountAsync(discountAccountId, "purchase discount received account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
                 foreach (var allocation in activeAllocations.Where(a => a.DiscountAmount > 0m))

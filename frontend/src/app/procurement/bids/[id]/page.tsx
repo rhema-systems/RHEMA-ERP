@@ -1561,6 +1561,7 @@ export default function BidDetailPage() {
                     <TableRow>
                       <TableHead>Document Type</TableHead>
                       <TableHead>Document Name</TableHead>
+                      <TableHead>Lot / Item</TableHead>
                       <TableHead>File Size</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
@@ -1572,6 +1573,9 @@ export default function BidDetailPage() {
                             <Badge variant="outline">{doc.documentType}</Badge>
                           </TableCell>
                           <TableCell>{doc.documentName}</TableCell>
+                          <TableCell>{doc.tenderBidItemId
+                            ? `Lot ${doc.lotNumber ?? '—'} / ${doc.itemDescription ?? 'Item supporting document'}`
+                            : 'Bid document'}</TableCell>
                           <TableCell>
                             {((doc.fileSize ?? 0) / 1024).toFixed(2)} KB
                           </TableCell>

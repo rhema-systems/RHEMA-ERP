@@ -21,6 +21,7 @@ import Link from 'next/link';
 import { authService } from '@/services/auth';
 import { businessPartnerRegistrationService, type BusinessPartnerRegistrationDto } from '@/services/businessPartnerRegistrationService';
 import * as tenderBidService from '@/services/tenderBidService';
+import { SupplierPortalAccount } from '@/components/procurement/SupplierPortalAccount';
 
 export default function ExternalPortalDashboard() {
   const user = authService.getStoredUser();
@@ -185,6 +186,7 @@ export default function ExternalPortalDashboard() {
       </div>
 
       {/* Stats Grid */}
+      <SupplierPortalAccount />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat) => {
           const Icon = stat.icon;

@@ -1163,12 +1163,16 @@ public sealed partial class ApPaymentPostingMigrationTests
                     IntegrityValid = true
                 });
 
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(value => value.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+            It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => $"VP-{Guid.NewGuid():N}");
         var service = new VendorPaymentService(
             new UnitOfWork(db),
             currentUser.Object,
             tenantSettings.Object,
             Mock.Of<ILogger<VendorPaymentService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            numbering.Object,
             workflowService ?? Mock.Of<IWorkflowService>(),
             // Existing posting tests run with access-scope enforcement disabled. The no-op mock
             // isolates those posting assertions while dedicated scope tests exercise fail-closed
@@ -1180,6 +1184,7 @@ public sealed partial class ApPaymentPostingMigrationTests
             fxAccountingService: fxAccountingService,
             approvalPolicyResolver: approvalPolicyResolver,
             withholdingTaxService: withholdingTaxService,
+            apSupplierIdentityService: new ApSupplierIdentityService(db, new UnitOfWork(db), currentUser.Object),
             procurementControlEvents: procurementControlEvents.Object,
             invoicePaymentSod: useRealPaymentSod
                 ? new ProcurementInvoicePaymentSodService(new UnitOfWork(db), currentUser.Object,

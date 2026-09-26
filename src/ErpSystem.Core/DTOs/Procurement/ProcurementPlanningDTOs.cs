@@ -435,6 +435,7 @@ public class ProcurementPlanningReportRowDto
 /// </summary>
 public class ProcurementPlanItemDto
 {
+    public string ReferenceNumber { get; set; } = string.Empty;
     public Guid Id { get; set; }
     public Guid ProcurementPlanId { get; set; }
     public Guid? InventoryItemId { get; set; }

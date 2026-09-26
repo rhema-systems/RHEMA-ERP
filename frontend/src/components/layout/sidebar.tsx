@@ -2390,6 +2390,20 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        title: 'Supplier Invoices',
+        href: '/procurement/supplier-invoices',
+        icon: FileText,
+        roles: PROCUREMENT_ROLES,
+        permissions: [
+          'procurement.records.read',
+          'procurement.purchase-order.read',
+          'Finance.AP.Invoices.Create',
+          'Finance.AP.Invoices.Manage',
+          'Finance.Read',
+        ],
+        accessMode: 'any',
+      },
+      {
         title: 'Tendering',
         href: '/procurement/tendering',
         icon: Gavel,

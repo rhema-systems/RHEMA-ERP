@@ -31,7 +31,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ApInvoicePostingMigrationTests
+public sealed partial class ApInvoicePostingMigrationTests
 {
     [Fact]
     public async Task DraftDistribution_ShouldUseThePostingTaxEngineAndConfiguredInputTaxAccount()
@@ -77,6 +77,7 @@ public sealed class ApInvoicePostingMigrationTests
             invoice.ApprovalStatus = "Draft";
             invoice.ApprovedById = null;
             invoice.ApprovedDate = null;
+            invoice.LineItems.Single().DiscountPercentage = 10m;
             invoice.LineItems.Single().DiscountAmount = 10m;
             invoice.DiscountAmount = 10m;
             invoice.SubTotal = 90m;
@@ -92,10 +93,10 @@ public sealed class ApInvoicePostingMigrationTests
 
         distribution.Status.Should().Be("Proposed");
         distribution.Currency.Should().Be("GHS");
-        distribution.Lines.Single(line => line.AccountId == fixture.ExpenseAccount.Id).Debit.Should().Be(100m);
+        distribution.Lines.Single(line => line.AccountId == fixture.ExpenseAccount.Id).Debit.Should().Be(90m);
         distribution.Lines.Single(line => line.AccountId == fixture.ApAccount.Id).Credit.Should().Be(90m);
-        distribution.Lines.Single(line => line.Type == "Purchase discount").Credit.Should().Be(10m);
-        distribution.TotalDebit.Should().Be(distribution.TotalCredit).And.Be(100m);
+        distribution.Lines.Should().NotContain(line => line.Type == "Purchase discount");
+        distribution.TotalDebit.Should().Be(distribution.TotalCredit).And.Be(90m);
         distribution.Lines.Should().NotContain(line => line.Type.Contains("WHT"));
         distribution.JournalEntryId.Should().BeNull();
         fixture.Invoice.Status.Should().Be(VendorInvoiceStatus.Draft);
@@ -761,7 +762,7 @@ public sealed class ApInvoicePostingMigrationTests
     [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task ForeignApInvoice_ShouldRejectCreateWithoutRateEvidence(bool isOpeningBalance)
+    public async Task ForeignApInvoice_ShouldRequireApprovedRateEvidenceOnlyForOpeningBalances(bool isOpeningBalance)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -790,9 +791,27 @@ public sealed class ApInvoicePostingMigrationTests
             }
         });
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*require an approved exchange-rate record*");
-        (await db.VendorInvoices.CountAsync()).Should().Be(1);
+        if (isOpeningBalance)
+        {
+            await action.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*require an approved exchange-rate record*");
+            (await db.VendorInvoices.CountAsync()).Should().Be(1);
+        }
+        else
+        {
+            // Ordinary invoices retain the existing editable-rate contract; the
+            // governed approved-rate requirement belongs to opening invoices.
+            var created = await action();
+            var draft = await db.VendorInvoices.SingleAsync(item => item.Id == created.Id);
+            draft.Status.Should().Be(VendorInvoiceStatus.Draft);
+            draft.CurrencyCode.Should().Be("USD");
+            draft.ExchangeRate.Should().Be(15m);
+            draft.ExchangeRateId.Should().BeNull();
+            draft.BaseCurrencyAmount.Should().Be(1500m);
+            (await db.VendorInvoices.CountAsync()).Should().Be(2);
+        }
+        (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
+        (await db.JournalEntries.AnyAsync()).Should().BeFalse();
     }
 
     [Fact]

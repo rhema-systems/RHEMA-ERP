@@ -21,6 +21,7 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
     private readonly IRoleService _roleService;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly ILogger<ProcurementSodGuardService> _logger;
+    private readonly IProcurementSodPolicy? _sodPolicy;
 
     public ProcurementSodGuardService(
         IUnitOfWork unitOfWork,
@@ -28,7 +29,8 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
         IProcurementPolicyService policyService,
         IRoleService roleService,
         IProcurementControlEventService controlEvents,
-        ILogger<ProcurementSodGuardService> logger)
+        ILogger<ProcurementSodGuardService> logger,
+        IProcurementSodPolicy? sodPolicy = null)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -36,6 +38,7 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
         _roleService = roleService;
         _controlEvents = controlEvents;
         _logger = logger;
+        _sodPolicy = sodPolicy;
     }
 
     private IGenericRepository<ProcurementPolicySet> PolicySets => _unitOfWork.Repository<ProcurementPolicySet>();
@@ -211,7 +214,16 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
              !hasQualifyingIndependentActor);
 
         ProcurementSodGuardDecisionDto decision;
-        if (isIdentityConflict)
+        var enforceSeparation = _sodPolicy is null || await _sodPolicy.IsRequiredForSourceAsync(
+            _currentUser.TenantId, request.SourceType,
+            Guid.TryParse(request.SourceReference, out var sourceId) ? sourceId : null, cancellationToken);
+        if (!enforceSeparation)
+        {
+            decision = Decision(true, "SOD_DISABLED",
+                "Actor separation is disabled for this tenant's procurement transaction chain. Permissions and workflow approvals still apply.",
+                definition, request, coverage, control, correlationId, now);
+        }
+        else if (isIdentityConflict)
         {
             decision = Decision(false, "SOD_CONFLICT", definition.Explanation,
                 definition, request, coverage, control, correlationId, now);

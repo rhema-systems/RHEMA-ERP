@@ -14,7 +14,7 @@ internal static class ApInvoiceSupplierEligibility
         (CanOnboard(partner) || (hasCanonicalSupplier && partner.PartnerType == "Contractor"));
 
     internal static bool CanOnboard(BusinessPartner partner) =>
-        partner.PartnerType is "Supplier" or "Vendor" or "Manufacturer" or "Both" or "CustomerAndSupplier";
+        BusinessPartnerRoles.HasSupplier(partner.PartnerType);
 
     internal static bool IsLinked(Supplier supplier, BusinessPartner partner) =>
         supplier.Id == partner.Id || (!string.IsNullOrWhiteSpace(partner.PartnerCode) &&

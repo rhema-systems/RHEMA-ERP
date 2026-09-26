@@ -32,23 +32,44 @@ async function openTab(name: string) {
 describe('new business partner defaults', () => {
   it('saves supplier credit, TIN and WHT from their respective tabs without customer-only gating', async () => {
     render(<NewBusinessPartnerPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Supplier', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Supplier' }));
     fireEvent.change(screen.getByLabelText('Partner Name *'), { target: { value: 'Freight Supplier' } });
     fireEvent.click(screen.getByRole('switch', { name: 'Subject To Withholding Deduction' }));
     fireEvent.change(screen.getByLabelText('WHT Rate (%)'), { target: { value: '5' } });
     await openTab('Options');
     fireEvent.change(screen.getByLabelText('TIN'), { target: { value: 'TIN-NEW' } });
     fireEvent.change(screen.getByLabelText('Credit Limit'), { target: { value: '9000' } });
-    await openTab('Accounts');
+    await openTab('Accounts Payable');
     expect(screen.getByText('Purchase Price Variance')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Save Partner', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Partner' }));
     await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({ partnerType: 'Supplier', creditLimit: 9000, taxNumber: 'TIN-NEW', postingDefaults: expect.objectContaining({ subjectToWithholdingDeduction: true, withholdingTaxRate: 5 }) })));
     expect(push).toHaveBeenCalledWith('/procurement/business-partners/new-supplier');
   });
 
+  it('offers separate payable and receivable accounts for a single dual-role partner', async () => {
+    render(<NewBusinessPartnerPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Supplier & Customer' }));
+    expect(screen.getByRole('tab', { name: 'Accounts Payable' })).toBeInTheDocument();
+    await openTab('Accounts Receivable');
+    expect(screen.getByLabelText('Accounts Receivable control account')).toBeInTheDocument();
+    await openTab('Details');
+    fireEvent.change(screen.getByLabelText('Partner Name *'), { target: { value: 'Dual Partner' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Partner' }));
+    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({
+      partnerType: 'CustomerAndSupplier', receivablesDefaults: { defaultArAccountId: null }
+    })));
+  });
+
   it('keeps Credit Limit in Options only and requests the customer tax catalogue for customers', async () => {
     render(<NewBusinessPartnerPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Customer', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customer' }));
+    expect(screen.queryByRole('switch', { name: 'Subject To Withholding Deduction' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('WHT Rate (%)')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'WHT Configuration' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Tax', exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Accounts Payable' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Accounts Receivable' })).toBeInTheDocument();
+    expect(screen.getByRole('tablist')).toHaveClass('grid-cols-6');
     await waitFor(() => expect(businessPartnerService.getPostingOptions).toHaveBeenCalledWith('Customer'));
     await openTab('Customer Details');
     expect(screen.queryByLabelText('Credit Limit')).not.toBeInTheDocument();

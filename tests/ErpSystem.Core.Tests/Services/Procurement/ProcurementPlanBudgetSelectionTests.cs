@@ -1,22 +1,74 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Data;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using System.Linq.Expressions;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
 
-public sealed class ProcurementPlanBudgetSelectionTests
+public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
 {
     private readonly Guid _tenantId = Guid.NewGuid();
+    private readonly Guid _organizationUnitId = Guid.NewGuid();
+    private readonly ApplicationDbContext _organizations = new(new DbContextOptionsBuilder<ApplicationDbContext>()
+        .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
     private readonly Mock<IProcurementPlanRepository> _plans = new();
     private readonly Mock<IProcurementPlanItemRepository> _items = new();
     private readonly Mock<IProcurementBudgetRepository> _budgets = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
+
+    public ProcurementPlanBudgetSelectionTests()
+    {
+        _organizations.Set<OrganizationUnit>().Add(new OrganizationUnit
+        {
+            Id = _organizationUnitId, TenantId = _tenantId, Name = "Procurement", Code = "PROC", IsActive = true
+        });
+        _organizations.SaveChanges();
+        var repository = new Mock<IGenericRepository<OrganizationUnit>>();
+        repository.Setup(value => value.GetQueryable(It.IsAny<Expression<Func<OrganizationUnit, bool>>>()))
+            .Returns((Expression<Func<OrganizationUnit, bool>> predicate) => _organizations.Set<OrganizationUnit>().Where(predicate));
+        _unitOfWork.Setup(value => value.Repository<OrganizationUnit>()).Returns(repository.Object);
+    }
+
+    public void Dispose() => _organizations.Dispose();
+
+    [Fact]
+    public void PlanLineReferenceMigrationBackfillsWithoutRewritingBudgetRelationships()
+    {
+        using var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\MSSQLLocalDB;Database=NeverConnected;Integrated Security=True").Options);
+        var entity = context.Model.FindEntityType(typeof(ProcurementPlanItem))!;
+        var reference = entity.FindProperty(nameof(ProcurementPlanItem.ReferenceNumber))!;
+        reference.GetMaxLength().Should().Be(36);
+        reference.GetComputedColumnSql().Should().Contain("[Id]");
+        reference.GetIsStored().Should().BeTrue();
+        entity.GetIndexes().Should().Contain(index => index.IsUnique &&
+            index.Properties.Select(property => property.Name).SequenceEqual(new[] { "TenantId", "ReferenceNumber" }));
+
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        var migration = new ErpSystem.Data.Migrations.ProcurementPlanLineReference();
+        migration.GetType().GetMethod("Up", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(migration, new object[] { builder });
+        builder.Operations.Should().HaveCount(2);
+        var column = builder.Operations.OfType<AddColumnOperation>().Single();
+        column.Name.Should().Be("ReferenceNumber");
+        column.ComputedColumnSql.Should().Be(reference.GetComputedColumnSql());
+        column.IsStored.Should().BeTrue();
+        var indexSql = builder.Operations.OfType<SqlOperation>().Single().Sql;
+        indexSql.Should().Contain("CREATE UNIQUE INDEX [IX_ProcurementPlanItems_TenantId_ReferenceNumber]");
+        indexSql.Should().NotContain("WHERE"); // SQL Server cannot filter an index on a computed column.
+        context.Database.GetDbConnection().State.Should().Be(System.Data.ConnectionState.Closed);
+    }
 
     [Fact]
     public async Task UpdateDraftPlanLinksSelectedApprovedBudgetAndInheritsCurrency()
@@ -220,6 +272,7 @@ public sealed class ProcurementPlanBudgetSelectionTests
         Id = Guid.NewGuid(),
         TenantId = _tenantId,
         DepartmentId = Guid.NewGuid(),
+        OrganizationUnitId = _organizationUnitId,
         FiscalYear = 2026,
         PlanNumber = "PP-2026-TEST",
         Title = "Draft plan",
@@ -230,11 +283,12 @@ public sealed class ProcurementPlanBudgetSelectionTests
         PlanDurationYears = 1
     };
 
-    private ProcurementBudget ApprovedBudget(Guid departmentId, int fiscalYear) => new()
+    private ProcurementBudget ApprovedBudget(Guid? departmentId, int fiscalYear) => new()
     {
         Id = Guid.NewGuid(),
         TenantId = _tenantId,
         DepartmentId = departmentId,
+        OrganizationUnitId = _organizationUnitId,
         FiscalYear = fiscalYear,
         BudgetCode = "PB-2026-TEST",
         Title = "Approved budget",
@@ -247,6 +301,7 @@ public sealed class ProcurementPlanBudgetSelectionTests
     {
         Title = plan.Title,
         DepartmentId = plan.DepartmentId,
+        OrganizationUnitId = plan.OrganizationUnitId!.Value,
         FiscalYear = plan.FiscalYear,
         PlanningCycle = "Annual",
         PlanStartDate = plan.PlanStartDate,

@@ -2583,7 +2583,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
     private IQueryable<BusinessPartner> PortalEnquiryPartners(Guid tenantId, Guid userId)
         => _db.BusinessPartners.AsNoTracking().Where(p => p.TenantId == tenantId && !p.IsDeleted && p.IsActive
-            && p.ApprovalStatus == "Approved" && (p.PartnerType == "Supplier" || p.PartnerType == "Customer" || p.PartnerType == "Both")
+            && p.ApprovalStatus == "Approved" && (BusinessPartnerRoles.SupplierTypes.Contains(p.PartnerType) || BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType))
             && (p.UserId == userId || _db.BusinessPartnerUsers.Any(link => link.TenantId == tenantId && !link.IsDeleted
                 && link.IsActive && link.UserId == userId && link.BusinessPartnerId == p.Id)));
 
@@ -3655,7 +3655,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && item.IsActive
                 && item.ApprovalStatus == "Approved"
                 && item.CustomerAccountNumber != null
-                && (item.PartnerType == "Customer" || item.PartnerType == "Both")
+                && BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType)
                 && (item.UserId == userId
                     || _db.BusinessPartnerUsers.Any(link => link.TenantId == tenantId
                         && !link.IsDeleted

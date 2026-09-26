@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.Entities;
@@ -292,7 +293,7 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
                 && item.TenantId == tenantId
                 && !item.IsDeleted
                 && item.IsActive
-                && (item.PartnerType == "Customer" || item.PartnerType == "Both"),
+                && BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType),
                 cancellationToken)
             ?? throw new InvalidOperationException("The selected customer is not an active Finance AR customer.");
 

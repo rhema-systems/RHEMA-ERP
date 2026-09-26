@@ -2341,7 +2341,8 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         string reconciliationPermissionCode,
         CancellationToken cancellationToken)
     {
-        if (HasPlatformSuperAdministratorBypass()) return new Capabilities(true, true, true);
+        var enforceSeparation = await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken);
+        if (HasPlatformSuperAdministratorBypass()) return new Capabilities(true, true, true, enforceSeparation);
         var correlation = $"ghaneps-status-{Guid.NewGuid():N}";
         var manage = await _accessControl.CheckCapabilityAsync(
             new ProcurementAccessCapabilityRequest
@@ -2367,7 +2368,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
                     SourceType = EventType,
                     SourceReference = sourceReference
                 }, correlation, cancellationToken);
-        return new Capabilities(manage.Allowed, acknowledge.Allowed, reconcile.Allowed);
+        return new Capabilities(manage.Allowed, acknowledge.Allowed, reconcile.Allowed, enforceSeparation);
     }
 
     private static void ValidateCreateRoute(
@@ -2599,7 +2600,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         var latestSuccessfulAttempt = item.Attempts
             .Where(value => value.Outcome == ProcurementGhanepsAttemptOutcome.Succeeded)
             .OrderByDescending(value => value.AttemptNumber).FirstOrDefault();
-        if (capabilities.Acknowledge && !actorLineage.Contains(_currentUser.UserId) &&
+        if (capabilities.Acknowledge && (!capabilities.EnforceSeparation || !actorLineage.Contains(_currentUser.UserId)) &&
             item.AcknowledgementRequired &&
             !item.Acknowledgements.Any(value =>
                 value.Outcome == ProcurementGhanepsAcknowledgementOutcome.Accepted) &&
@@ -2608,9 +2609,9 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
             allowed.Add("RecordAcknowledgement");
         var latestReconciliation = item.Reconciliations
             .OrderByDescending(value => value.Sequence).FirstOrDefault();
-        var canIndependentlyReconcile = !actorLineage.Contains(_currentUser.UserId) &&
+        var canIndependentlyReconcile = !capabilities.EnforceSeparation || (!actorLineage.Contains(_currentUser.UserId) &&
             (latestReconciliation?.Outcome != ProcurementGhanepsReconciliationOutcome.Mismatch ||
-             latestReconciliation.ReconciledByUserId != _currentUser.UserId);
+             latestReconciliation.ReconciledByUserId != _currentUser.UserId));
         if (capabilities.Reconcile && canIndependentlyReconcile &&
             item.ReconciliationRequired &&
             item.Attempts.Any(value => value.Outcome == ProcurementGhanepsAttemptOutcome.Succeeded) &&
@@ -2628,7 +2629,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
             blocked.Add("The current actor lacks the configured acknowledgement capability.");
         if (!capabilities.Reconcile)
             blocked.Add("The current actor lacks the configured reconciliation capability.");
-        if (actorLineage.Contains(_currentUser.UserId))
+        if (capabilities.EnforceSeparation && actorLineage.Contains(_currentUser.UserId))
             blocked.Add("An event preparer, payload recorder, or exchange-attempt actor cannot independently acknowledge or reconcile the same event.");
         if (latestAttempt?.Outcome == ProcurementGhanepsAttemptOutcome.Failed &&
             item.Attempts.Count(value => value.IsRetry) >= item.MaximumRetryAttempts)
@@ -2636,7 +2637,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         if (latestReconciliation?.Outcome is ProcurementGhanepsReconciliationOutcome.Matched or
             ProcurementGhanepsReconciliationOutcome.Resolved)
             blocked.Add("The reconciliation is terminal.");
-        if (latestReconciliation?.Outcome == ProcurementGhanepsReconciliationOutcome.Mismatch &&
+        if (capabilities.EnforceSeparation && latestReconciliation?.Outcome == ProcurementGhanepsReconciliationOutcome.Mismatch &&
             latestReconciliation.ReconciledByUserId == _currentUser.UserId)
             blocked.Add("The actor who recorded a mismatch cannot independently resolve it.");
 
@@ -3164,7 +3165,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
         string Reference,
         DateTime AwardedAtUtc);
 
-    private sealed record Capabilities(bool Manage, bool Acknowledge, bool Reconcile);
+    private sealed record Capabilities(bool Manage, bool Acknowledge, bool Reconcile, bool EnforceSeparation);
 
     private sealed record DenialContext(
         string Action,

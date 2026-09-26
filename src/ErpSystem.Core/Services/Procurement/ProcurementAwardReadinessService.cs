@@ -997,8 +997,9 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                                           financialSheets.Count == 1 &&
                                           technicalSheet is not null &&
                                           financialSheet is not null &&
-                                          technicalSheet.SubmittedByUserId !=
-                                          financialSheet.SubmittedByUserId &&
+                                          (technicalSheet.SubmittedByUserId !=
+                                          financialSheet.SubmittedByUserId ||
+                                          !await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken)) &&
                                           eligibleVotingAppointments.TryGetValue(
                                               technicalSheet.AppointmentId,
                                               out var technicalAppointment) &&

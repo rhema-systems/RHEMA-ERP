@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, Search, Calendar, DollarSign, Clock, Eye, AlertCircle } from 'lucide-react';
+import { FileText, Search, Calendar, Clock, Eye, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { tenderService, type TenderDto } from '@/services/tenderService';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -99,7 +99,7 @@ export default function ExternalTendersPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-500">Open Tenders</CardTitle>
@@ -122,16 +122,7 @@ export default function ExternalTendersPage() {
             </p>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Total Value</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold text-green-600">
-              {tenders.reduce((sum, t) => sum + (t.estimatedValue || 0), 0).toLocaleString()}
-            </p>
-          </CardContent>
-        </Card>
+
       </div>
 
       {/* Filters */}
@@ -211,13 +202,7 @@ export default function ExternalTendersPage() {
 
                     {/* Details */}
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm">
-                        <DollarSign className="h-4 w-4 text-gray-400" />
-                        <span className="text-gray-600">Est. Value:</span>
-                        <span className="font-medium">
-                          {tender.currency} {tender.estimatedValue?.toLocaleString() || 'N/A'}
-                        </span>
-                      </div>
+
 
                       <div className="flex items-center gap-2 text-sm">
                         <Calendar className="h-4 w-4 text-gray-400" />

@@ -3,6 +3,7 @@ using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.FixedAssets;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -13,6 +14,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -291,9 +293,47 @@ public sealed class FixedAssetCapitalizationFoundationTests
         fixture.Invoice.PurchaseOrderId = purchaseOrderId;
         fixture.Invoice.AcceptedSupplyKind = ProcurementAcceptedSupplyKind.GoodsReceiptInspection;
         fixture.Invoice.AcceptedSupplySourceId = purchaseOrderId;
+        var partner = new BusinessPartner
+        {
+            Id = fixture.Invoice.SupplierId, TenantId = tenantId, PartnerCode = "FA-SUPPLIER",
+            PartnerName = fixture.Invoice.SupplierName, PartnerType = "Supplier"
+        };
+        var orderLine = new PurchaseOrderItem
+        {
+            TenantId = tenantId, PurchaseOrderId = purchaseOrderId, OrderedQuantity = 1m,
+            UnitPrice = 100m, LineType = ItemType.StockItem, ItemDescription = "Accepted laptop"
+        };
+        db.PurchaseOrders.Add(new PurchaseOrder
+        {
+            Id = purchaseOrderId, TenantId = tenantId, BusinessPartnerId = partner.Id,
+            BusinessPartner = partner, OrderNumber = "PO-FA-ACCEPTED", Status = "Approved",
+            ProcurementCategory = ProcurementCategoryClass.Goods, Currency = "GHS", TotalAmount = 100m,
+            Items = new List<PurchaseOrderItem> { orderLine }
+        });
+        fixture.Invoice.LineItems.Single().PurchaseOrderItemId = orderLine.Id;
+        var configuration = new Mock<IProcurementConfigurationService>();
+        configuration.Setup(value => value.GetEffectiveProfileAsync("TDC-PROCUREMENT", It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementConfigurationProfileDto { Id = Guid.NewGuid(), ProfileCode = "TDC-PROCUREMENT", Version = 1 });
+        var events = new Mock<IProcurementControlEventService>();
+        events.Setup(value => value.RecordAsync(It.IsAny<ProcurementControlEventWriteRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementControlEventDto { Id = Guid.NewGuid() });
+        var acceptance = new Mock<IProcurementAcceptedSupplyService>();
+        acceptance.Setup(value => value.ResolveAsync(ProcurementAcceptedSupplyKind.GoodsReceiptInspection,
+                purchaseOrderId, purchaseOrderId, fixture.Invoice.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAcceptedSupplyResolutionDto
+            {
+                Kind = ProcurementAcceptedSupplyKind.GoodsReceiptInspection, SourceId = purchaseOrderId,
+                PurchaseOrderId = purchaseOrderId, BusinessPartnerId = partner.Id, SourceReference = "GRN-FA-ACCEPTED",
+                CurrencyCode = "GHS", Category = ProcurementCategoryClass.Goods, AcceptedAmount = 100m,
+                Lines = new List<ProcurementAcceptedSupplyLineDto>
+                {
+                    new() { PurchaseOrderItemId = orderLine.Id, AcceptedQuantity = 1m, UnitPrice = 100m }
+                }
+            });
         (await db.FinanceSettings.SingleAsync(value => value.TenantId == tenantId)).ControlAccountGRVAccrualId = grvControl.Id;
         await db.SaveChangesAsync();
-        var services = CreateServices(db, tenantId, fixedAssetServiceRequired: true);
+        var services = CreateServices(db, tenantId, fixedAssetServiceRequired: true,
+            procurementConfiguration: configuration.Object, procurementControlEvents: events.Object, acceptedSupply: acceptance.Object);
 
         var posted = await services.VendorInvoices.PostAsync(fixture.Invoice.Id);
 
@@ -304,6 +344,11 @@ public sealed class FixedAssetCapitalizationFoundationTests
         (await db.FixedAssets.AsNoTracking().SingleAsync(value => value.Id == fixture.Asset.Id)).Status
             .Should().Be(FixedAssetStatus.Draft,
                 "the accepted-receipt adapter, not the supplier invoice, owns Procurement asset capitalization");
+        acceptance.Verify(value => value.ResolveAsync(ProcurementAcceptedSupplyKind.GoodsReceiptInspection,
+            purchaseOrderId, purchaseOrderId, fixture.Invoice.Id, It.IsAny<CancellationToken>()), Times.Once);
+        events.Verify(value => value.RecordAsync(It.Is<ProcurementControlEventWriteRequest>(request =>
+            request.SourceId == fixture.Invoice.Id && request.EventType == "InvoiceThreeWayMatching"),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -867,7 +912,10 @@ public sealed class FixedAssetCapitalizationFoundationTests
         ITaxCalculationEngine? taxEngine = null,
         IWorkflowService? workflowService = null,
         Guid? userId = null,
-        string userName = "fa.poster")
+        string userName = "fa.poster",
+        IProcurementConfigurationService? procurementConfiguration = null,
+        IProcurementControlEventService? procurementControlEvents = null,
+        IProcurementAcceptedSupplyService? acceptedSupply = null)
     {
         EnsureCanonicalPostingBookFixture(db, tenantId);
         var currentUser = CreateCurrentUser(tenantId, userId, userName);
@@ -903,7 +951,10 @@ public sealed class FixedAssetCapitalizationFoundationTests
             postingEngine,
             auditService,
             taxEngine,
-            fixedAssetServiceRequired ? fixedAssetService : null);
+            fixedAssetServiceRequired ? fixedAssetService : null,
+            procurementConfiguration: procurementConfiguration,
+            procurementControlEvents: procurementControlEvents,
+            acceptedSupply: acceptedSupply);
 
         return new ServiceFixture(vendorInvoiceService, fixedAssetService, subledgerPostingMock);
     }

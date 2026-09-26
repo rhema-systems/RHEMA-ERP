@@ -141,7 +141,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         return await Registrations.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 !item.IsDeleted &&
-                item.PartnerType == "Supplier" &&
+                BusinessPartnerRoles.SupplierTypes.Contains(item.PartnerType) &&
                 (item.Status == "Draft" || item.Status == "MoreInfoRequired") &&
                 !registrationsWithTokens.Contains(item.Id))
             .AsNoTracking()

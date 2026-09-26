@@ -636,7 +636,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         // by a Finance cutover projection.
         var customers = await _db.BusinessPartners.AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive &&
-                (item.PartnerType == "Customer" || item.PartnerType == "Both"))
+                BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType))
             .OrderBy(item => item.PartnerName)
             .ThenBy(item => item.PartnerCode)
             .Select(item => new OpeningBalancePartyOptionDto
@@ -780,7 +780,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             item.Id == customerId &&
             !item.IsDeleted &&
             item.IsActive &&
-            (item.PartnerType == "Customer" || item.PartnerType == "Both"),
+            BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType),
             cancellationToken);
     }
 

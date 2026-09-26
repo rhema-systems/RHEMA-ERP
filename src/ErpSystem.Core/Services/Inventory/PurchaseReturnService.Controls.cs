@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Services.Procurement;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Inventory;
@@ -103,10 +104,11 @@ public sealed partial class PurchaseReturnService
             ? await _workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType) || await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, value.Id)
             : value.ApprovalRequired;
         var canIssue = await CanAsync("procurement.inventory.issue", value.WarehouseId);
+        var enforceSod = await new ProcurementSodPolicy(_unitOfWork).IsRequiredForSourceAsync(value.TenantId, WorkflowEntityType, value.Id);
         dto.CanSubmit = value.Status == "Draft" && canIssue;
         dto.CanCancel = (value.Status is "Draft" or "Submitted" or "ReadyToDispatch") && canIssue;
-        dto.CanDispatch = CanDispatchState(value) && canIssue && (!value.ApprovalRequired || value.ApprovedById != _currentUser.UserId);
-        dto.CanApprove = value.Status == "Submitted" && value.ApprovalRequired && value.RequestedById != _currentUser.UserId &&
+        dto.CanDispatch = CanDispatchState(value) && canIssue && (!enforceSod || !value.ApprovalRequired || value.ApprovedById != _currentUser.UserId);
+        dto.CanApprove = value.Status == "Submitted" && value.ApprovalRequired && (!enforceSod || value.RequestedById != _currentUser.UserId) &&
             await CanAsync("procurement.inventory.adjust.approve", value.WarehouseId) &&
             await _workflow.CanUserApproveAsync(WorkflowEntityType, value.Id, _currentUser.UserId);
         if (_financeHandoff is not null && value.Status is "Shipped" or "Acknowledged")

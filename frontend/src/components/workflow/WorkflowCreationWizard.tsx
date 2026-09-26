@@ -175,7 +175,8 @@ export function WorkflowCreationWizard({ isOpen, onClose, onComplete }: Workflow
   useEffect(() => {
     if (!isOpen) return;
     if (!entityType) {
-      setIsCustomEntityType(availableEntityTypes.length === 0);
+      // Keep an explicitly selected Custom input open while its value is empty.
+      if (availableEntityTypes.length === 0) setIsCustomEntityType(true);
       return;
     }
 

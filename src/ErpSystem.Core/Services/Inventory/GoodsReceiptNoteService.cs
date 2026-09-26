@@ -365,11 +365,18 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 var purchaseOrderItem = purchaseOrderItems[itemDto.PurchaseOrderItemId];
                 var sourceLine = sourceSnapshot.Readiness.Lines.Single(line =>
                     line.PurchaseOrderItemId == itemDto.PurchaseOrderItemId);
+                var weightMaster = await _unitOfWork.Repository<InventoryItem>().GetQueryable(value =>
+                    value.Id == itemDto.InventoryItemId && value.TenantId == _currentUser.TenantId && !value.IsDeleted)
+                    .SingleOrDefaultAsync()
+                    ?? throw new ArgumentException("Receipt inventory item was not found in this tenant.");
                 await _unitOfWork.Repository<PurchaseOrderReceiptItem>().AddAsync(
                     new PurchaseOrderReceiptItem
                     {
                         TenantId = _currentUser.TenantId,
                         ReceiptId = governedReceiptId,
+                        UnitWeightKg = ReceiptItemWeight.Capture(weightMaster, itemDto.UnitWeightKg),
+                        WeightStockUom = weightMaster.UnitOfMeasure,
+                        WeightOverridden = itemDto.UnitWeightKg.HasValue,
                         PurchaseOrderItemId = purchaseOrderItem.Id,
                         ReceivedQuantity = itemDto.ReceivedQuantity,
                         AcceptedQuantity = 0,
@@ -505,6 +512,9 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 {
                     TenantId = _currentUser.TenantId,
                     GoodsReceiptNoteId = grn.Id,
+                    UnitWeightKg = ReceiptItemWeight.Capture(item, itemDto.UnitWeightKg),
+                    WeightStockUom = item.UnitOfMeasure,
+                    WeightOverridden = itemDto.UnitWeightKg.HasValue,
                     PurchaseOrderItemId =
                         purchaseOrderItem.Id,
                     InventoryItemId = itemDto.InventoryItemId,
@@ -680,7 +690,11 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
         return Convert.ToHexString(
-                SHA256.HashData(Encoding.UTF8.GetBytes(json)))
+                SHA256.HashData(Encoding.UTF8.GetBytes(json +
+                    (request.Items.Any(item => item.UnitWeightKg.HasValue)
+                        ? "|weights:" + JsonSerializer.Serialize(request.Items.Where(item => item.UnitWeightKg.HasValue)
+                            .OrderBy(item => item.PurchaseOrderItemId).Select(item => new { item.PurchaseOrderItemId, item.UnitWeightKg }))
+                        : string.Empty))))
             .ToLowerInvariant();
     }
 
@@ -1491,6 +1505,9 @@ public class GoodsReceiptNoteService : IGoodsReceiptNoteService
                 OrderedQuantity = i.OrderedQuantity,
                 ItemCode = i.InventoryItem?.ItemCode ?? string.Empty,
                 ItemName = i.InventoryItem?.Name ?? string.Empty,
+                UnitWeightKg = i.UnitWeightKg,
+                WeightStockUom = i.WeightStockUom,
+                WeightOverridden = i.WeightOverridden,
                 ReceivedQuantity = i.ReceivedQuantity,
                 AcceptedQuantity = i.AcceptedQuantity,
                 RejectedQuantity = i.RejectedQuantity,

@@ -384,7 +384,10 @@ export default function SupplierDebitNoteDetailPage() {
               <TableBody>
                 {note.lineItems.map((line) => (
                   <TableRow key={line.id}>
-                    <TableCell>{line.description}</TableCell>
+                    <TableCell>
+                      {line.description}
+                      {line.lineItemType === 'Writeoff' && <p className="text-xs text-muted-foreground">Supplier liability write-off</p>}
+                    </TableCell>
                     <TableCell>
                       {line.originalVendorInvoiceLineItemId
                         ? 'Original invoice line'

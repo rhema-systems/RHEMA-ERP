@@ -22,6 +22,18 @@ const getAuthHeaders = () => {
 // BUSINESS PARTNER INTERFACES
 // ============================================================================
 
+export interface BusinessPartnerReceivablesDefaults {
+  defaultArAccountId?: string | null;
+  salesAccountId?: string | null;
+  costOfSalesAccountId?: string | null;
+  inventoryAccountId?: string | null;
+  termsDiscountsTakenAccountId?: string | null;
+  salesReturnsAccountId?: string | null;
+  financeChargesAccountId?: string | null;
+  writeoffAccountId?: string | null;
+  overpaymentWriteoffAccountId?: string | null;
+}
+
 export interface BusinessPartnerPostingDefaults {
   subjectToWithholdingDeduction: boolean;
   withholdingTaxRate: number;
@@ -102,6 +114,7 @@ export interface BusinessPartnerDto {
 }
 
 export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
+  receivablesDefaults?: BusinessPartnerReceivablesDefaults;
   postingDefaults?: BusinessPartnerPostingDefaults;
   parentId?: string;
   parentName?: string;
@@ -305,6 +318,7 @@ export interface LicenseTypeDto {
 }
 
 export interface CreateBusinessPartnerDto {
+  receivablesDefaults?: BusinessPartnerReceivablesDefaults;
   postingDefaults?: BusinessPartnerPostingDefaults;
   partnerType: string;
   partnerName: string;
@@ -347,6 +361,8 @@ export interface CreateBusinessPartnerDto {
 }
 
 export interface UpdateBusinessPartnerDto {
+  partnerType?: string;
+  receivablesDefaults?: BusinessPartnerReceivablesDefaults;
   postingDefaults?: BusinessPartnerPostingDefaults;
   creditLimit?: number | null;
   partnerName: string;
@@ -504,6 +520,12 @@ const getBusinessPartnerDropdownTotalPages = (result: unknown): number => {
 // ============================================================================
 
 export const businessPartnerService = {
+  async getMyAccount(): Promise<{ id: string; partnerCode: string; partnerName: string } | null> {
+    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/my-account`, { headers: getAuthHeaders() });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error('Could not load your business partner account.');
+    return response.json();
+  },
   async getPostingOptions(
     partnerType = 'Supplier'
   ): Promise<BusinessPartnerPostingOptions> {

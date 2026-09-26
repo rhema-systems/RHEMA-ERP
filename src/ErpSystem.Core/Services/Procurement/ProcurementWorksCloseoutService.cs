@@ -434,6 +434,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             throw Conflict("WORKS_CLOSEOUT_DECISION_NOT_ALLOWED",
                 "Only a pending or revalidation-failed Works closeout action may be decided.");
         if (request.Approved &&
+            await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken) &&
             !ProcurementWorksCloseoutRules.IsIndependent(
                 _currentUser.UserId, action.SubmittedById,
                 action.Contract.CreatedById))

@@ -564,7 +564,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     c.TenantId == TenantId &&
                     c.Id == customerId &&
                     !c.IsDeleted &&
-                    (c.PartnerType == "Customer" || c.PartnerType == "Both"));
+                    BusinessPartnerRoles.CustomerTypes.Contains(c.PartnerType));
 
             if (customer == null)
                 throw new KeyNotFoundException($"Customer with Id '{customerId}' not found.");
@@ -1009,7 +1009,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(a =>
                     a.TenantId == TenantId &&
                     a.Module == SubledgerModules.AccountsReceivable &&
-                    a.Status == SubledgerAdjustmentStatuses.Posted &&
+                    (a.Status == SubledgerAdjustmentStatuses.Posted || a.Status == SubledgerAdjustmentStatuses.Reversed) &&
                     !a.IsDeleted)
                 .Include(a => a.Customer);
 
@@ -1242,7 +1242,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
                     selectedIds.Contains(p.Id) &&
-                    (p.PartnerType == "Customer" || p.PartnerType == "Both"))
+                    BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType))
                 .ToListAsync(cancellationToken);
 
             return customers
@@ -1281,7 +1281,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .GetQueryable(a =>
                     a.TenantId == TenantId &&
                     a.Module == SubledgerModules.AccountsReceivable &&
-                    a.Status == SubledgerAdjustmentStatuses.Posted &&
+                    (a.Status == SubledgerAdjustmentStatuses.Posted || a.Status == SubledgerAdjustmentStatuses.Reversed) &&
                     a.CustomerId.HasValue &&
                     a.AdjustmentDate < endExclusive)
                 .Select(a => a.CustomerId!.Value)

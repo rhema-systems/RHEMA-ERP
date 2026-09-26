@@ -294,6 +294,11 @@ public class TenderBidDocumentDto
 {
     public Guid Id { get; set; }
     public Guid TenderBidId { get; set; }
+    public Guid? TenderBidItemId { get; set; }
+    public Guid? TenderItemId { get; set; }
+    public Guid? LotId { get; set; }
+    public int? LotNumber { get; set; }
+    public string? ItemDescription { get; set; }
     public string DocumentName { get; set; } = string.Empty;
     public string DocumentType { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
@@ -311,6 +316,9 @@ public class TenderBidDocumentDto
 /// </summary>
 public class UploadBidDocumentDto
 {
+    /// <summary>The tender lot item; the server resolves and validates its supplier bid line.</summary>
+    public Guid? TenderItemId { get; set; }
+
     [Required]
     [MaxLength(200)]
     public string DocumentName { get; set; } = string.Empty;

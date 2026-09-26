@@ -559,6 +559,7 @@ class ReportsService {
     templateId: string,
     request: GenerateReportTemplateDto
   ): Promise<{ fileName: string; blob: Blob }> {
+    if (request.format === 'Online') throw new Error('Select PDF or XLSX to export a report template.');
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
     const token = typeof window !== 'undefined'
       ? localStorage.getItem('token') || localStorage.getItem('authToken')
@@ -575,7 +576,7 @@ class ReportsService {
     return {
       fileName: normalizeReportExportFileName(
         response.headers.get('Content-Disposition'),
-        request.format.toLowerCase()
+        request.format === 'XLSX' ? 'xlsx' : 'pdf'
       ),
       blob: await response.blob(),
     };

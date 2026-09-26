@@ -15,7 +15,7 @@ namespace ErpSystem.Core.Services.Procurement;
 /// Normalizes accepted supplier performance without taking ownership away
 /// from Procurement receiving, Projects deliverables, or QS certificates.
 /// </summary>
-public sealed class ProcurementAcceptedSupplyService : IProcurementAcceptedSupplyService
+public sealed partial class ProcurementAcceptedSupplyService : IProcurementAcceptedSupplyService
 {
     private const string Approved = "Approved";
     private readonly IUnitOfWork _unitOfWork;
@@ -136,68 +136,29 @@ public sealed class ProcurementAcceptedSupplyService : IProcurementAcceptedSuppl
         PurchaseOrder order,
         CancellationToken cancellationToken)
     {
-        var receipts = await _unitOfWork.Repository<PurchaseOrderReceipt>()
-            .GetQueryable(value => value.TenantId == _currentUser.TenantId &&
-                value.PurchaseOrderId == order.Id && !value.IsDeleted)
-            .IgnoreQueryFilters()
-            .AsNoTracking().ToListAsync(cancellationToken);
-        if (receipts.Count == 0)
-            throw Invalid("ACCEPTED_GOODS_RECEIPT_MISSING",
-                "No governed goods receipt exists for this purchase order.");
-
-        var receiptIds = receipts.Select(value => value.Id).ToList();
-        var inspections = await _unitOfWork.Repository<ProcurementReceiptInspectionCase>()
-            .GetQueryable(value => value.TenantId == _currentUser.TenantId &&
-                receiptIds.Contains(value.PurchaseOrderReceiptId) && !value.IsDeleted)
-            .IgnoreQueryFilters()
-            .Include(value => value.Lines).ThenInclude(value => value.PurchaseOrderReceiptItem)
-            .AsNoTracking().ToListAsync(cancellationToken);
-        var latest = inspections.GroupBy(value => value.PurchaseOrderReceiptId)
-            .Select(group => group.OrderByDescending(value => value.Sequence).First()).ToList();
-        if (latest.Count != receipts.Count || latest.Any(value =>
-                !ProcurementReceiptInspectionRules.IsApMatchingResolved(
-                    value.Status, value.PendingQuantity, value.ApEligibleQuantity)))
-            throw Invalid("ACCEPTED_GOODS_INSPECTION_PENDING",
-                "Every goods receipt requires a current, independently resolved inspection outcome.");
-
-        var eligible = latest.Where(value => ProcurementReceiptInspectionRules.IsApEligible(
-            value.Status, value.PendingQuantity, value.ApEligibleQuantity)).ToList();
-        var lines = eligible.SelectMany(value => value.Lines)
-            .GroupBy(value => value.PurchaseOrderReceiptItem.PurchaseOrderItemId)
+        var receipts = await ReadGoodsReceiptLinesAsync(order, cancellationToken);
+        var lines = receipts.GroupBy(value => value.PurchaseOrderItemId)
             .Select(group => new ProcurementAcceptedSupplyLineDto
             {
                 PurchaseOrderItemId = group.Key,
-                AcceptedQuantity = group.Sum(value => value.AcceptedQuantity),
-                UnitPrice = order.Items.FirstOrDefault(value => value.Id == group.Key)?.UnitPrice ?? 0m
+                AcceptedQuantity = group.Sum(value => value.NetAcceptedQuantity),
+                UnitPrice = group.First().UnitPrice
             }).OrderBy(value => value.PurchaseOrderItemId).ToList();
         if (lines.Count == 0 || lines.Sum(value => value.AcceptedQuantity) <= 0m)
             throw Invalid("ACCEPTED_GOODS_QUANTITY_MISSING",
-                "The resolved goods inspections contain no AP-eligible accepted quantity.");
-
+                "No approved, accepted and unreturned inspection quantity is available. Pending inspections cannot authorize an invoice.");
         var snapshot = new
         {
-            schemaVersion = "tdc.accepted-supply.v1",
+            schemaVersion = "tdc.accepted-supply.v2",
             kind = ProcurementAcceptedSupplyKind.GoodsReceiptInspection,
             purchaseOrderId = order.Id,
-            receipts = latest.OrderBy(value => value.PurchaseOrderReceiptId).Select(value => new
-            {
-                value.PurchaseOrderReceiptId, value.Id, value.Sequence, value.Status,
-                value.ApEligibleQuantity, value.SourceSnapshotHash, value.IntegrityHash
-            }),
+            receipts,
             lines
         };
-        return Build(
-            ProcurementAcceptedSupplyKind.GoodsReceiptInspection,
-            order.Id,
-            order.OrderNumber,
-            ProcurementCategoryClass.Goods,
-            order.Id,
-            order.BusinessPartnerId,
-            order.Currency,
-            lines.Sum(value => value.AcceptedQuantity * value.UnitPrice),
-            latest.Max(value => value.DecidedAtUtc ?? value.UpdatedAt ?? value.CreatedAt),
-            lines,
-            snapshot);
+        return Build(ProcurementAcceptedSupplyKind.GoodsReceiptInspection, order.Id,
+            order.OrderNumber, ProcurementCategoryClass.Goods, order.Id, order.BusinessPartnerId,
+            order.Currency, lines.Sum(value => value.AcceptedQuantity * value.UnitPrice),
+            receipts.Max(value => value.AcceptedAtUtc), lines, snapshot);
     }
 
     private async Task<List<ProcurementAcceptedSupplyResolutionDto>> ServiceCandidatesAsync(

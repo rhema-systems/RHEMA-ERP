@@ -1029,8 +1029,7 @@ public class ProcurementPlanService : IProcurementPlanService
     }
 
     private static bool IsSupplierPartner(BusinessPartner partner)
-        => string.Equals(partner.PartnerType, "Supplier", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(partner.PartnerType, "Both", StringComparison.OrdinalIgnoreCase);
+        => BusinessPartnerRoles.HasSupplier(partner.PartnerType);
 
     private static decimal CalculateSupplierRiskScore(IEnumerable<SupplierRiskAssessmentDto> risks, int activeSupplierCount)
     {
@@ -1559,6 +1558,7 @@ public class ProcurementPlanService : IProcurementPlanService
     {
         return new ProcurementPlanItemDto
         {
+            ReferenceNumber = item.ReferenceNumber,
             Id = item.Id,
             ProcurementPlanId = item.ProcurementPlanId,
             InventoryItemId = item.InventoryItemId,

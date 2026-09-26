@@ -354,7 +354,7 @@ public class CustomerService : ICustomerService
         return _unitOfWork.Repository<BusinessPartner>()
             .GetQueryable(p => p.TenantId == TenantId &&
                                !p.IsDeleted &&
-                               (p.PartnerType == "Customer" || p.PartnerType == "Both"));
+                               BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType));
     }
 
     private async Task<BusinessPartner> EnsureCustomerExistsAsync(Guid customerId, CancellationToken cancellationToken)

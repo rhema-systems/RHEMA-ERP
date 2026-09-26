@@ -1,5 +1,6 @@
 'use client';
 
+import { hasSupplierRole } from '@/lib/business-partner-roles';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -63,7 +64,7 @@ export default function EditRfqPage() {
   const [validatingSupplierIds, setValidatingSupplierIds] = useState<string[]>([]);
 
   const filteredPartners = useMemo(() => {
-    const list = partners.filter((p) => p.partnerType === 'Supplier' || p.partnerType === 'Both');
+    const list = partners.filter((p) => hasSupplierRole(p.partnerType));
     if (!partnerSearch.trim()) return list;
     const s = partnerSearch.toLowerCase();
     return list.filter((p) => (p.partnerName || '').toLowerCase().includes(s) || (p.partnerCode || '').toLowerCase().includes(s) || (p.email || '').toLowerCase().includes(s));

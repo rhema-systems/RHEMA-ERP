@@ -251,6 +251,10 @@ public class GoodsReceiptNoteDetailDto : GoodsReceiptNoteDto
 
 public class GoodsReceiptNoteItemDto
 {
+    public decimal? UnitWeightKg { get; set; }
+    public string? WeightStockUom { get; set; }
+    public bool WeightOverridden { get; set; }
+
     public Guid Id { get; set; }
     public Guid InventoryItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
@@ -307,6 +311,10 @@ public class CreateGoodsReceiptNoteDto
 
 public class CreateGoodsReceiptNoteItemDto
 {
+    /// <summary>Optional transaction override in kg per stock base unit; omission copies the item master.</summary>
+    [Range(typeof(decimal), "0", "9999999999999999.999999")]
+    public decimal? UnitWeightKg { get; set; }
+
     [Required]
     public Guid PurchaseOrderItemId { get; set; }
 
@@ -1086,6 +1094,7 @@ public class LandedCostDto
 
 public class LandedCostDetailDto : LandedCostDto
 {
+    public List<LandedCostReceiptWeightDto> ReceiptWeights { get; set; } = new();
     public Guid? PurchaseOrderId { get; set; }
     public Guid ReceiptId { get; set; }
     public string EditToken { get; set; } = string.Empty;
@@ -1095,8 +1104,29 @@ public class LandedCostDetailDto : LandedCostDto
     public List<LandedCostAllocationDto> Allocations { get; set; } = new();
 }
 
+public sealed class LandedCostReceiptWeightDto
+{
+    public Guid GoodsReceiptNoteItemId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string StockUom { get; set; } = string.Empty;
+    public decimal? ReceiptUnitWeightKg { get; set; }
+    public decimal? UnitWeightKg { get; set; }
+    public bool IsOverridden { get; set; }
+    public string? Reason { get; set; }
+}
+
+public sealed class SetLandedCostReceiptWeightDto
+{
+    public decimal UnitWeightKg { get; set; }
+    [Required, MaxLength(500)] public string Reason { get; set; } = string.Empty;
+    [Required] public string EditToken { get; set; } = string.Empty;
+}
+
 public class LandedCostItemDto
 {
+    public Guid? SupplierDocumentId { get; set; }
+    public string? SupplierDocumentNumber { get; set; }
     public DateTime? InvoiceDate { get; set; }
     public Guid? InvoiceId { get; set; }
     public string? InvoiceNumber { get; set; }

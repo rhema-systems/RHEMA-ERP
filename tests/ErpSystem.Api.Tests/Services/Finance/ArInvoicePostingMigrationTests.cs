@@ -29,7 +29,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ArInvoicePostingMigrationTests
+public sealed partial class ArInvoicePostingMigrationTests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
