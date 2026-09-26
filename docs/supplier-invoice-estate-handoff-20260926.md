@@ -1,5 +1,7 @@
 # Supplier invoice integration for Estate
 
+**Estate developer handover:** Start with [estate-supplier-invoice-developer-quickstart.md](estate-supplier-invoice-developer-quickstart.md) for current endpoints, code examples, limitations and local setup. PRs 256 and 257 are merged. On 26 September the user assigned the remaining Estate workflow/source-to-posting rehearsal to the Estate developer. The local land account and published 17-step workflow are now configured; the new acquisition form was closed without saving. Older readiness notes below describe earlier checkpoints and are superseded by the quick start's local handover section.
+
 Estate creates supplier invoices from its existing land-acquisition documents. The supplier workspace owns invoice review and distribution editing; Finance AP continues to own approval, accounting and payments. No purchase order is required for an invoice created by the trusted Estate handoff.
 
 ## Finance PR 255 prerequisites

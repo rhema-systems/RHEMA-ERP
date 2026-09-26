@@ -893,7 +893,7 @@ export class EstateAcquisitionService {
         name: item.title,
         description: item.description,
         stepType: WorkflowStepType.Approval,
-        order: item.order,
+        order: item.order + 1,
         isRequired: true,
         requiredRole: item.requiredRole,
         estimatedHours: item.estimatedHours,
