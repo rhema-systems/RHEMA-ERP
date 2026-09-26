@@ -1,6 +1,7 @@
 ﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffTravel;
@@ -376,6 +377,9 @@ public class SeparationService : ISeparationService
                 + "Cancel it and raise a new one if the details are wrong.");
 
         if (dto.SeparationType is { } type) entity.SeparationType = type;
+        // ⚠ A board's finding supports a medical retirement and nothing else (lane K-II-a); left
+        // behind on another route out it would read as evidence for something it never said.
+        if (entity.SeparationType != EmployeeTerminationType.MedicalRetirement) entity.MedicalBoardId = null;
         if (dto.ReasonCategory is { } reason) entity.ReasonCategory = reason;
         if (dto.ReasonNotes is not null)
             entity.ReasonNotes = string.IsNullOrWhiteSpace(dto.ReasonNotes) ? null : dto.ReasonNotes.Trim();
@@ -434,6 +438,75 @@ public class SeparationService : ISeparationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Separation {Number} cancelled", entity.SeparationNumber);
+        return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>⚠ <b>This closes a column nothing could set.</b> <c>MedicalBoardId</c> went in with the
+    /// residue plan's G4 and no screen, endpoint or service ever wrote it (lane K-II-a).</para>
+    ///
+    /// <para>⚠ <b>A decided finding, not a pending board</b> — unlike leave, which lets a request
+    /// name the board it is waiting on and enforces the finding at its gate. Here the link IS the
+    /// evidence (submission accepts it in place of the medical report), so it is checked when made.
+    /// A board can find somebody unfit for their post and fit for redeployment; only a case that
+    /// recommends retirement can carry one.</para>
+    ///
+    /// <para>The board stays the thing linked, as on leave: an employee is before a board at most
+    /// once, so the board and this separation's employee name exactly one case.</para>
+    /// </remarks>
+    public async Task<EmployeeSeparationDetailDto> LinkMedicalBoardAsync(
+        Guid id, Guid? medicalBoardId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await RequireAsync(tenantId, id, cancellationToken);
+
+        if (entity.Status != SeparationStatus.Draft)
+            throw new InvalidOperationException(
+                $"This separation is {entity.Status} and can no longer be amended. The board it rests on "
+                + "was fixed when it was submitted.");
+
+        if (medicalBoardId is Guid boardId)
+        {
+            if (entity.SeparationType != EmployeeTerminationType.MedicalRetirement)
+                throw new InvalidOperationException(
+                    "Only a medical retirement rests on a medical board's finding.");
+
+            var board = await _unitOfWork.Repository<MedicalBoard>().GetQueryable()
+                .AsNoTracking()
+                .Where(b => b.TenantId == tenantId && b.Id == boardId)
+                .Select(b => new { b.BoardNumber })
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new ArgumentException($"Medical board '{boardId}' not found.");
+
+            var onBoard = await _unitOfWork.Repository<MedicalBoardCase>().GetQueryable()
+                .AsNoTracking()
+                .Where(c => c.TenantId == tenantId && c.BoardId == boardId && c.EmployeeId == entity.EmployeeId)
+                .Select(c => new { c.Status, c.RecommendsMedicalRetirement })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (onBoard is null)
+                throw new InvalidOperationException(
+                    $"Medical board {board.BoardNumber} has no case about this employee, so a retirement "
+                    + "cannot rest on it.");
+
+            if (onBoard.Status != MedicalBoardCaseStatus.Concluded)
+                throw new InvalidOperationException(onBoard.Status == MedicalBoardCaseStatus.Withdrawn
+                    ? $"Medical board {board.BoardNumber} withdrew this employee's case without deciding it."
+                    : $"Medical board {board.BoardNumber} has not yet decided this employee's case. Link it "
+                      + "once it has.");
+
+            if (!onBoard.RecommendsMedicalRetirement)
+                throw new InvalidOperationException(
+                    $"Medical board {board.BoardNumber}'s finding on this employee does not recommend "
+                    + "medical retirement, so a medical retirement cannot rest on it.");
+        }
+
+        entity.MedicalBoardId = medicalBoardId;
+
+        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
     }
 
@@ -1929,12 +2002,27 @@ public class SeparationService : ISeparationService
     private async Task RequireSupportingEvidenceAsync(
         Guid tenantId, EmployeeSeparation separation, CancellationToken cancellationToken)
     {
+        // ⚠ Round 5, lane K-II-a: a medical retirement may instead rest on a medical board's decided
+        // finding recommending it — the stronger form, naming who decided and when. The link was
+        // checked when it was made; it is read again here because this is the gate.
+        if (separation.SeparationType == EmployeeTerminationType.MedicalRetirement
+            && separation.MedicalBoardId is Guid boardId)
+        {
+            var recommended = await _unitOfWork.Repository<MedicalBoardCase>().GetQueryable()
+                .AnyAsync(c => c.TenantId == tenantId && c.BoardId == boardId
+                               && c.EmployeeId == separation.EmployeeId
+                               && c.Status == MedicalBoardCaseStatus.Concluded
+                               && c.RecommendsMedicalRetirement, cancellationToken);
+            if (recommended) return;
+        }
+
         var required = separation.SeparationType switch
         {
             EmployeeTerminationType.MedicalRetirement =>
                 (Category: SeparationDocumentCategory.MedicalReport,
-                 Message: "A medical retirement needs the medical report that supports it. Attach it "
-                          + "to the separation before submitting."),
+                 Message: "A medical retirement needs the medical report that supports it, or a medical "
+                          + "board's finding recommending it. Attach the report, or link the board, "
+                          + "before submitting."),
             EmployeeTerminationType.Death =>
                 (Category: SeparationDocumentCategory.DeathCertificate,
                  Message: "A separation by death needs the death certificate. Attach it to the "
@@ -3817,6 +3905,7 @@ public class SeparationService : ISeparationService
         ReasonCategory = s.ReasonCategory,
         ReasonCategoryName = s.ReasonCategory?.ToString(),
         ReasonNotes = s.ReasonNotes,
+        MedicalBoardId = s.MedicalBoardId,
         NoticeGivenOn = s.NoticeGivenOn,
         NoticeDays = s.NoticeDays,
         NoticeRequiredDays = Notice(s).Required,

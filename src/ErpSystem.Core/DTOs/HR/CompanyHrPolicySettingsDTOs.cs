@@ -113,6 +113,9 @@ public class CompanyHrPolicySettingsDto : BaseDto
     /// <summary>The most days of annual leave a leaver's settlement pays for; null = no cap (lane L2b).</summary>
     public int? SettlementLeaveDaysCap { get; set; }
 
+    /// <summary>Deciding members present at a medical board's deciding sitting (lane K-II-a).</summary>
+    public int MedicalBoardQuorum { get; set; }
+
     public bool AttendanceRateIncludesApprovedLeave { get; set; }
 
     // Leave encashment and the reminder cadence (residue plan G2).
@@ -236,6 +239,12 @@ public class UpdateCompanyHrPolicySettingsDto
     /// <c>null</c> removes the cap. See the entity.
     /// </remarks>
     [Range(1, 366)] public int? SettlementLeaveDaysCap { get; set; } = 56;
+
+    /// <summary>
+    /// Deciding members (chair or member) present at the sitting where a medical board decides a case
+    /// (round 5, lane K-II-a). Default 1.
+    /// </summary>
+    [Range(1, 20)] public int MedicalBoardQuorum { get; set; } = 1;
 
     public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
 

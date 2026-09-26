@@ -2272,15 +2272,22 @@ tiers. A short absence rests on the employee's own word. A longer one needs **ex
 local name for a medical certificate. And once somebody has taken enough sick leave **in a year**,
 the question stops being about one absence and becomes about their fitness for the job — which is
 not a question a certificate answers and not a question HR decides. That is what a **medical board**
-is: a panel, with a sitting, that produces one finding.
+is: a panel, which sits, and which decides each case put to it.
 
-**Since round 5 lane K (2026-09-26) a board is not only about sick leave.** It is asked one of five
-questions — *extended sick leave · injury on duty · fitness for duty · medical retirement · other* —
-and only a board about an **absence** (the first two, or *other*) can stand as the board a leave
-type's threshold asks for, and only if it **reported during the leave year being counted**. It can
-seat a physician from the register, name the facility and the examination it was based on, and carry
-its papers. One board still rules on **one** employee: several employees per board, the extent of
-incapacity and recommended compensation are step two, waiting on TDC (R5-Q5).
+**Since round 5 lane K (2026-09-26) a board is not only about sick leave.** Each employee before it
+is asked one of five questions — *extended sick leave · injury on duty · fitness for duty · medical
+retirement · other* — and only a case about an **absence** (the first two, or *other*) can stand as
+the board a leave type's threshold asks for, and only if it was **decided during the leave year being
+counted**. A board can seat a physician from the register, name the facility, base each case on the
+employee's own examination, and carry its papers.
+
+**Since lane K-II-a (2026-09-26) a board is a panel that hears CASES** — the shape tribunals,
+disciplinary panels and occupational-health boards share. **Several employees can be before one
+board**, one case each, each asked its own question and decided on its own finding. **Each case is
+decided at a recorded sitting, and the members recorded present there are the panel that decided
+it**, so a case can only be decided where at least the **quorum** of deciding members sat (a company
+setting, default 1). The board **reports by itself** when its last open case closes. The extent of
+incapacity and the Workmen's Compensation Act's figures are the next step, K-II-b.
 
 > **Say this:**
 >
@@ -2288,95 +2295,138 @@ incapacity and recommended compensation are step two, waiting on TDC (R5-Q5).
 > certificate, and the system will not take the request without one. The second is not about a
 > document at all. When somebody has been off sick for more than a certain number of days *in the
 > year*, what the organisation actually needs is a clinical judgment about whether they can still do
-> the job. So there is a board: a panel of named people, which meets, and which reports once.
+> the job. So there is a board: a panel of named people, which meets, and which decides each case put
+> to it — once, and on the record of who was in the room.
 >
 > And the boundary matters. **The board does not decide anybody's leave.** It records a finding.
 > Leave reads it. Separation reads it, if it comes to medical retirement. Neither writes to it."
 
 ### 👁 On the page — the boards register
 
-**Header.** Title *Medical boards*, subtitle *Panels convened to rule on an employee's health — an
-absence, an injury at work, fitness for duty or retirement.* One button: **+ Request a board**.
+**Header.** Title *Medical boards*, subtitle *Panels that hear employees' cases — an absence, an
+injury at work, fitness for duty or retirement — and decide each one.* One button: **+ Request a
+board**.
 
-**Filters:** Status *(All · Requested · Convened · Concluded · Cancelled or dissolved)*, **Purpose**
-*(All and the five)* and a **Search** box over board number, employee or reason.
+**Filters:** Status *(All · Requested · Convened · Concluded · Cancelled or dissolved)*, **A case
+about** *(Anything and the five purposes — a board is found by ANY case on it)*, **Convened by**
+*(Anybody · the employer's own board · the two statutory boards)* and a **Search** box over board
+number, any case's employee or reason.
 
-**The table:** Board *(number)* · Employee *(with staff number)* · **Purpose** · Requested · Status ·
-**Finding** · Members. A board stopped after it was convened reads **Dissolved**, one stopped before
-**Cancelled**. A board that recommended retirement carries an amber ***retirement advised*** flag
-beside its finding. Rows open the board.
+**The table** *(lane K-II-a)*: Board *(number, with the statutory board's name when it is one)* ·
+**Cases** *(one line per employee: name, the question, and the finding or the case's state —
+Listed, Withdrawn)* · Requested · Status · Members. A board stopped after it was convened reads
+**Dissolved**, one stopped before **Cancelled**. A case that recommended retirement carries an amber
+***retirement advised*** flag. Rows open the board.
 
-**The request dialog** *(lane K1, K3)*: an employee picker; **What the board is for** *(required —
-the five purposes)*; **Why a board is needed** *(required)*; **Facility** *(optional, the active
-register)*; and **Based on an examination** *(optional — only the chosen employee's own
-examinations are offered, because the server refuses anybody else's)*.
+**The request dialog** *(lanes K1, K3, K-II-a)*: **Convened by** *(the employer's own board by
+default; the Workmen's Compensation Act's two statutory boards — disfigurement, appointed by the
+chief labour officer; internal organs, appointed by the Minister)*; **Facility** *(optional, the
+active register)*; then **The first case**: an employee picker; **What the board is asked about
+them** *(required — the five purposes)*; **Why a board is needed** *(required)*; and **Based on an
+examination** *(optional — only the chosen employee's own examinations are offered, because the
+server refuses anybody else's)*. Anybody else the board should hear is added from its page.
 
-> *Only a board about an absence — extended sick leave, an injury on duty, or other — can satisfy a
-> leave type's medical-board rule, and only once it has reported in the leave year being counted.*
+> *Only a case about an absence — extended sick leave, an injury on duty, or other — can satisfy a
+> leave type's medical-board rule, and only once it has been decided in the leave year being counted.*
 >
-> *Required. A board convened without a stated question is one nobody can tell whether it answered.*
+> *Required. A case put to a board without a stated question is one nobody can tell whether it answered.*
 
 The health profile is not asked for: it follows from the examination, or is the employee's own
-record when there is one, and the board page opens it.
+record when there is one, and the case opens it.
 
 ### 👁 On the page — one board
 
-**Header:** the board number, the employee beneath it, a status badge, and the buttons for whichever
-step it is at:
+**Header:** the board number, who convened it and how many cases beneath it, a status badge, and the
+buttons for whichever step it is at:
 
 | Button | Shown when |
 |---|---|
+| **Add a case** | Requested or Convened — another employee before the board |
 | **Appoint a member** | Requested or Convened |
-| **Convene** | Requested — and **only if it has at least one member** |
-| **Record a sitting** | Convened |
-| **Report** | Convened — and **only if it has sat at least once and still has a member** |
+| **Convene** | Requested — and **only if it has at least one member and one open case** |
+| **Record a sitting** | Convened — with a tick-list of who was present |
 | **Cancel the request** | Requested — nobody has been convened, so only the request is stopped |
 | **Dissolve the board** | Convened — the panel is stood down; its members and sittings stay on the record |
 
-**Five cards:** *The board* (purpose — with *Not about an absence, so leave cannot rest on it* under
-fitness for duty and medical retirement — reason, requested, convened, facility, the examination it
-was based on, a link to the health record, concluded, reported by) · *The finding* (only once it has
-reported) · *Members* · *Sittings* · **Documents**.
+There is **no "Report" button** any more *(lane K-II-a)*: each case is decided on its own, and the
+board reports by itself when its last open case closes with at least one decided.
 
-**Documents** *(lane K4)*: a description and **Attach a document**. Each file is scanned for viruses
-by the upload gate and registered in the document store as *Medical restricted*; it downloads only
-through the board, to holders of the medical permissions. **A paper can be attached at any status** —
-the signed report usually arrives after the board has concluded — **and removed only while the board
-is open.** Once it has reported, or been cancelled or dissolved, its papers are part of the record.
+**Five cards:** *The board* (convened by, requested, convened, facility, reported) · **Cases** · 
+*Members* (with a **Decides** column) · *Sittings* · **Documents**.
+
+**Cases** *(lane K-II-a)*: one block per employee — name and staff number, the question (with *not
+about an absence, so leave cannot rest on it* under fitness for duty and medical retirement), a
+state badge (*Listed · Decided · Withdrawn*), the reason, when and by whom it was listed, the
+examination it was based on, and a link to the health record. A listed case carries **Record the
+finding** (once the board is convened and has sat) and **Withdraw**. A decided case shows the
+finding, **the sitting it was decided at and who decided — the members present there** (or *Not
+recorded — decided before attendance was kept* for boards decided before lane K-II-a), who recorded
+it and when, the review date, and the retirement recommendation. A withdrawn case shows when, by
+whom and why.
+
+**Sittings**: date, venue, **Present** *(each member with their role)*, **Decided** *(how many cases
+were decided there)*, notes, and an **Attendance** button to correct who was present — **until a
+case is decided at that sitting**, when its attendance becomes the record of who decided and is
+fixed.
+
+**Documents** *(lanes K4, K-II-a)*: a description, **About** *(the board as a whole, or one
+employee's case)* and **Attach a document**. Each file is scanned for viruses by the upload gate and
+registered in the document store as *Medical restricted*; it downloads only through the board, to
+holders of the medical permissions. **A paper can be attached at any status** — the signed report
+usually arrives after the board has concluded — **and removed only while the board is open.** Once it
+has reported, or been cancelled or dissolved, its papers are part of the record.
 
 **Once it has reported**, every button disappears and an amber panel explains why:
 
-> **This board has reported.** Its members, its sittings and its finding are now fixed. They are part
-> of what the recommendation means, and leave or separation may already rest on it. **A finding that
-> needs revisiting is a new board** — which is also how it works on paper.
+> **This board has reported.** Every case before it is decided or withdrawn, and its members, sittings
+> and findings are now fixed — leave or separation may already rest on them. **A finding that needs
+> revisiting is a case before a new board** — which is also how it works on paper.
+
+If **every case was withdrawn and none decided**, the board does **not** report — it stays open and
+says *Nothing is left before this board … Add a case, or cancel the request / dissolve the board and
+say why.* A board that ruled on nobody must not read as one that ruled.
 
 **The member dialog** asks *Who is this?* first — **A physician on the register** *(the default since
 lane K3: the active physicians, with their specialisation and facility; a link to the register for
 somebody missing)*, **Somebody who works here** *(an employee picker: HR as secretary, a staff or
 union representative, an in-house nurse)* or **Somebody from outside, not on the register** *(a typed
 name)* — then **From** *(e.g. Ridge Hospital, or HR Department)* and **Role** *(Chair · Member ·
-Secretary · Observer)*. A row is one of the three, never two.
+Secretary · Observer — the chair and members decide; a secretary or observer attends without
+deciding)*. A row is one of the three, never two. Removing a member does not change a past sitting:
+its attendance records who sat.
 
-**The report dialog** carries **Finding** *(Fit · Fit with restrictions · Temporarily unfit · Unfit ·
-Requires further investigation)*, **Recommendation** *(required)*, Findings, Restrictions, Review
-due, and a checkbox: *The board recommends **retirement on medical grounds**.*
+**The finding dialog** *(per case, lane K-II-a)* opens on **Decided at the sitting of** — the board's
+sittings, each with how many were present and how many of them decide, and beneath the chosen one
+*Decided by those present: …* — then **Finding** *(Fit · Fit with restrictions · Temporarily unfit ·
+Unfit · Requires further investigation)*, **Recommendation** *(required)*, Findings, Restrictions,
+Review due, and a checkbox: *The board recommends **retirement on medical grounds**.*
 
 > ⚠ *A recommendation, not an act. Retiring somebody is a separation, raised in that module, which
-> can point back at this board.*
+> can name this board.*
+
+**The quorum** lives on the **HR policy page** (*Medical boards → Quorum — deciding members
+present*, 1–20, default 1): a case cannot be decided at a sitting with fewer chairs and members
+recorded present than this. The refusal names the number and the sitting — *"The board needs 2
+deciding member(s) — a chair or a member — present where it decides a case; the sitting of 26 Sept
+2026 had 1."*
 
 **The rules the screen enforces, and why each one is there:**
 
 | Rule | Why |
 |---|---|
-| **A ratchet** — Requested → Convened → Concluded, cancellable (or dissolvable) until it reports, **no un-conclude** | membership and sittings are part of what the recommendation *means*; editing them afterwards would rewrite who decided, while leave approved on it stays approved |
-| **A purpose, from the list** *(K1)* | leave reads it: only a board about an absence can stand for one. Left out, or an undefined number, it is refused rather than saved as nothing |
-| **No members → cannot convene; none left → cannot report** *(K7)* | a board is its panel — and members can be removed while it is convened |
-| **No sitting → cannot report** | a board that never met cannot have reached a finding |
-| **No outcome → cannot report** *(K7)* | an omitted outcome used to bind to 0 — no finding at all — and conclude |
-| ⚠ **The subject cannot sit on their own board** | nobody rules on their own fitness, and it would discredit the finding that leave and separation rest on |
+| **Two ratchets** — the board: Requested → Convened → Concluded (by itself), cancellable (or dissolvable) until then; each case: Listed → Decided or Withdrawn, **no un-decide** | membership, sittings and attendance are part of what a finding *means*; editing them afterwards would rewrite who decided, while leave approved on it stays approved |
+| **A purpose, from the list, per case** *(K1)* | leave reads it: only a case about an absence can stand for one. Left out, or an undefined number, it is refused rather than saved as nothing |
+| **One case per employee per board** *(K-II-a)* | a finding that needs revisiting is a case before a new board; a withdrawn case keeps its place, because its withdrawal is part of the record |
+| **No members → cannot convene; no open case → cannot convene** *(K7, K-II-a)* | a board is its panel, and a panel with nobody before it has nothing to sit on |
+| **A case is decided at a named sitting of this board, with somebody recorded present, and at least the quorum of deciding members** *(K-II-a)* | who decided is who was there — a board that never met, or a finding nobody is recorded as having made, rests on nothing |
+| **A sitting's attendance is fixed once a case is decided there** *(K-II-a)* | it has become the record of who decided |
+| **A member removed after sitting still counts at that sitting** *(K-II-a)* | attendance records who sat, not who sits now — so membership no longer has to freeze for the whole board |
+| **No outcome → no finding** *(K7)* | an omitted outcome used to bind to 0 — no finding at all — and conclude |
+| **All withdrawn, none decided → the board does not report** *(K-II-a)* | it stays open for HR to add a case or stop it, saying why |
+| ⚠ **Nobody who is a case sits on the board; nobody who sits is a case** | nobody rules on their own fitness, and it would discredit the finding that leave and separation rest on |
 | **One chair, nobody seated twice, one identity per member** *(K7)* | the minutes would otherwise read as a larger board than sat, or two people in one seat |
 | **The facility and the examination are checked** *(K3)* | a mistyped id was a 500; another employee's examination behind a finding was accepted silently |
-| **Cancel or dissolve — one status, two words** *(K5)* | before convening only a request exists; after, a panel. Reason required either way; when and who are recorded and shown |
+| **Cancel or dissolve — one status, two words** *(K5)* | before convening only a request exists; after, a panel. Reason required either way; when and who are recorded and shown. Every open case is withdrawn with the reason *(K-II-a)* |
 
 ### ▶ Walk it
 
@@ -2422,18 +2472,19 @@ certificate would approve itself and nobody would ever have been asked.
 
 **5 — Build the cumulative total, in two absences. Read this whole step before you start it.**
 
-The board rule counts **days of this leave type already *taken* this year, plus the request in
-front of it** — and *taken* means approved, in progress or completed. A request sitting at Pending
-counts for nothing yet. So:
+The board rule counts **days of this leave type already asked for or taken this leave year, plus the
+request in front of it** — pending, approved, in progress or completed. *(Pending counts since round
+5 lane N3: two requests submitted the same week used to pass one at a time and cross the threshold
+together with nobody asked.)* So:
 
 | | Do | Why |
 |---|---|---|
-| **a** | Raise a **six-day** Sick Leave request. It will demand a certificate too *(six is more than three)* — so save as draft, attach one as **Excuse duty**, submit | 6 days, nothing else taken yet, threshold 10 → **it goes through** |
-| **b** | **Approve it twice.** Now those six days are *taken* | this is the step that makes the count move |
-| **c** | Raise a **second six-day** Sick Leave request, attach its certificate, and press Submit | 6 taken + 6 asked = **12**, past 10 → **refused** |
+| **a** | Raise a **six-day** Sick Leave request. It will demand a certificate too *(six is more than three)* — so save as draft, attach one as **Excuse duty**, submit | 6 days, nothing else this year, threshold 10 → **it goes through** (to Pending) |
+| **b** | Raise a **second six-day** Sick Leave request, attach its certificate, and press Submit | 6 pending + 6 asked = **12**, past 10 → **refused** |
 
 > *This would take Sick Leave to 12 day(s) in 2026, past the 10-day point at which a medical board
-> must sit. Link a concluded medical board, or attach its recommendation, before submitting.*
+> must sit. Link a medical board that has reported on the absence during this leave year, or attach
+> its recommendation, before it can be submitted.*
 
 ⚠ **The numbers in that message depend on what sick leave this person already has approved this
 year**, so read the refusal rather than expecting exactly 12. If the anchor already has approved sick
@@ -2450,14 +2501,22 @@ at all.
 
 **6 — 🔴 LIVE WRITE 12 — go to Medical Boards and run one.**
 
-`/hr/medical/boards` → **+ Request a board** → your anchor → **What the board is for:** *Extended
-sick leave* → *Sick leave this year has passed the point at which a board must sit.* → leave the
-facility and examination empty unless your anchor has one on file → **Request**. You land on the
-board, at **Requested**, with nobody on it.
+`/hr/medical/boards` → **+ Request a board** → leave *Convened by* at the employer's own board →
+**The first case:** your anchor → **What the board is asked about them:** *Extended sick leave* →
+*Sick leave this year has passed the point at which a board must sit.* → leave the facility and
+examination empty unless your anchor has one on file → **Request**. You land on the board, at
+**Requested**, with one case and nobody on the panel.
 
-> "The purpose is not decoration. Leave reads it: a board asked whether somebody is fit for their
+> "The purpose is not decoration. Leave reads it: a case asking whether somebody is fit for their
 > post, or should retire, has not ruled on an *absence*, and it will not stand as the board this
 > rule asks for."
+
+**6b — *Add a case*: a second employee, asked *Fitness for duty*.** *(Optional; lane K-II-a.)*
+
+> "A board is a panel, and panels hear more than one person — that is how it works on paper, and how
+> tribunals and disciplinary panels work. Each person is a case: their own question, their own
+> finding, decided on its own. What the board decides about one of them says nothing about the
+> other — and the leave rule knows that."
 
 **7 — Try to convene it before appointing anybody.** The button is not there.
 
@@ -2479,30 +2538,40 @@ board, at **Requested**, with nobody on it.
 > medical officers are nominated by the employer, SSNIT and the union."
 
 ⚠ **Try appointing the employee the board is about.** It is refused. Nobody rules on their own
-fitness.
+fitness — and the other way round, somebody on the panel cannot be added as a case.
 
-**9 — Convene it. Record a sitting** — today, a venue, and a note. **Then attach a paper** under
-*Documents* — the referral letter, or any PDF standing in for one — with a description.
+**9 — Convene it. Record a sitting** — today, a venue, a note, and **who was present**: everybody on
+the panel is ticked; untick nobody for now. **Then attach a paper** under *Documents* — the referral
+letter, or any PDF standing in for one — with a description, **About** your anchor's case.
+
+> "Who was in the room is recorded per sitting, because that is who decides whatever is decided
+> there. The chair and the members count; HR as secretary is present but does not decide."
 
 > "Scanned on the way in, stored as a medical record, and it downloads only through this board. It
 > can be added at any point — the signed report usually arrives after the board has reported — but
 > once the board has reported, nothing comes off it."
 
-**10 — Press *Report*.** Finding: **Fit with restrictions**. Recommendation: `Light duties for eight
+**10 — On your anchor's case, press *Record the finding*.** Decided at: today's sitting (it says who
+was present beneath it). Finding: **Fit with restrictions**. Recommendation: `Light duties for eight
 weeks, reviewed thereafter.` Review due: eight weeks out. Leave the retirement checkbox **unticked**.
 
 Read the dialog's warning aloud before confirming:
 
-> *⚠ This cannot be undone. Its members and sittings are fixed from here, and leave or separation may
-> rest on what it says.*
+> *⚠ This cannot be undone. Leave or separation may rest on what it says. The board reports by itself
+> once no case is left open.*
 
-> "One board, one finding. Not a table of findings it can add to — because then nothing could answer
-> *'what did the board decide?'* without somebody choosing a row.
+The case now reads **Decided**, *Decided at the sitting of* today, *Decided by* the chair and the
+member. If you added a second case in 6b, the board is still **Convened** — withdraw it (a reason is
+required) or decide it, and the board reports on its own.
+
+> "One case, one finding. Not a table of findings it can add to — because then nothing could answer
+> *'what did the board decide about her?'* without somebody choosing a row. And the finding carries
+> **who decided**: the people recorded at that sitting, not whoever happens to be on the panel today.
 >
-> And it is a ratchet. There is no un-conclude. Its panel and its sittings freeze the moment it
-> reports, because **they are part of what the recommendation means** — and by then somebody's leave
-> may already have been approved on the strength of it. A finding that needs revisiting is a new
-> board, which is also how it works on paper."
+> And it is a ratchet. There is no un-decide. That sitting's attendance is now fixed, because **it is
+> part of what the finding means** — and by then somebody's leave may already have been approved on
+> the strength of it. A finding that needs revisiting is a case before a new board, which is also how
+> it works on paper."
 
 **11 — Point at *Fit with restrictions* and the retirement checkbox.**
 
@@ -2511,7 +2580,8 @@ Read the dialog's warning aloud before confirming:
 >
 > And that checkbox is a **recommendation, not an act**. A board can advise retirement on medical
 > grounds; retiring somebody is a separation, raised in that module, on a reason that already
-> exists. The board does not do it and cannot."
+> exists. The board does not do it and cannot — but the separation can **name** the board, and only
+> a decided case that recommends retirement can be named there."
 
 **12 — Back on the refused leave request: attach the board's recommendation.**
 
@@ -2523,46 +2593,58 @@ It goes through.
 > paper. The other is to point the request at the board record itself, so the leave says which panel
 > it rests on.
 >
-> ⚠ **And only a board that has actually *reported* counts.** One that has merely been requested, or
-> convened and not yet sat, satisfies nothing — otherwise an absence would go through on the
-> strength of a meeting somebody had put in a diary."
+> ⚠ **And only a board that has actually *decided her case* counts.** One that has merely been
+> requested, or convened and not yet sat — or that has decided somebody else's case at the same
+> sitting — satisfies nothing. Otherwise an absence would go through on the strength of a meeting
+> somebody had put in a diary."
 
 **That second route got its screen on 2026-09-18** (closure plan G5c). The request's **Overview**
-tab carries a **Medical board** panel: it lists the boards held on that employee — only that
-employee, because the server refuses anybody else's — and links, changes or unlinks one. The panel
-hides itself on leave types that neither name a board nor set a threshold, so you will not see it on
-annual leave.
+tab carries a **Medical board** panel: it lists the boards with **a case about that employee** — only
+theirs, because the server refuses a board with no case on them — and links, changes or unlinks one.
+The panel hides itself on leave types that neither name a board nor set a threshold, so you will not
+see it on annual leave.
 
-⚠ **Show what the panel SAYS, not just that it links.** It states in as many words whether the
-board satisfies the rule: green once the board has reported **on an absence during the request's
-leave year**; amber, saying why, while it has only been requested or convened, when it was asked
-about fitness for duty or retirement, or when it reported before the leave year began; and a plain
-refusal for a cancelled or dissolved one. The picker marks a board that is *not about an absence*
-before it is chosen. **Linked and satisfied are different states** — that is the whole point of
-the split, and a submission refused after somebody has linked a board reads as a bug unless the
-screen has already said why.
+⚠ **Show what the panel SAYS, not just that it links.** Everything it says is about **this
+employee's case** on the board *(lane K-II-a)*, never the board as a whole. It states in as many
+words whether that case satisfies the rule: green once it was decided **on an absence during the
+request's leave year**; amber, saying why, while it is undecided, when it was about fitness for duty
+or retirement, or when it was decided before the leave year began; and a plain refusal for a case
+withdrawn — or a board cancelled or dissolved before deciding it. The picker marks a case that is *not
+about an absence* before it is chosen. **Linked and satisfied are different states** — that is the
+whole point of the split, and a submission refused after somebody has linked a board reads as a bug
+unless the screen has already said why.
 
-**The gate's refusal says why the linked board does not count** *(lane K6)*, after its usual
-sentence — for example:
+**The gate's refusal says why the linked board does not count** *(lanes K6, K-II-a)*, after its usual
+sentence — one of:
 
-> *… Link a medical board that has reported on the absence during this leave year, or attach its
-> recommendation, before it can be submitted. The linked board, MB-…, was asked about fitness for
-> duty, not an absence, so it cannot stand for this one.*
+> *… The linked board, MB-…, has not yet decided this employee's case.*
+>
+> *… The linked board, MB-…, withdrew this employee's case without deciding it.*
+>
+> *… The linked board, MB-…, was asked about fitness for duty, not an absence, so it cannot stand
+> for this one.*
+>
+> *… The linked board, MB-…, decided this employee's case on 31 Dec 2025, before this leave year
+> began on 1 Jan 2026.*
 
-A board about **injury on duty** counts as well as one about extended sick leave or *other*: the
-same rule serves any leave type with a board threshold, and an injury board is the relevant one for
-an injury absence. The typed paper recommendation is still accepted as before.
+A case about **injury on duty** counts as well as one about extended sick leave or *other*: the same
+rule serves any leave type with a board threshold, and an injury board is the relevant one for an
+injury absence. The typed paper recommendation is still accepted as before.
 
 ### ⚙ Behind the page
 
 | Control | Call | Gate |
 |---|---|---|
-| The register | `GET /api/hr/medical-boards?status=&purpose=&search=` | `HR.Medical.Read` |
-| One board | `GET /api/hr/medical-boards/{id}` | `HR.Medical.Read` |
-| Request · members · convene · sittings · report · cancel or dissolve | `POST` / `PUT` on `/api/hr/medical-boards/…` (one `…/cancel` for both words; the answer's `wasDissolved` says which) | `HR.Medical.Write` |
+| The register | `GET /api/hr/medical-boards?status=&purpose=&kind=&employeeId=&search=` (purpose and employee match any case) | `HR.Medical.Read` |
+| One board | `GET /api/hr/medical-boards/{id}` — its `cases`, `members`, `sittings` (each with `attendees`) | `HR.Medical.Read` |
+| Request (with the first case) · add a case · members · convene · sittings (with `attendeeMemberIds`) · cancel or dissolve | `POST /api/hr/medical-boards` · `POST …/{id}/cases` · `POST`/`DELETE …/{id}/members` · `PUT …/{id}/convene` · `POST …/{id}/sittings` · `PUT …/{id}/cancel` (one endpoint for both words; `wasDissolved` says which) | `HR.Medical.Write` |
+| Decide · withdraw a case | `PUT …/{id}/cases/{caseId}/conclude` (with `sittingId`) · `PUT …/{id}/cases/{caseId}/withdraw` (the reason as the body) | `HR.Medical.Write` |
+| Correct who was present | `PUT …/{id}/sittings/{sittingId}/attendance` — refused once a case is decided there | `HR.Medical.Write` |
 | The board's papers | `GET …/{id}/documents` · `GET …/{id}/documents/{docId}/download` | `HR.Medical.Read` |
-| Attach · remove a paper | `POST …/{id}/documents` (multipart, 10 MB, category `hr-medical-board-documents`, scan-mandatory) · `DELETE …/{id}/documents/{docId}` | `HR.Medical.Write` |
+| Attach · remove a paper | `POST …/{id}/documents` (multipart, 10 MB, category `hr-medical-board-documents`, scan-mandatory, optional `caseId` — checked before the scan) · `DELETE …/{id}/documents/{docId}` | `HR.Medical.Write` |
 | Point a leave request at a board | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write` — **the Medical board panel**, chapter 7 |
+| Name the board a medical retirement rests on | `PUT /api/hr/separations/{id}/medical-board` (an empty body unlinks) | `HR.Policy.SeparationWrite` — **the separation page's Medical board panel** |
+| The quorum | `PUT /api/hr/policy-settings` (`medicalBoardQuorum`, 1–20; a save that omits it resets it to 1) | the HR policy page |
 
 ⚠ **"Gated on `HR.Medical.*`" does not mean HR is shut out.** The HR role is granted
 `ViewMedicalRecords` and `MaintainMedicalRecords` deliberately, because HR **administers** this
@@ -2575,9 +2657,14 @@ why it is stated plainly here.
 verified in the database. A navigation would put a clinical record inside leave's and separation's
 object graphs, where an ordinary save in either module could modify it.
 
-⚠ **Linking and enforcing are deliberately separate.** A request may be linked to a board that is
-only *Requested* or *Convened* — a board is usually asked for before it sits, and the request should
-be able to say which one it is waiting on. **The evidence gate is what insists on *Concluded*.**
+⚠ **Linking and enforcing are deliberately separate — on leave.** A request may be linked to a board
+whose case on the employee is not yet decided — a board is usually asked for before it sits, and the
+request should be able to say which one it is waiting on. **The evidence gate is what insists on a
+decided case.** Separation is different: its link *is* the evidence, so it is checked when made.
+
+**A board hears several people, so both bridges read the case about their own employee** *(lane
+K-II-a)*. Leave and separation still hold the **board's** id — an employee is before a board at most
+once, so the board and the employee name exactly one case.
 
 **Stopping a board has a button** since 2026-09-18, and **two words since lane K5 (2026-09-26)**:
 **Cancel the request** while the board is only Requested, **Dissolve the board** once it is Convened
@@ -2586,19 +2673,28 @@ word follows whether a panel ever existed. It asks for a reason and **will not p
 — a stopped board is the one state that looks like an administrative accident from outside, and
 only the reason distinguishes *the panel was stood down* from *somebody clicked the wrong thing*.
 The board then carries a red panel saying which happened, **when and by whom**, and the reason; a
-dissolved board keeps its members and sittings on the record. (Boards cancelled before lane K show
-the date, taken from their last update, and no name — who did it was never recorded.)
+dissolved board keeps its members and sittings on the record. **Every case still open is withdrawn**
+with the reason, in the board's words — *"The board was dissolved: …"* or *"The request for a board
+was cancelled: …"* *(lane K-II-a)*. (Boards cancelled before lane K show the date, taken from their
+last update, and no name — who did it was never recorded.)
 
 ⚠ **What the dialog warns, and it is worth saying aloud on the walk:** cancelling does **not**
-unlink anything. A leave request naming this board goes on naming it — what changes is that the
-board stops *satisfying* the evidence rule, which only a concluded board ever did. So a request
-still waiting to be submitted is refused until it names another board or attaches a recommendation;
-one already approved on it **stays approved**, the same ratchet that applies when a board reports.
+unlink anything. A leave request naming this board goes on naming it — what changes is that its case
+is withdrawn, and a withdrawn case satisfies no evidence rule. So a request still waiting to be
+submitted is refused until it names another board or attaches a recommendation; one already
+approved on a decided case **stays approved**, the same ratchet that applies when a board reports.
 
-⚠ **One limit is left.** The **separation** side of the bridge is a column with no screen and no
-field on its API — `EmployeeSeparation.MedicalBoardId` exists and **nothing can set it**. It does
-not affect this walk, and it is not on §23's API-only list because it is not reachable at the API
-either.
+**The separation side of the bridge has its control since lane K-II-a (2026-09-26)** — before then
+`EmployeeSeparation.MedicalBoardId` was a column **nothing could set**. On a **medical retirement**,
+the separation page's *Overview* carries a **Medical board** panel: **Link a board**, **Change** and
+**Unlink** while the separation is a **draft**. Its picker lists the boards with a case about the
+leaver and says, before the pick, why one cannot be chosen — *no case about this employee · their case
+was withdrawn · not decided yet · the finding does not recommend medical retirement*. Linked, it shows
+the board, the finding, when it was decided, **who decided**, and the recommendation — not the
+clinical findings, which stay on the Medical page. **Submission then accepts the linked finding in
+place of the medical report** (*"A medical retirement needs the medical report that supports it, or a
+medical board's finding recommending it."*). Changing the route out away from medical retirement
+drops the board.
 
 ---
 

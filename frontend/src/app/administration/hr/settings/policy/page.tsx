@@ -92,6 +92,7 @@ const schema = z
     settlementDaysPerYear: z.coerce.number().int().min(1).max(366),
     // Round 5, lane L2b: empty means no cap, so '' is a real answer here.
     settlementLeaveDaysCap: z.union([z.coerce.number().int().min(1).max(366), z.literal('')]).optional(),
+    medicalBoardQuorum: z.coerce.number().int().min(1).max(20),
     attendanceRateIncludesApprovedLeave: z.boolean(),
 
     allowInServiceEncashment: z.boolean(),
@@ -215,6 +216,7 @@ export default function PolicySettingsPage() {
       disciplineBacklogHorizonDays: data.disciplineBacklogHorizonDays,
       settlementDaysPerYear: data.settlementDaysPerYear,
       settlementLeaveDaysCap: data.settlementLeaveDaysCap ?? '',
+      medicalBoardQuorum: data.medicalBoardQuorum ?? 1,
       attendanceRateIncludesApprovedLeave: data.attendanceRateIncludesApprovedLeave,
       allowInServiceEncashment: data.allowInServiceEncashment,
       encashmentWorkingDaysPerMonth: data.encashmentWorkingDaysPerMonth,
@@ -317,6 +319,8 @@ export default function PolicySettingsPage() {
         // ⚠ Sent every time, as null when emptied: the server keeps its default (56) for a save
         // that leaves the field out, so only an explicit null removes the cap.
         settlementLeaveDaysCap: orNullNumber(v.settlementLeaveDaysCap),
+        // ⚠ Sent every time: a save that leaves it out resets it to 1.
+        medicalBoardQuorum: Number(v.medicalBoardQuorum),
         attendanceRateIncludesApprovedLeave: v.attendanceRateIncludesApprovedLeave,
         allowInServiceEncashment: v.allowInServiceEncashment,
         encashmentWorkingDaysPerMonth: Number(v.encashmentWorkingDaysPerMonth),
@@ -692,6 +696,31 @@ export default function PolicySettingsPage() {
               label="Approved leave counts as an expected working day"
               description="On: leave sits in the attendance denominator, so a day on approved leave lowers the rate and DaysOnLeave shows why. Off: leave leaves the calculation entirely, as weekends and public holidays already do. Applies to today's rate, the trend and the chronic-absentee ranking together."
             />
+          </CardContent>
+        </Card>
+
+        {/* Round 5, lane K-II-a: a board decides each case at a sitting, by the members present. */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Medical boards</CardTitle>
+            <CardDescription>
+              How many of a board&apos;s deciding members must be present for it to decide a case.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <NumberField
+              form={form}
+              name="medicalBoardQuorum"
+              label="Quorum — deciding members present"
+              required
+            />
+            <p className="text-sm text-muted-foreground">
+              A board decides each case at a recorded sitting, and the members present are the panel
+              that decided it. A chair or member counts; a secretary or observer attends without
+              deciding. A case cannot be decided at a sitting with fewer deciding members than this.
+              The default, <strong>1</strong>, is the least a finding can rest on; set it to your
+              organisation&apos;s rule for how many doctors must sit.
+            </p>
           </CardContent>
         </Card>
 

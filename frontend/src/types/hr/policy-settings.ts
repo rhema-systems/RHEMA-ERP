@@ -89,6 +89,12 @@ export interface CompanyHrPolicySettings {
    * (round 5, lane L2b). ⚠ Send it on every save: the server keeps 56 for a save that omits it.
    */
   settlementLeaveDaysCap: number | null;
+  /**
+   * Deciding members — a chair or member — who must be present at the sitting where a medical board
+   * decides a case (round 5, lane K-II-a). 1–20, default 1. ⚠ Send it on every save: the server
+   * resets a save that omits it to 1.
+   */
+  medicalBoardQuorum: number;
   attendanceRateIncludesApprovedLeave: boolean;
 
   /**

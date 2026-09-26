@@ -5,8 +5,8 @@ using ErpSystem.Core.Enums;
 namespace ErpSystem.Core.Entities.HR.Medical;
 
 /// <summary>
-/// A medical board — a panel convened to rule on one employee's fitness for duty
-/// (residue plan G4 / R-15b).
+/// A medical board — a PANEL convened to rule on employees' health (residue plan G4 / R-15b; since
+/// round 5 lane K-II-a, a panel that hears <see cref="MedicalBoardCase"/>s).
 /// </summary>
 /// <remarks>
 /// <para><b>Why it lives in Medical and not in Leave.</b> The SHE↔Medical ownership boundary settles
@@ -14,15 +14,17 @@ namespace ErpSystem.Core.Entities.HR.Medical;
 /// other modules <b>bridge by reference</b>. A board ruling on fitness is a clinical record, and its
 /// findings are medical-grade data. It is gated on <c>HR.Medical.*</c>, not on the HR role.</para>
 ///
-/// <para>⚠ <b>The bridge is ONE-WAY, and keeping it that way is the point.</b> Leave reads a board
+/// <para>⚠ <b>The bridge is ONE-WAY, and keeping it that way is the point.</b> Leave reads a case
 /// to satisfy its evidence rule; separation reads one to justify a medical retirement. <b>Neither
 /// writes to it.</b> A shared mutable record across three modules is how three modules come to
 /// disagree about what a board decided.</para>
 ///
-/// <para><b>It reuses the vocabulary that already existed.</b> <see cref="Outcome"/> is
-/// <see cref="MedicalExamResult"/> — <i>Fit / Fit with restrictions / Temporarily unfit / Unfit /
-/// Requires further investigation</i> — which is exactly what a board reports, and was already in
-/// use on <c>EmployeeMedicalExam</c>. Minting a parallel enum would have let the two drift.</para>
+/// <para><b>A panel that hears cases (lane K-II-a) — the standard shape.</b> Tribunals, disciplinary
+/// panels, credentialing committees and occupational-health boards all separate the panel (who sits,
+/// when it met, its papers) from the cases before it (one per person, each with its own finding). One
+/// sitting can decide several people; each finding records the sitting it was decided at, and that
+/// sitting's attendance is who decided. Until K-II-a the board WAS its one employee's case, and the
+/// finding columns lived here; they moved to <see cref="MedicalBoardCase"/>.</para>
 /// </remarks>
 public class MedicalBoard : TenantEntity
 {
@@ -38,51 +40,112 @@ public class MedicalBoard : TenantEntity
     [MaxLength(40)]
     public string BoardNumber { get; set; } = string.Empty;
 
-    public Guid EmployeeId { get; set; }
-    public virtual Employee Employee { get; set; } = null!;
+    /// <summary>
+    /// Who convened it: the employer, or one of the two statutory boards of the Workmen's
+    /// Compensation Act (lane K-II-a).
+    /// </summary>
+    public MedicalBoardKind Kind { get; set; } = MedicalBoardKind.Employer;
 
     public MedicalBoardStatus Status { get; set; } = MedicalBoardStatus.Requested;
 
     /// <summary>
-    /// The question the board is asked (round 5, lane K1). Required when a board is requested;
-    /// boards recorded before purposes existed read <see cref="MedicalBoardPurpose.Other"/>.
-    /// </summary>
-    public MedicalBoardPurpose Purpose { get; set; } = MedicalBoardPurpose.Other;
-
-    /// <summary>Why a board was asked for, in the requester's words. Read beside <see cref="Purpose"/>.</summary>
-    [MaxLength(1000)]
-    public string Reason { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Who asked for it. ⚠ A bare <c>Guid</c> with no navigation, like <c>ApprovedById</c> and
-    /// <c>RecalledById</c> on <c>LeaveRequest</c>: an unpaired navigation to <c>Employee</c> mints a
-    /// shadow <c>EmployeeId1</c> column on the other side. Names are resolved by the read.
+    /// Who asked for the board. ⚠ A bare <c>Guid</c> with no navigation: an unpaired navigation to
+    /// <c>Employee</c> mints a shadow <c>EmployeeId1</c> column on the other side. Names are resolved by the read.
     /// </summary>
     public Guid? RequestedById { get; set; }
 
     public DateOnly RequestedOn { get; set; }
     public DateOnly? ConvenedOn { get; set; }
 
-    /// <summary>The clinical record this board is about, when there is one.</summary>
-    public Guid? HealthProfileId { get; set; }
-    public virtual EmployeeHealthProfile? HealthProfile { get; set; }
-
-    /// <summary>The examination the board considered, when it was based on one.</summary>
-    public Guid? BasedOnExamId { get; set; }
-    public virtual EmployeeMedicalExam? BasedOnExam { get; set; }
-
+    /// <summary>Where the board sits.</summary>
     public Guid? FacilityId { get; set; }
     public virtual HealthcareFacility? Facility { get; set; }
 
-    // ── The recommendation ───────────────────────────────────────────────────────────────────
-    //
-    // ⚠ Fields on the board rather than a separate entity, deliberately. ONE board produces ONE
-    // recommendation: that is what concluding means. A `MedicalBoardRecommendation` table would
-    // imply a board can report more than once, and then nothing could answer "what did the board
-    // decide?" without choosing between rows. A board that needs to revisit its own finding is a
-    // NEW board, which is also how it works on paper.
+    /// <summary>
+    /// When the board reported — the day its last open case closed with at least one decided.
+    /// Each case carries its own decision date.
+    /// </summary>
+    public DateOnly? ConcludedOn { get; set; }
 
-    /// <summary>The finding. Null until the board concludes.</summary>
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
+    /// <summary>
+    /// When it was stopped (round 5, lane K5). Whether that was a cancelled request or a dissolved
+    /// board is read from <see cref="ConvenedOn"/>: stopped before convening, it was never a panel.
+    /// </summary>
+    public DateOnly? CancelledOn { get; set; }
+
+    /// <summary>Who stopped it. A bare <c>Guid</c>, like <see cref="RequestedById"/> and for the same reason.</summary>
+    public Guid? CancelledById { get; set; }
+
+    public virtual ICollection<MedicalBoardCase> Cases { get; set; } = new List<MedicalBoardCase>();
+    public virtual ICollection<MedicalBoardMember> Members { get; set; } = new List<MedicalBoardMember>();
+    public virtual ICollection<MedicalBoardSitting> Sittings { get; set; } = new List<MedicalBoardSitting>();
+    public virtual ICollection<MedicalBoardDocument> Documents { get; set; } = new List<MedicalBoardDocument>();
+}
+
+/// <summary>
+/// One employee's case before a medical board, and its finding (round 5, lane K-II-a).
+/// </summary>
+/// <remarks>
+/// <para><b>One employee, one case, per board</b> (a unique index). A board hearing several people
+/// has several cases; each is decided on its own, at a recorded sitting.</para>
+///
+/// <para><b>It reuses the vocabulary that already existed.</b> <see cref="Outcome"/> is
+/// <see cref="MedicalExamResult"/> — <i>Fit / Fit with restrictions / Temporarily unfit / Unfit /
+/// Requires further investigation</i> — which is exactly what a board reports, and was already in
+/// use on <c>EmployeeMedicalExam</c>. Minting a parallel enum would have let the two drift.</para>
+///
+/// <para>⚠ <b>The finding is fields on the case, not a table.</b> One case, one finding: that is what
+/// concluding means. A case that needs revisiting is a NEW case, which is also how it works on
+/// paper — and it is what stops leave having been approved on a finding since edited away.</para>
+/// </remarks>
+public class MedicalBoardCase : TenantEntity
+{
+    public Guid BoardId { get; set; }
+
+    [ForeignKey(nameof(BoardId))]
+    public virtual MedicalBoard Board { get; set; } = null!;
+
+    /// <summary>The employee the case is about. Unique per board.</summary>
+    public Guid EmployeeId { get; set; }
+    public virtual Employee Employee { get; set; } = null!;
+
+    /// <summary>The question the board is asked about this employee (round 5, lane K1).</summary>
+    public MedicalBoardPurpose Purpose { get; set; } = MedicalBoardPurpose.Other;
+
+    /// <summary>Why, in the requester's words.</summary>
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+
+    /// <summary>Who listed the case. A bare <c>Guid</c>; names are resolved by the read.</summary>
+    public Guid? RequestedById { get; set; }
+    public DateOnly RequestedOn { get; set; }
+
+    /// <summary>The clinical record the case is about, when there is one (lane K3).</summary>
+    public Guid? HealthProfileId { get; set; }
+    public virtual EmployeeHealthProfile? HealthProfile { get; set; }
+
+    /// <summary>The examination the case is based on — the subject's own (lane K3).</summary>
+    public Guid? BasedOnExamId { get; set; }
+    public virtual EmployeeMedicalExam? BasedOnExam { get; set; }
+
+    public MedicalBoardCaseStatus Status { get; set; } = MedicalBoardCaseStatus.Listed;
+
+    // ── The finding ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The sitting the case was decided at — its attendance is the panel that decided.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A bare <c>Guid</c>, checked by the service to be one of this board's sittings. A foreign key
+    /// would be a second path from the board into this table (the board cascades to its sittings and
+    /// to its cases), which SQL Server refuses.
+    /// </remarks>
+    public Guid? DecidedAtSittingId { get; set; }
+
+    /// <summary>The finding. Null until the case is decided.</summary>
     public MedicalExamResult? Outcome { get; set; }
 
     [MaxLength(4000)]
@@ -98,44 +161,33 @@ public class MedicalBoard : TenantEntity
     /// <summary>When the board says the employee should be looked at again.</summary>
     public DateOnly? ReviewDueDate { get; set; }
 
-    /// <summary>
-    /// The board recommends retirement on medical grounds.
-    /// </summary>
+    /// <summary>The board recommends retirement on medical grounds.</summary>
     /// <remarks>
-    /// ⚠ <b>A recommendation, not an act.</b> Nothing here retires anybody: separation owns that,
-    /// and <c>SeparationReason.MedicalRetirement</c> already existed for it. This flag is what a
-    /// separation can point at to say why. Kept as its own field rather than inferred from
-    /// <c>Outcome == Unfit</c>, because a board can find somebody unfit for their current post and
-    /// fit for redeployment — which is a different recommendation entirely.
+    /// ⚠ <b>A recommendation, not an act.</b> Nothing here retires anybody: separation owns that, and
+    /// <c>SeparationReason.MedicalRetirement</c> already existed for it. Kept as its own field rather
+    /// than inferred from <c>Outcome == Unfit</c>, because a board can find somebody unfit for their
+    /// current post and fit for redeployment — a different recommendation entirely.
     /// </remarks>
     public bool RecommendsMedicalRetirement { get; set; }
 
     public DateOnly? ConcludedOn { get; set; }
     public Guid? ConcludedById { get; set; }
 
+    // ── Withdrawn without a finding ──────────────────────────────────────────────────────────
+
+    public DateOnly? WithdrawnOn { get; set; }
+    public Guid? WithdrawnById { get; set; }
+
     [MaxLength(1000)]
-    public string? CancellationReason { get; set; }
+    public string? WithdrawalReason { get; set; }
 
     /// <summary>
-    /// When it was stopped (round 5, lane K5). Whether that was a cancelled request or a dissolved
-    /// board is read from <see cref="ConvenedOn"/>: stopped before convening, it was never a panel.
-    /// </summary>
-    public DateOnly? CancelledOn { get; set; }
-
-    /// <summary>Who stopped it. A bare <c>Guid</c>, like <see cref="RequestedById"/> and for the same reason.</summary>
-    public Guid? CancelledById { get; set; }
-
-    public virtual ICollection<MedicalBoardMember> Members { get; set; } = new List<MedicalBoardMember>();
-    public virtual ICollection<MedicalBoardSitting> Sittings { get; set; } = new List<MedicalBoardSitting>();
-    public virtual ICollection<MedicalBoardDocument> Documents { get; set; } = new List<MedicalBoardDocument>();
-
-    /// <summary>
-    /// Whether a board asked this question rules on an ABSENCE — the only kind a leave type's board
+    /// Whether a case asked this question rules on an ABSENCE — the only kind a leave type's board
     /// threshold can rest on (round 5, lane K6).
     /// </summary>
     /// <remarks>
     /// ⚠ The one place this list lives: the leave evidence gate reads it, and the DTO carries its
-    /// answer so no screen keeps a copy. A board asked whether somebody is fit for their post, or
+    /// answer so no screen keeps a copy. A case asking whether somebody is fit for their post, or
     /// should retire, has not ruled on an absence, however recent it is.
     /// </remarks>
     public static bool CoversAbsence(MedicalBoardPurpose purpose) =>
@@ -160,15 +212,12 @@ public class MedicalBoard : TenantEntity
 ///   invent a register entry.</item>
 /// </list>
 ///
-/// <para>All three are recorded rather than flattened to a string, because a model that only took
-/// names would throw away the link for the people who ARE on file — and "who sat on the board" is
-/// most of what its authority rests on.</para>
-///
 /// <para>⚠ <b>The <see cref="Employee"/> navigation is safe here, unlike the board's own actor
 /// columns.</b> <c>EmployeeId</c> and <c>Employee</c> pair by EF convention, so no shadow FK is
-/// minted. <c>MedicalBoard.RequestedById</c> and <c>ConcludedById</c> are deliberately bare Guids
-/// for the opposite reason: a second, differently-named navigation to <c>Employee</c> on the same
-/// entity cannot be paired and mints an <c>EmployeeId1</c> column on the other side.</para>
+/// minted.</para>
+///
+/// <para>⚠ <b>Removing a member is a soft delete</b>, and a sitting's attendance keeps naming them: the
+/// panel that decided a case is history, not the current membership (lane K-II-a).</para>
 /// </remarks>
 public class MedicalBoardMember : TenantEntity
 {
@@ -184,8 +233,8 @@ public class MedicalBoardMember : TenantEntity
     /// A member who works here — HR, a staff or union representative, an in-house nurse.
     /// </summary>
     /// <remarks>
-    /// ⚠ The service refuses to seat the <b>subject of the board</b>. Nobody sits in judgement on
-    /// their own fitness, and a record showing they did would discredit the finding.
+    /// ⚠ The service refuses to seat anybody who is <b>a case before the board</b>. Nobody sits in
+    /// judgement on their own fitness, and a record showing they did would discredit the finding.
     /// </remarks>
     public Guid? EmployeeId { get; set; }
     public virtual Employee? Employee { get; set; }
@@ -198,14 +247,18 @@ public class MedicalBoardMember : TenantEntity
     [MaxLength(200)]
     public string? Institution { get; set; }
 
+    /// <summary>
+    /// ⚠ Chair and Member DECIDE; Secretary and Observer attend without deciding. The quorum at a
+    /// deciding sitting counts the first two (lane K-II-a).
+    /// </summary>
     public MedicalBoardMemberRole Role { get; set; } = MedicalBoardMemberRole.Member;
 }
 
 /// <summary>One meeting of a medical board.</summary>
 /// <remarks>
-/// A board may sit more than once before it reports — hence its own rows rather than a single date
-/// on the board. The <b>recommendation</b> still belongs to the board, not to a sitting: the last
-/// sitting is where it was agreed, but it is the board that gives it.
+/// A board may sit more than once, and may decide different cases at different sittings — hence its
+/// own rows, and, since lane K-II-a, its own attendance: who was present is who decided whatever was
+/// decided there.
 /// </remarks>
 public class MedicalBoardSitting : TenantEntity
 {
@@ -222,6 +275,27 @@ public class MedicalBoardSitting : TenantEntity
     /// <summary>What was discussed. ⚠ Medical-grade content — this is gated with the rest.</summary>
     [MaxLength(4000)]
     public string? Notes { get; set; }
+
+    public virtual ICollection<MedicalBoardSittingAttendance> Attendance { get; set; } = new List<MedicalBoardSittingAttendance>();
+}
+
+/// <summary>
+/// A member present at a sitting (round 5, lane K-II-a).
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="MemberId"/> is a bare <c>Guid</c>, checked by the service to be one of the board's
+/// members. A foreign key would give SQL Server two cascade paths from the board into this table
+/// (through its sittings and through its members), which it refuses. A member removed later keeps
+/// their attendance: it records who sat, not who sits now.
+/// </remarks>
+public class MedicalBoardSittingAttendance : TenantEntity
+{
+    public Guid SittingId { get; set; }
+
+    [ForeignKey(nameof(SittingId))]
+    public virtual MedicalBoardSitting Sitting { get; set; } = null!;
+
+    public Guid MemberId { get; set; }
 }
 
 /// <summary>
@@ -247,6 +321,12 @@ public class MedicalBoardDocument : TenantEntity
 
     [ForeignKey(nameof(BoardId))]
     public virtual MedicalBoard Board { get; set; } = null!;
+
+    /// <summary>
+    /// The case the paper is about, when it is about one employee (lane K-II-a). A bare <c>Guid</c>,
+    /// checked to be this board's, for the same cascade reason as the case's decided-at sitting.
+    /// </summary>
+    public Guid? CaseId { get; set; }
 
     [MaxLength(255)]
     public string FileName { get; set; } = string.Empty;

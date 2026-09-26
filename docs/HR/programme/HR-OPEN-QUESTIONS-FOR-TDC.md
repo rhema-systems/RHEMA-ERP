@@ -711,7 +711,7 @@ notifies is recorded when it arrives. Please confirm or change:
 
 | | Default | |
 |---|---|---|
-| **1** | **One** medical member must be present at the sitting that decides a case | or TDC's number (the statutory board has three) |
+| **1** | **One** deciding member — the chair or a member; a secretary or observer does not count — must be present at the sitting that decides a case. *(Built 2026-09-26 as the HR policy setting "Quorum — deciding members present".)* | or TDC's number (a public-service board has three medical officers) |
 | **2** | Compensation for permanent total incapacity is **96 months' earnings** (PNDCL 187 s.5), and a partial one the schedule's percentage of it (s.6) | or TDC pays more |
 | **3** | The **law's schedule** of injuries and percentages | or TDC's own |
 | **4** | TDC holds **its own** board; the two statutory boards are recorded when one sits — for a disputed disfigurement, appointed by the Chief Labour Officer (First Schedule), and for an internal-organ injury, appointed by the Minister (Third Schedule) | or TDC relies on the statutory boards only |
@@ -722,8 +722,10 @@ notifies is recorded when it arrives. Please confirm or change:
 Court (s.11(3)) and nothing may be set off against it (s.27), so the system never shows it as money
 HR pays out or nets it against a leaver's settlement.)*
 
-**Meanwhile:** boards have a purpose, physicians as members, documents, and a clear cancel/dissolve
-(built 2026-09-26). Cases, incapacity and compensation are built next, on the defaults above.
+**Meanwhile:** boards have a purpose, physicians as members, documents, and a clear cancel/dissolve;
+and they hear **cases** — several employees per board, each decided at a sitting whose attendance is
+recorded, on default 1 above (all built 2026-09-26). Incapacity and compensation are built next, on
+defaults 2–5.
 
 ---
 

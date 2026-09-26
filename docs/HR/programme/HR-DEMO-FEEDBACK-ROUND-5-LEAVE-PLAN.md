@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J, I, K and L done; K-II next, then M.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J, I, K, L, K-II-0 and K-II-a done; K-II-b next, then M.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -27,7 +27,7 @@
 > | **K** | **DONE** 2026-09-26 — the medical board, step one: a purpose, physicians from the register, the facility and examination checked, documents through the upload gate, cancel or dissolve, a leave gate that takes only a relevant, recent board, and the board defects · `run-round5-k.mjs` 144, green twice · § 8 |
 > | **L** | **DONE** 2026-09-26 — encashment on exit only: the leaver's line pays annual leave owed at the last day (the leave owed report's working, `ProRateOnExit` binding), none on summary dismissal; the cap a setting (56); in-service off on the demo and hidden in the portal; the L3 limits · `run-round5-l.mjs` 51, green twice · § 8 |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
-> | K-II | **planned 2026-09-26** — cases, incapacity and compensation on the standard pattern with statutory defaults; after L, before M; starts with K-II-0, the PNDCL 187 text verified |
+> | K-II | **planned 2026-09-26** — cases, incapacity and compensation on the standard pattern with statutory defaults; after L, before M. **K-II-0 DONE** 2026-09-26 — PNDCL 187 verified in its primary text, `HR-WORKMENS-COMPENSATION-SCHEDULES.md`. **K-II-a DONE** 2026-09-26 — a board hears cases: several employees, each decided at a sitting whose attendance decided it, a quorum setting, the board reporting by itself; leave's gate and separation's new control read the employee's case · `run-round5-k2a.mjs` 169, green twice · § 8. **K-II-b next** |
 
 ## Context
 
@@ -298,7 +298,10 @@ K-II-b: every section K-II relies on, both statutory boards, and the First and T
 | — | **s.27**: no claim may be **set off** against compensation | ⚠ Never on a settlement beside its deductions |
 | — | **s.36**: compensation is calculated on at most **25,000 cedis of a year's earnings**, revisable by legislative instrument — a pre-2007 figure (GH₵2.50 after redenomination); no revision found | A ceiling **setting with no default in force**; TDC / counsel to confirm (R5-Q5) |
 
-**K-II-a — The case split.**
+**K-II-a — The case split · DONE 2026-09-26** (§ 8 records where it departed from this text:
+`SafetyIncidentId` moved to K-II-b with its control; the quorum's minimum is 1, not "empty = none";
+the board keeps the existing status *Concluded*, reached by itself, rather than a new *Closed*;
+separation, like leave, links the board and reads the employee's case).
 - **`MedicalBoardCase`**: the board, the employee (**unique per board**), purpose, reason, requested
   by and on, health profile, examination, `SafetyIncidentId` (a bare Guid to SHE's incident, by
   reference, for injury cases — the SHE↔Medical boundary), status (*Listed · Concluded · Withdrawn*),
@@ -381,6 +384,10 @@ review (s.17), periodical payment schedules (payroll's).
 - A joiner's part period (lane C): accrual credits whole periods only, so a window opening mid-month loses the stretch after its last whole period in the year. The explainer's worked example (18 days) states it and the accrual statement names it. Crediting it pro rata is a question for R5-Q1, not a defect.
 - The desk leave screens' year pickers (adjustments, compliance, encashments, plans, register, requests) still open on the calendar year (lane C4 moved the portal's, the balances page's and every controller default; lane G the year-end page's). Invisible on a January leave year; a one-line change each (`useLeaveYear`).
 - Recall expenses (s.26): an ordinary claim.
+- **Harness residue on leave.emp** (found in lane K-II-a's pass): the older slices cancel their
+  fixture requests without retiring them — about 160 cancelled rows sit in the next 30 days alone, and
+  one read's page overflowed (slice 4, fixed by filtering). Retiring them in each slice's clean-up, as
+  lane H's suites do, is the real fix.
 - A leave allowance (R5-Q3): a payroll element, if TDC pays one.
 - Sick-pay tiers (full pay, then half pay): payroll's.
 - Plans on the calendar. (K-II is now a lane, above.)
@@ -1453,7 +1460,8 @@ fortnight; it now cancels and retires what it raised. **79, its recorded count.*
   correction is the natural answer if it is ever needed.
 - **The typed paper recommendation is not held to K6's tests** — the system cannot read what the
   paper is about, or when it was signed.
-- `EmployeeSeparation.MedicalBoardId` is still unreachable (K-II / separation's closure).
+- `EmployeeSeparation.MedicalBoardId` is still unreachable (K-II / separation's closure). *(Closed by
+  K-II-a, 2026-09-26: the separation page's Medical board panel.)*
 
 ### L — Encashment on exit only · DONE 2026-09-26
 
@@ -1570,3 +1578,134 @@ fortnight; it now cancels and retires what it raised. **79, its recorded count.*
   slice 2's encashment is for the current year on a type with no accrual policy and a planted 40-day
   balance, inside every L3 limit; slices 3 and 4 value any uncomputed line and total the released
   lines themselves.
+
+### K-II-0 — The Workmen's Compensation Act, verified · DONE 2026-09-26
+
+Recorded under Lane K-II above and in `docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md`
+(committed on its own). No code.
+
+### K-II-a — A board that hears cases · DONE 2026-09-26
+
+**Built.**
+
+- **`MedicalBoardCase`** — one per employee per board (unique among live rows): the employee, purpose,
+  reason, requested by and on, health profile, examination, status (*Listed · Concluded · Withdrawn*),
+  **`DecidedAtSittingId`**, the finding (outcome, findings, recommendation, restrictions, review date,
+  retirement recommendation), concluded by and on, withdrawn by, on and why. `CoversAbsence` moved
+  here — still the one list. Lane K's rules carry over per case: purpose required, the subject's own
+  examination, the profile derived, an outcome required.
+- **`MedicalBoard`** keeps the panel: number, **`Kind`** (the employer's own · the statutory
+  disfigurement board · the statutory internal-organ board, K-II-0), status, convened, facility,
+  cancellation, members, sittings, documents.
+- **Attendance** — `MedicalBoardSittingAttendance` (a sitting, a member; `MemberId` a bare Guid, since a
+  foreign key would be a second cascade path from the board). Recorded with a sitting, correctable
+  until a case is decided at it, then fixed.
+- **Deciding a case** (`PUT …/cases/{caseId}/conclude`): the board convened, the case listed, an
+  outcome and a recommendation, and a **named sitting of this board** where somebody is recorded
+  present and at least **`MedicalBoardQuorum`** chairs or members were — secretaries and observers
+  attend without deciding, and **a member removed after sitting still counts** (attendance records who
+  sat). The finding reads back *decided at the sitting of … by …*.
+- **Withdrawing a case** needs a reason. **The board reports by itself** when no case is left open and
+  at least one was decided; **all withdrawn and none decided is not reporting** — the board stays open
+  for HR to add a case or stop it. Cancel/dissolve withdraws every open case, in the board's words.
+  Convening needs a member **and an open case**.
+- **Membership both ways**: nobody who is a case can be seated; nobody seated can be a case.
+- **`MedicalBoardQuorum`** on `CompanyHrPolicySettings` (1–20, default 1) and the HR policy page.
+- **Leave** (`EnsureMedicalEvidenceAsync`, `LinkMedicalBoardAsync`) reads **the request's employee's
+  case** on the linked board: undecided, withdrawn, about something other than an absence, or decided
+  before the leave year — each refused in its own words; a board with no case on the employee, or a
+  withdrawn one, cannot be linked.
+- **Separation — the control for the column nothing could set.** `PUT api/hr/separations/{id}/medical-board`
+  (empty body unlinks): draft only, medical retirement only, the board's case on the leaver decided
+  **and recommending retirement**. `RequireSupportingEvidenceAsync` accepts that finding in place of the
+  medical report. Changing the route out away from medical retirement drops the board. The detail DTO
+  carries the bare `MedicalBoardId`; the page's **Medical board** panel reads the board from the Medical
+  module (who decided and the recommendation — not the clinical findings).
+- **Documents** can name a case (`caseId`, checked before the scan).
+- **Screens**: the register lists each board's cases (filters by any case's purpose, and by kind); the
+  request dialog takes the kind and the first case (shared `MedicalBoardCaseFields`); the board page
+  has *Add a case*, a **Cases** card (finding dialog with the sitting, *Withdraw*), attendance ticks on
+  *Record a sitting* and an *Attendance* correction per sitting, a *Decides* column, documents *About*
+  a case; no *Report* button. Leave's board panel reads the employee's case. Type-check (scoped
+  `tsconfig.round5-lane-k2a.json`) and lint clean.
+- **Migration `20260926143546_AddMedicalBoardCases`**, guarded SQL. ⚠ **The scaffold RENAMED
+  `Purpose` to `Kind`** — applied, every board's question would have been lost and purposes 4 and 5
+  become kinds that do not exist. Rewritten: `Kind` new (1 for every board), the two tables, `CaseId`,
+  `MedicalBoardQuorum` (1, never the scaffold's 0); **every board became a board with one case**
+  (Concluded → decided at its last *live* sitting, none invented where it never sat; Cancelled →
+  withdrawn with its date, actor and reason in the service's words; else Listed); **no attendance
+  invented**; the twelve moved columns dropped with their keys, indexes and defaults. **Down refuses**
+  (THROW, nothing changed) while any board hears two live cases or none, instead of choosing which
+  findings to lose. Proven on a scratch database with boards in every state and a soft-deleted sitting:
+  Up (28 checks), Up again, the refused Down, Down restoring every board exactly in all 28 columns, Down
+  again, Up again. **UAT applied it at startup**, checked against a snapshot taken just before: 22
+  boards → 22 cases, each matching its board; statuses 11 listed, 8 decided, 3 withdrawn.
+
+**Changed from the plan, and why.**
+
+1. **`SafetyIncidentId` moved to K-II-b**, with the control that asks for the incident — added now it
+   would have been another column nothing can set, the defect this lane closes on separation.
+2. **The quorum's minimum is 1, not "empty = no minimum".** A finding with nobody recorded present
+   rests on nothing; the service also refuses a sitting with no attendance at all.
+3. **The board reaches the existing *Concluded* by itself** rather than a new *Closed* — the leave
+   gate, the register's filter and every screen already read it — and **not when every case was
+   withdrawn**: a board that ruled on nobody must not read as one that ruled.
+4. **Separation links the board, as leave does**, and reads the leaver's case (the plan said it would
+   point at the case): an employee is before a board once, so the two name one case, and both bridges
+   stay the same shape. **Its link is checked when made** (decided and recommending retirement) —
+   unlike leave's, it *is* the evidence.
+5. **"Deciding" members are the chair and members**, not "medical members": the role, not the
+   register, is what the record knows; a physician can sit as secretary.
+
+**Suite.** `dev-harness/hr-leave/run-round5-k2a.mjs`: **169 assertions, green twice.** Its first run was
+166/169 — all three the suite's: the server writes September as **"Sept"** (its culture), and the
+second request's gate sentence counts the first, still Pending, as lane N3 intends (20 days, not 10).
+- [1] two employees on one board, their own questions; the four membership/case refusals in exact
+  words; found in the register by the SECOND case's employee and purpose. [2] attendance recorded,
+  corrected (soft-deleted row), fixed once decided; decided at no sitting / another board's / an
+  empty one — each refused. [3] **quorum both positions** at 2 (chair + secretary refused, exact words;
+  chair + member decide, named in order), **a removed chair still counts**, omitted → 1, 0 and 21
+  refused, put back. [4] reporting by itself, withdrawn-only not reporting, dissolving withdraws in the
+  board's words. [5] **the board deciding somebody else's case at the same sitting still refused**;
+  the employee's own decided case accepted. [6] separation both ways through the evidence gate —
+  refused on the report sentence before linking, refused only on the end date after (so nothing is
+  submitted). [7] a paper about one case; another board's case refused before storage. [8] a statutory
+  board. [9] every new verb 403 to an employee and a line manager.
+- Clean-up: its separation cancelled and retired, its requests cancelled and retired, its leave type
+  off, the quorum back at 1. Its start clears the fixtures' earlier boards — **pointing leave requests
+  and separations at nothing first**: on UAT **21 leave requests named boards that no longer existed**,
+  hard-deleted by lane K's and G4's own clean-up (leave's `MedicalBoardId` has no key by design). The
+  pointers were harness rows, all cancelled; the snapshot shows none was lost to the migration.
+
+**Re-based onto cases**, same claims, at their recorded counts: **`run-round5-k.mjs` 144** (purpose,
+references and finding read from the case; K7's "nobody on the board, no report" is now "nobody
+recorded present, no finding" — a removed member still counts, [3] of the new suite) and
+**slice 8 79** (the finding on the case; "a different employee" is now "no case about this employee").
+Both green twice.
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green twice:
+
+- **Slices 1–13 at their recorded counts** — slice 1 72/75, the same three environmental failures —
+  **except slice 4, 51/52: harness residue, not a defect.** Its employee-filtered register read (next
+  30 days, page of 100) lost its approved fixture under ~160 CANCELLED requests the older slices leave
+  on leave.emp without retiring them (lane H met the same read at 51/52). Filtered by status as well
+  (its request is Approved there); **54/54 re-run** — the two assertions that only run once the
+  request is found are back.
+- **The round 5 suites:** `-e` 119, `-f` 20, `-d` 74, `-a` 89, `-n` 92, `-c` 112, `-g` 55, `-h` 142,
+  `-j` 44, `-i` 88, **`-k` 144 and slice 8 79 (both re-based)**, `-l` 51.
+- **`run-round5-k2a.mjs` was 169 a third time**, run last.
+- **hr-separation `run-slice8.mjs` (the exit routes, including medical retirement's evidence rule):
+  47, twice.** Its refusal check reads "medical report", which the new sentence keeps.
+- **Cleanup:** the 27 harness types this lane's runs minted were switched off, measured first (all
+  harness codes, no creator, created that afternoon). Only TDC's nine are active. Nothing of the
+  lane's is left on leave.emp; no separation of the lane's is open; the quorum is 1.
+- **The API log holds nothing from this lane:** 6,593 notification-sender lines (no mail server on
+  UAT), 9 failures of the notification clean-up's own update contending with the sweeps' writes, 13
+  payroll-profile foreign-key failures — one per employee separation slice 8 minted (cross-module
+  defect #23) — and one procurement calendar failure for another tenant. **No request answered 500.**
+
+**Noted, not built.**
+- **Correcting a sitting's attendance after a case was decided there** is refused by design; a wrong
+  attendance on a decided case needs a Medical-admin correction, like a mis-filed paper.
+- The guide's § 7b walk step 5 still said a Pending request "counts for nothing" (stale since lane N3)
+  and quoted the gate's pre-K6 sentence — corrected here, with the chapter.

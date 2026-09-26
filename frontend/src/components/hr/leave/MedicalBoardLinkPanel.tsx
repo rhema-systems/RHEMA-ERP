@@ -18,10 +18,14 @@
  * satisfies the gate (see `LeaveService.EnsureMedicalEvidenceAsync`), so this panel says which of
  * the two it is instead of showing a link and leaving the reader to assume the rule is met.
  *
- * ⚠ **And only a relevant, recent one** (round 5, lane K6): a board about an absence
- * (`coversAbsence`, the server's answer) that reported on or after the start of the leave year the
- * request falls in. The panel applies the same three tests as the gate, in the same order, so it
- * never calls a board satisfying that the submission will then refuse.
+ * ⚠ **And only a relevant, recent one** (round 5, lane K6): a case about an absence
+ * (`coversAbsence`, the server's answer) decided on or after the start of the leave year the
+ * request falls in. The panel applies the same tests as the gate, in the same order, so it never
+ * calls a board satisfying that the submission will then refuse.
+ *
+ * ⚠ **A board hears several people** (lane K-II-a), so everything here is read from THIS
+ * employee's case on the board — its question, its status, its finding — never from the board as a
+ * whole. The board having decided somebody else's case says nothing about this absence.
  */
 
 import { useState } from 'react';
@@ -45,11 +49,13 @@ import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { medicalBoardService } from '@/services/hr/medical-board.service';
 import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import {
+  MEDICAL_BOARD_CASE_STATUS_LABEL,
   MEDICAL_BOARD_OUTCOME_LABEL,
   MEDICAL_BOARD_PURPOSE_LABEL,
   boardStatusLabel,
+  caseFor,
 } from '@/types/hr/medical-board';
-import type { MedicalBoard } from '@/types/hr/medical-board';
+import type { MedicalBoard, MedicalBoardCase } from '@/types/hr/medical-board';
 import type { LeaveRequest } from '@/types/hr/leave-request';
 
 const day = (d?: string | null) => (d ? d.slice(0, 10) : '—');
@@ -64,17 +70,21 @@ function leaveYearStartOf(date: string, startMonth: number): string {
 
 /**
  * Why a board would NOT satisfy the rule for a request starting on `startDate`, or null when it
- * would. The gate's three tests, in its order (lane K6).
+ * would. The gate's tests, in its order (lanes K6, K-II-a) — all of them on this employee's case.
  */
-function whyNotSatisfying(board: MedicalBoard, yearStart: string): string | null {
-  if (board.status === 'Cancelled')
-    return `This board was ${board.wasDissolved ? 'dissolved' : 'cancelled'} before it reported, so it satisfies nothing. Link the board that replaced it.`;
-  if (board.status !== 'Concluded')
-    return 'This board has not reported yet. Submission will still be refused until it concludes, or until its recommendation is attached.';
-  if (!board.coversAbsence)
-    return `This board was asked about ${MEDICAL_BOARD_PURPOSE_LABEL[board.purpose]?.toLowerCase() ?? board.purpose}, not an absence, so it cannot satisfy the board rule.`;
-  if (!board.concludedOn || board.concludedOn.slice(0, 10) < yearStart)
-    return `This board reported on ${day(board.concludedOn)}, before this request's leave year began on ${yearStart}, so it does not count for it.`;
+function whyNotSatisfying(board: MedicalBoard, c: MedicalBoardCase | undefined, yearStart: string): string | null {
+  if (!c)
+    return 'This board has no case about this employee, so it cannot satisfy anything here.';
+  if (c.status === 'Withdrawn')
+    return board.status === 'Cancelled'
+      ? `This board was ${board.wasDissolved ? 'dissolved' : 'cancelled'} before it decided this employee's case, so it satisfies nothing. Link the board that replaced it.`
+      : "This board withdrew this employee's case without deciding it, so it satisfies nothing.";
+  if (c.status !== 'Concluded')
+    return "This board has not yet decided this employee's case. Submission will still be refused until it does, or until its recommendation is attached.";
+  if (!c.coversAbsence)
+    return `This employee's case was about ${MEDICAL_BOARD_PURPOSE_LABEL[c.purpose]?.toLowerCase() ?? c.purpose}, not an absence, so it cannot satisfy the board rule.`;
+  if (!c.concludedOn || c.concludedOn.slice(0, 10) < yearStart)
+    return `This employee's case was decided on ${day(c.concludedOn)}, before this request's leave year began on ${yearStart}, so it does not count for it.`;
   return null;
 }
 
@@ -160,7 +170,8 @@ export function MedicalBoardLinkPanel({
   // Nothing to say: no board named and no rule that would ever ask for one.
   if (!linkedId && !boardRuleLive) return null;
 
-  const notSatisfying = board ? whyNotSatisfying(board, yearStart) : null;
+  const ownCase = board ? caseFor(board, request.employeeId) : undefined;
+  const notSatisfying = board ? whyNotSatisfying(board, ownCase, yearStart) : null;
 
   return (
     <Card>
@@ -251,13 +262,17 @@ export function MedicalBoardLinkPanel({
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{board.boardNumber}</span>
               <StatusBadge status={boardStatusLabel(board)} />
-              <span className="text-muted-foreground">
-                {MEDICAL_BOARD_PURPOSE_LABEL[board.purpose] ?? board.purpose}
-              </span>
-              {board.outcome && (
-                <span className="text-muted-foreground">
-                  {MEDICAL_BOARD_OUTCOME_LABEL[board.outcome] ?? board.outcome}
-                </span>
+              {ownCase && (
+                <>
+                  <span className="text-muted-foreground">
+                    {MEDICAL_BOARD_PURPOSE_LABEL[ownCase.purpose] ?? ownCase.purpose}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {ownCase.outcome
+                      ? MEDICAL_BOARD_OUTCOME_LABEL[ownCase.outcome] ?? ownCase.outcome
+                      : MEDICAL_BOARD_CASE_STATUS_LABEL[ownCase.status]}
+                  </span>
+                </>
               )}
               <Link
                 href={`/hr/medical/boards/${board.id}`}
@@ -270,16 +285,19 @@ export function MedicalBoardLinkPanel({
             <div className="grid gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
               <span>Requested {day(board.requestedOn)}</span>
               <span>Convened {day(board.convenedOn)}</span>
-              <span>Concluded {day(board.concludedOn)}</span>
+              <span>Case decided {day(ownCase?.concludedOn)}</span>
               <span>{board.members.length} member(s)</span>
+              {ownCase?.decidedBy && ownCase.decidedBy.length > 0 && (
+                <span className="sm:col-span-2">Decided by {ownCase.decidedBy.join(', ')}</span>
+              )}
             </div>
 
-            {board.recommendation && (
-              <p className="whitespace-pre-wrap">{board.recommendation}</p>
+            {ownCase?.recommendation && (
+              <p className="whitespace-pre-wrap">{ownCase.recommendation}</p>
             )}
-            {board.restrictions && (
+            {ownCase?.restrictions && (
               <p className="whitespace-pre-wrap text-muted-foreground">
-                Restrictions: {board.restrictions}
+                Restrictions: {ownCase.restrictions}
               </p>
             )}
 
@@ -297,7 +315,7 @@ export function MedicalBoardLinkPanel({
                 }
               >
                 {!notSatisfying
-                  ? 'This board has reported on an absence during this leave year, so it satisfies the board rule for this leave type.'
+                  ? "This board decided this employee's case about an absence during this leave year, so it satisfies the board rule for this leave type."
                   : `⚠ ${notSatisfying}`}
               </p>
             )}
@@ -313,6 +331,7 @@ export function MedicalBoardLinkPanel({
         currentId={linkedId}
         busy={link.isPending}
         onPick={(b) => link.mutate(b.id)}
+        employeeId={request.employeeId}
         employeeName={request.employeeName}
       />
     </Card>
@@ -327,6 +346,7 @@ function BoardPicker({
   currentId,
   busy,
   onPick,
+  employeeId,
   employeeName,
 }: {
   open: boolean;
@@ -336,6 +356,7 @@ function BoardPicker({
   currentId: string | null;
   busy: boolean;
   onPick: (board: MedicalBoard) => void;
+  employeeId: string;
   employeeName: string;
 }) {
   return (
@@ -344,9 +365,9 @@ function BoardPicker({
         <DialogHeader>
           <DialogTitle>Which board ruled on this absence?</DialogTitle>
           <DialogDescription>
-            Boards held on {employeeName}. A board that has not reported yet can be linked — the
-            request can say which board it is waiting on — but only a concluded one satisfies the
-            evidence rule.
+            Boards with a case about {employeeName}. A board that has not decided it yet can be
+            linked — the request can say which board it is waiting on — but only a decided case
+            satisfies the evidence rule.
           </DialogDescription>
         </DialogHeader>
 
@@ -368,28 +389,35 @@ function BoardPicker({
           )}
 
           {boards.map((b) => {
-            // ⚠ The server refuses a cancelled board. Disabled rather than hidden, so somebody
-            // looking for the board they remember can see what became of it.
-            const cancelled = b.status === 'Cancelled';
+            // ⚠ The server refuses a cancelled board, or a withdrawn case. Disabled rather than
+            // hidden, so somebody looking for the board they remember can see what became of it.
+            const c = caseFor(b, employeeId);
+            const cancelled = b.status === 'Cancelled' || c?.status === 'Withdrawn';
             return (
               <button
                 key={b.id}
                 type="button"
-                disabled={busy || cancelled || b.id === currentId}
+                disabled={busy || cancelled || !c || b.id === currentId}
                 onClick={() => onPick(b)}
                 className="flex w-full items-start justify-between gap-3 rounded-md border p-3 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span>
                   <span className="font-medium">{b.boardNumber}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {MEDICAL_BOARD_PURPOSE_LABEL[b.purpose] ?? b.purpose}
-                    {' · '}requested {day(b.requestedOn)}
-                    {b.concludedOn ? ` · concluded ${day(b.concludedOn)}` : ''}
-                    {b.outcome ? ` · ${MEDICAL_BOARD_OUTCOME_LABEL[b.outcome] ?? b.outcome}` : ''}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">{b.reason}</span>
+                  {c && (
+                    <>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {MEDICAL_BOARD_PURPOSE_LABEL[c.purpose] ?? c.purpose}
+                        {' · '}listed {day(c.requestedOn)}
+                        {c.concludedOn ? ` · decided ${day(c.concludedOn)}` : ''}
+                        {c.outcome
+                          ? ` · ${MEDICAL_BOARD_OUTCOME_LABEL[c.outcome] ?? c.outcome}`
+                          : ` · ${MEDICAL_BOARD_CASE_STATUS_LABEL[c.status].toLowerCase()}`}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">{c.reason}</span>
+                    </>
+                  )}
                   {/* ⚠ Linkable, but never going to count — said before the pick, not after it. */}
-                  {!b.coversAbsence && !cancelled && (
+                  {c && !c.coversAbsence && !cancelled && (
                     <span className="mt-0.5 block text-xs text-amber-700 dark:text-amber-300">
                       Not about an absence — it cannot satisfy the board rule.
                     </span>

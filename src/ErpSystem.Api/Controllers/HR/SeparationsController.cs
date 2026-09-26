@@ -168,6 +168,36 @@ public class SeparationsController : ControllerBase
         }
     }
 
+    /// <summary>Name the medical board a medical retirement rests on, or clear it.</summary>
+    /// <remarks>
+    /// <para>Round 5, lane K-II-a: the control for a column nothing could set. Draft only; the board's
+    /// case about this employee must be decided and recommend medical retirement. Submission then
+    /// accepts it in place of the medical report.</para>
+    ///
+    /// <para>⚠ An empty body means unlink — the frontend's <c>apiService.put</c> drops a null body,
+    /// so <c>EmptyBodyBehavior.Allow</c> is what lets the Unlink button work (leave's link endpoint
+    /// carries the full story).</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.SeparationWritePolicy)]
+    [HttpPut("{id:guid}/medical-board")]
+    [ProducesResponseType(typeof(EmployeeSeparationDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeSeparationDetailDto>> LinkMedicalBoard(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Guid? medicalBoardId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _service.LinkMedicalBoardAsync(id, medicalBoardId, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     /// <summary>
     /// Submit a draft into the approval queue, deriving the dates that follow from the notice
     /// already recorded. After this the notice facts are fixed — the settlement is computed from

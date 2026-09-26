@@ -242,6 +242,10 @@ public partial class ApplicationDbContext
     public DbSet<MedicalBoardSitting> MedicalBoardSittings { get; set; } = null!;
     /// <summary>Papers on a board, through the upload gate (round 5, lane K4).</summary>
     public DbSet<MedicalBoardDocument> MedicalBoardDocuments { get; set; } = null!;
+    /// <summary>One employee's case before a board, and its finding (round 5, lane K-II-a).</summary>
+    public DbSet<MedicalBoardCase> MedicalBoardCases { get; set; } = null!;
+    /// <summary>Who was present at a sitting — the panel for whatever was decided there (lane K-II-a).</summary>
+    public DbSet<MedicalBoardSittingAttendance> MedicalBoardSittingAttendances { get; set; } = null!;
     public DbSet<MedicalAppointment> MedicalAppointments { get; set; } = null!;
     public DbSet<NHISClaim> NHISClaims { get; set; } = null!;
     public DbSet<NHISClaimDocument> NHISClaimDocuments { get; set; } = null!;
@@ -4379,6 +4383,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 // SeparationService. ⚠ Nullable, so leaving it out of this anonymous seed would seed
                 // "no cap" rather than fail the build — it must be named.
                 SettlementLeaveDaysCap         = 56,
+                // Round 5, lane K-II-a: deciding members present at a board's deciding sitting.
+                MedicalBoardQuorum             = 1,
                 AttendanceRateIncludesApprovedLeave = true,
                 // Residue plan G2. Same rule as the block above: every property must appear here or
                 // the DbContext will not build at design time.
@@ -7183,6 +7189,42 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.UploadedById)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- MedicalBoardCase (round 5, lane K-II-a) ----
+        // One employee, one case, per board — filtered on IsDeleted, although cases are withdrawn
+        // rather than deleted, because a soft delete does not release a unique index. The employee is
+        // RESTRICT: a clinical record is never deleted along with an employee (soft-deleted anyway).
+        // Cascading from the board matches its members, sittings and documents.
+        builder.Entity<MedicalBoardCase>(entity =>
+        {
+            entity.HasIndex(x => new { x.BoardId, x.EmployeeId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_MedicalBoardCases_Board_Employee");
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasOne(x => x.Board)
+                .WithMany(x => x.Cases)
+                .HasForeignKey(x => x.BoardId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- MedicalBoardSittingAttendance (round 5, lane K-II-a) ----
+        // Cascades from its sitting only; MemberId is a bare Guid (see the entity).
+        builder.Entity<MedicalBoardSittingAttendance>(entity =>
+        {
+            entity.HasIndex(x => new { x.SittingId, x.MemberId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_MedicalBoardSittingAttendances_Sitting_Member");
+            entity.HasOne(x => x.Sitting)
+                .WithMany(x => x.Attendance)
+                .HasForeignKey(x => x.SittingId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<MedicalClaimPreAuthorization>(entity =>

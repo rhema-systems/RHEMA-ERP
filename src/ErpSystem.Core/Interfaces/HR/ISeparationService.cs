@@ -35,6 +35,14 @@ public interface ISeparationService
     Task<EmployeeSeparationDetailDto> CancelAsync(
         Guid id, CancelEmployeeSeparationDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Names the medical board a medical retirement rests on, or clears it with null (round 5, lane
+    /// K-II-a). ⚠ Draft only, medical retirement only, and the board's case about this employee must
+    /// be decided and recommend medical retirement. Separation reads the board; it never writes one.
+    /// </summary>
+    Task<EmployeeSeparationDetailDto> LinkMedicalBoardAsync(
+        Guid id, Guid? medicalBoardId, CancellationToken cancellationToken = default);
+
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>

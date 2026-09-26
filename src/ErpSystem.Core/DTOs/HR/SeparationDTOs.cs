@@ -49,6 +49,12 @@ public class EmployeeSeparationDetailDto : EmployeeSeparationListDto
     public string? ReasonCategoryName { get; set; }
     public string? ReasonNotes { get; set; }
 
+    /// <summary>
+    /// The medical board whose finding a medical retirement rests on (round 5, lane K-II-a). A bare
+    /// id: the board is a Medical record, read by its own screen under the Medical permissions.
+    /// </summary>
+    public Guid? MedicalBoardId { get; set; }
+
     public DateOnly? NoticeGivenOn { get; set; }
     public int? NoticeDays { get; set; }
 

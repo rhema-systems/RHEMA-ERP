@@ -483,7 +483,7 @@ sick leave needs a certificate, annual leave does not, and every client has both
 |---|---|---|---|
 | `RequiresMedicalCertificate` | `false` | **Enforced** | [1] a 21-day absence submits freely with the flag off; [2] a 7-day one is refused with it on |
 | `SelfCertificationDays` | `3` | **Enforced** | [2] 3 days submits, 7 days refuses, and the message names both figures |
-| `MedicalBoardThresholdDays` | `90` (null on pre-existing rows) | **Enforced** | [3] two 6-day absences against a 10-day threshold: each passes alone, together they refuse stating 12. Which board satisfies it: `run-round5-k.mjs` [6] — refused, in exact words, for a board not reported, about fitness for duty or retirement, or reported on the last day of the previous leave year; accepted for the same board on the first day of this one, and for sick-leave, injury and other boards |
+| `MedicalBoardThresholdDays` | `90` (null on pre-existing rows) | **Enforced** | [3] two 6-day absences against a 10-day threshold: each passes alone, together they refuse stating 12. Which board satisfies it: `run-round5-k.mjs` [6] — refused, in exact words, for a case not decided, about fitness for duty or retirement, or decided on the last day of the previous leave year; accepted for the same case on the first day of this one, and for sick-leave, injury and other cases. ⚠ **Since lane K-II-a it is THIS employee's case on the linked board**: `run-round5-k2a.mjs` [5] — the board deciding somebody else's case at the same sitting is still refused, the employee's own decided case accepted, a withdrawn case refused at submission and at linking, a board with no case on the employee not linkable |
 
 ⚠ **The board threshold is counted across the YEAR.** Asserted with two absences that each pass the
 per-request test — a per-request rule would let both through, which is what splitting an absence
@@ -503,6 +503,18 @@ statutory extension on top of 84 days makes 98, which would send a new mother to
 TDC's *Maternity Leave* is certificate on, 0 self-certification days, no board — set through the API
 on UAT on 2026-09-25, and by the seeder for a fresh build. `run-round5-a.mjs` [2b] proves both
 positions on its own maternity type.
+
+### The medical board's quorum — `CompanyHrPolicySettings.MedicalBoardQuorum` (round 5, lane K-II-a) — added 2026-09-26
+
+A tenant setting, on the HR policy page (*Medical boards → Quorum — deciding members present*).
+
+| Setting | Default | Status | Enforced where | Proof — `run-round5-k2a.mjs` [3], both positions |
+|---|---|---|---|---|
+| `MedicalBoardQuorum` | **`1`** (1–20). A save that omits it resets it to **1** (the update DTO's default), so the page sends it on every save. Migration `AddMedicalBoardCases` wrote 1 on every existing tenant row — never the scaffold's 0, which would let a case be decided with nobody present | **Enforced** | `MedicalBoardService.ConcludeCaseAsync` — the chairs and members recorded present at the sitting a case is decided at (secretaries and observers do not count; a member removed after sitting still does) must be at least this. The refusal names the number and the sitting | at 2: a chair and a secretary (one deciding) refused in exact words, nothing decided; a chair and a member decide, both named. A removed chair still counts at 2. Omitted → 1; 0 and 21 refused (400); put back after |
+
+⚠ **Default 1 is today's rule, not a recommendation.** Public-service boards sit with three medical
+officers; how many must be present to decide is each organisation's own rule — R5-Q5 asks TDC for
+theirs.
 
 ### The year-end basis and first-year pro-rating (entitlement plan B2/B3) — added 2026-09-18
 

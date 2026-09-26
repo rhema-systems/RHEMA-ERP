@@ -5037,12 +5037,12 @@ public enum MedicalReferralStatus
 }
 
 /// <summary>
-/// Where a medical board has got to (residue plan G4 / R-15b).
+/// Where a medical board — the PANEL — has got to (residue plan G4; round 5, lane K-II-a).
 /// </summary>
 /// <remarks>
-/// ⚠ A board is <b>convened for one employee about one question</b>, so its lifecycle is a case's,
-/// not a committee's. A standing panel that sits repeatedly on different people would need a
-/// different model, and TDC has not described one.
+/// ⚠ Since lane K-II-a a board is a panel that hears <b>cases</b>, one per employee, and each case
+/// has its own status (<see cref="MedicalBoardCaseStatus"/>). The board's status is the panel's:
+/// asked for, sitting, or finished. What leave and separation act on is a CASE's finding.
 /// </remarks>
 public enum MedicalBoardStatus
 {
@@ -5050,11 +5050,14 @@ public enum MedicalBoardStatus
     [Description("Requested")]
     Requested = 1,
 
-    /// <summary>Members appointed; it may now sit. Its recommendation is not yet given.</summary>
+    /// <summary>Members appointed; it may now sit and decide its cases.</summary>
     [Description("Convened")]
     Convened = 2,
 
-    /// <summary>It has reported. ⚠ The only status leave and separation will act on.</summary>
+    /// <summary>
+    /// Every case is decided or withdrawn, and at least one was decided — the board has reported.
+    /// Reached by itself when the last open case closes; nothing on the board changes after it.
+    /// </summary>
     [Description("Concluded")]
     Concluded = 3,
 
@@ -5068,6 +5071,53 @@ public enum MedicalBoardStatus
 }
 
 /// <summary>
+/// One employee's case before a medical board (round 5, lane K-II-a).
+/// </summary>
+public enum MedicalBoardCaseStatus
+{
+    /// <summary>Before the board, not yet decided.</summary>
+    [Description("Listed")]
+    Listed = 1,
+
+    /// <summary>
+    /// Decided, at a recorded sitting. ⚠ The only state leave and separation act on, and it cannot be
+    /// undone: a finding that needs revisiting is a new case.
+    /// </summary>
+    [Description("Concluded")]
+    Concluded = 2,
+
+    /// <summary>Taken off the board without a finding — a reason is required.</summary>
+    [Description("Withdrawn")]
+    Withdrawn = 3
+}
+
+/// <summary>
+/// Who convened a medical board (round 5, lane K-II-a; the Workmen's Compensation Act, checked in
+/// its primary text — <c>docs/HR/catalogues/HR-WORKMENS-COMPENSATION-SCHEDULES.md</c>).
+/// </summary>
+/// <remarks>
+/// The Act provides two statutory boards, both in its schedules' notes and both narrow; everything
+/// else — TDC's own fitness or sick-leave boards — is the employer's.
+/// </remarks>
+public enum MedicalBoardKind
+{
+    /// <summary>The employer's own board.</summary>
+    [Description("Employer's board")]
+    Employer = 1,
+
+    /// <summary>
+    /// A disputed disfigurement (First Schedule note): appointed by the chief labour officer — a chair
+    /// nominated by the Minister, one practitioner by the employer, one by the employee if they wish.
+    /// </summary>
+    [Description("Statutory — disfigurement (chief labour officer)")]
+    StatutoryDisfigurement = 2,
+
+    /// <summary>An injury to an internal organ or the spine (Third Schedule note): appointed by the Minister.</summary>
+    [Description("Statutory — internal organ (Minister)")]
+    StatutoryInternalOrgan = 3
+}
+
+/// <summary>
 /// The question a medical board is asked (round 5, lane K1 — decision A6).
 /// </summary>
 /// <remarks>
@@ -5078,10 +5128,10 @@ public enum MedicalBoardStatus
 /// purpose silently became the first value would be a board nobody asked that question of. The
 /// service refuses 0 and anything undefined.</para>
 ///
-/// <para>⚠ <b>The leave evidence gate reads it</b> (lane K6): only a board about an absence —
+/// <para>⚠ <b>The leave evidence gate reads it</b> (lane K6): only a case about an absence —
 /// <see cref="ExtendedSickLeave"/>, <see cref="InjuryOnDuty"/> or <see cref="Other"/> — can stand as
-/// the board a leave type's threshold asks for. <c>MedicalBoard.CoversAbsence</c> is the one place
-/// that list lives.</para>
+/// the board a leave type's threshold asks for. <c>MedicalBoardCase.CoversAbsence</c> is the one place
+/// that list lives. Since lane K-II-a the purpose is asked per case, not per board.</para>
 /// </remarks>
 public enum MedicalBoardPurpose
 {

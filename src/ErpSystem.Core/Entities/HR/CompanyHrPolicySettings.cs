@@ -411,6 +411,18 @@ public class CompanyHrPolicySettings : TenantEntity
     public int? SettlementLeaveDaysCap { get; set; } = 56;
 
     /// <summary>
+    /// How many DECIDING members (chair or member — not secretary or observer) must be present at
+    /// the sitting where a medical board decides a case (round 5, lane K-II-a).
+    /// </summary>
+    /// <remarks>
+    /// Default 1 — the rule until K-II-a was "somebody on the board". The statutory boards of the
+    /// Workmen's Compensation Act are three practitioners; a client whose own board must be quorate
+    /// raises it. R5-Q5 asks TDC for its number.
+    /// </remarks>
+    [Range(1, 20)]
+    public int MedicalBoardQuorum { get; set; } = 1;
+
+    /// <summary>
     /// Whether approved leave counts as an expected working day in the attendance rate.
     /// </summary>
     /// <remarks>

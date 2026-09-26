@@ -39,15 +39,16 @@ public class LeaveService : ILeaveService
     private readonly IGenericRepository<LeaveRequestAttachment> _attachmentRepository;
 
     /// <summary>
-    /// The medical board register, READ ONLY.
+    /// The medical board register and the cases before each board, READ ONLY.
     /// </summary>
     /// <remarks>
     /// ⚠ Leave never writes a board. The board is a Medical-module record and the bridge is one
-    /// way by design — this service asks whether one has concluded and does nothing else with it.
-    /// A shared mutable clinical record across three modules is how three modules come to
-    /// disagree about what a board decided.
+    /// way by design — this service asks whether the case about its employee has been decided and
+    /// does nothing else with it. A shared mutable clinical record across three modules is how three
+    /// modules come to disagree about what a board decided.
     /// </remarks>
     private readonly IGenericRepository<MedicalBoard> _medicalBoardRepository;
+    private readonly IGenericRepository<MedicalBoardCase> _medicalBoardCaseRepository;
     private readonly IEmployeeRepository _employeeRepository;
     private readonly ILeaveTypeService _leaveTypeService;
     private readonly IUnitOfWork _unitOfWork;
@@ -91,6 +92,7 @@ public class LeaveService : ILeaveService
             IGenericRepository<PublicHoliday> holidayNameLookupRepository,
             IGenericRepository<LeaveRequestAttachment> attachmentRepository,
             IGenericRepository<MedicalBoard> medicalBoardRepository,
+            IGenericRepository<MedicalBoardCase> medicalBoardCaseRepository,
             IEmployeeRepository employeeRepository,
             ILeaveTypeService leaveTypeService,
             ILeaveYearContext leaveYear,
@@ -121,6 +123,7 @@ public class LeaveService : ILeaveService
         _holidayNameLookupRepository = holidayNameLookupRepository;
         _attachmentRepository = attachmentRepository;
         _medicalBoardRepository = medicalBoardRepository;
+        _medicalBoardCaseRepository = medicalBoardCaseRepository;
         _employeeRepository = employeeRepository;
         _leaveTypeService = leaveTypeService;
         _leaveYear = leaveYear;
@@ -858,33 +861,41 @@ public class LeaveService : ILeaveService
         //
         // ⚠ Round 5, lane K6: and only a RELEVANT, RECENT board. Before this, any concluded board
         // about the employee satisfied the rule — one asked whether they could do their job, or one
-        // that reported three years ago. Now the board must have been asked about an absence
-        // (`MedicalBoard.CoversAbsence`) and have reported on or after the start of the leave year
+        // that reported three years ago. Now the case must have been asked about an absence
+        // (`MedicalBoardCase.CoversAbsence`) and decided on or after the start of the leave year
         // being counted, since that year's days are what the threshold counts.
+        //
+        // ⚠ Lane K-II-a: a board hears several people, so what is read is THIS employee's case on the
+        // linked board — its status, its question, its decision date. The board having reported on
+        // somebody else says nothing about this absence.
         var hasReport = attached.Contains(LeaveEvidenceKind.MedicalBoardRecommendation);
         string? whyNotTheLinkedBoard = null;
 
         if (!hasReport && request.MedicalBoardId is Guid boardId)
         {
-            var board = await _medicalBoardRepository
+            var onBoard = await _medicalBoardCaseRepository
                 .GetQueryable()
-                .Where(b => b.TenantId == tenantId
-                         && b.Id == boardId
-                         && b.EmployeeId == request.EmployeeId)
-                .Select(b => new { b.BoardNumber, b.Status, b.Purpose, b.ConcludedOn })
+                .Where(c => c.TenantId == tenantId
+                         && c.BoardId == boardId
+                         && c.EmployeeId == request.EmployeeId)
+                .Select(c => new { c.Board.BoardNumber, c.Status, c.Purpose, c.ConcludedOn })
                 .FirstOrDefaultAsync();
 
-            if (board is not null)
+            if (onBoard is not null)
             {
-                if (board.Status != MedicalBoardStatus.Concluded)
-                    whyNotTheLinkedBoard = $"The linked board, {board.BoardNumber}, has not reported.";
-                else if (!MedicalBoard.CoversAbsence(board.Purpose))
-                    whyNotTheLinkedBoard = $"The linked board, {board.BoardNumber}, was asked about "
-                        + $"{PurposeWords(board.Purpose)}, not an absence, so it cannot stand for this one.";
-                else if (board.ConcludedOn is not DateOnly concludedOn || concludedOn < boardYearStart)
-                    whyNotTheLinkedBoard = $"The linked board, {board.BoardNumber}, reported on "
-                        + $"{board.ConcludedOn:d MMM yyyy}, before this leave year began on "
-                        + $"{boardYearStart:d MMM yyyy}.";
+                if (onBoard.Status == MedicalBoardCaseStatus.Withdrawn)
+                    whyNotTheLinkedBoard = $"The linked board, {onBoard.BoardNumber}, withdrew this "
+                        + "employee's case without deciding it.";
+                else if (onBoard.Status != MedicalBoardCaseStatus.Concluded)
+                    whyNotTheLinkedBoard = $"The linked board, {onBoard.BoardNumber}, has not yet decided "
+                        + "this employee's case.";
+                else if (!MedicalBoardCase.CoversAbsence(onBoard.Purpose))
+                    whyNotTheLinkedBoard = $"The linked board, {onBoard.BoardNumber}, was asked about "
+                        + $"{PurposeWords(onBoard.Purpose)}, not an absence, so it cannot stand for this one.";
+                else if (onBoard.ConcludedOn is not DateOnly concludedOn || concludedOn < boardYearStart)
+                    whyNotTheLinkedBoard = $"The linked board, {onBoard.BoardNumber}, decided this "
+                        + $"employee's case on {onBoard.ConcludedOn:d MMM yyyy}, before this leave year "
+                        + $"began on {boardYearStart:d MMM yyyy}.";
                 else
                     hasReport = true;
             }
@@ -1498,30 +1509,42 @@ public class LeaveService : ILeaveService
 
         if (medicalBoardId is Guid boardId)
         {
-            // ⚠ The board must be about THIS employee. Without that check a request could be
-            // satisfied by somebody else's board — which is not a theoretical worry, because the
-            // board number is the natural thing to paste and boards are requested in batches.
+            // ⚠ The board must have a case about THIS employee. Without that check a request could be
+            // satisfied by somebody else's finding — which is not a theoretical worry, because the
+            // board number is the natural thing to paste, and since lane K-II-a one board hears
+            // several people.
             var board = await _medicalBoardRepository
                 .GetQueryable()
                 .Where(b => b.TenantId == tenantId && b.Id == boardId)
-                .Select(b => new { b.EmployeeId, b.Status })
+                .Select(b => new { b.Status })
                 .FirstOrDefaultAsync();
 
             if (board is null)
                 throw new ArgumentException($"Medical board '{boardId}' not found.");
 
-            if (board.EmployeeId != request.EmployeeId)
+            var caseStatus = await _medicalBoardCaseRepository
+                .GetQueryable()
+                .Where(c => c.TenantId == tenantId && c.BoardId == boardId && c.EmployeeId == request.EmployeeId)
+                .Select(c => (MedicalBoardCaseStatus?)c.Status)
+                .FirstOrDefaultAsync();
+
+            if (caseStatus is null)
                 throw new InvalidOperationException(
-                    "That medical board is about a different employee, so it cannot stand as evidence "
+                    "That medical board has no case about this employee, so it cannot stand as evidence "
                     + "for this request.");
 
-            // ⚠ A cancelled board is linkable to nothing. Note that a REQUESTED or CONVENED board
-            // IS linkable on purpose: the board is usually asked for before it sits, and the request
-            // should be able to say which board it is waiting on. The evidence gate is what insists
-            // on Concluded — linking records intent, the gate enforces the rule.
+            // ⚠ A cancelled board, or a withdrawn case, is linkable to nothing. Note that a board
+            // still REQUESTED or CONVENED IS linkable on purpose: the board is usually asked for
+            // before it sits, and the request should be able to say which board it is waiting on. The
+            // evidence gate is what insists on a decided case — linking records intent, the gate
+            // enforces the rule.
             if (board.Status == MedicalBoardStatus.Cancelled)
                 throw new InvalidOperationException(
                     "That medical board was cancelled, so it cannot stand as evidence.");
+
+            if (caseStatus == MedicalBoardCaseStatus.Withdrawn)
+                throw new InvalidOperationException(
+                    "That medical board withdrew this employee's case, so it cannot stand as evidence.");
         }
 
         request.MedicalBoardId = medicalBoardId;

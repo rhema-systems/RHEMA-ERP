@@ -623,7 +623,8 @@ compensation".)*
 only about sick leave. Members could be staff or outside names, but not the registered physicians. No
 documents could be attached. *Cancel the board* was the only way to stop one.
 
-**Still true after step one:** a board is about **one** employee. That is step two.
+**Still true after step one:** a board is about **one** employee. *(No longer — see step two a,
+built the same day.)*
 
 **Step one — built (2026-09-26)**
 
@@ -652,22 +653,45 @@ documents could be attached. *Cancel the board* was the only way to stop one.
 - **Fixes:** a board cannot conclude without members, or without an outcome; a member is recorded
   one way only (from the register, as a colleague, or by name).
 
-**Step two — planned (decided 2026-09-26), no longer waiting on TDC** ⏳
+**Step two** — decided 2026-09-26, no longer waiting on TDC. The system serves more organisations
+than TDC, so step two follows the standard way such boards work, with the law's figures as defaults
+that any organisation can change. TDC is asked only to confirm the defaults.
 
-The system serves more organisations than TDC, so step two follows the standard way such boards
-work, with the law's figures as defaults that any organisation can change. TDC is asked only to
-confirm the defaults.
+**Step two a — a board that hears cases — built (2026-09-26)**
 
-- **A board is a panel that hears cases** — one per employee, each with its own finding, decided at a
-  sitting whose attendance is recorded. So one sitting can decide several people, and "who decided"
-  is always answerable. How many medical members must be present is a setting (default one).
+- **Several employees before one board.** Each is a **case**: their own question (the purpose), their
+  own reason and examination, their own finding. HR adds a case from the board's page; one employee
+  is before a board once.
+- **Who decided is recorded.** Each sitting records **who was present**. A case is decided **at a
+  sitting**, and the members present there are the panel that decided it — the finding names them.
+  Once something is decided at a sitting, its attendance is fixed. A member who leaves the board
+  later still counts at the sittings they attended.
+- **A quorum.** A case can only be decided where enough deciding members — a chair or a member; a
+  secretary or observer does not count — were present. How many is a company setting on the HR
+  policy page, **default one**; TDC to confirm (R5-Q5).
+- **A case can be withdrawn** without a finding, with a reason. The board **reports by itself** once
+  no case is left open and at least one was decided. Stopping a board withdraws its open cases.
+- **Who convened it**: the organisation's own board, or one of the two boards the Workmen's
+  Compensation Law provides for (disfigurement, and injuries to internal organs).
+- **The sick-leave rule reads the employee's own case.** A board that decided somebody else's case
+  does not count for this absence, and the refusal says which case is missing.
+- **A medical retirement can name its board.** The separation page now has the control — a draft
+  medical retirement can be linked to a board whose case on the leaver was decided and recommends
+  retirement, and that counts in place of the medical report when it is submitted.
+- **Documents** can be about one employee's case, or the board as a whole.
+- **Every existing board became a board with one case**, with its finding intact. Nobody was
+  recorded as present at old sittings, so those findings say *decided before attendance was kept*
+  rather than naming a panel nobody wrote down.
+
+**Step two b — incapacity and compensation — planned** ⏳
+
 - **The extent of disability, as a percentage, and an indicative compensation** — mainly for injuries
   at work, under the Workmen's Compensation Law 1987: 96 months' earnings for total permanent
-  incapacity, and the law's schedule of injuries sets the percentage for a partial one (to be checked
-  against the law's own text before anything is set). The figure is **indicative**: the Labour
-  Department notifies the amount due, and Finance pays it.
+  incapacity, and the law's schedule of injuries sets the percentage for a partial one — checked
+  against the law's own text on 2026-09-26 and written up in `HR-WORKMENS-COMPENSATION-SCHEDULES.md`.
+  The figure is **indicative**: the Labour Department notifies the amount due, and it is paid through
+  the Court, never set against anything the employee owes.
 - **An injury case links to the safety incident** where the injury was reported.
-- **A medical retirement** can point at its board's case from the separation.
 
 ---
 

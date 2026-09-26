@@ -77,6 +77,12 @@ export interface SeparationDetail extends SeparationListItem {
   reasonCategoryName?: string | null;
   reasonNotes?: string | null;
 
+  /**
+   * The medical board a medical retirement rests on (round 5, lane K-II-a). A bare id: the board is
+   * a Medical record, read from its own service under the Medical permissions.
+   */
+  medicalBoardId?: string | null;
+
   noticeGivenOn?: string | null;
   noticeDays?: number | null;
   noticeRequiredDays: number;

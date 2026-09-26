@@ -4,63 +4,35 @@ using ErpSystem.Core.Enums;
 namespace ErpSystem.Core.DTOs.HR;
 
 /// <summary>
-/// A medical board and its recommendation (residue plan G4 / R-15b).
+/// A medical board — the panel — with its cases, members, sittings and papers (residue plan G4;
+/// round 5, lanes K and K-II-a).
 /// </summary>
 /// <remarks>
-/// ⚠ <b>Medical-grade content.</b> <see cref="Findings"/>, <see cref="Recommendation"/> and the
-/// sittings' notes describe somebody's health. Every endpoint returning this is gated on
-/// <c>HR.Medical.*</c>, not on the HR role — the same treatment the SHE↔Medical boundary gave
-/// occupational-health surveillance and return-to-work plans.
+/// ⚠ <b>Medical-grade content.</b> Findings, recommendations and sitting notes describe somebody's
+/// health. Every endpoint returning this is gated on <c>HR.Medical.*</c>, not on the HR role — the same
+/// treatment the SHE↔Medical boundary gave occupational-health surveillance and return-to-work plans.
 /// </remarks>
 public class MedicalBoardDto
 {
     public Guid Id { get; set; }
     public string BoardNumber { get; set; } = string.Empty;
 
-    public Guid EmployeeId { get; set; }
-    public string EmployeeName { get; set; } = string.Empty;
-    public string EmployeeNumber { get; set; } = string.Empty;
+    /// <summary>The employer's own board, or one of the Workmen's Compensation Act's statutory boards.</summary>
+    public MedicalBoardKind Kind { get; set; }
 
     public MedicalBoardStatus Status { get; set; }
-
-    /// <summary>The question the board is asked (round 5, lane K1).</summary>
-    public MedicalBoardPurpose Purpose { get; set; }
-
-    /// <summary>
-    /// ⚠ Whether this purpose can stand as the board a leave type's threshold asks for (lane K6) —
-    /// <c>MedicalBoard.CoversAbsence</c>'s answer, carried so no screen keeps its own copy of the list.
-    /// </summary>
-    public bool CoversAbsence { get; set; }
-
-    public string Reason { get; set; } = string.Empty;
 
     public Guid? RequestedById { get; set; }
     public string? RequestedByName { get; set; }
     public DateOnly RequestedOn { get; set; }
     public DateOnly? ConvenedOn { get; set; }
 
-    public Guid? HealthProfileId { get; set; }
-    public Guid? BasedOnExamId { get; set; }
-
-    /// <summary>The examination the board was based on, read back so the page can name it (lane K3).</summary>
-    public DateOnly? BasedOnExamDate { get; set; }
-    public MedicalExamResult? BasedOnExamResult { get; set; }
-
     public Guid? FacilityId { get; set; }
     public string? FacilityName { get; set; }
 
-    public MedicalExamResult? Outcome { get; set; }
-    public string? Findings { get; set; }
-    public string? Recommendation { get; set; }
-    public string? Restrictions { get; set; }
-    public DateOnly? ReviewDueDate { get; set; }
-
-    /// <summary>⚠ A recommendation, not an act — separation decides, this only says what was advised.</summary>
-    public bool RecommendsMedicalRetirement { get; set; }
-
+    /// <summary>When the board reported — its last open case closed with at least one decided.</summary>
     public DateOnly? ConcludedOn { get; set; }
-    public Guid? ConcludedById { get; set; }
-    public string? ConcludedByName { get; set; }
+
     public string? CancellationReason { get; set; }
 
     /// <summary>When it was stopped, and by whom (round 5, lane K5). Null on boards stopped before K5.</summary>
@@ -74,8 +46,74 @@ public class MedicalBoardDto
     /// </summary>
     public bool WasDissolved { get; set; }
 
+    /// <summary>The employees before the board, one case each (round 5, lane K-II-a).</summary>
+    public List<MedicalBoardCaseDto> Cases { get; set; } = new();
     public List<MedicalBoardMemberDto> Members { get; set; } = new();
     public List<MedicalBoardSittingDto> Sittings { get; set; } = new();
+}
+
+/// <summary>One employee's case before a board, and its finding (round 5, lane K-II-a).</summary>
+public class MedicalBoardCaseDto
+{
+    public Guid Id { get; set; }
+    public Guid BoardId { get; set; }
+    public string BoardNumber { get; set; } = string.Empty;
+
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string EmployeeNumber { get; set; } = string.Empty;
+
+    /// <summary>The question the board is asked about this employee (round 5, lane K1).</summary>
+    public MedicalBoardPurpose Purpose { get; set; }
+
+    /// <summary>
+    /// ⚠ Whether this purpose can satisfy a leave type's board rule (lane K6) —
+    /// <c>MedicalBoardCase.CoversAbsence</c>'s answer, carried so no screen keeps its own copy of the list.
+    /// </summary>
+    public bool CoversAbsence { get; set; }
+
+    public string Reason { get; set; } = string.Empty;
+
+    public Guid? RequestedById { get; set; }
+    public string? RequestedByName { get; set; }
+    public DateOnly RequestedOn { get; set; }
+
+    public Guid? HealthProfileId { get; set; }
+    public Guid? BasedOnExamId { get; set; }
+
+    /// <summary>The examination the case was based on, read back so the page can name it (lane K3).</summary>
+    public DateOnly? BasedOnExamDate { get; set; }
+    public MedicalExamResult? BasedOnExamResult { get; set; }
+
+    public MedicalBoardCaseStatus Status { get; set; }
+
+    /// <summary>The sitting the case was decided at, and its date.</summary>
+    public Guid? DecidedAtSittingId { get; set; }
+    public DateOnly? DecidedAtSittingDate { get; set; }
+
+    /// <summary>
+    /// ⚠ Who decided: that sitting's attendance, members removed since included. Empty for a case
+    /// decided before attendance was recorded (lane K-II-a) — the page says so.
+    /// </summary>
+    public List<string> DecidedBy { get; set; } = new();
+
+    public MedicalExamResult? Outcome { get; set; }
+    public string? Findings { get; set; }
+    public string? Recommendation { get; set; }
+    public string? Restrictions { get; set; }
+    public DateOnly? ReviewDueDate { get; set; }
+
+    /// <summary>⚠ A recommendation, not an act — separation decides, this only says what was advised.</summary>
+    public bool RecommendsMedicalRetirement { get; set; }
+
+    public DateOnly? ConcludedOn { get; set; }
+    public Guid? ConcludedById { get; set; }
+    public string? ConcludedByName { get; set; }
+
+    public DateOnly? WithdrawnOn { get; set; }
+    public Guid? WithdrawnById { get; set; }
+    public string? WithdrawnByName { get; set; }
+    public string? WithdrawalReason { get; set; }
 }
 
 public class MedicalBoardMemberDto
@@ -95,6 +133,9 @@ public class MedicalBoardMemberDto
 
     public string? Institution { get; set; }
     public MedicalBoardMemberRole Role { get; set; }
+
+    /// <summary>Chair or member: counted towards the quorum at a deciding sitting (lane K-II-a).</summary>
+    public bool Decides { get; set; }
 }
 
 public class MedicalBoardSittingDto
@@ -104,23 +145,44 @@ public class MedicalBoardSittingDto
     public DateOnly SittingDate { get; set; }
     public string? Venue { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>The members present (round 5, lane K-II-a). Removed members keep their attendance.</summary>
+    public List<MedicalBoardAttendeeDto> Attendees { get; set; } = new();
+
+    /// <summary>Cases decided at this sitting — its attendance is then fixed.</summary>
+    public int CasesDecided { get; set; }
 }
 
-/// <summary>Asking for a board.</summary>
+public class MedicalBoardAttendeeDto
+{
+    public Guid MemberId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public MedicalBoardMemberRole Role { get; set; }
+    public bool Decides { get; set; }
+}
+
+/// <summary>Asking for a board, with its first case.</summary>
 /// <remarks>
 /// <para>⚠ <see cref="Purpose"/> is nullable so that leaving it out is a refusal the service can
 /// word, not a silent 0 — <c>[Required]</c> on a non-nullable enum checks nothing.</para>
 ///
-/// <para>⚠ <b>The three references are checked, not stored blind</b> (round 5, lane K3): each must be
-/// this tenant's, and the health profile and the examination must be the subject's own. A bad id was
-/// a foreign-key 500 before. Name an examination and the health profile follows from it; name
-/// neither and the subject's own profile is used when there is one.</para>
+/// <para>⚠ <b>The references are checked, not stored blind</b> (round 5, lane K3): the facility must
+/// be this tenant's; the health profile and the examination must be the subject's own. Name an
+/// examination and the profile follows from it; name neither and the subject's own profile is used.</para>
+///
+/// <para>More employees are added with <c>POST {id}/cases</c> (lane K-II-a).</para>
 /// </remarks>
 public class RequestMedicalBoardDto
 {
+    /// <summary>The employer's own board unless said otherwise.</summary>
+    public MedicalBoardKind? Kind { get; set; }
+
+    public Guid? FacilityId { get; set; }
+
+    /// <summary>The first case: the employee.</summary>
     public Guid EmployeeId { get; set; }
 
-    /// <summary>Required. The question the board is asked.</summary>
+    /// <summary>Required. The question the board is asked about this employee.</summary>
     public MedicalBoardPurpose? Purpose { get; set; }
 
     [Required, MaxLength(1000)]
@@ -128,7 +190,21 @@ public class RequestMedicalBoardDto
 
     public Guid? HealthProfileId { get; set; }
     public Guid? BasedOnExamId { get; set; }
-    public Guid? FacilityId { get; set; }
+}
+
+/// <summary>Another employee before the same board (round 5, lane K-II-a).</summary>
+public class AddMedicalBoardCaseDto
+{
+    public Guid EmployeeId { get; set; }
+
+    /// <summary>Required, as on the first case.</summary>
+    public MedicalBoardPurpose? Purpose { get; set; }
+
+    [Required, MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+
+    public Guid? HealthProfileId { get; set; }
+    public Guid? BasedOnExamId { get; set; }
 }
 
 /// <summary>
@@ -137,10 +213,11 @@ public class RequestMedicalBoardDto
 /// <remarks>
 /// <para>⚠ Supply <b>exactly one</b> of <see cref="PhysicianId"/>, <see cref="EmployeeId"/> or
 /// <see cref="MemberName"/> — two at once is refused (round 5, lane K7): a row naming a physician
-/// AND typing somebody else's name would say two people sat in one seat. A board is not only doctors — it carries HR as secretary, a union or
-/// staff representative, and often a clinician from outside who is in nobody's register.</para>
+/// AND typing somebody else's name would say two people sat in one seat. A board is not only
+/// doctors — it carries HR as secretary, a union or staff representative, and often a clinician from
+/// outside who is in nobody's register.</para>
 ///
-/// <para>⚠ The subject of the board cannot be seated on it.</para>
+/// <para>⚠ Nobody who is a case before the board can be seated on it.</para>
 /// </remarks>
 public class AddMedicalBoardMemberDto
 {
@@ -167,19 +244,35 @@ public class RecordMedicalBoardSittingDto
 
     [MaxLength(4000)]
     public string? Notes { get; set; }
+
+    /// <summary>The members present — each must be on the board (round 5, lane K-II-a).</summary>
+    public List<Guid>? AttendeeMemberIds { get; set; }
+}
+
+/// <summary>Who was present at a sitting, replacing what was recorded (round 5, lane K-II-a).</summary>
+/// <remarks>⚠ Refused once a case has been decided at the sitting: its attendance is then the panel that decided.</remarks>
+public class SetMedicalBoardSittingAttendanceDto
+{
+    public List<Guid> MemberIds { get; set; } = new();
 }
 
 /// <summary>
-/// The board reporting. This is the write that makes it count for anything.
+/// A case decided. This is the write that makes it count for anything (round 5, lane K-II-a).
 /// </summary>
-public class ConcludeMedicalBoardDto
+public class ConcludeMedicalBoardCaseDto
 {
     /// <summary>
-    /// Required — a board that concludes without a finding has not concluded.
+    /// Required: the sitting it was decided at. Its attendance must include the quorum of deciding
+    /// members — who decided is who was there.
+    /// </summary>
+    public Guid? SittingId { get; set; }
+
+    /// <summary>
+    /// Required — a case that concludes without a finding has not concluded.
     /// </summary>
     /// <remarks>
     /// ⚠ Nullable so that leaving it out is refused (round 5, lane K7). As a plain enum an omitted
-    /// outcome bound to 0 — no finding at all — and the board concluded on it.
+    /// outcome bound to 0 — no finding at all.
     /// </remarks>
     public MedicalExamResult? Outcome { get; set; }
 
@@ -198,9 +291,14 @@ public class ConcludeMedicalBoardDto
 
 public class MedicalBoardFilterDto
 {
+    /// <summary>Boards with a case about this employee.</summary>
     public Guid? EmployeeId { get; set; }
     public MedicalBoardStatus? Status { get; set; }
+
+    /// <summary>Boards with a case asked this question.</summary>
     public MedicalBoardPurpose? Purpose { get; set; }
+
+    public MedicalBoardKind? Kind { get; set; }
     public DateOnly? From { get; set; }
     public DateOnly? To { get; set; }
     public string? Search { get; set; }
@@ -211,6 +309,11 @@ public class MedicalBoardDocumentDto
 {
     public Guid Id { get; set; }
     public Guid BoardId { get; set; }
+
+    /// <summary>The case the paper is about, when it is about one employee (lane K-II-a).</summary>
+    public Guid? CaseId { get; set; }
+    public string? CaseEmployeeName { get; set; }
+
     public string FileName { get; set; } = string.Empty;
     public long? FileSize { get; set; }
     public string? Description { get; set; }

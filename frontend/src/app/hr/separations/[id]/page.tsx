@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select';
 import { separationService } from '@/services/hr/separation.service';
 import { ExitInterviewTab } from '@/components/hr/separations/exit-interview-tab';
+import { SeparationMedicalBoardPanel } from '@/components/hr/separations/SeparationMedicalBoardPanel';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
@@ -322,6 +323,14 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
               )}
             </CardContent>
           </Card>
+
+          {/*
+            ⚠ Round 5, lane K-II-a: the control for `MedicalBoardId`, which nothing could set. Shown
+            for a medical retirement, or whenever a board is still named (the type changed since).
+          */}
+          {(s.separationType === 'MedicalRetirement' || s.medicalBoardId) && (
+            <SeparationMedicalBoardPanel separation={s} onChanged={refresh} />
+          )}
 
           <Card>
             <CardHeader><CardTitle className="text-base">Notice</CardTitle></CardHeader>
@@ -874,7 +883,10 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                 </Select>
                 {DOC_REQUIRED_BY[s.separationType] === docCategory && (
                   <p className="text-xs text-muted-foreground">
-                    This separation cannot be submitted until this document is attached.
+                    {/* ⚠ Lane K-II-a: a medical retirement has a second way through. */}
+                    {s.separationType === 'MedicalRetirement'
+                      ? 'This separation cannot be submitted until this document is attached, or a medical board’s finding recommending retirement is linked on the Overview.'
+                      : 'This separation cannot be submitted until this document is attached.'}
                   </p>
                 )}
               </div>
