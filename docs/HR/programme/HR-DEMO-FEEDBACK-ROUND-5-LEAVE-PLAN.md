@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H and J done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J and I done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -23,7 +23,8 @@
 > | **G** | **DONE** 2026-09-25 — the year-end, executed for real and fixed: expiry keeps what was taken in time, the reminder agrees with it, carry-over never moves lapsed days, not before the year ends, one pot per type · `run-round5-g.mjs` 55, green twice · § 8 |
 > | **H** | **DONE** 2026-09-26 — casual leave beyond its limit: the ask, the split at the final approval, and the two parts kept as one absence; a leak found and closed · `run-round5-h.mjs` 142, green twice · § 8 |
 > | **J** | **DONE** 2026-09-26 — balances: annual leave first, for everybody serving, worked out live where no record exists; the portal leads with *can take now*; the home reads the leave year (L-60) · `run-round5-j.mjs` 44, green twice · § 8 |
-> | I · K · L | not started, in that order — **I is next** |
+> | **I** | **DONE** 2026-09-26 — reminders that reach people: each to whoever can act on it, in the app and by email, HR told why when nobody else can be; one September chase for everybody serving, to the employee, the supervisor and HR; "you can now take annual leave"; the nightly host fixed · `run-round5-i.mjs` 88, green twice · § 8 |
+> | K · L | not started, in that order — **K is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -1142,3 +1143,117 @@ with the ledger asserted before and after:
 - **The API log holds nothing from this lane:** 2,174 notification-sender lines (no SMTP on UAT),
   20 notification clean-up failures and the clean-up's own error, and one procurement calendar
   failure. No request answered 500.
+
+### I — Reminders that reach people · DONE 2026-09-26
+
+**Built.**
+
+- **Every leave reminder goes to the people who can act on it, in the app and by email.** One
+  notification topic per kind and audience, `LeaveReminder.{Kind}.{Audience}` — fourteen, seeded
+  per tenant on the first sweep, editable on the Notification Topics screen. The old pair
+  (`LeaveReminder.DueSoon/Overdue.Internal`: the HR role, in the app only) is switched off.
+  - *Leave starting soon* → the employee, on the request in *My Leave*, where *Yes, still going*
+    answers it.
+  - *Leave not closed* → the line manager once the return is reported: the supervisor, or failing
+    one the nearest head of unit, walking up — lane D's rule, asking the first. HR before a return
+    is reported.
+  - *A request waiting* → whoever its current approval step is asking: the pending approvals of the
+    step the instance is on, in their lowest open group — named users, and every active holder of a
+    role — which is the set the engine lets decide and its own *Approval required* notice reaches,
+    less the employee whose leave it is. Sent back with other dates → the employee.
+  - *Carried days about to lapse* → the employee.
+  - **Anybody who cannot be told directly goes to HR, with the reason** (`{{Why}}`): no login, no
+    line manager with a login, nobody being asked, no return reported.
+- **I2, one chase: "annual leave not yet planned or taken"** (the kind was `MandatoryLeaveOutstanding`).
+  - Everybody still serving and past annual leave's qualifying period, **with or without a balance
+    record**. The old sweep read the 97 records, not the 2,377 people. The figures are the ones lane
+    J's annual view works out (one batch of snapshots), less the days of annual plans submitted,
+    approved or sent back and not yet raised as a request, counted as a request would charge them.
+  - To the employee (the leave planner); to their supervisor in **one message per run** naming their
+    people with their days (ten, then *and N more*; *My team*); to HR in **one summary per run**,
+    with how many could not be told (the balances page). Once per employee per leave year.
+- **I3, new: "You can now take annual leave"** — on the day the qualifying period ends (the hire date
+  plus `MinServiceMonthsToAccess`, the entitlement service's `AccessibleFrom`), caught up within the
+  90-day backlog, once → the employee and HR's summary.
+- **The preview says who each item reaches** (`SentTo`).
+- **The settings say it too.** The entity's five comments corrected (L-48, closed); the settings
+  card lists who is told, and its first and last labels say what they do.
+- **The nightly host can run it** — see point 7 below.
+
+**Changed from the plan, and why.**
+
+1. **The approver is whoever the engine asks.** The seeded leave definition asks roles: *Manager*
+   and *TenantAdmin* at the line-manager step, *HR* and *TenantAdmin* at HR confirmation. On UAT
+   that is 52 people for every request and 905 at HR confirmation (most of those harness users). The
+   reminder follows the engine's own notice and the Approvals screen rather than guessing a narrower
+   set. Narrowing belongs in the definition: the engine has a `RequestorManager` rule (guide L-70).
+2. **"Manager" in the chase is the supervisor** (`Employees.ManagerId`). *My team*, where the message
+   leads, lists direct reports, and a head of unit's message would name everybody in the unit. The
+   confirmer of a return, one person per item, is lane D's wider line authority.
+3. **Anybody who cannot be told goes to HR, saying why** — not in the plan. On UAT 691 of the 2,377
+   people serving have no login; without this, their reminders would have gone to nobody (round 4
+   lane K-a's lesson: count what is unrouted).
+4. **HR's summaries open the balances page**, not the compliance register, which still lists only
+   people with a record: 97 of 2,377 (guide L-71).
+5. **Plans sent back with other dates count as planned**, beside submitted and approved ones.
+6. **One message per supervisor and one summary to HR per run**, not one per person — round 4 lane
+   K-a's lesson that per-item messages flood whoever they share.
+7. **The first SCHEDULED run failed, and the fix is in this lane.** The chase asks the entitlement
+   service for everybody's days, and its batch read took the tenant and the leave year from the
+   signed-in user. The nightly host has none: its first sweep after the build logged *"No tenant is
+   associated with the current user"* from inside the chase, before claiming anything, so it sent
+   nothing — while every manual run, by a signed-in admin, passed. `GetSnapshotsForTenantAsync`
+   takes both from the caller (the tenant's own settings, as `ILeaveYearContext` documents for
+   sweeps), and the suite's [9] asserts that the last scheduled sweep completed.
+   **After the rebuild it got through.** The host's first run, at 02:59:52, seventeen minutes after
+   the API started, found 2,171 items with no user signed in — the chase's included — every one
+   already sent; it queued none and logged no error, and [9] read its row as completed.
+
+**On UAT (decision of 2026-09-26, option A).** The first sweep after the build — the suite's own, at
+02:33 — sent the September chase: **2,161 people** chased; 1,654 told in the app (and by email,
+queued: UAT has no mail server); 507 without a login, counted in HR's summary; 12 supervisors,
+naming 31 people; one HR summary, to the HR role's 867 holders. Plus one *you can now take annual
+leave*, in HR's summary only. Nothing else was due: the 2 unclosed and 7 waiting requests had been
+reminded at their current rung already.
+
+**Suite.** `dev-harness/hr-leave/run-round5-i.mjs`: **88 assertions, green twice.**
+- Every kind in both positions, read from the notification rows: the exact recipients, the page
+  each opens, the words, and the email beside the in-app message.
+- Its first runs failed on the harness itself. A hard delete of leave.emp's retired annual plans
+  hit the foreign key requests still hold (they are soft-deleted now, as lane E retires them). And
+  **a double quote inside a query does not survive the Windows command line to sqlcmd**: every
+  topic lookup died as *"Unclosed quotation mark"*, seven sections at once. The topic is matched with
+  `CHAR(34)` now.
+- Every sweep after its first claims only the fixtures ([8]), and the clean-up then deletes what
+  those sweeps made: about 15,900 notification rows a run on UAT, because HR's 867 role holders
+  make every HR message about 1,700 rows.
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green twice:
+
+- **Slices 1–13 are at their recorded counts.** Slice 1 is 72/75, the same three environmental
+  failures. Slice 4 (54) runs two real sweeps; its one fresh reminder went where lane I sends it —
+  to leave.emp, in the app and by email, about its own fixture leave starting soon. Slice 6 (32) and
+  lane C's suite now look for the chase as `AnnualLeaveOutstanding`: with the old name, slice 6's
+  *"not raised when chasing from next month"* half would have passed for ever.
+- **The round 5 suites:** `run-round5-e.mjs` 119, `-f` 20, `-d` 74, `-a` 89, `-n` 92, `-c` 112, `-g`
+  55, `-h` 142 (its reminder checks included), `-j` 44.
+- **`run-round5-i.mjs` was 88 a third time**, run last.
+- **Cleanup:** the 24 harness types the older slices minted were switched off, measured first (all
+  created by the pass, none of TDC's). Only TDC's nine are active. Each lane I run deleted the
+  ~15,900 notification rows its own sweeps made; slice 4's one reminder (two rows, to leave.emp)
+  remains.
+- **The API log holds nothing from this lane:** 6,738 notification-sender lines (the queued emails,
+  the chase's among them — no mail server on UAT), 12 failures of the notification clean-up's own
+  update, contending with the sweeps' writes (lane J's pass logged 20), and one procurement calendar
+  failure for another tenant. No request answered 500.
+
+**Noted, not built.**
+- The engine still has **no screen** (guide ch. 18): run, preview (now with who each item reaches),
+  runs and log are API calls only.
+- **When HR raises leave for somebody, the employee is not told it was approved** — the engine's
+  notice goes to whoever submitted it (guide L-72). A notice, not a reminder.
+- **The approver set** (L-70) and **the compliance register** (L-71) above.
+- **No email outcome is recorded per item**, unlike round 4 lane K-a: the email is a queued
+  notification row, and UAT has no mail server to send it.
+- **UAT's HR role has 867 holders**, most of them users the suites created. Every HR message on the
+  demo database fans out to all of them.

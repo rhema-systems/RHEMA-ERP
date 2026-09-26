@@ -465,33 +465,53 @@ public class CompanyHrPolicySettings : TenantEntity
     // ⚠ NOT moved: the reminder engine's 90-day backlog horizon. That one stops the first run on an
     // established database queueing years of history at once (area 9 queued 275, of which 242 were
     // history). It protects the system from itself; it is not a policy anybody should be choosing.
+    //
+    // Who each reminder reaches is what the summaries below say since round 5, lane I — in the app
+    // and by email. Before that, every one of them went to the HR role alone, in the app only,
+    // whatever these comments claimed. Wherever the person named cannot be told (no login, nobody
+    // asked), the reminder goes to HR, saying why.
 
-    /// <summary>Days before a start date that approved leave is announced to employee and manager.</summary>
+    /// <summary>
+    /// Days before a start date that the employee is asked whether approved leave is still going
+    /// ahead, until somebody answers.
+    /// </summary>
     [Range(0, 180)]
     public int LeaveStartingReminderDays { get; set; } = 7;
 
-    /// <summary>Days after an end date before leave nobody has closed is chased.</summary>
+    /// <summary>
+    /// Days after an end date before leave nobody has closed is chased: the line manager (the
+    /// supervisor, or failing one the nearest head of unit) once the return is reported, HR before.
+    /// </summary>
     [Range(0, 180)]
     public int LeaveClosureGraceDays { get; set; } = 2;
 
-    /// <summary>Days a request may sit undecided before its approver is chased.</summary>
+    /// <summary>
+    /// Days a request may sit undecided before whoever its current approval step is asking is
+    /// chased — or the employee, when the approver has sent it back with other dates.
+    /// </summary>
     [Range(0, 180)]
     public int LeaveUndecidedChaseDays { get; set; } = 5;
 
     /// <summary>
-    /// Month of the LEAVE year from which outstanding annual leave starts being chased (9 = the ninth
-    /// month: September when the leave year starts in January).
+    /// Month of the LEAVE year from which annual leave not yet planned or taken is chased (9 = the
+    /// ninth month: September when the leave year starts in January) — once a leave year, to the
+    /// employee, to their supervisor in one message naming all their people, and to HR in one summary.
     /// </summary>
     /// <remarks>
     /// Late enough that the chase is not noise, early enough that there is still time to take the
     /// leave. Chasing in the first month says nothing; chasing in the last is too late to act on.
     /// ⚠ Counted from <see cref="LeaveYearStartMonth"/> since round 5, lane C4 — it was compared with
-    /// the calendar month, which agrees only for a January start.
+    /// the calendar month, which agrees only for a January start. Everybody serving who has passed
+    /// annual leave's qualifying period is chased, with or without a balance record (lane I); the
+    /// name is older than the rule, which is decision B6's single chase.
     /// </remarks>
     [Range(1, 12)]
     public int MandatoryLeaveChaseFromMonth { get; set; } = 9;
 
-    /// <summary>Days before carry-over expires that the employee is warned.</summary>
+    /// <summary>
+    /// Days before carried-over leave lapses that the employee is warned of the days not covered by
+    /// leave taken or booked in time.
+    /// </summary>
     [Range(0, 365)]
     public int LeaveCarryOverExpiryReminderDays { get; set; } = 30;
 

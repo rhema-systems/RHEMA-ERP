@@ -72,10 +72,12 @@ public class LeaveEntitlementService : ILeaveEntitlementService
 
     // A leave type owned by another tenant is reported as missing rather than forbidden, so the endpoints do
     // not confirm that the id exists elsewhere.
-    private async Task<LeaveType> GetOwnedLeaveTypeAsync(Guid id)
+    private Task<LeaveType> GetOwnedLeaveTypeAsync(Guid id) => GetOwnedLeaveTypeAsync(id, GetTenantId());
+
+    private async Task<LeaveType> GetOwnedLeaveTypeAsync(Guid id, Guid tenantId)
     {
         var entity = await _leaveTypeRepository.GetByIdAsync(id);
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Leave type '{id}' not found.");
         return entity;
     }
@@ -135,10 +137,23 @@ public class LeaveEntitlementService : ILeaveEntitlementService
 
     public async Task<IReadOnlyDictionary<Guid, LeaveEntitlementSnapshot>> GetSnapshotsAsync(
         IReadOnlyCollection<LeaveAccrualSubject> subjects, Guid leaveTypeId, int year, DateOnly? asOf = null, CancellationToken ct = default)
-    {
-        var rules = await LoadRulesAsync(leaveTypeId, year, ct);
-        var when = asOf ?? _clock.TodayUtc;
+        => SnapshotsOf(await LoadRulesAsync(leaveTypeId, year, ct), subjects, asOf ?? _clock.TodayUtc);
 
+    public async Task<IReadOnlyDictionary<Guid, LeaveEntitlementSnapshot>> GetSnapshotsForTenantAsync(
+        Guid tenantId, int leaveYearStartMonth, IReadOnlyCollection<LeaveAccrualSubject> subjects, Guid leaveTypeId, int year,
+        DateOnly asOf, CancellationToken ct = default)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant is required.", nameof(tenantId));
+
+        // Out of range degrades to January, as LeaveYearContext does for the signed-in path.
+        var startMonth = leaveYearStartMonth is >= 1 and <= 12 ? leaveYearStartMonth : LeaveYear.CalendarStartMonth;
+        return SnapshotsOf(await LoadRulesAsync(tenantId, startMonth, leaveTypeId, year, ct), subjects, asOf);
+    }
+
+    private static Dictionary<Guid, LeaveEntitlementSnapshot> SnapshotsOf(
+        TypeRules rules, IReadOnlyCollection<LeaveAccrualSubject> subjects, DateOnly when)
+    {
         var snapshots = new Dictionary<Guid, LeaveEntitlementSnapshot>();
         foreach (var subject in subjects)
             snapshots[subject.EmployeeId] = Snapshot(rules, subject, when);
@@ -184,12 +199,20 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     private async Task<TypeRules> LoadRulesAsync(Guid leaveTypeId, int year, CancellationToken ct)
     {
         var tenantId = GetTenantId();
-        var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
 
         // ⚠ The tenant's leave year, resolved ONCE for the call. Every arm of the precedence, the
         // pro-rating helper and the accrual window all need the same answer, and the context caches
         // it for the request in any case (entitlement plan C1).
-        var startMonth = await _leaveYear.StartMonthAsync(ct);
+        return await LoadRulesAsync(tenantId, await _leaveYear.StartMonthAsync(ct), leaveTypeId, year, ct);
+    }
+
+    /// <summary>
+    /// The rules for a tenant and leave-year start month the caller names — the signed-in path above,
+    /// and the nightly reminder sweep's (round 5, lane I), which has no user to read either from.
+    /// </summary>
+    private async Task<TypeRules> LoadRulesAsync(Guid tenantId, int startMonth, Guid leaveTypeId, int year, CancellationToken ct)
+    {
+        var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId, tenantId);
         var yearStart = LeaveYear.StartOf(year, startMonth);
         var yearEnd = LeaveYear.EndOf(year, startMonth);
 

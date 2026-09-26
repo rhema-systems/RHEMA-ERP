@@ -1246,6 +1246,13 @@ public class LeaveReminderPreviewItemDto
     public int EscalationTier { get; set; }
     public string DedupeKey { get; set; } = string.Empty;
     public bool AlreadySent { get; set; }
+
+    /// <summary>
+    /// Who it goes to (round 5, lane I): <c>Employee</c>, <c>Manager</c>, <c>Confirmer</c>,
+    /// <c>Approver</c>, <c>Hr</c> — the audience part of its topic key — and <c>HrDigest</c> when it
+    /// is counted into HR's one summary per run. <c>Hr</c> means nobody else could be told.
+    /// </summary>
+    public List<string> SentTo { get; set; } = new();
 }
 
 public class LeaveReminderRunDto

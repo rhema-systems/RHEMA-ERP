@@ -1408,6 +1408,15 @@ is wrong; the letter is the likelier. Decide with TDC which unit the flat figure
 
 ## Lane 10 — Reminders that reach people · 2–3 slices · unblocked · added 2026-09-23
 
+> **2026-09-26: leave is done — round 5, lane I.** Leave was the one sweep that told somebody (the
+> HR role, in the app only). Its reminders now reach the people who can act on them, in the app and
+> by email, through the platform's notification topics — one topic per kind and audience, with one
+> message per supervisor and one summary to HR per run, and HR told, with the reason, about anyone
+> who cannot be reached. Not K-a's store; the general platform notification, as this lane proposed.
+> See `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md` § 8, lane I. ⚠ A sweep's first
+> SCHEDULED run is the real test: leave's died for want of a signed-in user while every manual run
+> passed. The other ten sweeps are as described below.
+
 **Found building round 4, lane K-a, and verified before it was written down:** eleven HR reminder
 sweeps — asset, certification expiry, discipline, identification expiry, leave, probation,
 separation, SHE, staff movement, staff travel, team — run nightly, claim their items in a dispatch

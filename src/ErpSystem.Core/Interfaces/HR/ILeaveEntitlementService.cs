@@ -219,6 +219,23 @@ public interface ILeaveEntitlementService
         IReadOnlyCollection<LeaveAccrualSubject> subjects, Guid leaveTypeId, int year, DateOnly? asOf = null, CancellationToken ct = default);
 
     /// <summary>
+    /// <see cref="GetSnapshotsAsync"/> for a tenant, and a leave-year start month, that the caller
+    /// names — for a sweep with no signed-in user (round 5, lane I).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Every other read here takes its tenant, and its leave year, from the signed-in user. The
+    /// nightly reminder host has none, so the September chase's first scheduled run on UAT threw
+    /// "No tenant is associated with the current user" (2026-09-26) while every manual run — made by
+    /// a signed-in admin — passed. The caller passes the tenant of the records it is sweeping and
+    /// the start month from that tenant's own settings (<c>ICompanyHrPolicyProvider.GetForTenantAsync</c>),
+    /// never <c>ILeaveYearContext</c>, whose scoped cache would hand a second tenant the
+    /// first one's leave year.
+    /// </remarks>
+    Task<IReadOnlyDictionary<Guid, LeaveEntitlementSnapshot>> GetSnapshotsForTenantAsync(
+        Guid tenantId, int leaveYearStartMonth, IReadOnlyCollection<LeaveAccrualSubject> subjects, Guid leaveTypeId, int year,
+        DateOnly asOf, CancellationToken ct = default);
+
+    /// <summary>
     /// How the accrual is worked out, step by step, as at <paramref name="asOf"/> (defaults to
     /// today) — the accrual statement (round 5, lane C2).
     /// </summary>

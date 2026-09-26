@@ -23,7 +23,8 @@ fixed) landed the same night; chapter 17 and § 23 (L-42 closed; L-67 and L-68) 
 (casual leave beyond its limit, charged to annual leave) landed 2026-09-26; chapter 4's kind section,
 chapters 6, 7, 11 and 18, § 19.3, § 19.4 and § 23 (L-69) describe it. Lane J (balances: annual
 leave first) landed the same day; chapter 13, § 19.1 (with the portal home's tile) and § 23 (L-60 closed)
-describe it. The
+describe it. Lane I (reminders that reach people) landed the same day; chapter 4b's reminder card,
+chapter 18 and § 23 (L-48 closed; L-70 to L-72) describe it. The
 other chapters still describe the module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
@@ -1586,11 +1587,15 @@ The same day of leave is worth 38% more under one basis than the other.
 
 | Field | Default |
 |---|---|
-| Announce approved leave this many days ahead | 7 |
+| Ask the employee about approved leave this many days ahead | 7 |
 | Grace before chasing unclosed leave | 2 |
 | Chase an undecided request after this many days | 5 |
 | Warn this many days before carry-over expires | 30 |
-| Start chasing outstanding annual leave from month *(of the leave year — lane C4)* | 9 |
+| Start chasing annual leave not yet planned or taken from month *(of the leave year — lane C4)* | 9 |
+
+*(Round 5, lane I.)* A box above the fields says **who each reminder reaches** — the employee, the
+approver, the line manager, the supervisor, HR — and that anybody who cannot be told directly is
+passed to HR with the reason. Chapter 18 has the detail.
 
 **Footer:** one **Save** for the whole record. There is no draft and no approval step — a saved
 value is in force on the next reminder run, the next payout and the next confirmation date.
@@ -3740,9 +3745,10 @@ a 403 check, so the insert had never run.
 
 ### 📖 What it is
 
-A nightly sweep that watches five kinds of date and chases each one, once. HR has twelve of these
-engines; leave — the module with more dates that matter than any of the others — had none until the
-closure build.
+A nightly sweep that watches six kinds of date and chases each one, once, telling the people who
+can act on it. HR has twelve of these engines; leave — the module with more dates that matter than
+any of the others — had none until the closure build, and until round 5 lane I (2026-09-26) every
+leave reminder went to the HR role, in the app only, whoever it was about.
 
 > **Say this:**
 >
@@ -3751,13 +3757,14 @@ closure build.
 
 ### 👁 What it watches
 
-| Kind | Fires when | Window *(the shipped default)* |
-|---|---|---|
-| **Leave starting soon** | approved leave is about to start and **nobody has confirmed it is still going** | 7 days |
-| **Leave not closed** | leave ended and was never closed — at *Approved* **or *In progress*** | 2 days after the end date |
-| **Request awaiting a decision** | a request has sat undecided since it was raised | 5 days |
-| **Mandatory leave outstanding** | somebody still owes statutory leave | from **month 9** of the leave year *(the calendar month until round 5 lane C4)* |
-| **Carry-over expiring** | carried days are about to lapse — counting only those not covered by leave taken or booked before the deadline, the days the expiry run will actually remove *(round 5, lane G)* | 30 days |
+| Kind | Fires when | Window *(the shipped default)* | Who is told *(round 5, lane I)* |
+|---|---|---|---|
+| **Leave starting soon** | approved leave is about to start and **nobody has confirmed it is still going** | 7 days | the **employee**, on *My Leave*, where *Yes, still going* answers it |
+| **Leave not closed** | leave ended and was never closed — at *Approved* **or *In progress*** | 2 days after the end date | the **line manager** once the return is reported — the supervisor, or failing one the nearest head of unit (chapter 7's rule); **HR** until then |
+| **Request awaiting a decision** | a request has sat undecided since it was raised | 5 days | **whoever its current approval step is asking**, never the employee whose leave it is; the **employee** when it was sent back with other dates |
+| **Annual leave not yet planned or taken** *(was "mandatory leave outstanding")* | somebody still serving, past annual leave's qualifying period, has days not yet planned or taken — with or without a balance record | from **month 9** of the leave year *(the calendar month until round 5 lane C4)*, once a year | the **employee**; their **supervisor**, in one message naming all their people; **HR**, in one summary per run |
+| **Carry-over expiring** | carried days are about to lapse — counting only those not covered by leave taken or booked before the deadline, the days the expiry run will actually remove *(round 5, lane G)* | 30 days | the **employee** |
+| **You can now take annual leave** *(new, lane I)* | the employee has just served annual leave's qualifying period | on the day, once | the **employee**, and **HR** in one summary per run |
 
 ✅ **All five windows are now settings** — chapter 4b, the *Leave — reminder cadence* card. They used
 to be constants in the source code, each with a comment beside it admitting the number was ours and
@@ -3775,6 +3782,34 @@ history. A comparable engine's first live run queued 275 reminders, of which 242
 skips the annual part, which begins while the employee is already away on the first. *Leave not
 closed* skips the first part while its annual part is still running: the two are closed together,
 on the annual part.
+
+### 👁 Who it tells — round 5, lane I
+
+- **Every reminder has a topic per audience** — `LeaveReminder.{Kind}.{Audience}`, fourteen of them
+  on the *Notification Topics* screen, where an administrator can change who receives each one and
+  what it says. Every one sends **in the app and by email**. *(The demo database has no mail server,
+  so there the email waits in the queue and only the in-app message shows.)*
+- **Anybody who cannot be told directly is passed to HR, and the message says why** — an employee
+  with no login, a line manager with no login, a request nobody is being asked to decide, a return
+  nobody has reported. On the demo, 691 of the 2,377 people serving have no login.
+- **The approver is whoever the engine is asking**: the named approvers of the current step and
+  everyone holding its role — the same people as the engine's own *Approval required* notice and the
+  Approvals screen (Rule 2). ⚠ On the demo that is **52 people** at the line-manager step and **905**
+  at HR confirmation, because the seeded leave definition asks roles, not the employee's own manager
+  (L-70).
+- **The September chase** tells each employee how many days are left to plan — the year's available
+  days less those in a plan already submitted, approved or sent back — tells each supervisor once,
+  naming their people with their days (ten, then *and N more*), and tells HR once, with a count and
+  how many could not be told. Nobody inside the qualifying period is chased; the day they come out
+  of it, *You can now take annual leave* tells them. Its first run on the demo, on 26 September,
+  reached **2,161 people**: 1,654 in the app, and 507 with no login, counted in HR's summary.
+- **The preview says who each item would reach** (`sentTo`), so what a sweep will do can be read
+  before it does it.
+
+> **Say this:** "Before this build, every reminder the leave module produced went into HR's
+> in-tray, whoever it was about. Now the employee hears about their own leave, the manager about
+> their own people, the approver about what is waiting on them — and HR only about what nobody else
+> can act on, with the reason why."
 
 ### 👁 The six endpoints
 
@@ -3797,11 +3832,13 @@ host runs, not a parallel implementation.
 
 ### ▶ Walk it
 
-**1 — In Window C (admin), call the preview endpoint.** Read a few rows aloud.
+**1 — In Window C (admin), call the preview endpoint.** Read a few rows aloud, with their `sentTo`.
 
-> "This is what the system *would* chase tonight, without chasing it. Four people whose leave starts
-> next week and who nobody has asked whether they're still going. Two requests that have sat with a
-> manager for over a week. Eleven people who still owe annual leave and it's September."
+> "This is what the system *would* chase tonight, without chasing it — and who it would tell. Four
+> people whose leave starts next week, each asked themselves whether they are still going. Two
+> requests that have sat for over a week, going to the people being asked to decide them. And in
+> September, everybody who still has annual leave to plan: each of them, their supervisor, and one
+> line to HR."
 
 **2 — Call `run`, then `log`.**
 
@@ -3849,9 +3886,17 @@ send-once guarantee rather than an optimisation.
 Hosted daily by `LeaveReminderBackgroundService`, staggered 17 minutes behind the other engines so a
 cold start does not run them all at once. It takes a distributed lock, so only one instance sweeps.
 
-**Notifications carry the leave type and the request number and nothing else** — no reason, no
-diagnosis, no balance. A reminder travels further than the record it is about, and sick leave makes
-that a confidentiality matter rather than a matter of taste.
+**Notifications carry the leave type and the request number, and never a reason or a diagnosis.** A
+reminder travels further than the record it is about, and sick leave makes that a confidentiality
+matter rather than a matter of taste. The only figures are days of annual leave and carried days,
+told to the employee and their supervisor; the employee's name goes only to the people who act on
+their leave.
+
+⚠ **The nightly host has no signed-in user**, so everything the sweep calls must take the tenant
+from the sweep. The September chase's first scheduled run after lane I died on exactly that — the
+entitlement service read the tenant from the signed-in user — while every manual run, made by a
+signed-in admin, passed; only the log showed it. `GetSnapshotsForTenantAsync` is the tenant-explicit
+read, and `run-round5-i.mjs` [9] checks that the last scheduled sweep completed.
 
 **The nightly host runs three passes, in order:** advance leave into *In progress* **first**, so
 everything after it sees today's truth; then the five reminder sweeps; then the attendance
@@ -4181,7 +4226,8 @@ are scheduled in the round 5 plan; until then, read chapter 4's settings with th
 lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60** (lane J closed L-60); lane N
 closed six of the audit's eleven and two in part, and found and closed four more, **L-61 to L-64**;
 lane C closed L-41 and half of L-48, and found and closed two more, **L-65 and L-66**; lane G closed
-L-42 and found and closed two more, **L-67 and L-68**; lane H found and closed one, **L-69**.
+L-42 and found and closed two more, **L-67 and L-68**; lane H found and closed one, **L-69**; lane I
+closed the rest of L-48 and found three it leaves open, **L-70 to L-72**.
 The round 5 blocks are listed after the settings audit.
 
 ### ✅ Closed
@@ -4264,7 +4310,7 @@ the round 5 plan, whose lane is named in the last column; the plain-terms accoun
 | **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 — **closed** 2026-09-25: submit re-runs notice, the reliever requirement, the balance and the cap |
 | **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 |
 | **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — N3's part **closed** 2026-09-25 (Pending counts; a lengthening move re-runs the gate); the board's purpose and date are lane K |
-| **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I — C4's part **closed** 2026-09-25: pro-rating counts months of the leave year, the reminder's month is the month of the leave year, and a call naming no year gets the current leave year. The reminders' recipients are lane I |
+| **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I — C4's part **closed** 2026-09-25: pro-rating counts months of the leave year, the reminder's month is the month of the leave year, and a call naming no year gets the current leave year. The reminders' recipients: ✅ **closed by lane I (2026-09-26)** — each reaches the people who can act on it, in the app and by email, and HR when nobody else can be told |
 
 **On the demo database, the same audit found:** *Leave of Absence (Unpaid)* and *Occupational Injury
 Leave* cannot be booked (L-39); Sick Leave's description promises a certificate rule that is switched
@@ -4355,6 +4401,17 @@ the round 5 plan's § 8.
 | # | Where | Finding | Closed by |
 |---|---|---|---|
 | **L-69** | ch. 7, 11 | ⚠ **A refusal told a non-approver about the employee's leave.** Approve checked whether the extra days could still go to annual leave before it checked who was approving, so a manager whose stage had passed was answered with *"… only 1 day(s) of it can be taken now"* instead of *not your step*. *Send back with dates* had always checked the dates before the approver, so its refusals could quote the employee's balance too. Found by the lane's own suite, on its first run | Both ask the engine's own question first — is this person deciding this step? — and refuse as that, saying nothing about the leave |
+
+### Round 5 lane I — reminders that reach people, 2026-09-26 — three found, left open
+
+Proved by `dev-harness/hr-leave/run-round5-i.mjs` (88 assertions, green twice). The build record is
+the round 5 plan's § 8.
+
+| # | Where | Finding | State |
+|---|---|---|---|
+| **L-70** | ch. 18, Rule 2 | **Everyone holding the approving role is asked — and now reminded.** The seeded leave definition's line-manager step asks the *Manager* role (and *TenantAdmin*): on the demo, 52 people are asked about every request and chased when it waits, and 905 at HR confirmation. The engine can ask the requester's own manager (`RequestorManager`), which would narrow the notice, the Approvals screen and the reminder together | Open — the workflow definition's configuration. The reminder asks whoever the engine asks, on purpose |
+| **L-71** | ch. 16 | **The compliance register lists only people with a balance record** — 97 of 2,377 on the demo — while the September chase covers everybody serving. HR's summary therefore opens the balances page, whose annual view (chapter 13) lists everybody | Open |
+| **L-72** | ch. 7 | **When HR raises leave on somebody's behalf, the employee is not told it was approved.** The engine's *Approval completed* notice goes to whoever submitted the request, which is HR | Open — a notice, not a reminder; noted by lane I |
 
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 

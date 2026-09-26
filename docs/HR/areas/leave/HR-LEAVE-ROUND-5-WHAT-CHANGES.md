@@ -9,8 +9,9 @@
 > [section 4](#4-a-new-employees-first-two-years), [section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)
 > (the accrual statement and the *leave owed* report) and [section 12](#12-the-year-end--carry-over-and-deferrals)
 > (the year-end) were built and tested on 25 September, and [section 8](#8-casual-leave-over-its-limit)
-> (casual leave over its limit) and [section 10](#10-the-balances-page--annual-leave-first) (the
-> balances page, annual leave first) on 26 September; nothing else described here is built yet.
+> (casual leave over its limit), [section 10](#10-the-balances-page--annual-leave-first) (the
+> balances page, annual leave first) and [section 11](#11-reminders-that-reach-people) (reminders that
+> reach people) on 26 September; nothing else described here is built yet.
 > This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
@@ -361,9 +362,9 @@ requests, so the recall button is where they need it.
 - **Coming back late** is recorded: the confirmation shows *"overstayed 3 working days"*. Nothing is
   charged automatically; HR and payroll decide what follows. In public-service practice, pay is
   forfeited for the unauthorised days and disciplinary action may follow.
-- **Reminders** that chase whoever should confirm come with the reminders work in
-  [section 11](#11-reminders-that-reach-people). Until then the overdue-closure reminder goes to HR,
-  as it does today.
+- **The reminder about leave nobody has closed** goes to the line manager once the employee has
+  said they are back, so they can confirm it, and to HR before that
+  ([section 11](#11-reminders-that-reach-people)).
 
 **Falling sick during annual leave.** The law says certified sickness during annual leave does not
 count as annual leave. HR's procedure: recall the employee from the first sick day, with the reason
@@ -479,24 +480,48 @@ shows whichever leave type has the most days left — often sick leave.
 
 *(Answers: "if someone is due for leave, will it send a reminder — to HR and to the employee?")*
 
-**Today.** Five leave reminders exist, and **all go to the HR team only, inside the system** — no
-email, and nothing to the employee or the manager. If HR raised the leave on somebody's behalf, the
-employee hears nothing when it is approved.
+**Before this change.** Five leave reminders existed, and **all went to the HR team only, inside
+the system** — no email, and nothing to the employee or the manager.
 
-**What changes**
+**What changes** *(built 26 September)*
 
-- **The existing reminders go to the right people**:
-  - *leave starting soon* and *carried-over days about to expire* → the employee;
-  - *request waiting for a decision* → the approver;
-  - *leave not closed* → whoever should confirm the return.
+- **Each reminder goes to the people who can act on it**:
+  - *leave starting soon* → the employee, who answers *"yes, still going"* on *My Leave*;
+  - *carried-over days about to expire* → the employee;
+  - *request waiting for a decision* → the people being asked to approve it at that stage — never
+    the person whose leave it is. If the approver sent it back with other dates, the employee;
+  - *leave not closed* → once the employee has said they are back, their line manager, to confirm
+    it; before that, HR.
 - **They arrive inside the system and by email.** Email works only where the company has a mail
   server set up; the demo database has none, so there you will see only the message inside the
   system.
-- **One reminder about annual leave not yet planned or taken**, from September, to the employee, their
-  manager and HR. It no longer nags people still inside their first 12 months, who cannot take leave
-  yet.
-- **New — "You can now take annual leave"**: sent once, to the employee and HR, on the day the
-  employee qualifies.
+- **Nobody is left out.** If the person a reminder is for cannot be reached — for example because
+  they have no login — it goes to HR instead, saying why, so HR can pick up the phone.
+- **One reminder about annual leave not yet planned or taken**, from September (the ninth month of
+  the leave year), once a year:
+  - to the **employee**, saying how many days are left to plan — days in a plan they have already
+    put in count as planned;
+  - to their **manager**, in one message naming everybody who reports to them;
+  - to **HR**, in one summary saying how many people it went to and how many could not be told.
+
+  It covers everybody still working here who has served their first 12 months — including people
+  who have not asked for any leave yet this year — and leaves out anybody still in their first 12
+  months, who cannot take annual leave yet.
+- **New — "You can now take annual leave"**: sent once, on the day the employee qualifies, to them,
+  and to HR in a summary.
+
+**What you will see.** On the demo, the first run, on 26 September, reached **2,161 people**. The
+1,654 who have a login saw it inside the system; the other 507 have none and were counted in HR's
+summary. Twelve managers had one message each, naming 31 people between them.
+
+⚠ **Two things this does not change** *(noted for later)*:
+
+- **Approvals go to everybody holding the approving role.** The demo's approval set-up asks *"any
+  manager"* rather than *"this employee's manager"*, so every manager is asked — and now reminded —
+  about every request. That is a setting of the approval workflow, not of the reminders.
+- **When HR raises leave on somebody's behalf, the employee is still not told it has been
+  approved** — that notice goes to HR, who raised it. It is a notice rather than a reminder, and is
+  noted for a later change.
 
 ---
 

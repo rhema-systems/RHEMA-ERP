@@ -43,7 +43,7 @@ the round 5 plan's *What exploration found* (repo copy to come:
 | `MedicalBoardThresholdDays` | Enforced (§ 3) | **Bypassable** — Pending requests are not counted; reschedule, suggested dates and the counter-proposal skip the gate | N3: **done** — Pending counts; a lengthening move re-runs the gate |
 | `ProRateFirstYearEntitlement` | Enforced (§ 3) | Correct only for a January leave year (counts calendar months to December) | C4: **done 2026-09-25** — months of the leave year; an April-start joiner hired in February gets 2/12, both start months asserted (`run-round5-c.mjs` [9]) |
 | `LeaveYearStartMonth` | Enforced (§ 1.5) | Two readers ignore it: first-year pro-rating and sweep 4's month | C4: **done 2026-09-25** — both follow it, and eleven controller defaults (a call naming no year) now give the current leave year, not the calendar year; `GET api/Leaves/leave-year` lets screens open on it |
-| The five reminder windows | Enforced (§ 2) | The windows bind, but every reminder goes to the **HR role only**, in-app — the entity comments naming the employee, manager or approver are false; sweep 4 compares the calendar month | C4: **done** for sweep 4's month — `MandatoryLeaveChaseFromMonth` is a month **of the leave year**, asserted in both positions under a July start. The recipients are I |
+| The five reminder windows | Enforced (§ 2) | The windows bind, but every reminder goes to the **HR role only**, in-app — the entity comments naming the employee, manager or approver are false; sweep 4 compares the calendar month | C4: **done** for sweep 4's month — `MandatoryLeaveChaseFromMonth` is a month **of the leave year**, asserted in both positions under a July start. I: **done 2026-09-26** — each reminder reaches the people who can act on it, in the app and by email, and HR when nobody else can be told; the entity comments now say who (§ 2, `run-round5-i.mjs`) |
 | `AllowCashConversion` and the four encashment-rate settings | Enforced | Enforced **in service only**. The exit settlement ignores all of them — it sums every type and year (`SeparationService.cs:2234-2249`) — so with `AllowInServiceEncashment` off (the default) none can fire | L2 |
 | The exit settlement's **56-day cap** on leave paid out | not listed | **A constant in code** (`SeparationService.cs:2232`, FR-HR-152): enforced, but visible on no screen and changeable only by a release | L2b (decided 2026-09-25): a company setting, default 56, empty = no cap, asserted in both positions |
 
@@ -208,6 +208,23 @@ is exactly what one client wants weekly and another fortnightly, and changing it
 | `MandatoryLeaveChaseFromMonth` | `9` | **Enforced** | [6] an outstanding mandatory balance: raised chasing from month 1, silent chasing from next month |
 | `LeaveCarryOverExpiryReminderDays` | `30` | **Enforced** | [7] 5 carried days lapsing 31 Dec: silent at a window short of it, warned at one that reaches it |
 
+**Who each one reaches** *(round 5, lane I, 2026-09-26)* — the entity's comments say the same, and
+the settings card lists it. Every reminder goes in the app **and by email**, through its own
+notification topic per audience (`LeaveReminder.{Kind}.{Audience}`), and anybody who cannot be told
+directly is passed to HR with the reason:
+
+| Setting | Chases | Told |
+|---|---|---|
+| `LeaveStartingReminderDays` | approved leave about to start, until somebody says it is still going | the employee |
+| `LeaveClosureGraceDays` | leave ended and not closed | the line manager once the return is reported (supervisor, else the nearest head of unit); HR before |
+| `LeaveUndecidedChaseDays` | a request waiting | whoever its current approval step is asking, never the requester; the employee when sent back with other dates |
+| `MandatoryLeaveChaseFromMonth` | annual leave not yet planned or taken — everybody serving past the qualifying period, with or without a record, once a leave year | the employee; the supervisor, one message naming their people; HR, one summary per run |
+| `LeaveCarryOverExpiryReminderDays` | carried days about to lapse | the employee |
+
+Proved in both positions by `dev-harness/hr-leave/run-round5-i.mjs`. The chase's kind is now
+`AnnualLeaveOutstanding` (was `MandatoryLeaveOutstanding`); slice 6 and lane C's suite look for the
+new name — with the old one, slice 6's *"silent from next month"* half would pass for ever.
+
 **All five now carry the two-position test.** For a time the last three were marked *Enforced
 (wiring)* — read from the same `policy` object in the same method as the two that were proved, but
 with no fixture of their own, so the sweep produced nothing for them and flipping the setting could
@@ -222,7 +239,7 @@ The fixtures they needed:
 | Setting | What the sweep required |
 |---|---|
 | `LeaveClosureGraceDays` | leave whose end date has passed and is still open — made by **recalling** leave that started today, since creating a backdated request is refused |
-| `MandatoryLeaveChaseFromMonth` | a balance on the tenant's **Annual** type with days outstanding — **planted directly**, as a year's accrual is not what the assertion is about. Since round 5 lane A it is planted on the tenant's own Annual type for the one fixture employee and removed by id; before, it was a `MandatoryAnnualLeave` type of the slice's own |
+| `MandatoryLeaveChaseFromMonth` | a balance on the tenant's **Annual** type with days outstanding — **planted directly**, as a year's accrual is not what the assertion is about. Since round 5 lane A it is planted on the tenant's own Annual type for the one fixture employee and removed by id; before, it was a `MandatoryAnnualLeave` type of the slice's own. Since lane I the chase reads everybody past the qualifying period, record or none, so the planted row fixes the figure rather than making the employee a candidate |
 | `LeaveCarryOverExpiryReminderDays` | a balance with carried days on a type with an expiry month — planted, with `CarryOverExpiryMonths = 12` so the lapse date is 31 December and the test works from any day of the year |
 
 ⚠ **One half of the mandatory assertion cannot run in December** — it needs a month the year has not

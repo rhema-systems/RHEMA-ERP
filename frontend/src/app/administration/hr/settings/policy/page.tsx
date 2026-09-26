@@ -798,11 +798,35 @@ export default function PolicySettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">Who is told, in the app and by email</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                <li>Leave starting soon, and carried days about to lapse: the employee.</li>
+                <li>
+                  A request waiting: whoever its approval step is asking. The employee instead, when
+                  the approver has suggested other dates.
+                </li>
+                <li>
+                  Leave not closed: the line manager once the return is reported, otherwise HR.
+                </li>
+                <li>
+                  Annual leave not yet planned or taken: the employee, their supervisor (one message
+                  naming all their people) and HR (one summary).
+                </li>
+                <li>
+                  When someone has served the qualifying period for annual leave: the employee and HR.
+                </li>
+              </ul>
+              <p className="mt-1">
+                Anyone who cannot be told directly, for example because they have no login, is
+                passed to HR with the reason.
+              </p>
+            </div>
             <FieldRow>
               <NumberField
                 form={form}
                 name="leaveStartingReminderDays"
-                label="Announce approved leave this many days ahead"
+                label="Ask the employee about approved leave this many days ahead"
                 required
               />
               <NumberField
@@ -829,7 +853,7 @@ export default function PolicySettingsPage() {
             <NumberField
               form={form}
               name="mandatoryLeaveChaseFromMonth"
-              label="Start chasing outstanding annual leave from month of the leave year"
+              label="Start chasing annual leave not yet planned or taken from month of the leave year"
               required
             />
             <p className="text-sm text-muted-foreground">
