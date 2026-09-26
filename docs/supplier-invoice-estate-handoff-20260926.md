@@ -2,6 +2,26 @@
 
 Estate creates supplier invoices from its existing land-acquisition documents. The supplier workspace owns invoice review and distribution editing; Finance AP continues to own approval, accounting and payments. No purchase order is required for an invoice created by the trusted Estate handoff.
 
+## Estate developer quick start
+
+1. Integrate the reviewed branch's backend, frontend and migrations together. Review the target migration history and apply the approved prerequisites below before starting the updated API. Copying only the Estate controller or supplier page is insufficient.
+2. Open the existing Estate workspace at `/estate/land-acquisition`. Save the acquisition's source evidence and use its existing Accounts Payable request action at the applicable stage. The endpoints below take the acquisition ID and an empty JSON body; the server resolves the supplier, amount, accounts and source identity.
+3. Reuse `estateAcquisitionService.ensureAccountsPayableRequest(acquisitionId)` for the primary stage payment, or `estateAcquisitionService.ensureOtherAcquisitionCostsPayableRequest(acquisitionId)` for other costs. Both return `WorkspaceData`. Read the primary invoice ID from `result.values.accountsPayableInvoiceId`, or the other-cost invoice ID from `result.values.otherAccountsPayableInvoiceId`. Keep the returned workspace values in the Estate screen as the existing handlers do.
+4. Render `<SupplierInvoiceWorkspaceButton invoiceId={invoiceId} />` once an ID exists. This checks the saved invoice's ownership and opens the correct route. It is already wired beside both Estate payable actions. Use this component for older records too; a legacy Finance invoice must retain its Finance route.
+5. In the supplier workspace, review the draft, select the applicable invoice tax treatment and withholding decision, save, and review **Distribution**. Continue through the existing AP approval/posting/payment controls when the invoice is ready. Creating an Estate request alone does not perform any of those financial actions.
+
+| Screen or integration surface | Route or source |
+| --- | --- |
+| Existing Estate workspace | `/estate/land-acquisition` |
+| Supplier invoice register | `/procurement/supplier-invoices` |
+| Supplier invoice view | `/procurement/supplier-invoices/{invoiceId}` |
+| Supplier invoice edit | `/procurement/supplier-invoices/{invoiceId}/edit` |
+| Existing manual/legacy Finance invoice | `/finance/ap/invoices/{invoiceId}` |
+| Estate client methods | `frontend/src/services/estate-acquisition.service.ts` |
+| Invoice navigation component | `frontend/src/components/procurement/SupplierInvoiceWorkspaceButton.tsx` |
+
+The generic `/procurement/supplier-invoices/create` page is for its supported purchasing sources. Estate creation goes through its source action, not a manually populated generic create form.
+
 ## Entry points
 
 | Estate source | Existing endpoint | Source kind |
@@ -9,13 +29,21 @@ Estate creates supplier invoices from its existing land-acquisition documents. T
 | External cadastral surveyor fee | `POST /api/estate/land-acquisitions/{id}/accounts-payable-request` at Cadastral Survey | `SurveyorFee` |
 | Agreed land-vendor consideration | Same endpoint at Vendor Payment | `VendorConsideration` |
 | Stamp duty | Same endpoint at Stamp Duty Payment | `StampDuty` |
-| Other acquisition services/costs | `POST /api/estate/land-acquisitions/{id}/other-acquisition-costs/accounts-payable-request` | `OtherAcquisitionCosts` |
+| Other acquisition services/costs | `POST /api/estate/land-acquisitions/{id}/other-acquisition-costs/accounts-payable-request` at Stamp Duty Payment | `OtherAcquisitionCosts` |
 
 The Estate action validates its current source stage and the user's existing access before handing off to AP. Use these endpoints from the originating Estate screens. Do not send an invented purchase order or a client-authored source flag to the supplier invoice create endpoint.
 
 New Estate invoices arrive as drafts with tax review pending. Open the supplier invoice, choose the applicable treatment and complete the existing AP approval flow. The Estate payment action appears only once the invoice is ready for payment (or a payment already exists). A source request does not approve or post the invoice.
 
 After creation, use the returned workspace's invoice ID to open `/procurement/supplier-invoices/{invoiceId}`. `SupplierInvoiceWorkspaceButton` resolves persisted invoice ownership before navigation, allowing existing Finance invoices to retain their original route. It is included beside the primary and other-costs payable actions in Land Acquisitions.
+
+## Source cardinality and editing
+
+The supported contract is **one invoice per tenant, acquisition and payable kind**. An acquisition may therefore have one surveyor-fee invoice, one vendor-consideration invoice, one stamp-duty invoice and one other-cost invoice. Repeat the source action to reuse its existing invoice. A simultaneous request can return a reload/retry error while the first request completes; reload the acquisition and reuse the linked invoice. Soft deletion or voiding does not release that source key for replacement billing.
+
+Other acquisition costs are the existing Estate aggregate: service-cost rows become separate lines of one invoice under `Land Acquisition Other Service Providers` (`LAND-ACQ-OTHER-COSTS`). This contract does not create independent bills for multiple payees or multiple invoices of the same kind. Additional Estate document types, multiple surveyor bills and replacement billing need a separate source contract before callers can use them.
+
+New source-owned invoices start in Draft with tax review pending. Supplier, source reference, line identity/description/type, quantities, prices, discounts, source GL accounts and currency/FX remain locked to the Estate evidence. Supplier invoice number, supported dates, notes and tax review use normal AP editing. Distribution lines may split an allowed source purpose while retaining its source account and balanced totals. If the Estate net amount changes after creation, AP update/submit/approve/post rejects the discrepancy for reconciliation; it does not silently rewrite the liability.
 
 ## Contract and boundaries
 
@@ -30,6 +58,8 @@ After creation, use the returned workspace's invoice ID to open `/procurement/su
 ## Migration and integration review
 
 Apply the reviewed branch migrations with the API and frontend. The Estate addition is `20260926210000_EstateSupplierInvoiceLineage`; it depends on the earlier supplier invoice, partner account and distribution schema changes in this branch. Review the target database's migration history first. Do not run the verification-only posting-book repair script against another database without a separate schema review.
+
+The shared supplier workspace uses the branch's receipt/Auto Invoice, landed-cost document, partner-role/account, supplier-tax fallback and editable-distribution models. In particular, review `20260924230000_ProcurementAutoInvoiceReceipts`, `20260925180442_SupplierInvoiceTaxFallback`, `20260925230000_ProcurementInvoiceDistributionDraft` and their earlier dependencies before `20260926210000_EstateSupplierInvoiceLineage`. These names are dependency landmarks, not a standalone four-migration installation list: use the complete reviewed pending migration chain for the integrated commit. Keep the EF model snapshot aligned with that chain. The accounting-period reconciliation migration and verification repair scripts require their own target-schema review; they are not instructions to open a financial period.
 
 Shared integration surfaces include `VendorInvoiceService`, AP DTOs/model, the AP controller's supplier workspace boundary, `ApplicationDbContext`, its snapshot, and the four existing Estate payable handoffs. Resolve overlap with Finance/Estate changes at these shared boundaries instead of replacing whole files. The original Finance AR invoice pages have no task edits; the original Finance AP create page retains the `GoodsReceiptConsolidation` enum compatibility addition.
 
