@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Preflight', 'Backup', 'Apply', 'ResumeFrontend', 'Verify')]
+    [ValidateSet('Preflight', 'Backup', 'Apply', 'SeedOperational', 'ResumeFrontend', 'Verify', 'RollbackFresh', 'CompleteFresh')]
     [string]$Action,
 
     [string]$DeploymentId,
@@ -12,6 +12,7 @@ param(
     [string]$FrontendPackageName,
     [string]$ApiSha256,
     [string]$FrontendSha256,
+    [string]$FreshDatabaseName,
     [string]$ExpectedPublicOrigin = 'https://63.141.230.56',
     [int]$ApiReadyTimeoutSeconds = 1800
 )
@@ -34,6 +35,10 @@ function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
 }
+
+__RHEMA_FRESHDATABASEPROVISIONING_LIBRARY__
+__RHEMA_OPERATIONALUATVERIFICATION_LIBRARY__
+__RHEMA_FRESHDATABASECUTOVER_LIBRARY__
 
 $UsesNssmApiConfiguration = -not (Test-Path -LiteralPath $ApiServiceXml)
 if ($UsesNssmApiConfiguration) {
@@ -182,6 +187,39 @@ function Get-DatabaseConnectionString {
     Assert-True (-not [string]::IsNullOrWhiteSpace($value)) `
         'Database connection setting is missing from the API service configuration.'
     return $value
+}
+
+function Get-RhemaOperationalPassword {
+    param([switch]$Optional)
+    $value = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [string](Get-ApiServiceEnvironment)['UatBootstrap__SharedPassword']
+    }
+    if ([string]::IsNullOrWhiteSpace($value) -and -not $Optional) {
+        throw 'Operational account bootstrap password is missing. Use the LocalVps secure prompt or protected UatBootstrap__SharedPassword setting.'
+    }
+    return $value
+}
+
+function Invoke-OperationalSeed {
+    Assert-DeploymentId
+    $connectionString = Get-DatabaseConnectionString
+    $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder $connectionString
+    $work = Join-Path $PackagesRoot "operational-$DeploymentId"
+    Assert-True (-not (Test-Path -LiteralPath $work)) 'Operational seed work directory already exists; review its evidence before retrying.'
+    [void](New-Item -ItemType Directory -Path $work)
+    $settings = @{ Logging=@{LogLevel=@{Default='Warning'}}; Serilog=@{MinimumLevel=@{Default='Warning'};WriteTo=@(@{Name='Console'})} }
+    [IO.File]::WriteAllText((Join-Path $work 'appsettings.json'), ($settings | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    try {
+        $command = Invoke-RhemaFreshApiCli -ApiExecutable (Join-Path $ApiRoot 'ErpSystem.Api.exe') `
+            -ContentRoot $work -ConnectionString $connectionString -Command 'seed-operational-uat' `
+            -OperationalUatPassword (Get-RhemaOperationalPassword)
+        $snapshot = Get-RhemaOperationalSeedSnapshot $connectionString $builder.InitialCatalog
+        Assert-RhemaOperationalSeedReadiness $snapshot
+        $evidence = [ordered]@{ database=$builder.InitialCatalog; command=$command; operationalSeed=$snapshot }
+        [IO.File]::WriteAllText((Join-Path $work 'verification.json'), ($evidence | ConvertTo-Json -Depth 7), (New-Object Text.UTF8Encoding($false)))
+        Write-Output 'OPERATIONAL_SEED|PASS'
+    } finally { $connectionString=$null; $builder=$null }
 }
 
 function Invoke-DatabaseTable {
@@ -765,6 +803,9 @@ function Invoke-Preflight {
 
     $environment = Get-ApiServiceEnvironment
     Assert-SyncfusionLicenseConfigured
+    if ([string]::IsNullOrWhiteSpace((Get-RhemaOperationalPassword -Optional))) {
+        Write-Output 'UAT_CREDENTIAL|REQUIRED'
+    } else { Write-Output 'UAT_CREDENTIAL|CONFIGURED' }
     $requiredSettings = @{
         'StartupInitialization__SeedDevelopmentData' = 'true'
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
@@ -796,6 +837,13 @@ function Invoke-Preflight {
     Assert-True ($corsNodes.Count -eq 1) `
         'The test VPS must expose exactly one HTTPS CORS origin.'
 
+    if (-not [string]::IsNullOrWhiteSpace($FreshDatabaseName)) {
+        Assert-FreshDatabaseServiceIdentity
+        Test-RhemaFreshDatabaseTarget -SourceConnectionString (Get-DatabaseConnectionString) -FreshDatabaseName $FreshDatabaseName | Out-Null
+        Write-Output "FRESH_TARGET_READY|$FreshDatabaseName"
+        Write-Output 'PREFLIGHT|PASS|Fresh target absent; source database preserved, not a migration target.'
+        return
+    }
     $history = @(Get-MigrationHistory)
     foreach ($row in $history) { Write-Output "MIGRATION_ID|$($row.MigrationId)" }
     Write-Output 'GUARD_COVERAGE|20260720181131_AddHRModule'
@@ -1307,6 +1355,10 @@ function Invoke-Apply {
     Assert-True ($serviceWorker -match [regex]::Escape($ExpectedCacheVersion)) `
         'Staged service-worker cache version differs from the release manifest.'
 
+    if (-not [string]::IsNullOrWhiteSpace($FreshDatabaseName)) {
+        Invoke-FreshDatabaseCutover -StageApi $stageApi -StageFrontend $stageFrontend -Backup $backup -Retired $retired
+    }
+    else {
     Set-TestServerConfiguration
     $apiStartedAt = Get-Date
     try {
@@ -1395,6 +1447,7 @@ function Invoke-Apply {
         throw "Frontend apply failed and was rolled back: $($_.Exception.Message)"
     }
 
+    }
     $release = [ordered]@{
         deploymentId = $DeploymentId
         commit = $ExpectedCommit
@@ -1403,6 +1456,7 @@ function Invoke-Apply {
         deployedUtc = [DateTime]::UtcNow.ToString('o')
         apiSha256 = $ApiSha256
         frontendSha256 = $FrontendSha256
+        freshDatabase = $FreshDatabaseName
     }
     [System.IO.File]::WriteAllText(
         (Join-Path $LogsRoot 'current-release.json'),
@@ -1621,6 +1675,9 @@ switch ($Action) {
     'Preflight' { Invoke-Preflight }
     'Backup' { Invoke-Backup }
     'Apply' { Invoke-Apply }
+    'SeedOperational' { Invoke-OperationalSeed }
     'ResumeFrontend' { Invoke-ResumeFrontend }
     'Verify' { Invoke-Verify }
+    'RollbackFresh' { Restore-FreshDatabaseCutover }
+    'CompleteFresh' { Complete-FreshDatabaseCutover }
 }

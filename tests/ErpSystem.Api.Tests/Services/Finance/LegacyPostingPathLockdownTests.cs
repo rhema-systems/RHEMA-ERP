@@ -35,8 +35,8 @@ public sealed class LegacyPostingPathLockdownTests
             "if (args.Length > 0 && args[0] == \"apply-migrations\")",
             StringComparison.Ordinal);
         var seedStart = program.IndexOf(
-            "// Check for seed command",
-            migrationStart,
+            "if (args.Length > 0",
+            migrationStart + 1,
             StringComparison.Ordinal);
         migrationStart.Should().BeGreaterThanOrEqualTo(0);
         seedStart.Should().BeGreaterThan(migrationStart);
@@ -73,7 +73,9 @@ public sealed class LegacyPostingPathLockdownTests
         var migrationStart = program.IndexOf(
             "if (args.Length > 0 && args[0] == \"apply-migrations\")",
             StringComparison.Ordinal);
-        var seedStart = program.IndexOf("// Check for seed command", migrationStart, StringComparison.Ordinal);
+        migrationStart.Should().BeGreaterThanOrEqualTo(0);
+        var seedStart = program.IndexOf("if (args.Length > 0", migrationStart + 1, StringComparison.Ordinal);
+        seedStart.Should().BeGreaterThan(migrationStart);
         var migrationCommand = program[migrationStart..seedStart];
         migrationCommand.IndexOf("migrationCommandOptions.ApplyAndAssertTo(db.Database)", StringComparison.Ordinal)
             .Should().BeLessThan(migrationCommand.IndexOf("db.Database.MigrateAsync()", StringComparison.Ordinal));
@@ -89,6 +91,16 @@ public sealed class LegacyPostingPathLockdownTests
         defaultOptions.CommandTimeoutSeconds.Should().Be(600);
         MigrationCommandOptions.Parse(
             ["seed-db", MigrationCommandOptions.TimeoutArgument, "600"]).CommandTimeoutSeconds.Should().Be(600);
+        foreach (var command in new[] { "seed-deployment-uat", "seed-operational-uat" })
+        {
+            MigrationCommandOptions.Parse([command]).CommandTimeoutSeconds.Should().Be(600);
+            MigrationCommandOptions.Parse([command, MigrationCommandOptions.TimeoutArgument, "300"])
+                .CommandTimeoutSeconds.Should().Be(300);
+            var unsafeTimeout = () => MigrationCommandOptions.Parse([command, MigrationCommandOptions.TimeoutArgument, "0"]);
+            unsafeTimeout.Should().Throw<InvalidOperationException>();
+            var unsupportedOption = () => MigrationCommandOptions.Parse([command, "--unknown", "600"]);
+            unsupportedOption.Should().Throw<InvalidOperationException>();
+        }
 
         using var services = BuildDatabaseServices(cli: false, commandTimeoutSeconds: 600);
         using var scope = services.CreateScope();
@@ -126,8 +138,10 @@ public sealed class LegacyPostingPathLockdownTests
         var program = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Program.cs"));
         program.Should().Contain("AddErpSystemCliDatabase")
             .And.Contain("migrationCommandOptions.ApplyAndAssertTo(db.Database)");
-        var seedStart = program.IndexOf("if (args.Length > 0 && args[0] == \"seed-db\")", StringComparison.Ordinal);
+        var seedStart = program.IndexOf("if (args.Length > 0 && args[0] is \"seed-db\" or \"seed-deployment-uat\")", StringComparison.Ordinal);
+        seedStart.Should().BeGreaterThanOrEqualTo(0);
         var seedEnd = program.IndexOf("// Check for HR module seeding command", seedStart, StringComparison.Ordinal);
+        seedEnd.Should().BeGreaterThan(seedStart);
         var seedCommand = program[seedStart..seedEnd];
         seedCommand.IndexOf("migrationCommandOptions.ApplyAndAssertTo(db.Database)", StringComparison.Ordinal)
             .Should().BeLessThan(seedCommand.IndexOf("db.Database.MigrateAsync()", StringComparison.Ordinal));
@@ -392,7 +406,7 @@ public sealed class LegacyPostingPathLockdownTests
                 Path.Combine(root, "src", "ErpSystem.Data", "Migrations"),
                 "*CanonicalSubledgerAdjustmentBusinessPartnerIdentity.cs")
             .Single(path => !path.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase));
-        var migration = File.ReadAllText(migrationPath);
+        var migration = File.ReadAllText(migrationPath).Replace("\r\n", "\n", StringComparison.Ordinal);
 
         entity.Should().Contain("public Guid BusinessPartnerId")
             .And.Contain("public Guid BusinessPartnerRoleId")
@@ -444,7 +458,7 @@ public sealed class LegacyPostingPathLockdownTests
                 Path.Combine(root, "src", "ErpSystem.Data", "Migrations"),
                 "*CanonicalCustomerPaymentBusinessPartnerIdentity.cs")
             .Single(path => !path.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase));
-        var migration = File.ReadAllText(migrationPath);
+        var migration = File.ReadAllText(migrationPath).Replace("\r\n", "\n", StringComparison.Ordinal);
 
         entity.Should().Contain("public Guid BusinessPartnerId")
             .And.Contain("public Guid BusinessPartnerRoleId")

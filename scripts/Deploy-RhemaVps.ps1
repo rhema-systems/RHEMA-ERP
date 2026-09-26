@@ -11,6 +11,8 @@ param(
     [string]$ReuseFrontendBuildFromCommit,
     [switch]$SkipBrowserSmoke,
     [switch]$LocalVps,
+    [ValidatePattern('^RhemaERP_[A-Za-z0-9_]{1,119}$')]
+    [string]$FreshDatabaseName,
     [switch]$AllowDirtyWorktree,
     [switch]$AllowNonRemoteHead,
 
@@ -108,9 +110,18 @@ function Invoke-NativeChecked {
         [string[]]$Arguments,
         [string]$FailureMessage
     )
-    & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "$FailureMessage (exit code $LASTEXITCODE)."
+    # Build/dependency/browser tools do not need the account-bootstrap secret.
+    # The dedicated deployment helper still inherits it for seed-only calls.
+    $nativePriorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $null, 'Process')
+        & $Command @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "$FailureMessage (exit code $LASTEXITCODE)."
+        }
+    } finally {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $nativePriorOperationalPassword, 'Process')
+        $nativePriorOperationalPassword = $null
     }
 }
 
@@ -331,7 +342,11 @@ function Invoke-RemoteHelper {
             $helperArguments += "-$key"
             $helperArguments += [string]$value
         }
-        $output = @(& powershell.exe @helperArguments 2>&1 | ForEach-Object { [string]$_ })
+        $output = @(& powershell.exe @helperArguments 2>&1 | ForEach-Object {
+            $line = [string]$_
+            if ($line.StartsWith('FRESH_PROGRESS|')) { Write-Host $line.Substring(15) }
+            else { $line }
+        })
         if ($LASTEXITCODE -ne 0) {
             $summary = ($output | Select-Object -Last 20) -join [Environment]::NewLine
             throw "Local VPS $Action failed.$([Environment]::NewLine)$summary"
@@ -887,6 +902,7 @@ function Write-RunResult {
         schemaVersion = 1
         status = $Status
         dryRun = [bool]$DryRun
+        freshDatabase = $FreshDatabaseName
         environment = $Environment
         deploymentId = $DeploymentId
         commit = $script:Commit
@@ -907,7 +923,12 @@ function Write-RunResult {
 }
 
 Push-Location $RepositoryRoot
+$freshApplyAttempted = $false
+$priorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+$operationalPasswordPrompted = $false
 try {
+    Assert-True ([string]::IsNullOrWhiteSpace($FreshDatabaseName) -or $LocalVps) `
+        'Fresh database cutover must run directly on the VPS with -LocalVps.'
     $requiredCommands = @('git', 'curl.exe', 'node')
     if (-not $LocalVps) {
         $requiredCommands += @('ssh', 'scp')
@@ -984,11 +1005,20 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     } | Out-Host
 
     $preflight = @(Invoke-Step 'Fail-fast VPS and migration preflight' {
-        Invoke-RemoteHelper $remoteHelperPath 'Preflight'
+        Invoke-RemoteHelper $remoteHelperPath 'Preflight' @{ FreshDatabaseName = $FreshDatabaseName }
     })
-    $migrationState = Compare-MigrationState $preflight $DryRun
+    if ($FreshDatabaseName) {
+        Assert-True ($preflight -contains "FRESH_TARGET_READY|$FreshDatabaseName") 'Fresh database preflight did not confirm an absent target.'
+        $migrationState = [ordered]@{ mode = 'FreshDatabase'; target = $FreshDatabaseName; provisioned = $false }
+    } else { $migrationState = Compare-MigrationState $preflight $DryRun }
 
     if ($DryRun) {
+        if ($FreshDatabaseName) {
+            $resultPath = Write-RunResult 'Passed' $deploymentId $releaseDirectory $null $migrationState $null
+            Write-Host "`nFRESH DATABASE PREFLIGHT PASSED: $resultPath" -ForegroundColor Green
+            Write-Host 'No database created or service changed. Migration, seed and release checks run during deployment.'
+            exit 0
+        }
         $verify = @(Invoke-Step 'Verify deployed services and database' {
             Invoke-RemoteHelper $remoteHelperPath 'Verify'
         })
@@ -1006,6 +1036,10 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
             $null $migrationState $null
         Write-Host "`nDRY RUN PASSED: $resultPath" -ForegroundColor Green
         exit 0
+    }
+
+    if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
+        Assert-True ([bool]$LocalVps) 'Set protected UatBootstrap__SharedPassword on the VPS or run with -LocalVps for the secure account-password prompt.'
     }
 
     Assert-CommandExists 'dotnet'
@@ -1044,8 +1078,25 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         }
     })
 
+    if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
+        $secureOperationalPassword = Read-Host 'Initial password for NEW Procurement, Inventory and QS test accounts (existing passwords are preserved)' -AsSecureString
+        $passwordPointer = [IntPtr]::Zero
+        try {
+            $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureOperationalPassword)
+            $operationalPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
+            Assert-True (-not [string]::IsNullOrWhiteSpace($operationalPassword)) 'An initial account password is required.'
+            [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $operationalPassword, 'Process')
+            $operationalPasswordPrompted = $true
+        } finally {
+            if ($passwordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
+            $secureOperationalPassword.Dispose(); $operationalPassword=$null
+        }
+    }
+
     Invoke-Step 'Apply API, migrations, and frontend' {
+        if ($FreshDatabaseName) { $script:freshApplyAttempted = $true }
         Invoke-RemoteHelper $remoteHelperPath 'Apply' @{
+            FreshDatabaseName = $FreshDatabaseName
             DeploymentId = $deploymentId
             ExpectedCommit = $script:Commit
             ExpectedBuildId = $releaseManifest.buildId
@@ -1057,6 +1108,12 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
             ApiReadyTimeoutSeconds = $ApiReadyTimeoutSeconds
         }
     } | Out-Host
+
+    if (-not $FreshDatabaseName) {
+        Invoke-Step 'Seed and verify Procurement, Inventory and QS baseline' {
+            Invoke-RemoteHelper $remoteHelperPath 'SeedOperational' @{ DeploymentId=$deploymentId }
+        } | Out-Host
+    }
 
     $verifyOutput = @(Invoke-Step 'Verify deployed services and database' {
         Invoke-RemoteHelper $remoteHelperPath 'Verify' @{
@@ -1082,9 +1139,29 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         Copy-ToVps @($resultPath) $RemoteLogsRoot
     } | Out-Host
 
+    if ($FreshDatabaseName) {
+        Invoke-Step 'Complete verified fresh database cutover' {
+            Invoke-RemoteHelper $remoteHelperPath 'CompleteFresh' @{
+                DeploymentId = $deploymentId; ExpectedCommit = $script:Commit; FreshDatabaseName = $FreshDatabaseName
+            }
+        } | Out-Host
+        $freshApplyAttempted = $false
+    }
+
     Write-Host "`nDEPLOYMENT PASSED: $resultPath" -ForegroundColor Green
 }
 catch {
+    if ($freshApplyAttempted) {
+        try {
+            Invoke-Step 'Restore original application and database connection' {
+                Invoke-RemoteHelper $remoteHelperPath 'RollbackFresh' @{
+                    DeploymentId = $deploymentId; ExpectedCommit = $script:Commit; FreshDatabaseName = $FreshDatabaseName
+                }
+            } | Out-Host
+        } catch {
+            Write-Warning "Automatic rollback could not complete. Keep both databases and the deployment backup; review the VPS evidence. $($_.Exception.Message)"
+        }
+    }
     if ($null -ne $script:Commit) {
         $safeReleaseDirectory = if ($null -ne $releaseDirectory) {
             $releaseDirectory
@@ -1101,5 +1178,9 @@ catch {
     throw
 }
 finally {
+    if ($operationalPasswordPrompted) {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $priorOperationalPassword, 'Process')
+    }
+    $priorOperationalPassword=$null
     Pop-Location
 }

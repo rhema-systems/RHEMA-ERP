@@ -1,6 +1,6 @@
 # Rhema ERP VPS Deployment Runbook
 
-Last updated: 2026-08-07
+Last updated: 2026-09-26
 
 This note captures the VPS deployment details that have caused repeat failures. Read it before deploying to the current Windows VPS. The server is presently a **test server**, so development-data seeding is intentionally enabled. It must be disabled before this host is promoted to production.
 
@@ -49,7 +49,7 @@ The command performs these controls automatically:
   on a build;
 - compares repository and deployed EF migration IDs and refuses unprobed pending
   migrations that contain SQL `THROW` guards;
-- publishes the API with `TdcFastEfBuild=true` and builds a clean production
+- publishes the self-contained API with the full build and builds a clean production
   frontend using the public HTTPS origin;
 - creates commit-keyed packages, verifies their hashes, and reuses them safely;
 - creates and verifies application and SQL backups before changing services;
@@ -64,7 +64,7 @@ The normal deployment target is 15-30 minutes when a build is required and 5-15
 minutes when verified artifacts are reused. Stop and investigate a stage when it
 exceeds its normal range; do not restart the whole deployment speculatively. API
 readiness may legitimately use several minutes while EF migrations apply, but is
-bounded by `-ApiReadyTimeoutSeconds` (420 seconds by default).
+bounded by `-ApiReadyTimeoutSeconds` (1800 seconds by default).
 
 `-AllowDirtyWorktree` and `-AllowNonRemoteHead` are diagnostics/emergency
 overrides, not normal release options. They prevent a validation run from being
@@ -103,12 +103,128 @@ sequence in `& { ... }` or run a saved `.ps1`. A `throw` typed at the prompt sto
 that statement, but later pasted statements can still run. The deployment
 command itself repeats preflight before any build/backup/apply stage.
 
+### Separate fresh database on the test VPS
+
+Use this only when a separate fresh test database has been approved. It preserves
+the current database and its users, settings and transactions; those records are
+**not copied into the new application database**. The fresh database receives the
+current canonical development seed plus the operational module baseline below.
+Obtain administrator sign-in details through the existing protected process;
+the deploy script does not print credentials.
+This is a one-time cutover option. For later releases, omit `-FreshDatabaseName`
+and use the normal deployment path against the newly configured database.
+
+Run from an elevated Windows PowerShell on the VPS, using the release checkout.
+The example is one complete block so a failed check stops all subsequent steps:
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    Set-Location 'C:\Users\Administrator\Documents\ERP\RHEMA-ERP'
+    $changes = @(git status --porcelain)
+    if ($LASTEXITCODE -ne 0 -or $changes.Count) { throw 'Review repository status before deploying.' }
+    git pull --ff-only origin master
+    if ($LASTEXITCODE -ne 0) { throw 'Git update failed.' }
+    $deploy = Get-Command .\scripts\Deploy-RhemaVps.ps1
+    if (-not $deploy.Parameters.ContainsKey('FreshDatabaseName')) { throw 'Merge the fresh-database deployment PR first.' }
+    $freshName = 'RhemaERP_VpsTest_' + (Get-Date -Format 'yyyyMMdd_HHmmss')
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 `
+        -Environment Test -LocalVps -FreshDatabaseName $freshName -DryRun
+    if ($LASTEXITCODE -ne 0) { throw 'Fresh target preflight failed; no database was created.' }
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 `
+        -Environment Test -LocalVps -FreshDatabaseName $freshName -ReuseVerifiedArtifacts
+    if ($LASTEXITCODE -ne 0) { throw 'Deployment stopped. Review its reported stage and rollback evidence before retrying.' }
+}
+```
+
+`-FreshDatabaseName` requires `-LocalVps`, a new `RhemaERP_` name, SQL permission
+to inspect/create databases, and the same SQL principal for provisioning and the
+API. Integrated authentication is accepted only when the deployment runs under
+the API service's Windows identity. The script never grants privileges itself.
+
+Fresh `-DryRun` checks the host, protected configuration, SQL permissions and
+target-name availability. It creates nothing and does not claim the old database
+has passed migration parity. The regular deployment path still enforces all
+existing migration guards when `-FreshDatabaseName` is omitted.
+
+The apply run builds and checks the release, creates verified application/SQL
+backups, then provisions the separate database while the old app remains running.
+It applies the exact release migration list, seeds twice, checks canonical schema
+and seed repeatability, trusted constraints and SQL physical integrity. CLI output
+is kept out of persistent logs because it can include seeded credentials.
+Each migration/seed command initializes the full ERP model and can take several
+minutes. The console reports each command's start and completion; the existing
+application stays running throughout this preparation.
+
+Only after these checks pass are both services stopped and the connection's
+database name changed. JWT/encryption keys and other protected runtime values
+are retained. Both services, release files and the original connection are
+restored together on apply, readiness, migration parity, public smoke or browser
+smoke failure. Both databases remain available; a failed target is never dropped
+or reused. Choose a new name only after reviewing a failed attempt. Application
+uploads/DMS storage are retained; their old database references are not imported.
+
+Evidence is in `C:\RhemaERP\backups\deploy-<deployment-id>\fresh-provisioning.json`
+and `fresh-cutover.json`, plus the normal release evidence. If rollback itself
+fails, keep both databases and the protected backup, and review the reported
+failure before restarting services. The matching generated helper supports
+`-Action RollbackFresh -DeploymentId <id> -ExpectedCommit <full-sha>
+-FreshDatabaseName <name>` for an interrupted, uncommitted cutover. It refuses a
+different release/database or an already committed cutover.
+
+### Procurement, Inventory and QS deployment seeds
+
+Test deployments automatically run the operational baseline. Fresh cutovers run
+`seed-deployment-uat` (base plus operational seeds) twice before changing services,
+and verify stable identities and master data. Later ordinary deployments run
+`seed-operational-uat` after migrations and verify its database results.
+
+| Area | Dedicated usernames |
+|---|---|
+| Procurement | `procurementofficer`, `procurementapprover`, `procurementevaluator`, `tdc0102-checker-201531` |
+| Inventory / Stores | `storesofficer`, `storesmanager` |
+| Quantity Survey | `uat.qs.preparer`, `uat.qs.reviewer`, `uat.qs.approver` |
+| Finance review for procurement | `financereviewer`, `financeapprover` |
+
+Accounts receive DEFAULT tenant membership and their existing module roles.
+The baseline also augments the established administrator, manager, employee,
+AP officer and Finance manager actors for the UAT workflow. Existing passwords
+are not reset. New dedicated accounts use `UatBootstrap__SharedPassword` from
+protected VPS configuration or the current deployment process. If absent,
+`-LocalVps` prompts securely after package creation and verified backups, immediately
+before applying the release. The input is inherited by the deployment helper and
+passed through the isolated seed process environment. Native build, dependency
+and browser tools have this setting removed from their environment, including
+when it was supplied to the deployment process in advance. It is not written
+to service settings, command arguments or deployment evidence. Dry run never
+prompts or seeds; it reports only whether this setting is configured. SSH mode
+requires the protected setting to exist on the VPS. The initial password needs
+at least 8 characters, including uppercase, lowercase, a digit and a symbol.
+Distribute it through your protected process.
+
+Inventory fixtures include 5 units of measure, 6 categories, 2 warehouses
+(`DEMO-PM`, `WH-02`), 3 locations and 9 items with base/purchase/stocking UOM
+links. Stores access includes both warehouses. The seeder adds the canonical
+supplier fixtures and required warehouse responsibilities. It creates no stock
+balances, invoices, payments or journals. Existing master records and draft
+supplier profiles are preserved; readiness conflicts stop verification for review
+instead of silently changing user-owned data.
+
+Fresh provisioning evidence includes `operationalSeed` counts and a fingerprint.
+Normal deployment evidence is under
+`C:\RhemaERP\packages\operational-<deployment-id>\verification.json`.
+Neither includes passwords, hashes of passwords or contact details.
+Provisioning failures retain sanitized stage, exit/SQL codes and output hashes in
+`C:\RhemaERP\packages\fresh-<deployment-id>\failure.json`; raw CLI output and
+connection strings are excluded.
+
 Regression checks (no deployment):
 
 ```powershell
 powershell.exe -NoProfile -File scripts\vps\Test-CanonicalMigrationPreflight.ps1
 powershell.exe -NoProfile -File scripts\vps\Test-CurrentBaselineMigrationGuardRouting.ps1
 powershell.exe -NoProfile -File scripts\vps\Test-RhemaVpsReleasePrerequisites.ps1
+powershell.exe -NoProfile -File scripts\vps\Test-FreshDatabaseCutover.ps1
 ```
 
 The first test optionally accepts `-SqlServer`, `-CanonicalDatabase` and

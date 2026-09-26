@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 namespace ErpSystem.Api.Configuration;
 
 /// <summary>
-/// Parses the bounded command timeout accepted only by the migration and full-seed CLI entry points.
+/// Parses the bounded command timeout accepted only by the migration and deployment-seed CLI entry points.
 /// Ordinary web requests retain the provider's normal command timeout.
 /// </summary>
 internal sealed record MigrationCommandOptions(int CommandTimeoutSeconds)
@@ -20,9 +20,11 @@ internal sealed record MigrationCommandOptions(int CommandTimeoutSeconds)
         ArgumentNullException.ThrowIfNull(args);
         if (args.Length == 0 ||
             (!string.Equals(args[0], "apply-migrations", StringComparison.Ordinal) &&
-             !string.Equals(args[0], "seed-db", StringComparison.Ordinal)))
+             !string.Equals(args[0], "seed-db", StringComparison.Ordinal) &&
+             !string.Equals(args[0], "seed-deployment-uat", StringComparison.Ordinal) &&
+             !string.Equals(args[0], "seed-operational-uat", StringComparison.Ordinal)))
         {
-            throw new InvalidOperationException("Migration command options require the apply-migrations or seed-db entry point.");
+            throw new InvalidOperationException("Migration command options require an apply-migrations, seed-db, seed-deployment-uat or seed-operational-uat entry point.");
         }
 
         var timeoutSeconds = DefaultTimeoutSeconds;

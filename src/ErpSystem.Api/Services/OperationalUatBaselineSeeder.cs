@@ -40,6 +40,8 @@ public sealed class OperationalUatBaselineSeeder(
         new("tdc0102-checker-201531", "Procurement", "Committee Checker", ["TDC_EVALUATOR"]),
         new("financereviewer", "Finance", "Reviewer", ["TDC_FINANCE_REVIEWER"]),
         new("financeapprover", "Finance", "Approver", ["Finance User"]),
+        new("storesofficer", "Stores", "Officer", ["Inventory User", "TDC_STORES_OFFICER"]),
+        new("storesmanager", "Stores", "Manager", ["Inventory User", "TDC_STORES_MANAGER"]),
         new("uat.qs.preparer", "UAT QS", "Preparer", [Constants.Roles.Employee, "TDC_QUANTITY_SURVEYOR"]),
         new("uat.qs.reviewer", "UAT QS", "Reviewer",
             [Constants.Roles.Employee, "TDC_QUANTITY_SURVEYOR", "TDC_SUPERVISING_QUANTITY_SURVEYOR"]),
@@ -211,6 +213,9 @@ public sealed class OperationalUatBaselineSeeder(
         }
         await db.SaveChangesAsync(cancellationToken);
 
+        var unitByCode = await db.UnitsOfMeasure.IgnoreQueryFilters()
+            .Where(value => value.TenantId == tenantId && !value.IsDeleted)
+            .ToDictionaryAsync(value => value.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
         var categoryByCode = await db.InventoryCategories.IgnoreQueryFilters()
             .Where(value => value.TenantId == tenantId && !value.IsDeleted)
             .ToDictionaryAsync(value => value.Code, StringComparer.OrdinalIgnoreCase, cancellationToken);
@@ -283,7 +288,7 @@ public sealed class OperationalUatBaselineSeeder(
                 value.TenantId == tenantId && !value.IsDeleted && value.ItemCode == seed.Code,
                 cancellationToken);
             if (exists) continue;
-            db.InventoryItems.Add(new InventoryItem
+            var item = new InventoryItem
             {
                 Id = Guid.NewGuid(), TenantId = tenantId, ItemCode = seed.Code, Name = seed.Name,
                 Description = "Reusable UAT procurement and inventory item.",
@@ -291,6 +296,17 @@ public sealed class OperationalUatBaselineSeeder(
                 StandardCost = seed.StandardCost, AverageCost = seed.StandardCost,
                 LastPurchaseCost = seed.StandardCost, Status = ItemStatus.Active,
                 CreatedAt = now, CreatedBy = SeedActor
+            };
+            db.InventoryItems.Add(item);
+            // Receipt and purchase conversion use the item/UOM identity, not only
+            // the display code. Create the base lineage with the new item, leaving
+            // existing tenant-owned item definitions and conversions unchanged.
+            db.ItemUnitsOfMeasure.Add(new ItemUnitOfMeasure
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, InventoryItemId = item.Id,
+                UnitOfMeasureId = unitByCode[seed.UnitOfMeasure].Id, ConversionToBase = 1m,
+                IsBaseUnit = true, IsStockingUnit = true, IsPurchaseUnit = true,
+                IsActive = true, CreatedAt = now, CreatedBy = SeedActor
             });
             createdItems++;
         }
@@ -307,20 +323,60 @@ public sealed class OperationalUatBaselineSeeder(
                      new SupplierSeed("SUP260001", "Harbourline Goods Supply Ltd", "Tema", "+233-000-000-001")
                  })
         {
-            var exists = await db.Suppliers.IgnoreQueryFilters().AnyAsync(value =>
-                value.TenantId == tenantId && !value.IsDeleted && value.SupplierCode == seed.Code,
+            var partner = await db.BusinessPartners.IgnoreQueryFilters().SingleOrDefaultAsync(value =>
+                value.TenantId == tenantId && value.PartnerCode == seed.Code,
                 cancellationToken);
-            if (exists) continue;
-            db.Suppliers.Add(new Supplier
+            if (partner is not null)
             {
-                Id = Guid.NewGuid(), TenantId = tenantId, SupplierCode = seed.Code, Name = seed.Name,
-                Description = "Reusable fictional supplier for Procurement and Inventory UAT.",
-                SupplierType = "Vendor", City = seed.City, Country = "Ghana", Phone = seed.Phone,
-                Email = seed.Code.ToLowerInvariant() + "@uat.invalid", PaymentTerms = "Net 30",
-                PaymentTermId = paymentTermId, IsActive = true, Status = "Active",
+                // The Projects baseline already owns this approved fictional Adom
+                // contractor. Reuse that identity without changing its details.
+                // Only the missing initial supplier capability may be introduced;
+                // any existing role/profile remains governed, including drafts.
+                var knownSeedIdentity =
+                    (seed.Code == "CONT-GH-ADOM-BUILD" && partner.CreatedBy == "System" && partner.PartnerType == "Contractor") ||
+                    (partner.CreatedBy == SeedActor && partner.PartnerType == "Supplier");
+                if (!knownSeedIdentity || partner.IsDeleted || !partner.IsActive ||
+                    partner.RegistrationStatus != "Approved" || partner.ApprovalStatus != "Approved") continue;
+                var existingRoles = await db.BusinessPartnerRoles.IgnoreQueryFilters()
+                    .Where(value => value.TenantId == tenantId && value.BusinessPartnerId == partner.Id)
+                    .Select(value => new { value.Id, value.RoleType }).ToListAsync(cancellationToken);
+                var roleIds = existingRoles.Select(value => value.Id).ToArray();
+                if (existingRoles.Any(value => value.RoleType == BusinessPartnerRoleType.Supplier) ||
+                    (roleIds.Length > 0 && await db.BusinessPartnerApProfileVersions.IgnoreQueryFilters().AnyAsync(value =>
+                        value.TenantId == tenantId && roleIds.Contains(value.BusinessPartnerRoleId), cancellationToken))) continue;
+            }
+            else
+            {
+                partner = new BusinessPartner
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, PartnerCode = seed.Code, PartnerName = seed.Name,
+                    LegalName = seed.Name, PartnerType = "Supplier", RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved", IsActive = true, Currency = "GHS",
+                    PhysicalCity = seed.City, PhysicalCountry = "Ghana", PrimaryPhone = seed.Phone,
+                    PrimaryEmail = seed.Code.ToLowerInvariant() + "@uat.invalid", PaymentTerms = "Net 30",
+                    PaymentTermId = paymentTermId, SubjectToWithholdingDeduction = false,
+                    Notes = "Reusable fictional supplier for Procurement and Inventory UAT.",
+                    CreatedAt = now, CreatedBy = SeedActor
+                };
+                db.BusinessPartners.Add(partner);
+                createdSuppliers++;
+            }
+            var role = new BusinessPartnerRole
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = partner.Id,
+                RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+                ActiveFromUtc = now, CreatedAt = now, CreatedBy = SeedActor
+            };
+            db.BusinessPartnerRoles.Add(role);
+            db.BusinessPartnerApProfileVersions.Add(new BusinessPartnerApProfileVersion
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+                VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+                EffectiveFrom = now, ApReferenceNumber = seed.Code, PaymentTermId = paymentTermId,
+                SubjectToWithholding = false, ApprovedAtUtc = now,
+                DecisionReason = "Initial fictional Operational UAT supplier profile.",
                 CreatedAt = now, CreatedBy = SeedActor
             });
-            createdSuppliers++;
         }
         await db.SaveChangesAsync(cancellationToken);
 
@@ -417,12 +473,14 @@ public sealed class OperationalUatBaselineSeeder(
     {
         var definitions = new[]
         {
-            new ResponsibilitySeed("manager", "TDC_STORES_OFFICER", ProcurementWarehouseScopeMode.Restricted, "DEMO-PM"),
-            new ResponsibilitySeed("manager", "TDC_STORES_MANAGER", ProcurementWarehouseScopeMode.All, null),
-            new ResponsibilitySeed("procurementapprover", "TDC_STORES_MANAGER", ProcurementWarehouseScopeMode.Restricted, "DEMO-PM"),
-            new ResponsibilitySeed("ap.officer", "TDC_STORES_MANAGER", ProcurementWarehouseScopeMode.Restricted, "DEMO-PM"),
-            new ResponsibilitySeed("financereviewer", "TDC_FINANCE_REVIEWER", ProcurementWarehouseScopeMode.Restricted, "DEMO-PM"),
-            new ResponsibilitySeed("employee", "TDC_INTERNAL_AUDIT", ProcurementWarehouseScopeMode.Restricted, "DEMO-PM")
+            new ResponsibilitySeed("manager", "TDC_STORES_OFFICER", ProcurementWarehouseScopeMode.Restricted, ["DEMO-PM"]),
+            new ResponsibilitySeed("manager", "TDC_STORES_MANAGER", ProcurementWarehouseScopeMode.All, []),
+            new ResponsibilitySeed("procurementapprover", "TDC_STORES_MANAGER", ProcurementWarehouseScopeMode.Restricted, ["DEMO-PM"]),
+            new ResponsibilitySeed("ap.officer", "TDC_STORES_MANAGER", ProcurementWarehouseScopeMode.Restricted, ["DEMO-PM"]),
+            new ResponsibilitySeed("financereviewer", "TDC_FINANCE_REVIEWER", ProcurementWarehouseScopeMode.Restricted, ["DEMO-PM"]),
+            new ResponsibilitySeed("employee", "TDC_INTERNAL_AUDIT", ProcurementWarehouseScopeMode.Restricted, ["DEMO-PM"]),
+            new ResponsibilitySeed("storesofficer", "TDC_STORES_OFFICER", ProcurementWarehouseScopeMode.Restricted, ["DEMO-PM", "WH-02"]),
+            new ResponsibilitySeed("storesmanager", "TDC_STORES_MANAGER", ProcurementWarehouseScopeMode.Restricted, ["DEMO-PM", "WH-02"])
         };
         var created = 0;
         foreach (var seed in definitions)
@@ -448,10 +506,10 @@ public sealed class OperationalUatBaselineSeeder(
             };
             db.ProcurementResponsibilityAssignments.Add(assignment);
 
-            if (seed.WarehouseCode is not null)
+            foreach (var warehouseCode in seed.WarehouseCodes)
             {
                 var warehouseId = await db.Warehouses.IgnoreQueryFilters()
-                    .Where(value => value.TenantId == tenantId && !value.IsDeleted && value.Code == seed.WarehouseCode)
+                    .Where(value => value.TenantId == tenantId && !value.IsDeleted && value.Code == warehouseCode)
                     .Select(value => value.Id)
                     .SingleAsync(cancellationToken);
                 db.ProcurementResponsibilityWarehouses.Add(new ProcurementResponsibilityWarehouse
@@ -481,7 +539,7 @@ public sealed class OperationalUatBaselineSeeder(
         string UserName,
         string RoleName,
         ProcurementWarehouseScopeMode WarehouseScope,
-        string? WarehouseCode);
+        string[] WarehouseCodes);
     private sealed record ActorSeedOutcome(bool Created, int AddedRoles);
 }
 
