@@ -37,6 +37,18 @@ function New-RhemaVpsPreflightHelper {
     $source = [IO.File]::ReadAllText((Join-Path $probeRoot 'Invoke-RhemaVpsRemote.ps1'))
     $marker = '__RHEMA_CANONICAL_PREFLIGHT_BUNDLE__'
     if ([regex]::Matches($source, $marker).Count -ne 1) { throw 'Expected one preflight bundle placeholder.' }
-    [IO.File]::WriteAllText($OutputPath, $source.Replace($marker, $encoded), (New-Object Text.UTF8Encoding($false)))
+    $source = $source.Replace($marker, $encoded)
+    foreach ($library in @('FreshDatabaseProvisioning', 'FreshDatabaseCutover')) {
+        $libraryMarker = "__RHEMA_$($library.ToUpperInvariant())_LIBRARY__"
+        if ([regex]::Matches($source, $libraryMarker).Count -ne 1) { throw "Expected one $library library placeholder." }
+        $source = $source.Replace($libraryMarker, [IO.File]::ReadAllText((Join-Path $probeRoot "$library.ps1")))
+    }
+    $migrationIds = @(Get-ChildItem (Join-Path $RepositoryRoot 'src\ErpSystem.Data\Migrations') -File -Filter '*.cs' |
+        Where-Object { $_.Name -match '^\d{14}_.+\.cs$' -and $_.Name -notmatch '\.Designer\.cs$' } |
+        Sort-Object BaseName | Select-Object -ExpandProperty BaseName)
+    if ($migrationIds.Count -eq 0) { throw 'Fresh database migration manifest is empty.' }
+    $migrationJson = ConvertTo-Json -Compress -InputObject $migrationIds
+    $source = $source.Replace('__RHEMA_FRESH_MIGRATION_IDS__', [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($migrationJson)))
+    [IO.File]::WriteAllText($OutputPath, $source, (New-Object Text.UTF8Encoding($false)))
     return $OutputPath
 }

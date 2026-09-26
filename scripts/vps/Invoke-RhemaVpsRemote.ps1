@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Preflight', 'Backup', 'Apply', 'ResumeFrontend', 'Verify')]
+    [ValidateSet('Preflight', 'Backup', 'Apply', 'ResumeFrontend', 'Verify', 'RollbackFresh', 'CompleteFresh')]
     [string]$Action,
 
     [string]$DeploymentId,
@@ -12,6 +12,7 @@ param(
     [string]$FrontendPackageName,
     [string]$ApiSha256,
     [string]$FrontendSha256,
+    [string]$FreshDatabaseName,
     [string]$ExpectedPublicOrigin = 'https://63.141.230.56',
     [int]$ApiReadyTimeoutSeconds = 1800
 )
@@ -34,6 +35,9 @@ function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
 }
+
+__RHEMA_FRESHDATABASEPROVISIONING_LIBRARY__
+__RHEMA_FRESHDATABASECUTOVER_LIBRARY__
 
 $UsesNssmApiConfiguration = -not (Test-Path -LiteralPath $ApiServiceXml)
 if ($UsesNssmApiConfiguration) {
@@ -796,6 +800,13 @@ function Invoke-Preflight {
     Assert-True ($corsNodes.Count -eq 1) `
         'The test VPS must expose exactly one HTTPS CORS origin.'
 
+    if (-not [string]::IsNullOrWhiteSpace($FreshDatabaseName)) {
+        Assert-FreshDatabaseServiceIdentity
+        Test-RhemaFreshDatabaseTarget -SourceConnectionString (Get-DatabaseConnectionString) -FreshDatabaseName $FreshDatabaseName | Out-Null
+        Write-Output "FRESH_TARGET_READY|$FreshDatabaseName"
+        Write-Output 'PREFLIGHT|PASS|Fresh target absent; source database preserved, not a migration target.'
+        return
+    }
     $history = @(Get-MigrationHistory)
     foreach ($row in $history) { Write-Output "MIGRATION_ID|$($row.MigrationId)" }
     Write-Output 'GUARD_COVERAGE|20260720181131_AddHRModule'
@@ -1307,6 +1318,10 @@ function Invoke-Apply {
     Assert-True ($serviceWorker -match [regex]::Escape($ExpectedCacheVersion)) `
         'Staged service-worker cache version differs from the release manifest.'
 
+    if (-not [string]::IsNullOrWhiteSpace($FreshDatabaseName)) {
+        Invoke-FreshDatabaseCutover -StageApi $stageApi -StageFrontend $stageFrontend -Backup $backup -Retired $retired
+    }
+    else {
     Set-TestServerConfiguration
     $apiStartedAt = Get-Date
     try {
@@ -1395,6 +1410,7 @@ function Invoke-Apply {
         throw "Frontend apply failed and was rolled back: $($_.Exception.Message)"
     }
 
+    }
     $release = [ordered]@{
         deploymentId = $DeploymentId
         commit = $ExpectedCommit
@@ -1403,6 +1419,7 @@ function Invoke-Apply {
         deployedUtc = [DateTime]::UtcNow.ToString('o')
         apiSha256 = $ApiSha256
         frontendSha256 = $FrontendSha256
+        freshDatabase = $FreshDatabaseName
     }
     [System.IO.File]::WriteAllText(
         (Join-Path $LogsRoot 'current-release.json'),
@@ -1623,4 +1640,6 @@ switch ($Action) {
     'Apply' { Invoke-Apply }
     'ResumeFrontend' { Invoke-ResumeFrontend }
     'Verify' { Invoke-Verify }
+    'RollbackFresh' { Restore-FreshDatabaseCutover }
+    'CompleteFresh' { Complete-FreshDatabaseCutover }
 }
