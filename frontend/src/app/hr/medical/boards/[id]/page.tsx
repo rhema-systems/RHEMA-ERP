@@ -1,9 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, CalendarPlus, Gavel, Loader2, Trash2, UserPlus, Users } from 'lucide-react';
+import {
+  Ban, CalendarPlus, Download, FileText, Gavel, Loader2, Paperclip, Trash2, UserPlus, Users,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -24,12 +27,20 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { medicalBoardService } from '@/services/hr/medical-board.service';
+import { medicalFacilityService } from '@/services/hr/medical-reference.service';
 import {
   MEDICAL_BOARD_MEMBER_ROLE_LABEL,
   MEDICAL_BOARD_OUTCOME_LABEL,
+  MEDICAL_BOARD_PURPOSE_LABEL,
+  boardStatusLabel,
   type MedicalBoardMemberRole,
   type MedicalBoardOutcome,
 } from '@/types/hr/medical-board';
+
+type MemberMode = 'physician' | 'employee' | 'external';
+
+const fileSize = (bytes?: number | null) =>
+  bytes == null ? '' : bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
 function Row({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -57,8 +68,9 @@ export default function MedicalBoardDetailPage() {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<null | 'member' | 'sitting' | 'conclude' | 'cancel'>(null);
 
-  // member form
-  const [memberMode, setMemberMode] = useState<'employee' | 'external'>('external');
+  // member form — a registered physician first: the board's clinicians are who it rests on (lane K3)
+  const [memberMode, setMemberMode] = useState<MemberMode>('physician');
+  const [memberPhysicianId, setMemberPhysicianId] = useState('');
   const [memberEmployeeId, setMemberEmployeeId] = useState('');
   const [memberName, setMemberName] = useState('');
   const [institution, setInstitution] = useState('');
@@ -80,12 +92,30 @@ export default function MedicalBoardDetailPage() {
   const [reviewDueDate, setReviewDueDate] = useState('');
   const [retire, setRetire] = useState(false);
 
+  // documents (lane K4)
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [documentDescription, setDocumentDescription] = useState('');
+
   const queryKey = ['hr', 'medical-boards', id];
   const { data: board, isLoading } = useQuery({
     queryKey,
     queryFn: () => medicalBoardService.getById(id),
     enabled: !!id,
   });
+
+  const { data: documents = [] } = useQuery({
+    queryKey: ['hr', 'medical-boards', id, 'documents'],
+    queryFn: () => medicalBoardService.getDocuments(id),
+    enabled: !!id,
+  });
+
+  // The register, active physicians only, loaded when the member dialog opens.
+  const { data: physicians = [] } = useQuery({
+    queryKey: ['hr', 'medical-physicians'],
+    queryFn: () => medicalFacilityService.getPhysicians(),
+    enabled: dialog === 'member',
+  });
+  const activePhysicians = physicians.filter((p) => p.isActive);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'medical-boards'] });
 
@@ -117,7 +147,23 @@ export default function MedicalBoardDetailPage() {
   const open = board.status === 'Requested' || board.status === 'Convened';
   const canConvene = board.status === 'Requested';
   const canSit = board.status === 'Convened';
-  const canConclude = board.status === 'Convened' && (board.sittings?.length ?? 0) > 0;
+  // ⚠ Members too (lane K7): a convened board can lose its members, and one with nobody on it
+  // cannot report. The server refuses it; the button waits for it.
+  const canConclude =
+    board.status === 'Convened' && (board.sittings?.length ?? 0) > 0 && (board.members?.length ?? 0) > 0;
+
+  // ⚠ One action, two words (lane K5): before convening it is only a request; after, a panel.
+  const dissolving = board.status === 'Convened';
+  const stopLabel = dissolving ? 'Dissolve the board' : 'Cancel the request';
+
+  const upload = async (file: File) => {
+    await run('Document attached', async () => {
+      await medicalBoardService.uploadDocument(id, file, documentDescription.trim() || null);
+      setDocumentDescription('');
+    });
+    // Cleared either way, or choosing the same file again after a refusal would do nothing.
+    if (fileInput.current) fileInput.current.value = '';
+  };
 
   return (
     <div className="space-y-6 p-6">
@@ -127,7 +173,7 @@ export default function MedicalBoardDetailPage() {
         backHref="/hr/medical/boards"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={board.status} />
+            <StatusBadge status={boardStatusLabel(board)} />
             {open && (
               <Button variant="outline" onClick={() => setDialog('member')}>
                 <UserPlus className="mr-2 h-4 w-4" /> Appoint a member
@@ -153,13 +199,13 @@ export default function MedicalBoardDetailPage() {
               </Button>
             )}
             {/*
-              ⚠ Cancel is available until the board reports and not after — the same ratchet as
-              everything else here. It sits last and destructive because it ends the board; it is
-              not an undo, and there is no un-cancel either.
+              ⚠ Available until the board reports and not after — the same ratchet as everything
+              else here. It sits last and destructive because it ends the board; it is not an undo,
+              and there is no un-cancel either. Its word follows the status (lane K5).
             */}
             {open && (
               <Button variant="destructive" onClick={() => setDialog('cancel')}>
-                <Ban className="mr-2 h-4 w-4" /> Cancel the board
+                <Ban className="mr-2 h-4 w-4" /> {stopLabel}
               </Button>
             )}
           </div>
@@ -187,11 +233,26 @@ export default function MedicalBoardDetailPage() {
       */}
       {board.status === 'Cancelled' && (
         <div className="rounded-md border border-red-300/60 bg-red-50 p-4 text-sm dark:border-red-900/60 dark:bg-red-950/40">
-          <p className="font-medium">This board was cancelled before it reported.</p>
+          {/* ⚠ Which it was, when and by whom (lane K5) — read back, not left to the badge. */}
+          <p className="font-medium">
+            {board.wasDissolved
+              ? 'This board was dissolved after it was convened, before it reported.'
+              : 'This request was cancelled before a board was convened.'}
+          </p>
+          {(board.cancelledOn || board.cancelledByName) && (
+            <p className="mt-1 text-muted-foreground">
+              {board.wasDissolved ? 'Dissolved' : 'Cancelled'}
+              {board.cancelledOn ? ` on ${board.cancelledOn.slice(0, 10)}` : ''}
+              {board.cancelledByName ? ` by ${board.cancelledByName}` : ''}
+            </p>
+          )}
           {board.cancellationReason && (
             <p className="mt-1 whitespace-pre-wrap">“{board.cancellationReason}”</p>
           )}
           <p className="mt-2 text-muted-foreground">
+            {board.wasDissolved
+              ? 'Its members and sittings stay on the record below. '
+              : ''}
             It never reached a finding, so it satisfies no evidence rule and justifies no medical
             retirement. <strong>A board that still needs to sit is a new board.</strong>
           </p>
@@ -201,10 +262,44 @@ export default function MedicalBoardDetailPage() {
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-base">The board</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-2 gap-x-6 md:grid-cols-3">
+          <Row
+            label="Purpose"
+            value={
+              <>
+                {MEDICAL_BOARD_PURPOSE_LABEL[board.purpose] ?? board.purpose}
+                {/* ⚠ Said on the board, because a leave request refused on it would otherwise puzzle. */}
+                {!board.coversAbsence && (
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Not about an absence, so leave cannot rest on it.
+                  </span>
+                )}
+              </>
+            }
+          />
           <Row label="Reason" value={board.reason} />
           <Row label="Requested" value={`${board.requestedOn?.slice(0, 10)}${board.requestedByName ? ` by ${board.requestedByName}` : ''}`} />
           <Row label="Convened" value={board.convenedOn?.slice(0, 10)} />
           <Row label="Facility" value={board.facilityName} />
+          <Row
+            label="Based on an examination"
+            value={
+              board.basedOnExamDate
+                ? `${board.basedOnExamDate.slice(0, 10)}${board.basedOnExamResult ? ` · ${MEDICAL_BOARD_OUTCOME_LABEL[board.basedOnExamResult]}` : ''}`
+                : undefined
+            }
+          />
+          <Row
+            label="Health record"
+            value={
+              board.healthProfileId ? (
+                <Link href={`/hr/medical/health/${board.healthProfileId}`} className="underline underline-offset-2">
+                  Open
+                </Link>
+              ) : (
+                'None on file'
+              )
+            }
+          />
           <Row label="Concluded" value={board.concludedOn?.slice(0, 10)} />
           <Row label="Reported by" value={board.concludedByName} />
         </CardContent>
@@ -318,6 +413,102 @@ export default function MedicalBoardDetailPage() {
         </CardContent>
       </Card>
 
+      {/*
+        ── Documents (lane K4) ───────────────────────────────────────────────
+        ⚠ Attachable at any status: the signed report usually arrives after the board has
+        reported. Removable only while it is open — afterwards its papers are part of the record.
+      */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-base">Documents</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-[16rem] flex-1 space-y-1.5">
+              <Label htmlFor="document-description">Description</Label>
+              <Input
+                id="document-description"
+                value={documentDescription}
+                onChange={(e) => setDocumentDescription(e.target.value)}
+                placeholder="e.g. specialist's report, signed minutes"
+              />
+            </div>
+            <input
+              ref={fileInput}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void upload(file);
+              }}
+            />
+            <Button variant="outline" disabled={busy} onClick={() => fileInput.current?.click()}>
+              <Paperclip className="mr-2 h-4 w-4" /> Attach a document
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            ⚠ Medical-grade content, checked for viruses on upload and visible to holders of the
+            medical permissions only.
+            {!open && ' This board is settled: papers can still be added, but none can be removed.'}
+          </p>
+
+          {documents.length === 0 ? (
+            <p className="py-2 text-sm text-muted-foreground">No documents attached.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>File</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Attached</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {documents.map((d) => (
+                  <TableRow key={d.id}>
+                    <TableCell className="font-medium">
+                      <span className="inline-flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" /> {d.fileName}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">{fileSize(d.fileSize)}</span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{d.description ?? '—'}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {d.uploadDate?.slice(0, 10)}
+                      {d.uploadedByName ? ` · ${d.uploadedByName}` : ''}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          medicalBoardService.downloadDocument(id, d).catch((e: any) =>
+                            toast({ title: 'Error', description: e?.message || 'Could not download.', variant: 'destructive' }),
+                          )
+                        }
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      {open && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => run('Document removed', () => medicalBoardService.removeDocument(id, d.id))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
       {/* ── Appoint a member ─────────────────────────────────────────────── */}
       <Dialog open={dialog === 'member'} onOpenChange={(o) => setDialog(o ? 'member' : null)}>
         <DialogContent className="sm:max-w-[520px]">
@@ -332,16 +523,40 @@ export default function MedicalBoardDetailPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="member-mode">Who is this?</Label>
-              <Select value={memberMode} onValueChange={(v) => setMemberMode(v as 'employee' | 'external')}>
+              <Select value={memberMode} onValueChange={(v) => setMemberMode(v as MemberMode)}>
                 <SelectTrigger id="member-mode"><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="physician">A physician on the register</SelectItem>
                   <SelectItem value="employee">Somebody who works here</SelectItem>
-                  <SelectItem value="external">Somebody from outside</SelectItem>
+                  <SelectItem value="external">Somebody from outside, not on the register</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {memberMode === 'employee' ? (
+            {memberMode === 'physician' ? (
+              <div className="space-y-2">
+                <Label htmlFor="member-physician">Physician <span className="text-red-500">*</span></Label>
+                <Select value={memberPhysicianId} onValueChange={setMemberPhysicianId}>
+                  <SelectTrigger id="member-physician">
+                    <SelectValue placeholder={activePhysicians.length ? 'Choose from the register' : 'The register is empty'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activePhysicians.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.fullName}
+                        {p.specialization ? ` · ${p.specialization}` : ''}
+                        {p.facilityName ? ` · ${p.facilityName}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Somebody missing? Add them under{' '}
+                  <Link href="/hr/medical/physicians" className="underline underline-offset-2">Physicians</Link>
+                  , or appoint them from outside by name.
+                </p>
+              </div>
+            ) : memberMode === 'employee' ? (
               <div className="space-y-2">
                 <Label>Employee <span className="text-red-500">*</span></Label>
                 <EmployeePicker value={memberEmployeeId || null} onChange={(v) => setMemberEmployeeId(v ?? '')} />
@@ -388,15 +603,25 @@ export default function MedicalBoardDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialog(null)} disabled={busy}>Cancel</Button>
             <Button
-              disabled={busy || (memberMode === 'employee' ? !memberEmployeeId : !memberName.trim())}
+              disabled={
+                busy ||
+                (memberMode === 'physician'
+                  ? !memberPhysicianId
+                  : memberMode === 'employee'
+                    ? !memberEmployeeId
+                    : !memberName.trim())
+              }
               onClick={() =>
                 run('Member appointed', async () => {
+                  // ⚠ Exactly one identity per row (lane K7) — the server refuses two.
                   await medicalBoardService.addMember(id, {
+                    physicianId: memberMode === 'physician' ? memberPhysicianId : null,
                     employeeId: memberMode === 'employee' ? memberEmployeeId : null,
                     memberName: memberMode === 'external' ? memberName.trim() : null,
                     institution: institution.trim() || null,
                     role,
                   });
+                  setMemberPhysicianId('');
                   setMemberEmployeeId('');
                   setMemberName('');
                   setInstitution('');
@@ -555,16 +780,21 @@ export default function MedicalBoardDetailPage() {
       <Dialog open={dialog === 'cancel'} onOpenChange={(o) => setDialog(o ? 'cancel' : null)}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Cancel this board?</DialogTitle>
+            <DialogTitle>{dissolving ? 'Dissolve this board?' : 'Cancel this request for a board?'}</DialogTitle>
             <DialogDescription>
-              ⚠ There is no un-cancel. A board that still needs to sit is a new board — which is
+              {dissolving
+                ? 'The panel has been convened. Dissolving it stands it down before it reports; its members and sittings stay on the record.'
+                : 'No panel has been convened yet, so this cancels the request.'}{' '}
+              ⚠ There is no undoing it. A board that still needs to sit is a new board — which is
               also how it works on paper.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="cancel-reason">Why is it being cancelled?</Label>
+              <Label htmlFor="cancel-reason">
+                {dissolving ? 'Why is it being dissolved?' : 'Why is it being cancelled?'}
+              </Label>
               <Textarea
                 id="cancel-reason"
                 rows={3}
@@ -583,10 +813,10 @@ export default function MedicalBoardDetailPage() {
               ratchet that applies when a board reports.
             */}
             <p className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-xs dark:border-amber-900/60 dark:bg-amber-950/40">
-              If a leave request already points at this board, cancelling does <strong>not</strong>{' '}
-              unlink it — but a cancelled board satisfies no evidence rule, so that request will be
-              refused at submission until it names another board or attaches a recommendation. Leave
-              already approved on it stays approved.
+              If a leave request already points at this board, {dissolving ? 'dissolving' : 'cancelling'}{' '}
+              does <strong>not</strong> unlink it — but a board that never reported satisfies no
+              evidence rule, so that request will be refused at submission until it names another
+              board or attaches a recommendation. Leave already approved on it stays approved.
             </p>
           </div>
 
@@ -598,12 +828,12 @@ export default function MedicalBoardDetailPage() {
               variant="destructive"
               disabled={busy || !cancelReason.trim()}
               onClick={() =>
-                run('Board cancelled', () =>
+                run(dissolving ? 'Board dissolved' : 'Request cancelled', () =>
                   medicalBoardService.cancel(id, cancelReason.trim()),
                 )
               }
             >
-              Cancel the board
+              {stopLabel}
             </Button>
           </DialogFooter>
         </DialogContent>

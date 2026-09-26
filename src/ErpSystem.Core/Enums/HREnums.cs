@@ -5058,8 +5058,52 @@ public enum MedicalBoardStatus
     [Description("Concluded")]
     Concluded = 3,
 
+    /// <summary>
+    /// Stopped before it reported. ⚠ One status, two words (round 5, lane K5): a board stopped while
+    /// only Requested was a <b>cancelled request</b>; one stopped after it was Convened was
+    /// <b>dissolved</b>. <c>ConvenedOn</c> tells them apart, so no second status is needed.
+    /// </summary>
     [Description("Cancelled")]
     Cancelled = 4
+}
+
+/// <summary>
+/// The question a medical board is asked (round 5, lane K1 — decision A6).
+/// </summary>
+/// <remarks>
+/// <para>Beside the free-text reason, not instead of it: the purpose is what the rest of the system
+/// can read, the reason is what the panel reads.</para>
+///
+/// <para>⚠ <b>Numbered from 1 on purpose.</b> An enum a request omits binds to 0, and a board whose
+/// purpose silently became the first value would be a board nobody asked that question of. The
+/// service refuses 0 and anything undefined.</para>
+///
+/// <para>⚠ <b>The leave evidence gate reads it</b> (lane K6): only a board about an absence —
+/// <see cref="ExtendedSickLeave"/>, <see cref="InjuryOnDuty"/> or <see cref="Other"/> — can stand as
+/// the board a leave type's threshold asks for. <c>MedicalBoard.CoversAbsence</c> is the one place
+/// that list lives.</para>
+/// </remarks>
+public enum MedicalBoardPurpose
+{
+    /// <summary>Sick leave has passed the point at which a board must sit.</summary>
+    [Description("Extended sick leave")]
+    ExtendedSickLeave = 1,
+
+    /// <summary>An injury at work — the Workmen's Compensation case (PNDCL 187).</summary>
+    [Description("Injury on duty")]
+    InjuryOnDuty = 2,
+
+    /// <summary>Whether somebody can do their job, with or without restrictions.</summary>
+    [Description("Fitness for duty")]
+    FitnessForDuty = 3,
+
+    /// <summary>Whether somebody should retire on medical grounds.</summary>
+    [Description("Medical retirement")]
+    MedicalRetirement = 4,
+
+    /// <summary>Anything else. Also what every board recorded before purposes existed.</summary>
+    [Description("Other")]
+    Other = 5
 }
 
 /// <summary>What a person is doing on a medical board.</summary>

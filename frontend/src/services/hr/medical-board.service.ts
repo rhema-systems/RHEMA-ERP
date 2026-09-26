@@ -1,8 +1,11 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   MedicalBoard,
+  MedicalBoardDocument,
   MedicalBoardMember,
+  MedicalBoardPurpose,
   MedicalBoardSitting,
   MedicalBoardStatus,
   RequestMedicalBoardRequest,
@@ -14,6 +17,7 @@ import type {
 export interface MedicalBoardListParams {
   employeeId?: string;
   status?: MedicalBoardStatus;
+  purpose?: MedicalBoardPurpose;
   from?: string;
   to?: string;
   search?: string;
@@ -35,6 +39,7 @@ class MedicalBoardService {
     const q = new URLSearchParams();
     if (params.employeeId) q.set('employeeId', params.employeeId);
     if (params.status) q.set('status', params.status);
+    if (params.purpose) q.set('purpose', params.purpose);
     if (params.from) q.set('from', params.from);
     if (params.to) q.set('to', params.to);
     if (params.search) q.set('search', params.search);
@@ -80,8 +85,39 @@ class MedicalBoardService {
     return apiService.put<MedicalBoard>(`${this.baseUrl}/${boardId}/conclude`, data);
   }
 
+  /**
+   * Stops a board that has not reported. ⚠ One action, two words (lane K5): a Requested board's
+   * request is cancelled; a Convened board is dissolved. The answer's `wasDissolved` says which.
+   */
   cancel(boardId: string, reason: string): Promise<MedicalBoard> {
     return apiService.put<MedicalBoard>(`${this.baseUrl}/${boardId}/cancel`, reason);
+  }
+
+  // ── Documents (round 5, lane K4) ──────────────────────────────────────────
+  // Multipart through the controlled-upload gate (scan-mandatory: a missing scanner is a 422 with a
+  // reason, not a stored file). Served only by the gated download — never link to the route.
+
+  getDocuments(boardId: string): Promise<MedicalBoardDocument[]> {
+    return apiService.get<MedicalBoardDocument[]>(`${this.baseUrl}/${boardId}/documents`);
+  }
+
+  /** Allowed at any status — the signed report usually arrives after the board has concluded. */
+  uploadDocument(boardId: string, file: File, description?: string | null): Promise<MedicalBoardDocument> {
+    return hrDocumentService.upload<MedicalBoardDocument>(`${this.baseUrl}/${boardId}/documents`, file, {
+      description: description ?? undefined,
+    });
+  }
+
+  downloadDocument(boardId: string, document: MedicalBoardDocument): Promise<void> {
+    return hrDocumentService.download(
+      `${this.baseUrl}/${boardId}/documents/${document.id}/download`,
+      document.fileName,
+    );
+  }
+
+  /** ⚠ Refused once the board has reported or been stopped — its papers are then part of the record. */
+  removeDocument(boardId: string, documentId: string): Promise<unknown> {
+    return apiService.delete<unknown>(`${this.baseUrl}/${boardId}/documents/${documentId}`);
   }
 }
 

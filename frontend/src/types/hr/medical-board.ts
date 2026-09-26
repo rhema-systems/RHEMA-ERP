@@ -23,6 +23,27 @@ export type MedicalBoardStatus = 'Requested' | 'Convened' | 'Concluded' | 'Cance
 export type MedicalBoardMemberRole = 'Chair' | 'Member' | 'Secretary' | 'Observer';
 
 /**
+ * The question a board is asked (round 5, lane K1). Required when a board is requested.
+ *
+ * ⚠ Leave reads it: only a board about an absence can stand as the board a leave type's threshold
+ * asks for. The server says which through `coversAbsence` — read that, do not keep a copy of the list.
+ */
+export type MedicalBoardPurpose =
+  | 'ExtendedSickLeave'
+  | 'InjuryOnDuty'
+  | 'FitnessForDuty'
+  | 'MedicalRetirement'
+  | 'Other';
+
+export const MEDICAL_BOARD_PURPOSE_LABEL: Record<MedicalBoardPurpose, string> = {
+  ExtendedSickLeave: 'Extended sick leave',
+  InjuryOnDuty: 'Injury on duty',
+  FitnessForDuty: 'Fitness for duty',
+  MedicalRetirement: 'Medical retirement',
+  Other: 'Other',
+};
+
+/**
  * The finding. ⚠ Reuses `MedicalExamResult`, which the module already used on examinations —
  * a parallel enum would have let the two vocabularies drift.
  */
@@ -89,6 +110,9 @@ export interface MedicalBoard {
   employeeNumber: string;
 
   status: MedicalBoardStatus;
+  purpose: MedicalBoardPurpose;
+  /** ⚠ Whether this purpose can satisfy a leave type's board rule (lane K6) — the server's answer. */
+  coversAbsence: boolean;
   reason: string;
 
   requestedById?: string | null;
@@ -99,6 +123,9 @@ export interface MedicalBoard {
 
   healthProfileId?: string | null;
   basedOnExamId?: string | null;
+  /** DateOnly — the examination the board was based on. */
+  basedOnExamDate?: string | null;
+  basedOnExamResult?: MedicalBoardOutcome | null;
   facilityId?: string | null;
   facilityName?: string | null;
 
@@ -115,13 +142,45 @@ export interface MedicalBoard {
   concludedById?: string | null;
   concludedByName?: string | null;
   cancellationReason?: string | null;
+  /** DateOnly. When it was stopped, and by whom (lane K5); null on boards stopped before that. */
+  cancelledOn?: string | null;
+  cancelledById?: string | null;
+  cancelledByName?: string | null;
+  /** ⚠ Stopped after it was convened: dissolved. Stopped before: a cancelled request. */
+  wasDissolved: boolean;
 
   members: MedicalBoardMember[];
   sittings: MedicalBoardSitting[];
 }
 
+/**
+ * What to call a board's state. ⚠ `Cancelled` is one status with two meanings (lane K5): a request
+ * cancelled before any panel existed, or a board dissolved after it was convened.
+ */
+export function boardStatusLabel(board: Pick<MedicalBoard, 'status' | 'wasDissolved'>): string {
+  return board.status === 'Cancelled' && board.wasDissolved ? 'Dissolved' : board.status;
+}
+
+/** A paper on a board (lane K4). Served only by the board's gated download — never link to a path. */
+export interface MedicalBoardDocument {
+  id: string;
+  boardId: string;
+  fileName: string;
+  fileSize?: number | null;
+  description?: string | null;
+  uploadDate: string;
+  uploadedById: string;
+  uploadedByName?: string | null;
+}
+
+/**
+ * ⚠ The facility and the examination are checked by the server (lane K3): each must be this
+ * tenant's, and the examination must be the subject's own. The health profile follows from the
+ * examination, or is the subject's own when neither is named — there is no need to send it.
+ */
 export interface RequestMedicalBoardRequest {
   employeeId: string;
+  purpose: MedicalBoardPurpose;
   reason: string;
   healthProfileId?: string | null;
   basedOnExamId?: string | null;
@@ -129,7 +188,7 @@ export interface RequestMedicalBoardRequest {
 }
 
 /**
- * ⚠ Supply **one** of `physicianId`, `employeeId` or `memberName`. A board is not only doctors —
+ * ⚠ Supply **exactly one** of `physicianId`, `employeeId` or `memberName` — two is refused. A board is not only doctors —
  * it carries HR as secretary, a staff or union representative, and often a clinician from outside
  * who is in nobody's register.
  *

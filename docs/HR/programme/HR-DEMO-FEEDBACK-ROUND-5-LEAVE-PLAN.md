@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J and I done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J, I and K done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -24,7 +24,8 @@
 > | **H** | **DONE** 2026-09-26 — casual leave beyond its limit: the ask, the split at the final approval, and the two parts kept as one absence; a leak found and closed · `run-round5-h.mjs` 142, green twice · § 8 |
 > | **J** | **DONE** 2026-09-26 — balances: annual leave first, for everybody serving, worked out live where no record exists; the portal leads with *can take now*; the home reads the leave year (L-60) · `run-round5-j.mjs` 44, green twice · § 8 |
 > | **I** | **DONE** 2026-09-26 — reminders that reach people: each to whoever can act on it, in the app and by email, HR told why when nobody else can be; one September chase for everybody serving, to the employee, the supervisor and HR; "you can now take annual leave"; the nightly host fixed · `run-round5-i.mjs` 88, green twice · § 8 |
-> | K · L | not started, in that order — **K is next** |
+> | **K** | **DONE** 2026-09-26 — the medical board, step one: a purpose, physicians from the register, the facility and examination checked, documents through the upload gate, cancel or dissolve, a leave gate that takes only a relevant, recent board, and the board defects · `run-round5-k.mjs` 144, green twice · § 8 |
+> | L | not started — **L is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -1257,3 +1258,113 @@ reminded at their current rung already.
   notification row, and UAT has no mail server to send it.
 - **UAT's HR role has 867 holders**, most of them users the suites created. Every HR message on the
   demo database fans out to all of them.
+
+### K — The medical board, step one · DONE 2026-09-26
+
+**Built.**
+
+- **K1 — what a board is for.** `MedicalBoardPurpose` (*extended sick leave · injury on duty ·
+  fitness for duty · medical retirement · other*), numbered from 1, beside the free-text reason.
+  - Required when a board is requested. It is nullable in the request, so leaving it out, sending 0
+    or an undefined number is refused with a sentence, never saved as nothing.
+  - `MedicalBoard.CoversAbsence` is the one place the list of purposes that can stand for an
+    absence lives. The DTO carries its answer (`coversAbsence`), so no screen keeps a copy.
+  - The register filters by it and shows it; its title, empty state and request form no longer
+    talk only about sick leave.
+- **K3 — the facility, the examination, the health profile, and physicians.**
+  - The request form picks the facility (the active register) and an examination — only the chosen
+    employee's own, because the server refuses anybody else's.
+  - The service checks all three: this tenant's, existing, and the subject's own. A missing one is a
+    404, not the foreign-key 500 it was; another employee's examination or profile is refused.
+  - The health profile follows from the examination, or is the subject's own record when neither is
+    named. The board page names the examination (date and result) and links to the health record.
+  - The member dialog offers **a physician on the register** first, then a colleague, then an
+    outside name.
+- **K4 — documents.** `MedicalBoardDocument`, through the controlled-upload gate (new category
+  `hr-medical-board-documents`, registered as scan-mandatory), registered in the DMS as *Medical
+  restricted* — the shared upload helper gained an optional access profile for it. Read, download,
+  attach and remove, each on the Medical policies. **Added at any status; removed only while the
+  board is open.** A *Documents* card on the board page.
+- **K5 — cancel or dissolve.** One status, two words: a Requested board's request is **cancelled**, a
+  Convened board is **dissolved** (members and sittings kept). The reason is required in both, and
+  every refusal uses the right word. `CancelledOn` and `CancelledById` are recorded; `wasDissolved`
+  is read from `ConvenedOn`. The board page's red panel says which, when, by whom and why; the
+  register and the leave panel show *Dissolved*.
+- **K6 — the leave gate takes only a relevant, recent board.** A linked board counts only if it
+  concluded, was asked about an absence, and reported on or after the start of the leave year being
+  counted. When a linked board does not count, the refusal adds why, in one sentence ("… has not
+  reported." / "… was asked about fitness for duty, not an absence …" / "… reported on 31 Dec 2025,
+  before this leave year began on 1 Jan 2026."). The paper recommendation is accepted as before. The
+  leave request's board panel applies the same three tests, in the gate's order, and the picker marks
+  a board that is not about an absence before it is chosen.
+- **K7 — the defects.** A board cannot report without an outcome (omitted or undefined), or with
+  nobody left on it (members can be removed while it is convened). A member row is one of physician,
+  employee or name — never two.
+- **Migration `20260926100539_AddMedicalBoardPurposeAndDocuments`**, guarded SQL: `Purpose` with
+  **5 = Other** for every existing board (never the scaffold's 0; Other also keeps every existing
+  board exactly as able to satisfy the gate as before); `CancelledOn` backfilled from `UpdatedAt` on
+  boards already cancelled (every write refuses a cancelled board, so its last update is the
+  cancellation), `CancelledById` left empty (never recorded); the documents table, cascading from the
+  board and **Restrict** on the uploader (a second cascade path from `Employees` would be refused).
+  Proven on a scratch database carrying the board's own cascade from `Employees`: Up twice, Down twice,
+  Up again, 30 checks. UAT applied it at startup, checked in SQL: the history row, six boards at 5, the
+  two cancelled ones dated.
+
+**Changed from the plan, and why.**
+
+1. **An injury-on-duty board satisfies the gate too** (the plan said extended sick leave or other).
+   The same gate serves any leave type with a board threshold, not only sick leave. Switching
+   *Occupational Injury Leave*'s certificate on arms its board rule at the default 90 days (lane A's
+   trap), and then the relevant board is the injury board. Without it HR would have to label an
+   injury board *sick leave* to get it accepted — a setting that says something untrue. **Flagged for
+   the user to confirm.**
+2. **Dissolve follows *convened*, not *met*.** The explainer said "after it has met"; the plan said
+   Convened. A panel exists from convening; the explainer now says so.
+3. **The health profile is filled in, not asked for.** It follows from the examination, or is the
+   subject's own record, and the page links to it — rather than a third picker for a field no screen
+   read.
+4. **Documents can be added after the board settles, but not removed.** The plan did not say. The
+   signed report usually arrives after the board reports; removing one afterwards would take evidence
+   out from under a finding, the same reason members and sittings freeze.
+5. **No separate medical guide exists.** The plan named "the medical guide"; the board is documented
+   in the leave guide's chapter 7b, which was updated. The area-11 build plan is a plan, not a guide.
+
+**Suite.** `dev-harness/hr-leave/run-round5-k.mjs`: **144 assertions, green twice** (144 on its
+first run).
+- The upload runs through the real gate with `../hr-medical/clamd-stub.mjs` answering clean, and
+  asserts the scan verdict is *Clean* (not *Skipped*), the DMS profile, and the bytes back.
+- The gate's refusals are asserted as exact sentences; the date rule in both positions on one board
+  (31 December of last year refused, 1 January of this accepted).
+- Its four requests sit in November and December of this leave year — the gate reads the request's
+  own leave year — and are cancelled and retired at the end. Its leave type is switched off. It made
+  one health profile and one examination for leave.emp (a harness employee), reused on later runs.
+
+**Slice 8 re-based.** `run-slice8-board.mjs` sends a purpose, and its [4] request moved from 600 days
+out (2028, where a board reporting today would rightly not count) into this leave year's last
+fortnight; it now cancels and retires what it raised. **79, its recorded count.**
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green twice:
+
+- **Slices 1–13 are at their recorded counts.** Slice 1 is 72/75, the same three environmental
+  failures (UAT holds one workflow definition row per entity). Slice 7 (34), the evidence gate by
+  paper, is unchanged; slice 8 (79) is the re-based board slice above.
+- **The round 5 suites:** `run-round5-e.mjs` 119, `-f` 20, `-d` 74, `-a` 89 (its maternity check
+  reads the gate's unchanged first sentence), `-n` 92 (the board threshold's Pending count and the
+  paper route), `-c` 112, `-g` 55, `-h` 142, `-j` 44, `-i` 88.
+- **`run-round5-k.mjs` was 144 a third time**, run last.
+- **Cleanup:** the 25 harness types the older slices minted were switched off, measured first (all
+  created by the pass, none of TDC's). Only TDC's nine are active. No request of lane K's is left on
+  leave.emp.
+- **The API log holds nothing from this lane:** 4,107 notification-sender lines (no mail server on
+  UAT), 10 failures of the notification clean-up's own update contending with the sweeps' writes (lane
+  I's pass logged 12, lane J's 20), and one procurement calendar failure for another tenant. No
+  request answered 500.
+
+**Noted, not built.**
+- **K-II** — several employees per board, incapacity % and compensation, separation's bridge —
+  waits on R5-Q5. A board still rules on one employee.
+- **A paper filed on a settled board by mistake cannot be removed** by anyone. A Medical-admin
+  correction is the natural answer if it is ever needed.
+- **The typed paper recommendation is not held to K6's tests** — the system cannot read what the
+  paper is about, or when it was signed.
+- `EmployeeSeparation.MedicalBoardId` is still unreachable (K-II / separation's closure).

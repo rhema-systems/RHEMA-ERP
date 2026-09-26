@@ -43,7 +43,13 @@ public class MedicalBoard : TenantEntity
 
     public MedicalBoardStatus Status { get; set; } = MedicalBoardStatus.Requested;
 
-    /// <summary>Why a board was asked for — extended sick leave, an injury, a fitness query.</summary>
+    /// <summary>
+    /// The question the board is asked (round 5, lane K1). Required when a board is requested;
+    /// boards recorded before purposes existed read <see cref="MedicalBoardPurpose.Other"/>.
+    /// </summary>
+    public MedicalBoardPurpose Purpose { get; set; } = MedicalBoardPurpose.Other;
+
+    /// <summary>Why a board was asked for, in the requester's words. Read beside <see cref="Purpose"/>.</summary>
     [MaxLength(1000)]
     public string Reason { get; set; } = string.Empty;
 
@@ -110,8 +116,32 @@ public class MedicalBoard : TenantEntity
     [MaxLength(1000)]
     public string? CancellationReason { get; set; }
 
+    /// <summary>
+    /// When it was stopped (round 5, lane K5). Whether that was a cancelled request or a dissolved
+    /// board is read from <see cref="ConvenedOn"/>: stopped before convening, it was never a panel.
+    /// </summary>
+    public DateOnly? CancelledOn { get; set; }
+
+    /// <summary>Who stopped it. A bare <c>Guid</c>, like <see cref="RequestedById"/> and for the same reason.</summary>
+    public Guid? CancelledById { get; set; }
+
     public virtual ICollection<MedicalBoardMember> Members { get; set; } = new List<MedicalBoardMember>();
     public virtual ICollection<MedicalBoardSitting> Sittings { get; set; } = new List<MedicalBoardSitting>();
+    public virtual ICollection<MedicalBoardDocument> Documents { get; set; } = new List<MedicalBoardDocument>();
+
+    /// <summary>
+    /// Whether a board asked this question rules on an ABSENCE — the only kind a leave type's board
+    /// threshold can rest on (round 5, lane K6).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The one place this list lives: the leave evidence gate reads it, and the DTO carries its
+    /// answer so no screen keeps a copy. A board asked whether somebody is fit for their post, or
+    /// should retire, has not ruled on an absence, however recent it is.
+    /// </remarks>
+    public static bool CoversAbsence(MedicalBoardPurpose purpose) =>
+        purpose is MedicalBoardPurpose.ExtendedSickLeave
+                or MedicalBoardPurpose.InjuryOnDuty
+                or MedicalBoardPurpose.Other;
 }
 
 /// <summary>Somebody appointed to a medical board.</summary>
@@ -192,4 +222,53 @@ public class MedicalBoardSitting : TenantEntity
     /// <summary>What was discussed. ⚠ Medical-grade content — this is gated with the rest.</summary>
     [MaxLength(4000)]
     public string? Notes { get; set; }
+}
+
+/// <summary>
+/// A paper on a medical board — the referral, a specialist's report the panel read, the signed
+/// minutes, the letter standing it down (round 5, lane K4).
+/// </summary>
+/// <remarks>
+/// <para>Uploaded through the controlled-upload gate (scanned, registered in the central DMS as
+/// <i>Medical restricted</i>) and served only by the board's own download, after the Medical read
+/// check. Never a caller-supplied path — the exam-documents defect this module has already fixed.</para>
+///
+/// <para>⚠ <b>Added at any status; removed only while the board is open.</b> The signed report
+/// usually arrives after the board concludes, so adding must stay possible. Removing one after the
+/// board has reported or been stopped would take evidence out from under a finding somebody may
+/// already rest on — the same reason membership and sittings freeze.</para>
+///
+/// <para>The <see cref="UploadedBy"/> navigation pairs with <c>UploadedById</c> by name, so it
+/// mints no shadow column.</para>
+/// </remarks>
+public class MedicalBoardDocument : TenantEntity
+{
+    public Guid BoardId { get; set; }
+
+    [ForeignKey(nameof(BoardId))]
+    public virtual MedicalBoard Board { get; set; } = null!;
+
+    [MaxLength(255)]
+    public string FileName { get; set; } = string.Empty;
+
+    public long? FileSize { get; set; }
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    public DateTime UploadDate { get; set; }
+
+    public Guid UploadedById { get; set; }
+
+    [ForeignKey(nameof(UploadedById))]
+    public virtual Employee UploadedBy { get; set; } = null!;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 }

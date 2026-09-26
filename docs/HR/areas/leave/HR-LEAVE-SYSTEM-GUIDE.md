@@ -24,7 +24,9 @@ fixed) landed the same night; chapter 17 and § 23 (L-42 closed; L-67 and L-68) 
 chapters 6, 7, 11 and 18, § 19.3, § 19.4 and § 23 (L-69) describe it. Lane J (balances: annual
 leave first) landed the same day; chapter 13, § 19.1 (with the portal home's tile) and § 23 (L-60 closed)
 describe it. Lane I (reminders that reach people) landed the same day; chapter 4b's reminder card,
-chapter 18 and § 23 (L-48 closed; L-70 to L-72) describe it. The
+chapter 18 and § 23 (L-48 closed; L-70 to L-72) describe it. Lane K (the medical board, step one:
+a purpose, physicians, documents, cancel or dissolve, and a gate that takes only a relevant, recent
+board) landed the same day; chapter 7b and § 23 (L-47 closed) describe it. The
 other chapters still describe the module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
@@ -2262,6 +2264,14 @@ the question stops being about one absence and becomes about their fitness for t
 not a question a certificate answers and not a question HR decides. That is what a **medical board**
 is: a panel, with a sitting, that produces one finding.
 
+**Since round 5 lane K (2026-09-26) a board is not only about sick leave.** It is asked one of five
+questions — *extended sick leave · injury on duty · fitness for duty · medical retirement · other* —
+and only a board about an **absence** (the first two, or *other*) can stand as the board a leave
+type's threshold asks for, and only if it **reported during the leave year being counted**. It can
+seat a physician from the register, name the facility and the examination it was based on, and carry
+its papers. One board still rules on **one** employee: several employees per board, the extent of
+incapacity and recommended compensation are step two, waiting on TDC (R5-Q5).
+
 > **Say this:**
 >
 > "Two things are worth separating here. The first is a document rule — past three days we want a
@@ -2275,21 +2285,29 @@ is: a panel, with a sitting, that produces one finding.
 
 ### 👁 On the page — the boards register
 
-**Header.** Title *Medical boards*, subtitle *Panels convened to rule on an employee's fitness for
-duty.* One button: **+ Request a board**.
+**Header.** Title *Medical boards*, subtitle *Panels convened to rule on an employee's health — an
+absence, an injury at work, fitness for duty or retirement.* One button: **+ Request a board**.
 
-**Filters:** Status *(All · Requested · Convened · Concluded · Cancelled)* and a **Search** box over
-board number, employee or reason.
+**Filters:** Status *(All · Requested · Convened · Concluded · Cancelled or dissolved)*, **Purpose**
+*(All and the five)* and a **Search** box over board number, employee or reason.
 
-**The table:** Board *(number)* · Employee *(with staff number)* · Requested · Status · **Finding** ·
-Members. A board that recommended retirement carries an amber ***retirement advised*** flag beside
-its finding. Rows open the board.
+**The table:** Board *(number)* · Employee *(with staff number)* · **Purpose** · Requested · Status ·
+**Finding** · Members. A board stopped after it was convened reads **Dissolved**, one stopped before
+**Cancelled**. A board that recommended retirement carries an amber ***retirement advised*** flag
+beside its finding. Rows open the board.
 
-**The request dialog:** an employee picker and **Why a board is needed** *(required)*.
+**The request dialog** *(lane K1, K3)*: an employee picker; **What the board is for** *(required —
+the five purposes)*; **Why a board is needed** *(required)*; **Facility** *(optional, the active
+register)*; and **Based on an examination** *(optional — only the chosen employee's own
+examinations are offered, because the server refuses anybody else's)*.
 
-> *The board is created with nobody on it. Appoint its members, then convene it.*
+> *Only a board about an absence — extended sick leave, an injury on duty, or other — can satisfy a
+> leave type's medical-board rule, and only once it has reported in the leave year being counted.*
 >
 > *Required. A board convened without a stated question is one nobody can tell whether it answered.*
+
+The health profile is not asked for: it follows from the examination, or is the employee's own
+record when there is one, and the board page opens it.
 
 ### 👁 On the page — one board
 
@@ -2301,10 +2319,20 @@ step it is at:
 | **Appoint a member** | Requested or Convened |
 | **Convene** | Requested — and **only if it has at least one member** |
 | **Record a sitting** | Convened |
-| **Report** | Convened — and **only if it has sat at least once** |
+| **Report** | Convened — and **only if it has sat at least once and still has a member** |
+| **Cancel the request** | Requested — nobody has been convened, so only the request is stopped |
+| **Dissolve the board** | Convened — the panel is stood down; its members and sittings stay on the record |
 
-**Four cards:** *The board* (reason, requested, convened, facility, concluded, reported by) ·
-*The finding* (only once it has reported) · *Members* · *Sittings*.
+**Five cards:** *The board* (purpose — with *Not about an absence, so leave cannot rest on it* under
+fitness for duty and medical retirement — reason, requested, convened, facility, the examination it
+was based on, a link to the health record, concluded, reported by) · *The finding* (only once it has
+reported) · *Members* · *Sittings* · **Documents**.
+
+**Documents** *(lane K4)*: a description and **Attach a document**. Each file is scanned for viruses
+by the upload gate and registered in the document store as *Medical restricted*; it downloads only
+through the board, to holders of the medical permissions. **A paper can be attached at any status** —
+the signed report usually arrives after the board has concluded — **and removed only while the board
+is open.** Once it has reported, or been cancelled or dissolved, its papers are part of the record.
 
 **Once it has reported**, every button disappears and an amber panel explains why:
 
@@ -2312,10 +2340,12 @@ step it is at:
 > of what the recommendation means, and leave or separation may already rest on it. **A finding that
 > needs revisiting is a new board** — which is also how it works on paper.
 
-**The member dialog** asks *Who is this?* first — **Somebody who works here** *(an employee picker:
-HR as secretary, a staff or union representative, an in-house nurse)* or **Somebody from outside**
-*(a typed name)* — then **From** *(e.g. Ridge Hospital, or HR Department)* and **Role**
-*(Chair · Member · Secretary · Observer)*.
+**The member dialog** asks *Who is this?* first — **A physician on the register** *(the default since
+lane K3: the active physicians, with their specialisation and facility; a link to the register for
+somebody missing)*, **Somebody who works here** *(an employee picker: HR as secretary, a staff or
+union representative, an in-house nurse)* or **Somebody from outside, not on the register** *(a typed
+name)* — then **From** *(e.g. Ridge Hospital, or HR Department)* and **Role** *(Chair · Member ·
+Secretary · Observer)*. A row is one of the three, never two.
 
 **The report dialog** carries **Finding** *(Fit · Fit with restrictions · Temporarily unfit · Unfit ·
 Requires further investigation)*, **Recommendation** *(required)*, Findings, Restrictions, Review
@@ -2328,11 +2358,15 @@ due, and a checkbox: *The board recommends **retirement on medical grounds**.*
 
 | Rule | Why |
 |---|---|
-| **A ratchet** — Requested → Convened → Concluded, cancellable until it reports, **no un-conclude** | membership and sittings are part of what the recommendation *means*; editing them afterwards would rewrite who decided, while leave approved on it stays approved |
-| **No members → cannot convene** | a board is its panel |
+| **A ratchet** — Requested → Convened → Concluded, cancellable (or dissolvable) until it reports, **no un-conclude** | membership and sittings are part of what the recommendation *means*; editing them afterwards would rewrite who decided, while leave approved on it stays approved |
+| **A purpose, from the list** *(K1)* | leave reads it: only a board about an absence can stand for one. Left out, or an undefined number, it is refused rather than saved as nothing |
+| **No members → cannot convene; none left → cannot report** *(K7)* | a board is its panel — and members can be removed while it is convened |
 | **No sitting → cannot report** | a board that never met cannot have reached a finding |
+| **No outcome → cannot report** *(K7)* | an omitted outcome used to bind to 0 — no finding at all — and conclude |
 | ⚠ **The subject cannot sit on their own board** | nobody rules on their own fitness, and it would discredit the finding that leave and separation rest on |
-| **One chair, and nobody seated twice** | the minutes would otherwise read as a larger board than sat |
+| **One chair, nobody seated twice, one identity per member** *(K7)* | the minutes would otherwise read as a larger board than sat, or two people in one seat |
+| **The facility and the examination are checked** *(K3)* | a mistyped id was a 500; another employee's examination behind a finding was accepted silently |
+| **Cancel or dissolve — one status, two words** *(K5)* | before convening only a request exists; after, a panel. Reason required either way; when and who are recorded and shown |
 
 ### ▶ Walk it
 
@@ -2406,9 +2440,14 @@ at all.
 
 **6 — 🔴 LIVE WRITE 12 — go to Medical Boards and run one.**
 
-`/hr/medical/boards` → **+ Request a board** → your anchor → *Cumulative sick leave has passed the
-point at which a board must sit.* → **Request**. You land on the board, at **Requested**, with
-nobody on it.
+`/hr/medical/boards` → **+ Request a board** → your anchor → **What the board is for:** *Extended
+sick leave* → *Sick leave this year has passed the point at which a board must sit.* → leave the
+facility and examination empty unless your anchor has one on file → **Request**. You land on the
+board, at **Requested**, with nobody on it.
+
+> "The purpose is not decoration. Leave reads it: a board asked whether somebody is fit for their
+> post, or should retire, has not ruled on an *absence*, and it will not stand as the board this
+> rule asks for."
 
 **7 — Try to convene it before appointing anybody.** The button is not there.
 
@@ -2418,19 +2457,26 @@ nobody on it.
 
 | Who | Kind | Role |
 |---|---|---|
-| `Dr K. Owusu`, from `Ridge Hospital` | Somebody from outside | **Chair** |
+| a physician from the register | **A physician on the register** | **Chair** |
 | your HR officer | **Somebody who works here** | Secretary |
-| a staff representative | Somebody who works here | Member |
+| `Dr K. Owusu`, from `Ridge Hospital` | Somebody from outside, not on the register | Member |
 
-> "Three kinds of member, and the middle one matters more than it looks. A board is not only
-> doctors — it carries HR as secretary and usually a staff or union representative. If the only
-> option here were *'registered physician'*, somebody would have had to invent a register entry for
-> their own HR manager, and the record would then say a clinician sat who did not."
+> "Three kinds of member, and each matters. The clinicians first, from the physician register the
+> medical module already keeps — the board's authority rests on who sat. HR as secretary and a staff
+> or union representative beside them: a board is not only doctors, and if the only option were
+> *'registered physician'* somebody would have to invent a register entry for their own HR manager.
+> And an outside doctor who is in nobody's register, by name. In the public service the three
+> medical officers are nominated by the employer, SSNIT and the union."
 
 ⚠ **Try appointing the employee the board is about.** It is refused. Nobody rules on their own
 fitness.
 
-**9 — Convene it. Record a sitting** — today, a venue, and a note.
+**9 — Convene it. Record a sitting** — today, a venue, and a note. **Then attach a paper** under
+*Documents* — the referral letter, or any PDF standing in for one — with a description.
+
+> "Scanned on the way in, stored as a medical record, and it downloads only through this board. It
+> can be added at any point — the signed report usually arrives after the board has reported — but
+> once the board has reported, nothing comes off it."
 
 **10 — Press *Report*.** Finding: **Fit with restrictions**. Recommendation: `Light duties for eight
 weeks, reviewed thereafter.` Review due: eight weeks out. Leave the retirement checkbox **unticked**.
@@ -2478,18 +2524,34 @@ hides itself on leave types that neither name a board nor set a threshold, so yo
 annual leave.
 
 ⚠ **Show what the panel SAYS, not just that it links.** It states in as many words whether the
-board satisfies the rule: green once the board has concluded, amber while it has only been requested
-or convened, and a plain refusal for a cancelled one. **Linked and satisfied are different states**
-— that is the whole point of the split, and a submission refused after somebody has linked a board
-reads as a bug unless the screen has already said the board has not reported.
+board satisfies the rule: green once the board has reported **on an absence during the request's
+leave year**; amber, saying why, while it has only been requested or convened, when it was asked
+about fitness for duty or retirement, or when it reported before the leave year began; and a plain
+refusal for a cancelled or dissolved one. The picker marks a board that is *not about an absence*
+before it is chosen. **Linked and satisfied are different states** — that is the whole point of
+the split, and a submission refused after somebody has linked a board reads as a bug unless the
+screen has already said why.
+
+**The gate's refusal says why the linked board does not count** *(lane K6)*, after its usual
+sentence — for example:
+
+> *… Link a medical board that has reported on the absence during this leave year, or attach its
+> recommendation, before it can be submitted. The linked board, MB-…, was asked about fitness for
+> duty, not an absence, so it cannot stand for this one.*
+
+A board about **injury on duty** counts as well as one about extended sick leave or *other*: the
+same rule serves any leave type with a board threshold, and an injury board is the relevant one for
+an injury absence. The typed paper recommendation is still accepted as before.
 
 ### ⚙ Behind the page
 
 | Control | Call | Gate |
 |---|---|---|
-| The register | `GET /api/hr/medical-boards?status=&search=` | `HR.Medical.Read` |
+| The register | `GET /api/hr/medical-boards?status=&purpose=&search=` | `HR.Medical.Read` |
 | One board | `GET /api/hr/medical-boards/{id}` | `HR.Medical.Read` |
-| Request · members · convene · sittings · report · cancel | `POST` / `PUT` on `/api/hr/medical-boards/…` | `HR.Medical.Write` |
+| Request · members · convene · sittings · report · cancel or dissolve | `POST` / `PUT` on `/api/hr/medical-boards/…` (one `…/cancel` for both words; the answer's `wasDissolved` says which) | `HR.Medical.Write` |
+| The board's papers | `GET …/{id}/documents` · `GET …/{id}/documents/{docId}/download` | `HR.Medical.Read` |
+| Attach · remove a paper | `POST …/{id}/documents` (multipart, 10 MB, category `hr-medical-board-documents`, scan-mandatory) · `DELETE …/{id}/documents/{docId}` | `HR.Medical.Write` |
 | Point a leave request at a board | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write` — **the Medical board panel**, chapter 7 |
 
 ⚠ **"Gated on `HR.Medical.*`" does not mean HR is shut out.** The HR role is granted
@@ -2507,11 +2569,15 @@ object graphs, where an ordinary save in either module could modify it.
 only *Requested* or *Convened* — a board is usually asked for before it sits, and the request should
 be able to say which one it is waiting on. **The evidence gate is what insists on *Concluded*.**
 
-**Cancelling a board has a button** since 2026-09-18: **Cancel the board**, on the detail screen,
-available until the board reports and not after. It asks for a reason and **will not proceed without
-one** — a cancelled board is the one state that looks like an administrative accident from outside,
-and only the reason distinguishes *the panel was stood down* from *somebody clicked the wrong thing*.
-A cancelled board then carries a red panel with that reason on it.
+**Stopping a board has a button** since 2026-09-18, and **two words since lane K5 (2026-09-26)**:
+**Cancel the request** while the board is only Requested, **Dissolve the board** once it is Convened
+— available until the board reports and not after. It is one status underneath (*Cancelled*); the
+word follows whether a panel ever existed. It asks for a reason and **will not proceed without one**
+— a stopped board is the one state that looks like an administrative accident from outside, and
+only the reason distinguishes *the panel was stood down* from *somebody clicked the wrong thing*.
+The board then carries a red panel saying which happened, **when and by whom**, and the reason; a
+dissolved board keeps its members and sittings on the record. (Boards cancelled before lane K show
+the date, taken from their last update, and no name — who did it was never recorded.)
 
 ⚠ **What the dialog warns, and it is worth saying aloud on the walk:** cancelling does **not**
 unlink anything. A leave request naming this board goes on naming it — what changes is that the
@@ -4155,7 +4221,7 @@ Do this after the room empties. Everything below is reversible; nothing needs a 
 | 12 | **Policy settings saved**, if you did *(ch. 4b)* | Window C → the same screen → put the value back → **Save**. ⚠ It does **not** restate anything already paid — each payout stores the sentence that produced it |
 | 13 | **Recall** *(ch. 7, LW 10)* | ⚠ **There is no un-recall, on any screen.** The end date stays where the recall put it. If you need the record clean, **Cancel the whole request** (item 1) — which is also the honest answer to *"can this be reversed?"*: the interruption happened, and a system that could quietly erase it would be worse |
 | 14 | **Sick leave requests** raised in chapter 7b *(LW 11, and the two in step 5)* | Cancel each, reason `Demonstration`. ⚠ **Cancel, do not close** — a closed request still counts as *taken*, so the cumulative total stays over the board threshold and the next person to raise sick leave here is sent to a board |
-| 15 | **Medical board** *(ch. 7b, LW 12)* | ⚠ **A concluded board cannot be un-concluded** — that is the ratchet, on purpose, and **Cancel the board** is offered only *until* it reports. So once you have walked chapter 7b to the end there is nothing to press. Leave it: a demonstration board with a finding on it is harmless, and it is a good record to show next time |
+| 15 | **Medical board** *(ch. 7b, LW 12)* | ⚠ **A concluded board cannot be un-concluded** — that is the ratchet, on purpose, and **Cancel the request** / **Dissolve the board** is offered only *until* it reports. So once you have walked chapter 7b to the end there is nothing to press. Leave it: a demonstration board with a finding on it is harmless, and it is a good record to show next time |
 | 16 | **`advance-in-progress` called** *(§2.6b)* | **Nothing to undo and nothing you can undo.** Those requests are genuinely in progress; the nightly sweep would have done it anyway |
 | 17 | **Entitlements repaired** *(§2.3b)* — only if you had to run it | ⚠ **Do not undo this.** It replaced a wrong figure with the one the rulebook resolves, and putting it back would mean restoring a defect. On a database built after 2026-09-18 the seed has already done it and there is nothing here to undo |
 | 18 | **Sick Leave configured for excuse duty** *(§2.6c)* | The same as item 11 — switch **Requires excuse duty** back off if you want the database as it was seeded. ⚠ Leaving it on is harmless and saves the setup next time |
@@ -4227,7 +4293,8 @@ lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **
 closed six of the audit's eleven and two in part, and found and closed four more, **L-61 to L-64**;
 lane C closed L-41 and half of L-48, and found and closed two more, **L-65 and L-66**; lane G closed
 L-42 and found and closed two more, **L-67 and L-68**; lane H found and closed one, **L-69**; lane I
-closed the rest of L-48 and found three it leaves open, **L-70 to L-72**.
+closed the rest of L-48 and found three it leaves open, **L-70 to L-72**; lane K closed the rest of
+**L-47** (the board's purpose and date) and found nothing new.
 The round 5 blocks are listed after the settings audit.
 
 ### ✅ Closed
@@ -4309,7 +4376,7 @@ the round 5 plan, whose lane is named in the last column; the plain-terms accoun
 | **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 — **closed** 2026-09-25: an edit checks the sub-type and its cap; creating one honours *Active*; the cap limits the sub-type inside its type's pot |
 | **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 — **closed** 2026-09-25: submit re-runs notice, the reliever requirement, the balance and the cap |
 | **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 |
-| **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — N3's part **closed** 2026-09-25 (Pending counts; a lengthening move re-runs the gate); the board's purpose and date are lane K |
+| **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — **closed**: N3's part 2026-09-25 (Pending counts; a lengthening move re-runs the gate); K6's 2026-09-26 — a linked board counts only if it was asked about an absence (extended sick leave, injury on duty or other) and reported on or after the start of the leave year being counted, and the refusal says which test the linked board failed |
 | **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I — C4's part **closed** 2026-09-25: pro-rating counts months of the leave year, the reminder's month is the month of the leave year, and a call naming no year gets the current leave year. The reminders' recipients: ✅ **closed by lane I (2026-09-26)** — each reaches the people who can act on it, in the app and by email, and HR when nobody else can be told |
 
 **On the demo database, the same audit found:** *Leave of Absence (Unpaid)* and *Occupational Injury

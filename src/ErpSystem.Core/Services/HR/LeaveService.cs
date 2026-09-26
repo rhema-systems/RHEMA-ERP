@@ -852,26 +852,61 @@ public class LeaveService : ILeaveService
         // ⚠ Only Concluded counts. A board that has been requested or convened has not said
         // anything yet, and accepting one would let an absence through on the strength of a
         // meeting somebody has merely scheduled.
+        //
+        // ⚠ Round 5, lane K6: and only a RELEVANT, RECENT board. Before this, any concluded board
+        // about the employee satisfied the rule — one asked whether they could do their job, or one
+        // that reported three years ago. Now the board must have been asked about an absence
+        // (`MedicalBoard.CoversAbsence`) and have reported on or after the start of the leave year
+        // being counted, since that year's days are what the threshold counts.
         var hasReport = attached.Contains(LeaveEvidenceKind.MedicalBoardRecommendation);
+        string? whyNotTheLinkedBoard = null;
 
         if (!hasReport && request.MedicalBoardId is Guid boardId)
         {
-            hasReport = await _medicalBoardRepository
+            var board = await _medicalBoardRepository
                 .GetQueryable()
-                .AnyAsync(b => b.TenantId == tenantId
-                            && b.Id == boardId
-                            && b.EmployeeId == request.EmployeeId
-                            && b.Status == MedicalBoardStatus.Concluded);
+                .Where(b => b.TenantId == tenantId
+                         && b.Id == boardId
+                         && b.EmployeeId == request.EmployeeId)
+                .Select(b => new { b.BoardNumber, b.Status, b.Purpose, b.ConcludedOn })
+                .FirstOrDefaultAsync();
+
+            if (board is not null)
+            {
+                if (board.Status != MedicalBoardStatus.Concluded)
+                    whyNotTheLinkedBoard = $"The linked board, {board.BoardNumber}, has not reported.";
+                else if (!MedicalBoard.CoversAbsence(board.Purpose))
+                    whyNotTheLinkedBoard = $"The linked board, {board.BoardNumber}, was asked about "
+                        + $"{PurposeWords(board.Purpose)}, not an absence, so it cannot stand for this one.";
+                else if (board.ConcludedOn is not DateOnly concludedOn || concludedOn < boardYearStart)
+                    whyNotTheLinkedBoard = $"The linked board, {board.BoardNumber}, reported on "
+                        + $"{board.ConcludedOn:d MMM yyyy}, before this leave year began on "
+                        + $"{boardYearStart:d MMM yyyy}.";
+                else
+                    hasReport = true;
+            }
         }
 
         if (!hasReport)
         {
             throw new InvalidOperationException(
                 $"This would take {leaveType.Name} to {cumulative:0.##} day(s) in {boardYear}, "
-                + $"past the {boardThreshold}-day point at which a medical board must sit. Link a concluded "
-                + $"medical board, or attach its recommendation, before it can be {act}.");
+                + $"past the {boardThreshold}-day point at which a medical board must sit. Link a medical "
+                + $"board that has reported on the absence during this leave year, or attach its "
+                + $"recommendation, before it can be {act}."
+                + (whyNotTheLinkedBoard is null ? string.Empty : " " + whyNotTheLinkedBoard));
         }
     }
+
+    /// <summary>A board's purpose as words in a sentence ("fitness for duty").</summary>
+    private static string PurposeWords(MedicalBoardPurpose purpose) => purpose switch
+    {
+        MedicalBoardPurpose.ExtendedSickLeave => "extended sick leave",
+        MedicalBoardPurpose.InjuryOnDuty => "an injury on duty",
+        MedicalBoardPurpose.FitnessForDuty => "fitness for duty",
+        MedicalBoardPurpose.MedicalRetirement => "medical retirement",
+        _ => "something else"
+    };
 
     /// <summary>
     /// Refuses an approval by the very employee the record is about.

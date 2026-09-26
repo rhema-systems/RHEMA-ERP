@@ -17,6 +17,11 @@
  * is the ordinary case, because a board is asked for before it sits. Only a *Concluded* board
  * satisfies the gate (see `LeaveService.EnsureMedicalEvidenceAsync`), so this panel says which of
  * the two it is instead of showing a link and leaving the reader to assume the rule is met.
+ *
+ * ⚠ **And only a relevant, recent one** (round 5, lane K6): a board about an absence
+ * (`coversAbsence`, the server's answer) that reported on or after the start of the leave year the
+ * request falls in. The panel applies the same three tests as the gate, in the same order, so it
+ * never calls a board satisfying that the submission will then refuse.
  */
 
 import { useState } from 'react';
@@ -38,11 +43,40 @@ import { useToast } from '@/components/ui/use-toast';
 import { leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { medicalBoardService } from '@/services/hr/medical-board.service';
-import { MEDICAL_BOARD_OUTCOME_LABEL } from '@/types/hr/medical-board';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
+import {
+  MEDICAL_BOARD_OUTCOME_LABEL,
+  MEDICAL_BOARD_PURPOSE_LABEL,
+  boardStatusLabel,
+} from '@/types/hr/medical-board';
 import type { MedicalBoard } from '@/types/hr/medical-board';
 import type { LeaveRequest } from '@/types/hr/leave-request';
 
 const day = (d?: string | null) => (d ? d.slice(0, 10) : '—');
+
+/** The first day (`YYYY-MM-DD`) of the leave year a date falls in, for a year starting in `startMonth`. */
+function leaveYearStartOf(date: string, startMonth: number): string {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  const startYear = month >= startMonth ? year : year - 1;
+  return `${startYear}-${String(startMonth).padStart(2, '0')}-01`;
+}
+
+/**
+ * Why a board would NOT satisfy the rule for a request starting on `startDate`, or null when it
+ * would. The gate's three tests, in its order (lane K6).
+ */
+function whyNotSatisfying(board: MedicalBoard, yearStart: string): string | null {
+  if (board.status === 'Cancelled')
+    return `This board was ${board.wasDissolved ? 'dissolved' : 'cancelled'} before it reported, so it satisfies nothing. Link the board that replaced it.`;
+  if (board.status !== 'Concluded')
+    return 'This board has not reported yet. Submission will still be refused until it concludes, or until its recommendation is attached.';
+  if (!board.coversAbsence)
+    return `This board was asked about ${MEDICAL_BOARD_PURPOSE_LABEL[board.purpose]?.toLowerCase() ?? board.purpose}, not an absence, so it cannot satisfy the board rule.`;
+  if (!board.concludedOn || board.concludedOn.slice(0, 10) < yearStart)
+    return `This board reported on ${day(board.concludedOn)}, before this request's leave year began on ${yearStart}, so it does not count for it.`;
+  return null;
+}
 
 export function MedicalBoardLinkPanel({
   request,
@@ -116,6 +150,9 @@ export function MedicalBoardLinkPanel({
       }),
   });
 
+  const { startMonth } = useLeaveYear();
+  const yearStart = request.startDate ? leaveYearStartOf(request.startDate, startMonth) : '';
+
   const gateArmed = !!leaveType?.requiresMedicalCertificate;
   const threshold = leaveType?.medicalBoardThresholdDays ?? null;
   const boardRuleLive = gateArmed && threshold != null;
@@ -123,7 +160,7 @@ export function MedicalBoardLinkPanel({
   // Nothing to say: no board named and no rule that would ever ask for one.
   if (!linkedId && !boardRuleLive) return null;
 
-  const concluded = board?.status === 'Concluded';
+  const notSatisfying = board ? whyNotSatisfying(board, yearStart) : null;
 
   return (
     <Card>
@@ -162,8 +199,9 @@ export function MedicalBoardLinkPanel({
             {leaveType?.name} needs a medical board once it passes{' '}
             <span className="font-medium">{threshold} day(s)</span> in a year — counted across
             every such absence in the year, not this request alone. A board satisfies the rule only
-            once it has <span className="font-medium">concluded</span>; its written recommendation,
-            attached under Attachments, does too.
+            if it was asked about an <span className="font-medium">absence</span> and has{' '}
+            <span className="font-medium">reported</span> during this request&apos;s leave year (from{' '}
+            {yearStart}); its written recommendation, attached under Attachments, does too.
           </p>
         )}
 
@@ -212,7 +250,10 @@ export function MedicalBoardLinkPanel({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{board.boardNumber}</span>
-              <StatusBadge status={board.status} />
+              <StatusBadge status={boardStatusLabel(board)} />
+              <span className="text-muted-foreground">
+                {MEDICAL_BOARD_PURPOSE_LABEL[board.purpose] ?? board.purpose}
+              </span>
               {board.outcome && (
                 <span className="text-muted-foreground">
                   {MEDICAL_BOARD_OUTCOME_LABEL[board.outcome] ?? board.outcome}
@@ -250,16 +291,14 @@ export function MedicalBoardLinkPanel({
             {boardRuleLive && (
               <p
                 className={
-                  concluded
+                  !notSatisfying
                     ? 'rounded-md border border-emerald-300/60 bg-emerald-50 p-2 text-xs dark:border-emerald-900/60 dark:bg-emerald-950/40'
                     : 'rounded-md border border-amber-300/60 bg-amber-50 p-2 text-xs dark:border-amber-900/60 dark:bg-amber-950/40'
                 }
               >
-                {concluded
-                  ? 'This board has reported, so it satisfies the board rule for this leave type.'
-                  : board.status === 'Cancelled'
-                    ? '⚠ This board was cancelled, so it satisfies nothing. Link the board that replaced it.'
-                    : '⚠ This board has not reported yet. Submission will still be refused until it concludes, or until its recommendation is attached.'}
+                {!notSatisfying
+                  ? 'This board has reported on an absence during this leave year, so it satisfies the board rule for this leave type.'
+                  : `⚠ ${notSatisfying}`}
               </p>
             )}
           </div>
@@ -343,15 +382,22 @@ function BoardPicker({
                 <span>
                   <span className="font-medium">{b.boardNumber}</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Requested {day(b.requestedOn)}
+                    {MEDICAL_BOARD_PURPOSE_LABEL[b.purpose] ?? b.purpose}
+                    {' · '}requested {day(b.requestedOn)}
                     {b.concludedOn ? ` · concluded ${day(b.concludedOn)}` : ''}
                     {b.outcome ? ` · ${MEDICAL_BOARD_OUTCOME_LABEL[b.outcome] ?? b.outcome}` : ''}
                   </span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">{b.reason}</span>
+                  {/* ⚠ Linkable, but never going to count — said before the pick, not after it. */}
+                  {!b.coversAbsence && !cancelled && (
+                    <span className="mt-0.5 block text-xs text-amber-700 dark:text-amber-300">
+                      Not about an absence — it cannot satisfy the board rule.
+                    </span>
+                  )}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
                   {b.id === currentId && <span className="text-xs">linked</span>}
-                  <StatusBadge status={b.status} />
+                  <StatusBadge status={boardStatusLabel(b)} />
                 </span>
               </button>
             );

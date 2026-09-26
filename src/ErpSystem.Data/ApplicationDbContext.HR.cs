@@ -240,6 +240,8 @@ public partial class ApplicationDbContext
     public DbSet<MedicalBoard> MedicalBoards { get; set; } = null!;
     public DbSet<MedicalBoardMember> MedicalBoardMembers { get; set; } = null!;
     public DbSet<MedicalBoardSitting> MedicalBoardSittings { get; set; } = null!;
+    /// <summary>Papers on a board, through the upload gate (round 5, lane K4).</summary>
+    public DbSet<MedicalBoardDocument> MedicalBoardDocuments { get; set; } = null!;
     public DbSet<MedicalAppointment> MedicalAppointments { get; set; } = null!;
     public DbSet<NHISClaim> NHISClaims { get; set; } = null!;
     public DbSet<NHISClaimDocument> NHISClaimDocuments { get; set; } = null!;
@@ -7160,6 +7162,24 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Exam)
                 .WithMany(x => x.Documents)
                 .HasForeignKey(x => x.ExamId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- MedicalBoardDocument (round 5, lane K4) ----
+        // ⚠ The uploader is RESTRICT, not the convention's cascade. The board already cascades from
+        // Employees (its subject) and its documents cascade from the board, so a cascading uploader
+        // would be a second path from Employees to this table — which SQL Server refuses, and a
+        // model-built database would fail to create. Cascading from the board matches its members
+        // and sittings.
+        builder.Entity<MedicalBoardDocument>(entity =>
+        {
+            entity.HasOne(x => x.Board)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.BoardId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

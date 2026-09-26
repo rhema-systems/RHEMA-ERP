@@ -10,8 +10,9 @@
 > (the accrual statement and the *leave owed* report) and [section 12](#12-the-year-end--carry-over-and-deferrals)
 > (the year-end) were built and tested on 25 September, and [section 8](#8-casual-leave-over-its-limit)
 > (casual leave over its limit), [section 10](#10-the-balances-page--annual-leave-first) (the
-> balances page, annual leave first) and [section 11](#11-reminders-that-reach-people) (reminders that
-> reach people) on 26 September; nothing else described here is built yet.
+> balances page, annual leave first), [section 11](#11-reminders-that-reach-people) (reminders that
+> reach people) and step one of [section 14](#14-the-medical-board) (the medical board) on 26
+> September; nothing else described here is built yet.
 > This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
@@ -610,25 +611,38 @@ physicians in the health module", "attach documents", "is cancelling the same as
 board sitting on several employees", "the extent of any disability and recommended
 compensation".)*
 
-**Today.** A board is about one employee. Its purpose is free text, and the screen talks only about
-sick leave. Members can be staff or outside names, but not the registered physicians. No documents
-can be attached. *Cancel the board* is the only way to stop one.
+**Before step one.** A board was about one employee. Its purpose was free text, and the screen talked
+only about sick leave. Members could be staff or outside names, but not the registered physicians. No
+documents could be attached. *Cancel the board* was the only way to stop one.
 
-**Step one — being built now**
+**Still true after step one:** a board is about **one** employee. That is step two.
 
-- **A purpose** from a list — *extended sick leave · injury at work · fitness for duty · medical
-  retirement · other* — beside the free-text reason.
-- **Members from the physician register**, as well as staff and outside names. (In the public
-  service, a board is three medical officers nominated by the employer, SSNIT and the union.)
-- **The facility and the medical exam** can be chosen when the board is requested.
-- **Documents can be attached**, each checked for viruses on upload.
-- **Cancel or dissolve — one action, named by timing.** Before the board has met: *Cancel the
-  request*. After it has met: *Dissolve the board* — a reason is required, and its sittings stay on
-  record. The board shows which happened, when, and who did it.
-- **The sick-leave rule counts only a relevant, recent board**: one held about extended sickness, and
-  concluded during the leave year being counted. An old board about something else no longer
-  satisfies it.
-- **Fixes:** a board cannot conclude without members, or without an outcome.
+**Step one — built (2026-09-26)**
+
+- **A purpose** from a list — *extended sick leave · injury on duty · fitness for duty · medical
+  retirement · other* — beside the free-text reason. It must be chosen. The register can be filtered
+  by it, and the screens no longer talk only about sick leave.
+- **Members from the physician register**, as well as staff and outside names — the register is
+  offered first. (In the public service, a board is three medical officers nominated by the
+  employer, SSNIT and the union.)
+- **The facility and the medical exam** can be chosen when the board is requested. Only the
+  employee's own examinations are offered, and the system refuses anybody else's. The board links
+  to the employee's health record.
+- **Documents can be attached**, each checked for viruses on upload and kept as a restricted medical
+  record. They can be added at any time — the signed report often comes after the board reports —
+  but once the board has reported, or been stopped, none can be removed.
+- **Cancel or dissolve — one action, named by the stage.** Before the board is convened, there is
+  only a request: *Cancel the request*. Once convened, there is a panel: *Dissolve the board* — its
+  members and sittings stay on record. A reason is required either way, and the board shows which
+  happened, when, and who did it.
+- **The sick-leave rule counts only a relevant, recent board**: one held about an absence —
+  extended sickness, **an injury on duty**, or *other* — that reported during the leave year being
+  counted. A board about someone's fitness for their post or about retirement, or one that reported
+  in an earlier year, no longer satisfies it — and the refusal says which. *(The injury case was
+  added while building: the same rule serves any leave type with a board limit, and for an injury
+  absence the injury board is the relevant one.)*
+- **Fixes:** a board cannot conclude without members, or without an outcome; a member is recorded
+  one way only (from the register, as a colleague, or by name).
 
 **Step two — after TDC explains how its board works** ⏳
 

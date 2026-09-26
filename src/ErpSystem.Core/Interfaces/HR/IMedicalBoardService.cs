@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Medical;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -53,5 +54,33 @@ public interface IMedicalBoardService
     /// </summary>
     Task<MedicalBoardDto> ConcludeAsync(Guid boardId, ConcludeMedicalBoardDto dto, CancellationToken ct = default);
 
+    /// <summary>
+    /// Stops a board that has not reported. ⚠ One status, two words (round 5, lane K5): a board
+    /// still only Requested is a <b>cancelled request</b>; a Convened one is <b>dissolved</b>, and its
+    /// members and sittings stay on the record. Either way a reason is required, and when and by
+    /// whom are recorded.
+    /// </summary>
     Task<MedicalBoardDto> CancelAsync(Guid boardId, string reason, CancellationToken ct = default);
+
+    // ── Documents (round 5, lane K4) ─────────────────────────────────────────────────────────
+
+    Task<IReadOnlyList<MedicalBoardDocumentDto>> GetDocumentsAsync(Guid boardId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records a paper the upload gate has already scanned and stored. Allowed at any status — the
+    /// signed report usually arrives after the board has concluded.
+    /// </summary>
+    Task<MedicalBoardDocumentDto> AddDocumentAsync(
+        Guid boardId, Guid uploadedById, string fileName, long? fileSize, string? description,
+        Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        CancellationToken ct = default);
+
+    /// <summary>The document, if it is this board's and this tenant's — for the gated download.</summary>
+    Task<MedicalBoardDocument?> GetDocumentForDownloadAsync(Guid boardId, Guid documentId, CancellationToken ct = default);
+
+    /// <summary>
+    /// ⚠ Refused once the board has reported or been stopped: its papers are then part of the
+    /// record a finding rests on, like its members and sittings.
+    /// </summary>
+    Task<bool> RemoveDocumentAsync(Guid boardId, Guid documentId, CancellationToken ct = default);
 }
