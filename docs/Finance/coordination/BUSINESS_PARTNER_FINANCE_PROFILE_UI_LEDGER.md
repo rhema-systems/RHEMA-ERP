@@ -86,3 +86,11 @@
   - the complete Finance-owned consumer filter passes locally (141/141 in 3m 23s);
   - independent accounting-contract review: APPROVED with no blocking findings; reviewer independently reproduced the seven corrected contracts (7/7).
 - Remaining verification: the next pushed PR gate.
+
+### Checkout compatibility follow-up
+
+- Run `36239822934` stopped before compilation because `actions/checkout@v7` was configured with `persist-credentials: false`.
+- Repository finding: `docs/EzFMC` is a legacy gitlink (`600f1c10b8a4c69e7385094fe753cede3ddcfdb3`) with no `.gitmodules` metadata in current or historical repository state.
+- Decision: do not fabricate an external submodule URL or mutate the separately owned documentation component as part of the Finance gate repair.
+- Correction: retain the Node 24 checkout action but use its standard credential lifecycle, which already completed the main checkout successfully in run `36237894891`. The orphaned gitlink remains a repository-hygiene item outside the Finance accounting change.
+- Pending verification: rerun the complete hosted Finance integration gate.
