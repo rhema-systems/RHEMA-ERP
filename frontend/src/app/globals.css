@@ -180,6 +180,15 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
 }
 
 @layer base {
+  /* Scale rem-based typography and controls together to avoid clipped text. */
+  html[data-font-size="small"] { font-size: 87.5%; }
+  html[data-font-size="medium"] { font-size: 100%; }
+  html[data-font-size="large"] { font-size: 112.5%; }
+
+  @media print {
+    html[data-font-size] { font-size: 100%; }
+  }
+
   * {
     @apply border-border outline-ring/50;
   }
@@ -201,7 +210,7 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
 
 @media screen {
   body:not(.printing-payroll-payslip) table {
-    font-size: 13px;
+    font-size: 0.8125rem;
     line-height: 1.25rem;
   }
 

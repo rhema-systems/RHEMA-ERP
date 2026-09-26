@@ -68,4 +68,14 @@
     <Compile Include="Migrations\20260916132000_DisposableDevelopmentCurrentModelBaseline.Designer.cs" />
   </ItemGroup>
 
+  <!-- EF design tooling brings Roslyn's extension-authoring analyzers transitively.
+       This project does not use Roslyn APIs; those meta-analyzers exhaust memory
+       walking the generated migration models. Retain SDK and EF analyzers and
+       the complete migration metadata in normal builds. -->
+  <Target Name="ExcludeRoslynAuthoringAnalyzers" AfterTargets="ResolveLockFileAnalyzers">
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)" Condition="'%(Analyzer.NuGetPackageId)' == 'Microsoft.CodeAnalysis.Analyzers'" />
+    </ItemGroup>
+  </Target>
+
 </Project>

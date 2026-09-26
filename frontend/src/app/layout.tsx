@@ -17,6 +17,7 @@ import { ReactQueryProvider } from '../lib/react-query';
 import { TenantProvider } from '../contexts/TenantContext';
 import { SessionBlacklistProvider } from '../contexts/SessionBlacklistContext';
 import { ThemeProvider } from '../contexts/ThemeContext';
+import { FontSizeProvider } from '../contexts/FontSizeContext';
 import { Toaster } from '../components/ui/toaster';
 import { Toaster as SonnerToaster } from 'sonner';
 import { PWAInit } from '../components/PWAInit';
@@ -63,6 +64,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className} suppressHydrationWarning>
+        <FontSizeProvider>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -84,6 +86,7 @@ export default function RootLayout({
             </SessionBlacklistProvider>
           </ReactQueryProvider>
         </ThemeProvider>
+        </FontSizeProvider>
       </body>
     </html>
   );
