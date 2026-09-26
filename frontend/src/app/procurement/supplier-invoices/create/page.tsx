@@ -1688,7 +1688,7 @@ export function VendorInvoiceFormPage({
                                 {supplier.name}
                               </span>
                               <span className="text-xs text-muted-foreground">
-                                {supplier.code}{supplier.isTransactionReady ? '' : ` · ${supplier.readinessMessage}`}
+                                {supplier.code}{supplier.isTransactionReady ? '' : ` Â· ${supplier.readinessMessage}`}
                               </span>
                             </div>
                           </div>
