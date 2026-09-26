@@ -16,6 +16,22 @@ public sealed class FinancePermissionAuthorizationHandlerTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-2")]
     [Trait("Category", "FinanceSecurity")]
+    public void FinancialControllerRoleContract_ShouldSeparateAccountingBookCheckerFromMaker()
+    {
+        FinancePermissions.FinancialControllerNames.Should().Contain(new[]
+        {
+            FinancePermissions.ApproveAccountingBookTransitions,
+            FinancePermissions.ApproveAccountingBookPeriods,
+            FinancePermissions.ApproveAccountingBookInitialization
+        });
+
+        FinancePermissions.FinancialControllerNames.Should().NotContain(
+            FinancePermissions.AccountingBookMakerNames);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-2")]
+    [Trait("Category", "FinanceSecurity")]
     public async Task PermissionAuthorization_ShouldDenyUnauthenticatedUsers()
     {
         await using var db = CreateContext();

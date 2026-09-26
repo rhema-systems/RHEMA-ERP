@@ -160,7 +160,7 @@ public sealed partial class ApInvoicePostingMigrationTests
             db.ChangeTracker.DetectChanges();
             db.ChangeTracker.Entries<VendorInvoiceLineItem>()
                 .Should().NotContain(entry => entry.State == EntityState.Modified);
-            db.ChangeTracker.Entries<Supplier>()
+            db.ChangeTracker.Entries<BusinessPartner>()
                 .Should().NotContain(entry => entry.State == EntityState.Modified);
         };
         var (service, _) = CreateService(db, tenantId);
@@ -381,7 +381,7 @@ public sealed partial class ApInvoicePostingMigrationTests
 
         var created = await service.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             SupplierInvoiceNumber = "SUP-DISCOUNT-001",
             InvoiceDate = new DateTime(2026, 7, 6),
             DueDate = new DateTime(2026, 8, 5),
@@ -771,7 +771,7 @@ public sealed partial class ApInvoicePostingMigrationTests
 
         var action = () => service.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             InvoiceDate = new DateTime(2026, 7, 5),
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
@@ -870,7 +870,7 @@ public sealed partial class ApInvoicePostingMigrationTests
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherSupplier = SeedSupplier(db, otherTenantId, fixture.ApAccount.Id, fixture.ExpenseAccount.Id);
-        fixture.Invoice.SupplierId = otherSupplier.Id;
+        fixture.Invoice.BusinessPartnerId = otherSupplier.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
@@ -904,7 +904,7 @@ public sealed partial class ApInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task CrossTenantApControlAccount_ShouldBeRejected()
+    public async Task LegacyInvoiceApControlOverride_ShouldBeIgnoredInFavorOfFinanceSettings()
     {
         var tenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();
@@ -916,10 +916,12 @@ public sealed partial class ApInvoicePostingMigrationTests
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
-        var act = () => service.PostAsync(fixture.Invoice.Id);
+        var result = await service.PostAsync(fixture.Invoice.Id);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP posting AP control account was not found for this tenant.");
+        result.Status.Should().Be(VendorInvoiceStatus.Approved);
+        var journal = await db.JournalEntries.Include(x => x.Transactions).SingleAsync(x => x.Id == result.JournalEntryId);
+        journal.Transactions.Should().Contain(line => line.AccountId == fixture.ApAccount.Id && line.CreditAmount > 0m);
+        journal.Transactions.Should().NotContain(line => line.AccountId == otherApAccount.Id);
     }
 
     [Fact]
@@ -1471,8 +1473,13 @@ public sealed partial class ApInvoicePostingMigrationTests
             TenantId = tenantId,
             InvoiceNumber = "VI-2026-00001",
             SupplierInvoiceNumber = "SUP-001",
-            SupplierId = supplier.Id,
-            SupplierName = supplier.Name,
+            BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = db.Set<BusinessPartnerRole>().Local.Single(x => x.BusinessPartnerId == supplier.Id).Id,
+            BusinessPartnerApProfileVersionId = db.Set<BusinessPartnerApProfileVersion>().Local.Single(x => x.BusinessPartnerRole.BusinessPartnerId == supplier.Id).Id,
+            BusinessPartnerCode = supplier.PartnerCode,
+            BusinessPartnerLegalName = supplier.LegalName,
+            BusinessPartnerTaxIdentificationNumber = supplier.TaxIdentificationNumber,
+            SupplierName = supplier.PartnerName,
             InvoiceDate = new DateTime(2026, 7, 5),
             ReceivedDate = new DateTime(2026, 7, 5),
             DueDate = new DateTime(2026, 8, 4),
@@ -1765,34 +1772,28 @@ public sealed partial class ApInvoicePostingMigrationTests
         }
     }
 
-    private static Supplier SeedSupplier(
-        ApplicationDbContext db,
-        Guid tenantId,
-        Guid apAccountId,
-        Guid expenseAccountId)
+    private static BusinessPartner SeedSupplier(ApplicationDbContext db, Guid tenantId, Guid apAccountId, Guid expenseAccountId)
     {
-        var supplier = new Supplier
+        var supplier = new BusinessPartner
         {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            SupplierCode = $"SUP-{tenantId.ToString("N")[..6]}",
-            Name = "Test Supplier",
-            SupplierType = "Vendor",
-            IsActive = true,
-            Status = "Active",
-            DefaultApAccountId = apAccountId,
-            DefaultExpenseAccountId = expenseAccountId,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = "seed"
+            TenantId = tenantId, PartnerCode = $"SUP-{tenantId:N}", PartnerName = "Test Supplier",
+            LegalName = "Test Supplier Limited", TaxIdentificationNumber = "TIN-TEST", PartnerType = "Supplier",
+            IsActive = true, RegistrationStatus = "Approved", ApprovalStatus = "Approved",
+            DefaultApAccountId = apAccountId, DefaultExpenseAccountId = expenseAccountId
         };
-
-        db.Suppliers.Add(supplier);
+        var role = new BusinessPartnerRole { TenantId = tenantId, BusinessPartnerId = supplier.Id,
+            BusinessPartner = supplier, RoleType = BusinessPartnerRoleType.Supplier,
+            Status = BusinessPartnerRoleStatus.Active, ActiveFromUtc = new DateTime(2020,1,1) };
+        var profile = new BusinessPartnerApProfileVersion { TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            BusinessPartnerRole = role, VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020,1,1), DefaultExpenseAccountId = expenseAccountId };
+        db.BusinessPartners.Add(supplier); db.Set<BusinessPartnerRole>().Add(role); db.Set<BusinessPartnerApProfileVersion>().Add(profile);
         return supplier;
     }
 
     private sealed record ApInvoiceFixture(
         VendorInvoice Invoice,
-        Supplier Supplier,
+        BusinessPartner Supplier,
         Account ExpenseAccount,
         Account ApAccount,
         Account TaxAccount);

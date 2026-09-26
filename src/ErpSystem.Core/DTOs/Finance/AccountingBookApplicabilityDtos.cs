@@ -41,6 +41,16 @@ public sealed class AccountingBookApplicabilityEligibleBookDto
     public bool MappingClassificationReady { get; set; }
 }
 
+public sealed class AccountingBookPostingIdentityDto
+{
+    public string OriginatingModuleCode { get; set; } = string.Empty;
+    public string ModuleName { get; set; } = string.Empty;
+    public string SourceDocumentType { get; set; } = string.Empty;
+    public string DocumentTypeName { get; set; } = string.Empty;
+    public string PostingAction { get; set; } = string.Empty;
+    public string PostingActionName { get; set; } = string.Empty;
+}
+
 public sealed class AccountingBookApplicabilityRuleDto
 {
     public Guid Id { get; set; }

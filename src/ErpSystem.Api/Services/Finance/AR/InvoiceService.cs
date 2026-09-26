@@ -7,10 +7,12 @@ using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Shared;
@@ -122,8 +124,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     (i.Reference != null && i.Reference.Contains(query.SearchTerm)));
             }
 
-            if (query.CustomerId.HasValue)
-                queryable = queryable.Where(i => i.BusinessPartnerId == query.CustomerId.Value);
+            if (query.BusinessPartnerId.HasValue)
+                queryable = queryable.Where(i => i.BusinessPartnerId == query.BusinessPartnerId.Value);
 
             if (!string.IsNullOrWhiteSpace(query.Status))
             {
@@ -203,16 +205,12 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingProducerContext? producer,
             CancellationToken cancellationToken)
         {
-            // Validate customer business partner exists
-            var customer = await _unitOfWork.Repository<BusinessPartner>()
-                .FirstOrDefaultAsync(c =>
-                    c.TenantId == TenantId &&
-                    c.Id == dto.CustomerId &&
-                    !c.IsDeleted &&
-                    BusinessPartnerRoles.CustomerTypes.Contains(c.PartnerType));
-
-            if (customer == null)
-                throw new KeyNotFoundException($"Customer with Id '{dto.CustomerId}' not found.");
+            var counterparty = await ResolveCustomerCounterpartyAsync(
+                dto.BusinessPartnerId,
+                dto.BusinessPartnerRoleId,
+                dto.InvoiceDate,
+                cancellationToken);
+            var customer = counterparty.Partner;
 
             var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? customer.PaymentTermId, cancellationToken);
             var paymentTermsDays = paymentTerm?.DueDays ?? TryParsePaymentTermsDays(customer.PaymentTerms) ?? 30;
@@ -239,7 +237,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Check for duplicate invoice
             if (!string.IsNullOrWhiteSpace(dto.Reference))
             {
-                var isDuplicate = await IsDuplicateAsync(dto.CustomerId, dto.Reference, dto.InvoiceDate, cancellationToken);
+                var isDuplicate = await IsDuplicateAsync(dto.BusinessPartnerId, dto.Reference, dto.InvoiceDate, cancellationToken);
                 if (isDuplicate)
                     throw new InvalidOperationException($"Duplicate invoice detected with reference '{dto.Reference}'.");
             }
@@ -259,7 +257,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 InvoiceNumber = invoiceNumber,
-                BusinessPartnerId = dto.CustomerId,
+                BusinessPartnerId = customer.Id,
+                BusinessPartnerRoleId = counterparty.Role.Id,
+                BusinessPartnerArProfileVersionId = counterparty.Profile.Id,
+                BusinessPartnerCode = customer.PartnerCode,
+                BusinessPartnerLegalName = customer.LegalName,
+                BusinessPartnerTin = customer.TaxIdentificationNumber,
                 CustomerName = customer.PartnerName,
                 CustomerAddress = customer.PhysicalAddress ?? customer.MailingAddress,
                 InvoiceDate = dto.InvoiceDate,
@@ -284,7 +287,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             decimal subtotal = 0;
             decimal totalTax = 0;
             var permitsDisposalAdjustment = await IsApprovedFixedAssetDisposalInvoiceAsync(
-                dto.CustomerId,
+                dto.BusinessPartnerId,
                 dto.Reference,
                 cancellationToken);
 
@@ -458,7 +461,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var existing = matchingLines[0].Invoice;
             var activeLines = existing.LineItems.Where(line => !line.IsDeleted).ToDictionary(line => line.Id);
             var sameHeader = existing.TenantId == TenantId
-                && existing.BusinessPartnerId == dto.CustomerId
+                && existing.BusinessPartnerId == dto.BusinessPartnerId
                 && existing.InvoiceDate == dto.InvoiceDate
                 && existing.DueDate == resolvedDueDate
                 && string.Equals(existing.Reference ?? string.Empty, dto.Reference ?? string.Empty, StringComparison.Ordinal)
@@ -905,7 +908,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             // Update customer's outstanding balance as an operational read model. The posted GL remains the source of truth.
-            var customerPartner = await GetCustomerPartnerAsync(invoice.CustomerId, cancellationToken);
+            var customerPartner = await GetCustomerPartnerAsync(invoice.BusinessPartnerId, cancellationToken);
             var previousOutstandingBalance = customerPartner?.OutstandingBalance;
             if (customerPartner != null)
             {
@@ -1063,7 +1066,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Reverse the unpaid portion of the invoice from customer's outstanding balance.
             // If partially paid, only the remaining outstanding (BaseCurrencyAmount - PaidAmount) 
             // should be reversed. The paid allocations will be reversed separately via payment reversal.
-            var customerPartner = await GetCustomerPartnerAsync(invoice.CustomerId, cancellationToken);
+            var customerPartner = await GetCustomerPartnerAsync(invoice.BusinessPartnerId, cancellationToken);
             if (customerPartner != null)
             {
                 var unpaidPortion = invoice.BaseCurrencyAmount - invoice.PaidAmount;
@@ -1191,13 +1194,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                 return lines.Select(line => new FinanceSourceDocumentLineContext(line.Id, clearingAccountId)).ToArray();
             }
 
-            var customer = await ResolveCustomerForPostingAsync(invoice, cancellationToken);
             var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
                 _unitOfWork, TenantId, invoice.JournalEntryId, "CustomerInvoice", invoice.Id, cancellationToken);
             return lines.Select(line => new FinanceSourceDocumentLineContext(
                 line.Id,
                 line.GLAccountId ?? originalAccounts?.Account(ResolveLineTag(line), line.Id)
-                ?? customer.CustomerSalesAccountId ?? throw new InvalidOperationException(
+                ?? throw new InvalidOperationException(
                     $"No revenue account specified for AR line '{line.Description}'.")))
                 .ToArray();
         }
@@ -1267,7 +1269,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                         : TaxTransactionType.SaleOfGoods,
                     BaseAmount = taxableBase,
                     TaxGroupId = line.TaxGroupId,
-                    CustomerId = invoice.CustomerId,
+                    BusinessPartnerId = invoice.BusinessPartnerId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Customer,
                     TransactionDate = invoice.InvoiceDate
                 }, cancellationToken);
                 line.TaxAmount = taxResult.TotalTaxAmount;
@@ -1321,8 +1324,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             var originalAccounts = await CustomerPostingAccountHistory.LoadAsync(
                 _unitOfWork, tenantId, invoice.JournalEntryId, "CustomerInvoice", invoice.Id, cancellationToken);
-            var arAccountId = originalAccounts?.Account("AR-Control") ?? customer.DefaultArAccountId
-                ?? settings.ControlAccountArId
+            var arAccountId = settings.ControlAccountArId
                 ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
             await ResolvePostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
@@ -1345,7 +1347,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var lineNumber = 1;
             var permitsDisposalAdjustment = !activeLines.Any(line => line.Quantity * line.UnitPrice < 0m)
                 || await IsApprovedFixedAssetDisposalInvoiceAsync(
-                    invoice.CustomerId,
+                    invoice.BusinessPartnerId,
                     invoice.Reference,
                     cancellationToken);
 
@@ -1369,7 +1371,6 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 var revenueAccountId = line.GLAccountId
                     ?? originalAccounts?.Account(ResolveLineTag(line), line.Id)
-                    ?? customer.CustomerSalesAccountId
                     ?? throw new InvalidOperationException($"No revenue account specified for AR line '{line.Description}'.");
                 await ResolvePostingAccountAsync(revenueAccountId, "revenue account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
@@ -1427,10 +1428,10 @@ namespace ErpSystem.Api.Services.Finance.AR
                 if (line.LineItemType == LineItemType.Inventory && line.CostTotal.HasValue && line.CostTotal.Value > 0m)
                 {
                     var cogsAccountId = originalAccounts?.Account("AR-COGS", line.Id)
-                        ?? customer.CustomerCostOfSalesAccountId ?? settings.ControlAccountCOGSId
+                        ?? settings.ControlAccountCOGSId
                         ?? throw new InvalidOperationException("COGS account is not configured for AR inventory invoice posting.");
                     var inventoryAccountId = originalAccounts?.Account("AR-Inventory")
-                        ?? customer.CustomerInventoryAccountId ?? settings.ControlAccountInventoryId
+                        ?? settings.ControlAccountInventoryId
                         ?? throw new InvalidOperationException("Inventory control account is not configured for AR inventory invoice posting.");
 
                     await ResolvePostingAccountAsync(cogsAccountId, "COGS account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
@@ -1823,16 +1824,34 @@ namespace ErpSystem.Api.Services.Finance.AR
             var customer = await _unitOfWork.Repository<BusinessPartner>()
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
-                    p.Id == invoice.CustomerId &&
-                    !p.IsDeleted &&
-                    BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType))
+                    p.Id == invoice.BusinessPartnerId &&
+                    !p.IsDeleted)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (customer == null)
                 throw new InvalidOperationException("AR invoice customer was not found for this tenant.");
 
-            if (!customer.IsActive || customer.IsBlacklisted)
-                throw new InvalidOperationException($"Customer '{customer.PartnerName}' is not active for AR posting.");
+            var role = await _unitOfWork.Repository<BusinessPartnerRole>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.Id == invoice.BusinessPartnerRoleId &&
+                    item.BusinessPartnerId == invoice.BusinessPartnerId &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken);
+            var profile = await _unitOfWork.Repository<BusinessPartnerArProfileVersion>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.Id == invoice.BusinessPartnerArProfileVersionId &&
+                    item.BusinessPartnerRoleId == invoice.BusinessPartnerRoleId &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken);
+            var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAr(
+                customer,
+                role,
+                profile is null ? Array.Empty<BusinessPartnerArProfileVersion>() : new[] { profile },
+                invoice.InvoiceDate);
+            if (!readiness.IsReady)
+                throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
 
             return customer;
         }
@@ -1921,7 +1940,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     TransactionType = line.LineItemType == LineItemType.GLAccount
                         ? TaxTransactionType.SaleOfServices
                         : TaxTransactionType.SaleOfGoods,
-                    CustomerId = invoice.CustomerId
+                    BusinessPartnerId = invoice.BusinessPartnerId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Customer
                 }, cancellationToken);
 
                 foreach (var breakdown in taxResult.TaxBreakdowns.Where(t => t.TaxAmount > 0m))
@@ -2277,12 +2297,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                     "The selected AR invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
             }
 
-            if (RoundRate(suppliedRate) != RoundRate(rate.Rate))
+            if (RoundRate(suppliedRate) != RoundRate(rate.InverseRate))
                 throw new InvalidOperationException("The AR invoice exchange-rate value does not match the approved rate record.");
 
             return new OpeningInvoiceExchangeRateSnapshot(
                 rate.Id,
-                rate.Rate,
+                rate.InverseRate,
                 transactionCurrency,
                 functionalCurrency,
                 rate.RateSource);
@@ -2340,14 +2360,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             return paymentTerm;
         }
 
-        private async Task<BusinessPartner?> GetCustomerPartnerAsync(Guid customerId, CancellationToken cancellationToken)
+        private async Task<BusinessPartner?> GetCustomerPartnerAsync(Guid businessPartnerId, CancellationToken cancellationToken)
         {
             return await _unitOfWork.Repository<BusinessPartner>()
                 .FirstOrDefaultAsync(p =>
                     p.TenantId == TenantId &&
-                    p.Id == customerId &&
-                    !p.IsDeleted &&
-                    BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType));
+                    p.Id == businessPartnerId &&
+                    !p.IsDeleted);
         }
 
         private static int? TryParsePaymentTermsDays(string? paymentTerms)
@@ -2380,13 +2399,68 @@ namespace ErpSystem.Api.Services.Finance.AR
                 : 0m;
         }
 
+        private sealed record CustomerCounterparty(
+            BusinessPartner Partner,
+            BusinessPartnerRole Role,
+            BusinessPartnerArProfileVersion Profile);
+
+        private async Task<CustomerCounterparty> ResolveCustomerCounterpartyAsync(
+            Guid businessPartnerId,
+            Guid? requestedRoleId,
+            DateTime accountingDate,
+            CancellationToken cancellationToken)
+        {
+            if (businessPartnerId == Guid.Empty)
+                throw new InvalidOperationException("Select a Business Partner for this customer invoice.");
+
+            var partner = await GetCustomerPartnerAsync(businessPartnerId, cancellationToken)
+                ?? throw new KeyNotFoundException($"Business Partner with Id '{businessPartnerId}' was not found for this tenant.");
+            var roles = await _unitOfWork.Repository<BusinessPartnerRole>()
+                .GetQueryable(role =>
+                    role.TenantId == TenantId &&
+                    role.BusinessPartnerId == partner.Id &&
+                    role.RoleType == BusinessPartnerRoleType.Customer &&
+                    !role.IsDeleted)
+                .OrderBy(role => role.CreatedAt)
+                .ThenBy(role => role.Id)
+                .ToListAsync(cancellationToken);
+            var role = requestedRoleId.HasValue
+                ? roles.SingleOrDefault(candidate => candidate.Id == requestedRoleId.Value)
+                : roles.Count == 1
+                    ? roles[0]
+                    : null;
+            if (role is null)
+            {
+                throw new InvalidOperationException(roles.Count > 1
+                    ? "Select the Business Partner Customer role to use for this invoice."
+                    : "AR_ROLE_REQUIRED: The Business Partner does not have a Customer role.");
+            }
+
+            var profiles = await _unitOfWork.Repository<BusinessPartnerArProfileVersion>()
+                .GetQueryable(profile =>
+                    profile.TenantId == TenantId &&
+                    profile.BusinessPartnerRoleId == role.Id &&
+                    !profile.IsDeleted)
+                .ToListAsync(cancellationToken);
+            var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAr(partner, role, profiles, accountingDate);
+            if (!readiness.IsReady || readiness.ArProfile is null)
+                throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
+
+            return new CustomerCounterparty(partner, role, readiness.ArProfile);
+        }
+
         private InvoiceDto MapToDto(Invoice invoice)
         {
             return new InvoiceDto
             {
                 Id = invoice.Id,
                 InvoiceNumber = invoice.InvoiceNumber,
-                CustomerId = invoice.CustomerId,
+                BusinessPartnerId = invoice.BusinessPartnerId,
+                BusinessPartnerRoleId = invoice.BusinessPartnerRoleId,
+                BusinessPartnerArProfileVersionId = invoice.BusinessPartnerArProfileVersionId,
+                BusinessPartnerCode = invoice.BusinessPartnerCode,
+                BusinessPartnerLegalName = invoice.BusinessPartnerLegalName,
+                BusinessPartnerTin = invoice.BusinessPartnerTin,
                 CustomerName = invoice.CustomerName,
                 CustomerAddress = invoice.CustomerAddress,
                 InvoiceDate = invoice.InvoiceDate,

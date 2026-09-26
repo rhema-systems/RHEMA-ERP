@@ -24,7 +24,7 @@ public sealed class ProcurementSupplierInvoiceBoundaryTests
     {
         await using var f = new Fixture();
         var invoice = new VendorInvoice { Id=Guid.NewGuid(), TenantId=foreignTenant ? Guid.NewGuid() : f.Tenant,
-            InvoiceNumber="VI-TEST", SupplierId=Guid.NewGuid(), SupplierName="Supplier", PurchaseOrderId=hasPo ? Guid.NewGuid() : null };
+            InvoiceNumber="VI-TEST", BusinessPartnerId=Guid.NewGuid(), SupplierName="Supplier", PurchaseOrderId=hasPo ? Guid.NewGuid() : null };
         f.Db.Add(invoice); await f.Db.SaveChangesAsync();
         var action = f.Action(new() { ["id"] = invoice.Id });
         var called = false;
@@ -63,8 +63,8 @@ public sealed class ProcurementSupplierInvoiceBoundaryTests
     public async Task Update_uses_route_identity_even_when_body_names_another_procurement_invoice()
     {
         await using var f = new Fixture();
-        var original = new VendorInvoice { Id=Guid.NewGuid(), TenantId=f.Tenant, InvoiceNumber="VI-ORIGINAL", SupplierId=Guid.NewGuid(), SupplierName="Supplier", PurchaseOrderId=Guid.NewGuid() };
-        var other = new VendorInvoice { Id=Guid.NewGuid(), TenantId=f.Tenant, InvoiceNumber="VI-OTHER", SupplierId=Guid.NewGuid(), SupplierName="Supplier", PurchaseOrderId=Guid.NewGuid() };
+        var original = new VendorInvoice { Id=Guid.NewGuid(), TenantId=f.Tenant, InvoiceNumber="VI-ORIGINAL", BusinessPartnerId=Guid.NewGuid(), SupplierName="Supplier", PurchaseOrderId=Guid.NewGuid() };
+        var other = new VendorInvoice { Id=Guid.NewGuid(), TenantId=f.Tenant, InvoiceNumber="VI-OTHER", BusinessPartnerId=Guid.NewGuid(), SupplierName="Supplier", PurchaseOrderId=Guid.NewGuid() };
         f.Db.AddRange(original, other); await f.Db.SaveChangesAsync();
         var action=f.Action(new() { ["id"]=original.Id, ["dto"]=new VendorInvoiceUpdateDto { Id=other.Id, PurchaseOrderId=other.PurchaseOrderId } });
         await f.Filter.OnActionExecutionAsync(action, () => throw new Exception("Should not change routed source"));

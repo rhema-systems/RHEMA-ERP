@@ -8,10 +8,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/use-auth';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { accountsPayableService } from '@/services/procurementSupplierInvoiceService';
+import type { ApInvoiceSupplierEntryOption } from '@/types/ap';
 import { financeService } from '@/services/finance.service';
 import { procurementAutoInvoiceService, type AutoInvoiceReceipt, type AutoInvoiceRequest } from '@/services/procurementAutoInvoiceService';
-import { hasSupplierRole } from '@/lib/business-partner-roles';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import type { VendorInvoice } from '@/types/ap';
@@ -19,8 +19,9 @@ import type { VendorInvoice } from '@/types/ap';
 export function ProcurementAutoInvoice({ onCreated }: { onCreated: (invoice: VendorInvoice) => void }) {
   const { hasAnyPermission } = useAuth();
   const [open, setOpen] = useState(false);
-  const [partners, setPartners] = useState<BusinessPartnerDto[]>([]);
+  const [partners, setPartners] = useState<ApInvoiceSupplierEntryOption[]>([]);
   const [supplier, setSupplier] = useState('');
+  const selectedSupplier = partners.find(partner => partner.businessPartnerRoleId === supplier);
   const [receipts, setReceipts] = useState<AutoInvoiceReceipt[]>([]);
   const [selection, setSelection] = useState<Record<string, number>>({});
   const [date, setDate] = useState('');
@@ -43,29 +44,31 @@ export function ProcurementAutoInvoice({ onCreated }: { onCreated: (invoice: Ven
   const loadSuppliers = async () => {
     setLoading(true); setError('');
     try {
-      setPartners((await businessPartnerService.getAllPartnersForDropdown()).filter(partner => hasSupplierRole(partner.partnerType) &&
-        partner.approvalStatus === 'Approved' && (partner.isActive ?? partner.status === 'Active') && !partner.isBlacklisted));
+      setPartners(await accountsPayableService.getInvoiceSupplierEntryOptions());
     } catch (e) { setError(getProcurementProblemMessage(e, 'Could not load suppliers. Retry.')); }
     finally { setLoading(false); }
   };
   const loadReceipts = async (id: string) => {
+    const partner = partners.find(option => option.businessPartnerRoleId === id);
+    if (!partner?.isTransactionReady) return;
     const version = ++loadingVersion.current;
     setSupplier(id); setReceipts([]); setSelection({}); setLoaded(false); changed(); setLoading(true);
     try {
-      const result = await procurementAutoInvoiceService.receipts(id);
+      const result = await procurementAutoInvoiceService.receipts(partner.businessPartnerId);
       if (version === loadingVersion.current) { setReceipts(result); setLoaded(true); }
     } catch (e) { if (version === loadingVersion.current) setError(getProcurementProblemMessage(e, 'Could not load eligible GRNs. Retry.')); }
     finally { if (version === loadingVersion.current) setLoading(false); }
   };
   const submit = async () => {
-    if (submitting.current || loading || !supplier || !date || !reference.trim() || picked.length === 0 || currencies.length !== 1 || invalid) return;
+    if (submitting.current || loading || !selectedSupplier?.isTransactionReady || !date || !reference.trim() || picked.length === 0 || currencies.length !== 1 || invalid) return;
     submitting.current = true; setBusy(true); setError('');
     try {
       if (!retryRequest.current) {
         const settings = await financeService.getSettings();
         const rate = await loadApprovedInvoiceRate({ module: 'AP', transactionCurrency: currencies[0], functionalCurrency: settings.baseCurrency,
           invoiceDate: new Date(`${date}T12:00:00`), settings }, (code, query) => financeService.getCurrentExchangeRate(code, query));
-        retryRequest.current = { requestId: crypto.randomUUID(), businessPartnerId: supplier, supplierInvoiceNumber: reference.trim(),
+        retryRequest.current = { requestId: crypto.randomUUID(), businessPartnerId: selectedSupplier.businessPartnerId,
+          businessPartnerRoleId: selectedSupplier.businessPartnerRoleId, supplierInvoiceNumber: reference.trim(),
           invoiceDate: date, exchangeRate: rate.rate, exchangeRateId: rate.exchangeRateId,
           lines: Object.entries(selection).map(([goodsReceiptNoteItemId, quantity]) => ({ goodsReceiptNoteItemId, quantity })) };
       }
@@ -89,7 +92,7 @@ export function ProcurementAutoInvoice({ onCreated }: { onCreated: (invoice: Ven
           <div className="grid gap-4 md:grid-cols-3">
             <div><Label htmlFor="auto-supplier">Supplier</Label><Select value={supplier} onValueChange={id => void loadReceipts(id)} disabled={loading}>
               <SelectTrigger id="auto-supplier"><SelectValue placeholder="Select supplier" /></SelectTrigger><SelectContent>
-                {partners.map(partner => <SelectItem key={partner.id} value={partner.id}>{partner.partnerCode} · {partner.partnerName}</SelectItem>)}
+                {partners.map(partner => <SelectItem key={partner.businessPartnerRoleId} value={partner.businessPartnerRoleId} disabled={!partner.isTransactionReady}>{partner.code} · {partner.name} ({partner.roleType}){partner.isTransactionReady ? '' : ` — ${partner.readinessMessage}`}</SelectItem>)}
               </SelectContent></Select></div>
             <div><Label htmlFor="auto-reference">Supplier invoice reference</Label><Input id="auto-reference" maxLength={100} value={reference} onChange={event => { changed(); setReference(event.target.value); }} /></div>
             <div><Label htmlFor="auto-date">Invoice date</Label><Input id="auto-date" type="date" value={date} onChange={event => { changed(); setDate(event.target.value); }} /></div>

@@ -6,6 +6,7 @@ public sealed class ProcurementAutoInvoiceRequestDto
 {
     public Guid RequestId { get; set; }
     public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
     [Required, StringLength(100)] public string SupplierInvoiceNumber { get; set; } = string.Empty;
     public DateTime InvoiceDate { get; set; }
     public Guid? ExchangeRateId { get; set; }

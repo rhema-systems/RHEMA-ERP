@@ -59,7 +59,7 @@ import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-d
 import { useAuth } from '@/hooks/use-auth';
 
 const paymentSchema = z.object({
-    customerId: z.string().min(1, 'Customer is required'),
+    businessPartnerId: z.string().min(1, 'Business Partner is required'),
     bankAccountId: z.string().optional(),
     liquidityAccountId: z.string().optional(),
     paymentDate: z.date(),
@@ -119,7 +119,7 @@ export default function NewReceiptPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user } = useAuth();
-    const preselectedCustomerId = searchParams.get('customerId');
+    const preselectedBusinessPartnerId = searchParams.get('businessPartnerId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
     const existingAdvancePaymentId = searchParams.get('paymentId');
     const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
@@ -198,7 +198,7 @@ export default function NewReceiptPage() {
     const form = useForm<PaymentFormValues>({
         resolver: zodResolver(paymentSchema) as any,
         defaultValues: {
-            customerId: preselectedCustomerId || '',
+            businessPartnerId: preselectedBusinessPartnerId || '',
             bankAccountId: preselectedBankAccountId,
             liquidityAccountId: undefined,
             paymentDate: preselectedPaymentDate,
@@ -239,7 +239,7 @@ export default function NewReceiptPage() {
         const remainingAdvance = Math.round((
             Number(existingAdvancePayment.totalAmount) - Number(existingAdvancePayment.allocatedAmount || 0)
         ) * 100) / 100;
-        form.setValue('customerId', existingAdvancePayment.customerId);
+        form.setValue('businessPartnerId', existingAdvancePayment.businessPartnerId);
         form.setValue('bankAccountId', existingAdvancePayment.bankAccountId || undefined);
         form.setValue('liquidityAccountId', existingAdvancePayment.liquidityAccountId || undefined);
         form.setValue('paymentDate', new Date(existingAdvancePayment.paymentDate));
@@ -250,7 +250,7 @@ export default function NewReceiptPage() {
         form.setValue('referenceNumber', existingAdvancePayment.paymentNumber);
     }, [existingAdvancePayment, existingAdvancePaymentId, form, functionalCurrencyCode]);
 
-    const selectedCustomerId = form.watch('customerId');
+    const selectedCustomerId = form.watch('businessPartnerId');
     const selectedBankAccountId = form.watch('bankAccountId');
     const selectedLiquidityAccountId = form.watch('liquidityAccountId');
     const selectedPaymentMethodId = form.watch('paymentMethodId');
@@ -726,8 +726,8 @@ export default function NewReceiptPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="customer">Customer</Label>
                                 <Select
-                                    onValueChange={(val) => form.setValue('customerId', val)}
-                                    value={form.watch('customerId') || undefined}
+                                    onValueChange={(val) => form.setValue('businessPartnerId', val)}
+                                    value={form.watch('businessPartnerId') || undefined}
                                     disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
@@ -741,8 +741,8 @@ export default function NewReceiptPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                {form.formState.errors.customerId && (
-                                    <p className="text-sm text-red-500">{form.formState.errors.customerId.message}</p>
+                                {form.formState.errors.businessPartnerId && (
+                                    <p className="text-sm text-red-500">{form.formState.errors.businessPartnerId.message}</p>
                                 )}
                             </div>
 

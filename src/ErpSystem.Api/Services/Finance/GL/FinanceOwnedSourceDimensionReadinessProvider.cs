@@ -72,6 +72,8 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
             : await _db.FinanceDimensionSets.AsNoTracking().Include(item => item.Items)
                 .Where(item => item.TenantId == tenantId && setIds.Contains(item.Id) && !item.IsDeleted)
                 .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var validationContext = await LoadValidationContextAsync(
+            tenantId, route, documents, sets.Values, cancellationToken);
         var settlementEvidence = documentIds.Length == 0
             ? []
             : await _db.FinanceSettlementDimensionComponents.AsNoTracking()
@@ -146,8 +148,8 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
                 }
 
                 sets.TryGetValue(assignment.FinanceDimensionSetId ?? Guid.Empty, out var set);
-                var issues = await ValidateAccountRulesAsync(
-                    tenantId, route, document.DocumentDate, line.AccountId.Value, set, cancellationToken);
+                var issues = ValidateAccountRules(
+                    route, document.DocumentDate, line.AccountId.Value, set, validationContext);
                 foreach (var issue in issues)
                     blockers.Add(Blocker(
                         document,
@@ -220,7 +222,7 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
         var settings = await _db.FinanceSettings.AsNoTracking()
             .SingleOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
         var invoices = await _db.VendorInvoices.AsNoTracking()
-            .Include(item => item.Supplier)
+            .Include(item => item.BusinessPartner)
             .Include(item => item.LineItems.Where(line => !line.IsDeleted))
             .Where(item => item.TenantId == tenantId && !item.IsDeleted
                 && (item.Status == VendorInvoiceStatus.Draft
@@ -286,7 +288,7 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
             || string.Equals(line.LineItemType, "Product", StringComparison.OrdinalIgnoreCase);
         return isInventory
             ? line.GLAccountId ?? settings?.ControlAccountInventoryId
-            : line.GLAccountId ?? invoice.ExpenseAccountId ?? invoice.Supplier?.DefaultExpenseAccountId;
+            : line.GLAccountId ?? invoice.ExpenseAccountId ?? invoice.BusinessPartner?.DefaultExpenseAccountId;
     }
 
     private async Task<IReadOnlyList<ReadinessDocument>> LoadSupplierDebitNotesAsync(
@@ -428,33 +430,77 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
             true)).ToArray();
     }
 
-    private async Task<IReadOnlyList<RuleIssue>> ValidateAccountRulesAsync(
+    private async Task<AccountRuleValidationContext> LoadValidationContextAsync(
         Guid tenantId,
+        FinanceDimensionRouteDefinition route,
+        IReadOnlyList<ReadinessDocument> documents,
+        IEnumerable<FinanceDimensionSet> sets,
+        CancellationToken cancellationToken)
+    {
+        var accountIds = documents.SelectMany(document => document.Lines)
+            .Where(line => line.AccountId.HasValue)
+            .Select(line => line.AccountId!.Value)
+            .Distinct()
+            .ToArray();
+        var activeAccountIds = accountIds.Length == 0
+            ? []
+            : await _db.Accounts.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && accountIds.Contains(item.Id)
+                    && !item.IsDeleted && item.Status == AccountStatus.Active)
+                .Select(item => item.Id)
+                .ToListAsync(cancellationToken);
+        var rules = accountIds.Length == 0
+            ? []
+            : await _db.FinanceDimensionAccountRules.AsNoTracking()
+                .Include(item => item.FinanceDimensionDefinition)
+                .Include(item => item.DefaultDimensionValue)
+                .Where(item => item.TenantId == tenantId && accountIds.Contains(item.AccountId)
+                    && !item.IsDeleted && item.IsActive
+                    && (!item.RouteId.HasValue || item.RouteId == route.Id)
+                    && (item.SourceModule == null || item.SourceModule == route.PostingSourceModule)
+                    && (item.SourceDocumentType == null || item.SourceDocumentType == route.DocumentType)
+                    && (item.PostingAction == null || item.PostingAction == "Post"))
+                .ToListAsync(cancellationToken);
+
+        var setItems = sets.SelectMany(item => item.Items).ToArray();
+        var definitionIds = setItems.Select(item => item.FinanceDimensionDefinitionId).Distinct().ToArray();
+        var valueIds = setItems.Select(item => item.FinanceDimensionValueId).Distinct().ToArray();
+        var activeDefinitionIds = definitionIds.Length == 0
+            ? []
+            : await _db.FinanceDimensionDefinitions.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && definitionIds.Contains(item.Id)
+                    && !item.IsDeleted && item.IsActive)
+                .Select(item => item.Id)
+                .ToListAsync(cancellationToken);
+        var activeValues = valueIds.Length == 0
+            ? []
+            : await _db.FinanceDimensionValues.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && valueIds.Contains(item.Id)
+                    && !item.IsDeleted && item.IsActive)
+                .Select(item => new EffectiveDimensionValue(item.Id, item.EffectiveDate, item.ExpiryDate))
+                .ToListAsync(cancellationToken);
+
+        return new AccountRuleValidationContext(
+            activeAccountIds.ToHashSet(),
+            rules.GroupBy(item => item.AccountId).ToDictionary(group => group.Key, group => group.ToArray()),
+            activeDefinitionIds.ToHashSet(),
+            activeValues.ToDictionary(item => item.Id));
+    }
+
+    private static IReadOnlyList<RuleIssue> ValidateAccountRules(
         FinanceDimensionRouteDefinition route,
         DateTime documentDate,
         Guid accountId,
         FinanceDimensionSet? set,
-        CancellationToken cancellationToken)
+        AccountRuleValidationContext context)
     {
-        var accountExists = await _db.Accounts.AsNoTracking().AnyAsync(item =>
-            item.TenantId == tenantId && item.Id == accountId && !item.IsDeleted
-            && item.Status == AccountStatus.Active,
-            cancellationToken);
-        if (!accountExists)
+        if (!context.ActiveAccountIds.Contains(accountId))
             return [new RuleIssue("SOURCE_ACCOUNT_INVALID", "The source account is inactive, deleted or cross-tenant.", false)];
 
-        var candidates = await _db.FinanceDimensionAccountRules.AsNoTracking()
-            .Include(item => item.FinanceDimensionDefinition)
-            .Include(item => item.DefaultDimensionValue)
-            .Where(item => item.TenantId == tenantId && item.AccountId == accountId
-                && !item.IsDeleted && item.IsActive
-                && item.EffectiveDate.Date <= documentDate.Date
-                && (!item.ExpiryDate.HasValue || item.ExpiryDate.Value.Date >= documentDate.Date)
-                && (!item.RouteId.HasValue || item.RouteId == route.Id)
-                && (item.SourceModule == null || item.SourceModule == route.PostingSourceModule)
-                && (item.SourceDocumentType == null || item.SourceDocumentType == route.DocumentType)
-                && (item.PostingAction == null || item.PostingAction == "Post"))
-            .ToListAsync(cancellationToken);
+        var candidates = context.RulesByAccount.GetValueOrDefault(accountId, [])
+            .Where(item => item.EffectiveDate.Date <= documentDate.Date
+                && (!item.ExpiryDate.HasValue || item.ExpiryDate.Value.Date >= documentDate.Date))
+            .ToArray();
         var selected = new List<FinanceDimensionAccountRule>();
         var issues = new List<RuleIssue>();
         foreach (var group in candidates.GroupBy(item => item.FinanceDimensionDefinitionId))
@@ -509,20 +555,12 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
 
         if (set is not null)
         {
-            var definitionIds = set.Items.Select(item => item.FinanceDimensionDefinitionId).ToArray();
-            var valueIds = set.Items.Select(item => item.FinanceDimensionValueId).ToArray();
-            var validDefinitions = await _db.FinanceDimensionDefinitions.AsNoTracking().CountAsync(item =>
-                item.TenantId == tenantId && definitionIds.Contains(item.Id)
-                && !item.IsDeleted && item.IsActive,
-                cancellationToken);
-            var validValues = await _db.FinanceDimensionValues.AsNoTracking().CountAsync(item =>
-                item.TenantId == tenantId && valueIds.Contains(item.Id)
-                && !item.IsDeleted && item.IsActive
-                && item.EffectiveDate.Date <= documentDate.Date
-                && (!item.ExpiryDate.HasValue || item.ExpiryDate.Value.Date >= documentDate.Date),
-                cancellationToken);
-            if (validDefinitions != definitionIds.Distinct().Count()
-                || validValues != valueIds.Distinct().Count())
+            var validMasters = set.Items.All(item =>
+                context.ActiveDefinitionIds.Contains(item.FinanceDimensionDefinitionId)
+                && context.ActiveValues.TryGetValue(item.FinanceDimensionValueId, out var value)
+                && value.EffectiveDate.Date <= documentDate.Date
+                && (!value.ExpiryDate.HasValue || value.ExpiryDate.Value.Date >= documentDate.Date));
+            if (!validMasters)
                 issues.Add(new RuleIssue(
                     "DIMENSION_MASTER_INVALID",
                     "One or more captured dimensions are inactive, expired, missing or cross-tenant.",
@@ -575,4 +613,10 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
         IReadOnlyList<Guid> ExpectedSettlementLineIds,
         bool RequiresInheritedSettlementEvidence);
     private sealed record RuleIssue(string Code, string Message, bool FixedRuleDrift);
+    private sealed record EffectiveDimensionValue(Guid Id, DateTime EffectiveDate, DateTime? ExpiryDate);
+    private sealed record AccountRuleValidationContext(
+        HashSet<Guid> ActiveAccountIds,
+        IReadOnlyDictionary<Guid, FinanceDimensionAccountRule[]> RulesByAccount,
+        HashSet<Guid> ActiveDefinitionIds,
+        IReadOnlyDictionary<Guid, EffectiveDimensionValue> ActiveValues);
 }

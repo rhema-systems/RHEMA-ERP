@@ -120,7 +120,7 @@ export function VendorInvoiceFormPage({
   const router = useRouter();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const preselectedSupplierId = searchParams.get('supplierId');
+  const preselectedSupplierId = searchParams.get('businessPartnerId');
   const defaultOpeningBalance = false;
   const preselectedPurchaseOrderId = searchParams.get('purchaseOrderId');
   const { toast } = useToast();
@@ -203,9 +203,7 @@ export function VendorInvoiceFormPage({
   } = useQuery({
     queryKey: ['ap-invoice-entry-suppliers'],
     queryFn: async () => {
-      // The Finance entry projection includes approved Business Partners that do not yet
-      // have a canonical Supplier row. The invoice command resolves either identity and
-      // persists Supplier.Id inside its controlled transaction.
+      // Canonical Business Partner roles include readiness reasons for incomplete profiles.
       const suppliers =
         await accountsPayableService.getInvoiceSupplierEntryOptions();
       return { items: suppliers };
@@ -574,6 +572,7 @@ export function VendorInvoiceFormPage({
       'ap-invoice-supplier-defaults',
       currentTenantCode,
       watchSupplierId,
+      selectedSupplier?.businessPartnerRoleId,
       selectedPurchaseOrderId,
       watchInvoiceDateTime,
     ],
@@ -581,7 +580,8 @@ export function VendorInvoiceFormPage({
       accountsPayableService.getInvoiceSupplierDefaults(
         watchSupplierId,
         selectedPurchaseOrderId || undefined,
-        watchInvoiceDate ? format(watchInvoiceDate, 'yyyy-MM-dd') : undefined
+        watchInvoiceDate ? format(watchInvoiceDate, 'yyyy-MM-dd') : undefined,
+        selectedSupplier?.businessPartnerRoleId
       ),
     enabled: Boolean(watchSupplierId) && !watchIsOpeningBalance,
   });
@@ -704,7 +704,7 @@ export function VendorInvoiceFormPage({
       return;
 
     const supplier = suppliersData.items.find(
-      (item) => item.id === editInvoice.supplierId
+      (item) => item.businessPartnerId === editInvoice.businessPartnerId && (!editInvoice.businessPartnerRoleId || item.businessPartnerRoleId === editInvoice.businessPartnerRoleId)
     );
     if (!supplier) return;
 
@@ -733,7 +733,7 @@ export function VendorInvoiceFormPage({
       : addDays(invoiceDate, editInvoice.paymentTermsDays || 30);
 
     form.reset({
-      supplierId: editInvoice.supplierId,
+      supplierId: editInvoice.businessPartnerId,
       supplierInvoiceNumber: editInvoice.supplierInvoiceNumber || '',
       purchaseOrderId: editInvoice.purchaseOrderId || undefined,
       acceptedSupplyKind: editInvoice.acceptedSupplyKind,
@@ -1038,10 +1038,13 @@ export function VendorInvoiceFormPage({
   };
 
   const onSupplierChange = async (
-    supplierId: string,
+    selectionId: string,
     preservePurchaseOrderId?: string
   ) => {
-    const selectionKey = `${supplierId}:${preservePurchaseOrderId || ''}`;
+    const supplier = suppliersData?.items.find(item => item.businessPartnerRoleId === selectionId || item.businessPartnerId === selectionId);
+    if (!supplier || !supplier.isTransactionReady) return;
+    const supplierId = supplier.businessPartnerId;
+    const selectionKey = `${supplier.businessPartnerRoleId}:${preservePurchaseOrderId || ''}`;
     if (supplierSelectionRef.current === selectionKey) return;
     if (!isEditMode && form.getValues('supplierId') !== supplierId) {
       setWithholdingDecision(null);
@@ -1061,7 +1064,6 @@ export function VendorInvoiceFormPage({
     setSelectedPurchaseOrderId(preservePurchaseOrderId || '');
     if (!suppliersData?.items) return;
 
-    const supplier = suppliersData.items.find((s) => s.id === supplierId);
     if (supplier) {
       setSelectedSupplier(supplier);
       const selectedTerm =
@@ -1349,8 +1351,11 @@ export function VendorInvoiceFormPage({
             new Set((taxGroupsData || []).map((group) => group.id))
           )
         : null;
+      const { supplierId, ...invoiceData } = data;
       const request = {
-        ...data,
+        ...invoiceData,
+        businessPartnerId: supplierId,
+        businessPartnerRoleId: selectedSupplier?.businessPartnerRoleId,
         apAccountId: data.apAccountId || undefined,
         expenseAccountId: data.expenseAccountId || undefined,
         paymentTermsDays:
@@ -1506,7 +1511,7 @@ export function VendorInvoiceFormPage({
     isEditMode &&
       editInvoice &&
       suppliersData &&
-      !suppliersData.items.some((item) => item.id === editInvoice.supplierId)
+      !suppliersData.items.some((item) => item.businessPartnerId === editInvoice.businessPartnerId && (!editInvoice.businessPartnerRoleId || item.businessPartnerRoleId === editInvoice.businessPartnerRoleId))
   );
 
   if (
@@ -1659,18 +1664,21 @@ export function VendorInvoiceFormPage({
                       <CommandGroup>
                         {filteredSuppliers.map((supplier: any) => (
                           <div
-                            key={supplier.id}
+                            key={supplier.businessPartnerRoleId}
                             onClick={() => {
-                              onSupplierChange(supplier.id);
+                              if (!supplier.isTransactionReady) return;
+                              onSupplierChange(supplier.businessPartnerRoleId);
                               setSupplierComboOpen(false);
                               setSupplierSearch('');
                             }}
+                            aria-disabled={!supplier.isTransactionReady}
+                            title={supplier.isTransactionReady ? undefined : supplier.readinessMessage}
                             className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
                           >
                             <Check
                               className={cn(
                                 'mr-2 h-4 w-4',
-                                selectedSupplier?.id === supplier.id
+                                selectedSupplier?.businessPartnerRoleId === supplier.businessPartnerRoleId
                                   ? 'opacity-100'
                                   : 'opacity-0'
                               )}
@@ -1680,7 +1688,7 @@ export function VendorInvoiceFormPage({
                                 {supplier.name}
                               </span>
                               <span className="text-xs text-muted-foreground">
-                                {supplier.code}
+                                {supplier.code}{supplier.isTransactionReady ? '' : ` · ${supplier.readinessMessage}`}
                               </span>
                             </div>
                           </div>

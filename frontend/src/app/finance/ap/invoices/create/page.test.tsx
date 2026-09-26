@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { VendorInvoiceFormPage } from './page';
+import { VendorInvoiceFormPage } from '@/components/finance/ap/VendorInvoiceFormPage';
 import { accountsPayableService } from '@/services/accountsPayableService';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 
@@ -28,7 +28,7 @@ beforeEach(() => {
     { id: 'expense', accountCode: '6100', accountNumber: '6100', accountName: 'Freight Purchases', accountType: 'Expense', isControlAccount: false, allowDirectPosting: true },
   ];
   Object.assign(queryData, {
-    'ap-invoice-entry-suppliers': { items: [{ id: 'supplier', name: 'Freight Vendor', code: 'SUP-001', currency: 'GHS' }] },
+    'ap-invoice-entry-suppliers': { items: [{ id: 'supplier-role', businessPartnerId: 'supplier', businessPartnerRoleId: 'supplier-role', roleType: 'Supplier', name: 'Freight Vendor', code: 'SUP-001', currency: 'GHS', isTransactionReady: true }] },
     'gl-accounts-active': { items: accounts }, 'inventory-items-active': [], warehouses: [], 'ap-purchase-orders': { items: [] },
     'finance-settings': { baseCurrency: 'GHS' }, taxes: [{ id: 'wht', code: 'WHT7', category: 'Withholding', name: 'Supplier WHT', rate: 7.5, isActive: true, applicability: 'Purchases', taxPayableAccountId: 'wht-account' }],
     'tax-groups-active': [{ id: 'vat', name: 'VAT Five', code: 'VAT5', components: [{ taxId: 'tax5', taxCode: 'VAT5', taxName: 'VAT Five', taxRate: 5, taxCategory: 'VAT', calculationOrder: 1, compoundBasis: 'Base' }] }],
@@ -42,9 +42,16 @@ beforeEach(() => {
 async function prepareInvoice(choice: 'Yes' | 'No' | 'Dismiss' = 'No') {
   const result = render(<VendorInvoiceFormPage />);
   fireEvent.click(screen.getByRole('combobox', { name: 'Supplier' }));
-  fireEvent.click(await screen.findByText('Freight Vendor'));
+  fireEvent.click(await screen.findByText(/Freight Vendor/));
   const confirmation = await screen.findByRole('dialog', { name: 'Apply withholding to this invoice?' });
   fireEvent.click(within(confirmation).getByRole('button', { name: choice === 'Dismiss' ? 'Close' : choice }));
+  if (choice === 'Yes') {
+    fireEvent.change(await screen.findByLabelText('WHT Contract / Reference'), { target: { value: 'CONTRACT-001' } });
+    const categoryArea = screen.getByText('WHT Supply Category').parentElement;
+    if (!categoryArea) throw new Error('WHT Supply Category field was not rendered.');
+    fireEvent.click(within(categoryArea).getByRole('combobox'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Services' }));
+  }
   const checkbox = await screen.findByRole('checkbox', { name: 'Use supplier defaults' });
   expect(checkbox).toBeChecked();
   await waitFor(() => expect(screen.getByLabelText('Accounts Payable')).toHaveTextContent('2100'));
@@ -59,7 +66,7 @@ describe('new AP invoice visible supplier defaults', () => {
   it('preserves a QS service certificate source and line identity while exposing expense and budget coding', async () => {
     const lineId = '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8';
     queryData['vendor-invoice'] = {
-      id: 'invoice', invoiceNumber: 'VI-QS-001', supplierId: 'supplier',
+      id: 'invoice', invoiceNumber: 'VI-QS-001', businessPartnerId: 'supplier',
       status: 'Draft', invoiceDate: '2026-09-20', dueDate: '2026-10-20', currencyCode: 'GHS', exchangeRate: 1,
       isOpeningBalance: false, paymentTermsDays: 30, applySupplierWithholdingDefaults: false,
       acceptedSupplyKind: 'WorksPaymentCertificate', acceptedSupplySourceId: 'certificate',
@@ -82,7 +89,7 @@ describe('new AP invoice visible supplier defaults', () => {
   it('edits and submits server-resolved PO line dimensions with the same line identity', async () => {
     const lineId = '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8';
     queryData['vendor-invoice'] = {
-      id: 'invoice', invoiceNumber: 'AP-001', supplierId: 'supplier', purchaseOrderId: 'po',
+      id: 'invoice', invoiceNumber: 'AP-001', businessPartnerId: 'supplier', purchaseOrderId: 'po',
       status: 'Draft', invoiceDate: '2026-09-01', dueDate: '2026-10-01', currencyCode: 'GHS', exchangeRate: 1,
       isOpeningBalance: false, paymentTermsDays: 30, matchingType: 'ThreeWay',
       applySupplierWithholdingDefaults: false,
@@ -181,10 +188,10 @@ describe('new AP invoice visible supplier defaults', () => {
   });
 
   it('asks for a fresh decision after changing supplier', async () => {
-    (queryData['ap-invoice-entry-suppliers'] as { items: unknown[] }).items.push({ id: 'supplier-two', name: 'Second Vendor', code: 'SUP-002', currency: 'GHS' });
+    (queryData['ap-invoice-entry-suppliers'] as { items: unknown[] }).items.push({ id: 'supplier-two-role', businessPartnerId: 'supplier-two', businessPartnerRoleId: 'supplier-two-role', roleType: 'Supplier', name: 'Second Vendor', code: 'SUP-002', currency: 'GHS', isTransactionReady: true });
     await prepareInvoice('Yes');
     fireEvent.click(screen.getByRole('combobox', { name: 'Supplier' }));
-    fireEvent.click(await screen.findByText('Second Vendor'));
+    fireEvent.click(await screen.findByText(/Second Vendor/));
     const prompt = await screen.findByRole('dialog', { name: 'Apply withholding to this invoice?' });
     fireEvent.click(within(prompt).getByRole('button', { name: 'No' }));
     expect(screen.getByRole('switch', { name: 'Subject to withholding' })).not.toBeChecked();
@@ -193,9 +200,10 @@ describe('new AP invoice visible supplier defaults', () => {
 
   it('preserves an existing draft choice, rate override and account despite catalogue changes', async () => {
     queryData['vendor-invoice'] = {
-      id: 'invoice', invoiceNumber: 'AP-001', supplierId: 'supplier', status: 'Draft', invoiceDate: '2026-09-01', dueDate: '2026-10-01', currencyCode: 'GHS', exchangeRate: 1,
+      id: 'invoice', invoiceNumber: 'AP-001', businessPartnerId: 'supplier', status: 'Draft', invoiceDate: '2026-09-01', dueDate: '2026-10-01', currencyCode: 'GHS', exchangeRate: 1,
       isOpeningBalance: false, paymentTermsDays: 30, matchingType: 'None', apAccountId: 'ap', expenseAccountId: 'expense',
       applySupplierWithholdingDefaults: true, withholdingTaxId: 'wht', withholdingTaxRate: 4.25, withholdingTaxRateOverride: 4.25, withholdingTaxAccountId: 'stored-wht-account',
+      withholdingContractReference: 'CONTRACT-001', withholdingSupplyCategory: 'Services',
       lineItems: [{ id: '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8', lineItemType: 'Expense', glAccountId: 'expense', description: 'Saved service', quantity: 1, unitPrice: 100, unit: 'EA' }],
     };
     render(<VendorInvoiceFormPage editInvoiceId="invoice" />);
@@ -209,7 +217,7 @@ describe('new AP invoice visible supplier defaults', () => {
 
   it('prompts when opening an unresolved auto-generated draft and saves No explicitly', async () => {
     queryData['vendor-invoice'] = {
-      id: 'invoice', invoiceNumber: 'LC-DRAFT', supplierId: 'supplier', status: 'Draft', invoiceDate: '2026-09-01', dueDate: '2026-10-01', currencyCode: 'GHS', exchangeRate: 1,
+      id: 'invoice', invoiceNumber: 'LC-DRAFT', businessPartnerId: 'supplier', status: 'Draft', invoiceDate: '2026-09-01', dueDate: '2026-10-01', currencyCode: 'GHS', exchangeRate: 1,
       isOpeningBalance: false, paymentTermsDays: 30, matchingType: 'None', apAccountId: 'ap', expenseAccountId: 'expense',
       applySupplierWithholdingDefaults: null, withholdingDecisionPending: true, withholdingTaxRate: 0,
       lineItems: [{ id: '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8', lineItemType: 'Expense', glAccountId: 'expense', description: 'Landed cost', quantity: 1, unitPrice: 100, unit: 'EA' }],

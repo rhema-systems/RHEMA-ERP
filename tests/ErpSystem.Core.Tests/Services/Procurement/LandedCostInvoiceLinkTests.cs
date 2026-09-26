@@ -33,9 +33,20 @@ public class LandedCostInvoiceLinkTests
         _item = new LandedCostItem { TenantId = tenant, Amount = 310, Currency = "GHS" };
         _cost = new LandedCost { TenantId = tenant, GoodsReceiptNoteId = _grn.Id, Currency = "GHS", Status = "Allocated", Items = new List<LandedCostItem> { _item } };
         _item.LandedCostId = _cost.Id;
-        _invoice = new VendorInvoice { TenantId = tenant, InvoiceNumber = "VIN-001", CurrencyCode = "GHS", TotalAmount = 310,
-            PurchaseOrderId = _grn.PurchaseOrderId, Supplier = new Supplier { SupplierCode = "SUP-1" } };
-        _invoice.SupplierId = _invoice.Supplier.Id;
+        // Landed Cost and AP must share the canonical Business Partner id. Keeping the
+        // partner navigation populated also exercises the Include used by LinkInvoiceAsync.
+        _invoice = new VendorInvoice
+        {
+            TenantId = tenant,
+            InvoiceNumber = "VIN-001",
+            CurrencyCode = "GHS",
+            TotalAmount = 310,
+            PurchaseOrderId = _grn.PurchaseOrderId,
+            BusinessPartnerId = _partner.Id,
+            BusinessPartner = _partner,
+            BusinessPartnerCode = _partner.PartnerCode,
+            SupplierName = _partner.PartnerName
+        };
         _costs.Setup(r => r.GetWithDetailsAsync(_cost.Id)).ReturnsAsync(_cost);
         _grns.Setup(r => r.GetWithItemsAsync(_grn.Id)).ReturnsAsync(_grn);
         _unit.SetupGet(u => u.HasActiveTransaction).Returns(true);

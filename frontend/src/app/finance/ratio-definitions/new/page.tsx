@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Divide, Save, X, AlertTriangle, Loader2 } from 'lucide-react';
 import type { UnitAccount } from '@/types/unit-accounts';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
+import { toast } from 'sonner';
 
 type ComponentType = 'FinancialAccount' | 'UnitAccount' | 'Constant';
 type ResultFormat = 'Currency' | 'Percentage' | 'Number';
@@ -114,7 +115,7 @@ export default function NewRatioDefinitionPage() {
             router.push('/finance/ratio-definitions');
         } catch (error) {
             console.error('Failed to create ratio definition:', error);
-            alert('Failed to create ratio definition. Please try again.');
+            toast.error('The ratio definition was not created. Review its components and calculation settings, then retry.');
         } finally {
             setSaving(false);
         }

@@ -41,7 +41,7 @@ const summary = {
 
 const unresolvedRow = {
   settlementBalanceId: 'balance-1',
-  customerId: 'partner-1',
+  businessPartnerId: 'partner-1',
   customerCode: '',
   customerName: 'Unresolved business partner',
   isPartnerResolved: false,

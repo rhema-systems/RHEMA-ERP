@@ -21,8 +21,14 @@ public class VendorInvoiceDto
     public string InvoiceNumber { get; set; } = string.Empty;
     public string? SupplierInvoiceNumber { get; set; }
 
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public string BusinessPartnerCode { get; set; } = string.Empty;
     public string SupplierName { get; set; } = string.Empty;
+    public string? BusinessPartnerLegalName { get; set; }
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
+
 
     public Guid? PurchaseOrderId { get; set; }
     public string? PurchaseOrderNumber { get; set; }
@@ -61,6 +67,8 @@ public class VendorInvoiceDto
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
     public DateTime? WithholdingCertificateDate { get; set; }
+    public string? WithholdingContractReference { get; set; }
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
 
     // Matching
     public InvoiceMatchingType MatchingType { get; set; }
@@ -114,7 +122,14 @@ public class VendorInvoiceCreateDto
     public string? SupplierInvoiceNumber { get; set; }
 
     [Required]
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+
+    /// <summary>
+    /// Required when the partner has both active Supplier and Contractor roles; otherwise the
+    /// server resolves the partner's single AP role for the invoice accounting date.
+    /// </summary>
+    public Guid? BusinessPartnerRoleId { get; set; }
+
 
     public Guid? PurchaseOrderId { get; set; }
 
@@ -144,6 +159,9 @@ public class VendorInvoiceCreateDto
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
     public DateTime? WithholdingCertificateDate { get; set; }
+    [MaxLength(100)]
+    public string? WithholdingContractReference { get; set; }
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
 
     // Matching
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
@@ -203,6 +221,9 @@ public class VendorInvoiceUpdateDto
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
     public DateTime? WithholdingCertificateDate { get; set; }
+    [MaxLength(100)]
+    public string? WithholdingContractReference { get; set; }
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
 
     public InvoiceMatchingType MatchingType { get; set; }
 
@@ -223,7 +244,7 @@ public class VendorInvoiceQueryDto
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
     public string? SearchTerm { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public VendorInvoiceStatus? Status { get; set; }
     public string? ApprovalStatus { get; set; }
     public InvoiceMatchingStatus? MatchingStatus { get; set; }
@@ -502,7 +523,7 @@ public sealed class VendorInvoiceMatchExceptionReportDto
     public DateTime FromDate { get; set; }
     public DateTime ToDate { get; set; }
     public VendorInvoiceMatchExceptionStatus? Status { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public int TotalCount { get; set; }
     public int ApprovedCount { get; set; }
     public int ExpiredCount { get; set; }
@@ -516,8 +537,13 @@ public sealed class VendorInvoiceMatchExceptionReportRowDto
     public Guid ExceptionId { get; set; }
     public Guid VendorInvoiceId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public string BusinessPartnerCode { get; set; } = string.Empty;
     public string SupplierName { get; set; } = string.Empty;
+    public string? BusinessPartnerLegalName { get; set; }
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
     public Guid PurchaseOrderId { get; set; }
     public string PurchaseOrderNumber { get; set; } = string.Empty;
     public VendorInvoiceMatchExceptionStatus Status { get; set; }
@@ -564,7 +590,7 @@ public class VendorPaymentDto
 {
     public Guid Id { get; set; }
     public string PaymentNumber { get; set; } = string.Empty;
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
@@ -641,7 +667,7 @@ public sealed class PostedSupplierAdvanceDto
 {
     public Guid Id { get; set; }
     public string PaymentNumber { get; set; } = string.Empty;
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public DateTime PaymentDate { get; set; }
     public decimal TotalAmount { get; set; }
@@ -655,7 +681,10 @@ public sealed class PostedSupplierAdvanceDto
 public class VendorPaymentCreateDto
 {
     [Required]
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+
+    /// <summary>Required only when both Supplier and Contractor roles are active.</summary>
+    public Guid? BusinessPartnerRoleId { get; set; }
 
     [Required]
     public DateTime PaymentDate { get; set; }
@@ -818,7 +847,7 @@ public class VendorPaymentQueryDto
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
     public string? SearchTerm { get; set; }
-    public Guid? SupplierId { get; set; }
+    public Guid? BusinessPartnerId { get; set; }
     public VendorPaymentStatus? Status { get; set; }
     public VendorPaymentMethod? PaymentMethod { get; set; }
     public Guid? PaymentMethodId { get; set; }
@@ -863,8 +892,7 @@ public class VendorPaymentAllocationCreateDto
     [Required]
     public Guid VendorInvoiceId { get; set; }
 
-    [Required]
-    [Range(0.01, double.MaxValue)]
+    [Range(0, double.MaxValue)]
     public decimal AllocatedAmount { get; set; }
 
     /// <summary>
@@ -872,6 +900,7 @@ public class VendorPaymentAllocationCreateDto
     /// the invoice-currency reduction. Same-currency callers may omit this value; cross-currency
     /// callers must state both native amounts so Finance never invents a commercial conversion.
     /// </summary>
+    [Range(0, double.MaxValue)]
     public decimal? PaymentCurrencyAmount { get; set; }
 
     /// <summary>
@@ -881,7 +910,9 @@ public class VendorPaymentAllocationCreateDto
     /// </summary>
     public Guid? InvoiceSettlementExchangeRateId { get; set; }
 
+    [Range(0, double.MaxValue)]
     public decimal DiscountAmount { get; set; }
+    [Range(0, double.MaxValue)]
     public decimal WithholdingTaxAmount { get; set; }
     public string? Notes { get; set; }
 }
@@ -920,6 +951,8 @@ public class OutstandingVendorInvoiceDto
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
     public bool IsDiscountAvailable { get; set; }
     public decimal? DiscountAmount { get; set; }
+    public string? WithholdingContractReference { get; set; }
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
     public VendorPaymentInvoiceReadinessDto? PaymentReadiness { get; set; }
 }
 
@@ -1087,7 +1120,7 @@ public class ApAgingReportDto
 
 public class SupplierAgingDetailDto
 {
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? SupplierCode { get; set; }
     public decimal TotalOutstanding { get; set; }
@@ -1147,7 +1180,7 @@ public class CashRequirementPeriodDto
 
 public class SupplierStatementDto
 {
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? SupplierCode { get; set; }
     public DateTime FromDate { get; set; }
@@ -1196,8 +1229,7 @@ public class SupplierDetailedLedgerReportDto
 
 public class SupplierDetailedLedgerAccountDto
 {
-    public Guid SupplierId { get; set; }
-    public Guid? BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierCode { get; set; } = string.Empty;
     public string SupplierName { get; set; } = string.Empty;
     public string CurrencyCode { get; set; } = "GHS";
@@ -1236,7 +1268,7 @@ public class WithholdingTaxSummaryDto
 
 public class WithholdingTaxBySupplierDto
 {
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
     public string? TaxId { get; set; }
     public decimal TotalInvoiceAmount { get; set; }

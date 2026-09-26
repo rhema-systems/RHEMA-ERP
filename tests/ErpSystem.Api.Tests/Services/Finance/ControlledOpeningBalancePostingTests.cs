@@ -1118,7 +1118,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var supplierBatch = await service.CreateSupplierAdvanceBatchAsync(new CreateSupplierAdvanceOpeningBalanceDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             SourceReference = "TDC-AP-ADV-001",
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
@@ -1127,7 +1127,7 @@ public sealed class ControlledOpeningBalancePostingTests
         });
         var customerBatch = await service.CreateCustomerAdvanceBatchAsync(new CreateCustomerAdvanceOpeningBalanceDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             SourceReference = "TDC-AR-ADV-001",
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
@@ -1198,7 +1198,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var batch = await service.CreateSupplierAdvanceBatchAsync(new CreateSupplierAdvanceOpeningBalanceDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             SourceReference = "TDC-USD-ADV-001",
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
@@ -1248,7 +1248,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var apBatch = await service.CreateApWithholdingBatchAsync(new CreateApWithholdingOpeningBalanceDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             TaxId = fixture.WithholdingTax.Id,
             WithholdingTaxAccountId = fixture.WhtPayable.Id,
             SourceReference = "TDC-WHT-PAY-001",
@@ -1261,7 +1261,7 @@ public sealed class ControlledOpeningBalancePostingTests
         });
         var arBatch = await service.CreateArWithholdingBatchAsync(new CreateArWithholdingOpeningBalanceDto
         {
-            CustomerId = fixture.Customer.Id,
+            BusinessPartnerId = fixture.Customer.Id,
             TaxId = fixture.WithholdingTax.Id,
             WithholdingTaxAccountId = fixture.WhtReceivable.Id,
             SourceReference = "TDC-WHT-CERT-001",
@@ -1306,7 +1306,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var act = () => service.CreateApWithholdingBatchAsync(new CreateApWithholdingOpeningBalanceDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             TaxId = fixture.WithholdingTax.Id,
             WithholdingTaxAccountId = fixture.Equity.Id,
             OpeningDate = new DateTime(2026, 1, 1),
@@ -2285,7 +2285,7 @@ public sealed class ControlledOpeningBalancePostingTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "CashBank")]
-    public async Task BankNonzeroOpeningBalance_ShouldRemainBlockedUnlessPostedThroughOpeningBalanceFlow()
+    public async Task BankCreationContract_ShouldNotAcceptOrCreateUngovernedOpeningValues()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -2294,20 +2294,23 @@ public sealed class ControlledOpeningBalancePostingTests
         await db.SaveChangesAsync();
         var service = CreateBankAccountService(db, tenantId);
 
-        var act = () => service.CreateAsync(new CreateBankAccountDto
+        var created = await service.CreateAsync(new CreateBankAccountDto
         {
             AccountNumber = "BANK-001",
             AccountName = "Tenant Bank",
             BankName = "Bank",
             Currency = "GHS",
             AccountType = BankAccountType.Checking,
-            GLAccountId = glAccount.Id,
-            OpeningDate = new DateTime(2026, 1, 1),
-            OpeningBalance = 100m
+            GLAccountId = glAccount.Id
         });
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*FIN-LIM-0006 opening-balance migration batch*");
+        var stored = await db.BankAccounts.SingleAsync(item => item.Id == created.Id);
+        stored.OpeningBalance.Should().Be(0m);
+        stored.CurrentBalance.Should().Be(0m);
+        stored.AvailableBalance.Should().Be(0m);
+        typeof(CreateBankAccountDto).GetProperty("OpeningBalance").Should().BeNull();
+        typeof(CreateBankAccountDto).GetProperty("OpeningBalanceExchangeRate").Should().BeNull();
+        typeof(CreateBankAccountDto).GetProperty("OpeningDate").Should().BeNull();
     }
 
     [Fact]
@@ -2546,7 +2549,7 @@ public sealed class ControlledOpeningBalancePostingTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FinalSignOff")]
     [Trait("Category", "Schema")]
-    public void CustomerPaymentModel_ShouldNotCreateLegacyCustomerIdShadowColumn()
+    public void CustomerPaymentModel_ShouldUseCanonicalBusinessPartnerIdentityAndProfileEvidence()
     {
         using var db = CreateContext();
 
@@ -2554,9 +2557,13 @@ public sealed class ControlledOpeningBalancePostingTests
         var customerEntity = db.Model.FindEntityType(typeof(ErpSystem.Core.Entities.Sales.Customer));
 
         customerPaymentEntity.Should().NotBeNull();
-        customerPaymentEntity!.FindProperty("CustomerId").Should().NotBeNull();
-        customerPaymentEntity.FindProperty("CustomerId1").Should().BeNull();
-        customerPaymentEntity.FindNavigation(nameof(CustomerPayment.Customer)).Should().BeNull();
+        customerPaymentEntity!.FindProperty("CustomerId").Should().BeNull();
+        customerPaymentEntity.FindProperty(nameof(CustomerPayment.BusinessPartnerId)).Should().NotBeNull();
+        customerPaymentEntity.FindProperty(nameof(CustomerPayment.BusinessPartnerRoleId)).Should().NotBeNull();
+        customerPaymentEntity.FindProperty(nameof(CustomerPayment.BusinessPartnerArProfileVersionId)).Should().NotBeNull();
+        customerPaymentEntity.FindNavigation(nameof(CustomerPayment.BusinessPartner)).Should().NotBeNull();
+        customerPaymentEntity.FindNavigation(nameof(CustomerPayment.BusinessPartnerRole)).Should().NotBeNull();
+        customerPaymentEntity.FindNavigation(nameof(CustomerPayment.BusinessPartnerArProfileVersion)).Should().NotBeNull();
         customerEntity?.FindNavigation("Payments").Should().BeNull();
     }
 

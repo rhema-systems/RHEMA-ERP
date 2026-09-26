@@ -50,6 +50,7 @@ import printStyles from '@/components/finance/ap/ApInvoicePrintDocument.module.c
 import { useTenant } from '@/contexts/TenantContext';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { InvoiceDistribution } from '@/components/finance/ap/InvoiceDistribution';
+import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -103,10 +104,14 @@ export default function VendorInvoiceDetailsPage() {
                 description: 'Vendor invoice approved successfully',
             });
         },
-        onError: (error: any) => {
+        onError: (error: unknown) => {
+            const postingError = getFinancePostingErrorPresentation(
+                error,
+                'Failed to approve the vendor invoice.',
+                'Approval failed',
+            );
             toast({
-                title: 'Error',
-                description: error.message || 'Failed to approve vendor invoice',
+                ...postingError,
                 variant: 'destructive',
             });
         },
@@ -122,13 +127,18 @@ export default function VendorInvoiceDetailsPage() {
                 ? 'Invoice completed. Approval is not required.' : 'Vendor invoice submitted for approval.' });
         },
         onError: (error: any) => {
-            const message = error.message || 'Failed to submit for approval';
+            const postingError = getFinancePostingErrorPresentation(
+                error,
+                'Failed to submit the vendor invoice.',
+                'Submission failed',
+            );
+            const message = error?.message || postingError.description;
             const budgetCellRequired = message.includes('requires an adopted Finance budget cell');
             toast({
-                title: budgetCellRequired ? 'Budget cell required' : 'Error',
+                title: budgetCellRequired ? 'Budget cell required' : postingError.title,
                 description: budgetCellRequired
                     ? 'Edit the invoice and select an adopted Finance budget cell for the affected expense line.'
-                    : message,
+                    : postingError.description,
                 variant: 'destructive',
                 action: budgetCellRequired ? (
                     <ToastAction
@@ -258,7 +268,7 @@ export default function VendorInvoiceDetailsPage() {
                         </Button>
                     )}
                     {(invoice.status === 'Approved' || invoice.status === 'PartiallyPaid') && invoice.balanceAmount > 0 && (
-                        <Button size="sm" onClick={() => router.push(`/finance/ap/payments/create?supplierId=${invoice.supplierId}&invoiceId=${invoice.id}`)}>
+                        <Button size="sm" onClick={() => router.push(`/finance/ap/payments/create?supplierId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
                             <CreditCard className="mr-2 h-4 w-4" /> Schedule Payment
                         </Button>
                     )}
@@ -336,7 +346,7 @@ export default function VendorInvoiceDetailsPage() {
                             <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Bill From</p>
                             <p className="font-bold text-lg">{invoice.supplierName}</p>
                             <p className="text-sm text-muted-foreground mt-1">
-                                Supplier ID: {invoice.supplierId}
+                                Business Partner ID: {invoice.businessPartnerId}
                             </p>
                         </div>
                         <div className="text-right">

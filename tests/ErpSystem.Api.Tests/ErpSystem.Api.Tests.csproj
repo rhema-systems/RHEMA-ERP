@@ -236,6 +236,7 @@
     <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.PartnerDefaults.cs" />
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.PartnerDefaults.cs" />
     <Compile Include="Services\Finance\CustomerPostingSettingsFixture.cs" />
+    <Compile Include="Services\Finance\CanonicalVendorInvoiceBusinessPartnerTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentEvidenceOptionalApprovalTests.cs" />
@@ -283,7 +284,7 @@
     <Compile Include="Services\Finance\ApSupplierStatementDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\SubledgerReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ManagementReportDocumentBuilderTests.cs" />
-    <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
+    <Compile Include="Services\Finance\BaseDeltaReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePartnerDefaultsTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
@@ -302,10 +303,11 @@
     <Compile Include="Services\Finance\AccountingBookLifecycleC3Tests.cs" />
     <Compile Include="Services\Finance\AccountingBookLifecycleC3ConcurrencySqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4Tests.cs" />
+    <Compile Include="Services\Finance\AccountingBookModelV2Tests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4ConcurrencySqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4MigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4MigrationSqlServerTests.cs" />
-    <Compile Include="Services\Finance\AccountingBookApplicabilityC5Tests.cs" />
+    <Compile Include="Services\Finance\AutomaticPrimaryBookSelectionTests.cs" />
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5MigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5MigrationSqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5ConcurrencySqlServerTests.cs" />
@@ -343,6 +345,7 @@
     <Compile Include="Services\Finance\LegacyPostingPathLockdownTests.cs" />
     <Compile Include="Services\Finance\FinanceConcurrencyHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceApprovalQueueProjectionTests.cs" />
+    <Compile Include="Services\Finance\WorkflowEntityDisplayServiceFinanceBookTests.cs" />
     <Compile Include="Services\Finance\FinanceSettingsMigrationGapTests.cs" />
     <Compile Include="Services\Finance\CrossCurrencyBankTransferMigrationTests.cs" />
     <!-- Cross-currency settlement is a Finance release gate. Keep both pure arithmetic and
@@ -400,6 +403,7 @@
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">
     <Compile Include="$(TdcFocusedTestFile)" />
     <Compile Include="$(TdcFocusedTestSupportFile)" Condition="'$(TdcFocusedTestSupportFile)' != ''" />
+    <Compile Include="$(TdcFocusedTestSupportFile2)" Condition="'$(TdcFocusedTestSupportFile2)' != ''" />
   </ItemGroup>
 
 </Project>

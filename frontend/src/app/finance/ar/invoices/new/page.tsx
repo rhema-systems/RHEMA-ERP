@@ -79,7 +79,7 @@ const lineItemSchema = z.object({
 });
 
 const invoiceSchema = z.object({
-    customerId: z.string().min(1, 'Customer is required'),
+    businessPartnerId: z.string().min(1, 'Customer is required'),
     invoiceDate: z.date(),
     dueDate: z.date(),
     currencyCode: z.string().default('GHS'),
@@ -112,7 +112,7 @@ type InvoiceFormValues = z.infer<typeof invoiceSchema>;
 export default function NewInvoicePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const preselectedCustomerId = searchParams.get('customerId');
+    const preselectedBusinessPartnerId = searchParams.get('businessPartnerId');
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const { toast } = useToast();
     const { currentTenantCode } = useTenant();
@@ -194,7 +194,7 @@ export default function NewInvoicePage() {
     const form = useForm<InvoiceFormValues>({
         resolver: zodResolver(invoiceSchema) as any,
         defaultValues: {
-            customerId: preselectedCustomerId || '',
+            businessPartnerId: preselectedBusinessPartnerId || '',
             invoiceDate: new Date(),
             dueDate: addDays(new Date(), 30),
             currencyCode: 'GHS',
@@ -421,11 +421,11 @@ export default function NewInvoicePage() {
     };
 
     // Update due date when customer is selected (based on payment terms)
-    const onCustomerChange = async (customerId: string) => {
-        form.setValue('customerId', customerId);
+    const onCustomerChange = async (businessPartnerId: string) => {
+        form.setValue('businessPartnerId', businessPartnerId);
         if (!customersData?.items) return;
 
-        const customer = customersData.items.find(c => c.id === customerId);
+        const customer = customersData.items.find(c => c.id === businessPartnerId);
         if (customer) {
             setSelectedCustomer(customer);
             const invoiceDate = form.getValues('invoiceDate');
@@ -456,10 +456,10 @@ export default function NewInvoicePage() {
 
     // Set initial selected customer if preselected
     useEffect(() => {
-        if (preselectedCustomerId && customersData?.items) {
-            onCustomerChange(preselectedCustomerId);
+        if (preselectedBusinessPartnerId && customersData?.items) {
+            onCustomerChange(preselectedBusinessPartnerId);
         }
-    }, [preselectedCustomerId, customersData]);
+    }, [preselectedBusinessPartnerId, customersData]);
 
 
     const onSubmit = async (data: InvoiceFormValues) => {
@@ -613,8 +613,8 @@ export default function NewInvoicePage() {
                                     </Command>
                                 </PopoverContent>
                             </Popover>
-                            {form.formState.errors.customerId && (
-                                <p className="text-sm text-red-500">{form.formState.errors.customerId.message}</p>
+                            {form.formState.errors.businessPartnerId && (
+                                <p className="text-sm text-red-500">{form.formState.errors.businessPartnerId.message}</p>
                             )}
                         </div>
 

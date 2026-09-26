@@ -7,13 +7,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { accountsPayableService } from '@/services/procurementSupplierInvoiceService';
+import type { ApInvoiceSupplierEntryOption } from '@/types/ap';
 import { landedCostInvoiceService, type LandedCostInvoiceRequest } from '@/services/landedCostInvoiceService';
 import type { LandedCostDetailDto } from '@/services/inventoryManagementService';
 import type { VendorInvoice } from '@/types/ap';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
-import { hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
 import { groupLandedCostsBySupplier } from '@/lib/landed-cost-suppliers';
 
 type Charge = LandedCostInvoiceRequest['charges'][number];
@@ -29,7 +29,7 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [setupError, setSetupError] = useState('');
-  const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
+  const [suppliers, setSuppliers] = useState<ApInvoiceSupplierEntryOption[]>([]);
   const [inventoryPosted, setInventoryPosted] = useState(false);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [invoiceDate, setInvoiceDate] = useState('');
@@ -37,29 +37,41 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
   const pending = voucher.costItems.filter(c => !c.invoiceId && !c.invoiceNumber);
   const groups = groupLandedCostsBySupplier(charges.map(row => {
     const cost = voucher.costItems.find(c => c.id === row.costItemId)!;
-    return { ...cost, supplierId: row.supplierId,
-      supplierName: suppliers.find(s => s.id === row.supplierId)?.partnerName,
+    return { ...cost, supplierId: row.businessPartnerId,
+      supplierName: suppliers.find(s => s.businessPartnerId === row.businessPartnerId)?.name,
       referenceNumber: row.supplierInvoiceNumber };
   }));
   const load = async () => {
     setLoading(true); setSetupError('');
     try {
-      const partners = await businessPartnerService.getAllPartnersForDropdown();
-      setSuppliers(partners.filter(s => (hasSupplierRole(s.partnerType) || hasContractorRole(s.partnerType)) &&
-        (s.isActive ?? s.status === 'Active') && !s.isBlacklisted && s.approvalStatus === 'Approved'));
+      const options = await accountsPayableService.getInvoiceSupplierEntryOptions();
+      setSuppliers(options);
+      setCharges(rows => rows.map(row => {
+        if (row.businessPartnerRoleId) return row;
+        const matches = options.filter(option => option.businessPartnerId === row.businessPartnerId);
+        return matches.length === 1 ? { ...row, businessPartnerRoleId: matches[0].businessPartnerRoleId } : row;
+      }));
     } catch { setSetupError('Could not load cost suppliers. Retry before preparing invoices.'); }
     finally { setLoading(false); }
   };
   const start = () => {
-    setCharges(voucher.costItems.map(c => ({ costItemId: c.id, supplierId: c.supplierId || '', supplierInvoiceNumber: c.referenceNumber || '' })));
+    setCharges(voucher.costItems.map(c => ({ costItemId: c.id, businessPartnerId: c.supplierId || '', supplierInvoiceNumber: c.referenceNumber || '' })));
     setInvoiceDate(voucher.costItems.find(c => c.invoiceDate)?.invoiceDate?.slice(0, 10) || new Date().toLocaleDateString('en-CA'));
     setError(''); setCreated([]); setInventoryPosted(voucher.status === 'Posted'); setOpen(true); void load();
   };
   const change = (id: string, patch: Partial<Charge>) => setCharges(rows => rows.map(c => c.costItemId === id ? { ...c, ...patch } : c));
   const save = async () => {
     if (submitting.current) return;
-    if (!invoiceDate || charges.length === 0 || charges.some(c => !c.supplierId || !c.supplierInvoiceNumber.trim())) {
+    if (!invoiceDate || charges.length === 0 || charges.some(c => !c.businessPartnerId || !c.supplierInvoiceNumber.trim())) {
       setError('Select a supplier and enter its invoice reference for every charge. Tax is completed later on the invoice draft.'); return;
+    }
+    if (charges.some(charge => {
+      const cost = voucher.costItems.find(item => item.id === charge.costItemId);
+      if (cost?.invoiceId || cost?.invoiceNumber) return false;
+      return !suppliers.some(option => option.businessPartnerId === charge.businessPartnerId &&
+        option.businessPartnerRoleId === charge.businessPartnerRoleId && option.isTransactionReady);
+    })) {
+      setError('Select a ready Supplier or Contractor role for every unlinked charge. Complete its Finance profile if required.'); return;
     }
     submitting.current = true; setBusy(true); onBusyChange?.(true); setError('');
     try {
@@ -97,9 +109,12 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
               <div className="flex justify-between gap-3"><p className="text-sm font-medium">{cost.description} · {cost.currency} {cost.amount.toFixed(2)}</p>
                 {cost.invoiceNumber && <span>{cost.invoiceNumber}</span>}</div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div><Label>Cost supplier</Label><Select value={row.supplierId} onValueChange={value => change(row.costItemId, { supplierId: value })}>
+                <div><Label>Cost supplier</Label><Select value={row.businessPartnerRoleId || ''} onValueChange={value => {
+                  const option = suppliers.find(supplier => supplier.businessPartnerRoleId === value);
+                  if (option) change(row.costItemId, { businessPartnerId: option.businessPartnerId, businessPartnerRoleId: option.businessPartnerRoleId });
+                }}>
                   <SelectTrigger aria-label={`Invoice charge ${i + 1} supplier`}><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                  <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.partnerCode} — {s.partnerName}</SelectItem>)}</SelectContent>
+                  <SelectContent>{suppliers.map(s => <SelectItem key={s.businessPartnerRoleId} value={s.businessPartnerRoleId} disabled={!s.isTransactionReady}>{s.code} — {s.name} ({s.roleType}){s.isTransactionReady ? '' : ` — ${s.readinessMessage}`}</SelectItem>)}</SelectContent>
                 </Select></div>
                 <div><Label>Supplier invoice reference</Label><Input aria-label={`Invoice charge ${i + 1} reference`} maxLength={100} value={row.supplierInvoiceNumber} onChange={e => change(row.costItemId, { supplierInvoiceNumber: e.target.value })} /></div>
               </div>

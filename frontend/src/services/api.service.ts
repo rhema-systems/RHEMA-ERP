@@ -1,4 +1,5 @@
 // Real API service that connects to the .NET backend
+import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
 export interface ApiResponse<T> {
   data?: T;
   success: boolean;
@@ -325,18 +326,33 @@ class ApiService {
             ? Object.values(errorData.errors).flat().find((e: unknown) => typeof e === 'string')
             : undefined);
 
-      const errorMessage = errorData.message ||
+      const sourceErrorMessage = errorData.message ||
         errorData.detail ||
         errorData.title ||
         firstValidationError ||
         errorData.error ||
         `HTTP ${response.status}: ${response.statusText}`;
+      const responsePath = (() => {
+        try { return new URL(response.url).pathname.toLowerCase(); }
+        catch { return ''; }
+      })();
+      const isFinanceResponse = responsePath.includes('/api/finance/') ||
+        responsePath.endsWith('/api/finance') ||
+        responsePath.includes('/api/ap/') ||
+        responsePath.includes('/api/ar/') ||
+        responsePath.includes('/api/budget/') ||
+        responsePath.includes('/api/fiscal-');
+      const financePresentation = isFinanceResponse
+        ? getFinancePostingErrorPresentation(errorData, sourceErrorMessage, 'Finance action failed')
+        : null;
+      const errorMessage = financePresentation?.description ?? sourceErrorMessage;
       const error = new Error(errorMessage);
 
       // Attach additional error details
       (error as any).status = response.status;
       (error as any).statusText = response.statusText;
       (error as any).response = errorData;
+      if (financePresentation) (error as any).financeTitle = financePresentation.title;
 
       throw error;
     }

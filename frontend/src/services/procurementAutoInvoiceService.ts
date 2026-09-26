@@ -10,7 +10,7 @@ export interface AutoInvoiceReceipt {
   orderNumber: string; currencyCode: string; warehouseId: string; lines: AutoInvoiceReceiptLine[];
 }
 export interface AutoInvoiceRequest {
-  requestId: string; businessPartnerId: string; supplierInvoiceNumber: string; invoiceDate: string;
+  requestId: string; businessPartnerId: string; businessPartnerRoleId?: string; supplierInvoiceNumber: string; invoiceDate: string;
   exchangeRateId?: string; exchangeRate: number; lines: Array<{ goodsReceiptNoteItemId: string; quantity: number }>;
 }
 export interface InvoiceReceiptLink {

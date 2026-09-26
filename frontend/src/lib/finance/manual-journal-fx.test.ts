@@ -11,6 +11,7 @@ import {
   getManualJournalFxBlocker,
   getManualJournalRateRequest,
   requireFunctionalCurrency,
+  roundJournalMoney,
 } from './manual-journal-fx';
 
 const account = (overrides: Partial<Account> = {}) =>
@@ -160,6 +161,30 @@ describe('manual journal FX policy', () => {
       rateSource: 'Approved daily rate',
       rateDate: '2025-01-01',
     });
+  });
+
+  it('rounds every converted functional amount to posting precision', () => {
+    expect(roundJournalMoney(3 * 12.345)).toBe(37.04);
+
+    const result = applyCanonicalJournalRate(
+      {
+        currencyCode: 'USD',
+        exchangeRate: '' as const,
+        foreignDebit: 3,
+        debit: 0,
+        credit: 0,
+        rateStatus: 'loading' as const,
+      },
+      {
+        id: 'rate-precision',
+        rate: 12.345,
+        currentExchangeRate: 12.345,
+        rateSource: 'Approved daily rate',
+        effectiveDate: '2025-01-01',
+      }
+    );
+
+    expect(result.debit).toBe(37.04);
   });
 
   it('blocks foreign lines until an approved positive rate is ready', () => {

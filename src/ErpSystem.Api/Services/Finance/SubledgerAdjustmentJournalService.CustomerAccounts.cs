@@ -18,7 +18,8 @@ public partial class SubledgerAdjustmentJournalService
         var existing = await LoadAdjustmentAsync(dto.RequestId.Value, true, token);
         if (existing == null) return null;
         if (existing.Module != NormalizeModule(dto.Module, false) || existing.Purpose != NormalizePurpose(dto.Purpose, false) ||
-            existing.CustomerId != dto.CustomerId || existing.SupplierId != dto.SupplierId ||
+            existing.BusinessPartnerId != dto.BusinessPartnerId ||
+            (dto.BusinessPartnerRoleId.HasValue && existing.BusinessPartnerRoleId != dto.BusinessPartnerRoleId) ||
             existing.AdjustmentType != NormalizeAdjustmentType(dto.AdjustmentType) || existing.Amount != dto.Amount ||
             existing.AdjustmentDate != dto.AdjustmentDate.Date || existing.DueDate != dto.DueDate?.Date ||
             existing.CurrencyCode != NormalizeCurrency(dto.CurrencyCode) || existing.ExchangeRate != dto.ExchangeRate ||
@@ -61,7 +62,7 @@ public partial class SubledgerAdjustmentJournalService
              i.Status == InvoiceStatus.Paid || i.Status == InvoiceStatus.Overdue))
             .Select(i => (i.TotalAmount - i.PaidAmount - i.CreditedAmount) * i.ExchangeRate).ToListAsync(token);
         var adjustments = await _context.SubledgerAdjustmentJournals.Where(a => a.TenantId == TenantId &&
-            a.Module == "AR" && a.CustomerId == customer.Id && !a.IsDeleted && a.JournalEntryId.HasValue &&
+            a.Module == "AR" && a.BusinessPartnerId == customer.Id && !a.IsDeleted && a.JournalEntryId.HasValue &&
             (a.Status == SubledgerAdjustmentStatuses.Posted || a.Status == SubledgerAdjustmentStatuses.Reversed))
             .Select(a => a.AdjustmentType == "Debit" ? a.BaseCurrencyAmount : -a.BaseCurrencyAmount).ToListAsync(token);
         var balance = Math.Round(invoices.Sum() + adjustments.Sum(), 2, MidpointRounding.AwayFromZero);
@@ -71,13 +72,9 @@ public partial class SubledgerAdjustmentJournalService
             throw new InvalidOperationException("The writeoff cannot exceed the customer's outstanding AR balance.");
         if (purpose == SubledgerAdjustmentPurposes.OverpaymentWriteoff && (balance >= 0m || dto.Amount > -balance))
             throw new InvalidOperationException("The overpayment writeoff cannot exceed the customer's AR credit balance. Customer advances are settled separately.");
-        var mapping = purpose switch
-        {
-            SubledgerAdjustmentPurposes.FinanceCharge => customer.CustomerFinanceChargesAccountId,
-            SubledgerAdjustmentPurposes.Writeoff => customer.CustomerWriteoffAccountId,
-            _ => customer.CustomerOverpaymentWriteoffAccountId
-        };
-        var accountId = dto.ContraAccountId != Guid.Empty ? dto.ContraAccountId : mapping;
+        // Finance governs the contra account explicitly; legacy Procurement defaults
+        // do not select posting accounts.
+        var accountId = dto.ContraAccountId;
         var account = await _context.Accounts.SingleOrDefaultAsync(a => a.Id == accountId && a.TenantId == TenantId && !a.IsDeleted, token);
         var type = purpose == SubledgerAdjustmentPurposes.Writeoff ? AccountType.Expense : AccountType.Revenue;
         if (account == null || account.Status != AccountStatus.Active || account.IsControlAccount || !account.AllowDirectPosting || account.AccountType != type)

@@ -58,6 +58,23 @@ public sealed class FinanceDemoPrerequisiteSeederTests
     }
 
     [Fact]
+    public void FinanceDemoCounterpartySeed_ShouldUseGovernedBusinessPartnerProfilesOnly()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Data", "Seeders", "FinanceDataSeeder.cs"));
+
+        source.Should().Contain("SeedFinanceDemoCounterpartiesAsync");
+        source.Should().Contain("BusinessPartnerRoleType.Supplier");
+        source.Should().Contain("BusinessPartnerRoleType.Customer");
+        source.Should().Contain("BusinessPartnerApProfileVersions.Add");
+        source.Should().Contain("BusinessPartnerArProfileVersions.Add");
+        source.Should().Contain("BusinessPartnerApWhtDefaults.Add");
+        source.Should().NotContain("_context.Suppliers",
+            "Finance demo counterparties must not recreate the retired Finance supplier master");
+    }
+
+    [Fact]
     public void BankLiquidityCode_ShouldRemainUniqueForDeterministicSeedIdentifiers()
     {
         // Finance seed GUIDs deliberately share a readable family prefix. This reproduces the

@@ -5,7 +5,7 @@ export type ArCollectionTaskStatus =
 
 export interface ArCollectionWorkItem {
   settlementBalanceId: string;
-  customerId: string;
+  businessPartnerId: string;
   customerCode: string;
   customerName: string;
   customerEmail?: string;

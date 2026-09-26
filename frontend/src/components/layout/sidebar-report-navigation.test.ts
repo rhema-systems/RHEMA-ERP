@@ -66,6 +66,16 @@ describe('navigation surfaces', () => {
     expect(containsHref(sidebarNavigationItems, '/finance/journal-batches')).toBe(true);
   });
 
+  it('exposes the Delta ledger workspace under General Ledger', () => {
+    const deltaLedger = findByTitle(navigationItems, 'Delta Ledger');
+
+    expect(deltaLedger).toMatchObject({
+      href: '/finance/delta-ledger',
+      permissions: ['Finance.Read'],
+    });
+    expect(containsHref(sidebarNavigationItems, '/finance/delta-ledger')).toBe(true);
+  });
+
   it('keeps frequent operational records and reports in the sidebar while moving stable setup to settings', () => {
     expect(sidebarNavigationItems.some(item => item.title === 'Administration')).toBe(false);
     expect(sidebarNavigationItems.some(item => item.title === 'Notifications')).toBe(false);

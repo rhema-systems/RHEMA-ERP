@@ -15,7 +15,7 @@ namespace ErpSystem.Core.DTOs.Finance
 
     public class InvoiceSearchDto : FinanceSearchDto
     {
-        public Guid? CustomerId { get; set; }
+        public Guid? BusinessPartnerId { get; set; }
         public string? Status { get; set; }
         public decimal? MinAmount { get; set; }
         public decimal? MaxAmount { get; set; }

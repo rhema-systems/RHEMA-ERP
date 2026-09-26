@@ -16,6 +16,7 @@ public sealed class AccountingBookInitialization : TenantEntity
     public DateTime CutoffDate { get; set; }
     public Guid CutoffFiscalPeriodId { get; set; }
     public Guid? SourceAccountingBookId { get; set; }
+    public ParallelBookTranslationMethod? TranslationMethod { get; set; }
     [MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     [MaxLength(500)] public string Reason { get; set; } = string.Empty;
     [Column(TypeName = "decimal(18,2)")] public decimal TotalDebits { get; set; }
@@ -52,7 +53,13 @@ public sealed class AccountingBookInitializationLine : TenantEntity
     [Column(TypeName = "decimal(18,2)")] public decimal OpeningCredit { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal BaseBookSignedBalance { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal OpeningAdjustment { get; set; }
+    public Guid? TranslationExchangeRateId { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? TranslationRate { get; set; }
+    public DateTime? TranslationRateDate { get; set; }
+    [MaxLength(30)] public string? TranslationRateType { get; set; }
+    [MaxLength(100)] public string? TranslationRateSource { get; set; }
 
     public AccountingBookInitialization Initialization { get; set; } = null!;
     public Account Account { get; set; } = null!;
+    public ExchangeRate? TranslationExchangeRate { get; set; }
 }

@@ -32,6 +32,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly IAccountSegmentIdentityService _segmentIdentity;
+        private readonly IAccountingBookService _accountingBookService;
         private readonly ILogger<AccountCombinationService> _logger;
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -42,12 +43,14 @@ namespace ErpSystem.Api.Services.Finance.Segments
             ICurrentUserService currentUser,
             ITenantSettingsService tenantSettingsService,
             IAccountSegmentIdentityService segmentIdentity,
+            IAccountingBookService accountingBookService,
             ILogger<AccountCombinationService> logger)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _tenantSettingsService = tenantSettingsService;
             _segmentIdentity = segmentIdentity;
+            _accountingBookService = accountingBookService;
             _logger = logger;
         }
 
@@ -262,6 +265,9 @@ namespace ErpSystem.Api.Services.Finance.Segments
             {
                 return result;
             }
+            if (request.AccountingBooks.Count == 0 || request.AccountingBooks.All(item => !item.IsEnabled))
+                throw new InvalidOperationException(
+                    "At least one enabled accounting-book classification is required for bulk-created GL accounts.");
 
             // Filter to only valid combinations (optionally skip duplicates)
             var toCreate = request.Combinations
@@ -275,6 +281,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
 
             foreach (var combination in toCreate)
             {
+                Account? stagedAccount = null;
                 try
                 {
                     var identity = await _segmentIdentity.ValidateAndComposeAsync(
@@ -324,11 +331,13 @@ namespace ErpSystem.Api.Services.Finance.Segments
                         IsIFRSClassified = true,
                         IsBaseClassified = true,
                         IsLocalClassified = false,
+                        EffectiveDate = DateTime.UtcNow.Date,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = UserName,
                         UpdatedAt = DateTime.UtcNow,
                         UpdatedBy = UserName
                     };
+                    stagedAccount = account;
 
                     await _unitOfWork.Accounts.AddAsync(account);
 
@@ -365,11 +374,18 @@ namespace ErpSystem.Api.Services.Finance.Segments
                         await _unitOfWork.Repository<AccountSegmentValue>().AddAsync(accountSegmentValue);
                     }
 
+                    await _accountingBookService.SyncAccountMappingsAsync(
+                        account,
+                        request.AccountingBooks,
+                        cancellationToken);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
                     result.CreatedAccountIds.Add(account.Id);
                     result.SuccessCount++;
                 }
                 catch (Exception ex)
                 {
+                    if (stagedAccount is not null)
+                        _unitOfWork.ClearTrackedChanges();
                     _logger.LogError(ex, "Failed to create account {AccountNumber}", combination.AccountNumber);
                     result.Errors.Add(new BulkCreationErrorDto
                     {
@@ -379,9 +395,6 @@ namespace ErpSystem.Api.Services.Finance.Segments
                     result.ErrorCount++;
                 }
             }
-
-            // Save all changes
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
                 "Bulk created {Success} accounts, skipped {Skip}, errors {Error}",

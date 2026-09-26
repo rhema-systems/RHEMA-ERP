@@ -4320,7 +4320,7 @@ function WorkspaceDialog({
 
     if (!accountsPayableInvoiceId || !accountsPayableSupplierId) return;
     const params = new URLSearchParams({
-      supplierId: accountsPayableSupplierId,
+      businessPartnerId: accountsPayableSupplierId,
       invoiceId: accountsPayableInvoiceId,
       amount: `${values.amountDue || ''}`,
       referenceNumber: item.projectReference,

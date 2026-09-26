@@ -21,7 +21,7 @@ public interface IVendorInvoiceService
     Task<VendorInvoiceDistributionDto> SaveDistributionAsync(Guid id, SaveVendorInvoiceDistributionDto request, CancellationToken cancellationToken = default);
     Task<VendorInvoiceDistributionDto> ResetDistributionAsync(Guid id, SaveVendorInvoiceDistributionDto request, CancellationToken cancellationToken = default);
     Task<ErpSystem.Core.DTOs.Procurement.PurchaseOrderSupplierDefaultsDto?> GetSupplierDefaultsAsync(
-        Guid supplierId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null);
+        Guid businessPartnerId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null, Guid? businessPartnerRoleId = null);
     Task<PostLandedCostResultDto> PostLandedCostAsync(Guid landedCostId,
         PostLandedCostDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
     Task<PostLandedCostResultDto> PrepareLandedCostInvoicesAsync(Guid landedCostId,

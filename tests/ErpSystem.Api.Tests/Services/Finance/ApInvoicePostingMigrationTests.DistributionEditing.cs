@@ -19,12 +19,8 @@ public sealed partial class ApInvoicePostingMigrationTests
         var tenant = Guid.NewGuid(); await using var db = CreateContext();
         var fixture = await SeedApprovedApInvoiceAsync(db, tenant, ProcurementDistributionDraft);
         var alternate = SeedAccount(db, tenant, "SPLIT-CREDIT", AccountType.Expense);
-        var partner = new ErpSystem.Core.Entities.Procurement.BusinessPartner
-        {
-            TenantId = tenant, PartnerCode = "SPLIT", PartnerName = "Split invoice supplier",
-            PartnerType = "Supplier", IsActive = true, DefaultApAccountId = fixture.ApAccount.Id
-        };
-        db.BusinessPartners.Add(partner); await db.SaveChangesAsync();
+        var partner = fixture.Supplier;
+        await db.SaveChangesAsync();
         var (invoiceService, _) = CreateService(db, tenant);
         var input = DistributionInput(await invoiceService.GetDistributionAsync(fixture.Invoice.Id));
         var debit = input.Lines.Single(row => row.Debit > 0); debit.Debit = 60;
@@ -44,7 +40,9 @@ public sealed partial class ApInvoicePostingMigrationTests
         var service = WriteoffService(db, tenant);
         // Posting clears the unit-of-work tracker; reuse the reloaded partner graph.
         partner = await db.BusinessPartners.SingleAsync(row => row.Id == partner.Id);
-        var note = WriteoffNote(tenant, partner, fixture.Supplier.Id);
+        var note = WriteoffNote(tenant, partner);
+        note.BusinessPartnerRoleId = invoice.BusinessPartnerRoleId;
+        note.BusinessPartnerApProfileVersionId = invoice.BusinessPartnerApProfileVersionId;
         note.OriginalVendorInvoiceId = invoice.Id; note.OriginalVendorInvoice = invoice;
         var source = invoice.LineItems.Single();
         var dto = new CreateSupplierDebitNoteLineItemDto

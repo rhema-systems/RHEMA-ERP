@@ -684,6 +684,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
               services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ConsolidatedBudgetDocumentBuilder>();
               services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BudgetScenarioComparisonDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.TrialBalanceDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BaseDeltaReportDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.IncomeStatementDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BalanceSheetDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CashFlowStatementDocumentBuilder>();
@@ -1001,7 +1002,6 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISupplierDebitNoteService, ErpSystem.Api.Services.Finance.AP.SupplierDebitNoteService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IInventorySupplierReturnFinanceHandoff>(provider =>
                 (ErpSystem.Core.Interfaces.Finance.IInventorySupplierReturnFinanceHandoff)provider.GetRequiredService<ErpSystem.Core.Interfaces.Finance.ISupplierDebitNoteService>());
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IApSupplierIdentityService, ErpSystem.Api.Services.Finance.AP.ApSupplierIdentityService>();
             // FIN-INT-012/013 is a Finance-owned, fail-closed consumer only. Procurement/Inventory
             // supplies approved immutable envelopes, never Finance account ids, and remains the
             // owner of return approval, dispatch, quantities, locations and carrying-cost evidence.

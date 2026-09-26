@@ -22,6 +22,43 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class EstateSupplierInvoiceLineageTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Missing_governed_payee_returns_actionable_problem_without_creating_partner_or_invoice(bool otherCosts)
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var acquisition = new LandAcquisition { TenantId = tenant, ProjectReference = "ESTATE-SETUP",
+            StageOrder = (int)AcquisitionProcedure.StampDutyPayment,
+            WorkspaceDataJson = JsonSerializer.Serialize(new Dictionary<string, object> {
+                ["14"] = new { otherAcquisitionServicesJson = "[{\"serviceName\":\"Legal costs\",\"amount\":200}]" }
+            }),
+            StampDutyAssessment = new StampDutyAssessment { TenantId = tenant, IsApproved = true, DutyAmount = 200m }
+        };
+        db.LandAcquisitions.Add(acquisition); await db.SaveChangesAsync();
+        var user = new Mock<ICurrentUserService>();
+        user.SetupGet(value => value.TenantId).Returns(tenant);
+        user.SetupGet(value => value.UserId).Returns(Guid.NewGuid().ToString());
+        user.SetupGet(value => value.Roles).Returns(new[] { "SystemAdmin" });
+        var controller = new ErpSystem.Api.Controllers.Estate.LandAcquisitionsController(
+            db, user.Object, null!, null!, null!, null!, null!, null!, null!, null!);
+
+        var result = otherCosts
+            ? await controller.EnsureOtherAcquisitionCostsAccountsPayableRequest(acquisition.Id, CancellationToken.None)
+            : await controller.EnsureAccountsPayableRequest(acquisition.Id, CancellationToken.None);
+        var response = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status400BadRequest, response.StatusCode);
+        var problem = Assert.IsType<ProblemDetails>(response.Value);
+        Assert.Contains(otherCosts ? "LAND-ACQ-OTHER-COSTS" : "GRA-STAMP-DUTY", problem.Detail);
+        Assert.Contains("approved AP profile", problem.Detail);
+        Assert.Equal(otherCosts ? "ESTATE_AP_VALIDATION" : "ESTATE_AP_PAYEE_SETUP_REQUIRED", problem.Extensions["code"]);
+        Assert.Empty(await db.BusinessPartners.ToListAsync());
+        Assert.Empty(await db.VendorInvoices.ToListAsync());
+        Assert.Empty(await db.Set<ErpSystem.Core.Entities.Procurement.BusinessPartnerApProfileVersion>().ToListAsync());
+    }
+
+    [Theory]
     [InlineData(true, 200, true)]
     [InlineData(true, 230, false)]
     [InlineData(false, 200, false)]
@@ -59,7 +96,7 @@ public sealed class EstateSupplierInvoiceLineageTests
         foreach (var scenario in new[] { (Typed: true, Foreign: false), (Typed: false, Foreign: false), (Typed: true, Foreign: true) })
         {
             var invoice = new VendorInvoice { Id = Guid.NewGuid(), TenantId = scenario.Foreign ? Guid.NewGuid() : tenant,
-                InvoiceNumber = Guid.NewGuid().ToString(), SupplierId = Guid.NewGuid(), SupplierName = "Canonical supplier",
+                InvoiceNumber = Guid.NewGuid().ToString(), BusinessPartnerId = Guid.NewGuid(), SupplierName = "Canonical supplier",
                 Reference = "LAND-STAMP-DUTY:" + Guid.NewGuid().ToString("N"),
                 EstateAcquisitionId = scenario.Typed ? Guid.NewGuid() : null, EstatePayableKind = scenario.Typed ? kind : null };
             db.Add(invoice); await db.SaveChangesAsync();

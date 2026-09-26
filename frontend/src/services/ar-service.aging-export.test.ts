@@ -5,6 +5,7 @@ import { documentOutputService } from './document-output.service';
 
 vi.mock('./api.service', () => ({
     apiService: {
+        get: vi.fn(),
         postBlob: vi.fn(),
     },
 }));
@@ -53,5 +54,19 @@ describe('accounts receivable aging export client', () => {
             { asOfDate: '2026-07-31' },
             { format: 'pdf' }
         );
+    });
+
+    it('uses canonical Business Partner filters for the customer detailed ledger', async () => {
+        vi.mocked(apiService.get).mockResolvedValueOnce({ customers: [] });
+
+        await arService.getCustomerDetailedLedger({
+            fromDate: '2026-07-01',
+            toDate: '2026-07-31',
+            businessPartnerIds: ['partner-1'],
+            showCustomerCurrency: true,
+        });
+
+        expect(apiService.get).toHaveBeenCalledWith(expect.stringContaining('businessPartnerIds=partner-1'));
+        expect(apiService.get).toHaveBeenCalledWith(expect.not.stringContaining('customerIds='));
     });
 });

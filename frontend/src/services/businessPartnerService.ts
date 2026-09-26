@@ -76,6 +76,7 @@ export interface BusinessPartnerDto {
   id: string;
   partnerCode: string;
   partnerType: string; // Supplier, Contractor, Both, Customer
+  roleTypes?: Array<'Supplier' | 'Contractor' | 'Customer'>;
   partnerName: string;
   companyName?: string; // Alias for partnerName
   tradingName?: string;
@@ -321,6 +322,7 @@ export interface CreateBusinessPartnerDto {
   receivablesDefaults?: BusinessPartnerReceivablesDefaults;
   postingDefaults?: BusinessPartnerPostingDefaults;
   partnerType: string;
+  roleTypes?: Array<'Supplier' | 'Contractor' | 'Customer'>;
   partnerName: string;
   companyName?: string; // Alias for partnerName
   tradingName?: string;

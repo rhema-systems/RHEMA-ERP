@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
 using System.Reflection;
@@ -32,6 +32,8 @@ public class ProcurementAutoInvoiceTests
     private readonly List<VendorInvoice> _invoices = new();
     private readonly List<VendorInvoiceLineItem> _lines = new();
     private readonly List<BusinessPartner> _partners = new();
+    private readonly List<BusinessPartnerRole> _partnerRoles = new();
+    private readonly List<BusinessPartnerApProfileVersion> _apProfiles = new();
     private readonly List<Supplier> _suppliers = new();
     private readonly LandedCost _cost;
     private readonly LandedCostItem _freight;
@@ -80,7 +82,13 @@ public class ProcurementAutoInvoiceTests
         _credit = new AccountTransaction { TenantId = _tenant, JournalEntryId = _journal.Id, AccountId = _accrual.Id, CreditAmount = 360, FunctionalCurrencyCode = "GHS" };
         Repo(new List<LandedCost> { _cost }); Repo(new List<LandedCostItem> { _freight, _handling });
         _partners.Add(_partner); _suppliers.Add(_supplier); Repo(_partners); Repo(_suppliers);
-        Repo(new List<ApSupplierIdentityLink>());
+        var role = new BusinessPartnerRole { TenantId = _tenant, BusinessPartnerId = _partner.Id,
+            BusinessPartner = _partner, RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2020,1,1) };
+        _partnerRoles.Add(role); Repo(_partnerRoles);
+        _apProfiles.Add(new() { TenantId = _tenant, BusinessPartnerRoleId = role.Id,
+            BusinessPartnerRole = role, VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020,1,1) }); Repo(_apProfiles);
         Repo(new List<JournalEntry> { _journal }); Repo(new List<FinancePostingEvent> { _posting });
         Repo(new List<AccountTransaction> { _credit }); Repo(new List<Account> { _accrual, _ap });
         _settings = new FinanceSettings { TenantId = _tenant, BaseCurrency = "GHS", ControlAccountApId = _ap.Id, ControlAccountGRVAccrualId = Guid.NewGuid() };
@@ -89,7 +97,7 @@ public class ProcurementAutoInvoiceTests
         var invoiceRepo = Repo(_invoices);
         invoiceRepo.Setup(r => r.AddAsync(It.IsAny<VendorInvoice>())).ReturnsAsync((VendorInvoice invoice) =>
         {
-            _invoices.Add(invoice); invoice.Supplier = _suppliers.Single(s => s.Id == invoice.SupplierId);
+            _invoices.Add(invoice); invoice.BusinessPartner = _partners.Single(s => s.Id == invoice.BusinessPartnerId);
             foreach (var line in invoice.LineItems) { line.VendorInvoice = invoice; _lines.Add(line); }
             return invoice;
         });
@@ -107,23 +115,6 @@ public class ProcurementAutoInvoiceTests
         user.SetupGet(u => u.UserId).Returns(Guid.NewGuid().ToString()); user.SetupGet(u => u.UserName).Returns("AP officer");
         var numbering = new Mock<IDocumentNumberingService>(); var number = 0;
         numbering.Setup(n => n.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => $"INV-{++number}");
-        var supplierIdentity = new Mock<IApSupplierIdentityService>();
-        supplierIdentity.Setup(service => service.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid partnerId, CancellationToken _) =>
-            {
-                var partner = _partners.Single(item => item.Id == partnerId);
-                var supplier = _suppliers.Single(item =>
-                    string.Equals(item.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase));
-                return Task.FromResult(new ApSupplierIdentityDto
-                {
-                    BusinessPartnerId = partner.Id,
-                    SupplierId = supplier.Id,
-                    PartnerCode = partner.PartnerCode,
-                    SupplierCode = supplier.SupplierCode,
-                    DisplayName = supplier.Name,
-                    IsVerified = true
-                });
-            });
         _partner.ApprovalStatus = "Approved";
         _settings.ControlAccountGRVAccrualId = _accrual.Id;
         Repo(new List<PurchaseOrderReceipt>()); Repo(new List<InventoryMovement>());
@@ -148,7 +139,7 @@ public class ProcurementAutoInvoiceTests
         _service = new VendorInvoiceService(_unit.Object, user.Object, Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<VendorInvoiceService>>(), numbering.Object, Mock.Of<IWorkflowService>(), financePostingEngine: _finance.Object,
             sourceDimensions: Mock.Of<IFinanceSourceDimensionService>(), landedCosts: _landed.Object,
-            workflowIntegration: _approval.Object, apSupplierIdentityService: supplierIdentity.Object, acceptedSupply: _accepted.Object, receiptAccess: _access.Object,
+            workflowIntegration: _approval.Object, acceptedSupply: _accepted.Object, receiptAccess: _access.Object,
             procurementConfiguration: _configuration.Object, procurementControlEvents: Mock.Of<IProcurementControlEventService>());
         _landed.Setup(s => s.PostToInventoryAsync(_cost.Id, It.IsAny<Guid>())).ReturnsAsync(() => { _cost.Status = "Posted"; return true; });
     }
@@ -182,7 +173,7 @@ public class ProcurementAutoInvoiceTests
         var create = new VendorInvoiceCreateDto
         {
             EstateAcquisitionId = acquisition.Id, EstatePayableKind = kind,
-            SupplierId = _supplier.Id, SupplierInvoiceNumber = $"ESTATE-{kind}",
+            BusinessPartnerId = _partner.Id, SupplierInvoiceNumber = $"ESTATE-{kind}",
             InvoiceDate = new DateTime(2026, 9, 24), DueDate = new DateTime(2026, 10, 24),
             CurrencyCode = "GHS", ExchangeRate = 1m, Reference = $"Estate source {kind}",
             ApplyBusinessPartnerDefaults = false, ApplySupplierWithholdingDefaults = null,
@@ -193,11 +184,11 @@ public class ProcurementAutoInvoiceTests
             }
         };
         var created = await _service.CreateAsync(create);
-        Assert.Equal(_supplier.Id, created.SupplierId);
+        Assert.Equal(_partner.Id, created.BusinessPartnerId);
         Assert.Equal(acquisition.Id, created.EstateAcquisitionId);
         Assert.Equal(kind, created.EstatePayableKind);
         Assert.Equal(200m, created.SubTotal);
-        Assert.True(created.WithholdingDecisionPending);
+        Assert.False(created.WithholdingDecisionPending);
         Assert.Null(created.ApplySupplierWithholdingDefaults);
         Assert.Equal(TaxTreatment.PendingReview, Assert.Single(created.LineItems).TaxTreatment);
         var read = Assert.IsType<VendorInvoiceDto>(await _service.GetByIdAsync(created.Id));
@@ -217,7 +208,7 @@ public class ProcurementAutoInvoiceTests
             }
         };
         var reviewed = await _service.UpdateAsync(update);
-        Assert.Equal(_supplier.Id, reviewed.SupplierId);
+        Assert.Equal(_partner.Id, reviewed.BusinessPartnerId);
         Assert.Equal(acquisition.Id, reviewed.EstateAcquisitionId);
         Assert.Equal(kind, reviewed.EstatePayableKind);
         Assert.Equal(200m, reviewed.SubTotal);
@@ -402,10 +393,29 @@ public class ProcurementAutoInvoiceTests
     public async Task SupplierEligibilityCannotBeBypassed(string invalid)
     {
         if (invalid == "foreign") _partner.TenantId = Guid.NewGuid();
-        if (invalid == "customer") _partner.PartnerType = "Customer";
+        if (invalid == "customer") _partnerRoles.Single().RoleType = BusinessPartnerRoleType.Customer;
         if (invalid == "inactive") _partner.IsActive = false;
         if (invalid == "unapproved") _partner.ApprovalStatus = "Pending";
         await Assert.ThrowsAsync<InvalidOperationException>(() => _service.GetAutoInvoiceReceiptsAsync(_partner.Id));
+    }
+
+    [Fact]
+    public async Task ExplicitApRoleIsPreservedAndCannotChangeOnRequestReplay()
+    {
+        var contractor = new BusinessPartnerRole { TenantId = _tenant, BusinessPartnerId = _partner.Id,
+            BusinessPartner = _partner, RoleType = BusinessPartnerRoleType.Contractor,
+            Status = BusinessPartnerRoleStatus.Active, ActiveFromUtc = new DateTime(2020, 1, 1) };
+        _partnerRoles.Add(contractor);
+        _apProfiles.Add(new BusinessPartnerApProfileVersion { TenantId = _tenant,
+            BusinessPartnerRoleId = contractor.Id, BusinessPartnerRole = contractor, VersionNumber = 1,
+            Status = BusinessPartnerFinanceProfileStatus.Approved, EffectiveFrom = new DateTime(2020, 1, 1) });
+        var request = Request((AddReceipt(), 2)); request.BusinessPartnerRoleId = contractor.Id;
+        var created = await _service.CreateAutoInvoiceAsync(request, _producer);
+        Assert.Equal(contractor.Id, created.BusinessPartnerRoleId);
+        Assert.Equal(created.Id, (await _service.CreateAutoInvoiceAsync(request, _producer)).Id);
+        request.BusinessPartnerRoleId = _partnerRoles.First().Id;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.CreateAutoInvoiceAsync(request, _producer));
+        Assert.Single(_invoices);
     }
 
     [Fact]

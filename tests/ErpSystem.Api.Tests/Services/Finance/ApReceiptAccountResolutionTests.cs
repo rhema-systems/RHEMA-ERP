@@ -332,10 +332,17 @@ public sealed class ApReceiptAccountResolutionTests
             foreach (var account in accounts.Append(ap))
                 Context.Accounts.Add(new Account { Id = account, TenantId = Tenant, AccountNumber = account.ToString("N"),
                     AccountName = "Posting account", AccountType = AccountType.Liability, Status = AccountStatus.Active, IsControlAccount = true });
-            var supplier = new Supplier { TenantId = Tenant, Name = "Invoice supplier", SupplierCode = "SUP-POST", IsActive = true, Status = "Active" };
-            Context.Suppliers.Add(supplier);
-            invoice.SupplierId = supplier.Id;
-            invoice.Supplier = supplier;
+            var supplier = new BusinessPartner
+            {
+                TenantId = Tenant,
+                PartnerName = "Invoice supplier",
+                PartnerCode = "SUP-POST",
+                PartnerType = "Supplier",
+                IsActive = true
+            };
+            Context.BusinessPartners.Add(supplier);
+            invoice.BusinessPartnerId = supplier.Id;
+            invoice.BusinessPartner = supplier;
             invoice.Status = VendorInvoiceStatus.Approved;
             invoice.ApprovalRequired = false;
             invoice.ApprovalStatus = "NotRequired";

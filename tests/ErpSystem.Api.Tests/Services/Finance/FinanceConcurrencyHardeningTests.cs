@@ -529,7 +529,7 @@ public sealed class FinanceConcurrencyHardeningTests
         balanceMethod.Should().Contain("AddSettlementBalanceToBalanceBuckets(balance, settlementBalance, asOfDate)", "overdue balances must be assigned to due-date aging buckets from the settlement projection");
         balanceMethod.Should().NotContain("BalanceAmount", "customer balance must not use mutable invoice balance snapshots");
         source.Should().Contain("i.BusinessPartnerId == customerId", "AR invoices use BusinessPartnerId as the current customer key");
-        source.Should().Contain("p.CustomerId == customerId", "AR receipts use CustomerId as the current BusinessPartner-backed customer key");
+        source.Should().Contain("p.BusinessPartnerId == customerId", "AR receipts use canonical Business Partner identity without a CustomerId alias");
         source.Should().Contain("daysOverdue <= 30", "the 1-30 day bucket must be calculated from invoice due dates");
         source.Should().Contain("daysOverdue <= 60", "the 31-60 day bucket must be calculated from invoice due dates");
         source.Should().Contain("daysOverdue <= 90", "the 61-90 day bucket must be calculated from invoice due dates");
@@ -572,7 +572,7 @@ public sealed class FinanceConcurrencyHardeningTests
         source.Should().Contain("c.[TenantId] = cp.[TenantId]",
             "legacy receipt migration must never map a counterparty across tenants");
         source.Should().Contain("FK_CustomerPayment_BusinessPartners_CustomerId",
-            "the physical database constraint must match the current EF relationship");
+            "the archived transitional migration must remain discoverable as historical evidence");
         source.Should().Contain("DROP CONSTRAINT",
             "the obsolete Customers FK must be removed before current BusinessPartner IDs can be saved");
         source.Should().Contain("WITH CHECK",
@@ -758,7 +758,7 @@ public sealed class FinanceConcurrencyHardeningTests
         allocationMethod.Should().Contain("Allocation would over-settle invoice",
             "every over-allocation must fail closed for maker correction");
         resolverMethod.Should().Contain("i.TenantId == TenantId", "allocation invoice lookup must remain tenant-scoped");
-        resolverMethod.Should().Contain("i.BusinessPartnerId != payment.CustomerId",
+        resolverMethod.Should().Contain("i.BusinessPartnerId != payment.BusinessPartnerId",
             "every allocated invoice must belong to the receipt customer");
         resolverMethod.Should().Contain("throw new KeyNotFoundException",
             "missing invoice IDs must produce an explicit client-visible failure");

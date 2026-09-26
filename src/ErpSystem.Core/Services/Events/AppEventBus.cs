@@ -6,12 +6,12 @@ namespace ErpSystem.Core.Services.Events;
 
 public class AppEventBus : IAppEventBus
 {
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AppEventBus> _logger;
 
-    public AppEventBus(IServiceScopeFactory scopeFactory, ILogger<AppEventBus> logger)
+    public AppEventBus(IServiceProvider serviceProvider, ILogger<AppEventBus> logger)
     {
-        _scopeFactory = scopeFactory;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
@@ -19,8 +19,12 @@ public class AppEventBus : IAppEventBus
     {
         if (evt == null) throw new ArgumentNullException(nameof(evt));
 
-        using var scope = _scopeFactory.CreateScope();
-        var handlers = scope.ServiceProvider.GetServices<IAppEventHandler<TEvent>>().ToList();
+        // AppEventBus is scoped. Resolve handlers from that same scope so event/outbox writes
+        // participate in the caller's unit of work and explicit transaction. Creating a child
+        // scope here gives handlers a second DbContext; when a workflow publishes before its
+        // transaction commits, that context can wait on the caller's locks while the caller
+        // waits for the handler, producing a self-deadlock.
+        var handlers = _serviceProvider.GetServices<IAppEventHandler<TEvent>>().ToList();
         if (handlers.Count == 0) return;
 
         foreach (var handler in handlers)

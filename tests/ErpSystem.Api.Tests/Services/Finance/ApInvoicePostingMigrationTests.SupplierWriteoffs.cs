@@ -29,14 +29,15 @@ public sealed partial class ApInvoicePostingMigrationTests
         await using var db = CreateContext();
         var fixture = await SeedApprovedApInvoiceAsync(db, tenant);
         var mapped = SeedAccount(db, tenant, "WRITE-OFF", AccountType.Revenue);
-        var partner = new BusinessPartner { TenantId = tenant, PartnerCode = "WO", PartnerName = "Writeoff supplier",
-            PartnerType = "Supplier", IsActive = true, DefaultWriteoffAccountId = mapped.Id, DefaultApAccountId = fixture.ApAccount.Id };
-        db.BusinessPartners.Add(partner);
+        var partner = fixture.Supplier;
+        partner.DefaultWriteoffAccountId = mapped.Id;
         await db.SaveChangesAsync();
         var service = WriteoffService(db, tenant, out var unitOfWork);
-        var note = WriteoffNote(tenant, partner, fixture.Supplier.Id);
+        var note = WriteoffNote(tenant, partner);
+        note.BusinessPartnerRoleId = fixture.Invoice.BusinessPartnerRoleId;
+        note.BusinessPartnerApProfileVersionId = fixture.Invoice.BusinessPartnerApProfileVersionId;
         await ReplaceWriteoffLines(service, note, new() { LineItemType = "Writeoff", Description = "Agreed liability reduction",
-            Quantity = 1m, UnitPrice = 25m, GLAccountId = explicitAccount ? fixture.ExpenseAccount.Id : null });
+            Quantity = 1m, UnitPrice = 25m, GLAccountId = explicitAccount ? fixture.ExpenseAccount.Id : mapped.Id });
         var expected = explicitAccount ? fixture.ExpenseAccount.Id : mapped.Id;
         note.LineItems.Single().GLAccountId.Should().Be(expected);
         note.LineItems.Single().ResolvedCreditAccountId.Should().Be(expected);
@@ -92,7 +93,7 @@ public sealed partial class ApInvoicePostingMigrationTests
         if (invalid == "discount-rate") dto.DiscountPercentage = 1m;
         if (invalid == "discount-amount") dto.DiscountAmount = 1m;
         if (invalid == "source-line") dto.OriginalVendorInvoiceLineItemId = Guid.NewGuid();
-        var note = WriteoffNote(tenant, new BusinessPartner { TenantId = tenant }, Guid.NewGuid());
+        var note = WriteoffNote(tenant, new BusinessPartner { TenantId = tenant });
         await ((Func<Task>)(() => ReplaceWriteoffLines(WriteoffService(db, tenant), note, dto)))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("AP_WRITEOFF_SETTLEMENT_ONLY*");
         note.LineItems.Should().BeEmpty();
@@ -114,16 +115,16 @@ public sealed partial class ApInvoicePostingMigrationTests
         var partner = new BusinessPartner { TenantId = tenant, PartnerCode = "WO", PartnerName = "Writeoff supplier",
             PartnerType = "Supplier", IsActive = true, DefaultWriteoffAccountId = invalid == "missing" ? null : account.Id };
         db.BusinessPartners.Add(partner); await db.SaveChangesAsync();
-        var note = WriteoffNote(tenant, partner, Guid.NewGuid());
+        var note = WriteoffNote(tenant, partner);
         await ((Func<Task>)(() => ReplaceWriteoffLines(WriteoffService(db, tenant), note,
-            new() { LineItemType = "Writeoff", Description = "Settlement", Quantity = 1m, UnitPrice = 25m })))
+            new() { LineItemType = "Writeoff", Description = "Settlement", Quantity = 1m, UnitPrice = 25m, GLAccountId = invalid == "missing" ? null : account.Id })))
             .Should().ThrowAsync<InvalidOperationException>();
         (await db.AccountTransactions.AnyAsync()).Should().BeFalse();
     }
 
-    private static SupplierDebitNote WriteoffNote(Guid tenant, BusinessPartner partner, Guid supplier) => new()
+    private static SupplierDebitNote WriteoffNote(Guid tenant, BusinessPartner partner) => new()
     {
-        TenantId = tenant, VendorId = partner.Id, Vendor = partner, SupplierId = supplier,
+        TenantId = tenant, VendorId = partner.Id, Vendor = partner,
         DebitNoteNumber = "WO-TEST", DebitNoteDate = new DateTime(2026, 7, 5), Reason = "Agreed liability reduction",
         CurrencyCode = "GHS", ExchangeRate = 1m, Status = SupplierDebitNoteStatus.Draft
     };
@@ -159,6 +160,6 @@ public sealed partial class ApInvoicePostingMigrationTests
             .Callback(() => transactionActive = false).Returns(Task.CompletedTask);
         unitOfWork.Setup(unit => unit.ClearTrackedChanges()).Callback(() => db.ChangeTracker.Clear());
         return new SupplierDebitNoteService(db, unitOfWork.Object, current.Object, null!, null!, engine, audit,
-            null!, null!, Mock.Of<ILogger<SupplierDebitNoteService>>());
+            null!, Mock.Of<ILogger<SupplierDebitNoteService>>());
     }
 }

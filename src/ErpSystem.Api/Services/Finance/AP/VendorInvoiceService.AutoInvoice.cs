@@ -65,7 +65,12 @@ public partial class VendorInvoiceService
         var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
             p.TenantId == TenantId && p.Id == id && !p.IsDeleted).AsNoTracking().SingleOrDefaultAsync(token)
             ?? throw new InvalidOperationException("Select a supplier Business Partner in this company.");
-        if (!BusinessPartnerLifecyclePolicy.IsOperationallyApproved(partner) || !BusinessPartnerRoles.HasSupplier(partner.PartnerType))
+        var hasApRole = await _unitOfWork.Repository<BusinessPartnerRole>().GetQueryable(role =>
+            role.TenantId == TenantId && role.BusinessPartnerId == id && !role.IsDeleted &&
+            role.Status == BusinessPartnerRoleStatus.Active &&
+            (role.RoleType == BusinessPartnerRoleType.Supplier || role.RoleType == BusinessPartnerRoleType.Contractor))
+            .AnyAsync(token);
+        if (!BusinessPartnerLifecyclePolicy.IsOperationallyApproved(partner) || !hasApRole)
             throw new InvalidOperationException("Auto Invoice requires an approved, active supplier Business Partner.");
         return partner;
     }
@@ -117,7 +122,7 @@ public partial class VendorInvoiceService
         if (_unitOfWork.HasActiveTransaction) throw new InvalidOperationException("Start Auto Invoice outside another transaction.");
         var hash = ProcurementInvoiceThreeWayMatchRules.HashSnapshot(new
         {
-            request.BusinessPartnerId, Reference = request.SupplierInvoiceNumber.Trim(), Date = request.InvoiceDate.Date,
+            request.BusinessPartnerId, request.BusinessPartnerRoleId, Reference = request.SupplierInvoiceNumber.Trim(), Date = request.InvoiceDate.Date,
             request.ExchangeRateId, request.ExchangeRate,
             Lines = request.Lines.OrderBy(l => l.GoodsReceiptNoteItemId).Select(l => new { l.GoodsReceiptNoteItemId, l.Quantity })
         });
@@ -172,11 +177,12 @@ public partial class VendorInvoiceService
                         throw new InvalidOperationException("A selected receipt quantity is no longer available. Refresh the eligible GRNs before generating the invoice.");
                     return (Input: input, Source: source.Source, LineId: Guid.NewGuid());
                 }).ToList();
-                var supplier = await ResolveSupplierIdentityForInvoiceAsync(request.BusinessPartnerId, false, cancellationToken);
+                var canonical = await ResolveCanonicalApPartnerAsync(request.BusinessPartnerId, request.BusinessPartnerRoleId, request.InvoiceDate, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 var invoice = await CreateCoreAsync(new VendorInvoiceCreateDto
                 {
-                    AutoInvoiceRequestId = request.RequestId, AutoInvoiceRequestHash = hash, SupplierId = supplier.Id,
+                    AutoInvoiceRequestId = request.RequestId, AutoInvoiceRequestHash = hash,
+                    BusinessPartnerId = canonical.Partner.Id, BusinessPartnerRoleId = canonical.Role.Id,
                     SupplierInvoiceNumber = request.SupplierInvoiceNumber.Trim(), InvoiceDate = request.InvoiceDate.Date,
                     CurrencyCode = currency, ExchangeRate = exchange.Rate, ExchangeRateId = exchange.ExchangeRateId,
                     MatchingType = InvoiceMatchingType.ThreeWay,

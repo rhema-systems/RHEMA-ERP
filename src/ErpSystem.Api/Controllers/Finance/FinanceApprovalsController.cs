@@ -246,38 +246,62 @@ public class FinanceApprovalsController : ControllerBase
 
                 var book = await _db.AccountingBooks.AsNoTracking().FirstOrDefaultAsync(item =>
                     item.TenantId == tenantId && !item.IsDeleted && item.Id == instance.EntityId &&
-                    item.TransitionWorkflowInstanceId == instance.Id &&
-                    item.PendingLifecycleStatus.HasValue &&
-                    item.TransitionRequestedByUserId.HasValue &&
-                    item.TransitionRequestedByUserId != currentUserId.Value,
+                    ((item.TransitionWorkflowInstanceId == instance.Id && item.PendingLifecycleStatus.HasValue &&
+                      item.TransitionRequestedByUserId.HasValue && item.TransitionRequestedByUserId != currentUserId.Value) ||
+                     (item.PrimaryReplacementWorkflowInstanceId == instance.Id && item.PrimaryReplacementRequestedAtUtc.HasValue &&
+                       item.PrimaryReplacementRequestedByUserId.HasValue && item.PrimaryReplacementRequestedByUserId != currentUserId.Value)),
                     cancellationToken);
+                AccountingBookPrimaryDesignation? primaryReversal = null;
+                if (book == null)
+                {
+                    book = await _db.AccountingBooks.AsNoTracking().FirstOrDefaultAsync(item =>
+                        item.TenantId == tenantId && !item.IsDeleted && item.Id == instance.EntityId, cancellationToken);
+                    if (book != null)
+                        primaryReversal = await _db.AccountingBookPrimaryDesignations.AsNoTracking().FirstOrDefaultAsync(item =>
+                            item.TenantId == tenantId && !item.IsDeleted && item.NewPrimaryBookId == book.Id
+                            && item.ReversalWorkflowInstanceId == instance.Id && item.ReversalRequestedAtUtc.HasValue
+                            && item.ReversalRequestedByUserId.HasValue && item.ReversalRequestedByUserId != currentUserId.Value
+                            && item.ReversedAtUtc == null, cancellationToken);
+                    if (primaryReversal == null) book = null;
+                }
                 if (book == null || !await _workflowService.CanUserApproveAsync(
                         "AccountingBookLifecycle", book.Id, currentUserId.Value))
                     continue;
 
+                var primaryReplacement = book.PrimaryReplacementWorkflowInstanceId == instance.Id;
+                var primaryReplacementReversal = primaryReversal != null;
                 results.Add(new FinanceApprovalQueueItemDto
                 {
                     ApprovalId = approval.Id,
                     EntityId = book.Id,
                     EntityType = "AccountingBookLifecycle",
                     Reference = book.Code,
-                    Title = $"{book.Name}: {book.LifecycleStatus} to {book.PendingLifecycleStatus}",
+                    Title = primaryReplacementReversal ? $"{book.Name}: reverse same-day primary replacement"
+                        : primaryReplacement ? $"{book.Name}: replace current primary book"
+                        : $"{book.Name}: {book.LifecycleStatus} to {book.PendingLifecycleStatus}",
                     DetailHref = "/finance/settings/accounting-books",
                     DocumentType = "Accounting Book",
                     Module = "Finance Settings",
                     CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
-                    StatusLabel = "Pending transition",
-                    SubmittedAt = book.TransitionRequestedAtUtc ?? instance.StartedDate ?? instance.CreatedDate,
+                    StatusLabel = primaryReplacementReversal ? "Pending primary replacement reversal"
+                        : primaryReplacement ? "Pending primary replacement" : "Pending transition",
+                    SubmittedAt = (primaryReplacementReversal ? primaryReversal!.ReversalRequestedAtUtc
+                        : primaryReplacement ? book.PrimaryReplacementRequestedAtUtc : book.TransitionRequestedAtUtc) ?? instance.StartedDate ?? instance.CreatedDate,
                     SubmittedBy = instance.InitiatedBy == null ? null : string.Join(" ",
                         new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }
                             .Where(value => !string.IsNullOrWhiteSpace(value))),
                     ApproverRole = approval.ApproverRole,
                     WorkflowName = instance.WorkflowDefinition?.Name,
                     DecisionOnDetailPage = true,
-                    Metadata = new Dictionary<string, string>
-                    {
-                        ["Target state"] = book.PendingLifecycleStatus!.Value.ToString()
-                    }
+                    Metadata = primaryReplacementReversal
+                        ? new Dictionary<string, string>
+                        {
+                            ["Effective date"] = primaryReversal!.EffectiveFrom.ToString("yyyy-MM-dd"),
+                            ["Restore book"] = primaryReversal.PreviousPrimaryBookId.ToString()
+                        }
+                        : primaryReplacement
+                        ? new Dictionary<string, string> { ["Effective date"] = book.PrimaryReplacementEffectiveDate?.ToString("yyyy-MM-dd") ?? "Not set" }
+                        : new Dictionary<string, string> { ["Target state"] = book.PendingLifecycleStatus!.Value.ToString() }
                 });
                 continue;
             }

@@ -81,7 +81,7 @@ export default function SupplierDetailedLedgerPage() {
             {
               fromDate: params.fromDate,
               toDate: params.toDate,
-              supplierIds: params.partnerIds,
+              businessPartnerIds: params.partnerIds,
               showSupplierCurrency: params.showPartnerCurrency,
             }
           );
@@ -96,7 +96,7 @@ export default function SupplierDetailedLedgerPage() {
             totalClosingBalance: report.totalClosingBalance,
             warnings: report.warnings ?? [],
             accounts: report.suppliers.map((supplier) => ({
-              id: supplier.supplierId,
+              id: supplier.businessPartnerId,
               code: supplier.supplierCode,
               name: supplier.supplierName,
               currencyCode: supplier.currencyCode,
@@ -111,14 +111,14 @@ export default function SupplierDetailedLedgerPage() {
         downloadPdf={(params) => accountsPayableService.downloadSupplierStatementDocument({
           fromDate: params.fromDate,
           toDate: params.toDate,
-          supplierIds: params.partnerIds,
+          businessPartnerIds: params.partnerIds,
           showSupplierCurrency: params.showPartnerCurrency,
           format: 'pdf',
         })}
         printPdf={(params) => accountsPayableService.printSupplierStatementDocument({
           fromDate: params.fromDate,
           toDate: params.toDate,
-          supplierIds: params.partnerIds,
+          businessPartnerIds: params.partnerIds,
           showSupplierCurrency: params.showPartnerCurrency,
         })}
       />

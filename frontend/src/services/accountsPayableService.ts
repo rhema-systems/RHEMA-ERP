@@ -40,8 +40,7 @@ import type {
     SupplierDebitNoteStatus,
     SupplierDebitNoteApplication,
     SupplierDebitNoteApplicationRequest,
-    SupplierDebitNoteApplicationResult,
-    ApSupplierIdentity
+    SupplierDebitNoteApplicationResult
 } from '../types/ap';
 import type { FinanceSourceDocumentDimension } from '../types/finance';
 import type { PurchaseOrderSupplierDefaultsDto } from './purchasingService';
@@ -62,7 +61,7 @@ export interface VendorInvoiceQuery {
     page?: number;
     pageSize?: number;
     searchTerm?: string;
-    supplierId?: string;
+    businessPartnerId?: string;
     status?: string;
     approvalStatus?: string;
     matchingStatus?: string;
@@ -80,7 +79,7 @@ export interface VendorPaymentQuery {
     page?: number;
     pageSize?: number;
     searchTerm?: string;
-    supplierId?: string;
+    businessPartnerId?: string;
     status?: string;
     paymentMethod?: string;
     paymentMethodId?: string;
@@ -124,10 +123,11 @@ export interface InvoiceSupplierDefaults extends PurchaseOrderSupplierDefaultsDt
 
 export class AccountsPayableService {
     constructor(private readonly invoiceBaseUrl = '/ap/invoices') {}
-    public async getInvoiceSupplierDefaults(supplierId: string, purchaseOrderId?: string, invoiceDate?: string): Promise<InvoiceSupplierDefaults | null> {
-        const query = new URLSearchParams({ supplierId });
+    public async getInvoiceSupplierDefaults(businessPartnerId: string, purchaseOrderId?: string, invoiceDate?: string, businessPartnerRoleId?: string): Promise<InvoiceSupplierDefaults | null> {
+        const query = new URLSearchParams({ businessPartnerId });
         if (purchaseOrderId) query.set('purchaseOrderId', purchaseOrderId);
         if (invoiceDate) query.set('invoiceDate', invoiceDate);
+        if (businessPartnerRoleId) query.set('businessPartnerRoleId', businessPartnerRoleId);
         return apiService.get<InvoiceSupplierDefaults | null>(`${this.invoiceBaseUrl}/supplier-defaults?${query}`);
     }
     private readonly baseUrl = '/ap';
@@ -140,7 +140,7 @@ export class AccountsPayableService {
         if (query.page) params.append('Page', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
         if (query.searchTerm) params.append('SearchTerm', query.searchTerm);
-        if (query.supplierId) params.append('SupplierId', query.supplierId);
+        if (query.businessPartnerId) params.append('BusinessPartnerId', query.businessPartnerId);
         if (query.status) params.append('Status', query.status);
         if (query.approvalStatus) params.append('ApprovalStatus', query.approvalStatus);
         if (query.matchingStatus) params.append('MatchingStatus', query.matchingStatus);
@@ -169,7 +169,7 @@ export class AccountsPayableService {
         return apiService.get<VendorInvoiceDistribution>(`${this.invoiceBaseUrl}/${id}/distribution`);
     }
 
-    /** Returns invoice-entry options spanning approved Business Partners and AP Suppliers. */
+    /** Returns canonical Business Partner AP roles, including corrective readiness feedback. */
     public async getInvoiceSupplierEntryOptions(): Promise<ApInvoiceSupplierEntryOption[]> {
         return apiService.get<ApInvoiceSupplierEntryOption[]>(`${this.invoiceBaseUrl}/entry-suppliers`);
     }
@@ -286,7 +286,7 @@ export class AccountsPayableService {
         if (query.page) params.append('Page', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
         if (query.searchTerm) params.append('SearchTerm', query.searchTerm);
-        if (query.supplierId) params.append('SupplierId', query.supplierId);
+        if (query.businessPartnerId) params.append('BusinessPartnerId', query.businessPartnerId);
         if (query.status) params.append('Status', query.status);
         if (query.paymentMethod) params.append('PaymentMethod', query.paymentMethod);
         if (query.paymentMethodId) params.append('PaymentMethodId', query.paymentMethodId);
@@ -444,9 +444,9 @@ export class AccountsPayableService {
         return apiService.get<CashRequirementForecast>(`${this.baseUrl}/reports/cash-forecast?${params.toString()}`);
     }
 
-    public async getSupplierStatement(supplierId: string, fromDate: string, toDate: string): Promise<any> {
+    public async getSupplierStatement(businessPartnerId: string, fromDate: string, toDate: string): Promise<any> {
         const params = new URLSearchParams();
-        params.append('supplierId', supplierId);
+        params.append('businessPartnerId', businessPartnerId);
         params.append('FromDate', fromDate);
         params.append('ToDate', toDate);
         return apiService.get<any>(`${this.baseUrl}/reports/supplier-statement?${params.toString()}`);
@@ -455,13 +455,13 @@ export class AccountsPayableService {
     public async getSupplierDetailedLedger(query: {
         fromDate: string;
         toDate: string;
-        supplierIds?: string[];
+        businessPartnerIds?: string[];
         showSupplierCurrency?: boolean;
     }): Promise<SupplierDetailedLedgerReport> {
         const params = new URLSearchParams();
         params.append('fromDate', query.fromDate);
         params.append('toDate', query.toDate);
-        query.supplierIds?.forEach((supplierId) => params.append('supplierIds', supplierId));
+        query.businessPartnerIds?.forEach((businessPartnerId) => params.append('businessPartnerIds', businessPartnerId));
         if (query.showSupplierCurrency !== undefined) {
             params.append('showSupplierCurrency', query.showSupplierCurrency.toString());
         }
@@ -472,7 +472,7 @@ export class AccountsPayableService {
     public async downloadSupplierStatementCsv(query: {
         fromDate: string;
         toDate: string;
-        supplierIds?: string[];
+        businessPartnerIds?: string[];
         showSupplierCurrency?: boolean;
     }): Promise<Blob> {
         return apiService.postBlob('/finance/report-exports/export', {
@@ -480,7 +480,7 @@ export class AccountsPayableService {
             format: 'Csv',
             periodStart: query.fromDate,
             periodEnd: query.toDate,
-            supplierIds: query.supplierIds ?? [],
+            businessPartnerIds: query.businessPartnerIds ?? [],
             showSupplierCurrency: query.showSupplierCurrency === true,
         });
     }
@@ -493,7 +493,7 @@ export class AccountsPayableService {
     public async downloadSupplierStatementDocument(query: {
         fromDate: string;
         toDate: string;
-        supplierIds?: string[];
+        businessPartnerIds?: string[];
         showSupplierCurrency?: boolean;
         format: 'pdf' | 'xlsx';
     }): Promise<void> {
@@ -502,7 +502,7 @@ export class AccountsPayableService {
             {
                 fromDate: query.fromDate,
                 toDate: query.toDate,
-                supplierIds: query.supplierIds ?? [],
+                businessPartnerIds: query.businessPartnerIds ?? [],
                 showSupplierCurrency: query.showSupplierCurrency === true,
             },
             { format: query.format }
@@ -512,7 +512,7 @@ export class AccountsPayableService {
     public async printSupplierStatementDocument(query: {
         fromDate: string;
         toDate: string;
-        supplierIds?: string[];
+        businessPartnerIds?: string[];
         showSupplierCurrency?: boolean;
     }): Promise<void> {
         await documentOutputService.printReportDocument(
@@ -520,7 +520,7 @@ export class AccountsPayableService {
             {
                 fromDate: query.fromDate,
                 toDate: query.toDate,
-                supplierIds: query.supplierIds ?? [],
+                businessPartnerIds: query.businessPartnerIds ?? [],
                 showSupplierCurrency: query.showSupplierCurrency === true,
             },
             { format: 'pdf' }
@@ -653,12 +653,6 @@ export class AccountsPayableService {
     }
 
     // --- Finance-owned Supplier Debit Notes ---
-
-    public async getApSupplierIdentity(id: string): Promise<ApSupplierIdentity> {
-        return apiService.get<ApSupplierIdentity>(
-            `${this.baseUrl}/supplier-identities/${encodeURIComponent(id)}`,
-        );
-    }
 
     public async getSupplierDebitNotes(query: SupplierDebitNoteQuery = {}): Promise<SupplierDebitNote[]> {
         return apiService.get<SupplierDebitNote[]>(`${this.baseUrl}/supplier-debit-notes`, { ...query });

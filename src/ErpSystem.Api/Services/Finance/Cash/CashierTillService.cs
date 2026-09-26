@@ -74,12 +74,18 @@ public sealed class CashierTillService : ICashierTillService
             .OrderByDescending(item => item.OpenedAt)
             .Take(500)
             .ToListAsync(cancellationToken);
+        var liveActivities = await LoadLiveActivitiesAsync(sessions, cancellationToken);
         var result = new List<CashierTillSessionDto>(sessions.Count);
         foreach (var session in sessions)
         {
             // Open sessions remain live. Recalculate their expected amount for the list so the
             // dashboard never presents a stale operational balance as if it were approved.
-            result.Add(await MapAsync(session, includeCustodyEntries: false, cancellationToken));
+            liveActivities.TryGetValue(session.Id, out var liveActivity);
+            result.Add(await MapAsync(
+                session,
+                includeCustodyEntries: false,
+                cancellationToken,
+                liveActivity));
         }
         return result;
     }
@@ -421,10 +427,11 @@ public sealed class CashierTillService : ICashierTillService
     private async Task<CashierTillSessionDto> MapAsync(
         CashierTillSession session,
         bool includeCustodyEntries,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TillActivity? precomputedActivity = null)
     {
         var cutoff = session.ActivityCutoffAt ?? DateTime.UtcNow;
-        var activity = session.Status == CashierTillSessionStatus.Open
+        var activity = precomputedActivity ?? (session.Status == CashierTillSessionStatus.Open
             ? await CalculateActivityAsync(session, cutoff, includeCustodyEntries, cancellationToken)
             : includeCustodyEntries
                 ? await CalculateActivityAsync(session, cutoff, includeEntries: true, cancellationToken)
@@ -433,7 +440,7 @@ public sealed class CashierTillService : ICashierTillService
                     session.DepositedAmount,
                     session.ExpectedClosingAmount,
                     session.CustodyEntryCount,
-                    Array.Empty<LiquidityAccountEntry>());
+                    Array.Empty<LiquidityAccountEntry>()));
         var transactionMovement = session.Status == CashierTillSessionStatus.Open
             ? activity.TransactionMovementAmount
             : session.TransactionMovementAmount;
@@ -518,6 +525,81 @@ public sealed class CashierTillService : ICashierTillService
                     ? [0]
                     : session.RowVersion)
         };
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, TillActivity>> LoadLiveActivitiesAsync(
+        IReadOnlyCollection<CashierTillSession> sessions,
+        CancellationToken cancellationToken)
+    {
+        var openSessions = sessions
+            .Where(item => item.Status == CashierTillSessionStatus.Open)
+            .ToArray();
+        if (openSessions.Length == 0)
+        {
+            return new Dictionary<Guid, TillActivity>();
+        }
+
+        var tenantId = TenantId;
+        var now = DateTime.UtcNow;
+        var earliestOpening = openSessions.Min(item => item.OpenedAt);
+        var latestCutoff = openSessions.Max(item => item.ActivityCutoffAt ?? now);
+        var liquidityAccountIds = openSessions
+            .Select(item => item.LiquidityAccountId)
+            .Distinct()
+            .ToArray();
+
+        // Load the operational window twice (entries and posted deposit allocations), then
+        // calculate every open session in memory. The previous implementation issued both
+        // queries once per session, so a 500-row dashboard could generate 1,000 SQL calls.
+        var entries = await _context.LiquidityAccountEntries
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId &&
+                           liquidityAccountIds.Contains(item.LiquidityAccountId) &&
+                           item.CreatedAt >= earliestOpening &&
+                           item.CreatedAt <= latestCutoff)
+            .ToListAsync(cancellationToken);
+
+        var postedAllocations = await _context.BankDepositAllocations
+            .AsNoTracking()
+            .Where(allocation => allocation.TenantId == tenantId &&
+                                 liquidityAccountIds.Contains(allocation.LiquidityAccountEntry.LiquidityAccountId) &&
+                                 allocation.BankDepositBatch.Status == BankDepositStatus.Posted &&
+                                 allocation.BankDepositBatch.PostedAt >= earliestOpening &&
+                                 allocation.BankDepositBatch.PostedAt <= latestCutoff)
+            .Select(allocation => new TillDepositActivity(
+                allocation.LiquidityAccountEntry.LiquidityAccountId,
+                allocation.BankDepositBatch.PostedAt!.Value,
+                allocation.AllocationType,
+                allocation.Amount))
+            .ToListAsync(cancellationToken);
+
+        return openSessions.ToDictionary(
+            session => session.Id,
+            session =>
+            {
+                var cutoff = session.ActivityCutoffAt ?? now;
+                var sessionEntries = entries
+                    .Where(item => item.LiquidityAccountId == session.LiquidityAccountId &&
+                                   item.CreatedAt >= session.OpenedAt &&
+                                   item.CreatedAt <= cutoff)
+                    .ToArray();
+                var movement = RoundMoney(sessionEntries.Sum(item =>
+                    item.Direction == LiquidityEntryDirection.Increase ? item.Amount : -item.Amount));
+                var deposited = RoundMoney(postedAllocations
+                    .Where(item => item.LiquidityAccountId == session.LiquidityAccountId &&
+                                   item.PostedAt >= session.OpenedAt &&
+                                   item.PostedAt <= cutoff)
+                    .Sum(item => item.AllocationType == BankDepositAllocationType.Receipt
+                        ? item.Amount
+                        : -item.Amount));
+
+                return new TillActivity(
+                    movement,
+                    deposited,
+                    RoundMoney(session.OpeningFloatAmount + movement - deposited),
+                    sessionEntries.Length,
+                    Array.Empty<LiquidityAccountEntry>());
+            });
     }
 
     private async Task<TillActivity> CalculateActivityAsync(
@@ -704,4 +786,10 @@ public sealed class CashierTillService : ICashierTillService
         decimal ExpectedClosingAmount,
         int EntryCount,
         IReadOnlyList<LiquidityAccountEntry> Entries);
+
+    private sealed record TillDepositActivity(
+        Guid LiquidityAccountId,
+        DateTime PostedAt,
+        BankDepositAllocationType AllocationType,
+        decimal Amount);
 }

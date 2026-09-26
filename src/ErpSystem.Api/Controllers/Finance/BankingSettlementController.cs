@@ -85,8 +85,10 @@ public sealed class BankingSettlementController : ControllerBase
     [HttpGet("deposits")]
     public async Task<ActionResult<IReadOnlyList<BankDepositDto>>> GetDeposits(
         [FromQuery] BankDepositStatus? status = null,
+        [FromQuery] bool includeAllocations = false,
+        [FromQuery] int limit = 200,
         CancellationToken cancellationToken = default)
-        => Ok(await _service.GetDepositsAsync(status, cancellationToken));
+        => Ok(await _service.GetDepositsAsync(status, includeAllocations, limit, cancellationToken));
 
     [HttpGet("deposits/{id:guid}")]
     public async Task<ActionResult<BankDepositDto>> GetDeposit(Guid id, CancellationToken cancellationToken)
@@ -178,8 +180,9 @@ public sealed class BankingSettlementController : ControllerBase
     [HttpGet("returned-cheques")]
     public async Task<ActionResult<IReadOnlyList<ReturnedChequeCaseDto>>> GetReturnedCheques(
         [FromQuery] ReturnedChequeCaseStatus? status = null,
+        [FromQuery] int limit = 200,
         CancellationToken cancellationToken = default)
-        => Ok(await _service.GetReturnedChequesAsync(status, cancellationToken));
+        => Ok(await _service.GetReturnedChequesAsync(status, limit, cancellationToken));
 
     [HttpGet("returned-cheques/{id:guid}")]
     public async Task<ActionResult<ReturnedChequeCaseDto>> GetReturnedCheque(

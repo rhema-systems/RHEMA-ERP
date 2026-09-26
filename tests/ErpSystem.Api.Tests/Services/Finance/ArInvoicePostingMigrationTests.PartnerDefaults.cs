@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed partial class ArInvoicePostingMigrationTests
 {
     [Fact]
-    public async Task SavedCustomerAccounts_ShouldReloadAndDriveInvoiceLedgerWithoutSupplierMappings()
+    public async Task LegacyCustomerAccounts_ShouldNotOverrideFinanceAndInvoiceAccounts()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -25,7 +25,7 @@ public sealed partial class ArInvoicePostingMigrationTests
         var supplierAccount = Guid.NewGuid();
         fixture.Customer.DefaultApAccountId = supplierAccount;
         var sourceLine = fixture.Invoice.LineItems.Single();
-        sourceLine.GLAccountId = null;
+        sourceLine.GLAccountId = sales.Id;
         sourceLine.LineItemType = LineItemType.Inventory;
         sourceLine.CostTotal = 40m;
         await db.SaveChangesAsync();
@@ -45,6 +45,10 @@ public sealed partial class ArInvoicePostingMigrationTests
         saved.SalesReturnsAccountId.Should().Be(returns.Id);
         (await db.Set<ErpSystem.Core.Entities.Procurement.BusinessPartner>().SingleAsync(x => x.Id == fixture.Customer.Id))
             .DefaultApAccountId.Should().Be(supplierAccount);
+        var settings = await db.FinanceSettings.SingleAsync(x => x.TenantId == tenantId);
+        settings.ControlAccountCOGSId = cost.Id;
+        settings.ControlAccountInventoryId = inventory.Id;
+        await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
         var posted = await service.PostAsync(fixture.Invoice.Id);
@@ -60,7 +64,7 @@ public sealed partial class ArInvoicePostingMigrationTests
         replay.JournalEntryId.Should().Be(posted.JournalEntryId);
         var lines = await db.AccountTransactions.Where(x => x.JournalEntryId == posted.JournalEntryId).ToListAsync();
         lines.Should().HaveCount(4);
-        lines.Single(x => x.AccountId == ar.Id).DebitAmount.Should().Be(100m);
+        lines.Single(x => x.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(100m);
         lines.Single(x => x.AccountId == sales.Id).CreditAmount.Should().Be(100m);
         lines.Single(x => x.AccountId == cost.Id).DebitAmount.Should().Be(40m);
         lines.Single(x => x.AccountId == inventory.Id).CreditAmount.Should().Be(40m);
@@ -68,15 +72,18 @@ public sealed partial class ArInvoicePostingMigrationTests
     }
 
     [Fact]
-    public async Task CustomerInventoryDefaults_ShouldPostBothSidesOfCapturedInventoryCost()
+    public async Task FinanceInventoryAccounts_ShouldPostBothSidesIgnoringCustomerDefaults()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedSentArInvoiceAsync(db, tenantId);
         var cost = SeedAccount(db, tenantId, "CUSTOMER-COGS", AccountType.Expense);
         var inventory = SeedAccount(db, tenantId, "CUSTOMER-INVENTORY", AccountType.Asset);
-        fixture.Customer.CustomerCostOfSalesAccountId = cost.Id;
-        fixture.Customer.CustomerInventoryAccountId = inventory.Id;
+        fixture.Customer.CustomerCostOfSalesAccountId = Guid.NewGuid();
+        fixture.Customer.CustomerInventoryAccountId = Guid.NewGuid();
+        var settings = await db.FinanceSettings.SingleAsync(x => x.TenantId == tenantId);
+        settings.ControlAccountCOGSId = cost.Id;
+        settings.ControlAccountInventoryId = inventory.Id;
         var line = fixture.Invoice.LineItems.Single();
         line.LineItemType = LineItemType.Inventory;
         line.CostTotal = 40m;
@@ -96,7 +103,7 @@ public sealed partial class ArInvoicePostingMigrationTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public async Task CustomerSalesDefault_ShouldPostUnlessDocumentAccountOverridesIt(bool explicitAccount, bool deactivateNewDefault)
+    public async Task InvoiceRevenueAccount_IsRequiredDespiteLegacyCustomerDefault(bool explicitAccount, bool deactivateNewDefault)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -110,6 +117,13 @@ public sealed partial class ArInvoicePostingMigrationTests
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
+        if (!explicitAccount)
+        {
+            var post = () => service.PostAsync(fixture.Invoice.Id);
+            await post.Should().ThrowAsync<InvalidOperationException>().WithMessage("*No revenue account*");
+            fixture.Invoice.JournalEntryId.Should().BeNull();
+            return;
+        }
         var result = await service.PostAsync(fixture.Invoice.Id);
         fixture.Customer.CustomerSalesAccountId = replacementSales.Id;
         if (deactivateNewDefault) replacementSales.Status = AccountStatus.Inactive;
@@ -153,7 +167,6 @@ public sealed partial class ArInvoicePostingMigrationTests
         await using var db = CreateContext();
         var fixture = await SeedSentArInvoiceAsync(db, tenantId);
         fixture.Customer.CustomerSalesAccountId = fixture.RevenueAccount.Id;
-        fixture.Invoice.LineItems.Single().GLAccountId = null;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
         var posted = await service.PostAsync(fixture.Invoice.Id);
@@ -196,7 +209,7 @@ public sealed partial class ArInvoicePostingMigrationTests
         var alternate = SeedAccount(db, tenantId, "ALTERED-LINE-ACCOUNT", AccountType.Revenue);
         fixture.Customer.CustomerSalesAccountId = fixture.RevenueAccount.Id;
         var line = fixture.Invoice.LineItems.Single();
-        line.GLAccountId = null;
+        line.GLAccountId = fixture.RevenueAccount.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
         var posted = await service.PostAsync(fixture.Invoice.Id);

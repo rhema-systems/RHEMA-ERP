@@ -3,7 +3,7 @@ import type { VendorInvoice } from '@/types/ap';
 
 export interface LandedCostInvoiceRequest {
   invoiceDate: string;
-  charges: Array<{ costItemId: string; supplierId: string; supplierInvoiceNumber: string;
+  charges: Array<{ costItemId: string; businessPartnerId: string; businessPartnerRoleId?: string; supplierInvoiceNumber: string;
     taxTreatment?: number; taxGroupId?: string }>;
 }
 export interface LandedCostPostResult {

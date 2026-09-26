@@ -30,7 +30,7 @@ public partial class VendorInvoiceService
     private static string DistributionBasis(VendorInvoice invoice, FinancePostingRequestV2Dto request) =>
         DistributionHash(JsonSerializer.Serialize(new
         {
-            invoice.SupplierId, invoice.InvoiceDate, invoice.CurrencyCode, invoice.ExchangeRate, invoice.TotalAmount,
+            invoice.BusinessPartnerId, invoice.InvoiceDate, invoice.CurrencyCode, invoice.ExchangeRate, invoice.TotalAmount,
             invoice.PurchaseOrderId, invoice.AcceptedSupplyKind, invoice.AcceptedSupplySourceId, invoice.EstateAcquisitionId, invoice.EstatePayableKind,
             request.FunctionalCurrencyCode,
             Lines = request.Lines.Select(line => new { line.SourceDocumentLineId, line.AccountId, line.TransactionTag,
@@ -78,7 +78,7 @@ public partial class VendorInvoiceService
                 await _unitOfWork.AcquireTransactionLockAsync($"ap-invoice-post:{TenantId:N}:{id:N}", ct);
                 var invoice = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(value =>
                         value.TenantId == TenantId && value.Id == id && !value.IsDeleted)
-                    .Include(value => value.Supplier).Include(value => value.LineItems).SingleOrDefaultAsync(ct)
+                    .Include(value => value.BusinessPartner).Include(value => value.LineItems).SingleOrDefaultAsync(ct)
                     ?? throw new KeyNotFoundException("Supplier invoice was not found for this tenant.");
                 var posted = await _unitOfWork.Repository<FinancePostingEvent>().GetQueryable(value =>
                     value.TenantId == TenantId && value.SourceDocumentId == id && value.SourceDocumentType == "VendorInvoice" &&

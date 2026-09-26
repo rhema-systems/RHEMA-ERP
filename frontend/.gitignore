@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-production/
 /.next-dev/
 /out/
 /public/syncfusion/

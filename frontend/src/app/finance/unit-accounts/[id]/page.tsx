@@ -15,6 +15,7 @@ import { Calculator, Save, X, Trash2, TrendingUp, History, AlertTriangle, Loader
 import Link from 'next/link';
 import type { UnitType, UnitAccount } from '@/types/unit-accounts';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
+import { toast } from 'sonner';
 
 export default function EditUnitAccountPage() {
     const router = useRouter();
@@ -90,7 +91,7 @@ export default function EditUnitAccountPage() {
             router.push('/finance/unit-accounts');
         } catch (error) {
             console.error('Failed to update account:', error);
-            alert('Failed to update unit account. Please try again.');
+            toast.error('The unit account was not updated. Review the account details, refresh its current state, and retry.');
         } finally {
             setSaving(false);
         }
@@ -103,7 +104,7 @@ export default function EditUnitAccountPage() {
                 router.push('/finance/unit-accounts');
             } catch (error) {
                 console.error('Failed to delete account:', error);
-                alert('Failed to delete unit account. Please try again.');
+                toast.error('The unit account was not deleted. It may have dependent activity; review its usage and retry.');
             }
         }
     };

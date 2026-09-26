@@ -48,7 +48,7 @@ public class CollectionService : ICollectionService
             FollowUpDate = dto.FollowUpDate,
             CollectionStatus = "Pending",
             OutstandingAmount = dto.OutstandingAmount,
-            CustomerId = dto.CustomerId,
+            BusinessPartnerId = dto.BusinessPartnerId,
             InvoiceId = dto.InvoiceId,
             AssignedToId = dto.AssignedToId ?? _currentUserProvider.UserId,
             Notes = dto.Notes,
@@ -58,7 +58,7 @@ public class CollectionService : ICollectionService
         await _activityRepo.AddAsync(activity);
         await _unitOfWork.SaveChangesAsync();
 
-        _logger.LogInformation("Created collection activity: {Subject} for customer {CustomerId}", activity.Subject, activity.CustomerId);
+        _logger.LogInformation("Created collection activity: {Subject} for business partner {BusinessPartnerId}", activity.Subject, activity.BusinessPartnerId);
         return await GetActivityByIdAsync(activity.Id) ?? throw new InvalidOperationException("Failed to retrieve");
     }
 
@@ -82,7 +82,7 @@ public class CollectionService : ICollectionService
     public async Task<CollectionActivityDetailDto?> GetActivityByIdAsync(Guid id)
     {
         var activity = await _activityRepo.GetByIdAsync(id,
-            a => a.Customer,
+            a => a.BusinessPartner,
             a => a.Invoice!,
             a => a.AssignedTo!);
         return activity == null ? null : MapActivityDetailDto(activity);
@@ -91,7 +91,7 @@ public class CollectionService : ICollectionService
     public async Task<PagedResult<CollectionActivitySummaryDto>> GetActivitiesAsync(
         int page = 1, int pageSize = 20,
         string? search = null, string? status = null, string? activityType = null,
-        Guid? customerId = null, Guid? assignedToId = null,
+        Guid? businessPartnerId = null, Guid? assignedToId = null,
         DateTime? startDate = null, DateTime? endDate = null)
     {
         var query = _activityRepo.GetQueryable();
@@ -101,8 +101,8 @@ public class CollectionService : ICollectionService
             query = query.Where(a => a.CollectionStatus == status);
         if (!string.IsNullOrEmpty(activityType))
             query = query.Where(a => a.ActivityType == activityType);
-        if (customerId.HasValue)
-            query = query.Where(a => a.CustomerId == customerId.Value);
+        if (businessPartnerId.HasValue)
+            query = query.Where(a => a.BusinessPartnerId == businessPartnerId.Value);
         if (assignedToId.HasValue)
             query = query.Where(a => a.AssignedToId == assignedToId.Value);
         if (startDate.HasValue)
@@ -112,7 +112,7 @@ public class CollectionService : ICollectionService
 
         var totalCount = await query.CountAsync();
         var items = await query
-            .Include(a => a.Customer)
+            .Include(a => a.BusinessPartner)
             .Include(a => a.AssignedTo)
             .OrderByDescending(a => a.ActivityDate)
             .Skip((page - 1) * pageSize).Take(pageSize)
@@ -135,7 +135,7 @@ public class CollectionService : ICollectionService
             query = query.Where(a => a.AssignedToId == assignedToId.Value);
 
         var items = await query
-            .Include(a => a.Customer).Include(a => a.AssignedTo)
+            .Include(a => a.BusinessPartner).Include(a => a.AssignedTo)
             .OrderBy(a => a.FollowUpDate)
             .ToListAsync();
 
@@ -152,7 +152,7 @@ public class CollectionService : ICollectionService
         var plan = new PaymentPlan
         {
             PlanName = dto.PlanName,
-            CustomerId = dto.CustomerId,
+            BusinessPartnerId = dto.BusinessPartnerId,
             TotalDebt = dto.TotalDebt,
             NumberOfInstallments = dto.NumberOfInstallments,
             Frequency = dto.Frequency,
@@ -214,7 +214,7 @@ public class CollectionService : ICollectionService
     public async Task<PaymentPlanDetailDto?> GetPlanByIdAsync(Guid id)
     {
         var plan = await _planRepo.GetByIdAsync(id,
-            p => p.Customer,
+            p => p.BusinessPartner,
             p => p.ApprovedBy!,
             p => p.Installments);
         return plan == null ? null : MapPlanDetailDto(plan);
@@ -223,15 +223,15 @@ public class CollectionService : ICollectionService
     public async Task<PagedResult<PaymentPlanSummaryDto>> GetPlansAsync(
         int page = 1, int pageSize = 20,
         string? search = null, string? status = null,
-        Guid? customerId = null, DateTime? startDate = null, DateTime? endDate = null)
+        Guid? businessPartnerId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
         var query = _planRepo.GetQueryable();
         if (!string.IsNullOrEmpty(search))
             query = query.Where(p => p.PlanName.Contains(search));
         if (!string.IsNullOrEmpty(status))
             query = query.Where(p => p.PlanStatus == status);
-        if (customerId.HasValue)
-            query = query.Where(p => p.CustomerId == customerId.Value);
+        if (businessPartnerId.HasValue)
+            query = query.Where(p => p.BusinessPartnerId == businessPartnerId.Value);
         if (startDate.HasValue)
             query = query.Where(p => p.StartDate >= startDate.Value);
         if (endDate.HasValue)
@@ -239,7 +239,7 @@ public class CollectionService : ICollectionService
 
         var totalCount = await query.CountAsync();
         var items = await query
-            .Include(p => p.Customer).Include(p => p.Installments)
+            .Include(p => p.BusinessPartner).Include(p => p.Installments)
             .OrderByDescending(p => p.CreatedAt)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .ToListAsync();
@@ -309,16 +309,16 @@ public class CollectionService : ICollectionService
         return await GetPlanByIdAsync(planId) ?? throw new InvalidOperationException("Failed to retrieve");
     }
 
-    public async Task<List<PaymentPlanInstallmentDto>> GetOverdueInstallmentsAsync(Guid? customerId = null)
+    public async Task<List<PaymentPlanInstallmentDto>> GetOverdueInstallmentsAsync(Guid? businessPartnerId = null)
     {
         var query = _installmentRepo.GetQueryable()
             .Where(i => i.DueDate < DateTime.UtcNow && i.InstallmentStatus != "Paid");
 
-        if (customerId.HasValue)
-            query = query.Where(i => i.PaymentPlan.CustomerId == customerId.Value);
+        if (businessPartnerId.HasValue)
+            query = query.Where(i => i.PaymentPlan.BusinessPartnerId == businessPartnerId.Value);
 
         var items = await query
-            .Include(i => i.PaymentPlan).ThenInclude(p => p.Customer)
+            .Include(i => i.PaymentPlan).ThenInclude(p => p.BusinessPartner)
             .OrderBy(i => i.DueDate)
             .ToListAsync();
         return items.Select(MapInstallmentDto).ToList();
@@ -334,7 +334,7 @@ public class CollectionService : ICollectionService
         Subject = a.Subject,
         ActivityType = a.ActivityType,
         CollectionStatus = a.CollectionStatus,
-        CustomerName = a.Customer?.CustomerName,
+        CustomerName = a.BusinessPartner?.PartnerName,
         OutstandingAmount = a.OutstandingAmount,
         PromisedAmount = a.PromisedAmount,
         PromisedPayDate = a.PromisedPayDate,
@@ -351,7 +351,7 @@ public class CollectionService : ICollectionService
         Subject = a.Subject,
         ActivityType = a.ActivityType,
         CollectionStatus = a.CollectionStatus,
-        CustomerName = a.Customer?.CustomerName,
+        CustomerName = a.BusinessPartner?.PartnerName,
         OutstandingAmount = a.OutstandingAmount,
         PromisedAmount = a.PromisedAmount,
         PromisedPayDate = a.PromisedPayDate,
@@ -360,7 +360,7 @@ public class CollectionService : ICollectionService
         FollowUpDate = a.FollowUpDate,
         AssignedToName = a.AssignedTo?.UserName,
         CreatedAt = a.CreatedAt,
-        CustomerId = a.CustomerId,
+        BusinessPartnerId = a.BusinessPartnerId,
         InvoiceId = a.InvoiceId,
         InvoiceNumber = a.Invoice?.InvoiceNumber,
         Description = a.Description,
@@ -373,7 +373,7 @@ public class CollectionService : ICollectionService
         Id = p.Id,
         PlanName = p.PlanName,
         PlanStatus = p.PlanStatus,
-        CustomerName = p.Customer?.CustomerName,
+        CustomerName = p.BusinessPartner?.PartnerName,
         TotalDebt = p.TotalDebt,
         TotalPaid = p.TotalPaid,
         RemainingBalance = p.TotalDebt - p.TotalPaid,
@@ -390,7 +390,7 @@ public class CollectionService : ICollectionService
         Id = p.Id,
         PlanName = p.PlanName,
         PlanStatus = p.PlanStatus,
-        CustomerName = p.Customer?.CustomerName,
+        CustomerName = p.BusinessPartner?.PartnerName,
         TotalDebt = p.TotalDebt,
         TotalPaid = p.TotalPaid,
         RemainingBalance = p.TotalDebt - p.TotalPaid,
@@ -400,7 +400,7 @@ public class CollectionService : ICollectionService
         StartDate = p.StartDate,
         EndDate = p.EndDate,
         CreatedAt = p.CreatedAt,
-        CustomerId = p.CustomerId,
+        BusinessPartnerId = p.BusinessPartnerId,
         ApprovedById = p.ApprovedById,
         ApprovedByName = p.ApprovedBy?.UserName,
         ApprovedDate = p.ApprovedDate,

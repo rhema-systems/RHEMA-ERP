@@ -129,7 +129,7 @@ public sealed class EstateRecurringBillingService(
         var invoice = existing is null
             ? await invoiceService.CreateAsync(new InvoiceCreateDto
             {
-                CustomerId = asset.CustomerBusinessPartnerId.Value,
+                BusinessPartnerId = asset.CustomerBusinessPartnerId.Value,
                 InvoiceDate = DateTime.UtcNow.Date,
                 DueDate = due,
                 Reference = reference,

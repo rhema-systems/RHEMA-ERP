@@ -460,8 +460,6 @@ export default function BusinessPartnerDetailPage() {
             )}
           </TabsTrigger>
           <TabsTrigger value="financial">Financial Info</TabsTrigger>
-          {(hasSupplierRole(partner.partnerType) || hasContractorRole(partner.partnerType)) && <TabsTrigger value="payables">Accounts Payable</TabsTrigger>}
-          {hasCustomerRole(partner.partnerType) && <TabsTrigger value="receivables">Accounts Receivable</TabsTrigger>}
           {hasSupplierRole(partner.partnerType) && (
             <TabsTrigger value="purchase-orders">
               Purchase Orders ({purchaseOrders.length})
@@ -745,8 +743,6 @@ export default function BusinessPartnerDetailPage() {
         </TabsContent>
 
         {/* Financial Info Tab */}
-        <TabsContent value="payables"><Card><CardContent className="pt-6"><PartnerAccountsFields value={partner.postingDefaults || emptyBusinessPartnerPostingDefaults()} onChange={() => {}} accounts={postingCatalogues.accounts} bankAccounts={postingCatalogues.bankAccounts} disabled /></CardContent></Card></TabsContent>
-        <TabsContent value="receivables"><Card><CardContent className="pt-6"><BusinessPartnerReceivablesFields value={partner.receivablesDefaults} onChange={() => {}} accounts={postingCatalogues.accounts} disabled /></CardContent></Card></TabsContent>
         <TabsContent value="financial">
           <Card>
             <CardHeader>

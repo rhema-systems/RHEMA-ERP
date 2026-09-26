@@ -18,8 +18,8 @@ describe('supplier invoice workspace contracts', () => {
     expect(apiService.get).toHaveBeenCalledWith('/procurement/supplier-invoices/invoice-id/distribution');
     expect(apiService.post).toHaveBeenCalledWith('/procurement/supplier-invoices/invoice-id/submit', {});
   });
-  it('uses the Procurement route for supplier account defaults', async () => {
-    await procurement.getInvoiceSupplierDefaults('supplier-id', 'po-id');
-    expect(apiService.get).toHaveBeenCalledWith('/procurement/supplier-invoices/supplier-defaults?supplierId=supplier-id&purchaseOrderId=po-id');
+  it('uses canonical partner, role and accounting date for Procurement defaults', async () => {
+    await procurement.getInvoiceSupplierDefaults('partner-id', 'po-id', '2026-09-26', 'supplier-role');
+    expect(apiService.get).toHaveBeenCalledWith('/procurement/supplier-invoices/supplier-defaults?businessPartnerId=partner-id&purchaseOrderId=po-id&invoiceDate=2026-09-26&businessPartnerRoleId=supplier-role');
   });
 });

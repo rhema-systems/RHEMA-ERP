@@ -14,19 +14,22 @@ public sealed class ApInvoiceSupplierDto
 }
 
 /// <summary>
-/// Finance-owned entry option spanning Procurement's approved Business Partner identities and
-/// canonical Supplier identities. <see cref="Id"/> is safe to submit to the vendor-invoice
-/// command, which resolves either identity to the persisted Supplier foreign key.
+/// Finance-owned entry option for one canonical Business Partner AP role. Incomplete profiles are
+/// returned with a corrective readiness explanation so the UI never hides master-data problems.
 /// </summary>
 public sealed class ApInvoiceSupplierEntryOptionDto
 {
     public Guid Id { get; set; }
-    public Guid? SupplierId { get; set; }
-    public Guid? BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public string RoleType { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public Guid? PaymentTermId { get; set; }
     public string? Currency { get; set; }
+    public bool IsTransactionReady { get; set; }
+    public string ReadinessCode { get; set; } = string.Empty;
+    public string ReadinessMessage { get; set; } = string.Empty;
 }
 
 public sealed class ApGoodsInvoiceEntryDto

@@ -292,7 +292,7 @@ public class ReturnedChequeCaseDto
     public string CaseNumber { get; set; } = string.Empty;
     public Guid CustomerPaymentId { get; set; }
     public string PaymentNumber { get; set; } = string.Empty;
-    public Guid CustomerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public Guid? BankDepositBatchId { get; set; }
     public string? DepositNumber { get; set; }

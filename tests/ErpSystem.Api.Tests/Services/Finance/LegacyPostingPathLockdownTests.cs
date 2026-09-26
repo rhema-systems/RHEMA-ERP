@@ -327,12 +327,20 @@ public sealed class LegacyPostingPathLockdownTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-LegacyPostingLockdown")]
     [Trait("Category", "Architecture")]
-    public void BankOpeningBalancePosting_ShouldRemainDisabledUntilPostingEngineMigration()
+    public void BankMasterCreation_ShouldNotExposeLegacyOpeningBalanceInputs()
     {
         var root = FindRepositoryRoot();
         var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "Cash", "BankAccountService.cs"));
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "BankAccountDtos.cs"));
+        var createDto = dto[dto.IndexOf("public class CreateBankAccountDto", StringComparison.Ordinal)
+            ..dto.IndexOf("public class UpdateBankAccountDto", StringComparison.Ordinal)];
 
-        service.Should().Contain("FIN-LIM-0006 opening-balance migration batch");
+        createDto.Should().NotContain("OpeningBalance")
+            .And.NotContain("OpeningBalanceExchangeRate")
+            .And.NotContain("OpeningDate");
+        service.Should().Contain("OpeningBalance = 0m")
+            .And.Contain("CurrentBalance = 0m")
+            .And.Contain("AvailableBalance = 0m");
         service.Should().NotContain("_journalEntryService");
         service.Should().NotContain("CreateJournalEntryAsync");
         service.Should().NotContain("PostJournalEntryAsync");
@@ -368,6 +376,267 @@ public sealed class LegacyPostingPathLockdownTests
         subledgerPage.Should().NotContain("financeDataService.getFinanceSettings()");
         journalPage.Should().NotContain("<SelectItem value=\"Opening Balance\"");
         journalPage.Should().NotContain("ALL_ACTIVE_BOOKS_CODE");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void SubledgerAdjustments_ShouldUseGovernedCanonicalBusinessPartnerIdentity()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "SubledgerAdjustmentJournalService.cs"));
+        var entity = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Entities", "Finance", "SubledgerAdjustmentJournal.cs"));
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "SubledgerAdjustmentJournalDtos.cs"));
+        var page = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "subledger-adjustments", "new", "page.tsx"));
+        var migrationPath = Directory.GetFiles(
+                Path.Combine(root, "src", "ErpSystem.Data", "Migrations"),
+                "*CanonicalSubledgerAdjustmentBusinessPartnerIdentity.cs")
+            .Single(path => !path.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase));
+        var migration = File.ReadAllText(migrationPath);
+
+        entity.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid BusinessPartnerRoleId")
+            .And.Contain("public Guid? BusinessPartnerApProfileVersionId")
+            .And.Contain("public Guid? BusinessPartnerArProfileVersionId")
+            .And.Contain("public string BusinessPartnerCode")
+            .And.Contain("public string BusinessPartnerName");
+        entity.Should().NotContain("public Guid? CustomerId")
+            .And.NotContain("public Guid? SupplierId");
+
+        dto.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid? BusinessPartnerRoleId");
+        dto.Should().NotContain("public Guid? CustomerId")
+            .And.NotContain("public Guid? SupplierId");
+
+        service.Should().Contain("BusinessPartnerFinanceProfilePolicy.ResolveAr")
+            .And.Contain("BusinessPartnerFinanceProfilePolicy.ResolveAp")
+            .And.Contain("BusinessPartnerCode = counterparty.Partner.PartnerCode")
+            .And.Contain("BusinessPartnerName = counterparty.Partner.PartnerName");
+        service.Should().NotContain("_context.Set<Supplier>()")
+            .And.NotContain("new Supplier")
+            .And.NotContain("dto.CustomerId")
+            .And.NotContain("dto.SupplierId");
+
+        page.Should().Contain("businessPartnerId: data.businessPartnerId")
+            .And.Contain("accountsPayableService.getInvoiceSupplierEntryOptions()")
+            .And.NotContain("customerId: data")
+            .And.NotContain("supplierId: data");
+
+        migration.Should().Contain("IF EXISTS (SELECT 1 FROM [dbo].[SubledgerAdjustmentJournals])")
+            .And.Contain("requires the approved Finance transaction reset")
+            .And.Contain("DropColumn(\n                name: \"CustomerId\"")
+            .And.Contain("DropColumn(\n                name: \"SupplierId\"")
+            .And.NotContain("RenameColumn(\n                name: \"CustomerId\"")
+            .And.NotContain("RenameColumn(\n                name: \"SupplierId\"");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void CustomerReceipts_ShouldUseGovernedCanonicalBusinessPartnerIdentity()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "PaymentService.cs"));
+        var entity = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Entities", "Finance", "CustomerPayment.cs"));
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "AR", "PaymentCrudDtos.cs"));
+        var createDto = dto[dto.IndexOf("public class PaymentCreateDto", StringComparison.Ordinal)..dto.IndexOf("public class PaymentUpdateDto", StringComparison.Ordinal)];
+        var migrationPath = Directory.GetFiles(
+                Path.Combine(root, "src", "ErpSystem.Data", "Migrations"),
+                "*CanonicalCustomerPaymentBusinessPartnerIdentity.cs")
+            .Single(path => !path.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase));
+        var migration = File.ReadAllText(migrationPath);
+
+        entity.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid BusinessPartnerRoleId")
+            .And.Contain("public Guid BusinessPartnerArProfileVersionId")
+            .And.Contain("public string BusinessPartnerCode")
+            .And.Contain("public string BusinessPartnerName")
+            .And.NotContain("public Guid CustomerId");
+        createDto.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid? BusinessPartnerRoleId")
+            .And.NotContain("public Guid CustomerId");
+        service.Should().Contain("BusinessPartnerFinanceProfilePolicy.ResolveAr")
+            .And.Contain("BusinessPartnerArProfileVersionId = counterparty.Profile.Id")
+            .And.Contain("BusinessPartnerCode = customer.PartnerCode")
+            .And.NotContain("dto.CustomerId")
+            .And.NotContain("payment.CustomerId");
+        migration.Should().Contain("IF EXISTS (SELECT 1 FROM [CustomerPayment])")
+            .And.Contain("requires a fresh Finance transactional database")
+            .And.Contain("DropColumn(\n                name: \"CustomerId\"")
+            .And.NotContain("RenameColumn(\n                name: \"CustomerId\"");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void CustomerInvoices_ShouldUseGovernedCanonicalBusinessPartnerIdentity()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "InvoiceService.cs"));
+        var entity = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Entities", "Finance", "Invoice.cs"));
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "AR", "PaymentCrudDtos.cs"));
+        var createDto = dto[dto.IndexOf("public class InvoiceCreateDto", StringComparison.Ordinal)..dto.IndexOf("public class InvoiceLineItemCreateDto", StringComparison.Ordinal)];
+        var migrationPath = Directory.GetFiles(
+                Path.Combine(root, "src", "ErpSystem.Data", "Migrations"),
+                "*CanonicalInvoiceBusinessPartnerEvidence.cs")
+            .Single(path => !path.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase));
+        var migration = File.ReadAllText(migrationPath);
+
+        entity.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid BusinessPartnerRoleId")
+            .And.Contain("public Guid BusinessPartnerArProfileVersionId")
+            .And.Contain("public string BusinessPartnerCode")
+            .And.NotContain("public Guid CustomerId");
+        createDto.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public Guid? BusinessPartnerRoleId")
+            .And.NotContain("public Guid CustomerId");
+        service.Should().Contain("BusinessPartnerFinanceProfilePolicy.ResolveAr")
+            .And.Contain("BusinessPartnerArProfileVersionId = counterparty.Profile.Id")
+            .And.Contain("BusinessPartnerCode = customer.PartnerCode")
+            .And.Contain("var arAccountId = settings.ControlAccountArId")
+            .And.NotContain("dto.CustomerId")
+            .And.NotContain("invoice.CustomerId");
+        migration.Should().Contain("IF EXISTS (SELECT 1 FROM [Invoices])")
+            .And.Contain("requires a fresh Finance transactional database")
+            .And.Contain("BusinessPartnerArProfileVersionId")
+            .And.Contain("BusinessPartnerRoleId")
+            .And.NotContain("RenameColumn(\n                name: \"CustomerId\"");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void TaxCalculation_ShouldUseOneCanonicalCounterpartyAndExplicitRole()
+    {
+        var root = FindRepositoryRoot();
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "TaxDtos.cs"));
+        var request = dto[dto.IndexOf("public class TaxCalculationRequestDto", StringComparison.Ordinal)..dto.IndexOf("public class TaxCalculationResultDto", StringComparison.Ordinal)];
+        var engine = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "Taxation", "TaxCalculationEngine.cs"));
+
+        request.Should().Contain("public Guid? BusinessPartnerId")
+            .And.Contain("public BusinessPartnerRoleType? BusinessPartnerRole")
+            .And.NotContain("CustomerId")
+            .And.NotContain("SupplierId");
+        engine.Should().Contain("request.BusinessPartnerId")
+            .And.Contain("request.BusinessPartnerRole")
+            .And.NotContain("request.CustomerId")
+            .And.NotContain("request.SupplierId");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void TaxReporting_ShouldUseOneCanonicalCounterpartyFilterAndNoLegacySupplierLookup()
+    {
+        var root = FindRepositoryRoot();
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "TaxReportDtos.cs"));
+        var request = dto[dto.IndexOf("public sealed class TaxReportRequestDto", StringComparison.Ordinal)..dto.IndexOf("public sealed class GhanaTaxSnapshotReportDto", StringComparison.Ordinal)];
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "Taxation", "TaxReportingService.cs"));
+
+        request.Should().Contain("public Guid? BusinessPartnerId")
+            .And.Contain("public BusinessPartnerRoleType? BusinessPartnerRole")
+            .And.NotContain("CustomerId")
+            .And.NotContain("SupplierId");
+        service.Should().Contain("request.BusinessPartnerId")
+            .And.Contain("request.BusinessPartnerRole")
+            .And.Contain("docInfo.BusinessPartnerId")
+            .And.NotContain("_context.Set<Supplier>()")
+            .And.NotContain("request.CustomerId")
+            .And.NotContain("request.SupplierId")
+            .And.NotContain("docInfo.CustomerId")
+            .And.NotContain("docInfo.SupplierId");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void ApReporting_ShouldUseCanonicalBusinessPartnerIdentityWithoutSupplierFallbacks()
+    {
+        var root = FindRepositoryRoot();
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "AccountsPayableDtos.cs"));
+        var reportDtos = dto[dto.IndexOf("#region AP Reports", StringComparison.Ordinal)..];
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApReportsService.cs"));
+        var controller = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "ApControllersConsolidated.cs"));
+
+        reportDtos.Should().Contain("public Guid BusinessPartnerId")
+            .And.NotContain("public Guid SupplierId")
+            .And.NotContain("public Guid? SupplierId");
+        service.Should().Contain("Repository<BusinessPartner>()")
+            .And.Contain("selection.BusinessPartnerId")
+            .And.NotContain("Repository<Supplier>()")
+            .And.NotContain("BusinessPartnerId ??")
+            .And.NotContain("selection.SupplierId");
+        controller.Should().Contain("businessPartnerIds")
+            .And.Contain("businessPartnerId")
+            .And.NotContain("supplier-detailed-ledger?supplierIds");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void ArReporting_ShouldUseCanonicalBusinessPartnerIdentityAndGovernedCustomerRoles()
+    {
+        var root = FindRepositoryRoot();
+        var dto = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "AR", "ReportDtos.cs"));
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "ArReportsService.cs"));
+        var controller = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "ArControllersConsolidated.cs"));
+
+        dto.Should().Contain("public Guid BusinessPartnerId")
+            .And.NotContain("public Guid CustomerId")
+            .And.NotContain("public Guid? CustomerId");
+        service.Should().Contain("Repository<BusinessPartnerRole>()")
+            .And.Contain("BusinessPartnerRoleType.Customer")
+            .And.Contain("customer.BusinessPartnerId")
+            .And.NotContain("PartnerType == \"Customer\"")
+            .And.NotContain("customer.CustomerId")
+            .And.NotContain("query.CustomerId");
+        controller.Should().Contain("businessPartnerIds")
+            .And.Contain("customer-statement/{businessPartnerId}");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void AuxiliaryFinanceContracts_ShouldExposeCanonicalBusinessPartnerIdentityOnly()
+    {
+        var root = FindRepositoryRoot();
+        var landedCost = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "LandedCostInvoiceDtos.cs"));
+        var purchaseOrder = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "FinancePurchaseOrderDtos.cs"));
+        var banking = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "BankingSettlementDtos.cs"));
+
+        landedCost.Should().Contain("BusinessPartnerId").And.NotContain("SupplierId");
+        purchaseOrder.Should().Contain("BusinessPartnerId")
+            .And.NotContain("public Guid VendorId")
+            .And.NotContain("public Guid SupplierId");
+        banking[banking.IndexOf("public class ReturnedChequeCaseDto", StringComparison.Ordinal)..]
+            .Should().Contain("BusinessPartnerId").And.NotContain("public Guid CustomerId");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-CanonicalBusinessPartner")]
+    [Trait("Category", "Architecture")]
+    public void ArCustomerRegister_ShouldBeAReadOnlyCanonicalBusinessPartnerView()
+    {
+        var root = FindRepositoryRoot();
+        var controller = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "CustomerController.cs"));
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "CustomerService.cs"));
+        var searchDtos = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "DTOs", "Finance", "FinanceSearchDtos.cs"));
+        var listPage = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "ar", "customers", "page.tsx"));
+
+        controller.Should().NotContain("[HttpPost]")
+            .And.NotContain("[HttpPut(")
+            .And.NotContain("[HttpDelete(");
+        service.Should().Contain("p.Roles.Any")
+            .And.Contain("BusinessPartnerRoleType.Customer")
+            .And.NotContain("PartnerType == \"Customer\"")
+            .And.NotContain("Task<CustomerDto> CreateAsync")
+            .And.NotContain("Task<CustomerDto> UpdateAsync")
+            .And.NotContain("Task DeleteAsync");
+        searchDtos.Should().Contain("public Guid? BusinessPartnerId")
+            .And.NotContain("public Guid? CustomerId");
+        listPage.Should().Contain("/procurement/business-partners/new")
+            .And.Contain("/procurement/business-partners/${customer.id}/edit")
+            .And.NotContain("/finance/ar/customers/new");
     }
 
     private static string FindRepositoryRoot()

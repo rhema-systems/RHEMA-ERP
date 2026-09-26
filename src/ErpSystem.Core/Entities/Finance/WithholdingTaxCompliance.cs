@@ -81,7 +81,7 @@ public sealed class WithholdingTaxCertificate : TenantEntity
     [MaxLength(50)]
     public string PaymentNumber { get; set; } = string.Empty;
 
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
 
     [Required]
     [MaxLength(300)]
@@ -232,7 +232,7 @@ public sealed class WithholdingTaxRemittanceLine : TenantEntity
     public Guid RemittanceId { get; set; }
     public Guid VendorPaymentId { get; set; }
     public Guid? CertificateId { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
     public Guid? TaxId { get; set; }
     public Guid? JournalEntryId { get; set; }
 

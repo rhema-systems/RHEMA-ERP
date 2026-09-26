@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { ArrowLeft, Save, Plus, Trash2, AlertCircle, Loader2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ManualJournalAccountCombobox } from '@/components/finance/journal-entries/manual-journal-account-combobox';
 import { ManualJournalDimensionCell, ManualJournalDimensionDefaults } from '@/components/finance/journal-entries/manual-journal-dimension-editor';
@@ -33,6 +33,7 @@ import {
     getManualJournalRateRequest,
     normalizeCurrencyCode,
     requireFunctionalCurrency,
+    roundJournalMoney,
 } from '@/lib/finance/manual-journal-fx';
 import {
     getMissingRequiredManualDimension,
@@ -61,6 +62,7 @@ interface JournalLine {
 
 export default function NewJournalEntryPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { toast } = useToast();
 
     // Accounts from API
@@ -81,11 +83,11 @@ export default function NewJournalEntryPage() {
     // Header State
     const [header, setHeader] = useState({
         entryDate: new Date().toISOString().split('T')[0],
-        journalType: 'General' as JournalType,
+        journalType: (searchParams.get('journalType') === 'Delta Adjustment' ? 'Delta Adjustment' : 'General') as JournalType,
         description: '',
         referenceNumber: '',
         notes: '',
-        bookClassification: 'IFRS',
+        bookClassification: searchParams.get('book') || 'IFRS',
     });
     const [journalNumber, setJournalNumber] = useState('');
     const journalSequence = useDocumentSequence('Finance', FinanceDocumentTypes.JournalEntry);
@@ -183,13 +185,27 @@ export default function NewJournalEntryPage() {
     ]);
 
     // Computed Totals
-    const totalDebit = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
-    const totalCredit = lines.reduce((sum, line) => sum + (line.credit || 0), 0);
-    const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
+    const totalDebit = roundJournalMoney(lines.reduce((sum, line) => sum + roundJournalMoney(line.debit || 0), 0));
+    const totalCredit = roundJournalMoney(lines.reduce((sum, line) => sum + roundJournalMoney(line.credit || 0), 0));
+    const isBalanced = totalDebit === totalCredit;
     const targetAccountingBooks = useMemo(
         () => getPostingTargetBooks(accountingBooks, header.bookClassification),
         [accountingBooks, header.bookClassification]
     );
+    const isDeltaAdjustment = header.journalType === 'Delta Adjustment';
+    const selectableAccountingBooks = useMemo(
+        () => accountingBooks.filter(book =>
+            book.isActive !== false &&
+            book.allowsPosting !== false &&
+            (isDeltaAdjustment ? book.bookType === 'Delta' : book.bookType !== 'Delta')),
+        [accountingBooks, isDeltaAdjustment]
+    );
+    useEffect(() => {
+        if (selectableAccountingBooks.length === 0) return;
+        if (!selectableAccountingBooks.some(book => book.code === header.bookClassification)) {
+            setHeader(current => ({ ...current, bookClassification: selectableAccountingBooks[0].code }));
+        }
+    }, [header.bookClassification, selectableAccountingBooks]);
     const selectedBookName = getAccountingBookName(accountingBooks, header.bookClassification);
     const targetBookLabel = selectedBookName;
     const invalidLines = useMemo(() => {
@@ -213,9 +229,17 @@ export default function NewJournalEntryPage() {
     [functionalCurrency, lines]);
 
     const handleJournalTypeChange = (value: JournalType) => {
+        const wantsDelta = value === 'Delta Adjustment';
+        const candidates = accountingBooks.filter(book =>
+            book.isActive !== false &&
+            book.allowsPosting !== false &&
+            (wantsDelta ? book.bookType === 'Delta' : book.bookType !== 'Delta'));
         setHeader(current => ({
             ...current,
             journalType: value,
+            bookClassification: candidates.some(book => book.code === current.bookClassification)
+                ? current.bookClassification
+                : candidates[0]?.code ?? '',
         }));
     };
 
@@ -439,11 +463,11 @@ export default function NewJournalEntryPage() {
             if (isForeign) {
                 const rate = typeof updatedLine.exchangeRate === 'number' ? updatedLine.exchangeRate : 0;
                 if (field === 'foreignDebit') {
-                    updatedLine.debit = (value || 0) * rate;
+                    updatedLine.debit = roundJournalMoney((value || 0) * rate);
                     updatedLine.foreignCredit = 0;
                     updatedLine.credit = 0;
                 } else if (field === 'foreignCredit') {
-                    updatedLine.credit = (value || 0) * rate;
+                    updatedLine.credit = roundJournalMoney((value || 0) * rate);
                     updatedLine.foreignDebit = 0;
                     updatedLine.debit = 0;
                 }
@@ -646,6 +670,7 @@ export default function NewJournalEntryPage() {
                                 <SelectContent>
                                     <SelectItem value="General">General</SelectItem>
                                     <SelectItem value="Adjusting">Adjusting</SelectItem>
+                                    <SelectItem value="Delta Adjustment">Delta adjustment</SelectItem>
                                     <SelectItem value="Reversing">Reversing</SelectItem>
                                 </SelectContent>
                             </Select>
@@ -658,12 +683,25 @@ export default function NewJournalEntryPage() {
                             >
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {accountingBooks.map((book) => (
+                                    {selectableAccountingBooks.map((book) => (
                                         <SelectItem key={book.code} value={book.code}>{book.name}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
+                            {isDeltaAdjustment && selectableAccountingBooks.length === 0 && (
+                                <p className="text-xs text-destructive">No active, posting-enabled Delta accounting book is available.</p>
+                            )}
                         </div>
+
+                        {isDeltaAdjustment && (
+                            <Alert className="md:col-span-2">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertTitle>Governed Delta adjustment</AlertTitle>
+                                <AlertDescription>
+                                    This journal posts only to the selected Delta book, never through ordinary applicability rules. It requires the dedicated Delta-adjustment approval workflow before posting.
+                                </AlertDescription>
+                            </Alert>
+                        )}
 
                         <div className="space-y-2 md:col-span-2">
                             <Label htmlFor="description">Description *</Label>
@@ -900,6 +938,16 @@ export default function NewJournalEntryPage() {
                                         <td className="p-3 text-right">{totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                         <td></td>
                                         <td></td>
+                                    </tr>
+                                    <tr className="border-t bg-background">
+                                        <td colSpan={10} className="p-3">
+                                            <div className="flex justify-end">
+                                                <Button variant="outline" size="sm" onClick={handleAddLine}>
+                                                    <Plus className="mr-2 h-4 w-4" />
+                                                    Add another line
+                                                </Button>
+                                            </div>
+                                        </td>
                                     </tr>
                                 </tfoot>
                             </table>

@@ -6,7 +6,7 @@ import type { LandedCostDetailDto } from '@/services/inventoryManagementService'
 
 const api = vi.hoisted(() => ({ suppliers: vi.fn(), prepare: vi.fn(), allowed: true }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasAnyPermission: () => api.allowed }) }));
-vi.mock('@/services/businessPartnerService', () => ({ businessPartnerService: { getAllPartnersForDropdown: api.suppliers } }));
+vi.mock('@/services/procurementSupplierInvoiceService', () => ({ accountsPayableService: { getInvoiceSupplierEntryOptions: api.suppliers } }));
 vi.mock('@/services/landedCostInvoiceService', () => ({ landedCostInvoiceService: { prepare: api.prepare } }));
 vi.mock('next/link', () => ({ default: ({ children, ...props }: any) => <a {...props}>{children}</a> }));
 const voucher = { id: 'costs', landedCostNumber: 'LC-1', status: 'Allocated', currency: 'GHS', costItems: [
@@ -16,7 +16,7 @@ const voucher = { id: 'costs', landedCostNumber: 'LC-1', status: 'Allocated', cu
 beforeEach(() => {
   vi.clearAllMocks(); api.allowed = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
-  api.suppliers.mockResolvedValue([{ id: 'carrier', partnerName: 'Carrier', partnerCode: 'C1', partnerType: 'Supplier', isActive: true, approvalStatus: 'Approved' }]);
+  api.suppliers.mockResolvedValue([{ id: 'carrier', businessPartnerId: 'carrier', businessPartnerRoleId: 'carrier-role', name: 'Carrier', code: 'C1', roleType: 'Supplier', isTransactionReady: true }]);
   api.prepare.mockResolvedValue({ inventoryPosted: false, invoicesPending: false, invoices: [
     { id: 'invoice', invoiceNumber: 'INV-1', supplierName: 'Carrier', currencyCode: 'GHS', totalAmount: 360, status: 'Draft' },
   ] });
@@ -46,13 +46,28 @@ describe('landed-cost invoice preparation', () => {
     await screen.findByRole('link', { name: 'INV-1 · Carrier' });
     expect(api.prepare).toHaveBeenCalledTimes(1);
     const request = api.prepare.mock.calls[0][1]; expect(request.charges).toHaveLength(2);
-    expect(request.charges[0]).toEqual({ costItemId: 'freight', supplierId: 'carrier', supplierInvoiceNumber: 'CARRIER-1' });
+    expect(request.charges[0]).toEqual({ costItemId: 'freight', businessPartnerId: 'carrier', businessPartnerRoleId: 'carrier-role', supplierInvoiceNumber: 'CARRIER-1' });
     expect(changed).toHaveBeenCalledOnce(); expect(screen.getByText(/review taxes, approve and post/)).toBeInTheDocument();
   });
   it('requires billing identities but does not require tax before creating a draft', async () => {
     await open(); fireEvent.change(screen.getByLabelText('Invoice charge 1 reference'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
     expect(screen.getByRole('alert')).toHaveTextContent('enter its invoice reference'); expect(api.prepare).not.toHaveBeenCalled();
+  });
+  it('shows the canonical supplier label and blocks an incomplete finance profile', async () => {
+    api.suppliers.mockResolvedValue([{ id: 'carrier', businessPartnerId: 'carrier', businessPartnerRoleId: 'carrier-role', name: 'Carrier', code: 'C1', roleType: 'Supplier', isTransactionReady: false, readinessMessage: 'Approved AP profile required' }]);
+    await open();
+    expect(screen.getByLabelText('Invoice charge 1 supplier')).toHaveTextContent('C1 — Carrier (Supplier)');
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Select a ready Supplier or Contractor role');
+    expect(api.prepare).not.toHaveBeenCalled();
+  });
+  it('requires an explicit role when the saved partner has both AP roles', async () => {
+    api.suppliers.mockResolvedValue(['Supplier', 'Contractor'].map(roleType => ({ id: 'carrier', businessPartnerId: 'carrier', businessPartnerRoleId: `carrier-${roleType}`, name: 'Carrier', code: 'C1', roleType, isTransactionReady: true })));
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Select a ready Supplier or Contractor role');
+    expect(api.prepare).not.toHaveBeenCalled();
   });
   it('retains inputs after a network error for an idempotent retry', async () => {
     api.prepare.mockRejectedValueOnce(new Error('Connection lost.'));

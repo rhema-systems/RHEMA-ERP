@@ -12,9 +12,13 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, ArrowLeft, RefreshCw, Save, CheckCircle2 } from 'lucide-react';
 import { SegmentValueSelector } from '@/components/finance/generator/SegmentValueSelector';
 import { CombinationPreviewGrid } from '@/components/finance/generator/CombinationPreviewGrid';
+import { AccountBookAssignments } from '@/components/finance/accounts/account-book-assignments';
 import { accountCombinationService } from '@/services/account-combination-service';
-import { SegmentSelection, AccountCombinationPreview, CombinationRequest, BulkCreateAccountsRequest } from '@/types/finance';
+import { SegmentSelection, AccountCombinationPreview, CombinationRequest, BulkCreateAccountsRequest, AccountBookAssignmentInput, AccountType } from '@/types/finance';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+const accountTypes: AccountType[] = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
 
 export default function AccountGeneratorPage() {
     const router = useRouter();
@@ -26,6 +30,8 @@ export default function AccountGeneratorPage() {
     // State
     const [selections, setSelections] = useState<SegmentSelection[]>([]);
     const [previewResults, setPreviewResults] = useState<AccountCombinationPreview[]>([]);
+    const [accountType, setAccountType] = useState<AccountType>('Expense');
+    const [accountingBooks, setAccountingBooks] = useState<AccountBookAssignmentInput[]>([]);
 
     // Options
     const [includeExisting, setIncludeExisting] = useState(false);
@@ -44,12 +50,21 @@ export default function AccountGeneratorPage() {
             });
             return;
         }
+        const enabledBooks = accountingBooks.filter(book => book.isEnabled);
+        if (enabledBooks.length === 0 || enabledBooks.some(book => !book.accountClassificationId)) {
+            toast({
+                title: "Complete book classifications",
+                description: "Select at least one accounting book and an active posting classification for every selected book.",
+                variant: "destructive"
+            });
+            return;
+        }
 
         setGenerating(true);
         try {
             const request: CombinationRequest = {
                 segmentSelections: selections,
-                accountType: 'Expense', // Default
+                accountType,
                 currencyCode: 'GHS',    // Default base currency
                 includeExistingInPreview: includeExisting,
                 isMultiCurrency: false,
@@ -109,7 +124,8 @@ export default function AccountGeneratorPage() {
         try {
             const request: BulkCreateAccountsRequest = {
                 combinations: selected,
-                skipDuplicates: skipDuplicates
+                skipDuplicates: skipDuplicates,
+                accountingBooks
             };
 
             const result = await accountCombinationService.bulkCreateAccounts(request);
@@ -189,6 +205,18 @@ export default function AccountGeneratorPage() {
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
+                            <div className="mb-6 space-y-2">
+                                <Label>Account type</Label>
+                                <Select value={accountType} onValueChange={value => {
+                                    setAccountType(value as AccountType);
+                                    setAccountingBooks(current => current.map(book => ({ ...book, accountClassificationId: null })));
+                                    setPreviewResults([]);
+                                }}>
+                                    <SelectTrigger className="max-w-sm"><SelectValue /></SelectTrigger>
+                                    <SelectContent>{accountTypes.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
+                                </Select>
+                                <p className="text-sm text-muted-foreground">All accounts in this generated batch share this core account type.</p>
+                            </div>
                             <SegmentValueSelector onSelectionChange={handleSelectionChange} />
 
                             <div className="mt-6 flex items-center space-x-2">
@@ -198,6 +226,12 @@ export default function AccountGeneratorPage() {
                                     onCheckedChange={setIncludeExisting}
                                 />
                                 <Label htmlFor="include-existing">Include existing accounts in preview (marked as Duplicate)</Label>
+                            </div>
+
+                            <div className="mt-6 space-y-2">
+                                <Label>Accounting-book classifications</Label>
+                                <p className="text-sm text-muted-foreground">Choose every book these accounts may post to and its compatible classification.</p>
+                                <AccountBookAssignments accountType={accountType} value={accountingBooks} onChange={setAccountingBooks} />
                             </div>
                         </CardContent>
                         <CardFooter className="flex justify-end space-x-2 border-t pt-4">

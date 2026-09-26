@@ -11,9 +11,17 @@ public static class FinanceAuditEvents
     public const string AccountClassificationCreated = "Finance.GL.AccountClassification.Created";
     public const string AccountClassificationUpdated = "Finance.GL.AccountClassification.Updated";
     public const string AccountClassificationRetired = "Finance.GL.AccountClassification.Retired";
+    public const string AccountBookMappingsChanged = "Finance.GL.Account.BookMappingsChanged";
     public const string AccountingBookCreated = "Finance.GL.AccountingBook.Created";
     public const string AccountingBookUpdated = "Finance.GL.AccountingBook.Updated";
+    public const string AccountingBookDeltaStructurePrepared = "Finance.GL.AccountingBook.DeltaStructurePrepared";
     public const string AccountingBookTransitionRequested = "Finance.GL.AccountingBook.TransitionRequested";
+    public const string AccountingBookPrimaryReplacementRequested = "Finance.GL.AccountingBook.PrimaryReplacementRequested";
+    public const string AccountingBookPrimaryReplacementApproved = "Finance.GL.AccountingBook.PrimaryReplacementApproved";
+    public const string AccountingBookPrimaryReplacementRejected = "Finance.GL.AccountingBook.PrimaryReplacementRejected";
+    public const string AccountingBookPrimaryReplacementReversalRequested = "Finance.GL.AccountingBook.PrimaryReplacementReversalRequested";
+    public const string AccountingBookPrimaryReplacementReversalApproved = "Finance.GL.AccountingBook.PrimaryReplacementReversalApproved";
+    public const string AccountingBookPrimaryReplacementReversalRejected = "Finance.GL.AccountingBook.PrimaryReplacementReversalRejected";
     public const string AccountingBookTransitionApproved = "Finance.GL.AccountingBook.TransitionApproved";
     public const string AccountingBookTransitionApprovalStepCompleted = "Finance.GL.AccountingBook.TransitionApprovalStepCompleted";
     public const string AccountingBookTransitionRejected = "Finance.GL.AccountingBook.TransitionRejected";

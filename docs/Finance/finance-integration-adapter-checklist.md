@@ -52,3 +52,6 @@ Use this checklist jointly with the producing-module owner. The adapter belongs 
 - Migration is rehearsed on a representative dry-run database when schema changes exist.
 - UAT covers success, retry, correction, reconciliation and report drill-through using representative TDC data.
 - Update the catalogue status only after the callable boundary and required evidence exist.
+# Canonical posting identity registration
+
+Before a module can participate in governed accounting-book selection, its producer must register the exact Finance-owned identity triplet—origin module, source document type, and posting action—in `FinancePostingIdentityCatalog`. Producer adapters must send those registered values verbatim; aliases or locally invented abbreviations are rejected. When communicating the Finance-module rollout to other development teams, include this registration step, the relevant canonical triplets, and contract tests proving their producer emits them unchanged.

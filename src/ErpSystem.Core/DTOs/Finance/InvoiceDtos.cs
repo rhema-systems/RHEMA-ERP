@@ -9,7 +9,12 @@ namespace ErpSystem.Core.DTOs.Finance
     {
         public Guid Id { get; set; }
         public string InvoiceNumber { get; set; } = string.Empty;
-        public Guid CustomerId { get; set; }
+        public Guid BusinessPartnerId { get; set; }
+        public Guid BusinessPartnerRoleId { get; set; }
+        public Guid BusinessPartnerArProfileVersionId { get; set; }
+        public string BusinessPartnerCode { get; set; } = string.Empty;
+        public string? BusinessPartnerLegalName { get; set; }
+        public string? BusinessPartnerTin { get; set; }
         public string CustomerName { get; set; } = string.Empty;
         public string? CustomerAddress { get; set; }
         public DateTime InvoiceDate { get; set; }
@@ -50,7 +55,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public string InvoiceNumber { get; set; } = string.Empty;
 
         [Required]
-        public Guid CustomerId { get; set; }
+        public Guid BusinessPartnerId { get; set; }
+        public Guid? BusinessPartnerRoleId { get; set; }
 
         [Required]
         [MaxLength(200)]
@@ -85,7 +91,8 @@ namespace ErpSystem.Core.DTOs.Finance
 
     public class UpdateInvoiceDto
     {
-        public Guid CustomerId { get; set; }
+        public Guid BusinessPartnerId { get; set; }
+        public Guid? BusinessPartnerRoleId { get; set; }
         public string CustomerName { get; set; } = string.Empty;
         public string? CustomerAddress { get; set; }
         public DateTime InvoiceDate { get; set; }

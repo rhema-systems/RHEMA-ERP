@@ -295,7 +295,7 @@ public sealed class FixedAssetCapitalizationFoundationTests
         fixture.Invoice.AcceptedSupplySourceId = purchaseOrderId;
         var partner = new BusinessPartner
         {
-            Id = fixture.Invoice.SupplierId, TenantId = tenantId, PartnerCode = "FA-SUPPLIER",
+            Id = fixture.Invoice.BusinessPartnerId, TenantId = tenantId, PartnerCode = "FA-SUPPLIER",
             PartnerName = fixture.Invoice.SupplierName, PartnerType = "Supplier"
         };
         var orderLine = new PurchaseOrderItem
@@ -1136,7 +1136,7 @@ public sealed class FixedAssetCapitalizationFoundationTests
             TenantId = tenantId,
             InvoiceNumber = invoiceNumber,
             SupplierInvoiceNumber = $"{invoiceNumber}-SUP",
-            SupplierId = supplier.Id,
+            BusinessPartnerId = supplier.Id,
             SupplierName = supplier.Name,
             InvoiceDate = new DateTime(2026, 7, 5),
             ReceivedDate = new DateTime(2026, 7, 5),

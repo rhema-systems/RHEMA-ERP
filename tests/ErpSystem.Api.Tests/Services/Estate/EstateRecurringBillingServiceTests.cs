@@ -117,7 +117,7 @@ public sealed class EstateRecurringBillingServiceTests
 
         var invoice = new InvoiceDto
         {
-            Id = Guid.NewGuid(), InvoiceNumber = "AR-101", CustomerId = customerId,
+            Id = Guid.NewGuid(), InvoiceNumber = "AR-101", BusinessPartnerId = customerId,
             CurrencyCode = "GHS"
         };
         var invoices = new Mock<IInvoiceService>();

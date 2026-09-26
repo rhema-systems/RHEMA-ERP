@@ -141,11 +141,24 @@ public class SupplierDebitNote : TenantEntity
     public virtual BusinessPartner Vendor { get; set; } = null!;
 
     /// <summary>
-    /// Canonical AP Supplier identity paired to VendorId by Finance. Nullable only for controlled
-    /// migration of pre-bridge drafts; every new or posted debit note must carry the pairing.
+    /// The governed Supplier or Contractor role and AP-profile version used by this accounting
+    /// document. These references replace the former parallel Finance Supplier identity.
     /// </summary>
-    public Guid? SupplierId { get; set; }
-    public virtual Supplier? Supplier { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public virtual BusinessPartnerRole? BusinessPartnerRole { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public virtual BusinessPartnerApProfileVersion? BusinessPartnerApProfileVersion { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string BusinessPartnerCode { get; set; } = string.Empty;
+    [Required]
+    [MaxLength(200)]
+    public string BusinessPartnerName { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? BusinessPartnerLegalName { get; set; }
+    [MaxLength(100)]
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
 
     public Guid? SupplierReturnId { get; set; }
     public virtual SupplierReturn? SupplierReturn { get; set; }
@@ -314,29 +327,6 @@ public class SupplierDebitNoteTaxComponent : TenantEntity
 
     public ErpSystem.Core.Enums.CompoundBasis CompoundBasis { get; set; }
     public int CalculationOrder { get; set; }
-}
-
-/// <summary>
-/// Finance-owned mapping between Procurement's Business Partner and Supplier masters. The bridge
-/// is the only durable identity used by AP settlement; Finance never mutates either source master.
-/// </summary>
-public class ApSupplierIdentityLink : TenantEntity
-{
-    [Required]
-    public Guid BusinessPartnerId { get; set; }
-    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
-
-    [Required]
-    public Guid SupplierId { get; set; }
-    public virtual Supplier Supplier { get; set; } = null!;
-
-    [Required]
-    [MaxLength(40)]
-    public string MappingSource { get; set; } = "ExactCode";
-
-    public bool IsVerified { get; set; }
-    public DateTime? VerifiedAtUtc { get; set; }
-    public Guid? VerifiedById { get; set; }
 }
 
 /// <summary>

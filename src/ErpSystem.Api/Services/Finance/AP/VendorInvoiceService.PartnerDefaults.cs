@@ -12,61 +12,47 @@ public partial class VendorInvoiceService
 {
     /// <summary>Read-only projection; never creates or updates a Finance supplier identity.</summary>
     public async Task<PurchaseOrderSupplierDefaultsDto?> GetSupplierDefaultsAsync(
-        Guid supplierId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null)
+        Guid businessPartnerId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null, Guid? businessPartnerRoleId = null)
     {
-        var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(candidate =>
-            candidate.Id == supplierId && candidate.TenantId == TenantId && !candidate.IsDeleted)
-            .Include(candidate => candidate.PaymentTerm).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-        Supplier? supplier = null;
-        if (partner == null)
-        {
-            supplier = await _unitOfWork.Repository<Supplier>().GetQueryable(candidate =>
-                candidate.Id == supplierId && candidate.TenantId == TenantId && !candidate.IsDeleted)
-                .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-            if (supplier == null) throw new KeyNotFoundException("The selected supplier was not found in the current tenant.");
-            var linkedPartnerIds = await _unitOfWork.Repository<ApSupplierIdentityLink>().GetQueryable(link =>
-                link.TenantId == TenantId && !link.IsDeleted && link.SupplierId == supplier.Id)
-                .Select(link => link.BusinessPartnerId).Distinct().ToListAsync(cancellationToken);
-            var matches = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(candidate =>
-                candidate.TenantId == TenantId && !candidate.IsDeleted &&
-                (linkedPartnerIds.Contains(candidate.Id) || candidate.Id == supplier.Id ||
-                 (!string.IsNullOrWhiteSpace(supplier.SupplierCode) && candidate.PartnerCode == supplier.SupplierCode)))
-                .Include(candidate => candidate.PaymentTerm).AsNoTracking().Take(2).ToListAsync(cancellationToken);
-            if (matches.Count > 1)
-                throw new InvalidOperationException("The supplier maps to multiple business partners. Resolve the supplier mapping before applying defaults.");
-            partner = matches.SingleOrDefault();
-            if (linkedPartnerIds.Count > 0 && (partner == null || linkedPartnerIds.Any(id => id != partner.Id)))
-                throw new InvalidOperationException("The supplier's saved business partner link is inconsistent. Resolve the supplier mapping before applying defaults.");
-        }
-
+        var date = (invoiceDate ?? DateTime.UtcNow).Date;
+        var canonical = await ResolveCanonicalApPartnerAsync(businessPartnerId, businessPartnerRoleId, date, cancellationToken);
+        var partner = canonical.Partner;
+        var profile = canonical.Profile;
         if (purchaseOrderId.HasValue)
         {
             var order = await _unitOfWork.Repository<PurchaseOrder>().GetQueryable(order =>
                 order.Id == purchaseOrderId.Value && order.TenantId == TenantId && !order.IsDeleted)
                 .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
                 ?? throw new KeyNotFoundException("The purchase order was not found in the current tenant.");
-            if (partner == null || order.BusinessPartnerId != partner.Id)
-                throw new InvalidOperationException("The purchase order defaults belong to a different supplier.");
-            var snapshot = BusinessPartnerPostingDefaults.ReadSnapshot(order.SupplierDefaultsSnapshotJson);
-            if (snapshot != null)
-            {
-                if (snapshot.BusinessPartnerId != order.BusinessPartnerId)
-                    throw new InvalidOperationException("The saved purchase order supplier defaults are inconsistent. Review the purchase order.");
-                return await WithholdingProjectionAsync(snapshot, partner, invoiceDate, cancellationToken);
-            }
+            if (order.BusinessPartnerId != partner.Id)
+                throw new InvalidOperationException("The purchase order defaults belong to a different Business Partner.");
         }
-        return partner == null ? null : await WithholdingProjectionAsync(
-            BusinessPartnerPostingDefaults.Snapshot(partner), partner, invoiceDate, cancellationToken);
-    }
-
-    private async Task<PurchaseOrderSupplierDefaultsDto> WithholdingProjectionAsync(
-        PurchaseOrderSupplierDefaultsDto source, BusinessPartner partner, DateTime? invoiceDate, CancellationToken cancellationToken)
-    {
-        // Terms and posting accounts retain the PO snapshot. A new invoice's WHT
-        // decision is based on the supplier's current designation, not an old PO.
-        source.WithholdingDefault = await ResolveSupplierWithholdingDefaultAsync(
-            BusinessPartnerPostingDefaults.FromPartner(partner), (invoiceDate ?? DateTime.UtcNow).Date, cancellationToken);
-        return source;
+        var term = await ResolvePaymentTermAsync(profile.PaymentTermId, "Business Partner AP profile", cancellationToken);
+        var defaults = new BusinessPartnerPostingDefaultsDto
+        {
+            DefaultExpenseAccountId = profile.DefaultExpenseAccountId,
+            DefaultTaxGroupId = profile.DefaultTaxGroupId,
+            SubjectToWithholdingDeduction = profile.SubjectToWithholding
+        };
+        var withholding = new SupplierWithholdingDefaultDto { Required = profile.SubjectToWithholding };
+        if (profile.SubjectToWithholding)
+        {
+            var choice = profile.WithholdingDefaults.SingleOrDefault(line => !line.IsDeleted && line.IsActive &&
+                line.IsDefaultForAp);
+            if (choice == null) throw new InvalidOperationException("AP_WHT_DEFAULT_REQUIRED: Select the approved profile's default AP withholding configuration.");
+            var resolved = await ResolveInvoiceWhtAsync(choice.WithholdingTaxId, 0m, date, false, cancellationToken);
+            defaults.DefaultWithholdingTaxId = resolved.TaxId;
+            defaults.WithholdingTaxRate = resolved.Rate;
+            withholding.TaxId = resolved.TaxId;
+            withholding.Rate = resolved.Rate;
+            withholding.TaxPayableAccountId = resolved.TaxPayableAccountId;
+        }
+        return new PurchaseOrderSupplierDefaultsDto
+        {
+            BusinessPartnerId = partner.Id, PaymentTermId = profile.PaymentTermId,
+            PaymentTermsDays = term?.DueDays, Tin = partner.TaxIdentificationNumber,
+            PostingDefaults = defaults, WithholdingDefault = withholding
+        };
     }
 
     /// <summary>Withholding needs a transaction decision, independent of optional VAT/account defaults.</summary>
@@ -85,11 +71,11 @@ public partial class VendorInvoiceService
         {
             if (dto.ApplySupplierWithholdingDefaults == true && !dto.WithholdingTaxRateOverride.HasValue)
                 dto.WithholdingTaxRateOverride = await ConfirmedSupplierRateAsync(
-                    dto.SupplierId, dto.PurchaseOrderId, dto.InvoiceDate, dto.WithholdingTaxId.Value, cancellationToken);
+                    dto.BusinessPartnerId, dto.PurchaseOrderId, dto.InvoiceDate, dto.WithholdingTaxId.Value, cancellationToken, dto.BusinessPartnerRoleId);
             dto.ApplySupplierWithholdingDefaults = true;
             return false;
         }
-        var source = await GetSupplierDefaultsAsync(dto.SupplierId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
+        var source = await GetSupplierDefaultsAsync(dto.BusinessPartnerId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate, dto.BusinessPartnerRoleId);
         var withholding = source?.WithholdingDefault;
         if (withholding?.Required != true && dto.ApplySupplierWithholdingDefaults != true) return false;
         if (!dto.ApplySupplierWithholdingDefaults.HasValue)
@@ -127,7 +113,7 @@ public partial class VendorInvoiceService
                 dto.WithholdingTaxRateOverride ??= invoice.WithholdingTaxRateOverride ?? invoice.WithholdingTaxRate;
             else if (!invoice.WithholdingTaxId.HasValue && dto.ApplySupplierWithholdingDefaults == true && !dto.WithholdingTaxRateOverride.HasValue)
                 dto.WithholdingTaxRateOverride = await ConfirmedSupplierRateAsync(
-                    invoice.SupplierId, dto.PurchaseOrderId, dto.InvoiceDate, dto.WithholdingTaxId.Value, cancellationToken);
+                    invoice.BusinessPartnerId, dto.PurchaseOrderId, dto.InvoiceDate, dto.WithholdingTaxId.Value, cancellationToken, invoice.BusinessPartnerRoleId);
             dto.ApplySupplierWithholdingDefaults ??= true;
             return false;
         }
@@ -141,7 +127,7 @@ public partial class VendorInvoiceService
                 dto.WithholdingTaxId = invoice.WithholdingTaxId;
                 return false;
             }
-            var source = await GetSupplierDefaultsAsync(invoice.SupplierId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
+            var source = await GetSupplierDefaultsAsync(invoice.BusinessPartnerId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate, invoice.BusinessPartnerRoleId);
             var withholding = source?.WithholdingDefault;
             if (withholding?.Message != null || withholding?.TaxId == null)
                 throw new InvalidOperationException(withholding?.Message ?? "Select a configured purchase WHT rule for this invoice.");
@@ -155,9 +141,9 @@ public partial class VendorInvoiceService
     }
 
     private async Task<decimal?> ConfirmedSupplierRateAsync(Guid supplierId, Guid? orderId,
-        DateTime invoiceDate, Guid selectedTaxId, CancellationToken cancellationToken)
+        DateTime invoiceDate, Guid selectedTaxId, CancellationToken cancellationToken, Guid? businessPartnerRoleId = null)
     {
-        var source = await GetSupplierDefaultsAsync(supplierId, orderId, cancellationToken, invoiceDate);
+        var source = await GetSupplierDefaultsAsync(supplierId, orderId, cancellationToken, invoiceDate, businessPartnerRoleId);
         var withholding = source?.WithholdingDefault;
         return withholding is { Required: true, Message: null } && withholding.TaxId == selectedTaxId
             ? withholding.Rate : null;
@@ -171,87 +157,22 @@ public partial class VendorInvoiceService
             throw new InvalidOperationException("Invoice WHT rate supports up to four decimal places.");
     }
 
-    private async Task<SupplierWithholdingDefaultDto> ResolveSupplierWithholdingDefaultAsync(
-        BusinessPartnerPostingDefaultsDto defaults, DateTime invoiceDate, CancellationToken cancellationToken)
-    {
-        var result = new SupplierWithholdingDefaultDto
-        {
-            Required = defaults.SubjectToWithholdingDeduction && defaults.WithholdingTaxRate > 0m
-        };
-        if (!result.Required) return result;
-        try
-        {
-            var selectedTaxId = defaults.DefaultWithholdingTaxId;
-            if (!selectedTaxId.HasValue)
-            {
-                // Legacy masters have only a rate. Resolve only one effective tenant purchase
-                // rule; a matching rate alone must never choose between different tax identities.
-                var taxes = await _unitOfWork.Repository<Tax>().GetQueryable(tax =>
-                    tax.TenantId == TenantId && !tax.IsDeleted && tax.IsActive && tax.Category == TaxCategory.Withholding &&
-                    (tax.Applicability == TaxApplicability.Purchases || tax.Applicability == TaxApplicability.Both))
-                    .AsNoTracking().ToListAsync(cancellationToken);
-                var matches = new List<Guid>();
-                foreach (var tax in taxes)
-                    if (await ResolveEffectiveInvoiceWhtRateAsync(tax, invoiceDate, cancellationToken) == defaults.WithholdingTaxRate)
-                        matches.Add(tax.Id);
-                if (matches.Count != 1)
-                    throw new InvalidOperationException(matches.Count == 0
-                        ? $"No active purchase WHT rule matches the supplier's {defaults.WithholdingTaxRate:0.####}% rate on {invoiceDate:yyyy-MM-dd}. Select its WHT rule in Business Partner details."
-                        : $"More than one purchase WHT rule matches the supplier's {defaults.WithholdingTaxRate:0.####}% rate. Select its WHT rule in Business Partner details; no rule has been guessed.");
-                selectedTaxId = matches[0];
-            }
-            // The supplier's entered rate is a default for this transaction. The
-            // configured effective rule still owns its identity and payable account.
-            var resolved = await ResolveInvoiceWhtAsync(selectedTaxId, 0m, invoiceDate, false, cancellationToken,
-                defaults.WithholdingTaxRate);
-            var account = await _unitOfWork.Accounts.GetByIdAsync(resolved.TaxPayableAccountId!.Value);
-            if (account == null || account.TenantId != TenantId || account.IsDeleted || account.Status != AccountStatus.Active ||
-                account.AccountType != AccountType.Liability || (!account.AllowDirectPosting && !account.IsControlAccount) ||
-                (account.EffectiveDate.HasValue && account.EffectiveDate.Value.Date > invoiceDate.Date) ||
-                (account.ExpirationDate.HasValue && account.ExpirationDate.Value.Date <= invoiceDate.Date))
-                throw new InvalidOperationException("The supplier's WHT rule needs an active payable GL account in the current tenant.");
-            result.TaxId = resolved.TaxId;
-            result.Rate = resolved.Rate;
-            result.TaxPayableAccountId = resolved.TaxPayableAccountId;
-        }
-        catch (InvalidOperationException exception)
-        {
-            result.Message = exception.Message;
-        }
-        return result;
-    }
-
     /// <summary>
     /// Called only while creating a new draft, and only by clients opting in.
     /// Explicit account, term, tax, exemption and no-default selections are retained.
     /// Supplier withholding has its own automatic create hook and does not use this opt-in.
     /// </summary>
     private async Task<(int? PaymentTermsDays, Guid? TaxFallbackAccountId)> ApplyBusinessPartnerCreateDefaultsAsync(
-        VendorInvoiceCreateDto dto, Supplier supplier, CancellationToken cancellationToken)
+        VendorInvoiceCreateDto dto, BusinessPartner supplier, CancellationToken cancellationToken)
     {
         if (dto.ApplyBusinessPartnerDefaults != true || dto.IsOpeningBalance) return (null, null);
-        var source = await GetSupplierDefaultsAsync(dto.SupplierId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate);
+        var source = await GetSupplierDefaultsAsync(dto.BusinessPartnerId, dto.PurchaseOrderId, cancellationToken, dto.InvoiceDate, dto.BusinessPartnerRoleId);
         if (source == null) return (null, null);
         var defaults = source.PostingDefaults;
-        dto.ApAccountId ??= defaults.DefaultApAccountId;
+        // AP control-account authority belongs exclusively to tenant Finance settings. Partner
+        // defaults may influence expense/tax/payment treatment but must never route AP control.
+        dto.ApAccountId = null;
         dto.ExpenseAccountId ??= defaults.DefaultExpenseAccountId;
-        if (defaults.DefaultTaxAccountId.HasValue)
-            await ValidateSupplierTaxFallbackAsync(defaults.DefaultTaxAccountId.Value, dto.InvoiceDate, cancellationToken);
-
-        // Capture typed charges on the draft. Later master-data changes must not
-        // redirect an approved invoice, and receipt/landed-cost clearing owns its accounts.
-        foreach (var line in dto.LineItems.Where(line => !line.GLAccountId.HasValue &&
-            !line.PurchaseOrderItemId.HasValue && !line.LandedCostItemId.HasValue && !line.FixedAssetId.HasValue))
-        {
-            line.GLAccountId = line.LineItemType?.Trim().ToUpperInvariant() switch
-            {
-                "FREIGHT" => defaults.DefaultFreightAccountId,
-                "MISCELLANEOUS" => defaults.DefaultMiscellaneousAccountId,
-                "FINANCECHARGE" => defaults.DefaultFinanceChargesAccountId,
-                _ => line.GLAccountId
-            };
-        }
-
         int? capturedDays = null;
         // The old DTO uses 30 as its default. Preserve explicit timing before
         // CreateCore resolves a supplier/global fallback payment-term catalogue.
@@ -261,8 +182,7 @@ public partial class VendorInvoiceService
         }
         else if (!dto.PaymentTermId.HasValue || dto.PaymentTermId == source.PaymentTermId)
         {
-            // A PO's captured term days remain authoritative when its default
-            // term is prefilled in the UI, even if the catalogue changes later.
+            // The effective approved AP profile owns default payment terms.
             dto.PaymentTermId ??= source.PaymentTermId;
             capturedDays = source.PaymentTermsDays;
             if (capturedDays.HasValue) dto.PaymentTermsDays = capturedDays.Value;
@@ -278,6 +198,6 @@ public partial class VendorInvoiceService
                 line.TaxGroupId = defaults.DefaultTaxGroupId;
             }
         }
-        return (capturedDays, defaults.DefaultTaxAccountId);
+        return (capturedDays, null);
     }
 }

@@ -20,7 +20,7 @@ public sealed class CustomerBalanceAdjustmentPostingTests
     [InlineData("FinanceCharge", "Debit", 100, 125)]
     [InlineData("Writeoff", "Credit", 100, 75)]
     [InlineData("OverpaymentWriteoff", "Debit", -100, -75)]
-    public async Task Customer_mapping_posts_balanced_entry_and_replay_keeps_original_accounts(
+    public async Task Explicit_contra_posts_balanced_entry_and_replay_keeps_original_accounts(
         string purpose, string direction, decimal openingBalance, decimal expectedBalance)
     {
         await using var f = new Fixture(openingBalance);
@@ -90,7 +90,7 @@ public sealed class CustomerBalanceAdjustmentPostingTests
                 CurrencyCode="GHS", AccountType=AccountType.Revenue, Status=AccountStatus.Active,
                 AllowDirectPosting=true };
             f.Context.Add(foreignAccount);
-            f.Customer.CustomerFinanceChargesAccountId = foreignAccount.Id;
+            request.ContraAccountId = foreignAccount.Id;
         }
         if (defect == "type") f.Revenue.AccountType = AccountType.Asset;
         if (defect == "control") f.Revenue.IsControlAccount = true;
@@ -101,6 +101,27 @@ public sealed class CustomerBalanceAdjustmentPostingTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => f.Service.CreateAndPostAsync(request));
         Assert.Empty(f.Postings);
         Assert.Equal(defect == "balance-cache" ? 1000m : 100m, f.Customer.OutstandingBalance);
+    }
+
+    [Fact]
+    public async Task Legacy_default_does_not_supply_missing_explicit_contra_account()
+    {
+        await using var f = new Fixture(100);
+        var request = f.Request("FinanceCharge", "Debit");
+        request.ContraAccountId = Guid.Empty;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => f.Service.CreateAndPostAsync(request));
+        Assert.Empty(f.Postings);
+    }
+
+    [Fact]
+    public async Task Missing_approved_profile_rejects_before_posting()
+    {
+        await using var f = new Fixture(100);
+        f.Context.Set<BusinessPartnerArProfileVersion>().RemoveRange(f.Context.Set<BusinessPartnerArProfileVersion>());
+        await f.Context.SaveChangesAsync();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => f.Service.CreateAndPostAsync(f.Request("FinanceCharge", "Debit")));
+        Assert.Contains("AR_PROFILE_REQUIRED", error.Message);
+        Assert.Empty(f.Postings);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -134,10 +155,16 @@ public sealed class CustomerBalanceAdjustmentPostingTests
             Control = Account(AccountType.Asset, true);
             Expense = Account(AccountType.Expense, false);
             Revenue = Account(AccountType.Revenue, false);
-            Customer = new BusinessPartner { Id = Guid.NewGuid(), TenantId = _tenant, PartnerName = "Customer", PartnerCode = "CUSTOMER", PartnerType = "Customer", IsActive = true,
-                OutstandingBalance = balance, DefaultArAccountId = Control.Id, CustomerFinanceChargesAccountId = Revenue.Id, CustomerWriteoffAccountId = Expense.Id, CustomerOverpaymentWriteoffAccountId = Revenue.Id };
+            Customer = new BusinessPartner { Id = Guid.NewGuid(), TenantId = _tenant, PartnerName = "Customer", PartnerCode = "CUSTOMER", PartnerType = "Customer", RegistrationStatus = "Approved", IsActive = true,
+                OutstandingBalance = balance, DefaultArAccountId = Guid.NewGuid(), CustomerFinanceChargesAccountId = Revenue.Id, CustomerWriteoffAccountId = Expense.Id, CustomerOverpaymentWriteoffAccountId = Revenue.Id };
+            var role = new BusinessPartnerRole { Id = Guid.NewGuid(), TenantId = _tenant,
+                BusinessPartnerId = Customer.Id, RoleType = BusinessPartnerRoleType.Customer };
+            var profile = new BusinessPartnerArProfileVersion { Id = Guid.NewGuid(), TenantId = _tenant,
+                BusinessPartnerRoleId = role.Id, VersionNumber = 1,
+                Status = BusinessPartnerFinanceProfileStatus.Approved, EffectiveFrom = new DateTime(2026, 1, 1) };
+            Context.AddRange(role, profile);
             Context.AddRange(Control, Expense, Revenue, Customer, new FinanceSettings { Id = Guid.NewGuid(), TenantId = _tenant, ControlAccountArId = Control.Id });
-            Context.Add(new SubledgerAdjustmentJournal { Id=Guid.NewGuid(), TenantId=_tenant, Module="AR", CustomerId=Customer.Id,
+            Context.Add(new SubledgerAdjustmentJournal { Id=Guid.NewGuid(), TenantId=_tenant, Module="AR", BusinessPartnerId=Customer.Id,
                 AdjustmentNumber="AR-EXISTING-TEST", AdjustmentDate=new DateTime(2026,9,1),
                 AdjustmentType=balance < 0 ? "Credit" : "Debit", Amount=Math.Abs(balance), BaseCurrencyAmount=Math.Abs(balance),
                 CurrencyCode="GHS", ExchangeRate=1, ContraAccountId=Expense.Id, JournalEntryId=Guid.NewGuid(), Reason="Existing posted balance" });
@@ -145,7 +172,7 @@ public sealed class CustomerBalanceAdjustmentPostingTests
             Service = new(Context, user.Object, numbering.Object, engine.Object, settings.Object);
         }
         private Account Account(AccountType type, bool control) => new() { Id=Guid.NewGuid(), TenantId=_tenant, AccountName=type.ToString(), AccountCode=Guid.NewGuid().ToString(), AccountNumber=Guid.NewGuid().ToString(), CurrencyCode="GHS", AccountType=type, Status=AccountStatus.Active, AllowDirectPosting=!control, IsControlAccount=control };
-        public CreateSubledgerAdjustmentJournalDto Request(string purpose, string direction) => new() { RequestId=Guid.NewGuid(), Module="AR", Purpose=purpose, CustomerId=Customer.Id, AdjustmentType=direction, Amount=25, CurrencyCode="GHS", ExchangeRate=1, AdjustmentDate=new DateTime(2026,9,25), Reason="Customer balance correction" };
+        public CreateSubledgerAdjustmentJournalDto Request(string purpose, string direction) => new() { RequestId=Guid.NewGuid(), Module="AR", Purpose=purpose, BusinessPartnerId=Customer.Id, ContraAccountId=purpose == "Writeoff" ? Expense.Id : Revenue.Id, AdjustmentType=direction, Amount=25, CurrencyCode="GHS", ExchangeRate=1, AdjustmentDate=new DateTime(2026,9,25), Reason="Customer balance correction" };
         public ValueTask DisposeAsync() => Context.DisposeAsync();
     }
 }

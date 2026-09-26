@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
@@ -12,35 +13,17 @@ using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
-using System.Linq.Expressions;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
 
-public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
+public sealed class ProcurementPlanBudgetSelectionTests
 {
     private readonly Guid _tenantId = Guid.NewGuid();
     private readonly Guid _organizationUnitId = Guid.NewGuid();
-    private readonly ApplicationDbContext _organizations = new(new DbContextOptionsBuilder<ApplicationDbContext>()
-        .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
     private readonly Mock<IProcurementPlanRepository> _plans = new();
     private readonly Mock<IProcurementPlanItemRepository> _items = new();
     private readonly Mock<IProcurementBudgetRepository> _budgets = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
-
-    public ProcurementPlanBudgetSelectionTests()
-    {
-        _organizations.Set<OrganizationUnit>().Add(new OrganizationUnit
-        {
-            Id = _organizationUnitId, TenantId = _tenantId, Name = "Procurement", Code = "PROC", IsActive = true
-        });
-        _organizations.SaveChanges();
-        var repository = new Mock<IGenericRepository<OrganizationUnit>>();
-        repository.Setup(value => value.GetQueryable(It.IsAny<Expression<Func<OrganizationUnit, bool>>>()))
-            .Returns((Expression<Func<OrganizationUnit, bool>> predicate) => _organizations.Set<OrganizationUnit>().Where(predicate));
-        _unitOfWork.Setup(value => value.Repository<OrganizationUnit>()).Returns(repository.Object);
-    }
-
-    public void Dispose() => _organizations.Dispose();
 
     [Fact]
     public void PlanLineReferenceMigrationBackfillsWithoutRewritingBudgetRelationships()
@@ -74,7 +57,7 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
     public async Task UpdateDraftPlanLinksSelectedApprovedBudgetAndInheritsCurrency()
     {
         var plan = DraftPlan();
-        var budget = ApprovedBudget(plan.DepartmentId, plan.FiscalYear);
+        var budget = ApprovedBudget(plan.OrganizationUnitId!.Value, plan.FiscalYear);
         _plans.Setup(value => value.GetByIdAsync(plan.Id)).ReturnsAsync(plan);
         _plans.Setup(value => value.GetWithFullDetailsAsync(plan.Id)).ReturnsAsync(plan);
         _plans.Setup(value => value.UpdateAsync(plan)).Returns(Task.CompletedTask);
@@ -100,7 +83,7 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
     public async Task UpdateDraftPlanAllowsBudgetUsedByAnotherPlanWhenCapacityIsSufficient()
     {
         var plan = DraftPlan();
-        var budget = ApprovedBudget(plan.DepartmentId, plan.FiscalYear);
+        var budget = ApprovedBudget(plan.OrganizationUnitId!.Value, plan.FiscalYear);
         budget.ProcurementPlanId = Guid.NewGuid();
         _plans.Setup(value => value.GetByIdAsync(plan.Id)).ReturnsAsync(plan);
         _plans.Setup(value => value.GetWithFullDetailsAsync(plan.Id)).ReturnsAsync(plan);
@@ -125,7 +108,7 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
     public async Task UpdateDraftPlanRejectsBudgetWhenOtherPlansExhaustPlanningCapacity()
     {
         var plan = DraftPlan();
-        var budget = ApprovedBudget(plan.DepartmentId, plan.FiscalYear);
+        var budget = ApprovedBudget(plan.OrganizationUnitId!.Value, plan.FiscalYear);
         _plans.Setup(value => value.GetByIdAsync(plan.Id)).ReturnsAsync(plan);
         _plans.Setup(value => value.GetPlannedBudgetExposureAsync(budget.Id, plan.Id)).ReturnsAsync(30_000m);
         _budgets.Setup(value => value.GetByPlanIdAsync(plan.Id)).ReturnsAsync(Array.Empty<ProcurementBudget>());
@@ -143,7 +126,7 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
     {
         var plan = DraftPlan();
         plan.TotalEstimatedBudget = 20_000m;
-        var budget = ApprovedBudget(plan.DepartmentId, plan.FiscalYear);
+        var budget = ApprovedBudget(plan.OrganizationUnitId!.Value, plan.FiscalYear);
         var allocation = new ProcurementBudgetAllocation
         {
             Id = Guid.NewGuid(),
@@ -190,7 +173,7 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
     {
         var plan = DraftPlan();
         plan.TotalEstimatedBudget = 20_000m;
-        var budget = ApprovedBudget(plan.DepartmentId, plan.FiscalYear);
+        var budget = ApprovedBudget(plan.OrganizationUnitId!.Value, plan.FiscalYear);
         budget.Allocations.Add(new ProcurementBudgetAllocation
         {
             Id = Guid.NewGuid(),
@@ -245,6 +228,20 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
     {
         var currentUser = new Mock<ICurrentUserProvider>();
         currentUser.SetupGet(value => value.TenantId).Returns(_tenantId);
+        var organizationUnits = new Mock<IGenericRepository<OrganizationUnit>>();
+        var activeUnit = new OrganizationUnit
+        {
+            Id = _organizationUnitId,
+            TenantId = _tenantId,
+            Code = "FIN",
+            Name = "Finance",
+            IsActive = true
+        };
+        organizationUnits
+            .Setup(value => value.GetQueryable(It.IsAny<Expression<Func<OrganizationUnit, bool>>>()))
+            .Returns((Expression<Func<OrganizationUnit, bool>> predicate) =>
+                new[] { activeUnit }.Where(predicate.Compile()).AsAsyncQueryable());
+        _unitOfWork.Setup(value => value.Repository<OrganizationUnit>()).Returns(organizationUnits.Object);
 
         return new ProcurementPlanService(
             _plans.Object,
@@ -271,7 +268,6 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
     {
         Id = Guid.NewGuid(),
         TenantId = _tenantId,
-        DepartmentId = Guid.NewGuid(),
         OrganizationUnitId = _organizationUnitId,
         FiscalYear = 2026,
         PlanNumber = "PP-2026-TEST",
@@ -283,12 +279,11 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
         PlanDurationYears = 1
     };
 
-    private ProcurementBudget ApprovedBudget(Guid? departmentId, int fiscalYear) => new()
+    private ProcurementBudget ApprovedBudget(Guid organizationUnitId, int fiscalYear) => new()
     {
         Id = Guid.NewGuid(),
         TenantId = _tenantId,
-        DepartmentId = departmentId,
-        OrganizationUnitId = _organizationUnitId,
+        OrganizationUnitId = organizationUnitId,
         FiscalYear = fiscalYear,
         BudgetCode = "PB-2026-TEST",
         Title = "Approved budget",
@@ -300,7 +295,6 @@ public sealed class ProcurementPlanBudgetSelectionTests : IDisposable
     private static UpdateProcurementPlanDto UpdateFor(ProcurementPlan plan, Guid budgetId) => new()
     {
         Title = plan.Title,
-        DepartmentId = plan.DepartmentId,
         OrganizationUnitId = plan.OrganizationUnitId!.Value,
         FiscalYear = plan.FiscalYear,
         PlanningCycle = "Annual",

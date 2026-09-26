@@ -38,7 +38,7 @@ export interface CollectionActivitySummaryDto {
 }
 
 export interface CreateCollectionActivityDto {
-  customerId: string;
+  businessPartnerId: string;
   invoiceId?: string;
   subject: string;
   activityType?: string;
@@ -77,7 +77,7 @@ export interface PaymentPlanSummaryDto {
 }
 
 export interface PaymentPlanDetailDto extends PaymentPlanSummaryDto {
-  customerId: string;
+  businessPartnerId: string;
   approvedById?: string;
   approvedByName?: string;
   approvedDate?: string;
@@ -100,7 +100,7 @@ export interface PaymentPlanInstallmentDto {
 }
 
 export interface CreatePaymentPlanDto {
-  customerId: string;
+  businessPartnerId: string;
   planName: string;
   totalDebt: number;
   numberOfInstallments: number;
@@ -189,8 +189,8 @@ export const collectionService = {
     return res.json();
   },
 
-  async getOverdueInstallments(customerId?: string): Promise<PaymentPlanInstallmentDto[]> {
-    const params = customerId ? `?customerId=${customerId}` : '';
+  async getOverdueInstallments(businessPartnerId?: string): Promise<PaymentPlanInstallmentDto[]> {
+    const params = businessPartnerId ? `?businessPartnerId=${businessPartnerId}` : '';
     const res = await fetch(`${API_BASE_URL}/sales/collections/installments/overdue${params}`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Failed to fetch overdue installments');
     return res.json();

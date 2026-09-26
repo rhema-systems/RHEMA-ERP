@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Shared;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
@@ -589,16 +590,21 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var supplier = await _db.Suppliers.AsNoTracking().FirstOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.Id == dto.SupplierId && !item.IsDeleted, cancellationToken)
-            ?? throw new InvalidOperationException("Supplier was not found for the current tenant.");
+        var supplier = await ResolveOpeningApPartnerAsync(
+            dto.BusinessPartnerId, dto.BusinessPartnerRoleId, dto.OpeningDate, cancellationToken);
         var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken);
         var advanceAccountId = context.Settings.SupplierAdvanceAccountId
             ?? throw new InvalidOperationException("Supplier Advance Account is not configured in Finance Settings.");
         var paymentId = Guid.NewGuid();
         var payment = new VendorPayment
         {
-            Id = paymentId, TenantId = tenantId, SupplierId = supplier.Id,
+            Id = paymentId, TenantId = tenantId, BusinessPartnerId = supplier.Partner.Id,
+            BusinessPartnerRoleId = supplier.Role.Id,
+            BusinessPartnerApProfileVersionId = supplier.Profile.Id,
+            BusinessPartnerCode = supplier.Partner.PartnerCode,
+            BusinessPartnerName = supplier.Partner.PartnerName,
+            BusinessPartnerLegalName = supplier.Partner.LegalName,
+            BusinessPartnerTaxIdentificationNumber = supplier.Partner.TaxIdentificationNumber,
             PaymentNumber = BuildOpeningReference("AP-ADV-OPEN", paymentId), PaymentDate = dto.OpeningDate.Date,
             TotalAmount = RoundMoney(dto.Amount), AllocatedAmount = 0m, IsSupplierAdvance = true,
             CurrencyCode = context.Currency, ExchangeRate = context.Rate, ExchangeRateId = dto.ExchangeRateId,
@@ -626,17 +632,27 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
 
         // Return only the tenant-scoped lookup projection needed by the Finance cutover screen.
         // This keeps source IDs server-owned and avoids coupling the workflow to another module's UI.
-        var suppliers = await _db.Suppliers.AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Status == "Active")
-            .OrderBy(item => item.Name)
-            .Select(item => new OpeningBalancePartyOptionDto { Id = item.Id, Code = item.SupplierCode, Name = item.Name })
+        var suppliers = await _db.BusinessPartnerRoles.AsNoTracking()
+            .Where(role => role.TenantId == tenantId && !role.IsDeleted &&
+                role.Status == BusinessPartnerRoleStatus.Active &&
+                (role.RoleType == BusinessPartnerRoleType.Supplier || role.RoleType == BusinessPartnerRoleType.Contractor) &&
+                role.BusinessPartner.IsActive && !role.BusinessPartner.IsDeleted)
+            .OrderBy(role => role.BusinessPartner.PartnerName)
+            .Select(role => new OpeningBalancePartyOptionDto
+            {
+                Id = role.BusinessPartnerId,
+                Code = role.BusinessPartner.PartnerCode,
+                Name = role.BusinessPartner.PartnerName
+            })
+            .Distinct()
             .ToListAsync(cancellationToken);
         // AR customer identity is owned by the canonical BusinessPartner master. The legacy
         // Customer entity is not a deployed table in current tenants and must never be queried
         // by a Finance cutover projection.
         var customers = await _db.BusinessPartners.AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive &&
-                BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType))
+                item.Roles.Any(role => role.TenantId == tenantId && !role.IsDeleted &&
+                    role.RoleType == BusinessPartnerRoleType.Customer))
             .OrderBy(item => item.PartnerName)
             .ThenBy(item => item.PartnerCode)
             .Select(item => new OpeningBalancePartyOptionDto
@@ -670,8 +686,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var customer = await FindActiveCustomerPartnerAsync(dto.CustomerId, cancellationToken)
-            ?? throw new InvalidOperationException("Customer was not found for the current tenant.");
+        var customer = await ResolveOpeningArPartnerAsync(
+            dto.BusinessPartnerId, dto.BusinessPartnerRoleId, dto.OpeningDate, cancellationToken);
         var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken);
         var advanceAccountId = context.Settings.CustomerAdvanceAccountId
             ?? throw new InvalidOperationException("Customer Advance Account is not configured in Finance Settings.");
@@ -679,7 +695,13 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         var reference = BuildOpeningReference("AR-ADV-OPEN", paymentId);
         var payment = new CustomerPayment
         {
-            Id = paymentId, TenantId = tenantId, CustomerId = customer.Id,
+            Id = paymentId, TenantId = tenantId, BusinessPartnerId = customer.Partner.Id,
+            BusinessPartnerRoleId = customer.Role.Id,
+            BusinessPartnerArProfileVersionId = customer.Profile.Id,
+            BusinessPartnerCode = customer.Partner.PartnerCode,
+            BusinessPartnerName = customer.Partner.PartnerName,
+            BusinessPartnerLegalName = customer.Partner.LegalName,
+            BusinessPartnerTaxIdentificationNumber = customer.Partner.TaxIdentificationNumber,
             PaymentNumber = reference, ReferenceNumber = reference, PaymentDate = dto.OpeningDate.Date,
             TotalAmount = RoundMoney(dto.Amount), AllocatedAmount = 0m, IsCustomerAdvance = true,
             CurrencyCode = context.Currency, ExchangeRate = context.Rate, ExchangeRateId = dto.ExchangeRateId,
@@ -704,8 +726,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var supplier = await _db.Suppliers.AsNoTracking().FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == dto.SupplierId && !item.IsDeleted, cancellationToken)
-            ?? throw new InvalidOperationException("Supplier was not found for the current tenant.");
+        var supplier = await ResolveOpeningApPartnerAsync(
+            dto.BusinessPartnerId, dto.BusinessPartnerRoleId, dto.OpeningDate, cancellationToken);
         var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken, requireFunctionalCurrency: true);
         await ValidateWithholdingConfigurationAsync(dto.TaxId, dto.WithholdingTaxAccountId, useReceivableAccount: false, cancellationToken);
         if (dto.TaxableBase < dto.Amount || dto.NetPaidAmount < 0m)
@@ -714,7 +736,14 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         var reference = BuildOpeningReference("AP-WHT-OPEN", paymentId);
         var payment = new VendorPayment
         {
-            Id = paymentId, TenantId = tenantId, SupplierId = supplier.Id, PaymentNumber = reference,
+            Id = paymentId, TenantId = tenantId, BusinessPartnerId = supplier.Partner.Id,
+            BusinessPartnerRoleId = supplier.Role.Id,
+            BusinessPartnerApProfileVersionId = supplier.Profile.Id,
+            BusinessPartnerCode = supplier.Partner.PartnerCode,
+            BusinessPartnerName = supplier.Partner.PartnerName,
+            BusinessPartnerLegalName = supplier.Partner.LegalName,
+            BusinessPartnerTaxIdentificationNumber = supplier.Partner.TaxIdentificationNumber,
+            PaymentNumber = reference,
             PaymentDate = dto.OpeningDate.Date, TotalAmount = RoundMoney(dto.NetPaidAmount), AllocatedAmount = RoundMoney(dto.NetPaidAmount),
             CurrencyCode = context.Currency, ExchangeRate = 1m, Status = VendorPaymentStatus.Draft,
             WithholdingTaxId = dto.TaxId, WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
@@ -743,15 +772,22 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var customer = await FindActiveCustomerPartnerAsync(dto.CustomerId, cancellationToken)
-            ?? throw new InvalidOperationException("Customer was not found for the current tenant.");
+        var customer = await ResolveOpeningArPartnerAsync(
+            dto.BusinessPartnerId, dto.BusinessPartnerRoleId, dto.OpeningDate, cancellationToken);
         var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken, requireFunctionalCurrency: true);
         await ValidateWithholdingConfigurationAsync(dto.TaxId, dto.WithholdingTaxAccountId, useReceivableAccount: true, cancellationToken);
         var paymentId = Guid.NewGuid();
         var reference = BuildOpeningReference("AR-WHT-OPEN", paymentId);
         var payment = new CustomerPayment
         {
-            Id = paymentId, TenantId = tenantId, CustomerId = customer.Id, PaymentNumber = reference, ReferenceNumber = reference,
+            Id = paymentId, TenantId = tenantId, BusinessPartnerId = customer.Partner.Id,
+            BusinessPartnerRoleId = customer.Role.Id,
+            BusinessPartnerArProfileVersionId = customer.Profile.Id,
+            BusinessPartnerCode = customer.Partner.PartnerCode,
+            BusinessPartnerName = customer.Partner.PartnerName,
+            BusinessPartnerLegalName = customer.Partner.LegalName,
+            BusinessPartnerTaxIdentificationNumber = customer.Partner.TaxIdentificationNumber,
+            PaymentNumber = reference, ReferenceNumber = reference,
             PaymentDate = dto.OpeningDate.Date, TotalAmount = 0m, AllocatedAmount = 0m,
             CurrencyCode = context.Currency, ExchangeRate = 1m, PaymentMethod = "OpeningBalance", Status = "Pending",
             WithholdingTaxId = dto.TaxId, WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
@@ -768,20 +804,6 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         payment.OpeningBalanceBatchId = batch.Id;
         await _db.SaveChangesAsync(cancellationToken);
         return batch;
-    }
-
-    private Task<BusinessPartner?> FindActiveCustomerPartnerAsync(
-        Guid customerId,
-        CancellationToken cancellationToken)
-    {
-        var tenantId = TenantId;
-        return _db.BusinessPartners.AsNoTracking().FirstOrDefaultAsync(item =>
-            item.TenantId == tenantId &&
-            item.Id == customerId &&
-            !item.IsDeleted &&
-            item.IsActive &&
-            BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType),
-            cancellationToken);
     }
 
     private async Task<OpeningBalanceBatchDto> CreateSpecializedBatchAsync(
@@ -864,7 +886,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             if (approvedRate.ApprovalStatus != RateApprovalStatus.Approved ||
                 !string.Equals(approvedRate.TargetCurrencyCode, currency, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(approvedRate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
-                RoundRate(approvedRate.Rate) != RoundRate(rate))
+                RoundRate(approvedRate.InverseRate) != RoundRate(rate))
                 throw new InvalidOperationException("Opening exchange-rate currency/value does not match approved rate evidence.");
         }
         return new SpecializedOpeningContext(settings, functionalCurrency, currency, rate,
@@ -2429,7 +2451,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         if (approvedRate == null || approvedRate.ApprovalStatus != RateApprovalStatus.Approved ||
             !string.Equals(approvedRate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(approvedRate.TargetCurrencyCode, currency, StringComparison.OrdinalIgnoreCase) ||
-            RoundRate(approvedRate.Rate) != RoundRate(sourceRate))
+            RoundRate(approvedRate.InverseRate) != RoundRate(sourceRate))
         {
             errors.Add("Foreign-currency opening advance rate is missing, unapproved, or no longer matches its source evidence.");
         }
@@ -3587,7 +3609,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
 
         return new BankExchangeRateSnapshot(
             approvedRate.Id,
-            RoundRate(approvedRate.Rate),
+            RoundRate(approvedRate.InverseRate),
             approvedRate.EffectiveDate.Date,
             approvedRate.RateType,
             approvedRate.QuoteSide,
@@ -4190,6 +4212,83 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         Guid AccountId,
         string? CounterpartyType,
         Guid? BankAccountId = null);
+
+    private sealed record CanonicalOpeningApPartner(
+        BusinessPartner Partner,
+        BusinessPartnerRole Role,
+        BusinessPartnerApProfileVersion Profile);
+
+    private sealed record CanonicalOpeningArPartner(
+        BusinessPartner Partner,
+        BusinessPartnerRole Role,
+        BusinessPartnerArProfileVersion Profile);
+
+    private async Task<CanonicalOpeningArPartner> ResolveOpeningArPartnerAsync(
+        Guid businessPartnerId,
+        Guid? requestedRoleId,
+        DateTime accountingDate,
+        CancellationToken cancellationToken)
+    {
+        var partner = await _db.BusinessPartners.IgnoreQueryFilters().SingleOrDefaultAsync(item =>
+            item.TenantId == TenantId && item.Id == businessPartnerId, cancellationToken)
+            ?? throw new InvalidOperationException("The selected Business Partner was not found for the current tenant.");
+        var roles = await _db.BusinessPartnerRoles.AsNoTracking().Where(role =>
+            role.TenantId == TenantId && role.BusinessPartnerId == businessPartnerId && !role.IsDeleted &&
+            role.RoleType == BusinessPartnerRoleType.Customer)
+            .OrderBy(role => role.CreatedAt)
+            .ThenBy(role => role.Id)
+            .ToListAsync(cancellationToken);
+        if (requestedRoleId.HasValue)
+            roles = roles.Where(role => role.Id == requestedRoleId.Value).ToList();
+        else if (roles.Count > 1)
+            throw new InvalidOperationException("Select the Customer role to use for this opening balance.");
+
+        var role = roles.SingleOrDefault();
+        var profiles = role is null
+            ? new List<BusinessPartnerArProfileVersion>()
+            : await _db.BusinessPartnerArProfileVersions.AsNoTracking()
+                .Where(profile => profile.TenantId == TenantId &&
+                    profile.BusinessPartnerRoleId == role.Id && !profile.IsDeleted)
+                .ToListAsync(cancellationToken);
+        var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAr(partner, role, profiles, accountingDate);
+        if (!readiness.IsReady || role is null || readiness.ArProfile is null)
+            throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
+        return new CanonicalOpeningArPartner(partner, role, readiness.ArProfile);
+    }
+
+    private async Task<CanonicalOpeningApPartner> ResolveOpeningApPartnerAsync(
+        Guid businessPartnerId,
+        Guid? requestedRoleId,
+        DateTime accountingDate,
+        CancellationToken cancellationToken)
+    {
+        var partner = await _db.BusinessPartners.IgnoreQueryFilters().SingleOrDefaultAsync(item =>
+            item.TenantId == TenantId && item.Id == businessPartnerId, cancellationToken)
+            ?? throw new InvalidOperationException("The selected Business Partner was not found for the current tenant.");
+        var roles = await _db.BusinessPartnerRoles.AsNoTracking().Where(role =>
+            role.TenantId == TenantId && role.BusinessPartnerId == businessPartnerId && !role.IsDeleted &&
+            role.Status == BusinessPartnerRoleStatus.Active &&
+            (role.RoleType == BusinessPartnerRoleType.Supplier || role.RoleType == BusinessPartnerRoleType.Contractor))
+            .ToListAsync(cancellationToken);
+        if (requestedRoleId.HasValue)
+            roles = roles.Where(role => role.Id == requestedRoleId.Value).ToList();
+        else if (roles.Count > 1)
+            throw new InvalidOperationException(
+                "Select the Supplier or Contractor role because this Business Partner has both roles.");
+
+        var role = roles.SingleOrDefault();
+        var profiles = role is null
+            ? new List<BusinessPartnerApProfileVersion>()
+            : await _db.BusinessPartnerApProfileVersions.AsNoTracking()
+                .Where(profile => profile.TenantId == TenantId &&
+                    profile.BusinessPartnerRoleId == role.Id && !profile.IsDeleted)
+                .Include(profile => profile.WithholdingDefaults)
+                .ToListAsync(cancellationToken);
+        var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAp(partner, role, profiles, accountingDate);
+        if (!readiness.IsReady || role is null || readiness.ApProfile is null)
+            throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
+        return new CanonicalOpeningApPartner(partner, role, readiness.ApProfile);
+    }
 
     private async Task<string> GetFunctionalCurrencyAsync(Guid tenantId, CancellationToken cancellationToken)
     {

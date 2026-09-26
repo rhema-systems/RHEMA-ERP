@@ -53,4 +53,11 @@ describe('Journal entry action visibility', () => {
     expect(pageSource).toContain('withdrawJournalEntryApproval(entry.id, withdrawalReason.trim())');
     expect(pageSource).not.toContain("withdrawJournalEntryApproval(entry.id, 'Approval request withdrawn by user.')");
   });
+
+  it('shows approval and posting audit values with their recorded time', () => {
+    expect(pageSource).toContain('>Posted At<');
+    expect(pageSource).toContain('formatDateTime(entry.postingDate)');
+    expect(pageSource).toContain('>Approved At<');
+    expect(pageSource).toContain('formatDateTime(entry.approvedDate)');
+  });
 });

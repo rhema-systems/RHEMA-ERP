@@ -503,7 +503,7 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             : await _invoiceService.CreateAsync(
             new InvoiceCreateDto
             {
-                CustomerId = account.CustomerBusinessPartnerId,
+                BusinessPartnerId = account.CustomerBusinessPartnerId,
                 InvoiceDate = invoiceDate,
                 DueDate = dueDate,
                 Reference = reference,
@@ -629,7 +629,7 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
         var invoice = await _invoiceService.CreateAsync(
             new InvoiceCreateDto
             {
-                CustomerId = account.CustomerBusinessPartnerId,
+                BusinessPartnerId = account.CustomerBusinessPartnerId,
                 InvoiceDate = DateTime.UtcNow.Date,
                 DueDate = DateTime.UtcNow.Date,
                 Reference = TrimTo($"GRP-{account.EstateManagedAsset.AssetCode}-{charge.DueDate:yyyyMMdd}", 100),
@@ -751,7 +751,7 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
         var payment = await _paymentService.CreateAsync(
             new PaymentCreateDto
             {
-                CustomerId = charge.GroundRentAccount.CustomerBusinessPartnerId,
+                BusinessPartnerId = charge.GroundRentAccount.CustomerBusinessPartnerId,
                 PaymentDate = request.PaymentDate == default ? DateTime.UtcNow.Date : request.PaymentDate.Date,
                 TotalAmount = request.Amount,
                 PaymentMethod = string.IsNullOrWhiteSpace(request.PaymentMethod) ? "Cash" : request.PaymentMethod.Trim(),

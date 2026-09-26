@@ -151,6 +151,41 @@ public sealed class BankingSettlementReleaseGateTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-ReadModels")]
+    public async Task DepositRegister_ShouldKeepSummaryBoundedAndLoadAllocationsOnlyWhenRequested()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var firstReceipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            500m);
+        var secondReceipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            300m);
+        db.LiquidityAccountEntries.AddRange(firstReceipt, secondReceipt);
+        await db.SaveChangesAsync();
+        var service = CreateBankingService(db, tenantId, Guid.NewGuid(), CreateWorkflow());
+        await service.CreateDepositAsync(CreateDepositRequest(setup, firstReceipt));
+        var secondRequest = CreateDepositRequest(setup, secondReceipt);
+        secondRequest.DepositReference = "SLIP-002";
+        await service.CreateDepositAsync(secondRequest);
+
+        var summary = await service.GetDepositsAsync(limit: 1);
+        summary.Should().ContainSingle();
+        summary.Single().Allocations.Should().BeEmpty();
+
+        var selectableEvidence = await service.GetDepositsAsync(includeAllocations: true, limit: 10);
+        selectableEvidence.Should().HaveCount(2);
+        selectableEvidence.Should().OnlyContain(item => item.Allocations.Count == 1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
     [Trait("Category", "CashBank")]
     public async Task Deposit_ShouldRequireMakerCheckerThenPostOneNetBankTransaction()
     {
@@ -952,7 +987,7 @@ public sealed class BankingSettlementReleaseGateTests
             Id = Guid.NewGuid(),
             TenantId = setup.TenantId,
             PaymentNumber = "CP-CHEQUE-001",
-            CustomerId = customer.Id,
+            BusinessPartnerId = customer.Id,
             PaymentDate = new DateTime(2026, 7, 5),
             TotalAmount = amount,
             AllocatedAmount = amount,

@@ -26,14 +26,14 @@ beforeEach(() => {
 describe('business partner detail account roles', () => {
   it.each([
     ['Contractor', true, false], ['Supplier', true, false], ['Customer', false, true], ['Both', true, true],
-  ] as const)('shows the applicable account tabs for %s', async (partnerType, payables, receivables) => {
+  ] as const)('does not expose ineffective legacy account tabs for %s', async (partnerType, payables, receivables) => {
     vi.mocked(businessPartnerService.getById).mockResolvedValue({
       id: 'partner-role-test', partnerCode: 'ROLE-001', partnerName: 'Role test partner', partnerType,
       status: 'Active', approvalStatus: 'Approved', documents: [], licenses: [],
     } as BusinessPartnerDetailDto);
     render(<BusinessPartnerDetailPage />);
     await screen.findByRole('heading', { name: 'Role test partner' });
-    expect(!!screen.queryByRole('tab', { name: 'Accounts Payable' })).toBe(payables);
-    expect(!!screen.queryByRole('tab', { name: 'Accounts Receivable' })).toBe(receivables);
+    expect(!!screen.queryByRole('tab', { name: 'Accounts Payable' })).toBe(false);
+    expect(!!screen.queryByRole('tab', { name: 'Accounts Receivable' })).toBe(false);
   });
 });

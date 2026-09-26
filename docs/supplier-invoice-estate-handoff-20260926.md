@@ -2,6 +2,16 @@
 
 Estate creates supplier invoices from its existing land-acquisition documents. The supplier workspace owns invoice review and distribution editing; Finance AP continues to own approval, accounting and payments. No purchase order is required for an invoice created by the trusted Estate handoff.
 
+## Finance PR 255 prerequisites
+
+The integrated handoff follows Finance's canonical Business Partner contract. `businessPartnerId` is the counterparty identity; do not pass a legacy Supplier or Customer ID. The partner must have an active Supplier or Contractor role and an approved AP profile effective on the invoice accounting date. Where both roles exist, pass the selected `businessPartnerRoleId`; receipt Auto Invoice and landed-cost generation preserve that selection through grouping and retry. Estate currently delegates role resolution to AP without an explicit role selection, so its existing handoff supports a partner with one active AP role; a partner with both Supplier and Contractor roles is rejected until Estate captures and forwards that choice. No Finance profile is silently approved.
+
+Stamp-duty and other-cost requests require preconfigured `GRA-STAMP-DUTY` and `LAND-ACQ-OTHER-COSTS` partners with governed AP setup. The source actions do not create or approve these payees. Both payable endpoints return structured validation details and a code so the existing Estate toast can explain missing setup. The remaining explicit integration limitation is dual-role selection: Estate currently needs one active AP role per payee until its role picker is added.
+
+Tenant Finance settings own AP control accounts, and the selected bank or cheque book owns cash accounts. The approved effective AP profile supplies expense, tax-group, payment-term and withholding defaults. Legacy Procurement partner account fields do not override those Finance controls. Historical posted-account and tax snapshots remain evidence for replay/reversal. See `docs/Finance/CANONICAL_BUSINESS_PARTNER_FINANCE_CONTRACT.md` for the shared contract.
+
+Finance's canonical migration chain requires its documented clean cutover baseline; it must not be applied blindly to a populated legacy Procurement verification database. A separate Finance-based verification copy has been authorized but has **not been created**: the user-secret target was verified as `.\SQL2017 / RhemaERP`, a legacy database without Book V2/canonical columns or migration history, and the documented `.\EXPRESS22` instance is unavailable. A suitable canonical source must be supplied or separately prepared before cloning and live checks. Final database identity, applied migration evidence and runtime checks must be recorded before release sign-off; the previous Procurement clone remains preserved. The latest fetched `origin/master` is `f92e660157` (Finance PR 255).
+
 ## Estate developer quick start
 
 1. Integrate the reviewed branch's backend, frontend and migrations together. Review the target migration history and apply the approved prerequisites below before starting the updated API. Copying only the Estate controller or supplier page is insufficient.
@@ -67,7 +77,7 @@ Shared integration surfaces include `VendorInvoiceService`, AP DTOs/model, the A
 
 Implementation and final checks are in progress. This document is the integration contract, not a release sign-off. Before merge readiness is claimed, record the final normal build, focused backend/UI test results, migration review and the live verification limits below.
 
-Current local development uses `http://localhost:3000`, API `http://127.0.0.1:5003`, and only `RhemaERP_Procurement_Verification_20260925`. Startup seeding and background workers are disabled in that verification environment. The source `RhemaERP` database is unchanged.
+Prior live checks used `http://localhost:3000`, API `http://127.0.0.1:5003`, and `RhemaERP_Procurement_Verification_20260925`. Those results predate the Finance canonical merge and are not validation of the new database model. Startup seeding and background workers remain disabled for verification. Record the separate Finance-based copy and fresh checks when prepared.
 
 Outstanding financial acceptance requires the invoice reviewer's tax decision, purchase tax GL mappings where applicable and an independently approved open accounting-book period. No invoice approval, payment or live GL posting is implied by successful compilation or draft distribution save.
 

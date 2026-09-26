@@ -263,7 +263,7 @@ public sealed class CashBankControlledDocumentBuilderTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "AR-PAY-2026-0001",
-            CustomerId = customer.Id,
+            BusinessPartnerId = customer.Id,
             PaymentDate = new DateTime(2026, 8, 3),
             TotalAmount = 800m,
             AllocatedAmount = 800m,

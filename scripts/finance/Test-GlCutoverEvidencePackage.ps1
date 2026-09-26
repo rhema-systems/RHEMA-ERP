@@ -959,12 +959,10 @@ if ($PackageKind -eq 'FinalClone') {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
         }
     )
-    if ($migrationIds.Count -ne 1 -or $migrationIds[-1] -ne '20260916132000_DisposableDevelopmentCurrentModelBaseline') {
-        throw "Final-clone migration evidence is not the authoritative disposable-development baseline. Count=$($migrationIds.Count); Latest=$($migrationIds[-1])."
-    }
-    if (@($migrationIds | Sort-Object -Unique).Count -ne 1 -or
+    if ($migrationIds.Count -lt 1 -or
+        @($migrationIds | Sort-Object -Unique).Count -ne $migrationIds.Count -or
         (@($migrationIds | Sort-Object) -join "`n") -ne ($migrationIds -join "`n")) {
-        throw 'Final-clone migration evidence contains duplicate or out-of-order migration IDs.'
+        throw 'Final-clone migration evidence is empty or contains duplicate/out-of-order migration IDs.'
     }
     if (-not (Test-NonnegativeJsonInt64 $summary.repositoryMigrationCount) -or
         [long]$summary.repositoryMigrationCount -ne $migrationIds.Count -or

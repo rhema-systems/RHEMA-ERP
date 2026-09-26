@@ -31,16 +31,61 @@ public sealed class AccountClassificationService : IAccountClassificationService
     public async Task<IReadOnlyList<AccountClassificationDto>> GetAsync(Guid? accountingBookId = null, bool includeInactive = false, CancellationToken cancellationToken = default)
     {
         var query = _db.AccountClassifications.AsNoTracking()
-            .AsSplitQuery()
-            .Include(item => item.AccountingBook)
-            .Include(item => item.ParentClassification)
-            .Include(item => item.Children.Where(child => !child.IsDeleted))
-            .Include(item => item.AccountMappings.Where(mapping => !mapping.IsDeleted))
             .Where(item => item.TenantId == TenantId && !item.IsDeleted);
         if (accountingBookId.HasValue) query = query.Where(item => item.AccountingBookId == accountingBookId);
         if (!includeInactive) query = query.Where(item => item.Status == AccountClassificationStatus.Active);
-        return (await query.OrderBy(item => item.AccountingBook.SortOrder).ThenBy(item => item.DisplayOrder).ThenBy(item => item.Code)
-            .ToListAsync(cancellationToken)).Select(Map).ToList();
+        var classifications = await query.OrderBy(item => item.AccountingBook.SortOrder)
+            .ThenBy(item => item.DisplayOrder)
+            .ThenBy(item => item.Code)
+            .Select(item => new AccountClassificationSummaryRow
+            {
+                Id = item.Id,
+                AccountingBookId = item.AccountingBookId,
+                AccountingBookCode = item.AccountingBook.Code,
+                ParentClassificationId = item.ParentClassificationId,
+                ParentClassificationCode = item.ParentClassification == null ? null : item.ParentClassification.Code,
+                ParentClassificationName = item.ParentClassification == null ? null : item.ParentClassification.Name,
+                Code = item.Code,
+                Name = item.Name,
+                Description = item.Description,
+                CoreAccountType = item.CoreAccountType,
+                DefaultRevaluationTreatment = item.DefaultRevaluationTreatment,
+                SystemRole = item.SystemRole,
+                IsPostingClassification = item.IsPostingClassification,
+                Status = item.Status,
+                DisplayOrder = item.DisplayOrder,
+                ChildCount = item.Children.Count(child => !child.IsDeleted),
+                NonRetiredChildCount = item.Children.Count(child => !child.IsDeleted
+                    && child.Status != AccountClassificationStatus.Retired),
+                TotalAccountCount = item.AccountMappings.Count(mapping => !mapping.IsDeleted),
+                EnabledAccountCount = item.AccountMappings.Count(mapping => !mapping.IsDeleted && mapping.IsEnabled),
+                RowVersion = item.RowVersion
+            })
+            .ToListAsync(cancellationToken);
+        var ids = classifications.Select(item => item.Id).ToArray();
+        var draftSelectors = await _db.FinancialStatementRowMappings.AsNoTracking()
+            .Where(item => item.TenantId == TenantId
+                && item.AccountClassificationId.HasValue
+                && ids.Contains(item.AccountClassificationId.Value)
+                && !item.IsDeleted
+                && !item.FinancialStatementRow.IsDeleted
+                && item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+                && !item.FinancialStatementRow.FinancialStatementLayoutVersion.IsDeleted)
+            .Select(item => new { ClassificationId = item.AccountClassificationId!.Value, item.IncludeClassificationDescendants })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var directSelectors = draftSelectors.Select(item => item.ClassificationId).ToHashSet();
+        var descendantSelectors = draftSelectors.Where(item => item.IncludeClassificationDescendants)
+            .Select(item => item.ClassificationId).ToHashSet();
+        var parentById = classifications.ToDictionary(item => item.Id, item => item.ParentClassificationId);
+
+        return classifications.Select(item =>
+        {
+            var dto = Map(item);
+            dto.HasDraftLayoutReference = directSelectors.Contains(item.Id)
+                || HasAncestorIn(item.Id, descendantSelectors, parentById);
+            return dto;
+        }).ToList();
     }
 
     public async Task<AccountClassificationWhereUsedDto> GetWhereUsedAsync(Guid id, CancellationToken cancellationToken = default)
@@ -143,7 +188,7 @@ public sealed class AccountClassificationService : IAccountClassificationService
         _db.AccountClassifications.Add(entity);
         await _db.SaveChangesAsync(cancellationToken);
         await RecordAuditAsync(FinanceAuditEvents.AccountClassificationCreated, entity, null, Snapshot(entity), null, cancellationToken);
-        var result = Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        var result = Map(await LoadSummaryForDtoAsync(entity.Id, cancellationToken));
         return result;
     }
 
@@ -155,6 +200,7 @@ public sealed class AccountClassificationService : IAccountClassificationService
         var entity = await _db.AccountClassifications.Include(item => item.AccountingBook)
             .SingleOrDefaultAsync(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("Account classification was not found.");
+        EnsureManualMaintenanceAllowed(entity.AccountingBook);
         if (entity.Status == AccountClassificationStatus.Retired)
             throw new InvalidOperationException("A retired classification cannot be edited.");
         ApplyRowVersion(entity, request.RowVersion);
@@ -200,7 +246,7 @@ public sealed class AccountClassificationService : IAccountClassificationService
         entity.UpdatedBy = _currentUser.UserName ?? "system";
         await _db.SaveChangesAsync(cancellationToken);
         await RecordAuditAsync(FinanceAuditEvents.AccountClassificationUpdated, entity, before, Snapshot(entity), null, cancellationToken);
-        var result = Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        var result = Map(await LoadSummaryForDtoAsync(entity.Id, cancellationToken));
         return result;
     }
 
@@ -213,6 +259,7 @@ public sealed class AccountClassificationService : IAccountClassificationService
         var entity = await _db.AccountClassifications.Include(item => item.AccountingBook)
             .SingleOrDefaultAsync(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("Account classification was not found.");
+        EnsureManualMaintenanceAllowed(entity.AccountingBook);
         ApplyRowVersion(entity, request.RowVersion);
         var before = Snapshot(entity);
         if (await _db.AccountAccountingBooks.AnyAsync(item =>
@@ -240,7 +287,7 @@ public sealed class AccountClassificationService : IAccountClassificationService
         entity.UpdatedBy = _currentUser.UserName ?? "system";
         await _db.SaveChangesAsync(cancellationToken);
         await RecordAuditAsync(FinanceAuditEvents.AccountClassificationRetired, entity, before, Snapshot(entity), request.Reason.Trim(), cancellationToken);
-        var result = Map(await LoadForDtoAsync(entity.Id, cancellationToken));
+        var result = Map(await LoadSummaryForDtoAsync(entity.Id, cancellationToken));
         return result;
     }
 
@@ -263,7 +310,11 @@ public sealed class AccountClassificationService : IAccountClassificationService
         ValidateSystemRole(accountType, role);
         var book = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item => item.Id == request.AccountingBookId && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Accounting book is invalid for this tenant.");
+        EnsureManualMaintenanceAllowed(book);
         var code = NormalizeCode(request.Code);
+        if (!IsCanonicalCode(code))
+            throw new InvalidOperationException(
+                "Classification code must start with an uppercase letter and contain only uppercase letters, numbers and underscores (maximum 50 characters).");
         if (await _db.AccountClassifications.AnyAsync(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && item.Code == code && !item.IsDeleted && item.Id != currentId, cancellationToken))
             throw new InvalidOperationException("Classification code already exists in this accounting book.");
         if (role.HasValue && !IsRepeatableSystemRole(role.Value)
@@ -313,6 +364,15 @@ public sealed class AccountClassificationService : IAccountClassificationService
     private static bool IsRepeatableSystemRole(AccountClassificationSystemRole role) =>
         role is AccountClassificationSystemRole.Cash or AccountClassificationSystemRole.Bank;
 
+    private static void EnsureManualMaintenanceAllowed(AccountingBook book)
+    {
+        if (book.BookType == AccountingBookType.Delta)
+            throw new InvalidOperationException(
+                "Delta account classifications are governed by the base book and cannot be maintained manually. Use governed Delta structure preparation.");
+        if (book.LifecycleStatus == AccountingBookLifecycleStatus.Retired)
+            throw new InvalidOperationException("Classifications in a retired accounting book cannot be maintained.");
+    }
+
     private async Task<T> ExecuteAtomicAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
     {
         if (!_db.Database.IsRelational()) return await operation();
@@ -344,6 +404,21 @@ public sealed class AccountClassificationService : IAccountClassificationService
         {
             if (cursor.Value == ancestorId) return true;
             cursor = await _db.AccountClassifications.AsNoTracking().Where(item => item.Id == cursor.Value && item.TenantId == TenantId && !item.IsDeleted).Select(item => item.ParentClassificationId).SingleOrDefaultAsync(cancellationToken);
+        }
+        return false;
+    }
+
+    private static bool HasAncestorIn(
+        Guid classificationId,
+        IReadOnlySet<Guid> selectors,
+        IReadOnlyDictionary<Guid, Guid?> parentById)
+    {
+        var seen = new HashSet<Guid>();
+        Guid? current = classificationId;
+        while (current.HasValue && seen.Add(current.Value))
+        {
+            if (selectors.Contains(current.Value)) return true;
+            current = parentById.TryGetValue(current.Value, out var parent) ? parent : null;
         }
         return false;
     }
@@ -392,15 +467,38 @@ public sealed class AccountClassificationService : IAccountClassificationService
     }
 
     private static string NormalizeCode(string value) => value.Trim().ToUpperInvariant();
+    private static bool IsCanonicalCode(string value) => value.Length is > 0 and <= 50
+        && value[0] is >= 'A' and <= 'Z'
+        && value.All(character => character is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_');
     private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-    private async Task<AccountClassification> LoadForDtoAsync(Guid id, CancellationToken cancellationToken) =>
+    private async Task<AccountClassificationSummaryRow> LoadSummaryForDtoAsync(Guid id, CancellationToken cancellationToken) =>
         await _db.AccountClassifications.AsNoTracking()
-            .AsSplitQuery()
-            .Include(item => item.AccountingBook)
-            .Include(item => item.ParentClassification)
-            .Include(item => item.Children.Where(child => !child.IsDeleted))
-            .Include(item => item.AccountMappings.Where(mapping => !mapping.IsDeleted))
-            .SingleAsync(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
+            .Where(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted)
+            .Select(item => new AccountClassificationSummaryRow
+            {
+                Id = item.Id,
+                AccountingBookId = item.AccountingBookId,
+                AccountingBookCode = item.AccountingBook.Code,
+                ParentClassificationId = item.ParentClassificationId,
+                ParentClassificationCode = item.ParentClassification == null ? null : item.ParentClassification.Code,
+                ParentClassificationName = item.ParentClassification == null ? null : item.ParentClassification.Name,
+                Code = item.Code,
+                Name = item.Name,
+                Description = item.Description,
+                CoreAccountType = item.CoreAccountType,
+                DefaultRevaluationTreatment = item.DefaultRevaluationTreatment,
+                SystemRole = item.SystemRole,
+                IsPostingClassification = item.IsPostingClassification,
+                Status = item.Status,
+                DisplayOrder = item.DisplayOrder,
+                ChildCount = item.Children.Count(child => !child.IsDeleted),
+                NonRetiredChildCount = item.Children.Count(child => !child.IsDeleted
+                    && child.Status != AccountClassificationStatus.Retired),
+                TotalAccountCount = item.AccountMappings.Count(mapping => !mapping.IsDeleted),
+                EnabledAccountCount = item.AccountMappings.Count(mapping => !mapping.IsDeleted && mapping.IsEnabled),
+                RowVersion = item.RowVersion
+            })
+            .SingleAsync(cancellationToken);
 
     private async Task RecordAuditAsync(string eventType, AccountClassification item, object? before, object after, string? reason, CancellationToken cancellationToken) =>
         await _audit.RecordAsync(new FinanceAuditEventDto
@@ -435,20 +533,44 @@ public sealed class AccountClassificationService : IAccountClassificationService
         item.RetiredByUserId
     };
 
-    private static AccountClassificationDto Map(AccountClassification item) => new()
+    private static AccountClassificationDto Map(AccountClassificationSummaryRow item) => new()
     {
-        Id = item.Id, AccountingBookId = item.AccountingBookId, AccountingBookCode = item.AccountingBook.Code,
+        Id = item.Id, AccountingBookId = item.AccountingBookId, AccountingBookCode = item.AccountingBookCode,
         ParentClassificationId = item.ParentClassificationId,
-        ParentClassificationCode = item.ParentClassification?.Code,
-        ParentClassificationName = item.ParentClassification?.Name,
+        ParentClassificationCode = item.ParentClassificationCode,
+        ParentClassificationName = item.ParentClassificationName,
         Code = item.Code, Name = item.Name,
         Description = item.Description, CoreAccountType = item.CoreAccountType.ToString(),
         DefaultRevaluationTreatment = item.DefaultRevaluationTreatment.ToString(), SystemRole = item.SystemRole?.ToString(),
         IsPostingClassification = item.IsPostingClassification, Status = item.Status.ToString(), DisplayOrder = item.DisplayOrder,
-        ChildCount = item.Children.Count(child => !child.IsDeleted),
-        NonRetiredChildCount = item.Children.Count(child => !child.IsDeleted && child.Status != AccountClassificationStatus.Retired),
-        TotalAccountCount = item.AccountMappings.Count(mapping => !mapping.IsDeleted),
-        EnabledAccountCount = item.AccountMappings.Count(mapping => !mapping.IsDeleted && mapping.IsEnabled),
+        ChildCount = item.ChildCount,
+        NonRetiredChildCount = item.NonRetiredChildCount,
+        TotalAccountCount = item.TotalAccountCount,
+        EnabledAccountCount = item.EnabledAccountCount,
         RowVersion = item.RowVersion.Length == 0 ? string.Empty : Convert.ToBase64String(item.RowVersion)
     };
+
+    private sealed class AccountClassificationSummaryRow
+    {
+        public Guid Id { get; init; }
+        public Guid AccountingBookId { get; init; }
+        public string AccountingBookCode { get; init; } = string.Empty;
+        public Guid? ParentClassificationId { get; init; }
+        public string? ParentClassificationCode { get; init; }
+        public string? ParentClassificationName { get; init; }
+        public string Code { get; init; } = string.Empty;
+        public string Name { get; init; } = string.Empty;
+        public string? Description { get; init; }
+        public AccountType CoreAccountType { get; init; }
+        public RevaluationTreatment DefaultRevaluationTreatment { get; init; }
+        public AccountClassificationSystemRole? SystemRole { get; init; }
+        public bool IsPostingClassification { get; init; }
+        public AccountClassificationStatus Status { get; init; }
+        public int DisplayOrder { get; init; }
+        public int ChildCount { get; init; }
+        public int NonRetiredChildCount { get; init; }
+        public int TotalAccountCount { get; init; }
+        public int EnabledAccountCount { get; init; }
+        public byte[] RowVersion { get; init; } = [];
+    }
 }

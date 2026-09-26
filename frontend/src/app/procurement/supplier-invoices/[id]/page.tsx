@@ -260,7 +260,7 @@ export default function VendorInvoiceDetailsPage() {
                         </Button>
                     )}
                     {(invoice.status === 'Approved' || invoice.status === 'PartiallyPaid') && invoice.balanceAmount > 0 && (
-                        <Button size="sm" onClick={() => router.push(`/finance/ap/payments/create?supplierId=${invoice.supplierId}&invoiceId=${invoice.id}`)}>
+                        <Button size="sm" onClick={() => router.push(`/finance/ap/payments/create?businessPartnerId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
                             <CreditCard className="mr-2 h-4 w-4" /> Schedule Payment
                         </Button>
                     )}

@@ -18,6 +18,7 @@ public sealed class ReconcileAccountingBookPeriodInitializationSchema : Migratio
             THROW 51000, 'C4_RECONCILE_PARTIAL_SCHEMA: incomplete authority schema requires explicit repair; no objects were changed.', 1;
         IF OBJECT_ID(N'dbo.AccountingBooks', N'U') IS NULL OR OBJECT_ID(N'dbo.FiscalPeriods', N'U') IS NULL
            OR OBJECT_ID(N'dbo.Accounts', N'U') IS NULL OR OBJECT_ID(N'dbo.Tenants', N'U') IS NULL
+           OR OBJECT_ID(N'dbo.ExchangeRates', N'U') IS NULL
             THROW 51000, 'C4_RECONCILE_PREDECESSOR: required Finance predecessor tables are missing.', 1;
 
         IF @C4TableCount = 0
@@ -28,12 +29,15 @@ public sealed class ReconcileAccountingBookPeriodInitializationSchema : Migratio
                 ALTER TABLE dbo.FiscalPeriods ADD CONSTRAINT AK_FiscalPeriods_TenantId_Id UNIQUE (TenantId, Id);
             IF NOT EXISTS (SELECT 1 FROM sys.key_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.Accounts') AND name=N'AK_Accounts_TenantId_Id')
                 ALTER TABLE dbo.Accounts ADD CONSTRAINT AK_Accounts_TenantId_Id UNIQUE (TenantId, Id);
+            IF NOT EXISTS (SELECT 1 FROM sys.key_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.ExchangeRates') AND name=N'AK_ExchangeRates_TenantId_Id')
+                ALTER TABLE dbo.ExchangeRates ADD CONSTRAINT AK_ExchangeRates_TenantId_Id UNIQUE (TenantId, Id);
             CREATE TABLE [dbo].[AccountingBookInitializations] (
                 [Id] uniqueidentifier NOT NULL,
                 [AccountingBookId] uniqueidentifier NOT NULL,
                 [Version] int NOT NULL,
                 [SupersedesInitializationId] uniqueidentifier NULL,
                 [Mode] int NOT NULL,
+                [TranslationMethod] int NULL,
                 [InitializationStatus] int NOT NULL,
                 [CutoffDate] datetime2 NOT NULL,
                 [CutoffFiscalPeriodId] uniqueidentifier NOT NULL,
@@ -81,6 +85,7 @@ public sealed class ReconcileAccountingBookPeriodInitializationSchema : Migratio
                 CONSTRAINT [CK_AccountingBookInitializations_ReconciliationFingerprint] CHECK (LEN([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] = RTRIM([ReconciliationFingerprint]) AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'),
                 CONSTRAINT [CK_AccountingBookInitializations_SourceShape] CHECK (([Mode] = 1 AND [SourceAccountingBookId] IS NULL) OR ([Mode] IN (2, 3) AND [SourceAccountingBookId] IS NOT NULL AND [SourceAccountingBookId] <> [AccountingBookId])),
                 CONSTRAINT [CK_AccountingBookInitializations_Status] CHECK ([IsDeleted] = 1 OR [InitializationStatus] IN (1, 2, 3, 4)),
+                CONSTRAINT [CK_AccountingBookInitializations_TranslationMethod] CHECK ([TranslationMethod] IS NULL OR [TranslationMethod] IN (1, 2)),
                 CONSTRAINT [FK_AccountingBookInitializations_AccountingBookInitializations_TenantId_AccountingBookId_SupersedesInitializationId] FOREIGN KEY ([TenantId], [AccountingBookId], [SupersedesInitializationId]) REFERENCES [dbo].[AccountingBookInitializations] ([TenantId], [AccountingBookId], [Id]) ON DELETE NO ACTION,
                 CONSTRAINT [FK_AccountingBookInitializations_AccountingBooks_TenantId_AccountingBookId] FOREIGN KEY ([TenantId], [AccountingBookId]) REFERENCES [dbo].[AccountingBooks] ([TenantId], [Id]) ON DELETE NO ACTION,
                 CONSTRAINT [FK_AccountingBookInitializations_AccountingBooks_TenantId_SourceAccountingBookId] FOREIGN KEY ([TenantId], [SourceAccountingBookId]) REFERENCES [dbo].[AccountingBooks] ([TenantId], [Id]) ON DELETE NO ACTION,
@@ -130,6 +135,11 @@ public sealed class ReconcileAccountingBookPeriodInitializationSchema : Migratio
                 [OpeningCredit] decimal(18,4) NOT NULL,
                 [BaseBookSignedBalance] decimal(18,4) NOT NULL,
                 [OpeningAdjustment] decimal(18,4) NOT NULL,
+                [TranslationExchangeRateId] uniqueidentifier NULL,
+                [TranslationRate] decimal(18,6) NULL,
+                [TranslationRateDate] datetime2 NULL,
+                [TranslationRateSource] nvarchar(100) NULL,
+                [TranslationRateType] nvarchar(30) NULL,
                 [CreatedAt] datetime2 NOT NULL,
                 [UpdatedAt] datetime2 NULL,
                 [CreatedBy] nvarchar(max) NULL,
@@ -144,12 +154,15 @@ public sealed class ReconcileAccountingBookPeriodInitializationSchema : Migratio
                 CONSTRAINT [CK_AccountingBookInitializationLines_Amounts] CHECK ([OpeningDebit] >= 0 AND [OpeningCredit] >= 0 AND NOT ([OpeningDebit] > 0 AND [OpeningCredit] > 0)),
                 CONSTRAINT [CK_AccountingBookInitializationLines_Currency] CHECK (LEN([CurrencyCode]) = 3 AND [CurrencyCode] = RTRIM([CurrencyCode]) AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'),
                 CONSTRAINT [CK_AccountingBookInitializationLines_NoDelete] CHECK ([IsDeleted] = 0),
+                CONSTRAINT [CK_AccountingBookInitializationLines_TranslationEvidence] CHECK (([TranslationExchangeRateId] IS NULL AND [TranslationRate] IS NULL AND [TranslationRateDate] IS NULL AND [TranslationRateType] IS NULL AND [TranslationRateSource] IS NULL) OR ([TranslationExchangeRateId] IS NOT NULL AND [TranslationRate] > 0 AND [TranslationRateDate] IS NOT NULL AND [TranslationRateType] IS NOT NULL AND [TranslationRateSource] IS NOT NULL)),
                 CONSTRAINT [FK_AccountingBookInitializationLines_AccountingBookInitializations_TenantId_AccountingBookInitializationId] FOREIGN KEY ([TenantId], [AccountingBookInitializationId]) REFERENCES [dbo].[AccountingBookInitializations] ([TenantId], [Id]) ON DELETE NO ACTION,
                 CONSTRAINT [FK_AccountingBookInitializationLines_Accounts_TenantId_AccountId] FOREIGN KEY ([TenantId], [AccountId]) REFERENCES [dbo].[Accounts] ([TenantId], [Id]) ON DELETE NO ACTION,
+                CONSTRAINT [FK_AccountingBookInitializationLines_ExchangeRates_TenantId_TranslationExchangeRateId] FOREIGN KEY ([TenantId], [TranslationExchangeRateId]) REFERENCES [dbo].[ExchangeRates] ([TenantId], [Id]) ON DELETE NO ACTION,
                 CONSTRAINT [FK_AccountingBookInitializationLines_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION
             );
 
             CREATE INDEX [IX_AccountingBookInitializationLines_TenantId_AccountId] ON [dbo].[AccountingBookInitializationLines] ([TenantId], [AccountId]);
+            CREATE INDEX [IX_AccountingBookInitializationLines_TenantId_TranslationExchangeRateId] ON [dbo].[AccountingBookInitializationLines] ([TenantId], [TranslationExchangeRateId]);
             CREATE UNIQUE INDEX [IX_AccountingBookInitializationLines_TenantId_AccountingBookInitializationId_AccountId] ON [dbo].[AccountingBookInitializationLines] ([TenantId], [AccountingBookInitializationId], [AccountId]);
             CREATE UNIQUE INDEX [IX_AccountingBookInitializations_TenantId_AccountingBookId_InitializationStatus] ON [dbo].[AccountingBookInitializations] ([TenantId], [AccountingBookId], [InitializationStatus]) WHERE [IsDeleted] = 0 AND [InitializationStatus] = 3;
             CREATE UNIQUE INDEX [IX_AccountingBookInitializations_TenantId_AccountingBookId_Version] ON [dbo].[AccountingBookInitializations] ([TenantId], [AccountingBookId], [Version]);
@@ -168,6 +181,7 @@ public sealed class ReconcileAccountingBookPeriodInitializationSchema : Migratio
         (N'AccountingBookInitializations',N'Version',N'int',NULL,NULL,NULL,0),
         (N'AccountingBookInitializations',N'SupersedesInitializationId',N'uniqueidentifier',NULL,NULL,NULL,1),
         (N'AccountingBookInitializations',N'Mode',N'int',NULL,NULL,NULL,0),
+        (N'AccountingBookInitializations',N'TranslationMethod',N'int',NULL,NULL,NULL,1),
         (N'AccountingBookInitializations',N'InitializationStatus',N'int',NULL,NULL,NULL,0),
         (N'AccountingBookInitializations',N'CutoffDate',N'datetime2',NULL,NULL,NULL,0),
         (N'AccountingBookInitializations',N'CutoffFiscalPeriodId',N'uniqueidentifier',NULL,NULL,NULL,0),
@@ -232,6 +246,11 @@ public sealed class ReconcileAccountingBookPeriodInitializationSchema : Migratio
         (N'AccountingBookInitializationLines',N'OpeningCredit',N'decimal',NULL,18,4,0),
         (N'AccountingBookInitializationLines',N'BaseBookSignedBalance',N'decimal',NULL,18,4,0),
         (N'AccountingBookInitializationLines',N'OpeningAdjustment',N'decimal',NULL,18,4,0),
+        (N'AccountingBookInitializationLines',N'TranslationExchangeRateId',N'uniqueidentifier',NULL,NULL,NULL,1),
+        (N'AccountingBookInitializationLines',N'TranslationRate',N'decimal',NULL,18,6,1),
+        (N'AccountingBookInitializationLines',N'TranslationRateDate',N'datetime2',NULL,NULL,NULL,1),
+        (N'AccountingBookInitializationLines',N'TranslationRateSource',N'nvarchar',200,NULL,NULL,1),
+        (N'AccountingBookInitializationLines',N'TranslationRateType',N'nvarchar',60,NULL,NULL,1),
         (N'AccountingBookInitializationLines',N'CreatedAt',N'datetime2',NULL,NULL,NULL,0),
         (N'AccountingBookInitializationLines',N'UpdatedAt',N'datetime2',NULL,NULL,NULL,1),
         (N'AccountingBookInitializationLines',N'CreatedBy',N'nvarchar',-1,NULL,NULL,1),
@@ -248,6 +267,22 @@ public sealed class ReconcileAccountingBookPeriodInitializationSchema : Migratio
                OR (e.MaxLength IS NOT NULL AND c.max_length <> e.MaxLength)
                OR (e.[Precision] IS NOT NULL AND c.precision <> e.[Precision]) OR (e.Scale IS NOT NULL AND c.scale <> e.Scale))
             THROW 51000, 'C4_RECONCILE_COLUMN_DRIFT: existing C4 columns do not match the governed model.', 1;
+
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes i WHERE i.object_id = OBJECT_ID(N'dbo.AccountingBookInitializationLines') AND i.name = N'IX_AccountingBookInitializationLines_TenantId_TranslationExchangeRateId' AND i.is_unique = 0 AND i.is_disabled = 0 AND i.is_hypothetical = 0
+            AND (SELECT COUNT(*) FROM sys.index_columns ic WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.key_ordinal>0) = 2
+            AND EXISTS (SELECT 1 FROM sys.index_columns ic JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.key_ordinal=1 AND c.name=N'TenantId')
+            AND EXISTS (SELECT 1 FROM sys.index_columns ic JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.key_ordinal=2 AND c.name=N'TranslationExchangeRateId')
+            AND i.has_filter = 0)
+            THROW 51000, 'C4_RECONCILE_KEY_DRIFT: IX_AccountingBookInitializationLines_TenantId_TranslationExchangeRateId', 1;
+        IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys f WHERE f.parent_object_id=OBJECT_ID(N'dbo.AccountingBookInitializationLines') AND f.name=N'FK_AccountingBookInitializationLines_ExchangeRates_TenantId_TranslationExchangeRateId' AND f.referenced_object_id=OBJECT_ID(N'dbo.ExchangeRates') AND f.is_disabled=0 AND f.is_not_trusted=0 AND f.delete_referential_action=0 AND f.update_referential_action=0
+            AND (SELECT COUNT(*) FROM sys.foreign_key_columns x WHERE x.constraint_object_id=f.object_id)=2
+            AND EXISTS (SELECT 1 FROM sys.foreign_key_columns x JOIN sys.columns pc ON pc.object_id=x.parent_object_id AND pc.column_id=x.parent_column_id JOIN sys.columns rc ON rc.object_id=x.referenced_object_id AND rc.column_id=x.referenced_column_id WHERE x.constraint_object_id=f.object_id AND x.constraint_column_id=1 AND pc.name=N'TenantId' AND rc.name=N'TenantId')
+            AND EXISTS (SELECT 1 FROM sys.foreign_key_columns x JOIN sys.columns pc ON pc.object_id=x.parent_object_id AND pc.column_id=x.parent_column_id JOIN sys.columns rc ON rc.object_id=x.referenced_object_id AND rc.column_id=x.referenced_column_id WHERE x.constraint_object_id=f.object_id AND x.constraint_column_id=2 AND pc.name=N'TranslationExchangeRateId' AND rc.name=N'Id'))
+            THROW 51000, 'C4_RECONCILE_FK_DRIFT: FK_AccountingBookInitializationLines_ExchangeRates_TenantId_TranslationExchangeRateId', 1;
+        IF NOT EXISTS (SELECT 1 FROM sys.check_constraints c WHERE c.parent_object_id=OBJECT_ID(N'dbo.AccountingBookInitializations') AND c.name=N'CK_AccountingBookInitializations_TranslationMethod' AND c.is_disabled=0 AND c.is_not_trusted=0 AND c.definition COLLATE Latin1_General_100_BIN2 = N'([TranslationMethod] IS NULL OR ([TranslationMethod]=(2) OR [TranslationMethod]=(1)))' COLLATE Latin1_General_100_BIN2)
+            THROW 51000, 'C4_RECONCILE_CHECK_DRIFT: CK_AccountingBookInitializations_TranslationMethod', 1;
+        IF NOT EXISTS (SELECT 1 FROM sys.check_constraints c WHERE c.parent_object_id=OBJECT_ID(N'dbo.AccountingBookInitializationLines') AND c.name=N'CK_AccountingBookInitializationLines_TranslationEvidence' AND c.is_disabled=0 AND c.is_not_trusted=0 AND c.definition COLLATE Latin1_General_100_BIN2 = N'([TranslationExchangeRateId] IS NULL AND [TranslationRate] IS NULL AND [TranslationRateDate] IS NULL AND [TranslationRateType] IS NULL AND [TranslationRateSource] IS NULL OR [TranslationExchangeRateId] IS NOT NULL AND [TranslationRate]>(0) AND [TranslationRateDate] IS NOT NULL AND [TranslationRateType] IS NOT NULL AND [TranslationRateSource] IS NOT NULL)' COLLATE Latin1_General_100_BIN2)
+            THROW 51000, 'C4_RECONCILE_CHECK_DRIFT: CK_AccountingBookInitializationLines_TranslationEvidence', 1;
 
         IF NOT EXISTS (SELECT 1 FROM sys.indexes i WHERE i.object_id = OBJECT_ID(N'dbo.AccountingBookInitializations') AND i.name = N'PK_AccountingBookInitializations' AND i.is_unique = 1 AND i.is_disabled = 0 AND i.is_hypothetical = 0
             AND (SELECT COUNT(*) FROM sys.index_columns ic WHERE ic.object_id=i.object_id AND ic.index_id=i.index_id AND ic.key_ordinal>0) = 1

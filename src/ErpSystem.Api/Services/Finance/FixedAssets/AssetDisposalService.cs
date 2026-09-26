@@ -764,7 +764,7 @@ public class AssetDisposalService : IAssetDisposalService
         }).ToArray();
         var invoiceRequest = new InvoiceCreateDto
         {
-            CustomerId = disposal.BuyerBusinessPartnerId.Value,
+            BusinessPartnerId = disposal.BuyerBusinessPartnerId.Value,
             InvoiceDate = disposal.DisposalDate.Date,
             DueDate = disposal.SettlementMode == AssetDisposalSettlementMode.ImmediateReceipt
                 ? disposal.DisposalDate.Date
@@ -808,7 +808,7 @@ public class AssetDisposalService : IAssetDisposalService
 
         var receiptRequest = new PaymentCreateDto
         {
-            CustomerId = disposal.BuyerBusinessPartnerId.Value,
+            BusinessPartnerId = disposal.BuyerBusinessPartnerId.Value,
             PaymentDate = disposal.DisposalDate.Date,
             TotalAmount = invoice.TotalAmount,
             PaymentMethod = "Configured",
@@ -2045,7 +2045,7 @@ public class AssetDisposalService : IAssetDisposalService
 
         return new ProceedsExchangeRateSnapshot(
             rate.Id,
-            rate.Rate,
+            rate.InverseRate,
             rate.RateSource,
             rate.EffectiveDate.Date,
             rate.RateType,

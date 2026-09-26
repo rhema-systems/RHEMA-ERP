@@ -81,8 +81,7 @@ public sealed class BankAccountTenantIsolationTests
             BankName = "Bank",
             Currency = "GHS",
             AccountType = BankAccountType.Checking,
-            GLAccountId = otherTenantGlAccountId,
-            OpeningDate = DateTime.UtcNow
+            GLAccountId = otherTenantGlAccountId
         };
 
         var act = () => service.CreateAsync(dto);
@@ -121,8 +120,7 @@ public sealed class BankAccountTenantIsolationTests
             BankName = "Test Bank",
             Currency = "GHS",
             AccountType = BankAccountType.Checking,
-            GLAccountId = usdGl.Id,
-            OpeningDate = DateTime.UtcNow
+            GLAccountId = usdGl.Id
         });
 
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -170,8 +168,7 @@ public sealed class BankAccountTenantIsolationTests
             BankName = "Test Bank",
             Currency = "GHS",
             AccountType = BankAccountType.Checking,
-            GLAccountId = glAccount.Id,
-            OpeningDate = DateTime.UtcNow
+            GLAccountId = glAccount.Id
         });
 
         await action.Should().ThrowAsync<InvalidOperationException>().WithMessage(expectedMessage);

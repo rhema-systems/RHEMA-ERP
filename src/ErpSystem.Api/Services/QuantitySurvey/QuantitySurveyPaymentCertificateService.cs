@@ -40,8 +40,7 @@ public sealed class QuantitySurveyPaymentCertificateService(
     IDocumentOutputService documentOutput,
     IControlledFileUploadService controlledFiles,
     ICentralDocumentRepositoryFileService centralDocuments,
-    IProcurementBudgetCommitmentLifecycleService budgetCommitments,
-    IApSupplierIdentityService supplierIdentity) : IQuantitySurveyPaymentCertificateService
+    IProcurementBudgetCommitmentLifecycleService budgetCommitments) : IQuantitySurveyPaymentCertificateService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -483,15 +482,9 @@ public sealed class QuantitySurveyPaymentCertificateService(
         if (taxableBase < 0m)
             throw Conflict("The certificate tax snapshot exceeds its net payable amount.");
 
-        // This is the purpose-authorized handoff of an approved Works certificate.
-        // Finance owns the tenant-safe, idempotent partner-to-supplier projection; normal
-        // invoice entry still cannot implicitly onboard an unlinked contractor.
-        var supplier = await supplierIdentity.ResolveByBusinessPartnerAsync(contract.BusinessPartnerId, token);
-        if (supplier.BusinessPartnerId != contract.BusinessPartnerId || supplier.SupplierId == Guid.Empty)
-            throw Conflict("The Finance supplier identity does not match the certificate's contractor.");
         var invoice = await vendorInvoices.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = supplier.SupplierId,
+            BusinessPartnerId = contract.BusinessPartnerId,
             SupplierInvoiceNumber = entity.CertificateNumber,
             InvoiceDate = entity.IssueDate,
             ReceivedDate = DateTime.UtcNow,

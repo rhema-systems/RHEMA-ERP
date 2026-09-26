@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { getFinanceFeedbackTitle } from "@/lib/finance/posting-error"
 
 const TOAST_LIMIT = 1
 const TOAST_REMOVE_DELAY = 5000
@@ -142,6 +143,16 @@ type Toast = Omit<ToasterToast, "id">
 
 function toast({ ...props }: Toast) {
   const id = genId()
+  const isFinanceRoute = typeof window !== "undefined" && (
+    window.location.pathname.startsWith("/finance") ||
+    window.location.pathname.startsWith("/administration/finance")
+  )
+  const normalizedProps = isFinanceRoute && typeof props.title === "string" && typeof props.description === "string"
+    ? {
+        ...props,
+        title: getFinanceFeedbackTitle(props.title, props.description, props.variant === "destructive"),
+      }
+    : props
 
   const update = (props: ToasterToast) =>
     dispatch({
@@ -153,7 +164,7 @@ function toast({ ...props }: Toast) {
   dispatch({
     type: "ADD_TOAST",
     toast: {
-      ...props,
+      ...normalizedProps,
       id,
       open: true,
       onOpenChange: (open) => {

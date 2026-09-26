@@ -469,7 +469,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
         FinanceReportExportRequestDto request,
         CancellationToken cancellationToken)
     {
-        var report = await _apReportsService.GetDetailedAgingReportAsync(request.AsOfDate, request.SupplierId, cancellationToken);
+        var report = await _apReportsService.GetDetailedAgingReportAsync(request.AsOfDate, request.BusinessPartnerId, cancellationToken);
         if (!report.UsesSettlementReadModel)
         {
             throw new InvalidOperationException("AP aging export requires the AP settlement read model. Legacy operational-field aging is not allowed for production export.");
@@ -528,7 +528,7 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
         FinanceReportExportRequestDto request,
         CancellationToken cancellationToken)
     {
-        var report = await _arReportsService.GetDetailedAgingReportAsync(request.AsOfDate, request.CustomerId, cancellationToken);
+        var report = await _arReportsService.GetDetailedAgingReportAsync(request.AsOfDate, request.BusinessPartnerId, cancellationToken);
         if (!report.UsesSettlementReadModel)
         {
             throw new InvalidOperationException("AR aging export requires the AR settlement read model. Legacy operational-field aging is not allowed for production export.");
@@ -590,11 +590,11 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
     {
         var startDate = request.PeriodStart ?? DateTime.UtcNow.Date;
         var endDate = request.PeriodEnd ?? request.AsOfDate ?? DateTime.UtcNow.Date;
-        var customerIds = ResolveReportIds(request.CustomerIds, request.CustomerId);
+        var businessPartnerIds = ResolveReportIds(request.BusinessPartnerIds, request.BusinessPartnerId);
         var report = await _arReportsService.GetCustomerDetailedLedgerAsync(
             startDate,
             endDate,
-            customerIds,
+            businessPartnerIds,
             request.ShowCustomerCurrency,
             cancellationToken);
 
@@ -694,11 +694,11 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
     {
         var startDate = request.PeriodStart ?? DateTime.UtcNow.Date;
         var endDate = request.PeriodEnd ?? request.AsOfDate ?? DateTime.UtcNow.Date;
-        var supplierIds = ResolveReportIds(request.SupplierIds, request.SupplierId);
+        var businessPartnerIds = ResolveReportIds(request.BusinessPartnerIds, request.BusinessPartnerId);
         var report = await _apReportsService.GetSupplierDetailedLedgerAsync(
             startDate,
             endDate,
-            supplierIds,
+            businessPartnerIds,
             request.ShowSupplierCurrency,
             cancellationToken);
 
@@ -814,11 +814,13 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
     {
         var rows = new List<string[]>
         {
-            new[] { "SourceModule", "AsOfDate", "ControlAccountNumber", "ControlAccountName", "ReadModelOutstanding", "PostedGlControlBalance", "Variance", "DocumentCount", "DiagnosticCount" },
+            new[] { "SourceModule", "AsOfDate", "AccountingBookCode", "AccountingBookName", "ControlAccountNumber", "ControlAccountName", "ReadModelOutstanding", "PostedGlControlBalance", "Variance", "DocumentCount", "DiagnosticCount" },
             new[]
             {
                 report.SourceModule,
                 Date(report.AsOfDate),
+                report.AccountingBookCode ?? string.Empty,
+                report.AccountingBookName ?? string.Empty,
                 report.ControlAccountNumber ?? string.Empty,
                 report.ControlAccountName ?? string.Empty,
                 Money(report.ReadModelOutstanding),
@@ -839,6 +841,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
                 diagnostic.SourceDocumentId?.ToString() ?? string.Empty,
                 diagnostic.PostingEventId?.ToString() ?? string.Empty,
                 Money(diagnostic.VarianceAmount),
+                string.Empty,
+                string.Empty,
                 string.Empty,
                 string.Empty,
                 string.Empty
@@ -1294,8 +1298,8 @@ public sealed class FinanceReportExportService : IFinanceReportExportService
             FromDate = request.PeriodStart,
             ToDate = request.PeriodEnd ?? request.AsOfDate,
             TaxAccountId = request.AccountIds.Count == 1 ? request.AccountIds[0] : (Guid?)null,
-            CustomerId = request.CustomerId,
-            SupplierId = request.SupplierId
+            BusinessPartnerId = request.BusinessPartnerId,
+            BusinessPartnerRole = request.BusinessPartnerRole
         };
     }
 
