@@ -77,8 +77,21 @@ public interface ILeaveService
     /// </remarks>
     Task<PagedResult<LeaveRequestDto>> GetMyPendingApprovalsAsync(
         int pageNumber, int pageSize, CancellationToken ct = default);
-    Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(Guid employeeId, int year);
+    /// <summary>
+    /// One employee's balances for a year, annual leave first. With <paramref name="includeLiveAnnual"/>,
+    /// an employee with no annual record yet gets their annual leave worked out live (round 5, lane J),
+    /// marked <c>HasRecord = false</c>; nothing is created.
+    /// </summary>
+    Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(Guid employeeId, int year, bool includeLiveAnnual = false);
     Task<IEnumerable<LeaveBalanceDto>> GetAllLeaveBalancesAsync(int year, Guid? employeeId, Guid? leaveTypeId);
+
+    /// <summary>
+    /// Annual leave for every employee still serving and hired by the year's end (round 5, lane J):
+    /// the stored record where there is one, the figures worked out live where there is none. Leavers
+    /// are left out; a unit takes everything beneath it. Creates nothing.
+    /// </summary>
+    Task<IReadOnlyList<LeaveBalanceDto>> GetAnnualBalancesAsync(
+        int year, Guid? employeeId, Guid? organizationUnitId, CancellationToken ct = default);
     Task<LeaveBalanceDetailDto?> GetLeaveBalanceDetailAsync(Guid balanceId);
 
     /// <summary>
@@ -195,6 +208,10 @@ public interface ILeaveService
 
     /// <summary>The balances screen as a CSV, with the same filters it offers.</summary>
     Task<byte[]> ExportBalancesCsvAsync(int year, Guid? employeeId, Guid? leaveTypeId, CancellationToken ct = default);
+
+    /// <summary>The annual view of the balances screen as a CSV (round 5, lane J): the same rows.</summary>
+    Task<byte[]> ExportAnnualBalancesCsvAsync(
+        int year, Guid? employeeId, Guid? organizationUnitId, CancellationToken ct = default);
 
     /// <summary>The mandatory-leave compliance register as a CSV.</summary>
     Task<byte[]> ExportComplianceCsvAsync(int year, CancellationToken ct = default);

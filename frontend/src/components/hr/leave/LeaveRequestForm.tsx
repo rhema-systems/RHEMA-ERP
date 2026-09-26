@@ -158,8 +158,10 @@ export function LeaveRequestForm({
   // Show what the employee actually has left for the chosen type — the most common
   // reason a request gets rejected downstream.
   const { data: balances } = useQuery({
-    queryKey: ['hr', 'leave-balances', 'employee', employeeId],
-    queryFn: () => leaveService.getEmployeeBalances(employeeId),
+    // Round 5, lane J: annual leave worked out live when no request has opened its record, so the
+    // strip shows it from the first request ('live' keeps it apart in the cache).
+    queryKey: ['hr', 'leave-balances', 'employee', employeeId, 'live'],
+    queryFn: () => leaveService.getEmployeeBalances(employeeId, 0, true),
     enabled: !!employeeId,
   });
 

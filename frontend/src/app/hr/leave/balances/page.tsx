@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Loader2, RefreshCw, Scale, Wallet, Wrench } from 'lucide-react';
@@ -23,17 +23,20 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 import { leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import { LeaveBalanceDetailDialog } from '@/components/hr/leave/LeaveBalanceDetailDialog';
 import { fmtDay } from '@/components/hr/leave/AccrualStatementPanel';
-import type { LeaveEntitlementRepairResult } from '@/types/hr/leave-request';
+import type { LeaveBalance, LeaveEntitlementRepairResult } from '@/types/hr/leave-request';
 
 /** Saves a blob the browser already has, rather than navigating to a URL that carries no token. */
 function saveBlob(blob: Blob, filename: string) {
@@ -48,6 +51,14 @@ function saveBlob(blob: Blob, filename: string) {
 }
 
 const ALL = '__all__';
+const PAGE_SIZE = 50;
+
+/**
+ * Round 5, lane J: the page opens on ANNUAL leave for every employee still serving — the balance the
+ * stakeholders asked to see first — and the Overview is the page as it was: every leave type, every
+ * record that exists.
+ */
+type View = 'annual' | 'overview';
 
 export default function LeaveBalancesPage() {
   const queryClient = useQueryClient();
@@ -70,6 +81,10 @@ export default function LeaveBalancesPage() {
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [repairPreview, setRepairPreview] = useState<LeaveEntitlementRepairResult | null>(null);
+  const [view, setView] = useState<View>('annual');
+  const [unitId, setUnitId] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
   // Both bulk passes are Admin, which the HR role does not hold. Hidden rather than offered and
   // refused — the rule the closure build applied to the rulebook's delete controls (L-11).
@@ -80,12 +95,16 @@ export default function LeaveBalancesPage() {
   const exportCsv = async () => {
     setExporting(true);
     try {
-      const blob = await leaveService.exportBalances(
-        Number(year),
-        employeeId ?? undefined,
-        leaveTypeId === ALL ? undefined : leaveTypeId,
-      );
-      saveBlob(blob, `leave-balances-${year}.csv`);
+      // The file follows the view: the annual list, or every record.
+      const blob =
+        view === 'annual'
+          ? await leaveService.exportAnnualBalances(Number(year), employeeId ?? undefined, unitId || undefined)
+          : await leaveService.exportBalances(
+              Number(year),
+              employeeId ?? undefined,
+              leaveTypeId === ALL ? undefined : leaveTypeId,
+            );
+      saveBlob(blob, view === 'annual' ? `annual-leave-${year}.csv` : `leave-balances-${year}.csv`);
     } catch (e: any) {
       toast({
         title: 'Export failed',
@@ -102,7 +121,7 @@ export default function LeaveBalancesPage() {
     queryFn: () => leaveTypeService.getAll(true),
   });
 
-  const { data, isLoading } = useQuery({
+  const { data: overview, isLoading: overviewLoading } = useQuery({
     queryKey: ['hr', 'leave-balances', year, employeeId, leaveTypeId],
     queryFn: () =>
       leaveService.getBalances(
@@ -110,6 +129,21 @@ export default function LeaveBalancesPage() {
         employeeId ?? undefined,
         leaveTypeId === ALL ? undefined : leaveTypeId,
       ),
+    enabled: view === 'overview',
+  });
+
+  // Round 5, lane J: everybody still serving, including the many no request has opened an annual
+  // record for yet — their figures are worked out live, and nothing is created by reading them.
+  const {
+    data: annual,
+    isLoading: annualLoading,
+    isError: annualFailed,
+    error: annualError,
+  } = useQuery({
+    queryKey: ['hr', 'leave-balances', 'annual', year, employeeId, unitId],
+    queryFn: () =>
+      leaveService.getAnnualBalances(Number(year), employeeId ?? undefined, unitId || undefined),
+    enabled: view === 'annual',
   });
 
   const recalculate = async () => {
@@ -246,7 +280,25 @@ export default function LeaveBalancesPage() {
     }
   };
 
-  const rows = data ?? [];
+  const annualRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const all = annual ?? [];
+    if (!term) return all;
+    return all.filter((b) =>
+      [b.employeeName, b.employeeNumber, b.organizationUnitName]
+        .filter((v): v is string => !!v)
+        .some((v) => v.toLowerCase().includes(term)),
+    );
+  }, [annual, search]);
+  const pages = Math.max(1, Math.ceil(annualRows.length / PAGE_SIZE));
+  const current = Math.min(page, pages);
+
+  const rows: LeaveBalance[] =
+    view === 'annual'
+      ? annualRows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE)
+      : overview ?? [];
+  const isLoading = view === 'annual' ? annualLoading : overviewLoading;
+  const columns = view === 'annual' ? 10 : 11;
 
   // Round 5, C2: "Accrued" says as at when. The server says, per row — a leaver's figure stops at
   // their last day — so the header carries the date the rows share and a row that differs says its own.
@@ -389,31 +441,51 @@ export default function LeaveBalancesPage() {
       />
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
           <CardTitle>Filters</CardTitle>
+          <Tabs
+            value={view}
+            onValueChange={(v) => {
+              setView(v as View);
+              setPage(1);
+            }}
+          >
+            <TabsList>
+              <TabsTrigger value="annual">Annual leave</TabsTrigger>
+              <TabsTrigger value="overview">Overview — every type</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2">
               <label className="text-sm font-medium">Employee</label>
-              <EmployeePicker value={employeeId} onChange={setEmployeeId} />
+              <EmployeePicker
+                value={employeeId}
+                onChange={(v) => {
+                  setEmployeeId(v);
+                  setPage(1);
+                }}
+              />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Leave type</label>
-              <Select value={leaveTypeId} onValueChange={setLeaveTypeId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All leave types</SelectItem>
-                  {(leaveTypes ?? []).map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {view === 'overview' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Leave type</label>
+                <Select value={leaveTypeId} onValueChange={setLeaveTypeId}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All leave types</SelectItem>
+                    {(leaveTypes ?? []).map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <label className="text-sm font-medium">Year</label>
               <Select value={year} onValueChange={setChosenYear}>
@@ -430,12 +502,48 @@ export default function LeaveBalancesPage() {
               </Select>
             </div>
           </div>
+
+          {view === 'annual' && (
+            <OrganizationUnitPicker
+              idPrefix="balances-unit"
+              value={unitId}
+              onChange={(id) => {
+                setUnitId(id);
+                setPage(1);
+              }}
+              allowNone="Any unit"
+              levelLabel="Level"
+              unitLabel="Unit — and every unit beneath it"
+              className="grid gap-4 md:grid-cols-3"
+            />
+          )}
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Balances</CardTitle>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
+          <div className="space-y-1">
+            <CardTitle>{view === 'annual' ? 'Annual leave' : 'Balances'}</CardTitle>
+            {view === 'annual' && (
+              <p className="text-sm text-muted-foreground">
+                Everybody still serving
+                {annual ? ` — ${annual.length.toLocaleString()} ${annual.length === 1 ? 'person' : 'people'}` : ''}. Where
+                no request has opened a record yet, the figures are worked out live, exactly as the
+                record will hold them. Leavers are not listed; the Overview shows every record.
+              </p>
+            )}
+          </div>
+          {view === 'annual' && (
+            <Input
+              placeholder="Search name, staff number or unit"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              className="w-[280px]"
+            />
+          )}
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-md border">
@@ -443,7 +551,7 @@ export default function LeaveBalancesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
-                  <TableHead>Leave type</TableHead>
+                  {view === 'overview' && <TableHead>Leave type</TableHead>}
                   <TableHead className="text-right">Entitled</TableHead>
                   <TableHead className="text-right">
                     Accrued
@@ -464,43 +572,83 @@ export default function LeaveBalancesPage() {
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i}>
-                      {[...Array(11)].map((__, j) => (
+                      {[...Array(columns)].map((__, j) => (
                         <TableCell key={j}>
                           <Skeleton className="h-4 w-[60px]" />
                         </TableCell>
                       ))}
                     </TableRow>
                   ))
-                ) : rows.length === 0 ? (
+                ) : view === 'annual' && annualFailed ? (
                   <TableRow>
-                    <TableCell colSpan={11}>
+                    <TableCell colSpan={columns}>
                       <EmptyState
                         icon={Scale}
-                        title="No balances"
-                        description="Balances appear once leave types have allocations and employees are entitled."
+                        title="No annual leave to show"
+                        description={
+                          (annualError as any)?.message ||
+                          'Set the kind of the annual leave type to Annual, and it appears here.'
+                        }
+                      />
+                    </TableCell>
+                  </TableRow>
+                ) : rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={columns}>
+                      <EmptyState
+                        icon={Scale}
+                        title={view === 'annual' && search ? 'Nobody matches' : 'No balances'}
+                        description={
+                          view === 'annual'
+                            ? search
+                              ? 'Try a shorter search.'
+                              : 'Nobody still serving matches these filters.'
+                            : 'Balances appear once leave types have allocations and employees are entitled.'
+                        }
                       />
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((b) => (
+                  rows.map((b) => {
+                    // A row worked out live has no record to open (round 5, lane J).
+                    const opens = b.hasRecord !== false;
+                    return (
                     <TableRow
-                      key={b.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setOpenBalanceId(b.id)}
-                      title="Open the balance and how it built up"
+                      key={opens ? b.id : `live-${b.employeeId}`}
+                      className={opens ? 'cursor-pointer hover:bg-muted/50' : undefined}
+                      onClick={opens ? () => setOpenBalanceId(b.id) : undefined}
+                      title={
+                        opens
+                          ? 'Open the balance and how it built up'
+                          : 'No request has opened a record yet; these figures are worked out live'
+                      }
                     >
                       <TableCell className="font-medium">
                         {b.employeeName}
-                        {b.organizationUnitName && (
+                        {(b.employeeNumber || b.organizationUnitName) && (
                           <span className="block text-xs text-muted-foreground">
-                            {b.organizationUnitName}
+                            {[view === 'annual' ? b.employeeNumber : null, b.organizationUnitName]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </span>
+                        )}
+                        {!opens && (
+                          <span className="block text-xs font-normal italic text-muted-foreground">
+                            no record yet — worked out live
+                          </span>
+                        )}
+                        {b.accessibleFrom && (
+                          <span className="block text-xs font-normal text-amber-700 dark:text-amber-400">
+                            may take it from {fmtDay(b.accessibleFrom)}
                           </span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        {b.leaveTypeName}
-                        {b.leaveSubTypeName ? ` · ${b.leaveSubTypeName}` : ''}
-                      </TableCell>
+                      {view === 'overview' && (
+                        <TableCell>
+                          {b.leaveTypeName}
+                          {b.leaveSubTypeName ? ` · ${b.leaveSubTypeName}` : ''}
+                        </TableCell>
+                      )}
                       <TableCell className="text-right">{b.entitledDays}</TableCell>
                       <TableCell className="text-right">
                         {b.accruedToDateDays}
@@ -525,11 +673,26 @@ export default function LeaveBalancesPage() {
                         {b.accruedAvailableDays}
                       </TableCell>
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
           </div>
+          {view === 'annual' && pages > 1 && (
+            <div className="mt-3 flex items-center justify-end gap-2 text-sm">
+              <span className="text-muted-foreground">
+                {(current - 1) * PAGE_SIZE + 1}–{Math.min(current * PAGE_SIZE, annualRows.length)} of{' '}
+                {annualRows.length.toLocaleString()}
+              </span>
+              <Button variant="outline" size="sm" disabled={current <= 1} onClick={() => setPage(current - 1)}>
+                Previous
+              </Button>
+              <Button variant="outline" size="sm" disabled={current >= pages} onClick={() => setPage(current + 1)}>
+                Next
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G and H done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H and J done.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -22,7 +22,8 @@
 > | **C** | **DONE** 2026-09-25 — accrual: a period counts on its last day; the accrual statement; leave owed as at a date; a leave year that does not start in January · `run-round5-c.mjs` 112, green twice · § 8 |
 > | **G** | **DONE** 2026-09-25 — the year-end, executed for real and fixed: expiry keeps what was taken in time, the reminder agrees with it, carry-over never moves lapsed days, not before the year ends, one pot per type · `run-round5-g.mjs` 55, green twice · § 8 |
 > | **H** | **DONE** 2026-09-26 — casual leave beyond its limit: the ask, the split at the final approval, and the two parts kept as one absence; a leak found and closed · `run-round5-h.mjs` 142, green twice · § 8 |
-> | J · I · K · L | not started, in that order — **J is next** |
+> | **J** | **DONE** 2026-09-26 — balances: annual leave first, for everybody serving, worked out live where no record exists; the portal leads with *can take now*; the home reads the leave year (L-60) · `run-round5-j.mjs` 44, green twice · § 8 |
+> | I · K · L | not started, in that order — **I is next** |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | waits on TDC (R5-Q5) |
 
@@ -296,6 +297,9 @@ For each finding, the simplest honest option: make it bind, relabel it truthfull
 - A leave allowance (R5-Q3): a payroll element, if TDC pays one.
 - Sick-pay tiers (full pay, then half pay): payroll's.
 - K-II; plans on the calendar.
+- An accrual statement for somebody with no annual record yet (lane J). The statement reads a
+  record, so a row worked out live cannot open one; it says *no record yet* instead. The first
+  request opens the record, and the statement with it.
 
 ## Conventions that bind every lane (from memory)
 
@@ -1072,3 +1076,69 @@ with the ledger asserted before and after:
   newest first, and its own request fell off the page: 51/52, the two assertions under
   `if (found)` never ran. The 60 were retired (measured; none held attendance), and the suite now
   retires every request it raises, cancelled ones included, and asserts it did.
+
+### J — Balances: annual leave first · DONE 2026-09-26
+
+**Built.**
+
+- **The annual view** (`GET api/Leaves/balances/annual`, and `/export`, the leave read tier): one
+  row for every employee still serving and hired by the year's end.
+  - The record's own figures where there is one; where there is none, the figures worked out live
+    (`HasRecord = false`, no id): the entitlement, what has built up, and nothing used, carried or
+    adjusted — exactly what the record holds when a request opens it. **Reading creates nothing.**
+  - Leavers and anybody switched off are left out; the suspended are on strength.
+  - A unit filter takes everything beneath it, as the calendar does (lane F).
+  - Everybody's accrual comes from one batch (`GetSnapshotsAsync`, lane C), so 2,377 people cost a
+    handful of queries: about 60 ms on UAT, warm.
+  - `AccessibleFrom` says when somebody still inside the qualifying period may start. Every balance
+    read carries it now.
+- **The balances page** opens on that view, with search, pages of 50, the unit filter and an export
+  of the same rows. **Overview — every type** is the page as it was.
+- **The portal.** `employee/{id}/balances?includeLiveAnnual=true` adds annual leave worked out live
+  when no record exists, and lists annual leave first. *My Leave*, both request forms and the home
+  ask for it.
+  - Every *My Leave* card leads with **days you can take now**, with the year's figure beneath it
+    when they differ, and a joiner's card says when they may start.
+  - The home tile is **Leave you can take now**.
+  - `PortalLeaveBalanceDto` carries *can take now*, the qualifying date and whether a record exists.
+- **L-60, closed:** the home reads the leave year (`ILeaveYearContext`), not the calendar year.
+
+**Changed from the plan, and why.**
+
+1. **The portal gets the live annual row too, on request.** The plan put the live figures on the
+   desk's annual view. But on UAT 2,280 of 2,377 people have no annual record, so *My Leave*, the
+   request forms and the home tile would have shown them no annual leave at all. It is an opt-in
+   flag, so the screens that need a real record (adjustments, encashments) are unchanged.
+2. **"Every active employee" is the module's one definition of serving** (`HrServingEmployees`),
+   hired by the year's end: the suspended are listed, and the switched-off, the terminated, the
+   retired and the inactive are not.
+3. **A live row cannot open the accrual statement**, which reads a record. Its card and row say
+   *no record yet — worked out live* instead. A statement for an employee without a record is not
+   built; noted.
+
+**Suite.** `dev-harness/hr-leave/run-round5-j.mjs`: **44 assertions, green twice.**
+- Its first run was 42/44. Both failures were its own: the CSV writer quotes every cell, and the
+  assertions compared unquoted text. It now parses the CSV, as lane C's suite does.
+- It flips lane E's R5EReliefB through terminated, switched off and hired after the year, and back,
+  and moves leave.emp's hire date and the tenant's leave-year start month for seconds. It checks all
+  three are as found.
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green:
+
+- **Slices 1–13 are at their recorded counts.** Slice 1 is 72/75, the same three environmental
+  failures. Slice 4 (54) reads the Overview's balances and the per-employee read, whose order is now
+  annual leave first. The balances slices 10–12 are unchanged: 27, 27, 20.
+- **The round 5 suites:** `run-round5-e.mjs` 119, `-f` 20, `-d` 74, `-a` 89, `-n` 92, `-c` 112
+  (its leave owed and its leave-year moves beside this lane's), `-g` 55, `-h` 142.
+- **`run-round5-j.mjs` was 44 a third time**, run last.
+- **Not run: hr-portal slice 3.** Its home-equality leg compared the home with the plain
+  per-employee read, which the home no longer matches for somebody with no annual record: by
+  design, it carries the live annual row, as does `/me/leave`, the page its tile links to. The leg
+  now reads `?includeLiveAnnual=true` and compares *can take now* too. It was not run, because it
+  mints three employees and four users on the demo database on every run. This lane's [4] proves
+  the same claim on leave.emp.
+- **Cleanup:** the 24 harness types the older slices minted were switched off, measured first (all
+  created by the pass, none of TDC's). Only TDC's nine are active.
+- **The API log holds nothing from this lane:** 2,174 notification-sender lines (no SMTP on UAT),
+  20 notification clean-up failures and the clean-up's own error, and one procurement calendar
+  failure. No request answered 500.

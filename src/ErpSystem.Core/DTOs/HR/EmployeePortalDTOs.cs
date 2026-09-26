@@ -170,9 +170,21 @@ public sealed class PortalLeaveBalanceDto
     /// <summary>The kind (round 5, A4). The home tile shows the Annual balance first.</summary>
     public LeaveTypeCategory? LeaveTypeCategory { get; set; }
     public decimal AvailableDays { get; set; }
+
+    /// <summary>
+    /// What can be booked today (round 5, lane J): the figure the request's own check enforces. On
+    /// leave that builds up it is below <see cref="AvailableDays"/> until the year has built up.
+    /// </summary>
+    public decimal AccruedAvailableDays { get; set; }
     public decimal UsedDays { get; set; }
     public decimal PendingDays { get; set; }
     public decimal EntitledDays { get; set; }
+
+    /// <summary>Before the qualifying service is served: the first day this leave may be taken.</summary>
+    public DateOnly? AccessibleFrom { get; set; }
+
+    /// <summary>False when no request has opened a record yet and the figures are worked out live.</summary>
+    public bool HasRecord { get; set; } = true;
 }
 
 public sealed class PortalHolidayDto

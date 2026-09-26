@@ -60,8 +60,11 @@ export default function MyLeavePage() {
   const [statementFor, setStatementFor] = useState<LeaveBalance | null>(null);
 
   const { data: balances, isLoading: balancesLoading } = useQuery({
-    queryKey: ['me', 'leave-balances', employeeId, year],
-    queryFn: () => leaveService.getEmployeeBalances(employeeId, year),
+    // 'live' keeps this apart in the cache from reads without the live annual row.
+    queryKey: ['me', 'leave-balances', employeeId, year, 'live'],
+    // Round 5, lane J: annual leave is shown from the first day, worked out live until a request
+    // opens its record — and it comes first.
+    queryFn: () => leaveService.getEmployeeBalances(employeeId, year, true),
     enabled: !!employeeId,
   });
 
@@ -149,23 +152,39 @@ export default function MyLeavePage() {
         ) : balances?.length ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {balances.map((b) => (
-              <Card key={b.id}>
+              <Card key={b.hasRecord === false ? `live-${b.leaveTypeId}` : b.id}>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     <TreePalm className="h-3.5 w-3.5" /> {b.leaveTypeName}
                     {b.leaveSubTypeName ? ` · ${b.leaveSubTypeName}` : ''}
                   </div>
+                  {/*
+                    Round 5, lane J: what you can book today leads, because it is what a request is
+                    checked against. On leave that builds up it is below the year's figure until the
+                    year has built up, and the card says both.
+                  */}
                   <div className="mt-2 text-2xl font-bold leading-none">
-                    {b.availableDays}
+                    {b.accruedAvailableDays}
                     <span className="ml-1 text-sm font-normal text-muted-foreground">
-                      days available
+                      days you can take now
                     </span>
                   </div>
+                  {b.accruedAvailableDays !== b.availableDays && (
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {b.availableDays} available for the whole year
+                    </div>
+                  )}
                   <div className="mt-2 text-xs text-muted-foreground">
                     entitled {b.entitledDays} · used {b.usedDays} · pending {b.pendingDays}
                     {b.carriedOverDays ? ` · carried over ${b.carriedOverDays}` : ''}
                     {b.encashedDays ? ` · encashed ${b.encashedDays}` : ''}
                   </div>
+                  {b.accessibleFrom && (
+                    <div className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                      You can take it from {fmtDay(b.accessibleFrom)}, once you have served the
+                      qualifying period.
+                    </div>
+                  )}
                   {/*
                     Round 5, C2: leave that builds up says how much, and as at when — and shows its
                     working. Answering "why only 12.25?" used to take a call to HR.
@@ -175,14 +194,17 @@ export default function MyLeavePage() {
                       <span className="text-muted-foreground">
                         built up {b.accruedToDateDays} as at {fmtDay(b.accruedAsOf)}
                       </span>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="h-auto p-0 text-xs"
-                        onClick={() => setStatementFor(b)}
-                      >
-                        How it builds up
-                      </Button>
+                      {/* The statement reads a record; a figure worked out live has none yet. */}
+                      {b.hasRecord !== false && (
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="h-auto p-0 text-xs"
+                          onClick={() => setStatementFor(b)}
+                        >
+                          How it builds up
+                        </Button>
+                      )}
                     </div>
                   )}
                 </CardContent>

@@ -297,9 +297,18 @@ export type LeaveRequestPagedResult = PagedResult<LeaveRequest>;
 // ── Balances ────────────────────────────────────────────────────────────────────
 
 export interface LeaveBalance {
+  /** Empty (all zeros) on a row without a record — see `hasRecord`. */
   id: string;
+  /**
+   * False on annual leave worked out live for somebody no request has opened a record for yet
+   * (round 5, lane J). There is nothing to open, adjust or recalculate; the figures are what the
+   * record will hold when it is created.
+   */
+  hasRecord?: boolean;
   employeeId: string;
   employeeName: string;
+  /** The staff number, for finding a person in a long list. */
+  employeeNumber?: string | null;
   organizationUnitName?: string | null;
   leaveTypeId: string;
   leaveTypeName: string;
@@ -324,6 +333,8 @@ export interface LeaveBalance {
   availableDays: number;
   /** What the server's create check actually enforces — accrued replaces entitled for accruing types. */
   accruedAvailableDays: number;
+  /** Before the qualifying service is served: the first day this leave may be taken (lane J). */
+  accessibleFrom?: string | null;
 }
 
 export interface LeaveBalanceDetail extends LeaveBalance {

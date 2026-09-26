@@ -382,15 +382,65 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(typeof(IEnumerable<LeaveBalanceDto>), StatusCodes.Status200OK)]
         public async Task<ActionResult<IEnumerable<LeaveBalanceDto>>> GetEmployeeLeaveBalances(
             Guid employeeId,
-            [FromQuery] int year = 0)
+            [FromQuery] int year = 0,
+            [FromQuery] bool includeLiveAnnual = false)
         {
             // W3: own balances, or the leave read tier.
             if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
                 return Forbid();
 
             if (year == 0) year = await _leaveYear.CurrentYearAsync();
-            var balances = await _leaveService.GetEmployeeLeaveBalancesAsync(employeeId, year);
+            // Round 5, lane J: the portal and the request forms ask for annual leave worked out live
+            // when no record exists yet; every other caller gets the records alone, as before.
+            var balances = await _leaveService.GetEmployeeLeaveBalancesAsync(employeeId, year, includeLiveAnnual);
             return Ok(balances);
+        }
+
+        /// <summary>
+        /// Annual leave for every employee still serving (round 5, lane J): the stored balance where
+        /// there is one, the figures worked out live where there is none. Leavers are left out, and
+        /// nothing is created.
+        /// </summary>
+        [HttpGet("balances/annual")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        [ProducesResponseType(typeof(IReadOnlyList<LeaveBalanceDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<IReadOnlyList<LeaveBalanceDto>>> GetAnnualBalances(
+            [FromQuery] int year = 0,
+            [FromQuery] Guid? employeeId = null,
+            [FromQuery] Guid? organizationUnitId = null,
+            CancellationToken ct = default)
+        {
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
+            try
+            {
+                return Ok(await _leaveService.GetAnnualBalancesAsync(year, employeeId, organizationUnitId, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>The annual view as a CSV: the same rows (round 5, lane J).</summary>
+        [HttpGet("balances/annual/export")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
+        public async Task<IActionResult> ExportAnnualBalances(
+            [FromQuery] int year = 0,
+            [FromQuery] Guid? employeeId = null,
+            [FromQuery] Guid? organizationUnitId = null,
+            CancellationToken ct = default)
+        {
+            if (year == 0) year = await _leaveYear.CurrentYearAsync();
+            try
+            {
+                var csv = await _leaveService.ExportAnnualBalancesCsvAsync(year, employeeId, organizationUnitId, ct);
+                return File(csv, "text/csv", $"annual-leave-{year}.csv");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
 
         /// <summary>

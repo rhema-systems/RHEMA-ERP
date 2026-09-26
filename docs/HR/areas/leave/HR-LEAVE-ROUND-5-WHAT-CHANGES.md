@@ -9,7 +9,8 @@
 > [section 4](#4-a-new-employees-first-two-years), [section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)
 > (the accrual statement and the *leave owed* report) and [section 12](#12-the-year-end--carry-over-and-deferrals)
 > (the year-end) were built and tested on 25 September, and [section 8](#8-casual-leave-over-its-limit)
-> (casual leave over its limit) on 26 September; nothing else described here is built yet.
+> (casual leave over its limit) and [section 10](#10-the-balances-page--annual-leave-first) (the
+> balances page, annual leave first) on 26 September; nothing else described here is built yet.
 > This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
 > Changes 180926*. It describes how leave will work for employees, managers, HR and Finance once
@@ -451,14 +452,26 @@ so somebody with no leave activity is missing, and somebody who has left still a
 portal, *My Leave* shows the whole year's figure but not what you can take now, and the home page
 shows whichever leave type has the most days left — often sick leave.
 
-**What changes**
+**What changes** *(built 26 September)*
 
-- The page opens on **annual leave**; an **Overview** switch shows every type.
-- The annual view lists **every active employee**, with live figures for anybody who has no record
-  yet, and nobody who has left.
-- The **"leave owed as at a date"** report sits here ([section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)).
-- On the portal, **Can take now** appears beside *Available*, and the home page shows **annual
-  leave**.
+- **The page opens on annual leave** — one row for **every employee still serving**, not only the
+  people who already have a leave record. On the demo that is all 2,377 staff, where before it was
+  the 97 who had asked for annual leave this year.
+- **Somebody with no record yet** — nobody has asked for leave on their behalf — gets their figures
+  **worked out on the spot**, by the same rules, marked *no record yet*. Nothing is created by
+  looking; the figures are exactly what their record will say when it is made.
+- **Nobody who has left is listed.** People still serving their first twelve months say when they
+  may start taking annual leave.
+- It can be narrowed to **a department** (and everything under it), searched by name or staff
+  number, and **exported** as a spreadsheet of the same rows.
+- **An Overview switch** shows every leave type, as the page did before.
+- The **"leave owed as at a date"** report sits here, as a button
+  ([section 5](#5-how-much-has-built-up--the-accrual-statement-and-a-leave-owed-report)).
+- **On the portal**, *My Leave* shows annual leave first, and every card leads with **"days you can
+  take now"** — what a request will be checked against — with the whole year's figure beneath it.
+  Annual leave is there from an employee's first day, even before any request.
+- **The home page** shows **annual leave you can take now**, and reads the right leave year (it read
+  the calendar year, which only matters to a company whose leave year does not start in January).
 
 ---
 

@@ -280,8 +280,19 @@ public class CreateLeaveAccrualPolicyDto
 public class LeaveBalanceDto
 {
     public Guid Id { get; set; }
+
+    /// <summary>
+    /// False on a figure worked out live for somebody with no balance record for the year yet (round
+    /// 5, lane J): the annual view and the portal show everybody's annual leave before a request has
+    /// opened a record. Such a row has no <see cref="Id"/>, so there is nothing to open, adjust or
+    /// recalculate; its figures are exactly what the record will hold when it is created.
+    /// </summary>
+    public bool HasRecord { get; set; } = true;
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
+
+    /// <summary>The staff number, for finding a person in a long list.</summary>
+    public string? EmployeeNumber { get; set; }
     public string? OrganizationUnitName { get; set; }
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
@@ -312,6 +323,12 @@ public class LeaveBalanceDto
     /// whatever has not accrued yet, and a screen showing only the first invites a refused request.
     /// </summary>
     public decimal AccruedAvailableDays { get; set; }
+
+    /// <summary>
+    /// While the employee has not yet served the leave type's qualifying period: the first day they
+    /// may take it (round 5, lane J). Null once they may, and for a type without one.
+    /// </summary>
+    public DateOnly? AccessibleFrom { get; set; }
 }
 
 // ─── Leave Adjustment ────────────────────────────────────────────────────────

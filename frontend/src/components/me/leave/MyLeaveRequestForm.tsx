@@ -142,8 +142,10 @@ export function MyLeaveRequestForm({
   });
 
   const { data: balances } = useQuery({
-    queryKey: ['me', 'leave-balances', employeeId],
-    queryFn: () => leaveService.getEmployeeBalances(employeeId),
+    // Round 5, lane J: annual leave worked out live when no request has opened its record, so the
+    // panel shows it from the first request ('live' keeps it apart in the cache).
+    queryKey: ['me', 'leave-balances', employeeId, 'live'],
+    queryFn: () => leaveService.getEmployeeBalances(employeeId, 0, true),
   });
 
   // The caller's own roster is the whole universe of pickable relievers here — a plain

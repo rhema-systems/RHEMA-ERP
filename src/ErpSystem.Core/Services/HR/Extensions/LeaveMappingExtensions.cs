@@ -362,6 +362,7 @@ namespace ErpSystem.Application.Extensions
             Id = entity.Id,
             EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            EmployeeNumber = entity.Employee?.EmployeeNumber,
             OrganizationUnitName = entity.Employee?.OrganizationUnit?.Name,
             LeaveTypeId = entity.LeaveTypeId,
             LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,

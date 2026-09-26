@@ -191,7 +191,9 @@ export default function MeLandingPage() {
     : 0;
 
   // The most meaningful balance first: ANNUAL leave (round 5, A4), and only without one the type
-  // with the most days available. "Most available" alone could put sick leave on the tile.
+  // with the most days available. "Most available" alone could put sick leave on the tile. Since
+  // lane J the server works annual leave out live when no request has opened its record, so the
+  // fallback is for a tenant with no annual leave at all.
   const topBalance = home?.leaveBalances?.length
     ? home.leaveBalances.find((b) => b.leaveTypeCategory === 'Annual') ??
       [...home.leaveBalances].sort((a, b) => b.availableDays - a.availableDays)[0]
@@ -276,13 +278,17 @@ export default function MeLandingPage() {
           </p>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {/*
+              Round 5, lane J: what can be booked today — the figure a request is checked against —
+              with the year's figure beside it when the two differ (leave that builds up).
+            */}
             <StatCard
               icon={TreePalm}
-              title="Leave available"
+              title="Leave you can take now"
               value={
                 topBalance ? (
                   <>
-                    {topBalance.availableDays}
+                    {topBalance.accruedAvailableDays}
                     <span className="ml-1 text-sm font-normal text-muted-foreground">days</span>
                   </>
                 ) : (
@@ -291,7 +297,15 @@ export default function MeLandingPage() {
               }
               detail={
                 topBalance
-                  ? `${topBalance.leaveTypeName}${leaveTypesCount > 1 ? ` · +${leaveTypesCount - 1} more types` : ''}`
+                  ? [
+                      topBalance.leaveTypeName,
+                      topBalance.accruedAvailableDays !== topBalance.availableDays
+                        ? `${topBalance.availableDays} for the year`
+                        : null,
+                      leaveTypesCount > 1 ? `+${leaveTypesCount - 1} more types` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
                   : 'No balance recorded yet'
               }
               href="/me/leave"

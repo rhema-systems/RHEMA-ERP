@@ -270,6 +270,15 @@ class LeaveService {
     });
   }
 
+  /** The annual view as a CSV (round 5, lane J): the same rows as `getAnnualBalances`. */
+  exportAnnualBalances(year: number, employeeId?: string, organizationUnitId?: string): Promise<Blob> {
+    return apiService.downloadBlob(`${this.baseUrl}/balances/annual/export`, {
+      year,
+      employeeId,
+      organizationUnitId,
+    });
+  }
+
   exportCompliance(year: number): Promise<Blob> {
     return apiService.downloadBlob(`${this.baseUrl}/compliance/export`, { year });
   }
@@ -353,9 +362,28 @@ class LeaveService {
     });
   }
 
-  getEmployeeBalances(employeeId: string, year = 0): Promise<LeaveBalance[]> {
+  /**
+   * One employee's balances, annual leave first. With `includeLiveAnnual`, an employee no request
+   * has opened an annual record for yet gets their annual leave worked out live (`hasRecord: false`)
+   * — the portal and the request forms ask for it (round 5, lane J).
+   */
+  getEmployeeBalances(employeeId: string, year = 0, includeLiveAnnual = false): Promise<LeaveBalance[]> {
     return apiService.get<LeaveBalance[]>(`${this.baseUrl}/employee/${employeeId}/balances`, {
       year,
+      includeLiveAnnual: includeLiveAnnual || undefined,
+    });
+  }
+
+  /**
+   * Annual leave for every employee still serving (round 5, lane J): the record where there is one,
+   * the figures worked out live where there is none. Leavers are left out; a unit takes everything
+   * beneath it. Nothing is created.
+   */
+  getAnnualBalances(year = 0, employeeId?: string, organizationUnitId?: string): Promise<LeaveBalance[]> {
+    return apiService.get<LeaveBalance[]>(`${this.baseUrl}/balances/annual`, {
+      year,
+      employeeId,
+      organizationUnitId,
     });
   }
 

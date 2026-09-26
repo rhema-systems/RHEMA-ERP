@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -52,6 +53,7 @@ public class EmployeePortalController : ControllerBase
     private readonly ITrainingServiceBondService    _bondService;
     private readonly IHrAnnouncementService         _announcementService;
     private readonly IHrPolicyService               _policyService;
+    private readonly ILeaveYearContext              _leaveYear;
 
     public EmployeePortalController(
         IStaffMovementService          movementService,
@@ -74,7 +76,8 @@ public class EmployeePortalController : ControllerBase
         ISheRiskAssessmentService      riskAssessmentService,
         ITrainingServiceBondService    bondService,
         IHrAnnouncementService         announcementService,
-        IHrPolicyService               policyService)
+        IHrPolicyService               policyService,
+        ILeaveYearContext              leaveYear)
     {
         _movementService    = movementService;
         _actingService      = actingService;
@@ -97,6 +100,7 @@ public class EmployeePortalController : ControllerBase
         _bondService          = bondService;
         _announcementService  = announcementService;
         _policyService        = policyService;
+        _leaveYear            = leaveYear;
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
@@ -183,13 +187,17 @@ public class EmployeePortalController : ControllerBase
         if (_currentUser.EmployeeId is not Guid empId) return NoEmployee();
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var year  = DateTime.UtcNow.Year;
+        // ⚠ The LEAVE year, not the calendar year (round 5, lane J; guide L-60). A tenant whose leave
+        // year starts in April would otherwise see last April's balances from January to March.
+        var leaveYear = await _leaveYear.CurrentYearAsync(ct);
 
         var movements    = (await _movementService.GetByEmployeeAsync(empId, ct)).ToList();
         var held         = (await _assignmentService.GetActiveAssignmentsForEmployeeAsync(empId)).ToList();
         var requisitions = (await _requisitionService.GetForEmployeeAsync(empId)).ToList();
         var surcharges   = (await _surchargeService.GetByEmployeeIdAsync(empId)).ToList();
-        var balances     = (await _leaveService.GetEmployeeLeaveBalancesAsync(empId, year)).ToList();
+        // Annual leave worked out live when no request has opened a record yet, so the tile always
+        // has the employee's annual leave to show (round 5, lane J).
+        var balances     = (await _leaveService.GetEmployeeLeaveBalancesAsync(empId, leaveYear, includeLiveAnnual: true)).ToList();
         var training     = await _trainingDashboardService.GetEmployeeSummaryAsync(empId, ct);
         var certificates = (await _certificateService.GetByEmployeeIdAsync(empId, ct)).ToList();
         // Next 12 months is enough to always find "the next holiday" without scanning years.
@@ -239,9 +247,12 @@ public class EmployeePortalController : ControllerBase
                 LeaveTypeName = b.LeaveTypeName,
                 LeaveTypeCategory = b.LeaveTypeCategory,
                 AvailableDays = b.AvailableDays,
+                AccruedAvailableDays = b.AccruedAvailableDays,
                 UsedDays      = b.UsedDays,
                 PendingDays   = b.PendingDays,
                 EntitledDays  = b.EntitledDays,
+                AccessibleFrom = b.AccessibleFrom,
+                HasRecord     = b.HasRecord,
             }).ToList(),
             NextHoliday = nextHoliday is null
                 ? null

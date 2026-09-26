@@ -1980,7 +1980,8 @@ public class LeaveService : ILeaveService
         };
     }
 
-    public async Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(Guid employeeId, int year)
+    public async Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(
+        Guid employeeId, int year, bool includeLiveAnnual = false)
     {
         var tenantId = GetTenantId();
         var balances = await _leaveBalanceRepository
@@ -1994,7 +1995,168 @@ public class LeaveService : ILeaveService
         foreach (var (balance, dto) in balances.Zip(dtos))
             await ApplyLiveEntitlementAsync(balance, dto);
 
-        return dtos;
+        // Round 5, lane J: somebody whose annual leave has no record yet (no request has opened one)
+        // still has annual leave. Asked for, it is worked out live — exactly what the record will hold
+        // — so the portal and the request forms show it from the first day. Nothing is created.
+        if (includeLiveAnnual
+            && await ActiveAnnualTypeAsync(tenantId) is { } annual
+            && dtos.All(d => d.LeaveTypeId != annual.Id)
+            && await LiveAnnualRowAsync(annual, employeeId, year) is { } live)
+        {
+            dtos.Add(live);
+        }
+
+        // Annual leave first, then the rest by name.
+        return dtos
+            .OrderBy(d => d.LeaveTypeCategory == LeaveTypeCategory.Annual ? 0 : 1)
+            .ThenBy(d => d.LeaveTypeName)
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<LeaveBalanceDto>> GetAnnualBalancesAsync(
+        int year, Guid? employeeId, Guid? organizationUnitId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var annual = await ActiveAnnualTypeAsync(tenantId, ct)
+            ?? throw new InvalidOperationException(
+                "No leave type is set up as annual leave, so there is no annual leave to show. " +
+                "Set the kind of the annual leave type to Annual.");
+        var yearEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync(ct));
+
+        // ── Who: everybody still serving (the module's one definition) and hired by the year's end.
+        //    Leavers are left out: this is the list of people whose leave is still to be managed.
+        var query = _employeeRepository
+            .GetQueryable()
+            .Where(HrServingEmployees.Predicate)
+            .Where(e => e.TenantId == tenantId && (e.DateEmployed == null || e.DateEmployed <= yearEnd));
+        if (employeeId is Guid one)
+            query = query.Where(e => e.Id == one);
+        if (organizationUnitId is Guid unitId)
+        {
+            // A unit takes everything beneath it, as the calendar's filter does (lane F).
+            var units = (await _audience.UnitSubtreeAsync(unitId, ct)).ToList();
+            query = query.Where(e => e.OrganizationUnitId != null && units.Contains(e.OrganizationUnitId.Value));
+        }
+        var people = await query
+            .Select(e => new
+            {
+                e.Id, e.FirstName, e.MiddleName, e.LastName, e.EmployeeNumber,
+                UnitName = e.OrganizationUnit != null ? e.OrganizationUnit.Name : null,
+                e.DateEmployed, e.TerminationDate,
+                StaffLevelId = e.Position != null ? e.Position.StaffLevelId : null,
+            })
+            .OrderBy(p => p.LastName).ThenBy(p => p.FirstName)
+            .ToListAsync(ct);
+
+        // ── The records that exist, one read. One row per employee and type is the rule; should a
+        //    stray second one exist, the type-level row is the balance (lane G's one pot per type).
+        var records = (await _leaveBalanceRepository
+                .GetQueryable()
+                .Where(b => b.TenantId == tenantId && b.LeaveTypeId == annual.Id && b.Year == year)
+                .ToListAsync(ct))
+            .GroupBy(b => b.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(b => b.LeaveSubTypeId != null).ThenBy(b => b.CreatedAt).First());
+
+        // ── Everybody's entitlement and accrual in one pass: the same working every other read
+        //    uses, over the same three facts, so a row here and the same row elsewhere agree.
+        var snapshots = await _entitlementService.GetSnapshotsAsync(
+            people.Select(p => new LeaveAccrualSubject(
+                p.Id, p.DateEmployed,
+                p.TerminationDate is DateTime left ? DateOnly.FromDateTime(left) : null,
+                p.StaffLevelId)).ToList(),
+            annual.Id, year, null, ct);
+
+        return people
+            .Select(p => AnnualRow(
+                annual, year, p.Id,
+                string.IsNullOrEmpty(p.MiddleName) ? $"{p.FirstName} {p.LastName}" : $"{p.FirstName} {p.MiddleName} {p.LastName}",
+                p.EmployeeNumber, p.UnitName,
+                records.TryGetValue(p.Id, out var record) ? record : null,
+                snapshots[p.Id]))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The tenant's annual leave: at most one type is Annual and active (round 5, A1). Null when none is.
+    /// </summary>
+    private Task<LeaveType?> ActiveAnnualTypeAsync(Guid tenantId, CancellationToken ct = default)
+        => _leaveTypeRepository
+            .GetQueryable()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.IsActive && t.Category == LeaveTypeCategory.Annual, ct);
+
+    /// <summary>
+    /// One employee's annual leave worked out live, when they have no record for the year (round 5,
+    /// lane J). Null for somebody the annual view would not list: a leaver, or someone hired after the
+    /// year ends.
+    /// </summary>
+    private async Task<LeaveBalanceDto?> LiveAnnualRowAsync(LeaveType annual, Guid employeeId, int year)
+    {
+        var tenantId = GetTenantId();
+        var yearEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync());
+        var person = await _employeeRepository
+            .GetQueryable()
+            .Where(HrServingEmployees.Predicate)
+            .Where(e => e.TenantId == tenantId && e.Id == employeeId
+                     && (e.DateEmployed == null || e.DateEmployed <= yearEnd))
+            .Select(e => new
+            {
+                e.FirstName, e.MiddleName, e.LastName, e.EmployeeNumber,
+                UnitName = e.OrganizationUnit != null ? e.OrganizationUnit.Name : null,
+            })
+            .FirstOrDefaultAsync();
+        if (person is null) return null;
+
+        var snapshot = await _entitlementService.GetSnapshotAsync(employeeId, annual.Id, null, year);
+        return AnnualRow(
+            annual, year, employeeId,
+            string.IsNullOrEmpty(person.MiddleName)
+                ? $"{person.FirstName} {person.LastName}"
+                : $"{person.FirstName} {person.MiddleName} {person.LastName}",
+            person.EmployeeNumber, person.UnitName, null, snapshot);
+    }
+
+    /// <summary>
+    /// A row of annual leave: the record's own figures where it exists, and where it does not, the
+    /// entitlement worked out live with nothing used, carried or adjusted — which is what the record
+    /// holds the moment it is created. Accrual and "can take now" come from the snapshot either way,
+    /// as <see cref="ApplyLiveEntitlementAsync"/> fills them for every other read.
+    /// </summary>
+    private static LeaveBalanceDto AnnualRow(
+        LeaveType annual, int year, Guid employeeId, string employeeName, string? employeeNumber,
+        string? unitName, LeaveBalance? record, LeaveEntitlementSnapshot snapshot)
+    {
+        var entitled = record?.EntitledDays ?? snapshot.AnnualEntitledDays;
+        var carried = record?.CarriedOverDays ?? 0m;
+        var adjustments = record?.AdjustmentDays ?? 0m;
+        var used = record?.UsedDays ?? 0m;
+        var pending = record?.PendingDays ?? 0m;
+        var encashed = record?.EncashedDays ?? 0m;
+
+        return new LeaveBalanceDto
+        {
+            Id = record?.Id ?? Guid.Empty,
+            HasRecord = record is not null,
+            EmployeeId = employeeId,
+            EmployeeName = employeeName,
+            EmployeeNumber = employeeNumber,
+            OrganizationUnitName = unitName,
+            LeaveTypeId = annual.Id,
+            LeaveTypeName = annual.Name,
+            LeaveTypeCategory = annual.Category,
+            Year = year,
+            EntitledDays = entitled,
+            AccruedToDateDays = snapshot.AccruedToDateDays,
+            AccruedAsOf = snapshot.AccruedAsOf,
+            CarriedOverDays = carried,
+            AdjustmentDays = adjustments,
+            UsedDays = used,
+            PendingDays = pending,
+            EncashedDays = encashed,
+            AvailableDays = entitled + carried + adjustments - used - pending - encashed,
+            AccruedAvailableDays = EnforcedAvailableDays(snapshot, entitled, carried, adjustments, used, pending, encashed),
+            AccessibleFrom = snapshot.IsAccessible ? null : snapshot.AccessibleFrom,
+        };
     }
 
     public async Task<IEnumerable<LeaveBalanceDto>> GetAllLeaveBalancesAsync(int year, Guid? employeeId, Guid? leaveTypeId)
@@ -2047,6 +2209,7 @@ public class LeaveService : ILeaveService
         dto.AccruedAvailableDays = EnforcedAvailableDays(
             snapshot, balance.EntitledDays, balance.CarriedOverDays, balance.AdjustmentDays,
             balance.UsedDays, balance.PendingDays, balance.EncashedDays);
+        dto.AccessibleFrom = snapshot.IsAccessible ? null : snapshot.AccessibleFrom;
     }
 
     /// <summary>
@@ -2273,6 +2436,48 @@ public class LeaveService : ILeaveService
                 b.EncashedDays.ToString("0.##"),
                 b.AvailableDays.ToString("0.##"),
                 b.AccruedAvailableDays.ToString("0.##"),
+            }.Select(CsvCell)));
+        }
+
+        return Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
+    }
+
+    /// <inheritdoc />
+    public async Task<byte[]> ExportAnnualBalancesCsvAsync(
+        int year, Guid? employeeId, Guid? organizationUnitId, CancellationToken ct = default)
+    {
+        // The screen's own read (round 5, lane J), so the file and the screen cannot disagree.
+        var rows = await GetAnnualBalancesAsync(year, employeeId, organizationUnitId, ct);
+
+        var csv = new StringBuilder();
+        csv.AppendLine(string.Join(",", new[]
+        {
+            "Employee", "Staff number", "Organisation unit", "Year",
+            "Entitled", "Built up to date", "Carried over", "Adjustments",
+            "Used", "Pending", "Cashed in", "Available for the year", "Can take now",
+            "Qualifies on", "Record",
+        }.Select(CsvCell)));
+
+        foreach (var b in rows)
+        {
+            csv.AppendLine(string.Join(",", new[]
+            {
+                b.EmployeeName,
+                b.EmployeeNumber ?? string.Empty,
+                b.OrganizationUnitName ?? string.Empty,
+                b.Year.ToString(),
+                b.EntitledDays.ToString("0.##"),
+                b.AccruedToDateDays.ToString("0.##"),
+                b.CarriedOverDays.ToString("0.##"),
+                b.AdjustmentDays.ToString("0.##"),
+                b.UsedDays.ToString("0.##"),
+                b.PendingDays.ToString("0.##"),
+                b.EncashedDays.ToString("0.##"),
+                b.AvailableDays.ToString("0.##"),
+                b.AccruedAvailableDays.ToString("0.##"),
+                b.AccessibleFrom?.ToString("yyyy-MM-dd") ?? string.Empty,
+                // A row without a record is worked out live: nothing has been booked against it yet.
+                b.HasRecord ? "Yes" : "Not yet",
             }.Select(CsvCell)));
         }
 

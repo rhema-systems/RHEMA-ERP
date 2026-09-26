@@ -15,9 +15,15 @@ export interface PortalLeaveBalance {
   /** The kind (round 5, A4): the home tile shows the Annual balance first. */
   leaveTypeCategory?: 'Annual' | 'Maternity' | 'Other' | null;
   availableDays: number;
+  /** What can be booked today — the figure the request's own check enforces (round 5, lane J). */
+  accruedAvailableDays: number;
   usedDays: number;
   pendingDays: number;
   entitledDays: number;
+  /** Before the qualifying service is served: the first day this leave may be taken. */
+  accessibleFrom?: string | null;
+  /** False when no request has opened a record yet and the figures are worked out live. */
+  hasRecord?: boolean;
 }
 
 export interface PortalHoliday {

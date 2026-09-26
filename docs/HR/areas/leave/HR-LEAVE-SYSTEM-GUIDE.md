@@ -21,8 +21,10 @@ report) landed after it; § 1.3, § 1.3b, chapter 4b, chapter 13 and its new § 
 (L-41 and half of L-48 closed; L-65 and L-66) describe it. Lane G (the year-end, run for real and
 fixed) landed the same night; chapter 17 and § 23 (L-42 closed; L-67 and L-68) describe it. Lane H
 (casual leave beyond its limit, charged to annual leave) landed 2026-09-26; chapter 4's kind section,
-chapters 6, 7, 11 and 18, § 19.3, § 19.4 and § 23 (L-69) describe it. The other chapters still
-describe the module before round 5.
+chapters 6, 7, 11 and 18, § 19.3, § 19.4 and § 23 (L-69) describe it. Lane J (balances: annual
+leave first) landed the same day; chapter 13, § 19.1 (with the portal home's tile) and § 23 (L-60 closed)
+describe it. The
+other chapters still describe the module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
 >
@@ -3036,6 +3038,37 @@ rejected request does not spend a plan — it becomes raiseable again.
 Every balance in the organisation, with all of the working shown. Eleven columns, nine of which are
 the arithmetic of the last two.
 
+*(Round 5, lane J, 2026-09-26.)* **It opens on annual leave for every employee still serving**, and
+an **Overview** switch is the page as it was: every leave type, every record.
+
+### 👁 Two views — *Annual leave* and *Overview — every type*
+
+**Annual leave** *(the default)* lists **one row for each employee still serving** and hired by the
+end of the chosen year: 2,377 on the demo database, of whom only 97 have an annual record for 2026.
+
+- **Where there is a record**, the row is the record, exactly as the Overview shows it.
+- **Where there is none** — nobody has yet raised a request that would open one — the figures are
+  **worked out live**: the entitlement from § 1.2, what has built up from § 1.3, and nothing used,
+  carried or adjusted. That is exactly what the record will hold when it is created. The row says
+  *no record yet — worked out live* and does not open, because there is nothing to open. **Reading
+  it creates nothing.**
+- **Leavers are not listed**, and neither are people who are switched off. The suspended are on
+  strength, so they are.
+- Somebody still inside the twelve months' service reads *may take it from 28 Jun 2027*, and their
+  **Can take now** is 0.
+- The filters are **Employee**, **Year** and **Unit**; a unit includes every unit beneath it, as on
+  the calendar. A **search box** (name, staff number or unit) and pages of 50 make the long list
+  usable. **Export CSV** exports the list you are looking at, with *Qualifies on* and *Record*
+  columns.
+
+**Overview — every type** is every balance record for the year, with the Leave type filter —
+unchanged, and still the place to recalculate one employee.
+
+> **Say this:** "The page answers the question people actually ask first — how much annual leave
+> has everybody got — and it answers it for everybody, including the two thousand people who have
+> not asked for a day yet. Their figures are worked out on the spot, by the same rules, and they are
+> exactly what their record will say when it is created."
+
 ### 👁 On the page
 
 **Header.** Five buttons: **👛 Leave owed** *(new, § 13b)* · **⬇ Export CSV** · **↻ Recalculate** ·
@@ -3844,6 +3877,12 @@ employee picker anywhere in this chapter**, and that is the point.
 Balance cards per leave type, a history list, and four buttons: **Calendar** *(new)* · **Planner** ·
 **Encashments** · **New request**. The year opens on the leave year we are in *(round 5, lane C4)*.
 
+*(Round 5, lane J.)* **Annual leave comes first, and every card leads with what she can take now**
+— *12 days you can take now* — with *21 available for the whole year* beneath it when the two differ.
+The big number is the one her request is checked against. If no request has opened her annual record
+yet, the card is still there, worked out live; a new joiner's card says *You can take it from 28 Jun
+2027*.
+
 A card for leave that builds up says **built up 12.25 as at 25 Sep 2026**, and **How it builds up**
 opens her own accrual statement *(round 5, lane C2, § 1.3)*: her entitlement and where it comes from,
 the rate, one line per month with a running total, and a date box — *"what will I have by
@@ -3854,6 +3893,10 @@ disagree with the refusal.
 > everything about how it is asked for — the employee never chooses an employee, because the only
 > record they can reach is their own, and that is enforced on every single call, not by hiding a
 > dropdown."
+
+**The portal home's leave tile** *(round 5, lane J)* reads **Leave you can take now**: her annual
+leave, with *21 for the year* beside it when they differ. It reads the **leave year**, not the
+calendar year (§ 23, L-60), and it has annual leave to show from her first day.
 
 ### 19.2 `/me/leave/calendar` — My leave calendar *(new)*
 
@@ -4135,7 +4178,7 @@ nobody promises a stakeholder a button.
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
 **Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
-lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60**; lane N
+lane D closed three more, **L-55 to L-57**; lane A closed two and opened one, **L-58 to L-60** (lane J closed L-60); lane N
 closed six of the audit's eleven and two in part, and found and closed four more, **L-61 to L-64**;
 lane C closed L-41 and half of L-48, and found and closed two more, **L-65 and L-66**; lane G closed
 L-42 and found and closed two more, **L-67 and L-68**; lane H found and closed one, **L-69**.
@@ -4255,7 +4298,7 @@ the round 5 plan's § 8.
 | **L-56** | ch. 7, 19.4 | The employee could cancel approved leave, even while on it; the desk could cancel at any stage, with no reason | The employee until approval; HR up to and including the first day, with a reason; after that, Recall |
 | **L-57** | ch. 7 | Nothing recorded that anyone came back: closing was a desk action with no day back, no early return and no overstay. Recall was HR's alone, and the line manager who needs someone back could not even open their request | *I'm back at work* and *Confirm return*; recall and confirmation by the supervisor or head of department; a read arm for them |
 
-### Round 5 lane A — leave kinds, 2026-09-25 — two closed, one open
+### Round 5 lane A — leave kinds, 2026-09-25 — two closed, one open (closed by lane J)
 
 Proved by `dev-harness/hr-leave/run-round5-a.mjs` (89 assertions, green twice). The build record is
 the round 5 plan's § 8.
@@ -4264,7 +4307,7 @@ the round 5 plan's § 8.
 |---|---|---|---|
 | **L-58** | ch. 4, 7 | ⚠ **Switching maternity's certificate on, as planned, would have sent new mothers to a medical board.** The certificate switch also arms the board rule, whose default is 90 days a year, and the statutory extension on top of 84 days makes 98. On the demo database *Maternity Leave* had the certificate off, three days on the employee's word, and a board at 90 | *Maternity Leave* set, through HR's own save, to certificate on, 0 days, **no board**. The seeder sets the same for a fresh build, and the form's Maternity section says so. The suite proves both positions on its own maternity type |
 | **L-59** | ch. 6, 12 | A request raised from a plan was not held to the plan's kind. The new-request page pre-filled the plan's leave type and left it editable, a draft's edit could change it, and *matches the approved plan* compared dates only, so a sick-leave request on an annual plan's dates would use the plan up and carry the badge | A request raised from a plan is the plan's leave: refused otherwise when raised and when a draft is edited; the form locks the type; the badge compares the type too (the user's decision, 2026-09-25) |
-| **L-60** | ch. 19 | The portal home reads balances by **calendar** year, not the leave year: a site the entitlement plan's C1 sweep missed. Invisible on a January tenant | **Open** — round 5 lane J, which reworks the balances view |
+| **L-60** | ch. 19 | The portal home reads balances by **calendar** year, not the leave year: a site the entitlement plan's C1 sweep missed. Invisible on a January tenant | ✅ **Closed by round 5 lane J (2026-09-26)**: the home reads the leave year. `run-round5-j.mjs` [4] proves it in both positions, a leave year starting next month making the home read last year's record |
 
 ### Round 5 lane N — settings that do what they say, 2026-09-25 — four more found and closed
 
