@@ -1,6 +1,6 @@
 # HR demo feedback, round 5 — Staff Leave (`HR Demo Changes 180926.pdf`)
 
-> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J, I and K done.** Drafted 2026-09-24 and reviewed the same day (six
+> **Status (2026-09-26): DECIDED, in build — M0 and lanes E, F, D, A, N, C, G, H, J, I, K and L done; K-II next, then M.** Drafted 2026-09-24 and reviewed the same day (six
 > design errors, about ten half-answered bullets). On 2026-09-25 the user took decisions **A1–A7** and
 > **B1–B7**, Ghanaian law and public-service practice were researched, and every leave-type setting was
 > audited against the code. This version folds all of that in. **It cuts the anniversary leave year,
@@ -25,7 +25,7 @@
 > | **J** | **DONE** 2026-09-26 — balances: annual leave first, for everybody serving, worked out live where no record exists; the portal leads with *can take now*; the home reads the leave year (L-60) · `run-round5-j.mjs` 44, green twice · § 8 |
 > | **I** | **DONE** 2026-09-26 — reminders that reach people: each to whoever can act on it, in the app and by email, HR told why when nobody else can be; one September chase for everybody serving, to the employee, the supervisor and HR; "you can now take annual leave"; the nightly host fixed · `run-round5-i.mjs` 88, green twice · § 8 |
 > | **K** | **DONE** 2026-09-26 — the medical board, step one: a purpose, physicians from the register, the facility and examination checked, documents through the upload gate, cancel or dissolve, a leave gate that takes only a relevant, recent board, and the board defects · `run-round5-k.mjs` 144, green twice · § 8 |
-> | L | not started — **L is next** |
+> | **L** | **DONE** 2026-09-26 — encashment on exit only: the leaver's line pays annual leave owed at the last day (the leave owed report's working, `ProRateOnExit` binding), none on summary dismissal; the cap a setting (56); in-service off on the demo and hidden in the portal; the L3 limits · `run-round5-l.mjs` 51, green twice · § 8 |
 > | M1–M4 | M1, M3, M4 done 2026-09-25 (explainer rewritten, TDC questions, memory); M2 per lane |
 > | K-II | **planned 2026-09-26** — cases, incapacity and compensation on the standard pattern with statutory defaults; after L, before M; starts with K-II-0, the PNDCL 187 text verified |
 
@@ -1448,3 +1448,119 @@ fortnight; it now cancels and retires what it raised. **79, its recorded count.*
 - **The typed paper recommendation is not held to K6's tests** — the system cannot read what the
   paper is about, or when it was signed.
 - `EmployeeSeparation.MedicalBoardId` is still unreachable (K-II / separation's closure).
+
+### L — Encashment on exit only · DONE 2026-09-26
+
+**Built.**
+
+- **L2 — the leaver's line.** `SeparationService.AddLeaveEncashmentLineAsync` rewritten, now
+  *Annual leave owed on exit — N day(s)*:
+  - **Annual leave only, the leave year the person leaves in, owed at the last day**
+    (`EffectiveDate`, else `LastWorkingDay`) — by the *leave owed* report's own working, extracted
+    from `LeaveService.GetLeaveOwedAsync` unchanged into `ILeaveOwedCalculator` so the two readers
+    cannot disagree: built up + carried in (in full until the lapse, then only what was taken in
+    time) + adjustments − taken by the last day − cashed in; **less requests still awaiting a
+    decision** (paying them as well would pay twice). Leave approved after the last day is not
+    deducted, and the line says to cancel it.
+  - **`ProRateOnExit` binds.** The build-up is asked of the leave year's END, with the last day on
+    the subject: on, the clock stops at the last day; off, the whole year is credited. The line says
+    where it stopped ("built up to 30 Jun 2026").
+  - **Summary dismissal: a stated zero** citing Act 651 s.30(3) — the line is there, not missing
+    (Finance's posting skips zero lines).
+  - **Cannot be valued** without an end date, or without an annual leave type, or without a salary
+    — each saying why.
+  - **Indicative.** The basis ends "HR decides the days, Finance confirms the amount; correct it
+    here, naming the source" — the settlement already lets a line's amount be changed with its source
+    (it then reads *Manually entered*), and Internal Audit can return a statement, so no new Finance
+    step was built.
+  - The separation page (`/hr/separations/[id]`) shows each line's basis, so the working is on the
+    screen HR and Internal Audit read; no screen change was needed.
+- **L2b — the cap.** `CompanyHrPolicySettings.SettlementLeaveDaysCap` (`int?`, default 56, empty = no
+  cap) on the HR policy page beside the settlement's days per year; the line says when it capped and
+  from what. ⚠ The update DTO carries default 56, so a save that leaves the field out keeps 56 and
+  only an explicit empty clears it — the DTO's own convention for every field.
+- **L1 — in-service off.** The demo tenant's seed switched off; UAT switched through HR's own save
+  (one field changed, compared field by field). New `GET api/hr/leave-encashments/availability`
+  (open to anybody signed in); the portal hides *Encashments* on *My Leave* and in the top navigation,
+  and the page itself explains where the cash comes from and keeps past encashments readable. The
+  policy page's copy says why it is off (FR-HR-046, s.31).
+- **L3 — defensive (only where a client switches in-service on).** An encashment holds its days from
+  **Approved**, not only once **Processed**; the guard reads **can take now** (the snapshot's
+  `AvailableFrom`, the one definition), less the employee's other requests awaiting a decision; only
+  the **current leave year** can be cashed; the portal sends the leave year, offers only this leave
+  year's requests, and its days hint reads *can be cashed in now*.
+- **Migration `20260926111408_AddSettlementLeaveDaysCap`**, guarded SQL: the column and its backfill
+  (56 on every existing tenant row, through dynamic SQL) in one step that runs only when the column is
+  added, so a re-run never overwrites a tenant that has since cleared its cap; no default constraint
+  (empty must mean no cap). **The scaffold's `UpdateData` was dropped**: it also switched the seeded
+  tenant's in-service flag, and a migration overwriting a tenant's own setting on every database is a
+  data decision — UAT was switched through the API. Proven on a scratch database (Up, Up again with a
+  cleared cap left alone, Down twice, Up again; 10 checks). UAT applied it at startup, checked in SQL.
+
+**Changed from the plan, and why.**
+
+1. **The leaver's figure is the leave owed report's**, less requests awaiting a decision. The plan
+   wrote "accrued-to-exit + carried − used − pending − encashed"; lane C6 had already built that
+   working (and deviated on *pending* for a report — owed ≠ can take now). For a leaver a pending
+   request is days asked for during service, so it is deducted here and named. One working, two
+   readers.
+2. **`ProRateOnExit` needed the build-up asked of the year's end.** The first cut asked it as at the
+   last day, which stops the clock there whatever the policy says — so the setting would still have
+   bound nothing (found before the suite ran, fixed in a second build). TDC's policy has it on, so
+   TDC's figure is the same either way.
+3. **Summary dismissal writes a zero line, not no line** (the plan said none): the settlement's own
+   rule is that a missing line is invisible in a way a stated zero is not.
+4. **The migration does not switch the in-service flag** (the scaffold did): see above.
+5. **The line quotes the daily rate by its figure**, not its sentence: `Basis` holds 500 characters,
+   and the rate's basis is on the statement's header (`DailyRateBasis`).
+
+**Suite.** `dev-harness/hr-leave/run-round5-l.mjs`: **51 assertions, green twice.**
+- ⚠ **Its first run found a defect, 39/40:** the capped leaver's statement failed to save — the
+  line's explanation (the working, both notes, the cap and the daily rate's whole sentence) overran
+  `SeparationSettlementLine.Basis` (500), a SQL truncation → 500 on *prepare*. Fixed: shorter words,
+  the rate by its figure, and `FitBasis` as a last resort so a long payroll source name can never fail
+  a statement again; the suite now asserts the capped line fits.
+- One fixture leaver, **R5LLeaver** (TDC/02392, minted once, a contract at 6,000, no login), whose
+  separation sits at ClearanceCompleted and is reset in SQL between prepares — so every rule is proved
+  on the same facts in both positions: exact against an expectation worked out from the accrual
+  statement (21 × 6/12 = 10.5 built up; 10.5 + 3 − 1 − 2 = 10.5 owed); the report agrees; pro-rate on
+  exit on 10.5, off 21; carried in full before the lapse (31 March: 9.25), not after; cap 2 → 2, no cap
+  → 10.5; summary dismissal zero; no end date uncomputed.
+- Its balances (this year's annual, last year's leftover, sick leave) and one pending request are
+  planted for the run and removed after; the settings and ANN's `ProRateOnExit` are put back. [4]
+  asks for encashments that are all refused — nothing is accepted, so no workflow instance starts.
+
+**Neighbours.** Every hr-leave suite, in order, in one pass after the lane's suite was green twice:
+
+- **Slices 1–13 are at their recorded counts.** Slice 1 is 72/75, the same three environmental
+  failures. Slice 6 (32) cashes leave in with the switch on, inside every L3 limit.
+- **The round 5 suites:** `run-round5-e.mjs` 119, `-f` 20, `-d` 74, `-n` 92, **`-c` 112 — the leave
+  owed report, now through the extracted calculator, unchanged**, `-g` 55, `-h` 142, `-j` 44, `-i` 88,
+  `-k` 144.
+- **`run-round5-a.mjs` read 88/89, and was re-based to 89.** It proves the annual kind passes the
+  "annual only" check by asking for 1999, so a LATER check refuses; that later check used to be the
+  balance lookup, and lane L3's current-leave-year rule now comes before it. Its assertion names the
+  new refusal; the claim — later than the kind — is unchanged.
+- **`run-round5-l.mjs` was 51 a third time**, run last.
+- **hr-separation `run-slice5.mjs` (the settlement suite): 77, re-based.** Its leave line was
+  uncomputed "because no leave balance is on record"; now the leaver's days are worked out without a
+  record and the line names them, and it stays uncomputed because the fixture has no salary — which
+  the basis says. Asserting the old reason would have passed on the new one, so two assertions say
+  which. ⚠ **The separation harness could not mint at all before this lane**: its `setup.mjs`
+  supplied a staff number, refused for permanent staff since the TDC/ staff-number change. Fixed (one
+  line); 17 other harness files still pass one when minting (noted in memory, not fixed here).
+- **hr-finance slices 2–4: read, not run** (see *Noted, not built*).
+- **Cleanup:** the 24 harness types the older slices minted were switched off, measured first (all
+  created by the pass, none of TDC's). Only TDC's nine are active. The in-service switch is off and
+  the cap 56, as the lane leaves them.
+- **The API log holds nothing from this lane:** 2,853 notification-sender lines (no mail server on
+  UAT), 8 payroll-profile foreign-key failures — one per employee hr-separation slice 5 minted
+  (cross-module defect #23) — and one procurement calendar failure for another tenant. No request
+  answered 500.
+
+**Noted, not built.**
+- **TDC's daily rate for a day of leave** (L-D7) is still owed; the settlement uses monthly × 12 ÷ 365.
+- hr-finance slices 2–4 were **read, not run** (they post journals on UAT and mint actors per run):
+  slice 2's encashment is for the current year on a type with no accrual policy and a planted 40-day
+  balance, inside every L3 limit; slices 3 and 4 value any uncomputed line and total the released
+  lines themselves.

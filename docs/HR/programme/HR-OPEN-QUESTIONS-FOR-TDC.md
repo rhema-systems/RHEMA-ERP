@@ -664,10 +664,13 @@ Still open from 17 September (above). The Act says *"Any agreement to relinquish
 annual leave or to forgo such leave is void"* (s.31); the public service pays for unused leave only at
 the end of service; and FR-HR-046 says leave is encashed *"only on exit"*.
 
-**Meanwhile:** cashing in while employed is switched off. Unused annual leave is paid only in a
-leaver's settlement, where HR states the days and Finance confirms the amount. **Please confirm this,
+**Meanwhile (built 26 September, round 5 lane L):** cashing in while employed is switched off, and
+the employee portal no longer offers it. Unused annual leave is paid only in a leaver's settlement:
+this leave year's days built up to the last day, plus carried days not yet lapsed, less what was
+taken or cashed in — the line says how each number was reached — capped at 56 days (now a setting),
+nothing on summary dismissal, and marked indicative for Finance to confirm. **Please confirm this,
 and name the daily rate used to value a day of leave** (L-D7 — two formulas about 38% apart are in
-the system today).
+the system today; the settlement uses *monthly × 12 ÷ 365*).
 
 ### R5-Q3 · Is a leave allowance paid?
 

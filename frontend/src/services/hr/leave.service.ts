@@ -593,6 +593,14 @@ class LeavePlanService {
 class LeaveEncashmentService {
   private readonly baseUrl = '/hr/leave-encashments';
 
+  /**
+   * Whether leave may be cashed in while still employed (round 5, lane L1) — open to anybody signed
+   * in. Off, the portal hides its encashment screen: unused leave is paid in the final settlement.
+   */
+  getAvailability(): Promise<{ inServiceAllowed: boolean; explanation: string }> {
+    return apiService.get<{ inServiceAllowed: boolean; explanation: string }>(`${this.baseUrl}/availability`);
+  }
+
   getAll(year = 0, status?: string): Promise<LeaveEncashment[]> {
     return apiService.get<LeaveEncashment[]>(this.baseUrl, { year, status });
   }

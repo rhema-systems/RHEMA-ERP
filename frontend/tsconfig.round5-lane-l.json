@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/policy-settings.ts",
+    "src/services/hr/leave.service.ts",
+    "src/app/administration/hr/settings/policy/page.tsx",
+    "src/app/me/leave/page.tsx",
+    "src/app/me/leave/encashments/page.tsx",
+    "src/components/me/portal-top-nav.tsx",
+    "src/components/me/leave/use-encashment-availability.ts"
+  ]
+}

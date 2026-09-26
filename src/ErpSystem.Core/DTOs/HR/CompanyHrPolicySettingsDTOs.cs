@@ -109,6 +109,10 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int InvestigationDays { get; set; }
     public int DisciplineBacklogHorizonDays { get; set; }
     public int SettlementDaysPerYear { get; set; }
+
+    /// <summary>The most days of annual leave a leaver's settlement pays for; null = no cap (lane L2b).</summary>
+    public int? SettlementLeaveDaysCap { get; set; }
+
     public bool AttendanceRateIncludesApprovedLeave { get; set; }
 
     // Leave encashment and the reminder cadence (residue plan G2).
@@ -223,6 +227,15 @@ public class UpdateCompanyHrPolicySettingsDto
     /// a 38% spread on the same facts. See the entity.
     /// </summary>
     [Range(1, 366)] public int SettlementDaysPerYear { get; set; } = 365;
+
+    /// <summary>
+    /// The most days of annual leave a leaver's settlement pays for (FR-HR-152); empty = no cap.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Left out of a save, it keeps this default, 56, like every field here; only an explicit
+    /// <c>null</c> removes the cap. See the entity.
+    /// </remarks>
+    [Range(1, 366)] public int? SettlementLeaveDaysCap { get; set; } = 56;
 
     public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
 

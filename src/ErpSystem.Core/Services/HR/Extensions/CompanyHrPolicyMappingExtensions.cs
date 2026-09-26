@@ -69,6 +69,7 @@ public static class CompanyHrPolicyMappingExtensions
             InvestigationDays                     = entity.InvestigationDays,
             DisciplineBacklogHorizonDays          = entity.DisciplineBacklogHorizonDays,
             SettlementDaysPerYear                 = entity.SettlementDaysPerYear,
+            SettlementLeaveDaysCap                = entity.SettlementLeaveDaysCap,
             AttendanceRateIncludesApprovedLeave   = entity.AttendanceRateIncludesApprovedLeave,
             AllowInServiceEncashment              = entity.AllowInServiceEncashment,
             EncashmentWorkingDaysPerMonth         = entity.EncashmentWorkingDaysPerMonth,
@@ -142,6 +143,7 @@ public static class CompanyHrPolicyMappingExtensions
         entity.InvestigationDays                   = dto.InvestigationDays;
         entity.DisciplineBacklogHorizonDays        = dto.DisciplineBacklogHorizonDays;
         entity.SettlementDaysPerYear               = dto.SettlementDaysPerYear;
+        entity.SettlementLeaveDaysCap              = dto.SettlementLeaveDaysCap;
         entity.AttendanceRateIncludesApprovedLeave = dto.AttendanceRateIncludesApprovedLeave;
         entity.AllowInServiceEncashment           = dto.AllowInServiceEncashment;
         entity.EncashmentWorkingDaysPerMonth      = dto.EncashmentWorkingDaysPerMonth;

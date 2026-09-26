@@ -90,6 +90,8 @@ const schema = z
     investigationDays: z.coerce.number().int().min(1).max(365),
     disciplineBacklogHorizonDays: z.coerce.number().int().min(1).max(3650),
     settlementDaysPerYear: z.coerce.number().int().min(1).max(366),
+    // Round 5, lane L2b: empty means no cap, so '' is a real answer here.
+    settlementLeaveDaysCap: z.union([z.coerce.number().int().min(1).max(366), z.literal('')]).optional(),
     attendanceRateIncludesApprovedLeave: z.boolean(),
 
     allowInServiceEncashment: z.boolean(),
@@ -212,6 +214,7 @@ export default function PolicySettingsPage() {
       investigationDays: data.investigationDays,
       disciplineBacklogHorizonDays: data.disciplineBacklogHorizonDays,
       settlementDaysPerYear: data.settlementDaysPerYear,
+      settlementLeaveDaysCap: data.settlementLeaveDaysCap ?? '',
       attendanceRateIncludesApprovedLeave: data.attendanceRateIncludesApprovedLeave,
       allowInServiceEncashment: data.allowInServiceEncashment,
       encashmentWorkingDaysPerMonth: data.encashmentWorkingDaysPerMonth,
@@ -311,6 +314,9 @@ export default function PolicySettingsPage() {
         investigationDays: Number(v.investigationDays),
         disciplineBacklogHorizonDays: Number(v.disciplineBacklogHorizonDays),
         settlementDaysPerYear: Number(v.settlementDaysPerYear),
+        // ⚠ Sent every time, as null when emptied: the server keeps its default (56) for a save
+        // that leaves the field out, so only an explicit null removes the cap.
+        settlementLeaveDaysCap: orNullNumber(v.settlementLeaveDaysCap),
         attendanceRateIncludesApprovedLeave: v.attendanceRateIncludesApprovedLeave,
         allowInServiceEncashment: v.allowInServiceEncashment,
         encashmentWorkingDaysPerMonth: Number(v.encashmentWorkingDaysPerMonth),
@@ -663,6 +669,23 @@ export default function PolicySettingsPage() {
               </p>
             </div>
 
+            {/* Round 5, lane L2b: FR-HR-152's cap, visible and changeable instead of a constant. */}
+            <div className="space-y-2">
+              <NumberField
+                form={form}
+                name="settlementLeaveDaysCap"
+                label="Final settlement — most days of annual leave paid"
+              />
+              <p className="text-sm text-muted-foreground">
+                A leaver is paid for the annual leave they are owed on their last day: this leave
+                year&apos;s share, built up to that day, plus carried days not yet lapsed, less what
+                they took or already cashed in. This caps the days paid (FR-HR-152 says 56).{' '}
+                <strong>Leave it empty for no cap.</strong> Nothing is paid on summary dismissal
+                (Labour Act, s.30(3)), whatever this says. The amount on the statement is indicative:
+                Finance confirms it.
+              </p>
+            </div>
+
             <SwitchField
               form={form}
               name="attendanceRateIncludesApprovedLeave"
@@ -688,8 +711,11 @@ export default function PolicySettingsPage() {
               description="Off: leave is only ever paid out when somebody leaves, and the in-service encashment screen refuses. On: employees may convert unused days to cash, for whichever leave types are marked convertible. This switch decides whether the route exists at all - the per-type setting still decides which leave may use it."
             />
             <p className="text-sm text-muted-foreground">
-              FR-HR-046 says leave is encashed <em>only on exit, no other route</em> — so a new
-              tenant starts with this off. Turn it on if this organisation&apos;s policy differs.
+              FR-HR-046 says leave is encashed <em>only on exit, no other route</em>, and the Labour
+              Act makes an agreement to give up annual leave void (s.31) — so this is off, and the
+              employee portal hides its encashment screen. Turn it on only if this
+              organisation&apos;s policy differs; even then, only annual leave, from the current
+              leave year, up to the days built up so far, can be cashed in.
             </p>
 
             {/* The two daily-rate bases, shown together on purpose. */}

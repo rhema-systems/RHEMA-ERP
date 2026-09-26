@@ -67,6 +67,25 @@ public class LeaveEncashmentsController : ControllerBase
         return (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
     }
 
+    /// <summary>Whether leave may be cashed in while still employed (round 5, lane L1)</summary>
+    /// <remarks>
+    /// Open to anybody signed in: the portal asks it to decide whether to show its encashment screen
+    /// at all. It says only whether the route exists — no figures, nobody's leave.
+    /// </remarks>
+    [HttpGet("availability")]
+    [ProducesResponseType(typeof(LeaveEncashmentAvailabilityDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<LeaveEncashmentAvailabilityDto>> GetAvailability()
+    {
+        var allowed = await _service.IsInServiceAllowedAsync();
+        return Ok(new LeaveEncashmentAvailabilityDto
+        {
+            InServiceAllowed = allowed,
+            Explanation = allowed
+                ? "Annual leave may be cashed in while employed, subject to approval."
+                : "Leave is cashed in only when you leave: unused annual leave is paid in your final settlement.",
+        });
+    }
+
     [HttpGet]
     [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<LeaveEncashmentDto>), StatusCodes.Status200OK)]

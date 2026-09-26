@@ -392,6 +392,25 @@ public class CompanyHrPolicySettings : TenantEntity
     public int SettlementDaysPerYear { get; set; } = 365;
 
     /// <summary>
+    /// The most days of annual leave a leaver's final settlement pays for (FR-HR-152). Empty means
+    /// no cap (round 5, lane L2b).
+    /// </summary>
+    /// <remarks>
+    /// <para>Was a constant, 56, in <c>SeparationService</c> — visible on no screen and changeable
+    /// only by a release. FR-HR-152 is TDC's own requirement, so the default is its figure.</para>
+    ///
+    /// <para>⚠ <b>Empty is a real answer, not a missing one.</b> A client with no cap clears it. So a
+    /// save that leaves the field out keeps the update DTO's own default, 56, as every other field on
+    /// that DTO does, and only an explicit empty value removes the cap.</para>
+    ///
+    /// <para>After round 5 lane L2 the settlement pays only this leave year's share plus carried days
+    /// not yet lapsed, so for TDC (at most 30 + 5 = 35 days) the cap rarely binds. The point is that
+    /// it is visible and changeable, not that anybody is paid differently.</para>
+    /// </remarks>
+    [Range(1, 366)]
+    public int? SettlementLeaveDaysCap { get; set; } = 56;
+
+    /// <summary>
     /// Whether approved leave counts as an expected working day in the attendance rate.
     /// </summary>
     /// <remarks>
@@ -425,9 +444,11 @@ public class CompanyHrPolicySettings : TenantEntity
     /// per-type flag still decides <i>which</i> leave may be converted; this decides whether the
     /// in-service route exists at all. Off here means off for every type, whatever they say.</para>
     ///
-    /// <para>⚠ The TDC demo tenant is seeded with this ON, because stakeholders have already been
-    /// shown the encashment screen. Turning it off by default without that seed line would make a
-    /// demonstrated feature vanish.</para>
+    /// <para>⚠ <b>Round 5, decision A3 (2026-09-25): OFF for TDC too.</b> The demo tenant was seeded
+    /// ON because stakeholders had been shown the encashment screen; the Labour Act (s.31: an
+    /// agreement to forgo annual leave is void) and public-service practice (cash only at the end of
+    /// service) settled it the other way, and lane L1 switched the seed off. Off, the portal hides
+    /// its encashment screen and the leaver's settlement is the only route to cash.</para>
     /// </remarks>
     public bool AllowInServiceEncashment { get; set; } = false;
 

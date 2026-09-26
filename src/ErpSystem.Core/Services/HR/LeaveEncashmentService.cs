@@ -31,6 +31,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
     private readonly IDateTimeProvider _clock;
     private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly IHrFinancePostingAdapter _financePosting;
+    private readonly ILeaveEntitlementService _entitlementService;
+    private readonly ILeaveYearContext _leaveYear;
 
     public LeaveEncashmentService(
         IGenericRepository<LeaveEncashment> encashmentRepository,
@@ -46,7 +48,9 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         IGenericRepository<LeaveType> leaveTypeRepository,
         IDateTimeProvider clock,
         ICompanyHrPolicyProvider policyProvider,
-        IHrFinancePostingAdapter financePosting)
+        IHrFinancePostingAdapter financePosting,
+        ILeaveEntitlementService entitlementService,
+        ILeaveYearContext leaveYear)
     {
         _encashmentRepository = encashmentRepository;
         _leaveRepository = leaveRepository;
@@ -62,6 +66,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         _clock = clock;
         _policyProvider = policyProvider;
         _financePosting = financePosting;
+        _entitlementService = entitlementService;
+        _leaveYear = leaveYear;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -101,6 +107,9 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         return entity;
     }
 
+    public async Task<bool> IsInServiceAllowedAsync()
+        => (await _policyProvider.GetAsync()).AllowInServiceEncashment;
+
     public async Task<LeaveEncashmentDto> RequestEncashmentAsync(CreateLeaveEncashmentDto dto)
     {
         var leaveRequest = await GetOwnedLeaveRequestAsync(dto.LeaveRequestId);
@@ -135,6 +144,15 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (!leaveType.AllowCashConversion)
             throw new InvalidOperationException("This leave type does not allow cash conversion (encashment).");
 
+        // ⚠ Round 5, lane L3 — defensive, and it matters only where a client switches in-service
+        // encashment on. Only the CURRENT leave year's days can be cashed: an earlier year's leftover
+        // was carried over or lapsed at its year-end, and cashing it as well would pay for it twice.
+        var currentYear = await _leaveYear.CurrentYearAsync();
+        if (dto.Year != currentYear)
+            throw new InvalidOperationException(
+                $"Leave can be cashed in from the current leave year, {currentYear}, only. Days left over "
+                + $"from {dto.Year} were carried over or lapsed when that year ended.");
+
         var tenantId = GetTenantId();
         var balance = await _balanceRepository.FirstOrDefaultAsync(
             b => b.TenantId == tenantId &&
@@ -145,9 +163,26 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (balance == null)
             throw new InvalidOperationException("No leave balance found for the specified year and leave type.");
 
-        if (balance.AvailableDays < dto.DaysEncashed)
+        // ⚠ Lane L3: the guard reads CAN TAKE NOW — the days built up so far, less those taken,
+        // pending and already cashed — not the whole year's AvailableDays, which counts days not yet
+        // earned. Less, too, the employee's other requests still awaiting a decision, which hold no
+        // days until they are approved: two submitted side by side would each pass alone.
+        var snapshot = await _entitlementService.GetSnapshotAsync(
+            dto.EmployeeId, dto.LeaveTypeId, balance.LeaveSubTypeId, dto.Year);
+        var awaiting = await _encashmentRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.EmployeeId == dto.EmployeeId
+                        && e.LeaveTypeId == dto.LeaveTypeId && e.Year == dto.Year
+                        && (e.Status == LeaveEncashmentStatus.Submitted || e.Status == LeaveEncashmentStatus.PendingApproval))
+            .SumAsync(e => (decimal?)e.DaysEncashed) ?? 0m;
+        var canCashNow = snapshot.AvailableFrom(
+            balance.EntitledDays, balance.CarriedOverDays, balance.AdjustmentDays,
+            balance.UsedDays, balance.PendingDays, balance.EncashedDays) - awaiting;
+
+        if (canCashNow < dto.DaysEncashed)
             throw new InvalidOperationException(
-                $"Insufficient balance. Available: {balance.AvailableDays} days, Requested: {dto.DaysEncashed} days.");
+                $"Only {Math.Max(0m, canCashNow):0.##} day(s) can be cashed in now — the days built up so far, "
+                + $"less those taken, booked, already cashed in or awaiting a decision. {dto.DaysEncashed:0.##} "
+                + "were asked for.");
 
         // Derive the payout from the employee's emoluments (basic + linked allowances) per the
         // leave type's rate policy — the server is the source of truth. Fall back to the supplied

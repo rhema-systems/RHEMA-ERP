@@ -1186,6 +1186,15 @@ public class LeaveEncashmentDto
     public string? RejectionReason { get; set; }
 }
 
+/// <summary>Whether leave may be cashed in while still employed (round 5, lane L1).</summary>
+public class LeaveEncashmentAvailabilityDto
+{
+    public bool InServiceAllowed { get; set; }
+
+    /// <summary>A sentence for the screen: where the cash comes from either way.</summary>
+    public string Explanation { get; set; } = string.Empty;
+}
+
 public class CreateLeaveEncashmentDto
 {
     public Guid LeaveRequestId { get; set; }

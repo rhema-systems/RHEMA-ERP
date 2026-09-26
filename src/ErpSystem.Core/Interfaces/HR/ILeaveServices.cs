@@ -341,6 +341,12 @@ public interface ILeavePlanService
 /// </summary>
 public interface ILeaveEncashmentService
 {
+    /// <summary>
+    /// Whether leave may be cashed in while still employed — the company's switch (round 5, lane
+    /// L1). Off, the only route to cash is the leaver's settlement, and the portal hides its screen.
+    /// </summary>
+    Task<bool> IsInServiceAllowedAsync();
+
     Task<LeaveEncashmentDto>              RequestEncashmentAsync(CreateLeaveEncashmentDto dto);
     Task<LeaveEncashmentDto>              ApproveEncashmentAsync(Guid id);
     Task<LeaveEncashmentDto>              RejectEncashmentAsync(Guid id, string reason);

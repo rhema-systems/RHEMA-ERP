@@ -43,6 +43,7 @@ import { LEAVE_STATUS_BADGE } from '@/components/me/leave/leave-status';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { AccrualStatementPanel, fmtDay } from '@/components/hr/leave/AccrualStatementPanel';
 import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
+import { useEncashmentAvailability } from '@/components/me/leave/use-encashment-availability';
 import type { LeaveBalance } from '@/types/hr/leave-request';
 
 const fmtDate = (d: string) =>
@@ -54,6 +55,8 @@ export default function MyLeavePage() {
   // Round 5, C4: opens on the leave year we are in (not the calendar year, for a leave year that
   // starts later than January); a year the employee picks wins.
   const { currentYear } = useLeaveYear();
+  // Round 5, lane L1: the Encashments button only where leave may be cashed in while employed.
+  const { allowed: encashmentAllowed } = useEncashmentAvailability();
   const [chosenYear, setChosenYear] = useState<number | null>(null);
   const year = chosenYear ?? currentYear;
   // Round 5, C2: the balance whose accrual statement is open.
@@ -109,11 +112,13 @@ export default function MyLeavePage() {
                 <CalendarRange className="mr-2 h-4 w-4" /> Planner
               </Link>
             </Button>
-            <Button variant="outline" asChild>
-              <Link href="/me/leave/encashments">
-                <Coins className="mr-2 h-4 w-4" /> Encashments
-              </Link>
-            </Button>
+            {encashmentAllowed && (
+              <Button variant="outline" asChild>
+                <Link href="/me/leave/encashments">
+                  <Coins className="mr-2 h-4 w-4" /> Encashments
+                </Link>
+              </Button>
+            )}
             <Button asChild>
               <Link href="/me/leave/new">
                 <CalendarPlus className="mr-2 h-4 w-4" /> New request

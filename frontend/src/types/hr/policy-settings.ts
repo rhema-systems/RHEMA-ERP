@@ -84,6 +84,11 @@ export interface CompanyHrPolicySettings {
   disciplineBacklogHorizonDays: number;
   /** ⚠ Moves money: 365 calendar / 360 thirty-day / 264 working — a 38% spread on the same facts. */
   settlementDaysPerYear: number;
+  /**
+   * The most days of annual leave a leaver's settlement pays for (FR-HR-152); `null` = no cap
+   * (round 5, lane L2b). ⚠ Send it on every save: the server keeps 56 for a save that omits it.
+   */
+  settlementLeaveDaysCap: number | null;
   attendanceRateIncludesApprovedLeave: boolean;
 
   /**

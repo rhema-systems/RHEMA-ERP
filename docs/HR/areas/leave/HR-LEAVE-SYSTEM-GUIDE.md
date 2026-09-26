@@ -26,7 +26,9 @@ leave first) landed the same day; chapter 13, § 19.1 (with the portal home's ti
 describe it. Lane I (reminders that reach people) landed the same day; chapter 4b's reminder card,
 chapter 18 and § 23 (L-48 closed; L-70 to L-72) describe it. Lane K (the medical board, step one:
 a purpose, physicians, documents, cancel or dissolve, and a gate that takes only a relevant, recent
-board) landed the same day; chapter 7b and § 23 (L-47 closed) describe it. The
+board) landed the same day; chapter 7b and § 23 (L-47 closed) describe it. Lane L (cashing in
+leave only on exit: the leaver's annual leave line, the settlement cap as a setting, in-service
+encashment off) landed the same day; chapters 4b and 15 and § 19.6 describe it. The
 other chapters still describe the module before round 5.
 
 > ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
@@ -1567,11 +1569,19 @@ coupling them is invisible until somebody wants a July leave year on a January f
 
 > *This one moves money. A daily rate is monthly pay × 12 ÷ this.*
 
+**…and beneath it, *Final settlement — most days of annual leave paid*** *(round 5, lane L2b)*.
+Default **56** (FR-HR-152); **empty means no cap**. It was a constant in the program until 26
+September. It caps the days on a leaver's *Annual leave owed on exit* line — this leave year's share
+built up to the last day, plus carried days not yet lapsed, plus adjustments, less leave taken,
+cashed in or awaiting a decision — and the line says when it capped and from how many. Nothing is
+paid on summary dismissal, whatever it says (Labour Act s.30(3)). With TDC's figures (at most 30 +
+5 days) it rarely binds; the point is that it can be seen and changed.
+
 **3 — Leave — encashment.** A switch and a number, and a worked example between them:
 
 | Control | Default | What it does |
 |---|---|---|
-| **Allow leave to be encashed while still employed** | **off for a new tenant**, **on for this one** | off, the in-service encashment path refuses outright, naming the setting. On, the leave type's own *Allow cash conversion* decides which leave may use it |
+| **Allow leave to be encashed while still employed** | **off** — for a new tenant and, since round 5 lane L1, for this one | off, the in-service encashment path refuses outright, naming the setting, and the portal hides its screen. On, only annual leave, this leave year, up to *can take now* (lane L3) — the leave type's own *Allow cash conversion* still decides which type may use it |
 | ~~**Encashment — working days per month**~~ | — | **Gone from the page** *(round 5 lane N, § 23 L-38)*. It could never apply: every leave type carries its own figure, 22 unless the type says otherwise, and the type's form will not take less than 1. The value is still stored and saved unchanged; the example below uses a type's 22 |
 
 **…and inside that card, the worked example** — the whole point of it, updating as you type:
@@ -3437,7 +3447,24 @@ sentence rather than a constraint error.
 ### 📖 What it is
 
 Converting untaken leave into money. Four checks, a server-derived payout, and a lifecycle that
-ends in *Processed* — which is the only status that moves a balance.
+ends in *Processed*. ⚠ **Since round 5 lane L3 an encashment holds its days from *Approved***, not
+only once *Processed*: before, an approved encashment's days could be taken as leave in the weeks
+before Finance paid it — the same days sold and spent.
+
+> ### ⚠ Round 5, lane L (2026-09-26): this route is closed on the demo
+>
+> **In-service encashment is OFF for TDC** (decision A3: the Labour Act's s.31, public-service
+> practice, and TDC's own FR-HR-046). This register still lists the encashments made before, and
+> the employee portal no longer offers the route. **A leaver's unused annual leave is paid in their
+> final settlement** — the separation's settlement statement, where the line *Annual leave owed on
+> exit* shows the days and how each was reached (built up to the last day, carried, adjusted, taken,
+> cashed in, awaiting a decision), capped by the policy page's *most days of annual leave paid*, and
+> marked indicative for Finance to confirm.
+>
+> Where an organisation switches the route **on**, lane L3 limits it: **annual leave only**, from the
+> **current leave year** only (a closed year's days were carried or lapsed), and no more than **can be
+> taken now** — the days built up so far — less the employee's other requests still awaiting a
+> decision. Each refusal names its limit.
 
 ⚠ **There is a fifth check now, and it is asked first.** The tenant switch in chapter 4b —
 *Allow leave to be encashed while still employed* — decides whether this route exists at all. With
@@ -3448,7 +3475,7 @@ it off, every request here is refused with:
 
 It is asked **before** the leave type's own *Allow cash conversion* flag on purpose: a company with
 the route closed should be told the route is closed, not sent off to change a flag that would make no
-difference. **This demo database has it on**; a brand-new one does not.
+difference. **This demo database has it off since round 5 lane L1**, as a brand-new one does.
 
 ⚠ **And a sixth, asked second** *(round 5, lane A)*: **only annual leave is cashed in while employed.**
 Sick, casual or compassionate days are not a reserve of money, whatever a flag on their type says, so
@@ -4133,6 +4160,13 @@ is hers only until the plan is approved; after that it is HR's, with a reason.
 
 Read, and request. Approving and paying are the desk's.
 
+⚠ **Round 5, lane L1: hidden on the demo.** With in-service encashment off, *My Leave* has no
+*Encashments* button and the top navigation no *My Encashments* link (both read
+`GET /api/hr/leave-encashments/availability`, open to any employee). Somebody arriving by an old link
+sees *"Leave is not cashed in while you are employed"*, where the cash comes from instead, and a link
+to the planner — and any encashments made before are still listed. Where the route is on, the picker
+offers only this leave year's requests and the days hint reads *can be cashed in now*.
+
 ### 19.7 `/me/leave/[id]/edit`
 
 Draft only, same rules as chapter 8.
@@ -4294,7 +4328,9 @@ closed six of the audit's eleven and two in part, and found and closed four more
 lane C closed L-41 and half of L-48, and found and closed two more, **L-65 and L-66**; lane G closed
 L-42 and found and closed two more, **L-67 and L-68**; lane H found and closed one, **L-69**; lane I
 closed the rest of L-48 and found three it leaves open, **L-70 to L-72**; lane K closed the rest of
-**L-47** (the board's purpose and date) and found nothing new.
+**L-47** (the board's purpose and date) and found nothing new; lane L closed **L-46** (the leaver's
+settlement) and found and fixed one of its own before commit (a capped line's explanation overran its
+column and failed the statement's save — § 8 of the round 5 plan).
 The round 5 blocks are listed after the settings audit.
 
 ### ✅ Closed
@@ -4375,7 +4411,7 @@ the round 5 plan, whose lane is named in the last column; the plain-terms accoun
 | **L-43** | ch. 4 | Eligibility rules are OR'd under a tab that says "restrict"; the gender qualifier on an organisation rule cannot be set from the tab | N2 — **closed** 2026-09-25: the tab says any rule lets people in, and a unit, level or position rule takes a gender |
 | **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 — **closed** 2026-09-25: an edit checks the sub-type and its cap; creating one honours *Active*; the cap limits the sub-type inside its type's pot |
 | **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 — **closed** 2026-09-25: submit re-runs notice, the reliever requirement, the balance and the cap |
-| **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 |
+| **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 — **closed** 2026-09-26: annual leave only, the leave year the person leaves in, owed at the last day (the leave owed report's working) less requests awaiting a decision; *pro-rate on exit* decides where the build-up stops (the line is asked of the year's end); none on summary dismissal, stated at zero; the cap a setting (L2b). The per-type encashment rates still apply in service only, which stays off |
 | **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — **closed**: N3's part 2026-09-25 (Pending counts; a lengthening move re-runs the gate); K6's 2026-09-26 — a linked board counts only if it was asked about an absence (extended sick leave, injury on duty or other) and reported on or after the start of the leave year being counted, and the refusal says which test the linked board failed |
 | **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I — C4's part **closed** 2026-09-25: pro-rating counts months of the leave year, the reminder's month is the month of the leave year, and a call naming no year gets the current leave year. The reminders' recipients: ✅ **closed by lane I (2026-09-26)** — each reaches the people who can act on it, in the app and by email, and HR when nobody else can be told |
 
@@ -4566,7 +4602,7 @@ defect because nothing errors. Neither waits on anybody now.
 | | Was | Is |
 |---|---|---|
 | **L-D7 · Two daily-rate bases** | leave encashment on *(basic + linked allowances) ÷ 22*, the separation settlement on *monthly × 12 ÷ 365* — **38% apart**, configured on different screens in different modules, so no client could see the gap | **deliberately not merged** — they are different money events — but **both on one screen with a live worked example** (chapter 4b), and every payout on either side stores the basis that produced it |
-| **L-D8 · In-service encashment** | FR-HR-046 says *"only on exit"*; the module shipped an in-service path anyway | **a tenant switch**, defaulting to the specification's reading. This demo tenant has it on, deliberately and by an explicit seed line |
+| **L-D8 · In-service encashment** | FR-HR-046 says *"only on exit"*; the module shipped an in-service path anyway | **a tenant switch**, defaulting to the specification's reading. ~~This demo tenant has it on, deliberately and by an explicit seed line~~ — **off for TDC too since round 5 lane L1** (decision A3: Act 651 s.31, public-service practice), the seed line reversed and UAT switched through HR's own save; the portal hides the screen. TDC's confirmation is still owed (R5-Q2) |
 | **L-D9 · The five reminder windows** | constants in the source, with a comment admitting they were ours | settings, chapter 4b, each proved in **both** positions |
 | **L-D10 · Excuse-duty thresholds** | *"blocked on TDC's numbers"* | built in full with defaults **stated on screen as defaults**, on the leave type where they belong |
 

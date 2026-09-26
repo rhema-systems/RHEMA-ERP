@@ -11,7 +11,8 @@
 > (the year-end) were built and tested on 25 September, and [section 8](#8-casual-leave-over-its-limit)
 > (casual leave over its limit), [section 10](#10-the-balances-page--annual-leave-first) (the
 > balances page, annual leave first), [section 11](#11-reminders-that-reach-people) (reminders that
-> reach people) and step one of [section 14](#14-the-medical-board) (the medical board) on 26
+> reach people), step one of [section 14](#14-the-medical-board) (the medical board) and
+> [section 13](#13-cashing-in-leave--only-when-leaving) (cashing in leave only when leaving) on 26
 > September; nothing else described here is built yet.
 > This is the
 > plain-terms companion to the round 5 leave plan, which answers the stakeholder notes *HR Demo
@@ -577,27 +578,34 @@ working correctly".)*
 days and sends it to Finance; once paid, the request is updated as paid", and "at times you'll have
 to pay cash or the encashment".)*
 
-**Today** there are two routes, and both have problems:
+**Before this round** there were two routes, and both had problems:
 
-- **While employed**, an employee can ask to be paid for unused days. The demo has this switched on.
-- **When somebody leaves**, their settlement pays for unused leave of **every** type — sick and
+- **While employed**, an employee could ask to be paid for unused days. The demo had this switched on.
+- **When somebody left**, their settlement paid for unused leave of **every** type — sick and
   maternity included — from **every** year on record, up to 56 days.
 
-**What changes**
+**Built (26 September)**
 
-- **While employed: switched off.** The law says an agreement to give up annual leave is void. The
-  public service pays for unused leave only at the end of service, and TDC's own requirement
-  (FR-HR-046) says leave is cashed in *"only on exit"*. ⏳ TDC still has to confirm this.
-- **When leaving:** the settlement pays **annual leave only**:
-  - this year's days built up to the leaving date, plus carried days not yet expired, minus days
-    already taken or booked;
-  - **nothing** for somebody dismissed without notice, as the law says;
-  - the existing 56-day cap stays — and becomes a setting on the HR Policy Settings page, 56 by
-    default, instead of a number fixed in the program (decided 25 September). With this year's
-    days plus at most five carried, the cap will rarely be reached.
+- **While employed: switched off**, on the demo too. The law says an agreement to give up annual
+  leave is void. The public service pays for unused leave only at the end of service, and TDC's own
+  requirement (FR-HR-046) says leave is cashed in *"only on exit"*. The employee portal no longer
+  shows *Encashments*; anybody who reaches the page is told the cash comes in the final settlement.
+  ⏳ TDC still has to confirm this.
+- **When leaving:** the settlement pays **annual leave only**, for the year the person leaves in:
+  - the days built up to the last day, plus carried days not yet expired, plus any adjustments,
+    minus days already taken or cashed in — the same figure the *leave owed* report gives for that
+    day;
+  - minus any leave request still waiting for a decision (paying for it as well would pay twice);
+  - the line says, in words, how each number was reached;
+  - **nothing** for somebody dismissed without notice, as the law says — the line is there, at
+    zero, saying why;
+  - the 56-day cap is now a setting on the HR Policy Settings page, 56 by default, empty for no cap.
+    With this year's days plus at most five carried, it will rarely be reached.
 - **HR decides the days, Finance the money** — which is what the stakeholders asked for. HR's figure
-  on the settlement is marked **estimated**, and Finance confirms or corrects it before the settlement
-  is paid.
+  on the settlement is marked **indicative**; Finance confirms it, and a correction is entered on
+  the settlement line with its source, before Internal Audit releases the payment.
+- **If an organisation does switch in-service cashing on** (not TDC), it is limited: annual leave
+  only, this leave year only, and no more than the days built up so far.
 
 ⏳ **Waiting on TDC:** which daily rate is used to value a day of leave. Two different formulas exist
 in the system today, about 38% apart.

@@ -8,6 +8,12 @@
  * this screen never lets the employee name their own amount (the field the DTO carries is
  * a fallback for rate-less configurations, not an offer). The desk register at
  * /hr/leave/encashments stays where it is (D3).
+ *
+ * ⚠ Round 5, lane L. Where the company does not allow leave to be cashed in while employed — TDC,
+ * FR-HR-046, the Labour Act's s.31 — the portal does not link here, and a visit says where the cash
+ * comes from instead (the final settlement) and offers no request. Past encashments stay readable.
+ * Where it is allowed, only annual leave from the CURRENT leave year can be cashed, up to what can
+ * be taken now; the server refuses the rest, so the picker offers only what can work.
  */
 
 import { useMemo, useState } from 'react';
@@ -41,17 +47,29 @@ import { useAuth } from '@/hooks/use-auth';
 import { leaveEncashmentService, leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { ENCASHMENT_STATUS_BADGE } from '@/components/me/leave/leave-status';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
+import { useEncashmentAvailability } from '@/components/me/leave/use-encashment-availability';
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** The leave year a date falls in, for a leave year starting in `startMonth` (1 = January). */
+const leaveYearOf = (date: string, startMonth: number) => {
+  const y = Number(date.slice(0, 4));
+  const m = Number(date.slice(5, 7));
+  return m >= startMonth ? y : y - 1;
+};
 
 export default function MyLeaveEncashmentsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const employeeId = user?.employeeId ?? '';
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
+  // ⚠ The LEAVE year, not the calendar year (round 5, lane C4's rule; this screen was left to L).
+  const { currentYear, startMonth } = useLeaveYear();
+  const { allowed, explanation, loaded: availabilityKnown } = useEncashmentAvailability();
+  const [chosenYear, setChosenYear] = useState<number | null>(null);
+  const year = chosenYear ?? currentYear;
   const [open, setOpen] = useState(false);
   const [leaveRequestId, setLeaveRequestId] = useState('');
   const [days, setDays] = useState('');
@@ -92,9 +110,11 @@ export default function MyLeaveEncashmentsPage() {
       (r) =>
         convertible.has(r.leaveTypeId) &&
         !alreadyEncashed.has(r.id) &&
-        !['Cancelled', 'Rejected'].includes(r.status),
+        !['Cancelled', 'Rejected'].includes(r.status) &&
+        // Lane L3: only this leave year's days can be cashed; the server refuses any other year.
+        leaveYearOf(r.startDate, startMonth) === currentYear,
     );
-  }, [leaveTypes, history, encashments]);
+  }, [leaveTypes, history, encashments, startMonth, currentYear]);
 
   const selectedRequest = encashableRequests.find((r) => r.id === leaveRequestId);
   const selectedBalance = balances?.find(
@@ -108,7 +128,8 @@ export default function MyLeaveEncashmentsPage() {
         leaveRequestId,
         employeeId,
         leaveTypeId: selectedRequest.leaveTypeId,
-        year: new Date(selectedRequest.startDate).getFullYear(),
+        // The leave year the request falls in — which, by the filter above, is the current one.
+        year: leaveYearOf(selectedRequest.startDate, startMonth),
         daysEncashed: Number(days),
         amountPaid: 0, // derived server-side from emoluments; 0 = no client-side claim
         notes: notes || null,
@@ -136,9 +157,12 @@ export default function MyLeaveEncashmentsPage() {
 
   const years = [currentYear, currentYear - 1, currentYear - 2];
   const daysNumber = Number(days);
+  // Lane L3: what can be cashed is what can be TAKEN now — the days built up so far — not the
+  // whole year's figure, which counts days not yet earned. The server applies the same test.
+  const canCashNow = selectedBalance ? selectedBalance.accruedAvailableDays : null;
   const daysValid =
     !!days && Number.isFinite(daysNumber) && daysNumber > 0 &&
-    (!selectedBalance || daysNumber <= selectedBalance.availableDays);
+    (canCashNow == null || daysNumber <= canCashNow);
 
   return (
     <div className="space-y-6">
@@ -156,7 +180,7 @@ export default function MyLeaveEncashmentsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+            <Select value={String(year)} onValueChange={(v) => setChosenYear(Number(v))}>
               <SelectTrigger className="w-28">
                 <SelectValue />
               </SelectTrigger>
@@ -168,12 +192,32 @@ export default function MyLeaveEncashmentsPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button onClick={() => setOpen(true)}>
-              <Coins className="mr-2 h-4 w-4" /> Request encashment
-            </Button>
+            {allowed && (
+              <Button onClick={() => setOpen(true)}>
+                <Coins className="mr-2 h-4 w-4" /> Request encashment
+              </Button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Round 5, lane L1: said, not merely hidden — somebody arriving by an old link should learn
+          where the cash comes from rather than finding a button that only ever refuses. */}
+      {availabilityKnown && !allowed && (
+        <Card>
+          <CardContent className="p-4 text-sm">
+            <p className="font-medium">Leave is not cashed in while you are employed.</p>
+            <p className="mt-1 text-muted-foreground">
+              {explanation} Under the Labour Act an agreement to give up annual leave is void
+              (s.31), so take your leave — plan it in the{' '}
+              <Link href="/me/leave/planner" className="underline underline-offset-2">
+                leave planner
+              </Link>
+              . Any encashments made before this changed are listed below.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {isLoading ? (
         <Skeleton className="h-40" />
@@ -285,9 +329,9 @@ export default function MyLeaveEncashmentsPage() {
               />
               {selectedBalance && (
                 <p className="text-xs text-muted-foreground">
-                  {selectedBalance.availableDays} day
-                  {selectedBalance.availableDays === 1 ? '' : 's'} available for{' '}
-                  {selectedBalance.leaveTypeName}.
+                  Up to {canCashNow} day{canCashNow === 1 ? '' : 's'} of{' '}
+                  {selectedBalance.leaveTypeName} can be cashed in now — the days built up so far,
+                  less those taken, booked or already cashed in.
                 </p>
               )}
             </div>

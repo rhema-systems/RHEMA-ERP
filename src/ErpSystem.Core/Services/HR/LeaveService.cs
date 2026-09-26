@@ -62,6 +62,7 @@ public class LeaveService : ILeaveService
     private readonly INumberSequenceService _numberSequence;
     private readonly IHrAudienceResolver _audience;
     private readonly ILeaveUsageReader _usage;
+    private readonly ILeaveOwedCalculator _owedCalculator;
 
     /// <summary>
     /// Sequence key for leave request numbers. Year-bucketed: the printed number is
@@ -103,7 +104,8 @@ public class LeaveService : ILeaveService
             IDateTimeProvider clock,
             INumberSequenceService numberSequence,
             IHrAudienceResolver audience,
-            ILeaveUsageReader usage)
+            ILeaveUsageReader usage,
+            ILeaveOwedCalculator owedCalculator)
     {
         _leaveRepository = leaveRepository;
         _leaveTypeRepository = leaveTypeRepository;
@@ -133,6 +135,7 @@ public class LeaveService : ILeaveService
         _clock = clock;
         _audience = audience;
         _usage = usage;
+        _owedCalculator = owedCalculator;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -2931,18 +2934,6 @@ public class LeaveService : ILeaveService
     {
         var tenantId = GetTenantId();
         var date = asOf ?? _clock.TodayUtc;
-        var startMonth = await _leaveYear.StartMonthAsync(ct);
-        var year = LeaveYear.For(date, startMonth);
-        var yearStart = LeaveYear.StartOf(year, startMonth);
-        var yearEnd = LeaveYear.EndOf(year, startMonth);
-
-        // The tenant's annual leave: at most one type is Annual and active (round 5, A1).
-        var annual = await _leaveTypeRepository
-            .GetQueryable()
-            .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.IsActive && t.Category == LeaveTypeCategory.Annual, ct)
-            ?? throw new InvalidOperationException(
-                "No leave type is set up as annual leave, so there is no annual leave to report. " +
-                "Set the kind of the annual leave type to Annual.");
 
         // ── Who: on the books at the date. Two reads rather than one OR, so "still serving" stays the
         //    module's one definition (HrServingEmployees) instead of a copy of it inlined here.
@@ -2979,73 +2970,29 @@ public class LeaveService : ILeaveService
             .OrderBy(p => p.LastName).ThenBy(p => p.FirstName)
             .ToList();
 
-        // ── The year's figures, one read each.
-        var balances = (await _leaveBalanceRepository
-                .GetQueryable()
-                .Where(b => b.TenantId == tenantId && b.LeaveTypeId == annual.Id && b.Year == year)
-                .Select(b => new
-                {
-                    b.EmployeeId, b.LeaveSubTypeId, b.CreatedAt,
-                    b.EntitledDays, b.CarriedOverDays, b.AdjustmentDays, b.EncashedDays,
-                })
-                .ToListAsync(ct))
-            // One row per employee and type is the rule (RecalculateAsync keys on it). Should a stray
-            // second one exist, its counters are the same totals, so summing would double them.
-            .GroupBy(b => b.EmployeeId)
-            .ToDictionary(g => g.Key, g => g.OrderBy(b => b.LeaveSubTypeId != null).ThenBy(b => b.CreatedAt).First());
-
-        // Taken, booked and pending leave by the date — from the shared reader (round 5, lane G), so
-        // this report, the year-end expiry run and reminder sweep 5 count exactly the same days.
-        var usage = await _usage.ReadAsync(tenantId, annual.Id, yearStart, yearEnd, date, null, ct);
-
-        var snapshots = await _entitlementService.GetSnapshotsAsync(
+        // The figures themselves: the one working the leaver's settlement shares (round 5, lane L2).
+        var owed = await _owedCalculator.ComputeAsync(
+            date,
             people.Select(p => new LeaveAccrualSubject(
                 p.Id, p.DateEmployed,
                 p.TerminationDate is DateTime left ? DateOnly.FromDateTime(left) : null,
                 p.StaffLevelId)).ToList(),
-            annual.Id, year, date, ct);
-
-        // The day carried-in days lapse, as the forfeiture run's expiry step reads it — and, once it
-        // has passed, the leave taken in time to use them.
-        DateOnly? lapse = annual.CarryOverExpiryMonths is int expiryMonths ? yearStart.AddMonths(expiryMonths) : null;
-        var usedBeforeLapse = lapse is DateOnly lapsed && date >= lapsed
-            ? await _usage.ReadAsync(tenantId, annual.Id, yearStart, yearEnd, lapsed.AddDays(-1), null, ct)
-            : null;
+            ct: ct);
 
         var report = new LeaveOwedReportDto
         {
             AsOf = date,
-            Year = year,
-            YearStart = yearStart,
-            YearEnd = yearEnd,
-            LeaveTypeId = annual.Id,
-            LeaveTypeName = annual.Name,
-            CarryOverExpiresOn = lapse?.AddDays(-1),
+            Year = owed.Year,
+            YearStart = owed.YearStart,
+            YearEnd = owed.YearEnd,
+            LeaveTypeId = owed.AnnualType.Id,
+            LeaveTypeName = owed.AnnualType.Name,
+            CarryOverExpiresOn = owed.CarryOverExpiresOn,
         };
 
         foreach (var person in people)
         {
-            var snapshot = snapshots[person.Id];
-            balances.TryGetValue(person.Id, out var balance);
-
-            var used = usage.TryGetValue(person.Id, out var u) ? u : new LeaveUsage(0m, 0m, 0m);
-            var taken = used.TakenThrough;
-            var booked = used.TakenOrBooked - used.TakenThrough;
-            var awaiting = used.Pending;
-
-            // Carried days count in full until the lapse; from it on, only those taken in time
-            // (carried days are used first) — the rule the expiry run applies.
-            var carried = balance?.CarriedOverDays ?? 0m;
-            var carriedIn = usedBeforeLapse is null
-                ? carried
-                : Math.Min(carried, usedBeforeLapse.TryGetValue(person.Id, out var early) ? early.TakenThrough : 0m);
-
-            // The same substitution the create check makes: a type that does not accrue hands over
-            // the stored entitlement, an accruing one what has built up by the date.
-            var entitled = balance?.EntitledDays ?? snapshot.AnnualEntitledDays;
-            var adjustments = balance?.AdjustmentDays ?? 0m;
-            var cashedIn = balance?.EncashedDays ?? 0m;
-
+            var f = owed.ByEmployee[person.Id];
             report.Rows.Add(new LeaveOwedRowDto
             {
                 EmployeeId = person.Id,
@@ -3056,15 +3003,15 @@ public class LeaveService : ILeaveService
                 OrganizationUnitName = person.UnitName,
                 HiredOn = person.DateEmployed,
                 LeftOn = person.TerminationDate is DateTime gone ? DateOnly.FromDateTime(gone) : null,
-                EntitledDays = entitled,
-                BuiltUpDays = snapshot.HasAccrualPolicy ? snapshot.AccruedToDateDays : entitled,
-                CarriedInDays = carriedIn,
-                AdjustmentDays = adjustments,
-                TakenDays = taken,
-                CashedInDays = cashedIn,
-                OwedDays = snapshot.AvailableFrom(entitled, carriedIn, adjustments, taken, 0m, cashedIn),
-                BookedDays = booked,
-                AwaitingApprovalDays = awaiting,
+                EntitledDays = f.EntitledDays,
+                BuiltUpDays = f.BuiltUpDays,
+                CarriedInDays = f.CarriedInDays,
+                AdjustmentDays = f.AdjustmentDays,
+                TakenDays = f.TakenDays,
+                CashedInDays = f.CashedInDays,
+                OwedDays = f.OwedDays,
+                BookedDays = f.BookedDays,
+                AwaitingApprovalDays = f.AwaitingApprovalDays,
             });
         }
 

@@ -4375,17 +4375,19 @@ private void ConfigureHREntities(ModelBuilder builder)
                 // ⚠ Moves money: monthly × 12 ÷ this. 365 calendar / 360 thirty-day / 264 working,
                 // a 38% spread on the same facts, and TDC has not chosen. See the entity.
                 SettlementDaysPerYear          = 365,
+                // Round 5, lane L2b: FR-HR-152's cap, a setting now rather than a constant in
+                // SeparationService. ⚠ Nullable, so leaving it out of this anonymous seed would seed
+                // "no cap" rather than fail the build — it must be named.
+                SettlementLeaveDaysCap         = 56,
                 AttendanceRateIncludesApprovedLeave = true,
                 // Residue plan G2. Same rule as the block above: every property must appear here or
                 // the DbContext will not build at design time.
                 //
-                // ⚠ AllowInServiceEncashment is seeded TRUE and the entity's own default is FALSE,
-                // and that difference is deliberate. FR-HR-046 says leave is encashed only on exit,
-                // so a brand-new tenant should start there — but this seeded tenant is the one the
-                // demo runs on, the encashment screen has already been shown to stakeholders, and
-                // defaulting it off without this line would make a demonstrated feature disappear.
-                // A client who wants the FRD's reading switches it off; a fresh tenant already has it.
-                AllowInServiceEncashment       = true,
+                // ⚠ Round 5, decision A3 / lane L1: OFF, like the entity's default. It was seeded ON
+                // because stakeholders had been shown the encashment screen; the Labour Act (s.31) and
+                // public-service practice settled that leave is cashed only on exit, and TDC's own
+                // FR-HR-046 says the same.
+                AllowInServiceEncashment       = false,
                 // The divisor that decides what a day of unused leave is worth. Was a private const
                 // in EmolumentService. ⚠ Read it against SettlementDaysPerYear above — 22 working
                 // days a month against 365 calendar days a year is ~38% apart on the same salary.

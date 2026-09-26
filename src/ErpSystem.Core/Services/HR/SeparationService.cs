@@ -57,6 +57,12 @@ public class SeparationService : ISeparationService
     private readonly AssetCustodyClearanceBridge _assetCustody;
     private readonly IHrFinancePostingAdapter _financePosting;
 
+    /// <summary>
+    /// Leave's own answer to "how much annual leave is this person owed at a date" — the working the
+    /// leave owed report uses (round 5, lane L2), so the leaver's figure and Finance's agree.
+    /// </summary>
+    private readonly ILeaveOwedCalculator _leaveOwed;
+
     private readonly ILogger<SeparationService> _logger;
 
     /// <summary>
@@ -77,7 +83,8 @@ public class SeparationService : ISeparationService
         IWorkflowStatusAdapterRegistry workflowAdapters,
         AssetCustodyClearanceBridge assetCustody,
         ILogger<SeparationService> logger,
-        IHrFinancePostingAdapter financePosting)
+        IHrFinancePostingAdapter financePosting,
+        ILeaveOwedCalculator leaveOwed)
     {
         _payrollMembership = payrollMembership;
         _unitOfWork = unitOfWork;
@@ -90,6 +97,7 @@ public class SeparationService : ISeparationService
         _assetCustody = assetCustody;
         _logger = logger;
         _financePosting = financePosting;
+        _leaveOwed = leaveOwed;
     }
 
     private Guid GetTenantId()
@@ -2137,8 +2145,9 @@ public class SeparationService : ISeparationService
                     null, SettlementLineComputation.CannotCompute, rateBasis);
         }
 
-        // Leave encashment: FR-HR-046 (on exit only) and FR-HR-152 (capped at 56 days).
-        await AddLeaveEncashmentLineAsync(tenantId, separation, rate, rateBasis, currency, Add, cancellationToken);
+        // Annual leave owed on exit: FR-HR-046 (cash on exit only), FR-HR-152 (the cap, a setting since
+        // round 5 lane L2b) and the Labour Act (s.30: the year's share; s.30(3): none on summary dismissal).
+        await AddLeaveEncashmentLineAsync(tenantId, separation, settings, rate, rateBasis, Add, cancellationToken);
 
         // ── Deductions ────────────────────────────────────────────────────────
 
@@ -2216,59 +2225,148 @@ public class SeparationService : ISeparationService
     }
 
     /// <summary>
-    /// The leave encashment line — FR-HR-046 (encashed on exit, and only on exit) and FR-HR-152
-    /// (capped at fifty-six days).
+    /// The leaver's annual leave line — FR-HR-046 (cash for leave on exit, and only on exit), FR-HR-152
+    /// (a cap on the days) and the Labour Act 2003 (round 5, lane L2).
     /// </summary>
     /// <remarks>
-    /// ⚠ Measured 2026-08-20: <c>LeaveBalances</c> holds <b>zero</b> rows, so on live data this
-    /// always lands on <c>CannotCompute</c>. The cap and the rate are applied anyway, so that the
-    /// rules bite the moment balances exist rather than being remembered later.
+    /// <para><b>What is paid: annual leave owed at the last day</b>, by the working the leave owed
+    /// report uses (<see cref="ILeaveOwedCalculator"/>): this leave year's share built up to the day
+    /// employment ends — the accrual stops there when the policy pro-rates on exit, which is what
+    /// makes <c>ProRateOnExit</c> bind — plus carried days not yet lapsed, plus adjustments, less leave
+    /// taken by then and days already cashed in; less, too, requests still awaiting a decision, which
+    /// would be paid twice if they are approved after the cash.</para>
+    ///
+    /// <para>⚠ <b>Until lane L this summed every balance of every leave type and every year</b> — sick
+    /// days, casual days and closed years included — with whole-year figures. Only annual leave is
+    /// owed in cash (Act 651 s.30 speaks of annual leave, and sick or casual days are not a reserve
+    /// of money), and only the year the person leaves in (earlier years were carried or lapsed).</para>
+    ///
+    /// <para><b>Summary dismissal pays none</b> (Act 651 s.30(3)). The line is written anyway, at
+    /// zero, saying so: a missing line is invisible on a statement in a way a stated zero is not.
+    /// Finance's posting skips a zero line.</para>
+    ///
+    /// <para><b>The amount is indicative.</b> HR decides the days; Finance confirms the money. The
+    /// correction route already exists — the line's amount is changed here, naming its source, and
+    /// Internal Audit can return the statement — so the basis says so rather than a new step being
+    /// built for it.</para>
     /// </remarks>
     private async Task AddLeaveEncashmentLineAsync(
-        Guid tenantId, EmployeeSeparation separation, decimal? rate, string rateBasis, string currency,
+        Guid tenantId, EmployeeSeparation separation, CompanyHrPolicySettings settings,
+        decimal? rate, string rateBasis,
         Action<SettlementLineCategory, bool, string, decimal?, SettlementLineComputation, string, Guid?, Guid?> add,
         CancellationToken cancellationToken)
     {
-        const decimal encashmentCapDays = 56m;   // FR-HR-152
+        const SettlementLineCategory category = SettlementLineCategory.LeaveEncashment;
 
-        var balances = await _unitOfWork.Repository<LeaveBalance>().GetQueryable()
-            .AsNoTracking()
-            .Where(b => b.TenantId == tenantId && !b.IsDeleted && b.EmployeeId == separation.EmployeeId)
-            .ToListAsync(cancellationToken);
-
-        if (balances.Count == 0)
+        if (separation.SeparationType == EmployeeTerminationType.SummaryDismissal)
         {
-            add(SettlementLineCategory.LeaveEncashment, false,
-                "Accrued leave encashed on exit", null, SettlementLineComputation.CannotCompute,
-                "No leave balance is on record for this employee. Enter the days and amount, and name the source.",
-                null, null);
+            add(category, false, "Annual leave on exit — none payable", 0m, SettlementLineComputation.Computed,
+                "Summary dismissal: no leave pay is due on dismissal without notice (Labour Act 2003, "
+                + "Act 651, s.30(3)).", null, null);
             return;
         }
 
-        var available = balances.Sum(b =>
-            b.EntitledDays + b.CarriedOverDays + b.AdjustmentDays - b.UsedDays - b.PendingDays - b.EncashedDays);
+        var lastDay = separation.EffectiveDate ?? separation.LastWorkingDay;
+        if (lastDay is not DateOnly exit)
+        {
+            add(category, false, "Annual leave owed on exit", null, SettlementLineComputation.CannotCompute,
+                "The separation has no end date yet, so the leave owed at it cannot be worked out. Enter the "
+                + "days and amount, and name the source.", null, null);
+            return;
+        }
 
-        if (available <= 0)
-            return;   // nothing accrued: no line rather than a zero one
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .AsNoTracking()
+            .Where(e => e.Id == separation.EmployeeId && e.TenantId == tenantId)
+            .Select(e => new { e.DateEmployed, StaffLevelId = e.Position != null ? e.Position.StaffLevelId : null })
+            .FirstAsync(cancellationToken);
 
-        var capped = Math.Min(available, encashmentCapDays);
-        var cappedNote = capped < available
-            ? $" Capped at {encashmentCapDays:N0} days under FR-HR-152 (from {available:N2} accrued)."
-            : string.Empty;
+        LeaveOwedComputation owed;
+        try
+        {
+            // ⚠ The build-up is asked of the leave year's END, with the last day on the subject, so the
+            // accrual policy's ProRateOnExit decides where it stops: on, at the last day; off, the
+            // whole year. Asked as at the last day, the clock would stop there whatever the policy said.
+            owed = await _leaveOwed.ComputeAsync(
+                exit,
+                new[] { new LeaveAccrualSubject(separation.EmployeeId, employee.DateEmployed, exit, employee.StaffLevelId) },
+                accrueToYearEnd: true,
+                ct: cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // No Annual leave type: said on the line, not thrown at whoever is preparing the statement.
+            add(category, false, "Annual leave owed on exit", null, SettlementLineComputation.CannotCompute,
+                $"{ex.Message} Enter the days and amount, and name the source.", null, null);
+            return;
+        }
+
+        var f = owed.ByEmployee[separation.EmployeeId];
+        var days = f.OwedDays - f.AwaitingApprovalDays;
+
+        // Where the build-up stopped: the last day (the policy pro-rates on exit), or the year's end
+        // (it does not) — said, because the two differ by up to a year's leave.
+        var builtUpTo = f.BuiltUpTo is DateOnly to ? $" to {to:d MMM yyyy}" : " (whole entitlement)";
+
+        // ⚠ Basis holds 500 characters. The first cut of this line wrote the working, both notes, the
+        // cap and the daily rate's whole sentence, and a capped leaver's statement failed to save —
+        // a 500 on "prepare", found by lane L's suite. Hence the short words, the daily rate by its
+        // figure (its basis is on the statement itself, DailyRateBasis), and a last-resort fit.
+        var parts = new List<string>
+        {
+            $"{owed.AnnualType.Name} {owed.Year}, last day {exit:d MMM yyyy}: built up{builtUpTo} {f.BuiltUpDays:0.##}"
+            + $" + carried {f.CarriedInDays:0.##} + adjusted {f.AdjustmentDays:0.##} − taken {f.TakenDays:0.##}"
+            + $" − cashed {f.CashedInDays:0.##}"
+            + (f.AwaitingApprovalDays > 0 ? $" − awaiting a decision {f.AwaitingApprovalDays:0.##}" : string.Empty)
+            + $" = {days:0.##} day(s).",
+        };
+        if (f.AwaitingApprovalDays > 0)
+            parts.Add("Awaiting a decision: cancel any never taken, then correct this line.");
+        if (f.BookedDays > 0)
+            parts.Add($"{f.BookedDays:0.##} day(s) approved after the last day are not deducted: cancel them.");
+
+        if (days <= 0)
+        {
+            add(category, false, "Annual leave owed on exit — none", 0m, SettlementLineComputation.Computed,
+                FitBasis(parts), null, null);
+            return;
+        }
+
+        // FR-HR-152's cap, a company setting since lane L2b; empty means none.
+        var cap = settings.SettlementLeaveDaysCap;
+        var paid = cap is int c && days > c ? c : days;
+        if (paid < days)
+            parts.Add($"Capped at {paid:0.##} by the settlement cap (FR-HR-152), from {days:0.##}.");
 
         if (rate is { } r)
-            add(SettlementLineCategory.LeaveEncashment, false,
-                $"Accrued leave encashed on exit — {capped:N2} day(s)",
-                Math.Round(r * capped, 2, MidpointRounding.AwayFromZero),
-                SettlementLineComputation.Computed,
-                $"{capped:N2} day(s) × {rateBasis}{cappedNote}",
-                null, null);
+        {
+            parts.Add($"{paid:0.##} × daily rate {r:N4}.");
+            parts.Add("Indicative: HR decides the days, Finance confirms the amount; correct it here, naming the source.");
+            add(category, false, $"Annual leave owed on exit — {paid:0.##} day(s)",
+                Math.Round(r * paid, 2, MidpointRounding.AwayFromZero), SettlementLineComputation.Computed,
+                FitBasis(parts), null, null);
+        }
         else
-            add(SettlementLineCategory.LeaveEncashment, false,
-                $"Accrued leave encashed on exit — {capped:N2} day(s)",
-                null, SettlementLineComputation.CannotCompute,
-                $"{rateBasis}{cappedNote}",
-                null, null);
+        {
+            parts.Add(rateBasis);
+            add(category, false, $"Annual leave owed on exit — {paid:0.##} day(s)",
+                null, SettlementLineComputation.CannotCompute, FitBasis(parts), null, null);
+        }
+    }
+
+    /// <summary>
+    /// Joins a line's sentences and makes them fit <c>SeparationSettlementLine.Basis</c> (500).
+    /// </summary>
+    /// <remarks>
+    /// A last resort: the leave line's sentences are written to fit, but a daily-rate source named at
+    /// length could still carry it over, and an overlong basis fails the whole statement's save. The
+    /// working comes first, so it is what survives.
+    /// </remarks>
+    private static string FitBasis(IEnumerable<string> parts)
+    {
+        const int max = 500;
+        var text = string.Join(" ", parts);
+        return text.Length <= max ? text : text[..(max - 1)] + "…";
     }
 
     /// <summary>Which settlement category a clearance line's outstanding amount belongs under.</summary>

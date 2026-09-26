@@ -422,6 +422,9 @@ public static class HrModuleServiceRegistration
         // Round 5, lane G: "which days had been used by then" — the expiry run, reminder sweep 5 and
         // the leave owed report share it, so they cannot disagree about a lapse.
         services.AddScoped<ILeaveUsageReader, LeaveUsageReader>();
+        // Round 5, lane L2: "how much annual leave is owed at a date" — the leave owed report and a
+        // leaver's final settlement share it, so Finance's figure and the leaver's cannot disagree.
+        services.AddScoped<ILeaveOwedCalculator, LeaveOwedCalculator>();
         // Approved leave reaches the attendance register through this. Before it, StaffDailyAttendance
         // .LeaveRequestId and StaffAttendanceStatus.OnLeave were both written by nothing, so the
         // payroll export read zero days on leave for everybody (closure plan L-27).

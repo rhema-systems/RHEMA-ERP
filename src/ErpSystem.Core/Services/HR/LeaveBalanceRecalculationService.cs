@@ -167,8 +167,12 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
                 a.Year        == year)
             .SumAsync(a => (decimal?)a.Days) ?? 0m;
 
-        // EncashedDays — sum of processed encashments (single source of truth; the encashment
-        // service no longer mutates UsedDays directly, so a recalc can't erase the deduction).
+        // EncashedDays — sum of approved and processed encashments (single source of truth; the
+        // encashment service no longer mutates UsedDays directly, so a recalc can't erase the deduction).
+        //
+        // ⚠ Round 5, lane L3: from APPROVAL, not from payment. Counting only Processed left an
+        // approved encashment's days free to be taken as leave in the weeks before Finance paid it —
+        // the same days sold and spent. Defensive: it matters only where in-service encashment is on.
         balance.EncashedDays = await _leaveEncashmentRepository
             .GetQueryable()
             .Where(e =>
@@ -176,7 +180,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
                 e.EmployeeId  == employeeId &&
                 e.LeaveTypeId == leaveTypeId &&
                 e.Year        == year &&
-                e.Status == LeaveEncashmentStatus.Processed)
+                (e.Status == LeaveEncashmentStatus.Approved || e.Status == LeaveEncashmentStatus.Processed))
             .SumAsync(e => (decimal?)e.DaysEncashed) ?? 0m;
 
         // A newly-created balance is already tracked as Added; calling UpdateAsync would flip it
