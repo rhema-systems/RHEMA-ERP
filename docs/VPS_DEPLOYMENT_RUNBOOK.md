@@ -110,6 +110,8 @@ the current database and its users, settings and transactions; those records are
 **not copied into the new application database**. The fresh database receives the
 current canonical development seed. Obtain seeded sign-in details through the
 existing protected administrator process; the deploy script does not print them.
+This is a one-time cutover option. For later releases, omit `-FreshDatabaseName`
+and use the normal deployment path against the newly configured database.
 
 Run from an elevated Windows PowerShell on the VPS, using the release checkout.
 The example is one complete block so a failed check stops all subsequent steps:
