@@ -94,3 +94,12 @@
 - Decision: do not fabricate an external submodule URL or mutate the separately owned documentation component as part of the Finance gate repair.
 - Correction: retain the Node 24 checkout action but use its standard credential lifecycle, which already completed the main checkout successfully in run `36237894891`. The orphaned gitlink remains a repository-hygiene item outside the Finance accounting change.
 - Pending verification: rerun the complete hosted Finance integration gate.
+
+### SQL Server contract follow-up
+
+- Run `36239964462` proved checkout, the optimized API assembly, all Finance-owned consumer contracts, the Procurement consumer contract and the Inventory consumer contract pass on the hosted runner.
+- The real SQL Server suite then exposed one stale test fixture: its supposed Parallel book omitted its governed base, replication cutoff and opening treatment, and incorrectly used the Primary currency. SQL Server correctly rejected that row under `CK_AccountingBooks_BaseShape`; 10 other relational contracts passed.
+- Correction: model the fixture as a valid USD Parallel derived from the Primary, with a zero-opening cutoff after the test posting date. This keeps automatic replication (and its rate requirement) outside this concurrency contract. The contract now requires the current `PARALLEL_DIRECT_POSTING_FORBIDDEN` error and proves only the Primary can succeed and receive balances.
+- Independent review initially identified the replication-cutoff and obsolete-error-code implications; both findings were incorporated before commit.
+- Database state: unchanged; this is a test-fixture correction only.
+- Pending verification: focused review and another complete hosted Finance integration gate.
