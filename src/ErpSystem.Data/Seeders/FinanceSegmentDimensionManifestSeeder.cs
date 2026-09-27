@@ -82,20 +82,36 @@ public sealed class FinanceSegmentDimensionManifestSeeder
             });
         }
 
-        var dimensions = new (string Code, string Name, int Order)[]
+        var dimensions = new (string Code, string Name, string Description, int Order)[]
         {
-            ("DEPARTMENT", "Department / Cost Centre", 10), ("PROJECT", "Project / Development", 20),
-            ("ESTATE", "Estate / Property / Site", 30), ("CONTRACT", "Contract", 40),
-            ("FUNDING_SOURCE", "Funding Source", 50), ("ACTIVITY", "Activity / Programme", 60)
+            ("DEPARTMENT", "Department / Cost Centre", "Identifies the organizational department or cost centre responsible for the transaction line.", 10),
+            ("PROJECT", "Project / Development", "Identifies the project or development to which the transaction line relates.", 20),
+            ("ESTATE", "Estate / Property / Site", "Identifies the estate, property or site associated with the transaction line.", 30),
+            ("CONTRACT", "Contract", "Identifies the governed contract associated with the transaction line.", 40),
+            ("FUNDING_SOURCE", "Funding Source", "Identifies the source of funds financing the transaction line.", 50),
+            ("ACTIVITY", "Activity / Programme", "Identifies the activity or programme delivered by the transaction line.", 60)
         };
         foreach (var definition in dimensions)
         {
-            if (await _db.FinanceDimensionDefinitions.AnyAsync(item => item.TenantId == tenantId && item.Code == definition.Code && !item.IsDeleted, cancellationToken))
+            var existing = await _db.FinanceDimensionDefinitions.SingleOrDefaultAsync(item =>
+                item.TenantId == tenantId && item.Code == definition.Code && !item.IsDeleted, cancellationToken);
+            if (existing != null)
+            {
+                // Upgrade only the original generic system description. Administrator-authored text is preserved.
+                if (existing.Description == "Finance transaction coding dimension."
+                    && (string.IsNullOrWhiteSpace(existing.UpdatedBy)
+                        || existing.UpdatedBy.StartsWith("System", StringComparison.OrdinalIgnoreCase)))
+                {
+                    existing.Description = definition.Description;
+                    existing.UpdatedAt = seedDate;
+                    existing.UpdatedBy = "System (Finance Dimension Manifest 1.1)";
+                }
                 continue;
+            }
             _db.FinanceDimensionDefinitions.Add(new FinanceDimensionDefinition
             {
                 Id = StableGuid($"finance:dimension:{tenantId}:{definition.Code}"), TenantId = tenantId,
-                Code = definition.Code, Name = definition.Name, Description = "Finance transaction coding dimension.",
+                Code = definition.Code, Name = definition.Name, Description = definition.Description,
                 Classification = "Analytical", ValueSourceType = "Lookup", IsActive = true,
                 DisplayOrder = definition.Order, CreatedAt = seedDate, CreatedBy = "System (Finance Dimension Manifest 1.0)"
             });
