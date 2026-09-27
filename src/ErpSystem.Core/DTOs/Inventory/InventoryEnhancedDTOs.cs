@@ -242,6 +242,7 @@ public class GoodsReceiptNoteDto
 
 public class GoodsReceiptNoteDetailDto : GoodsReceiptNoteDto
 {
+    public SupplierReturnSourceContextDto? ReturnSource { get; set; }
     public Guid? ReceivingLocationId { get; set; }
     public string? ReceivingLocationName { get; set; }
     public string? InspectedByName { get; set; }
@@ -411,6 +412,10 @@ public class InventoryTransferDto
 
 public class InventoryTransferDetailDto : InventoryTransferDto
 {
+    public Guid? CarrierBusinessPartnerId { get; set; }
+    public string? VehicleNumber { get; set; }
+    public Guid? InTransitLocationId { get; set; }
+    public bool RequiresTransitReconciliation { get; set; }
     public DateTime? ApprovedDate { get; set; }
     public string? ShippedByName { get; set; }
     public string? ReceivedByName { get; set; }
@@ -426,6 +431,8 @@ public class InventoryTransferDetailDto : InventoryTransferDto
 
 public class InventoryTransferItemDto
 {
+    public List<InventoryTransferDispatchAllocationDto> DispatchAllocations { get; set; } = new();
+    public List<InventoryTransferReceiptAllocationRequest> Allocations { get; set; } = new();
     public Guid Id { get; set; }
     public Guid InventoryItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
@@ -462,6 +469,9 @@ public class InventoryTransferItemDto
 
 public class InventoryTransferMutationContext
 {
+    public Guid? CarrierBusinessPartnerId { get; set; }
+    [MaxLength(100)] public string? VehicleNumber { get; set; }
+    public Dictionary<Guid, List<InventoryTransferPickRequest>> Picks { get; set; } = new();
     [Required] public string RowVersion { get; set; } = string.Empty;
     [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     [MaxLength(100)] public string? CorrelationId { get; set; }
@@ -472,6 +482,8 @@ public class InventoryTransferMutationContext
 
 public sealed class ResolveInventoryTransferDiscrepancyRequest : InventoryTransferMutationContext
 {
+    public Dictionary<Guid, List<InventoryTransferReceiptAllocationRequest>> AllocationsByDiscrepancy { get; set; } = new();
+    public Dictionary<Guid, List<InventoryTransactionScanLineDto>> TrackingLinesByDiscrepancy { get; set; } = new();
     [Required] public List<Guid> DiscrepancyIds { get; set; } = new();
     [Required, MaxLength(50)] public string ResolutionCode { get; set; } = string.Empty;
     [Required, MaxLength(1000)] public string ResolutionNotes { get; set; } = string.Empty;
@@ -637,6 +649,8 @@ public class UpdateTransferItemDto
 /// </summary>
 public class ShipTransferWithCostsDto
 {
+    public Guid? CarrierBusinessPartnerId { get; set; }
+    [MaxLength(100)] public string? VehicleNumber { get; set; }
     [Required] public string RowVersion { get; set; } = string.Empty;
     [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     [MaxLength(100)] public string? CorrelationId { get; set; }
@@ -699,6 +713,7 @@ public class ShipTransferWithCostsDto
 /// </summary>
 public class ShipTransferItemDto
 {
+    public List<InventoryTransferPickRequest> Picks { get; set; } = new();
     [Required]
     public Guid ItemId { get; set; }
 
@@ -715,6 +730,10 @@ public class PhysicalCountDto
 {
     public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
+    public Guid? RootPhysicalCountId { get; set; }
+    public Guid? ParentPhysicalCountId { get; set; }
+    public int RecountAttempt { get; set; }
+    public DateTime? ObservationSubmittedAtUtc { get; set; }
     public string CountNumber { get; set; } = string.Empty;
     public Guid WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
@@ -749,6 +768,10 @@ public class PhysicalCountDto
 
 public class PhysicalCountDetailDto : PhysicalCountDto
 {
+    public bool CanCreateRecount { get; set; }
+    public List<PhysicalCountDto> Sheets { get; set; } = new();
+    public bool CanManageCounters { get; set; }
+    public List<PhysicalCountCounterDto> Counters { get; set; } = new();
     public bool CanReview { get; set; }
     public bool CanDecide { get; set; }
     public bool CanPost { get; set; }
@@ -787,6 +810,10 @@ public sealed class PhysicalCountEvidenceDto
 public class PhysicalCountItemDto
 {
     public Guid Id { get; set; }
+    public Guid? RootPhysicalCountItemId { get; set; }
+    public Guid? PredecessorPhysicalCountItemId { get; set; }
+    public Guid? SupersededByPhysicalCountId { get; set; }
+    public string? RecountReason { get; set; }
     public Guid InventoryItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
@@ -794,6 +821,8 @@ public class PhysicalCountItemDto
     public string? LocationName { get; set; }
     public decimal SystemQuantity { get; set; }
     public decimal CountedQuantity { get; set; }
+    [Range(0, double.MaxValue)] public decimal DefectiveQuantity { get; set; }
+    [MaxLength(2000)] public string? DefectiveNotes { get; set; }
     public decimal VarianceQuantity { get; set; }
     public decimal VarianceValue { get; set; }
     public decimal VariancePercent { get; set; }
@@ -820,6 +849,7 @@ public class PhysicalCountItemDto
 
 public class CreatePhysicalCountDto
 {
+    [MaxLength(100)] public List<Guid> CounterEmployeeIds { get; set; } = new();
     [Required]
     public Guid WarehouseId { get; set; }
 
@@ -842,6 +872,8 @@ public class RecordCountItemDto
     [Required]
     [Range(0, double.MaxValue)]
     public decimal CountedQuantity { get; set; }
+    [Range(0, double.MaxValue)] public decimal DefectiveQuantity { get; set; }
+    [MaxLength(2000)] public string? DefectiveNotes { get; set; }
 
     [MaxLength(100)]
     public string? LotNumber { get; set; }
@@ -973,6 +1005,10 @@ public class PhysicalCountFilterDto
 public class PhysicalCountExportDto
 {
     public Guid Id { get; set; }
+    public Guid? RootPhysicalCountId { get; set; }
+    public Guid? ParentPhysicalCountId { get; set; }
+    public int RecountAttempt { get; set; }
+    public DateTime? ObservationSubmittedAtUtc { get; set; }
     public string CountNumber { get; set; } = string.Empty;
     public string WarehouseName { get; set; } = string.Empty;
     public string CountType { get; set; } = string.Empty;
@@ -989,6 +1025,8 @@ public class PhysicalCountItemExportDto
     public string? LocationName { get; set; }
     public decimal SystemQuantity { get; set; }
     public decimal CountedQuantity { get; set; }
+    [Range(0, double.MaxValue)] public decimal DefectiveQuantity { get; set; }
+    [MaxLength(2000)] public string? DefectiveNotes { get; set; }
     public decimal VarianceQuantity { get; set; }
     public decimal VarianceValue { get; set; }
     public string? LotNumber { get; set; }
@@ -999,8 +1037,12 @@ public class PhysicalCountItemExportDto
 
 public class ImportCountItemDto
 {
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     public string ItemCode { get; set; } = string.Empty;
     public decimal CountedQuantity { get; set; }
+    [Range(0, double.MaxValue)] public decimal DefectiveQuantity { get; set; }
+    [MaxLength(2000)] public string? DefectiveNotes { get; set; }
     public string? LotNumber { get; set; }
     public string? SerialNumber { get; set; }
     public string? Notes { get; set; }
@@ -1232,6 +1274,7 @@ public class ManualLandedCostAllocationLineDto
 
 public class PurchaseReturnDto
 {
+    public List<PurchaseReturnAccountingGroupDto> AccountingGroups { get; set; } = new();
     public Guid? SupplierDebitNoteId { get; set; }
     public bool FinanceResolutionCompleted { get; set; }
     public bool ApprovalRequired { get; set; } = true;
@@ -1257,6 +1300,21 @@ public class PurchaseReturnDto
     public string? ApprovedByName { get; set; }
     public string? Notes { get; set; }
     public string CreatedAtFormatted { get; set; } = string.Empty;
+}
+
+public sealed class PurchaseReturnAccountingGroupDto
+{
+    public Guid Id { get; set; }
+    public Guid? OriginalVendorInvoiceId { get; set; }
+    public string? OriginalInvoiceNumber { get; set; }
+    public decimal BaseQuantity { get; set; }
+    public decimal CarryingAmount { get; set; }
+    public decimal OriginalAccrualAmount { get; set; }
+    public string FunctionalCurrency { get; set; } = string.Empty;
+    public Guid? DispatchJournalEntryId { get; set; }
+    public Guid? SupplierDebitNoteId { get; set; }
+    public string? SupplierDebitNoteNumber { get; set; }
+    public bool FinanceResolutionCompleted { get; set; }
 }
 
 public class PurchaseReturnDetailDto : PurchaseReturnDto

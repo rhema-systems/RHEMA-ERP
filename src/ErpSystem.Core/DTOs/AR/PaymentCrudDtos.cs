@@ -117,6 +117,14 @@ public class InvoiceLineItemCreateDto
     public Guid? Id { get; set; }
     public string LineItemType { get; set; } = "Product";
     public Guid? ProductId { get; set; }
+    // Stock identities are accepted only from the trusted Sales order producer.
+    public Guid? InventoryItemId { get; set; }
+    public Guid? WarehouseId { get; set; }
+    public Guid? LocationId { get; set; }
+    public string? LotNumber { get; set; }
+    public string? SerialNumber { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+
     public Guid? GLAccountId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Quantity { get; set; }

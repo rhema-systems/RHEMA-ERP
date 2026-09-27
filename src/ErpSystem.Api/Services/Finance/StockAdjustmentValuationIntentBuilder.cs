@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Api.Services.Inventory;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
@@ -61,6 +62,40 @@ public sealed partial class StockAdjustmentValuationIntentBuilder(ApplicationDbC
                 item.TenantId == adjustment.TenantId && itemIds.Contains(item.Id) && !item.IsDeleted)
             .ToDictionaryAsync(item => item.Id, cancellationToken);
 
+        var usesDisposalAccounts = false;
+        var usesAuctionAccounts = false;
+        var auctionDisposalAccounts = new Dictionary<Guid, Guid>();
+        if (expectedOwnerEffect is { ParticipantCode: "INVENTORY.DISPOSAL.V1", OwnerEntityType: "INVENTORY_DISPOSAL" })
+        {
+            var disposal = await db.InventoryDisposalCases.AsNoTracking().SingleOrDefaultAsync(value =>
+                value.Id == expectedOwnerEffect.OwnerEntityId && value.TenantId == adjustment.TenantId && !value.IsDeleted,
+                cancellationToken) ?? throw new InvalidOperationException("The disposal accounting owner could not be verified.");
+            usesDisposalAccounts = disposal.AccountingVersion >= 1;
+            if (usesDisposalAccounts && disposal.Method == InventoryDisposalMethod.Auction)
+            {
+                usesAuctionAccounts = true;
+                var link = await db.Set<InventoryDisposalAuctionInvoice>().AsNoTracking().Include(value => value.Invoice)
+                    .ThenInclude(value => value.LineItems).SingleOrDefaultAsync(value => value.TenantId == adjustment.TenantId &&
+                        value.InventoryDisposalCaseId == disposal.Id && !value.IsDeleted, cancellationToken);
+                if (link is null || link.Invoice.IsDeleted || link.Invoice.TenantId != adjustment.TenantId ||
+                    link.Invoice.Status == ErpSystem.Core.Entities.Finance.InvoiceStatus.Cancelled ||
+                    link.InvoiceEconomicsJson != InventoryDisposalAuctionInvoiceGuard.Snapshot(link.Invoice))
+                    throw new InvalidOperationException("The disposal requires intact auction invoice account evidence.");
+                var sources = await db.InventoryDisposalLines.AsNoTracking().Where(value => value.TenantId == adjustment.TenantId &&
+                    value.InventoryDisposalCaseId == disposal.Id && !value.IsDeleted).ToListAsync(cancellationToken);
+                if (sources.Count == 0) throw new InvalidOperationException("Auction disposal source lines are required.");
+                foreach (var source in sources)
+                {
+                    var invoiceLineId = InventoryDisposalService.AuctionInvoiceLineId(adjustment.TenantId, disposal.Id, source.Id);
+                    var invoiceLine = link.Invoice.LineItems.SingleOrDefault(value => value.Id == invoiceLineId && !value.IsDeleted);
+                    if (invoiceLine?.GLAccountId is not { } accountId || invoiceLine.Quantity != source.Quantity ||
+                        (auctionDisposalAccounts.TryGetValue(source.InventoryItemId, out var priorAccount) && priorAccount != accountId))
+                        throw new InvalidOperationException("Auction lines do not retain one disposal account per inventory item.");
+                    auctionDisposalAccounts[source.InventoryItemId] = accountId;
+                }
+            }
+        }
+
         foreach (var item in adjustment.Items.Where(item => !item.IsDeleted)
                      .OrderBy(item => item.CreatedAt).ThenBy(item => item.Id))
         {
@@ -81,10 +116,14 @@ public sealed partial class StockAdjustmentValuationIntentBuilder(ApplicationDbC
             }
             else if (item.AdjustmentQuantity < 0)
             {
-                var itemExpense = adjustment.ReasonCode == StockAdjustmentReasonCodes.Damage
+                if (usesAuctionAccounts && !auctionDisposalAccounts.ContainsKey(item.InventoryItemId))
+                    throw new InvalidOperationException("Every auction stock line must retain its original invoice account.");
+                var itemExpense = usesDisposalAccounts ? auctionDisposalAccounts.GetValueOrDefault(item.InventoryItemId, profile?.InventoryDisposalAccountId ?? Guid.Empty) : adjustment.ReasonCode == StockAdjustmentReasonCodes.Damage
                     ? profile?.DamagedAccountId ?? profile?.VarianceAccountId : profile?.VarianceAccountId;
+                if (usesDisposalAccounts && (!itemExpense.HasValue || itemExpense == Guid.Empty))
+                    throw new InvalidOperationException($"Configure the Inventory Disposal Account for item {profile?.ItemCode ?? item.InventoryItemId.ToString()} before preparing disposal posting.");
                 var expenseAccount = await InventoryPostingAccountResolution.ResolveAsync(db, adjustment.TenantId,
-                    itemExpense, expense, "Stock adjustment expense", cancellationToken, AccountType.Expense, AccountType.Revenue);
+                    itemExpense, usesDisposalAccounts ? null : expense, usesDisposalAccounts ? "Inventory disposal" : "Stock adjustment expense", cancellationToken, AccountType.Expense, AccountType.Revenue);
                 lines.Add(Line(expenseAccount, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
                     "INV-ADJ-EXPENSE", adjustment.AdjustmentDate, SourceLine(adjustment.Id, item.Id, "writeoff-expense")));
                 lines.Add(Line(inventory, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,

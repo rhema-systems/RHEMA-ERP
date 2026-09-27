@@ -75,6 +75,30 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('compact inventory disposal page', () => {
+  it('offers non-sales methods for a new disposal', async () => {
+    render(<Page />);
+    fireEvent.click(await screen.findByRole('button', { name: /new disposal/i }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Disposal method' }));
+    expect(await screen.findByRole('option', { name: 'Auction' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Sale' })).not.toBeInTheDocument();
+  });
+
+  it('preserves the selected Sales method on historical drafts', async () => {
+    mocks.rows = [disposal({ method: 2 })];
+    await openEdit();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Disposal method' }));
+    expect(await screen.findByRole('option', { name: 'Sale' })).toBeInTheDocument();
+  });
+
+  it.each([true, false])('shows the waybill only when eligible stage is %s', async capability => {
+    mocks.rows = [disposal({ status: 6, canEdit: false, canGenerateWaybill: capability })];
+    render(<Page />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View DISP-001' }));
+    await screen.findByRole('dialog', { name: 'DISP-001' });
+    if (capability) expect(screen.getByRole('button', { name: 'Waybill' })).toBeEnabled();
+    else expect(screen.queryByRole('button', { name: 'Waybill' })).not.toBeInTheDocument();
+  });
+
   it('uses labelled eye, pencil and cancel icons with no visible action text', async () => {
     render(<Page />);
     for (const action of ['View', 'Edit', 'Cancel']) {

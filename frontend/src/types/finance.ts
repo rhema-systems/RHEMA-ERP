@@ -1380,6 +1380,11 @@ export interface FinanceSettings {
   controlAccountArId?: string;
   controlAccountApId?: string;
   controlAccountInventoryId?: string;
+  controlAccountCOGSId?: string | null;
+  supplierAdvanceAccountId?: string;
+  customerAdvanceAccountId?: string;
+  writeOffExpenseAccountId?: string;
+  writeOffRecoveryAccountId?: string;
   returnToVendorClearingAccountId?: string;
   purchaseReturnVarianceAccountId?: string;
   controlAccountPayrollId?: string;

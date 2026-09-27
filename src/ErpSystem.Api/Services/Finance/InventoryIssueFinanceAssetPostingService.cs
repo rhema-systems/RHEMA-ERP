@@ -11,6 +11,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Data;
+using ErpSystem.Api.Services.Finance.GL;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance;
@@ -28,17 +29,20 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
     private readonly IFinancePostingEngine _posting;
     private readonly IFixedAssetService _fixedAssets;
     private readonly ICurrentUserProvider _currentUser;
+    private readonly IUnitOfWork _unitOfWork;
 
     public InventoryIssueFinanceAssetPostingService(
         ApplicationDbContext db,
         IFinancePostingEngine posting,
         IFixedAssetService fixedAssets,
-        ICurrentUserProvider currentUser)
+        ICurrentUserProvider currentUser,
+        IUnitOfWork unitOfWork)
     {
         _db = db;
         _posting = posting;
         _fixedAssets = fixedAssets;
         _currentUser = currentUser;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task PostIssueAsync(Guid issueVoucherId, CancellationToken cancellationToken = default)
@@ -90,7 +94,9 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
         }
 
         var settings = await GetFinanceSettingsAsync(voucher.TenantId, cancellationToken);
-        var currency = Currency(settings.BaseCurrency);
+        var bookAuthority = await PrimaryBookCompatibilityAuthorityResolver.ResolveAsync(
+            _unitOfWork, voucher.TenantId, cancellationToken);
+        var currency = bookAuthority.FunctionalCurrencyCode;
         var lines = new List<FinancePostingLineDto>();
         var sequence = 1;
         foreach (var (line, rule) in resolved)
@@ -138,7 +144,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Governed inventory issue {voucher.VoucherNumber} - {movementReason}",
             PostingDate = voucher.IssuedAtUtc,
             JournalType = "System Generated",
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = bookAuthority.AccountingBookCode,
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryIssueVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -281,8 +287,11 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
                     "The return value does not reconcile to the original issue value.");
         }
 
-        var settings = await GetFinanceSettingsAsync(voucher.TenantId, cancellationToken);
-        var currency = Currency(settings.BaseCurrency);
+        var originalAuthority = await ResolveOriginalBookAuthorityAsync(_db, voucher.TenantId,
+            planned.Select(value => new OriginalInventoryPostingReference(value.Lineage.JournalEntryId,
+                value.Lineage.PostingEventId, value.Lineage.InventoryIssueVoucherLine.InventoryIssueVoucherId))
+                .Distinct().ToArray(), IssueSourceType, "PostInventoryIssue", cancellationToken);
+        var currency = originalAuthority.FunctionalCurrencyCode;
         var postingLines = new List<FinancePostingLineDto>();
         var sequence = 1;
         foreach (var group in planned.GroupBy(value => value.ReturnLine.Id))
@@ -313,7 +322,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Governed Store Return Voucher {voucher.VoucherNumber}",
             PostingDate = voucher.PostedAtUtc ?? DateTime.UtcNow,
             JournalType = "System Generated",
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = originalAuthority.AccountingBookCode,
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryReturnVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -399,6 +408,17 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
         if (!plan.IsDefined || plan.ReversalLines.Count == 0)
             throw Control("INV_RETURN_REVERSAL_PLAN_MISSING",
                 "Finance could not derive a balanced reversal for the Store Return Voucher.");
+        if (plan.OriginalPostingEventId != originalEventId ||
+            allocations.Any(value => value.ReturnJournalEntryId != plan.OriginalJournalEntryId))
+            throw Control("INV_RETURN_REVERSAL_LINEAGE_CONFLICT",
+                "The reversal plan does not identify the original return posting event and journal.");
+        var originalAuthority = await ResolveOriginalBookAuthorityAsync(_db, voucher.TenantId,
+            [new OriginalInventoryPostingReference(plan.OriginalJournalEntryId, originalEventId, voucher.Id)],
+            ReturnSourceType, "PostInventoryReturn", cancellationToken);
+        if (plan.ReversalLines.Any(value => value.TransactionCurrency != originalAuthority.FunctionalCurrencyCode ||
+                value.ExchangeRate != 1m))
+            throw Control("INV_RETURN_CURRENCY_LINEAGE_CONFLICT",
+                "The original return reversal lines must retain their functional currency and rate.");
         var fixedAssetAllocations = allocations
             .Where(value => value.InventoryIssueFinanceLineage.Treatment == InventoryIssueAccountingTreatment.FixedAsset)
             .Select(value => new KeyValuePair<Guid, decimal>(value.InventoryReturnVoucherLineId, value.Value))
@@ -411,7 +431,6 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
                 .ToListAsync(cancellationToken);
             PreserveFixedAssetReversalLineage(plan.ReversalLines, originalLines, fixedAssetAllocations, reason);
         }
-        var settings = await GetFinanceSettingsAsync(voucher.TenantId, cancellationToken);
         var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
@@ -427,8 +446,8 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Reversal of Store Return Voucher {voucher.VoucherNumber}",
             PostingDate = plan.ReversalDate,
             JournalType = "System Generated",
-            AccountingBookCode = "IFRS",
-            FunctionalCurrencyCode = Currency(settings.BaseCurrency),
+            AccountingBookCode = originalAuthority.AccountingBookCode,
+            FunctionalCurrencyCode = originalAuthority.FunctionalCurrencyCode,
             IdempotencyKey = $"InventoryReturnVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Reverse",
             ReturnExistingOnDuplicate = true,
             Lines = plan.ReversalLines
@@ -528,6 +547,52 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             .SingleOrDefaultAsync(value => value.TenantId == _currentUser.TenantId &&
                 value.Id == id && !value.IsDeleted, cancellationToken)
            ?? throw Control("INV_RETURN_VOUCHER_NOT_FOUND", "The Store Return Voucher was not found for Finance posting.");
+
+    internal readonly record struct OriginalInventoryPostingReference(Guid JournalEntryId, Guid PostingEventId, Guid SourceDocumentId);
+
+    internal static async Task<(string AccountingBookCode, string FunctionalCurrencyCode)> ResolveOriginalBookAuthorityAsync(
+        ApplicationDbContext db, Guid tenantId, IReadOnlyCollection<OriginalInventoryPostingReference> references,
+        string sourceDocumentType, string postingAction, CancellationToken cancellationToken = default)
+    {
+        var retained = references.Distinct().ToArray();
+        var ids = retained.Select(value => value.JournalEntryId).Distinct().ToArray();
+        var journals = await db.JournalEntries.AsNoTracking()
+            .Where(value => value.TenantId == tenantId && !value.IsDeleted && ids.Contains(value.Id) &&
+                value.PostingStatus == "Posted" && !value.IsReversed && !value.ReversalJournalEntryId.HasValue)
+            .Select(value => new { value.Id, value.AccountingBookId, value.BookClassification })
+            .ToListAsync(cancellationToken);
+        if (ids.Length == 0 || journals.Count != ids.Length ||
+            journals.Any(value => value.AccountingBookId == Guid.Empty) ||
+            journals.Select(value => (value.AccountingBookId, value.BookClassification)).Distinct().Count() != 1)
+            throw Control("INV_RETURN_BOOK_LINEAGE_CONFLICT",
+                "The original posted journals must identify one accounting book before returning stock.");
+        var original = journals[0];
+        var book = await db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(value =>
+            value.TenantId == tenantId && value.Id == original.AccountingBookId && !value.IsDeleted, cancellationToken);
+        if (book == null || string.IsNullOrWhiteSpace(book.Code) || book.Code != original.BookClassification)
+            throw Control("INV_RETURN_BOOK_LINEAGE_CONFLICT",
+                "The original journal accounting-book identity does not match its retained code.");
+        var eventIds = retained.Select(value => value.PostingEventId).Distinct().ToArray();
+        var events = await db.FinancePostingEvents.AsNoTracking().Where(value => value.TenantId == tenantId &&
+                !value.IsDeleted && value.PostingStatus == "Posted" && eventIds.Contains(value.Id))
+            .ToListAsync(cancellationToken);
+        if (retained.Length != ids.Length || events.Count != retained.Length || retained.Any(reference =>
+                !events.Any(value => value.Id == reference.PostingEventId && value.JournalEntryId == reference.JournalEntryId &&
+                    value.AccountingBookId == original.AccountingBookId && value.SourceModule == "Inventory" &&
+                    value.SourceDocumentType == sourceDocumentType && value.PostingAction == postingAction &&
+                    value.SourceDocumentId == reference.SourceDocumentId)))
+            throw Control("INV_RETURN_BOOK_LINEAGE_CONFLICT",
+                "The original Inventory posting event does not match its retained source, journal and accounting book.");
+        var currencies = events.Select(value => value.FunctionalCurrencyCode).Distinct().ToArray();
+        if (currencies.Length != 1 || string.IsNullOrWhiteSpace(currencies[0]) || currencies[0].Length != 3 ||
+            currencies[0].Any(value => value < 'A' || value > 'Z') ||
+            book.FunctionalCurrencyCode != currencies[0])
+            throw Control("INV_RETURN_CURRENCY_LINEAGE_CONFLICT",
+                "The original posted functional currency does not match the original accounting book.");
+        // The Finance engine still validates lifecycle and period authority. A later default must
+        // never redirect a return or compensation into a different ledger.
+        return (original.BookClassification, currencies[0]);
+    }
 
     private async Task<FinanceSettings> GetFinanceSettingsAsync(Guid tenantId, CancellationToken cancellationToken)
         => await _db.FinanceSettings.AsNoTracking()
@@ -636,7 +701,6 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
     };
 
     private static decimal Money(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
-    private static string Currency(string? value) => string.IsNullOrWhiteSpace(value) ? "GHS" : value.Trim().ToUpperInvariant();
     private static string IssueVoucherIntegrity(InventoryIssueVoucher voucher) => Hash(new
     {
         voucher.TenantId,

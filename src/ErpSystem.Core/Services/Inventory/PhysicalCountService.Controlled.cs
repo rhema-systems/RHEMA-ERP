@@ -22,64 +22,8 @@ public partial class PhysicalCountService
     private const string FinanceReviewerRole = "TDC_FINANCE_REVIEWER";
     private static readonly JsonSerializerOptions CountJsonOptions = new(JsonSerializerDefaults.Web);
 
-    public async Task<bool> RecordRecountAsync(
-        Guid countId,
-        Guid userId,
-        RecordPhysicalCountRecountRequest request)
-    {
-        EnsureActor(userId);
-        var count = await LoadControlledCountAsync(countId)
-            ?? throw new ArgumentException($"Physical count {countId} not found");
-        await EnsureAccessAsync(count, "procurement.inventory.count");
-        if (await ReplayCountActionAsync(count.Id, PhysicalCountActionType.RecountRecorded,
-                request.IdempotencyKey, userId, "IndependentCounter", request.InvestigationNotes,
-                new { Id = request.PhysicalCountItemId, request.RecountedQuantity }))
-            return true;
-        EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the recount.");
-        if (count.Status != "RecountRequired")
-            throw new InvalidOperationException("A recount can only be recorded when the count requires recount.");
-        if (count.CountedById == userId || count.InitiatedById == userId)
-            throw new InvalidOperationException("The original counter or initiator cannot perform the independent recount.");
-
-        var item = count.Items.SingleOrDefault(x => x.Id == request.PhysicalCountItemId && !x.IsDeleted)
-            ?? throw new ArgumentException($"Physical count item {request.PhysicalCountItemId} not found in count {count.CountNumber}.");
-        if (!item.RequiresRecount)
-            throw new InvalidOperationException("The selected count line does not require recount.");
-        EnsureRowVersion(item.RowVersion, request.ItemRowVersion, "The count line changed. Reload and retry the recount.");
-
-        item.RecountedQuantity = request.RecountedQuantity;
-        item.RecountedAtUtc = DateTime.UtcNow;
-        item.RecountedById = userId;
-        item.InvestigationNotes = Required(request.InvestigationNotes, "Investigation notes are required.", 2000);
-        item.CountedQuantity = request.RecountedQuantity;
-        item.VarianceQuantity = item.CountedQuantity - item.SystemQuantity;
-        item.VarianceValue = item.VarianceQuantity * item.UnitCost;
-        item.CountAttempts = Math.Max(item.CountAttempts, 2);
-        await _countItemRepository.UpdateAsync(item);
-
-        var outstanding = count.Items.Any(x => x.RequiresRecount && x.Id != item.Id && !x.RecountedQuantity.HasValue);
-        if (!outstanding)
-        {
-            count.Status = "PendingStoresApproval";
-            count.InvestigationSummary = string.Join(" | ", count.Items
-                .Where(x => x.RequiresRecount && !string.IsNullOrWhiteSpace(x.InvestigationNotes))
-                .Select(x => $"{x.ItemCode}: {x.InvestigationNotes}"));
-        }
-
-        await _countRepository.UpdateAsync(count);
-        await AddCountActionAsync(count, PhysicalCountActionType.RecountRecorded, userId,
-            request.IdempotencyKey, request.InvestigationNotes,
-            new { item.Id, item.FirstCountQuantity, item.RecountedQuantity, item.VarianceQuantity }, "IndependentCounter",
-            request.CorrelationId);
-        await _unitOfWork.SaveChangesAsync();
-        await UpdateCountSummaryAsync(count.Id);
-
-        if (!outstanding)
-            await EnsureStockAdjustmentSubmittedAsync(count.Id, userId, request.IdempotencyKey, request.Comment);
-        await RecordCountControlEventAsync(count, "Recount", ProcurementControlEventResult.Allowed,
-            request.IdempotencyKey, request.CorrelationId, request.InvestigationNotes);
-        return true;
-    }
+    public Task<bool> RecordRecountAsync(Guid countId, Guid userId, RecordPhysicalCountRecountRequest request) =>
+        Task.FromException<bool>(new InvalidOperationException("Original observations are retained. Create a selective recount sheet and record its quantities instead."));
 
     public Task<bool> ApproveStoresAsync(Guid countId, Guid userId, PhysicalCountDecisionRequest request) =>
         InCountTransactionAsync(countId, () => ApproveStoresCoreAsync(countId, userId, request));
@@ -103,6 +47,7 @@ public partial class PhysicalCountService
         if (count.Status != "PendingStoresApproval")
             throw new InvalidOperationException("The count is not awaiting Stores approval.");
         EnsureIndependentActor(count, userId, includeFinance: false, includeAudit: false);
+        await EnsureRootCountIndependenceAsync(count, userId);
         if (request.Approved)
             await RevalidateRecordedCountEvidenceAsync(count);
 
@@ -171,6 +116,7 @@ public partial class PhysicalCountService
         if (count.Status != "PendingFinanceApproval")
             throw new InvalidOperationException("The count is not awaiting Finance approval.");
         EnsureIndependentActor(count, userId, includeFinance: false, includeAudit: false);
+        await EnsureRootCountIndependenceAsync(count, userId);
         if (request.Approved)
             await RevalidateRecordedCountEvidenceAsync(count);
 
@@ -220,6 +166,7 @@ public partial class PhysicalCountService
         if (count.Status != "PendingAuditAttestation")
             throw new InvalidOperationException("The count is not awaiting Internal Audit attestation.");
         EnsureIndependentActor(count, userId, includeFinance: true, includeAudit: false);
+        await EnsureRootCountIndependenceAsync(count, userId);
         if (request.Approved)
             await RevalidateRecordedCountEvidenceAsync(count);
 
@@ -271,6 +218,9 @@ public partial class PhysicalCountService
         var postingStateError = CountPostingStateError(count, userId);
         if (postingStateError != null) throw new InvalidOperationException(postingStateError);
         await RevalidateRecordedCountEvidenceAsync(count);
+
+        await EnsureRootCountIndependenceAsync(count, userId);
+        await ClaimResolvedCountLinesAsync(count, userId);
 
         StockAdjustmentDetailDto? posted = null;
         if (HasLineVariance(count))
@@ -331,7 +281,7 @@ public partial class PhysicalCountService
         }
         if (count.FinanceApprovedById != actor)
             return "The Finance Reviewer who approved the variance must perform the governed Finance posting.";
-        if (count.InitiatedById == actor || count.CountedById == actor || count.StoresApprovedById == actor || count.AuditAttestedById == actor)
+        if (count.InitiatedById == actor || WasCounter(count, actor) || count.StoresApprovedById == actor || count.AuditAttestedById == actor)
             return "The initiator, counter, Stores approver, or Internal Audit attestor cannot post this count.";
         return null;
     }
@@ -583,7 +533,7 @@ public partial class PhysicalCountService
                     CentralDocumentVersionId = value.CentralDocumentVersionId,
                     EvidenceReference = value.EvidenceReference
                 }).ToList(),
-                Items = count.Items.Where(x => x.IsCounted && x.VarianceQuantity != 0).Select(x =>
+                Items = count.Items.Where(x => x.IsCounted && !x.RequiresRecount && !x.SupersededByPhysicalCountId.HasValue && x.VarianceQuantity != 0).Select(x =>
                     new CreateStockAdjustmentItemDto
                     {
                         InventoryItemId = x.InventoryItemId,
@@ -1000,6 +950,8 @@ public partial class PhysicalCountService
             count.StoresApprovedById
         };
         prohibited.AddRange(count.Items.Select(x => x.RecountedById));
+        prohibited.AddRange(count.Items.Select(x => x.CountedById));
+        prohibited.AddRange(count.Counters.Where(x => x.TenantId == count.TenantId).Select(x => (Guid?)x.UserId));
         if (includeFinance) prohibited.Add(count.FinanceApprovedById);
         if (includeAudit) prohibited.Add(count.AuditAttestedById);
         if (prohibited.Any(x => x.HasValue && x.Value == actor))
@@ -1019,7 +971,7 @@ public partial class PhysicalCountService
         count.InvestigationSummary = $"{count.InvestigationSummary}\nControl-stage exception: {reason}".Trim();
         foreach (var item in count.Items.Where(x => x.VarianceQuantity != 0))
         {
-            item.RequiresRecount = false;
+            // Existing selective recount flags and lineage remain retained.
         }
     }
 
@@ -1058,7 +1010,7 @@ public partial class PhysicalCountService
     }
 
     private static bool HasLineVariance(PhysicalCount count) =>
-        count.Items.Any(item => item.IsCounted && item.VarianceQuantity != 0);
+        count.Items.Any(item => item.IsCounted && !item.RequiresRecount && !item.SupersededByPhysicalCountId.HasValue && item.VarianceQuantity != 0);
 
     private void EnsureActor(Guid userId)
     {

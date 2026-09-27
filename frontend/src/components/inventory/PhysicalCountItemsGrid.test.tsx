@@ -19,6 +19,30 @@ function Harness({ count = makeCount(), save = noop }: { count?: PhysicalCountDe
 }
 
 describe('compact physical count grid', () => {
+  it('hides selected recount lines by default and keeps retained observations read-only', () => {
+    const count = makeCount(2);
+    count.items[0].supersededByPhysicalCountId = 'child';
+    count.items[0].recountReason = 'Check quantity';
+    render(<Harness count={count} />);
+    expect(screen.queryByText('ITEM-0001')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show recount items' }));
+    expect(screen.getByText('ITEM-0001')).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: 'Counted quantity ITEM-0001' })).not.toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Counted quantity ITEM-0002' })).toBeInTheDocument();
+  });
+  it('edits defective observations separately from the unchanged physical quantity and variance', () => {
+    const onDefect = vi.fn();
+    const count = makeCount(1);
+    render(<PhysicalCountItemsGrid count={count} edits={new Map()} defectEdits={new Map()} onDefect={onDefect}
+      busy={false} fullPage={false} onToggleFullPage={noop} onQuantity={noop} {...callbacks} />);
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Defective quantity ITEM-0001' }), { target: { value: '2' } });
+    expect(onDefect).toHaveBeenLastCalledWith('line-1', 2, '');
+    expect(screen.getByRole('spinbutton', { name: 'Counted quantity ITEM-0001' })).toHaveValue(9);
+    expect(screen.getByText('-1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Defective notes ITEM-0001' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit defective notes ITEM-0001' }), { target: { value: 'Broken packaging' } });
+    expect(onDefect).toHaveBeenLastCalledWith('line-1', 0, 'Broken packaging');
+  });
   it('keeps one saved cost column and puts the current average in supporting details without changing quantities', () => {
     const count = makeCount(1);
     count.items[0].countUnitCost = 1918.85;

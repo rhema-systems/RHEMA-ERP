@@ -30,6 +30,7 @@ public class SalesOrderService : ISalesOrderService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<SalesOrderService> _logger;
     private readonly IDocumentNumberingService _documentNumberingService;
+    private readonly ISalesOrderInvoiceService? _invoiceGenerator;
 
     public SalesOrderService(
         IGenericRepository<SalesOrder> salesOrderRepo,
@@ -43,7 +44,8 @@ public class SalesOrderService : ISalesOrderService
         IDocumentNumberingService documentNumberingService,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
-        ILogger<SalesOrderService> logger)
+        ILogger<SalesOrderService> logger,
+        ISalesOrderInvoiceService? invoiceGenerator = null)
     {
         _salesOrderRepo = salesOrderRepo;
         _lineRepo = lineRepo;
@@ -58,6 +60,7 @@ public class SalesOrderService : ISalesOrderService
         _logger = logger;
         // Document numbering is kept with workflow governance so merged Sales orders remain traceable and approval-controlled.
         _documentNumberingService = documentNumberingService;
+        _invoiceGenerator = invoiceGenerator;
     }
 
     #region CRUD
@@ -734,12 +737,10 @@ public class SalesOrderService : ISalesOrderService
         }
     }
 
-    public async Task<Guid> GenerateInvoiceAsync(Guid salesOrderId)
+    public async Task<Guid> GenerateInvoiceAsync(Guid salesOrderId, GenerateSalesOrderInvoiceRequest request)
     {
-        // TODO: Integrate with Finance module's Invoice creation service
-        // This will create an Invoice from the Sales Order lines and link it back
-        _logger.LogWarning("GenerateInvoiceAsync not yet integrated with Finance module for SO {SalesOrderId}", salesOrderId);
-        throw new NotImplementedException("Invoice generation will be implemented during Finance module integration");
+        var generator = _invoiceGenerator ?? throw new InvalidOperationException("The Sales invoice adapter is not configured.");
+        return (await generator.GenerateAsync(salesOrderId, request)).Invoice.Id;
     }
 
     #endregion
@@ -957,6 +958,7 @@ public class SalesOrderService : ISalesOrderService
     private SalesOrderDetailDto MapToDetailDto(SalesOrder so, SalesLinkedProjectUnitContextDto? projectUnitContext = null) => new()
     {
         Id = so.Id,
+        RowVersion = Convert.ToBase64String(so.RowVersion),
         DocumentNumber = so.DocumentNumber,
         DocumentDate = so.DocumentDate,
         OrderType = so.OrderType,

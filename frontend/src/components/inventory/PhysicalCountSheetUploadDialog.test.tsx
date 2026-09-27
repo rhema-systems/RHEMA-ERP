@@ -38,7 +38,7 @@ describe('current count sheet upload', () => {
   it('previews without a blank Location column and leaves saving to the user', async () => {
     await upload(0, { ...count, items: count.items.map(item => ({ ...item, locationName: '' })) });
     await screen.findByText(/2 quantities to save/);
-    expect(screen.getAllByRole('columnheader')).toHaveLength(4);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(6);
     expect(screen.queryByRole('columnheader', { name: 'Location' })).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
     expect(service.importPhysicalCountSheet).not.toHaveBeenCalled();

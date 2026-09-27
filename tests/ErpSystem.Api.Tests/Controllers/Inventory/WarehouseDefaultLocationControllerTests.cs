@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Services.Inventory;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -14,6 +15,33 @@ namespace ErpSystem.Api.Tests.Controllers.Inventory;
 
 public sealed class WarehouseDefaultLocationControllerTests
 {
+    [Fact]
+    public async Task Managed_transit_location_cannot_be_edited_or_deleted()
+    {
+        var f = new Fixture(); f.Location.IsDefault=false; f.Location.IsInTransitLocation=true;
+        var edit = await f.Controller.Update(f.Location.Id, new UpdateWarehouseLocationDto
+        {
+            WarehouseId=f.Warehouse.Id, LocationCode="RENAMED", IsActive=true
+        });
+        edit.Result.Should().BeOfType<BadRequestObjectResult>().Which.Value.Should().Be(InventoryTransitProtection.Message);
+        (await f.Controller.Delete(f.Location.Id)).Should().BeOfType<BadRequestObjectResult>()
+            .Which.Value.Should().Be(InventoryTransitProtection.Message);
+        f.Location.LocationCode.Should().Be("DEFAULT"); f.Location.IsDeleted.Should().BeFalse();
+        f.Unit.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Ordinary_bin_cannot_be_created_in_the_system_transit_warehouse()
+    {
+        var f = new Fixture(); f.Warehouse.WarehouseType="Transit";
+        var result = await f.Controller.Create(new CreateWarehouseLocationDto
+        {
+            WarehouseId=f.Warehouse.Id, LocationCode="PICKABLE", LocationType="Bin", IsPickingLocation=true
+        });
+        result.Result.Should().BeOfType<BadRequestObjectResult>().Which.Value.Should().Be(InventoryTransitProtection.Message);
+        f.Unit.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task Current_default_cannot_be_deleted_without_a_replacement()
     {

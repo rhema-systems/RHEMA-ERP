@@ -49,6 +49,14 @@ public class InventoryTransfersController : ControllerBase
         return Guid.TryParse(userIdClaim, out var userId) ? userId : Guid.Empty;
     }
 
+    [HttpGet("{id:guid}/picking-options")]
+    public async Task<ActionResult<IReadOnlyList<InventoryTransferPickingOptionDto>>> PickingOptions(Guid id)
+    {
+        try { return Ok(await _transferService.GetPickingOptionsAsync(id, HttpContext.RequestAborted)); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (ArgumentException ex) { return BadRequest(new ProblemDetails { Title = "Transfer picking unavailable", Detail = ex.Message }); }
+    }
+
     /// <summary>
     /// Gets all inventory transfers with optional date filtering
     /// </summary>
@@ -363,6 +371,9 @@ public class InventoryTransfersController : ControllerBase
             var userId = GetCurrentUserId();
             var shippedItems = dto.Items?.ToDictionary(i => i.ItemId, i => i.ShippedQuantity);
             var control = dto.ToControl();
+            control.CarrierBusinessPartnerId = dto.CarrierBusinessPartnerId;
+            control.VehicleNumber = dto.VehicleNumber;
+            control.Picks = dto.Items?.ToDictionary(item => item.ItemId, item => item.Picks) ?? new();
             control.NegativeStockOverrideIds = dto.Items?
                 .Where(item => item.NegativeStockOverrideId.HasValue)
                 .ToDictionary(item => item.ItemId, item => item.NegativeStockOverrideId!.Value) ?? new();
@@ -787,6 +798,8 @@ public abstract class TransferMutationDto
 
 public class ShipTransferDto : TransferMutationDto
 {
+    public Guid? CarrierBusinessPartnerId { get; set; }
+    [MaxLength(100)] public string? VehicleNumber { get; set; }
     public string? TrackingNumber { get; set; }
     [Required, MinLength(1)]
     public List<ShipTransferItemDto>? Items { get; set; }
@@ -797,6 +810,7 @@ public class ShipTransferDto : TransferMutationDto
 /// </summary>
 public class ShipTransferItemDto
 {
+    public List<InventoryTransferPickRequest> Picks { get; set; } = new();
     [Required]
     public Guid ItemId { get; set; }
     [Range(0.0001, double.MaxValue)]

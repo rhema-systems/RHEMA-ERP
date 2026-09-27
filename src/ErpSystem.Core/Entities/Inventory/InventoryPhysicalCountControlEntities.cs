@@ -20,7 +20,8 @@ public enum PhysicalCountActionType
     Cancelled = 13,
     ReviewStarted = 14,
     DefaultLocationsResolved = 15,
-    ApprovalNotRequired = 16
+    ApprovalNotRequired = 16,
+    CountersAssigned = 17
 }
 
 public sealed class InventoryCycleCountSchedule : TenantEntity

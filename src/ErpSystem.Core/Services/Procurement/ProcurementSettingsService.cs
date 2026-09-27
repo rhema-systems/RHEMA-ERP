@@ -55,10 +55,11 @@ public class ProcurementSettingsService : IProcurementSettingsService
                 _currentUserProvider.TenantId,
                 _currentUserProvider.UserId);
 
-            var oldControls = new { settings.AutoCloseTenders, settings.EnforceSegregationOfDuties };
+            var oldControls = new { settings.AutoCloseTenders, settings.EnforceSegregationOfDuties, settings.PurchasePriceDifferenceHandling };
             // Update settings
             if (dto.EnforceSegregationOfDuties.HasValue) settings.EnforceSegregationOfDuties = dto.EnforceSegregationOfDuties.Value;
             if (dto.AutoCloseTenders.HasValue) settings.AutoCloseTenders = dto.AutoCloseTenders.Value;
+            if (dto.PurchasePriceDifferenceHandling is not null) settings.PurchasePriceDifferenceHandling = dto.PurchasePriceDifferenceHandling;
             settings.AutoCreateInventoryItems = dto.AutoCreateInventoryItems;
             settings.AutoCreateSupplierItems = dto.AutoCreateSupplierItems;
             settings.AllowNonInventoryItems = dto.AllowNonInventoryItems;
@@ -80,7 +81,8 @@ public class ProcurementSettingsService : IProcurementSettingsService
             settings.UpdatedAt = DateTime.UtcNow;
 
             if (oldControls.AutoCloseTenders != settings.AutoCloseTenders ||
-                oldControls.EnforceSegregationOfDuties != settings.EnforceSegregationOfDuties)
+                oldControls.EnforceSegregationOfDuties != settings.EnforceSegregationOfDuties ||
+                oldControls.PurchasePriceDifferenceHandling != settings.PurchasePriceDifferenceHandling)
             {
                 await _unitOfWork.Repository<AuditLog>().AddAsync(new AuditLog
                 {
@@ -91,7 +93,7 @@ public class ProcurementSettingsService : IProcurementSettingsService
                     Resource = "ProcurementSettings",
                     ResourceId = settings.Id.ToString(),
                     OldValues = JsonSerializer.Serialize(oldControls),
-                    NewValues = JsonSerializer.Serialize(new { settings.AutoCloseTenders, settings.EnforceSegregationOfDuties }),
+                    NewValues = JsonSerializer.Serialize(new { settings.AutoCloseTenders, settings.EnforceSegregationOfDuties, settings.PurchasePriceDifferenceHandling }),
                     Timestamp = DateTime.UtcNow,
                     IpAddress = "Unknown",
                     CreatedBy = _currentUserProvider.FullName,
@@ -165,6 +167,8 @@ public class ProcurementSettingsService : IProcurementSettingsService
 
     private void ValidateSettings(UpdateProcurementSettingsDto dto)
     {
+        if (dto.PurchasePriceDifferenceHandling is not null && !PurchasePriceDifferencePolicy.IsValid(dto.PurchasePriceDifferenceHandling))
+            throw new InvalidOperationException("Purchase price difference handling must be Revalue Inventory or Purchase Price Variance.");
         // AutoCreateSupplierItems can only be enabled if AutoCreateInventoryItems is also enabled
         if (dto.AutoCreateSupplierItems && !dto.AutoCreateInventoryItems)
         {
@@ -202,6 +206,7 @@ public class ProcurementSettingsService : IProcurementSettingsService
         return new ProcurementSettingsDto
         {
             Id = settings.Id,
+            PurchasePriceDifferenceHandling = settings.PurchasePriceDifferenceHandling,
             TenantId = settings.TenantId,
             AutoCloseTenders = settings.AutoCloseTenders,
             EnforceSegregationOfDuties = settings.EnforceSegregationOfDuties,

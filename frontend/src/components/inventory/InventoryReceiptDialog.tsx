@@ -473,7 +473,10 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
                   <Select value={formData.reasonCode} onValueChange={(v) => setFormData({ ...formData, reasonCode: v })} disabled={!canEdit}>
                     <SelectTrigger><SelectValue placeholder="Select reason" /></SelectTrigger>
                     <SelectContent>
-                      {Object.entries(StockAdjustmentReasonCodes).map(([code, label]) => (
+                      {Object.entries(StockAdjustmentReasonCodes)
+                        // Initial stock is prepared through the governed opening-stock endpoint.
+                        .filter(([code]) => code !== 'INITIAL_STOCK' || formData.reasonCode === code)
+                        .map(([code, label]) => (
                         <SelectItem key={code} value={code}>{label}</SelectItem>
                       ))}
                     </SelectContent>

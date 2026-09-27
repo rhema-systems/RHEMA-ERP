@@ -15,6 +15,28 @@ namespace ErpSystem.Core.Tests.Services.Inventory;
 public sealed class WarehouseDefaultLocationServiceTests
 {
     [Fact]
+    public async Task Virtual_transit_warehouse_cannot_get_an_ordinary_default_bin()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Warehouse.WarehouseType = "Transit";
+        await f.Context.SaveChangesAsync();
+        Func<Task> create = () => f.Service.GetOrCreateAsync(f.Warehouse.Id, f.Actor);
+        await create.Should().ThrowAsync<InvalidOperationException>().WithMessage(InventoryTransitProtection.Message);
+        (await f.Context.Set<WarehouseLocation>().AnyAsync()).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Transit_hierarchy_cannot_be_disguised_as_a_normal_default_bin()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var bin = f.Bin("Transit"); bin.LocationHierarchyType = WarehouseLocationType.InTransit;
+        f.Context.Add(bin); await f.Context.SaveChangesAsync();
+        Func<Task> select = () => f.Service.SetDefaultAsync(bin, f.Actor);
+        await select.Should().ThrowAsync<InvalidOperationException>();
+        bin.IsDefault.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Warehouse_without_locations_gets_one_idempotent_normal_default()
     {
         await using var f = await Fixture.CreateAsync();

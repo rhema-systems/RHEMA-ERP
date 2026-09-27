@@ -337,6 +337,10 @@ public sealed partial class PurchaseReturnService : IPurchaseReturnService
                 if (value.ApprovalRequired && value.ApprovedById == userId && await new ProcurementSodPolicy(_unitOfWork).IsRequiredForSourceAsync(value.TenantId, WorkflowEntityType, value.Id)) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return approver cannot dispatch the same return.");
                 if (!value.ApprovalRequired && await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, value.Id))
                     throw Conflict("INV_SUPPLIER_RETURN_WORKFLOW_RETAINED", "An existing active approval instance must be completed before dispatch.");
+                // Invoice posting takes the PO matching lock before the accepted-GRN
+                // source lock. Use that same order before reading accounting stage.
+                if (value.PurchaseOrderId.HasValue)
+                    await _unitOfWork.AcquireTransactionLockAsync($"tdc-ap-match:{value.TenantId:N}:{value.PurchaseOrderId.Value:N}");
                 await ValidateSourceAsync(value);
 
                 foreach (var line in value.Items)

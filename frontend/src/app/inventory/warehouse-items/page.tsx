@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,24 +22,27 @@ import {
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import axios from 'axios';
+import { procurementAccessControlService } from '@/services/procurement-access-control.service';
+import { eligibleAssignmentItems, retainEligibleSelection, selectFilteredItems } from './assignment-selection';
 import { InventoryCostValue } from '@/components/inventory/InventoryCostValue';
 import { useInventoryCostCurrency } from '@/hooks/useInventoryCostCurrency';
 
 type ProblemDetailsPayload = {
   detail?: string;
+  title?: string;
+  message?: string;
   code?: string;
   extensions?: { code?: string };
 };
 
 function getApiErrorMessage(error: unknown, fallback: string): string {
-  if (axios.isAxiosError(error)) {
-    const payload = error.response?.data as ProblemDetailsPayload | string | undefined;
-    if (typeof payload === 'string' && payload.trim()) return payload;
-    if (payload && typeof payload === 'object') {
-      const detail = payload.detail?.trim();
-      const code = payload.code ?? payload.extensions?.code;
-      if (detail) return code ? `${detail} (${code})` : detail;
-    }
+  const payload = (axios.isAxiosError(error) ? error.response?.data : error) as ProblemDetailsPayload | string | undefined;
+  if (typeof payload === 'string' && payload.trim()) return payload;
+  if (payload && typeof payload === 'object') {
+    const detail = payload.detail?.trim() || payload.message?.trim() || payload.title?.trim();
+    const code = payload.code ?? payload.extensions?.code;
+    if (detail) return code ? `${detail} (${code})` : detail;
+    if (code) return `${fallback} (${code})`;
   }
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -51,6 +54,9 @@ export default function WarehouseItemsPage() {
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [canManage, setCanManage] = useState(false);
+  const [accessMessage, setAccessMessage] = useState<string | null>(null);
+  const [isAssigning, setIsAssigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -90,13 +96,48 @@ export default function WarehouseItemsPage() {
       setInventoryItems(invItemsData);
     } catch (err: unknown) {
       console.error('Error fetching data:', err);
-      setError('Failed to load warehouse items');
+      setError(getApiErrorMessage(err, 'Failed to load warehouse items'));
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    let current = true;
+    procurementAccessControlService.checkCapability({
+      permissionCode: 'procurement.inventory.master-data.manage',
+      sourceType: 'WarehouseItemAssignment', sourceReference: 'warehouse-item-assignment',
+    }).then(decision => {
+      if (!current) return;
+      setCanManage(decision.allowed);
+      setAccessMessage(decision.allowed ? null : `${decision.message} (${decision.code})`);
+    }).catch(err => {
+      if (current) {
+        setCanManage(false);
+        setAccessMessage(getApiErrorMessage(err, 'Unable to verify warehouse assignment access'));
+      }
+    });
+    return () => { current = false; };
+  }, []);
+
+  const eligibleItems = useMemo(() => eligibleAssignmentItems(inventoryItems, warehouseItems,
+    selectedWarehouses.filter(id => warehouses.some(warehouse => warehouse.id === id))),
+  [inventoryItems, warehouseItems, selectedWarehouses, warehouses]);
+  const eligibleIds = useMemo(() => eligibleItems.map(item => item.id), [eligibleItems]);
+  useEffect(() => {
+    setSelectedInventoryItems(previous => {
+      const next = retainEligibleSelection(previous, eligibleIds);
+      return next.length === previous.length ? previous : next;
+    });
+  }, [eligibleIds]);
+  useEffect(() => {
+    setSelectedWarehouses(previous => {
+      const next = previous.filter(id => warehouses.some(warehouse => warehouse.id === id));
+      return next.length === previous.length ? previous : next;
+    });
+  }, [warehouses]);
 
   const filteredItems = warehouseItems.filter(item => {
     const matchesSearch = !searchTerm || 
@@ -109,11 +150,15 @@ export default function WarehouseItemsPage() {
   });
 
   const handleAssign = async () => {
+    const itemIds = retainEligibleSelection(selectedInventoryItems, eligibleIds);
+    const warehouseIds = selectedWarehouses.filter(id => warehouses.some(warehouse => warehouse.id === id));
+    if (!canManage || isAssigning || !itemIds.length || !warehouseIds.length) return;
+    setIsAssigning(true);
     try {
       const result = await inventoryManagementService.assignItemsToWarehouses({
         ...assignForm,
-        inventoryItemIds: selectedInventoryItems,
-        warehouseIds: selectedWarehouses
+        inventoryItemIds: itemIds,
+        warehouseIds
       });
 
       const hasErrors = result.errors && result.errors.length > 0;
@@ -133,10 +178,13 @@ export default function WarehouseItemsPage() {
         description: getApiErrorMessage(err, 'Failed to assign items to warehouses'),
         variant: 'destructive'
       });
+    } finally {
+      setIsAssigning(false);
     }
   };
 
   const handleEdit = (item: WarehouseItemDto) => {
+    if (!canManage) return;
     setSelectedItem(item);
     setEditForm({
       reorderLevel: item.reorderLevel,
@@ -147,7 +195,7 @@ export default function WarehouseItemsPage() {
   };
 
   const handleUpdate = async () => {
-    if (!selectedItem) return;
+    if (!canManage || !selectedItem) return;
     try {
       await inventoryManagementService.updateWarehouseItem(selectedItem.id, editForm);
       toast({
@@ -168,7 +216,7 @@ export default function WarehouseItemsPage() {
   };
 
   const confirmDelete = async (): Promise<boolean> => {
-    if (!deleteTarget) return false;
+    if (!canManage || !deleteTarget) return false;
     setIsDeleting(true);
     try {
       await inventoryManagementService.deleteWarehouseItem(deleteTarget.id);
@@ -221,15 +269,6 @@ export default function WarehouseItemsPage() {
     return warehouseItems.filter(wi => wi.warehouseId === previewWarehouseId);
   };
 
-  // Get items not yet assigned to any selected warehouse for the assign dialog
-  const getUnassignedItems = () => {
-    if (selectedWarehouses.length === 0) return inventoryItems;
-    const assignedItemIds = warehouseItems
-      .filter(wi => selectedWarehouses.includes(wi.warehouseId))
-      .map(wi => wi.inventoryItemId);
-    return inventoryItems.filter(item => !assignedItemIds.includes(item.id));
-  };
-
   // Filter warehouses by search term for dialog
   const getFilteredWarehouses = () => {
     if (!dialogWarehouseSearch.trim()) return warehouses;
@@ -242,9 +281,9 @@ export default function WarehouseItemsPage() {
 
   // Filter items by search term for dialog
   const getFilteredItems = () => {
-    const unassigned = getUnassignedItems();
+    const unassigned = eligibleItems;
     if (!dialogItemSearch.trim()) return unassigned;
-    const search = dialogItemSearch.toLowerCase();
+    const search = dialogItemSearch.trim().toLowerCase();
     return unassigned.filter(item =>
       item.name.toLowerCase().includes(search) ||
       item.itemCode.toLowerCase().includes(search)
@@ -276,9 +315,9 @@ export default function WarehouseItemsPage() {
           <h1 className="text-3xl font-bold">Warehouse Items</h1>
           <p className="text-muted-foreground">Maintain warehouse assignments and stocking parameters</p>
         </div>
-        <Button onClick={() => setIsAssignDialogOpen(true)}>
+        {canManage && <Button onClick={() => { resetAssignForm(); setIsAssignDialogOpen(true); }}>
           <Plus className="mr-2 h-4 w-4" /> Assign Items to Warehouses
-        </Button>
+        </Button>}
       </div>
 
       {error && (
@@ -286,6 +325,8 @@ export default function WarehouseItemsPage() {
           <AlertTriangle className="h-5 w-5" />{error}
         </div>
       )}
+
+      {accessMessage && <p role="status" className="text-sm text-muted-foreground">{accessMessage}</p>}
 
       {/* Filters */}
       <Card>
@@ -336,12 +377,12 @@ export default function WarehouseItemsPage() {
                 <TableHead className="text-right">Warehouse avg. cost</TableHead>
                 <TableHead className="text-right">Item-wide avg. cost</TableHead>
                 <TableHead>Last Movement</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                {canManage && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredItems.length === 0 ? (
-                <TableRow><TableCell colSpan={12} className="text-center py-8 text-muted-foreground">No warehouse items found</TableCell></TableRow>
+                <TableRow><TableCell colSpan={canManage ? 12 : 11} className="text-center py-8 text-muted-foreground">No warehouse items found</TableCell></TableRow>
               ) : (
                 filteredItems.map(item => (
                   <TableRow key={item.id}>
@@ -360,8 +401,8 @@ export default function WarehouseItemsPage() {
                     <TableCell className="text-right"><InventoryCostValue value={item.averageCost} kind="warehouse" currencyCode={costCurrency} /></TableCell>
                     <TableCell className="text-right"><InventoryCostValue value={item.itemAverageCost} kind="item" currencyCode={costCurrency} /></TableCell>
                     <TableCell>{item.lastMovementDate ? format(new Date(item.lastMovementDate), 'MMM dd, yyyy') : '-'}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}><Edit className="h-4 w-4" /></Button>
+                    {canManage && <TableCell className="text-right">
+                      <Button variant="ghost" size="icon" aria-label={`Edit ${item.itemName} at ${item.warehouseName}`} onClick={() => handleEdit(item)}><Edit className="h-4 w-4" /></Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -372,7 +413,7 @@ export default function WarehouseItemsPage() {
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
-                    </TableCell>
+                    </TableCell>}
                   </TableRow>
                 ))
               )}
@@ -382,13 +423,13 @@ export default function WarehouseItemsPage() {
       </Card>
 
       {/* Assign Items Dialog */}
-      <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
+      <Dialog open={canManage && isAssignDialogOpen} onOpenChange={open => { if (!isAssigning) { setIsAssignDialogOpen(open); if (!open) resetAssignForm(); } }}>
         <DialogContent className="w-[1200px] max-w-[95vw] h-[750px] max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Assign Items to Warehouses</DialogTitle>
             <DialogDescription>Preview existing assignments on the left, then select items and warehouses to assign on the right</DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-hidden">
+          <fieldset disabled={isAssigning} className="flex-1 min-h-0 overflow-hidden">
             <div className="grid grid-cols-[400px_1fr] gap-6 h-full">
               {/* Left Panel - Preview Existing Warehouse Items */}
               <div className="flex flex-col border-r pr-6">
@@ -481,6 +522,14 @@ export default function WarehouseItemsPage() {
                         className="pl-8 h-9"
                       />
                     </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <Button type="button" variant="outline" size="sm" disabled={!getFilteredItems().length || isAssigning}
+                        onClick={() => setSelectedInventoryItems(previous => selectFilteredItems(previous, getFilteredItems().map(item => item.id), eligibleIds))}>
+                        Select all filtered ({getFilteredItems().length})
+                      </Button>
+                      <Button type="button" variant="ghost" size="sm" disabled={!selectedInventoryItems.length || isAssigning}
+                        onClick={() => setSelectedInventoryItems([])}>Clear all</Button>
+                    </div>
                     <div className="border rounded-lg p-3 mt-2 flex-1 overflow-y-auto space-y-2">
                       {getFilteredItems().map(item => (
                         <div key={item.id} className="flex items-center space-x-2">
@@ -489,10 +538,11 @@ export default function WarehouseItemsPage() {
                         </div>
                       ))}
                       {getFilteredItems().length === 0 && (
-                        <p className="text-sm text-muted-foreground text-center py-2">No items found</p>
+                        <p className="text-sm text-muted-foreground text-center py-2">{selectedWarehouses.length ? 'No eligible items found' : 'Select a target warehouse first'}</p>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">{selectedInventoryItems.length} selected</p>
+                    <p className="text-xs text-muted-foreground mt-1">{selectedInventoryItems.length} selected · {getFilteredItems().length} eligible in filter</p>
+                    <p className="text-xs text-muted-foreground mt-1">All filtered items are shown. Existing warehouse assignments are skipped.</p>
                   </div>
                 </div>
 
@@ -512,18 +562,18 @@ export default function WarehouseItemsPage() {
                 </p>
               </div>
             </div>
-          </div>
+          </fieldset>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsAssignDialogOpen(false); resetAssignForm(); }}>Cancel</Button>
-            <Button onClick={handleAssign} disabled={selectedInventoryItems.length === 0 || selectedWarehouses.length === 0}>
-              Assign {selectedInventoryItems.length} Item(s) to {selectedWarehouses.length} Warehouse(s)
+            <Button variant="outline" disabled={isAssigning} onClick={() => { setIsAssignDialogOpen(false); resetAssignForm(); }}>Cancel</Button>
+            <Button onClick={handleAssign} disabled={!canManage || isAssigning || selectedInventoryItems.length === 0 || selectedWarehouses.length === 0}>
+              {isAssigning ? 'Assigning…' : `Assign ${selectedInventoryItems.length} Item(s) to ${selectedWarehouses.length} Warehouse(s)`}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Edit Stocking Parameters Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+      <Dialog open={canManage && isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Warehouse Item</DialogTitle>
@@ -565,7 +615,7 @@ export default function WarehouseItemsPage() {
       </Dialog>
 
       <ConfirmationDialog
-        open={deleteTarget !== null}
+        open={canManage && deleteTarget !== null}
         onOpenChange={(open) => { if (!open && !isDeleting) setDeleteTarget(null); }}
         title="Remove Warehouse Assignment"
         description={deleteTarget

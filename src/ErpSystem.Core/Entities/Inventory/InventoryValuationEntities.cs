@@ -12,6 +12,11 @@ namespace ErpSystem.Core.Entities.Inventory;
 /// </summary>
 public class InventoryMovement : TenantEntity
 {
+    public Guid? TransferDispatchAllocationId { get; set; }
+    public Guid? TransferReceiptAllocationId { get; set; }
+    [MaxLength(20)] public string? TransferLeg { get; set; }
+    public InventoryTransferDispatchAllocation? TransferDispatchAllocation { get; set; }
+    public InventoryTransferReceiptAllocation? TransferReceiptAllocation { get; set; }
     /// <summary>
     /// Unique movement number for reference
     /// </summary>
@@ -478,7 +483,10 @@ public enum InventoryMovementType
     /// <summary>
     /// Value-only adjustment from landed cost revaluation (no quantity movement)
     /// </summary>
-    LandedCostRevaluation = 16
+    LandedCostRevaluation = 16,
+
+    /// <summary>Value-only approved supplier invoice price adjustment, with immutable receipt cost authority.</summary>
+    InvoiceCostAdjustment = 17
 }
 
 /// <summary>

@@ -134,6 +134,7 @@ export interface InventoryCategoryDto {
 
 // Inventory Item
 export interface InventoryItemPostingAccountsDto {
+  inventoryDisposalAccountId?: string | null;
   inventoryAccountId?: string | null;
   inventoryOffsetAccountId?: string | null;
   costOfGoodsSoldAccountId?: string | null;
@@ -592,6 +593,10 @@ export interface WarehouseLocationDto {
   parentLocationId?: string;
   parentLocationName?: string;
   isActive: boolean;
+  isInTransitLocation?: boolean;
+  isQuarantineLocation?: boolean;
+  isInspectionLocation?: boolean;
+  isDamageLocation?: boolean;
   isDefault?: boolean;
   isPickingLocation: boolean;
   isReceivingLocation: boolean;
@@ -804,6 +809,9 @@ export interface InventoryTransferDto {
   shippedDate?: string;
   receivedDate?: string;
   trackingNumber?: string;
+  carrierBusinessPartnerId?: string;
+  carrierName?: string;
+  vehicleNumber?: string;
   shippingCost?: number;
   miscellaneousCost?: number;
   miscellaneousCostDescription?: string;
@@ -817,6 +825,8 @@ export interface InventoryTransferDto {
 }
 
 export interface InventoryTransferDetailDto extends InventoryTransferDto {
+  inTransitLocationId?: string;
+  requiresTransitReconciliation?: boolean;
   hasOpenDiscrepancy: boolean;
   completedDate?: string;
   rowVersion: string;
@@ -887,7 +897,65 @@ export interface InventoryTransferItemDto {
   sourceLocationName?: string;
   destinationLocationId?: string;
   destinationLocationName?: string;
+  dispatchAllocations?: InventoryTransferDispatchAllocationDto[];
   notes?: string;
+}
+
+export interface InventoryTransferDispatchAllocationDto {
+  id: string;
+  sourceLocationId: string;
+  sourceLocationName?: string;
+  quantity: number;
+  receivedQuantity: number;
+  outstandingQuantity: number;
+  carrierBusinessPartnerId?: string;
+  carrierName?: string;
+  vehicleNumber?: string;
+  shippedAtUtc: string;
+}
+
+export interface InventoryTransferPickingOptionDto {
+  itemId: string;
+  sourceLocationId: string;
+  sourceLocationName?: string;
+  quantityOnHand: number;
+  quantityAllocated: number;
+  quantityAvailable: number;
+}
+
+export interface InventoryTransferTransitStockRowDto {
+  transferId: string;
+  transferNumber: string;
+  transferItemId: string;
+  dispatchAllocationId: string;
+  itemId: string;
+  itemCode: string;
+  itemName: string;
+  sourceWarehouseId: string;
+  sourceWarehouseName: string;
+  destinationWarehouseId: string;
+  destinationWarehouseName: string;
+  sourceLocationId: string;
+  sourceLocationName?: string;
+  inTransitWarehouseId: string;
+  inTransitWarehouseName?: string;
+  inTransitLocationId: string;
+  inTransitLocationName?: string;
+  carrierBusinessPartnerId?: string;
+  carrierName?: string;
+  vehicleNumber?: string;
+  shippedAtUtc: string;
+  requestedQuantity: number;
+  dispatchedQuantity: number;
+  receivedQuantity: number;
+  returnedQuantity: number;
+  inTransitQuantity: number;
+  inTransitValue: number;
+}
+
+export interface InventoryTransferTransitStockReportDto {
+  items: InventoryTransferTransitStockRowDto[];
+  legacyReconciliationRequiredCount: number;
 }
 
 export interface CreateInventoryTransferDto {
@@ -953,6 +1021,7 @@ export interface UpdateTransferItemDto {
 export interface ShipTransferItemDto {
   itemId: string;
   shippedQuantity: number;
+  picks?: { sourceLocationId: string; quantity: number }[];
 }
 
 export interface ShipTransferWithCostsDto {
@@ -962,6 +1031,8 @@ export interface ShipTransferWithCostsDto {
   comment?: string;
   trackingNumber?: string;
   carrierName?: string;
+  carrierBusinessPartnerId?: string;
+  vehicleNumber?: string;
   shippingCost: number;
   miscellaneousCost: number;
   miscellaneousCostDescription?: string;
@@ -974,6 +1045,8 @@ export interface ShipTransferWithCostsDto {
 export interface ReceiveTransferItemDto {
   id: string;  // Backend expects Id (transfer item id)
   receivedQuantity: number;
+  destinationLocationId?: string;
+  allocations?: { dispatchAllocationId: string; receivedQuantity: number; destinationLocationId: string }[];
   damagedQuantity?: number;
   shortageQuantity?: number;
   discrepancyReasonCode?: string;
@@ -999,6 +1072,10 @@ export interface ResolveInventoryTransferDiscrepancyRequest extends InventoryTra
 export interface PhysicalCountDto {
   approvalRequired?: boolean;
   id: string;
+  rootPhysicalCountId?: string;
+  parentPhysicalCountId?: string;
+  recountAttempt?: number;
+  observationSubmittedAtUtc?: string;
   countNumber: string;
   warehouseId: string;
   warehouseName?: string;
@@ -1032,6 +1109,10 @@ export interface PhysicalCountDto {
 }
 
 export interface PhysicalCountDetailDto extends PhysicalCountDto {
+  canCreateRecount?: boolean;
+  sheets?: PhysicalCountDto[];
+  counters?: PhysicalCountCounterDto[];
+  canManageCounters?: boolean;
   canReview?: boolean;
   canDecide?: boolean;
   canPost?: boolean;
@@ -1068,6 +1149,10 @@ export interface PhysicalCountEvidenceDto {
 
 export interface PhysicalCountItemDto {
   id: string;
+  rootPhysicalCountItemId?: string;
+  predecessorPhysicalCountItemId?: string;
+  supersededByPhysicalCountId?: string;
+  recountReason?: string;
   inventoryItemId: string;
   itemCode: string;
   itemName: string;
@@ -1075,6 +1160,8 @@ export interface PhysicalCountItemDto {
   locationName?: string;
   systemQuantity: number;
   countedQuantity: number;
+  defectiveQuantity?: number;
+  defectiveNotes?: string;
   varianceQuantity: number;
   varianceValue: number;
   variancePercent: number;
@@ -1099,6 +1186,7 @@ export interface PhysicalCountItemDto {
 }
 
 export interface CreatePhysicalCountDto {
+  counterEmployeeIds?: string[];
   warehouseId: string;
   countType: string;  // FullCount, CycleCount, SpotCheck, ABCCount
   locationId?: string;
@@ -1124,9 +1212,18 @@ export interface AddCountItemDto {
   serialNumber?: string;
 }
 
+export interface CreatePhysicalCountRecountRequest {
+  rowVersion: string;
+  idempotencyKey: string;
+  comment?: string;
+  items: { physicalCountItemId: string; itemRowVersion: string; reason: string }[];
+}
+
 export interface RecordCountItemDto {
   physicalCountItemId: string;
   countedQuantity: number;
+  defectiveQuantity?: number;
+  defectiveNotes?: string;
   lotNumber?: string;
   serialNumber?: string;
   notes?: string;
@@ -1139,6 +1236,35 @@ export interface PhysicalCountMutationRequest {
   idempotencyKey: string;
   correlationId?: string;
   comment?: string;
+}
+
+export interface PhysicalCountCounterOptionDto {
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  userId?: string;
+  hasEmail: boolean;
+  canAssign: boolean;
+  ineligibilityReason?: string;
+}
+
+export interface PhysicalCountCounterDto {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  employeeName: string;
+  userId: string;
+  isActive: boolean;
+  assignedById: string;
+  assignedAtUtc: string;
+  removedById?: string;
+  removedAtUtc?: string;
+  changeReason?: string;
+  emailNotificationQueued: boolean;
+}
+
+export interface UpdatePhysicalCountCountersRequest extends PhysicalCountMutationRequest {
+  employeeIds: string[];
 }
 
 export interface PhysicalCountDecisionRequest extends PhysicalCountMutationRequest {
@@ -1241,6 +1367,8 @@ export interface PhysicalCountItemExportDto {
   locationName?: string;
   systemQuantity: number;
   countedQuantity: number;
+  defectiveQuantity?: number;
+  defectiveNotes?: string;
   varianceQuantity: number;
   varianceValue: number;
   lotNumber?: string;
@@ -1250,8 +1378,12 @@ export interface PhysicalCountItemExportDto {
 }
 
 export interface ImportCountItemDto {
+  rowVersion: string;
+  idempotencyKey: string;
   itemCode: string;
   countedQuantity: number;
+  defectiveQuantity?: number;
+  defectiveNotes?: string;
   lotNumber?: string;
   serialNumber?: string;
   notes?: string;
@@ -2032,8 +2164,18 @@ class InventoryManagementService {
     });
   }
 
-  async shipTransfer(id: string, control: InventoryTransferMutationRequest, trackingNumber?: string, items?: ShipTransferItemDto[]): Promise<void> {
-    await axios.post(`${API_URL}/inventory/transfers/${id}/ship`, { ...control, trackingNumber, items }, {
+  async getTransferPickingOptions(id: string): Promise<InventoryTransferPickingOptionDto[]> {
+    const response = await axios.get(`${API_URL}/inventory/transfers/${id}/picking-options`, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
+  async getTransferTransitStock(): Promise<InventoryTransferTransitStockReportDto> {
+    const response = await axios.get(`${API_URL}/inventory/transfers/transit-stock`, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
+  async shipTransfer(id: string, control: InventoryTransferMutationRequest, trackingNumber?: string, items?: ShipTransferItemDto[], shipment?: { carrierBusinessPartnerId?: string; vehicleNumber?: string }): Promise<void> {
+    await axios.post(`${API_URL}/inventory/transfers/${id}/ship`, { ...control, trackingNumber, items, ...shipment }, {
       headers: this.getAuthHeaders()
     });
   }
@@ -2168,6 +2310,11 @@ class InventoryManagementService {
     return response.data;
   }
 
+  async createPhysicalCountRecount(id: string, request: CreatePhysicalCountRecountRequest): Promise<PhysicalCountDto> {
+    const response = await axios.post(`${API_URL}/inventory/physical-counts/${id}/recounts`, request, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
   async getPhysicalCountById(id: string): Promise<PhysicalCountDetailDto> {
     const response = await axios.get(`${API_URL}/inventory/physical-counts/${id}`, {
       headers: this.getAuthHeaders()
@@ -2208,6 +2355,20 @@ class InventoryManagementService {
       headers: this.getAuthHeaders()
     });
     return response.data;
+  }
+
+  async getPhysicalCountCounterOptions(warehouseId: string, search = '', locationId?: string): Promise<PhysicalCountCounterOptionDto[]> {
+    if (!warehouseId) throw new Error('Select a warehouse before searching for counters.');
+    const response = await axios.get(`${API_URL}/inventory/physical-counts/counter-options`, {
+      headers: this.getAuthHeaders(), params: { warehouseId, search: search.trim(), ...(locationId ? { locationId } : {}) },
+    });
+    return response.data;
+  }
+
+  async updatePhysicalCountCounters(countId: string, request: UpdatePhysicalCountCountersRequest): Promise<void> {
+    await axios.put(`${API_URL}/inventory/physical-counts/${countId}/counters`, request, {
+      headers: this.getAuthHeaders(),
+    });
   }
 
   async uploadPhysicalCountEvidence(countId: string, file: File, title?: string): Promise<PhysicalCountEvidenceDto> {

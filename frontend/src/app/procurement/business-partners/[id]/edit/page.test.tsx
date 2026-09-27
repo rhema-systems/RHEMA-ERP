@@ -12,16 +12,18 @@ import {
 } from '@/services/financeCommonService';
 import { priceListService } from '@/services/priceListService';
 
-const { push, errorToast } = vi.hoisted(() => ({
+const { push, errorToast, navigation } = vi.hoisted(() => ({
   push: vi.fn(),
   errorToast: vi.fn(),
+  navigation: { query: '' },
 }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push, back: vi.fn() }),
   useParams: () => ({ id: 'partner-1' }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(navigation.query),
 }));
 vi.mock('@/components/finance/BusinessPartnerFinanceProfilesPanel', () => ({ BusinessPartnerFinanceProfilesPanel: () => <div>Governed profiles</div> }));
+vi.mock('@/components/procurement/BusinessPartnerCurrentAccountsPanel', () => ({ BusinessPartnerCurrentAccountsPanel: ({ ledger, onOpenFinanceProfiles }: { ledger: string; onOpenFinanceProfiles?: () => void }) => <div>Current {ledger} accounts<button type="button" onClick={onOpenFinanceProfiles}>Finance profiles</button></div> }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: errorToast } }));
 vi.mock('@/services/businessPartnerService', () => ({
   businessPartnerService: {
@@ -70,6 +72,7 @@ const saved = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  navigation.query = '';
   vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue(saved);
   vi.mocked(businessPartnerService.getAllPartnersForDropdown).mockResolvedValue(
     []
@@ -99,6 +102,41 @@ async function openTab(name: string) {
 }
 
 describe('business partner governed finance setup', () => {
+  it.each([
+    ['Supplier', 'Accounts Payable'],
+    ['Customer', 'Accounts Receivable'],
+  ])('returns from the %s account grid when the URL already selects Finance profiles', async (partnerType, tabName) => {
+    vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({ ...saved, partnerType });
+    navigation.query = 'tab=finance-profiles';
+    render(<EditBusinessPartnerPage />);
+    expect(await screen.findByText('Governed profiles')).toBeInTheDocument();
+    await openTab(tabName);
+    expect(screen.queryByText('Governed profiles')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Finance profiles' }));
+    expect(await screen.findByText('Governed profiles')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Finance Profiles' })).toHaveAttribute('data-state', 'active');
+    expect(navigation.query).toBe('tab=finance-profiles');
+    expect(businessPartnerService.updatePartner).not.toHaveBeenCalled();
+  });
+
+  it('follows Finance-profile links from an already mounted account tab', async () => {
+    navigation.query = 'tab=accounts-payable';
+    const view = render(<EditBusinessPartnerPage />);
+    expect(await screen.findByText('Current payables accounts')).toBeInTheDocument();
+    navigation.query = 'tab=finance-profiles';
+    view.rerender(<EditBusinessPartnerPage />);
+    expect(await screen.findByText('Governed profiles')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Finance Profiles' })).toHaveAttribute('data-state', 'active');
+  });
+
+  it('opens customer account mappings from the edit query route', async () => {
+    vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({ ...saved, partnerType: 'Customer' });
+    navigation.query = 'tab=accounts-receivable';
+    render(<EditBusinessPartnerPage />);
+    expect(await screen.findByText('Current receivables accounts')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Accounts Payable' })).not.toBeInTheDocument();
+  });
+
   it.each(['Approved', 'PendingApproval'])('preserves stored %s status while routing finance setup to profiles', async status => {
     vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({ ...saved, status });
     render(<EditBusinessPartnerPage />);

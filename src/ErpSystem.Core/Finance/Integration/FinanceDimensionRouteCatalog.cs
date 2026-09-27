@@ -50,7 +50,9 @@ public enum FinanceDimensionRouteId
     MaintenanceWorkOrderBilling = 74,
     HrPayrollJournal = 75,
     ProcurementSupplierReturnDispatch = 76,
-    ProcurementSupplierReturnResolution = 77
+    ProcurementSupplierReturnResolution = 77,
+    InventoryDisposalAuctionInvoice = 78,
+    SalesOrderCustomerInvoice = 79
 }
 
 public enum FinanceDimensionCertificationState
@@ -326,6 +328,10 @@ public static class FinanceDimensionRouteCatalog
             "inventory.landed-cost", "InventoryLandedCost", "Posted landed-cost valuation and variance."),
         External(FinanceDimensionRouteId.InventoryDisposalProceeds, "Inventory", "INVENTORY",
             "inventory.disposals.proceeds", "InventoryDisposal", "Approved inventory-disposal proceeds only."),
+        External(FinanceDimensionRouteId.InventoryDisposalAuctionInvoice, "Inventory", "AR",
+            "inventory.disposals.auction-invoices", "CustomerInvoice", "Canonical non-stock auction invoice linked to an authorized inventory disposal."),
+        External(FinanceDimensionRouteId.SalesOrderCustomerInvoice, "Sales", "AR",
+            "sales.orders.customer-invoices", "CustomerInvoice", "Canonical stock/customer invoice generated from an immutable approved Sales order."),
         External(FinanceDimensionRouteId.QuantitySurveyPaymentCertificate, "QuantitySurvey", "AP",
             "quantity-survey.payment-certificates.ap", "VendorInvoice", "Approved main-contract payment certificate handed to AP."),
         External(FinanceDimensionRouteId.QuantitySurveySubcontractCertificate, "QuantitySurvey", "AP",

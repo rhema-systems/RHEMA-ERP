@@ -33,9 +33,16 @@ public sealed class PhysicalCountControlConfiguration : IEntityTypeConfiguration
 {
     public void Configure(EntityTypeBuilder<PhysicalCount> builder)
     {
+        builder.Navigation(x => x.Counters).AutoInclude();
+        builder.HasOne<PhysicalCount>().WithMany().HasForeignKey(x => x.RootPhysicalCountId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<PhysicalCount>().WithMany().HasForeignKey(x => x.ParentPhysicalCountId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasIndex(x => new { x.TenantId, x.ParentPhysicalCountId, x.RecountRequestKey }).IsUnique().HasFilter("[ParentPhysicalCountId] IS NOT NULL AND [RecountRequestKey] IS NOT NULL");
+        builder.HasIndex(x => new { x.TenantId, x.RootPhysicalCountId, x.RecountAttempt }).IsUnique().HasFilter("[RootPhysicalCountId] IS NOT NULL");
         builder.ToTable("PhysicalCounts", table =>
         {
             table.HasTrigger("TR_PhysicalCounts_ControlledLifecycle");
+            table.HasTrigger("TR_PhysicalCounts_CommitteeActors");
+            table.HasTrigger("TR_PhysicalCounts_RecountLineage");
             table.HasCheckConstraint("CK_PhysicalCounts_ABCClass", "[ABCClass] IS NULL OR [ABCClass] IN ('A','B','C')");
             table.HasCheckConstraint("CK_PhysicalCounts_Cutoff", "[ScheduledForUtc] IS NULL OR [CutoffAtUtc] IS NULL OR [ScheduledForUtc] <= [CutoffAtUtc]");
         });
@@ -60,11 +67,17 @@ public sealed class PhysicalCountItemControlConfiguration : IEntityTypeConfigura
         builder.ToTable("PhysicalCountItems", table =>
         {
             table.HasTrigger("TR_PhysicalCountItems_ControlledMutation");
+            table.HasTrigger("TR_PhysicalCountItems_DefectiveObservation");
+            table.HasTrigger("TR_PhysicalCountItems_RecountLineage");
+            table.HasCheckConstraint("CK_PhysicalCountItems_DefectiveQuantity", "[DefectiveQuantity] >= 0 AND [DefectiveQuantity] <= [CountedQuantity]");
             table.HasCheckConstraint("CK_PhysicalCountItems_CountAttempts", "[CountAttempts] BETWEEN 0 AND 2");
             table.HasCheckConstraint("CK_PhysicalCountItems_CountQuantities", "[SystemQuantity] >= 0 AND [CountedQuantity] >= 0 AND ([FirstCountQuantity] IS NULL OR [FirstCountQuantity] >= 0) AND ([RecountedQuantity] IS NULL OR [RecountedQuantity] >= 0)");
         });
         builder.Property(x => x.RowVersion).IsRowVersion();
         builder.HasOne(x => x.RecountedBy).WithMany().HasForeignKey(x => x.RecountedById).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<PhysicalCountItem>().WithMany().HasForeignKey(x => x.RootPhysicalCountItemId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<PhysicalCountItem>().WithMany().HasForeignKey(x => x.PredecessorPhysicalCountItemId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne<PhysicalCount>().WithMany().HasForeignKey(x => x.SupersededByPhysicalCountId).OnDelete(DeleteBehavior.NoAction);
     }
 }
 
@@ -75,7 +88,7 @@ public sealed class PhysicalCountActionConfiguration : IEntityTypeConfiguration<
         builder.ToTable("PhysicalCountActions", table =>
         {
             table.HasTrigger("TR_PhysicalCountActions_AppendOnly");
-            table.HasCheckConstraint("CK_PhysicalCountActions_ActionType", "[ActionType] BETWEEN 1 AND 16");
+            table.HasCheckConstraint("CK_PhysicalCountActions_ActionType", "[ActionType] BETWEEN 1 AND 17");
         });
         builder.HasIndex(x => new { x.TenantId, x.PhysicalCountId, x.Sequence }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.PhysicalCountId, x.ActionType, x.IdempotencyKey }).IsUnique();

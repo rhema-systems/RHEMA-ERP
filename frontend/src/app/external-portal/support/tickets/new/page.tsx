@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import ReCAPTCHA from 'react-google-recaptcha';
@@ -12,18 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useTenant } from '@/contexts/TenantContext';
-import { ehcTicketService, type CreateEhcTicketRequest, type EhcTicketCategoryTree, type EhcTicketPriority, type EhcTicketSource, type EhcTicketType } from '@/services/ehcTicketService';
+import { ehcTicketService, type CreateEhcTicketRequest, type EhcTicketCategoryTree, type EhcTicketType } from '@/services/ehcTicketService';
 import { settingsService } from '@/services/settings';
 import { fileUploadService } from '@/services/fileUploadService';
-
-const channelOptions: Array<{ label: string; value: EhcTicketSource }> = [
-  { label: 'Website', value: 'Web' },
-  { label: 'Mobile App', value: 'Mobile' },
-  { label: 'Email', value: 'Email' },
-  { label: 'Phone Call', value: 'PhoneCall' },
-  { label: 'SMS', value: 'Sms' },
-  { label: 'WhatsApp', value: 'WhatsApp' },
-];
 
 export default function NewExternalPortalSupportTicketPage() {
   const router = useRouter();
@@ -54,26 +45,6 @@ export default function NewExternalPortalSupportTicketPage() {
     queryKey: ['ehc', 'categories', currentTenantCode],
     queryFn: () => ehcTicketService.listCategories(),
   });
-
-  const { data: priorityLevels } = useQuery({
-    queryKey: ['ehc', 'priorities', currentTenantCode],
-    queryFn: () => ehcTicketService.listPriorityLevels(),
-  });
-
-  const activePriorityLevels = useMemo(() => {
-    return (priorityLevels ?? [])
-      .filter((p) => p.isActive)
-      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-  }, [priorityLevels]);
-
-  useEffect(() => {
-    if (!activePriorityLevels.length) return;
-    setForm((f) => {
-      const exists = activePriorityLevels.some((p) => p.priority === (f.priority as any));
-      if (exists) return f;
-      return { ...f, priority: activePriorityLevels[0].priority as EhcTicketPriority };
-    });
-  }, [activePriorityLevels]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -127,9 +98,7 @@ export default function NewExternalPortalSupportTicketPage() {
   });
 
   const captchaRequired = Boolean(securitySettings?.captchaEnabled);
-  const canSubmit = Boolean(form.categoryId) && form.description.trim().length > 0 && (!captchaRequired || Boolean(captchaToken));
-
-  const flattenCategoryTree = (nodes: EhcTicketCategoryTree[], rootId: string | null = null, depth = 0) => {
+  const flattenCategoryTree = (nodes: EhcTicketCategoryTree[], rootId: string | null = null, depth = 0, inheritedType?: EhcTicketType | null) => {
     const out: Array<{ label: string; categoryId: string; subcategoryId?: string; appliesToType?: EhcTicketType | null; depth: number }> = [];
     for (const n of nodes || []) {
       const effectiveRootId = rootId ?? n.id;
@@ -137,11 +106,11 @@ export default function NewExternalPortalSupportTicketPage() {
         label: n.name,
         categoryId: effectiveRootId,
         subcategoryId: rootId ? n.id : undefined,
-        appliesToType: n.appliesToType,
+        appliesToType: n.appliesToType ?? inheritedType,
         depth,
       });
       if (n.subcategories?.length) {
-        out.push(...flattenCategoryTree(n.subcategories, effectiveRootId, depth + 1));
+        out.push(...flattenCategoryTree(n.subcategories, effectiveRootId, depth + 1, n.appliesToType ?? inheritedType));
       }
     }
     return out;
@@ -149,11 +118,13 @@ export default function NewExternalPortalSupportTicketPage() {
 
   const allCategoryOptions = flattenCategoryTree(categories || []);
   const visibleCategoryOptions = allCategoryOptions
-    .filter((o) => !o.appliesToType || o.appliesToType === form.ticketType)
     .map((o) => ({
       ...o,
       label: `${'— '.repeat(o.depth)}${o.label}`,
     }));
+  const selectedCategory = visibleCategoryOptions.find((option) =>
+    (option.subcategoryId || option.categoryId) === (form.subcategoryId || form.categoryId));
+  const canSubmit = Boolean(selectedCategory?.appliesToType) && form.description.trim().length > 0 && (!captchaRequired || Boolean(captchaToken));
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -176,66 +147,7 @@ export default function NewExternalPortalSupportTicketPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-4 rounded-lg border bg-slate-50/80 p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Type</Label>
-                  <select
-                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={form.ticketType}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        ticketType: e.target.value as EhcTicketType,
-                        categoryId: undefined,
-                        subcategoryId: undefined,
-                      }))
-                    }
-                  >
-                    <option value="Enquiry">Enquiry</option>
-                    <option value="Complaint">Complaint</option>
-                    <option value="Helpdesk">Helpdesk</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Priority</Label>
-                  <select
-                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={form.priority}
-                    onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as EhcTicketPriority }))}
-                  >
-                    {activePriorityLevels.length ? (
-                      activePriorityLevels.map((p) => (
-                        <option key={p.priority} value={p.priority}>
-                          {p.displayName}
-                        </option>
-                      ))
-                    ) : (
-                      <>
-                        <option value="Low">Low</option>
-                        <option value="Medium">Medium</option>
-                        <option value="High">High</option>
-                        <option value="Critical">Critical</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Channel</Label>
-                  <select
-                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={form.source || 'Web'}
-                    onChange={(e) => setForm((f) => ({ ...f, source: e.target.value as EhcTicketSource }))}
-                  >
-                    {channelOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Category</Label>
                   <select
@@ -253,18 +165,24 @@ export default function NewExternalPortalSupportTicketPage() {
                           ...f,
                           categoryId: selected.categoryId,
                           subcategoryId: selected.subcategoryId,
+                          ticketType: selected.appliesToType ?? f.ticketType,
                         };
                       })
                     }
                   >
                     <option value="">Select category</option>
                     {visibleCategoryOptions.map((o) => (
-                      <option key={`${o.categoryId}:${o.subcategoryId ?? ''}:${o.label}`} value={o.subcategoryId || o.categoryId}>
-                        {o.label}
+                      <option key={`${o.categoryId}:${o.subcategoryId ?? ''}:${o.label}`} value={o.subcategoryId || o.categoryId} disabled={!o.appliesToType}>
+                        {o.label}{!o.appliesToType ? ' (not configured)' : ''}
                       </option>
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                {selectedCategory?.appliesToType ? <Badge variant="outline">{selectedCategory.appliesToType}</Badge> : null}
+                <span>Website</span>
               </div>
 
               <div className="space-y-2">
@@ -358,7 +276,7 @@ export default function NewExternalPortalSupportTicketPage() {
             <Button variant="outline" onClick={() => router.push('/support/tickets')}>
               Cancel
             </Button>
-            {mutation.isError ? <div className="text-sm text-red-600 ml-2">Failed to submit. Please try again.</div> : null}
+            {mutation.isError ? <div className="text-sm text-red-600 ml-2">{mutation.error instanceof Error ? mutation.error.message : 'Failed to submit. Please try again.'}</div> : null}
           </div>
         </CardContent>
       </Card>

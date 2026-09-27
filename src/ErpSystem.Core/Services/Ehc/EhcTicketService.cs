@@ -648,7 +648,12 @@ public sealed class EhcTicketService : IEhcTicketService
     }
 
     public async Task<EhcTicketDetailDto> CreateExternalTicketAsync(CreateEhcTicketRequestDto request, CancellationToken cancellationToken = default)
-        => await CreateExternalTicketCoreAsync(request, null, null, cancellationToken);
+    {
+        if (!Guid.TryParse(_currentUserService.UserId, out var requesterId) || requesterId == Guid.Empty)
+            throw new InvalidOperationException("Authenticated user context is required.");
+        await EhcExternalTicketPolicy.ApplyAsync(_unitOfWork, _currentUserService.TenantId ?? Guid.Empty, request, cancellationToken);
+        return await CreateExternalTicketCoreAsync(request, null, null, cancellationToken);
+    }
 
     public async Task<EhcTicketDetailDto> CreateExternalPropertyEnquiryAsync(
         CreateEhcTicketRequestDto request, EhcPropertyListingContextDto property, Guid submissionId,

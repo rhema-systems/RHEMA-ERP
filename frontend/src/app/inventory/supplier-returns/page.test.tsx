@@ -158,4 +158,21 @@ describe('Inventory supplier-return actions', () => {
     expect(screen.queryByRole('columnheader', { name: 'System cost' })).not.toBeInTheDocument();
     expect(screen.getByRole('spinbutton')).toHaveValue(1);
   });
+
+  it('shows original invoice and receipt context and reserves only the current draft allowance when editing', async () => {
+    mocks.sources = [{ id: 'grn-1', supplierId: 'supplier-1', warehouseId: 'warehouse-1', grnNumber: 'GRN-1', purchaseOrderNumber: 'PO-001',
+      returnSource: { receiptNumber: 'RCT-001', lines: [{ goodsReceiptNoteItemId: 'grn-line-1', previouslyReturnedQuantity: 5,
+        reservedReturnQuantity: 12, remainingReturnableQuantity: 3, invoicedQuantity: 10,
+        invoices: [{ invoiceId: 'invoice-1', invoiceNumber: 'VI-001', baseQuantity: 10, posted: true }] }] },
+      items: [{ id: 'grn-line-1', acceptedQuantity: 20, unitCost: 700, itemCode: 'SKU-1', unitOfMeasure: 'EA' }] }];
+    mocks.get.mockResolvedValue({ ...mocks.rows[0], goodsReceiptNoteId: 'grn-1', items: [{ ...returnedLine(), grnItemId: 'grn-line-1' }] });
+    render(<Page />); fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(await screen.findByText('PO: PO-001 · Receipt: RCT-001')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'VI-001' })).toHaveAttribute('href', '/procurement/supplier-invoices/invoice-1');
+    expect(screen.getByRole('spinbutton')).toHaveAttribute('max', '4');
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mocks.toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Check return quantities' }));
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
 });

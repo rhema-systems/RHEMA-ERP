@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
@@ -47,6 +48,17 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly ICurrentUserService _currentUserService;
         private readonly ApplicationDbContext _dbContext;
         private readonly IWorkflowService _workflowService;
+        private async Task<FinancePostingProducerContext> ProducerForInvoiceAsync(Guid invoiceId)
+        {
+            var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            if (await _dbContext.SalesOrders.AsNoTracking().AnyAsync(value =>
+                    value.TenantId == tenantId && value.InvoiceId == invoiceId, HttpContext.RequestAborted))
+                return new(FinanceDimensionRouteId.SalesOrderCustomerInvoice);
+            if (await _dbContext.Set<ErpSystem.Core.Entities.Inventory.InventoryDisposalAuctionInvoice>().AsNoTracking().AnyAsync(value =>
+                    value.TenantId == tenantId && value.InvoiceId == invoiceId, HttpContext.RequestAborted))
+                return new(FinanceDimensionRouteId.InventoryDisposalAuctionInvoice);
+            return DimensionProducer;
+        }
 
         public InvoiceController(
             IInvoiceService invoiceService,
@@ -139,7 +151,7 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 try
                 {
-                    invoice = await _invoiceService.GetByIdAsync(invoiceId, DimensionProducer);
+                    invoice = await _invoiceService.GetByIdAsync(invoiceId, await ProducerForInvoiceAsync(invoiceId));
                 }
                 catch (KeyNotFoundException)
                 {
@@ -153,7 +165,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 {
                     try
                     {
-                        invoice = await _invoiceService.GetByIdAsync(invoice.Id, DimensionProducer) ?? invoice;
+                        invoice = await _invoiceService.GetByIdAsync(invoice.Id, await ProducerForInvoiceAsync(invoice.Id)) ?? invoice;
                     }
                     catch (KeyNotFoundException)
                     {
@@ -242,7 +254,7 @@ namespace ErpSystem.Api.Controllers.Finance
             if (id != dto.Id) return BadRequest("ID mismatch");
             if (!await HasAnyPermissionAsync("Finance.AR.Invoices.Edit", "Finance.AR.Invoices.Write"))
                 return Forbid();
-            try { return Ok(await _invoiceService.UpdateAsync(dto, DimensionProducer)); }
+            try { return Ok(await _invoiceService.UpdateAsync(dto, await ProducerForInvoiceAsync(dto.Id))); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -317,7 +329,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 return Forbid();
             try
             {
-                return Ok(await _invoiceService.SubmitAsync(id, DimensionProducer, HttpContext.RequestAborted));
+                return Ok(await _invoiceService.SubmitAsync(id, await ProducerForInvoiceAsync(id), HttpContext.RequestAborted));
             }
             catch (KeyNotFoundException) { return NotFound(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
@@ -328,7 +340,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (!await HasAnyPermissionAsync("Finance.AR.Invoices.ApprovePost"))
                 return Forbid();
-            try { return Ok(await _invoiceService.PostAsync(id, DimensionProducer)); }
+            try { return Ok(await _invoiceService.PostAsync(id, await ProducerForInvoiceAsync(id))); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 

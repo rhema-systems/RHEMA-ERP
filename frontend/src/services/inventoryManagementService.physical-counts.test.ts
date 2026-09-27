@@ -14,6 +14,28 @@ beforeEach(() => {
 });
 
 describe('inventoryManagementService controlled physical counts', () => {
+  it('searches committee employees using the selected warehouse and exact bin scope', async () => {
+    await inventoryManagementService.getPhysicalCountCounterOptions('warehouse-1', ' Ama ', 'bin-1');
+    expect(mockedAxios.get).toHaveBeenCalledWith(expect.stringMatching(/\/physical-counts\/counter-options$/), {
+      headers: { Authorization: 'Bearer tenant-token', 'Content-Type': 'application/json' },
+      params: { warehouseId: 'warehouse-1', search: 'Ama', locationId: 'bin-1' },
+    });
+  });
+
+  it('refuses employee search without warehouse scope', async () => {
+    await expect(inventoryManagementService.getPhysicalCountCounterOptions('')).rejects.toThrow('Select a warehouse');
+    expect(mockedAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('saves employee identities and concurrency controls without accepting caller actor or email', async () => {
+    mockedAxios.put.mockResolvedValueOnce({ status: 204 });
+    const request = { employeeIds: ['employee-1', 'employee-2'], rowVersion: 'AQID', idempotencyKey: 'committee-key', comment: 'Rotation' };
+    await inventoryManagementService.updatePhysicalCountCounters('count-1', request);
+    expect(mockedAxios.put).toHaveBeenCalledWith(expect.stringMatching(/\/physical-counts\/count-1\/counters$/), request, {
+      headers: { Authorization: 'Bearer tenant-token', 'Content-Type': 'application/json' },
+    });
+  });
+
   it('loads decision options against the saved count, without accepting caller warehouse or location scope', async () => {
     await inventoryManagementService.getPhysicalCountDecisions(false, 'count-1');
     expect(mockedAxios.get).toHaveBeenCalledWith(expect.stringMatching(/\/physical-counts\/decision-options$/), {

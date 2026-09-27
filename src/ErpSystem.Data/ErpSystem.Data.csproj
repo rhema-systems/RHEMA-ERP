@@ -28,6 +28,7 @@
     <ProjectReference Include="../ErpSystem.Shared/ErpSystem.Shared.csproj" />
   </ItemGroup>
 
+
   <ItemGroup>
     <!--
       The merged pre-baseline archive retains 607 exact historical migration
@@ -75,6 +76,33 @@
   <Target Name="ExcludeRoslynAuthoringAnalyzers" AfterTargets="ResolveLockFileAnalyzers">
     <ItemGroup>
       <Analyzer Remove="@(Analyzer)" Condition="'%(Analyzer.NuGetPackageId)' == 'Microsoft.CodeAnalysis.Analyzers'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Full model metadata is retained. Exact repeated statements share generated helpers
+       in obj, avoiding hundreds of megabytes of duplicate compiler binding work. -->
+  <Target Name="CompilePreservedMigrationModels" BeforeTargets="CoreCompile"
+          DependsOnTargets="ResolveProjectReferences" Condition="'$(TdcFastEfBuild)' != 'true'">
+    <PropertyGroup>
+      <MigrationModelChunkDirectory>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'MigrationSharedModels'))))</MigrationModelChunkDirectory>
+      <MigrationModelCompilerProject>$(MSBuildProjectDirectory)/../../tools/ErpSystem.MigrationModelCompiler/ErpSystem.MigrationModelCompiler.csproj</MigrationModelCompilerProject>
+      <!-- Release-host output overrides belong to the ERP artifact, not this SDK-only build tool. -->
+      <MigrationModelCompilerRemovedProperties>TargetFramework;TargetFrameworks;RuntimeIdentifier;RuntimeIdentifiers;SelfContained;OutputPath;BaseOutputPath;IntermediateOutputPath;BaseIntermediateOutputPath;MSBuildProjectExtensionsPath;PublishDir;PublishUrl;OutDir;ArtifactsPath;UseArtifactsOutput;AppendTargetFrameworkToOutputPath;AppendRuntimeIdentifierToOutputPath;PublishAot;PublishReadyToRun;PublishSingleFile;PublishTrimmed</MigrationModelCompilerRemovedProperties>
+    </PropertyGroup>
+    <MSBuild Projects="$(MigrationModelCompilerProject)" Targets="Restore;Build"
+             Properties="Configuration=$(Configuration)" RemoveProperties="$(MigrationModelCompilerRemovedProperties)" />
+    <MSBuild Projects="$(MigrationModelCompilerProject)" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration)" RemoveProperties="$(MigrationModelCompilerRemovedProperties)">
+      <Output TaskParameter="TargetOutputs" ItemName="MigrationModelCompilerTarget" />
+    </MSBuild>
+    <Exec Command="dotnet &quot;@(MigrationModelCompilerTarget)&quot; --share-statements &quot;$(MSBuildProjectDirectory)/Migrations&quot; &quot;$(MigrationModelChunkDirectory)&quot;"
+          EnvironmentVariables="DOTNET_GCHeapHardLimit=0x40000000" />
+    <ReadLinesFromFile File="$(MigrationModelChunkDirectory)/compile-files.txt">
+      <Output TaskParameter="Lines" ItemName="PreservedMigrationModelCompile" />
+    </ReadLinesFromFile>
+    <ItemGroup>
+      <Compile Remove="Migrations\*.Designer.cs;Migrations\ApplicationDbContextModelSnapshot.cs" />
+      <Compile Include="@(PreservedMigrationModelCompile)" />
     </ItemGroup>
   </Target>
 

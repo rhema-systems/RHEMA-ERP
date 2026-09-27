@@ -15,7 +15,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Inventory;
 
-public sealed class InventoryTrackingControlService : IInventoryTrackingControlService
+public sealed partial class InventoryTrackingControlService : IInventoryTrackingControlService
 {
     private const string TrackingExceptionEntityTypeCode = "INVENTORY_TRACKING_EXCEPTION";
     private const string WorkflowPayloadHashProperty = "inventoryTrackingExceptionPayloadHash";
@@ -180,8 +180,11 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
         if (request.WarehouseId == Guid.Empty || request.ReferenceId == Guid.Empty || string.IsNullOrWhiteSpace(request.ReferenceType))
             throw new InventoryTrackingControlException("INV_TRACKING_REFERENCE_INVALID", "Warehouse and transaction reference are required for tracking enforcement.");
 
-        await RequireCapabilityAsync(PermissionFor(request.Direction), request.WarehouseId,
-            $"{request.ReferenceType}:{request.ReferenceId:N}", cancellationToken, request.LocationId);
+        if (request.TransferDispatchAllocationId.HasValue)
+            await RequireTransitAllocationCapabilityAsync(request, cancellationToken);
+        else
+            await RequireCapabilityAsync(PermissionFor(request.Direction), request.WarehouseId,
+                $"{request.ReferenceType}:{request.ReferenceId:N}", cancellationToken, request.LocationId);
 
         var requirements = await GetRequirementsAsync(request.InventoryItemId, cancellationToken);
         var item = await _unitOfWork.Repository<InventoryItem>()
@@ -212,10 +215,10 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
         if (request.ManufactureDate.HasValue && request.ExpiryDate.HasValue &&
             request.ManufactureDate.Value.ToUniversalTime() >= request.ExpiryDate.Value.ToUniversalTime())
             throw new InventoryTrackingControlException("INV_TRACKING_DATES_INVALID", "Expiry date must be later than manufacture date.");
-        if (request.Direction != InventoryTrackingDirection.TransferIn &&
+        if (request.Direction != InventoryTrackingDirection.TransferIn && !request.TransferDispatchAllocationId.HasValue &&
             request.ExpiryDate.HasValue && request.ExpiryDate.Value.ToUniversalTime() <= now)
             violations.Add("INV_TRACKING_EXPIRED");
-        if (request.Direction != InventoryTrackingDirection.TransferIn &&
+        if (request.Direction != InventoryTrackingDirection.TransferIn && !request.TransferDispatchAllocationId.HasValue &&
             request.ExpiryDate.HasValue && requirements.MinimumShelfLifeDays > 0 &&
             request.ExpiryDate.Value.ToUniversalTime() < now.Date.AddDays(requirements.MinimumShelfLifeDays))
             violations.Add("INV_TRACKING_MINIMUM_SHELF_LIFE");
@@ -311,10 +314,10 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
             request.ManufactureDate ??= canonical.ManufactureDate;
             request.ExpiryDate ??= canonical.ExpiryDate;
             request.BatchNumber ??= canonical.BatchNumber;
-            if (request.Direction != InventoryTrackingDirection.TransferIn &&
+            if (request.Direction != InventoryTrackingDirection.TransferIn && !request.TransferDispatchAllocationId.HasValue &&
                 request.ExpiryDate.HasValue && request.ExpiryDate.Value.ToUniversalTime() <= now)
                 violations.Add("INV_TRACKING_EXPIRED");
-            if (request.Direction != InventoryTrackingDirection.TransferIn &&
+            if (request.Direction != InventoryTrackingDirection.TransferIn && !request.TransferDispatchAllocationId.HasValue &&
                 request.ExpiryDate.HasValue && requirements.MinimumShelfLifeDays > 0 &&
                 request.ExpiryDate.Value.ToUniversalTime() < now.Date.AddDays(requirements.MinimumShelfLifeDays))
                 violations.Add("INV_TRACKING_MINIMUM_SHELF_LIFE");
@@ -328,7 +331,7 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
             if (available < request.Quantity)
                 throw new InventoryTrackingControlException("INV_TRACKING_LOT_INSUFFICIENT", $"The selected tracked stock has {available.ToString(CultureInfo.InvariantCulture)} units available, below the requested {request.Quantity.ToString(CultureInfo.InvariantCulture)}.");
 
-            if (requirements.EnforcesFifoIssue)
+            if (requirements.EnforcesFifoIssue && !request.TransferDispatchAllocationId.HasValue)
             {
                 var fifoPersisted = await Events.Where(value => value.TenantId == TenantId &&
                         value.InventoryItemId == request.InventoryItemId && value.WarehouseId == request.WarehouseId &&

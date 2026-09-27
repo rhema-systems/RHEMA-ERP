@@ -15,6 +15,8 @@ using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Inventory;
+using ErpSystem.Api.Services.Sales;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -27,7 +29,7 @@ using System.Threading.Tasks;
 
 namespace ErpSystem.Api.Services.Finance.AR
 {
-    public class InvoiceService : IInvoiceService
+    public partial class InvoiceService : IInvoiceService
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
@@ -39,6 +41,7 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
         private readonly IWorkflowIntegrationService? _workflowIntegration;
+        private readonly IInventoryTrackingControlService? _inventoryTracking;
 
         public InvoiceService(
             IUnitOfWork unitOfWork,
@@ -50,7 +53,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             IFinancePostingEngine? financePostingEngine = null,
             IFinanceAuditService? financeAuditService = null,
             IFinanceSourceDimensionService? sourceDimensions = null,
-            IWorkflowIntegrationService? workflowIntegration = null)
+            IWorkflowIntegrationService? workflowIntegration = null,
+            IInventoryTrackingControlService? inventoryTracking = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -62,6 +66,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             _financeAuditService = financeAuditService;
             _sourceDimensions = sourceDimensions;
             _workflowIntegration = workflowIntegration;
+            _inventoryTracking = inventoryTracking;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -205,6 +210,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingProducerContext? producer,
             CancellationToken cancellationToken)
         {
+            await SalesOrderInvoiceGuard.ValidateCreationAsync(_unitOfWork, TenantId, dto, producer, cancellationToken);
             var counterparty = await ResolveCustomerCounterpartyAsync(
                 dto.BusinessPartnerId,
                 dto.BusinessPartnerRoleId,
@@ -322,6 +328,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                     InvoiceId = invoice.Id,
                     LineItemType = lineItemType,
                     ProductId = lineDto.ProductId,
+                    InventoryItemId = lineDto.InventoryItemId,
+                    WarehouseId = lineDto.WarehouseId,
+                    LocationId = lineDto.LocationId,
+                    LotNumber = lineDto.LotNumber,
+                    SerialNumber = lineDto.SerialNumber,
+                    ExpirationDate = lineDto.ExpirationDate,
                     GLAccountId = lineDto.GLAccountId,
                     Description = lineDto.Description,
                     Quantity = lineDto.Quantity,
@@ -398,7 +410,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             {
                 if (_sourceDimensions is null)
                     throw new InvalidOperationException("Finance source dimensions are not configured for the manual AR invoice route.");
-                await _unitOfWork.ExecuteInTransactionAsync(async token =>
+                async Task PersistInvoiceAsync(CancellationToken token)
                 {
                     await _unitOfWork.Repository<Invoice>().AddAsync(invoice);
                     await _unitOfWork.SaveChangesAsync(token);
@@ -412,7 +424,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                         budgetReservationSourceDocumentType: null,
                         "Customer invoice created.",
                         token);
-                }, cancellationToken);
+                }
+                if (_unitOfWork.HasActiveTransaction)
+                    await PersistInvoiceAsync(cancellationToken);
+                else
+                    await _unitOfWork.ExecuteInTransactionAsync(PersistInvoiceAsync, cancellationToken);
             }
             else
             {
@@ -524,6 +540,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingProducerContext? producer,
             CancellationToken cancellationToken)
         {
+            await InventoryDisposalAuctionInvoiceGuard.RequireNotGeneratedAsync(_unitOfWork, TenantId, dto.Id, cancellationToken);
+            await SalesOrderInvoiceGuard.RequireNotGeneratedAsync(_unitOfWork, TenantId, dto.Id, cancellationToken);
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == dto.Id)
                 .Include(i => i.LineItems)
@@ -734,6 +752,8 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
         {
+            await InventoryDisposalAuctionInvoiceGuard.RequireNotGeneratedAsync(_unitOfWork, TenantId, id, cancellationToken);
+            await SalesOrderInvoiceGuard.RequireNotGeneratedAsync(_unitOfWork, TenantId, id, cancellationToken);
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .FirstOrDefaultAsync(i => i.TenantId == TenantId && i.Id == id);
 
@@ -760,6 +780,8 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var workflow = _workflowIntegration ?? throw new InvalidOperationException("Invoice workflow integration is not configured.");
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
+            await InventoryDisposalAuctionInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);
+            await SalesOrderInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);
             if (invoice.Status is not (InvoiceStatus.Draft or InvoiceStatus.Rejected) || invoice.JournalEntryId.HasValue)
                 throw new InvalidOperationException("Only unposted draft or rejected invoices can be submitted.");
             await ResolveCustomerForPostingAsync(invoice, cancellationToken);
@@ -801,11 +823,13 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             if (_unitOfWork.HasActiveTransaction)
             {
+                _inventoryValuationService.ResetProcessingAttempt();
                 await _unitOfWork.AcquireTransactionLockAsync($"AR:Invoice:{TenantId:N}:{id:N}", cancellationToken);
                 return await action();
             }
             return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
+                _inventoryValuationService.ResetProcessingAttempt();
                 await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
                 try
                 {
@@ -848,6 +872,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (invoice == null)
                 throw new KeyNotFoundException($"Invoice with Id '{id}' not found.");
 
+            await InventoryDisposalAuctionInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);
+            await SalesOrderInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);
+
             if (invoice.Status == InvoiceStatus.Sent && invoice.JournalEntryId.HasValue)
                 return MapToDto(invoice); // Retried release must never issue stock or increase debt twice.
             if (invoice.Status == InvoiceStatus.Draft)
@@ -889,10 +916,15 @@ namespace ErpSystem.Api.Services.Finance.AR
             invoice.UpdatedBy = UserName;
 
             // Process Inventory Issues for Inventory-type line items
-            foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == LineItemType.Inventory))
+            foreach (var line in invoice.LineItems.Where(l => !l.IsDeleted && !invoice.IsOpeningBalance && l.LineItemType == LineItemType.Inventory)
+                         .OrderBy(value => value.CreatedAt).ThenBy(value => value.Id))
             {
+                if (!line.InventoryItemId.HasValue || !line.WarehouseId.HasValue || line.Quantity <= 0)
+                    throw new InvalidOperationException("Every stock invoice line requires its inventory item, warehouse and positive quantity before posting.");
                 if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
                 {
+                    if (producer?.RouteId == FinanceDimensionRouteId.SalesOrderCustomerInvoice)
+                        await RequireSalesStockTracking().StageEventAsync(SalesTrackingRequest(invoice, line), cancellationToken);
                     var totalCost = await _inventoryValuationService.ProcessIssueAsync(
                         line.InventoryItemId.Value,
                         line.WarehouseId.Value,
@@ -1027,6 +1059,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
             if (invoice.Status is InvoiceStatus.ReadyToPost or InvoiceStatus.Approved)
                 return await SendInvoiceCoreAsync(id, producer, cancellationToken);
+            await InventoryDisposalAuctionInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);
+            await SalesOrderInvoiceGuard.ValidateAsync(_unitOfWork, TenantId, invoice, producer, cancellationToken);
             var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
 
             if (producer is not null)
@@ -1079,6 +1113,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<InvoiceDto> VoidInvoiceAsync(Guid id, string reason, CancellationToken cancellationToken = default)
         {
+            await SalesOrderInvoiceGuard.RequireNotGeneratedAsync(_unitOfWork, TenantId, id, cancellationToken);
             var invoice = await _unitOfWork.Repository<Invoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -1088,6 +1123,25 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (invoice.Status == InvoiceStatus.Cancelled)
                 throw new InvalidOperationException("Invoice is already cancelled.");
+
+            var auctionSource = await _unitOfWork.Repository<ErpSystem.Core.Entities.Inventory.InventoryDisposalAuctionInvoice>()
+                .GetQueryable(value => value.TenantId == TenantId && value.InvoiceId == invoice.Id)
+                .Include(value => value.Disposal).SingleOrDefaultAsync(cancellationToken);
+            if (auctionSource is not null)
+            {
+                if (string.IsNullOrWhiteSpace(reason) || invoice.JournalEntryId.HasValue || invoice.PaidAmount != 0 ||
+                    invoice.CreditedAmount != 0 || invoice.Status is not (InvoiceStatus.Draft or InvoiceStatus.Rejected) ||
+                    auctionSource.Disposal.Status is not (ErpSystem.Core.Entities.Inventory.InventoryDisposalStatus.Approved or
+                        ErpSystem.Core.Entities.Inventory.InventoryDisposalStatus.ReadyForExecution))
+                    throw new InvalidOperationException("Only an unposted auction invoice draft can be cancelled before stock posting is prepared. Posted auction invoices require a governed Finance reversal and disposal reconciliation.");
+                invoice.Status = InvoiceStatus.Cancelled;
+                invoice.Notes = $"{invoice.Notes}\n\nAuction draft cancelled: {reason.Trim()}";
+                invoice.UpdatedAt = DateTime.UtcNow;
+                invoice.UpdatedBy = UserName;
+                await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                return MapToDto(invoice);
+            }
 
             var now = DateTime.UtcNow;
             invoice.Status = InvoiceStatus.Cancelled;
@@ -1241,7 +1295,9 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             ArgumentNullException.ThrowIfNull(producer);
             if (producer.RouteId is not (FinanceDimensionRouteId.FinanceArCustomerInvoice
-                or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice))
+                or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice
+                or FinanceDimensionRouteId.InventoryDisposalAuctionInvoice
+                or FinanceDimensionRouteId.SalesOrderCustomerInvoice))
                 throw new InvalidOperationException("The trusted producer context is not a supported Finance AR customer-invoice route.");
             return producer;
         }
@@ -1466,15 +1522,24 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                 if (line.LineItemType == LineItemType.Inventory && line.CostTotal.HasValue && line.CostTotal.Value > 0m)
                 {
+                    var salesSource = producer?.RouteId == FinanceDimensionRouteId.SalesOrderCustomerInvoice;
+                    ErpSystem.Core.Entities.Inventory.InventoryItem? stockItem = null;
+                    if (salesSource && originalAccounts is null)
+                        stockItem = await _unitOfWork.Repository<ErpSystem.Core.Entities.Inventory.InventoryItem>()
+                            .GetQueryable(value => value.TenantId == tenantId && value.Id == line.InventoryItemId && !value.IsDeleted)
+                            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                            ?? throw new InvalidOperationException("The Sales invoice inventory item is unavailable in this tenant.");
                     var cogsAccountId = originalAccounts?.Account("AR-COGS", line.Id)
-                        ?? settings.ControlAccountCOGSId
+                        ?? stockItem?.CostOfGoodsSoldAccountId ?? settings.ControlAccountCOGSId
                         ?? throw new InvalidOperationException("COGS account is not configured for AR inventory invoice posting.");
-                    var inventoryAccountId = originalAccounts?.Account("AR-Inventory")
-                        ?? settings.ControlAccountInventoryId
+                    var inventoryAccountId = originalAccounts?.Account("AR-Inventory", salesSource ? line.Id : null)
+                        ?? stockItem?.InventoryAccountId ?? settings.ControlAccountInventoryId
                         ?? throw new InvalidOperationException("Inventory control account is not configured for AR inventory invoice posting.");
 
-                    await ResolvePostingAccountAsync(cogsAccountId, "COGS account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
-                    await ResolvePostingAccountAsync(inventoryAccountId, "inventory control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+                    var cogsAccount = await ResolvePostingAccountAsync(cogsAccountId, "COGS account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
+                    var inventoryAccount = await ResolvePostingAccountAsync(inventoryAccountId, "inventory control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+                    if (salesSource && (cogsAccount.AccountType != AccountType.Expense || inventoryAccount.AccountType != AccountType.Asset))
+                        throw new InvalidOperationException("Sales stock posting requires an Expense COGS account and an Asset inventory account.");
 
                     var costAmount = RoundMoney(line.CostTotal.Value);
                     var cogsPostingLine = BuildPostingLine(
@@ -1492,7 +1557,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     ApplySourceDimensions(cogsPostingLine, line, sourceLineDimensions);
                     postingLines.Add(cogsPostingLine);
 
-                    postingLines.Add(BuildPostingLine(
+                    var inventoryPostingLine = BuildPostingLine(
                         inventoryAccountId,
                         $"Inventory issue - {invoice.InvoiceNumber} - {line.Description}",
                         debitTransactionAmount: 0m,
@@ -1503,7 +1568,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                         invoice.InvoiceDate,
                         invoice.InvoiceNumber,
                         lineNumber++,
-                        "AR-Inventory"));
+                        "AR-Inventory");
+                    if (salesSource) inventoryPostingLine.SourceDocumentLineId = line.Id;
+                    postingLines.Add(inventoryPostingLine);
                 }
             }
 

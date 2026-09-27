@@ -17,11 +17,12 @@ import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/Wo
 import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import { Plus, Trash2, Package, AlertCircle, Pencil, Check, X } from 'lucide-react';
 import { RequisitionItemSelect } from './RequisitionItemSelect';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 import {
   inventoryRequisitionService,
   InventoryRequisitionDetailDto, InventoryRequisitionItemDto,
   CreateInventoryRequisitionDto, CreateInventoryRequisitionItemDto,
-  AddRequisitionItemDto, UpdateRequisitionItemDto, DepartmentDto,
+  AddRequisitionItemDto, UpdateRequisitionItemDto,
   RequisitionStatusMap, RequisitionTypeMap
 } from '@/services/inventoryRequisitionService';
 import { inventoryManagementService, WarehouseDto, WarehouseInventoryItemDto, WarehouseLocationDto, BinStockDto } from '@/services/inventoryManagementService';
@@ -42,12 +43,14 @@ interface RequisitionDialogProps {
     projectTitle: string;
     departmentId?: string;
     departmentName?: string;
+    organizationUnitId?: string;
+    organizationUnitName?: string;
   };
 }
 
 interface FormData {
-  departmentId: string;
-  departmentName: string;
+  organizationUnitId: string;
+  organizationUnitName: string;
   warehouseId: string;
   locationId: string;
   requisitionType: number;
@@ -113,7 +116,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [requisitionDetail, setRequisitionDetail] = useState<InventoryRequisitionDetailDto | null>(null);
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+
   const [warehouseInventoryItems, setWarehouseInventoryItems] = useState<WarehouseInventoryItemDto[]>([]);
   const [warehouseLocations, setWarehouseLocations] = useState<WarehouseLocationDto[]>([]);
   const [locationStockItems, setLocationStockItems] = useState<BinStockDto[]>([]);
@@ -126,8 +129,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   const [pendingItems, setPendingItems] = useState<CreateInventoryRequisitionItemDto[]>([]);
 
   const [formData, setFormData] = useState<FormData>({
-    departmentId: '',
-    departmentName: '',
+    organizationUnitId: '',
+    organizationUnitName: '',
     warehouseId: '',
     locationId: '',
     requisitionType: 1,
@@ -176,8 +179,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       setItemFormData({ inventoryItemId: '', locationId: '', requestedQuantity: 1, lotNumber: '', batchNumber: '', serialNumber: '', notes: '' });
       if (mode === 'create') {
         setFormData({
-          departmentId: projectContext?.departmentId || '',
-          departmentName: projectContext?.departmentName || '',
+          organizationUnitId: projectContext?.organizationUnitId || '',
+          organizationUnitName: projectContext?.organizationUnitName || '',
           warehouseId: '',
           locationId: '',
           requisitionType: projectContext ? 2 : 1,
@@ -190,7 +193,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         setWarehouseLocations([]);
         setLocationStockItems([]);
       }
-      loadDepartments();
+
     }
   }, [open, mode, projectContext]);
 
@@ -242,14 +245,6 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
     }
   }, [formData.locationId, formData.warehouseId, isCreateMode]);
 
-  const loadDepartments = async () => {
-    try {
-      const data = await inventoryRequisitionService.getDepartments();
-      setDepartments(data);
-    } catch (err) {
-      console.error('Error loading departments:', err);
-    }
-  };
 
   const loadRequisitionDetail = async () => {
     if (!requisitionId) return;
@@ -258,8 +253,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       const detail = await inventoryRequisitionService.getById(requisitionId);
       setRequisitionDetail(detail);
       setFormData({
-        departmentId: detail.departmentId || '',
-        departmentName: detail.departmentName || '',
+        organizationUnitId: detail.organizationUnitId || '',
+        organizationUnitName: detail.organizationUnitName || detail.departmentName || '',
         warehouseId: detail.warehouseId || '',
         locationId: detail.locationId || '',
         requisitionType: detail.requisitionType || 1,
@@ -321,16 +316,16 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   };
 
   const handleSave = async () => {
-    if (!formData.departmentId || !formData.warehouseId) {
-      toast({ title: 'Validation Error', description: 'Please select department and warehouse', variant: 'destructive' });
+    if (!formData.organizationUnitId || !formData.warehouseId) {
+      toast({ title: 'Validation Error', description: 'Please select an organisation unit and warehouse', variant: 'destructive' });
       return;
     }
     try {
       setSaving(true);
       if (isCreateMode) {
         const createDto: CreateInventoryRequisitionDto = {
-          departmentId: formData.departmentId,
-          departmentName: formData.departmentName,
+          organizationUnitId: formData.organizationUnitId,
+
           warehouseId: formData.warehouseId,
           locationId: formData.locationId || undefined,
           projectId: projectContext?.projectId,
@@ -346,8 +341,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         toast({ title: 'Success', description: 'Requisition created successfully' });
       } else if (isEditMode && requisitionId) {
         await inventoryRequisitionService.update(requisitionId, {
-          departmentId: formData.departmentId,
-          departmentName: formData.departmentName,
+          organizationUnitId: formData.organizationUnitId,
+
           warehouseId: formData.warehouseId,
           locationId: formData.locationId || undefined,
           projectId: projectContext?.projectId,
@@ -603,16 +598,16 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                 ) : null}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Department *</Label>
-                    <Select value={formData.departmentId} onValueChange={(v) => {
-                      const dept = departments.find(d => d.id === v);
-                      setFormData({ ...formData, departmentId: v, departmentName: dept?.name || '' });
-                    }} disabled={!canEdit || (!!projectContext?.departmentId && isCreateMode)}>
-                      <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                      <SelectContent>
-                        {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    {canEdit ? (
+                      <OrganizationUnitPicker
+                        value={formData.organizationUnitId}
+                        onChange={(id, unit) => setFormData(current => ({ ...current, organizationUnitId: id, organizationUnitName: unit?.name || '' }))}
+                        unitLabel="Organisation unit *"
+                        disabled={!!projectContext?.organizationUnitId && isCreateMode}
+                      />
+                    ) : (
+                      <><Label>Organisation unit</Label><p className="text-sm">{formData.organizationUnitName || 'Not recorded'}</p></>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Warehouse *</Label>

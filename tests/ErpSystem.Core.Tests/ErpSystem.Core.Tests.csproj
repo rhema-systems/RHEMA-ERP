@@ -151,6 +151,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Services\Ehc\EhcExternalTicketPolicyTests.cs" />
     <Compile Include="Services\Crm\**\*.cs" />
     <Compile Include="Services\Deployment\**\*.cs" />
     <Compile Include="Services\Procurement\**\*.cs" />
@@ -167,6 +168,12 @@
     <Compile Include="Services\Inventory\InventoryIssueValuationTests.cs" />
     <Compile Include="Services\Inventory\InventoryCurrentCostProjectionTests.cs" />
     <Compile Include="Services\Inventory\InventoryTransferValuationTests.cs" />
+    <Compile Include="Services\Inventory\InventoryTransferAllocationTrackingTests.cs" />
+    <Compile Include="Services\Inventory\InventoryTransitStockReportTests.cs" />
+    <Compile Include="Services\Inventory\InventoryTransitProtectionTests.cs" />
+    <Compile Include="Services\Inventory\SupplierReturnQuantityAllocationTests.cs" />
+    <Compile Include="Services\Inventory\PhysicalCountObservationPolicyTests.cs" />
+    <Compile Include="Services\Inventory\ReceiptStockAttributionTests.cs" />
     <Compile Include="Services\Inventory\InventoryTransferNewBinBalanceTests.cs" />
     <Compile Include="Services\Inventory\InventoryReturnValuationSqlTests.cs" />
     <Compile Include="Services\Inventory\InventoryRequisitionDraftTests.cs" />
@@ -185,6 +192,7 @@
     <Compile Include="Services\Inventory\InventoryStoresArchitectureSqlServerIntegrationTests.cs" />
     <Compile Include="Services\Inventory\E2E010ProjectMaterialLifecycleTests.cs" />
     <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.cs" />
+    <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.Recovery.cs" />
     <Compile Include="Services\Inventory\PhysicalCountPostingEligibilityTests.cs" />
     <Compile Include="Services\Inventory\InventoryOptionalApprovalTests.cs" />
     <Compile Include="Services\Inventory\PurchaseReturnLifecycleTests.cs" />

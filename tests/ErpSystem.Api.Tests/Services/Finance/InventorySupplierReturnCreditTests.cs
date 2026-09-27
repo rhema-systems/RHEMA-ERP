@@ -1,7 +1,9 @@
 using System.Reflection;
 using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Api.Services.Finance.AP;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Shared;
@@ -13,6 +15,73 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class InventorySupplierReturnCreditTests
 {
+    [Theory]
+    [InlineData(500, 0)]
+    [InlineData(600, 80)]
+    [InlineData(450, -40)]
+    public void Mixed_receipt_return_clears_only_uninvoiced_basis_and_retains_invoiced_carrying(decimal carrying, decimal variance)
+    {
+        var (source, captured, inventory, accrual, clearing, varianceAccount) = AllocatedFixture(carrying);
+        var lines = SupplierDebitNoteService.BuildAllocatedReturnDispatchLines(source, captured, clearing, varianceAccount);
+        lines.Sum(x => x.DebitAmount - x.CreditAmount).Should().Be(0m);
+        lines.Single(x => x.AccountId == accrual).DebitAmount.Should().Be(400m);
+        lines.Single(x => x.AccountId == clearing).DebitAmount.Should().Be(carrying / 5m);
+        lines.Single(x => x.AccountId == inventory).CreditAmount.Should().Be(carrying);
+        lines.Where(x => x.AccountId == varianceAccount).Sum(x => x.DebitAmount - x.CreditAmount).Should().Be(variance);
+        lines.Should().NotContain(x => x.TransactionTag == "AP-Control");
+        lines.Should().OnlyContain(x => x.TransactionCurrency == "GHS");
+    }
+
+    [Fact]
+    public void Pure_uninvoiced_return_needs_original_accrual_and_inventory_without_a_clearing_account()
+    {
+        var (source, captured, inventory, accrual, _, variance) = AllocatedFixture(500);
+        captured.Groups.RemoveAll(x => x.OriginalVendorInvoiceId.HasValue);
+        var group = captured.Groups.Single();
+        group.CarryingAmount = 500;
+        group.OriginalAccrualAmount = 500;
+        captured.Allocations.RemoveAll(x => x.AccountingGroupId != group.Id);
+        captured.Allocations.Single().BaseQuantity = 50;
+        captured.Allocations.Single().CarryingAmount = 500;
+        captured.Allocations.Single().OriginalAccrualAmount = 500;
+        captured.AccrualShares.Single().Amount = 500;
+        var lines = SupplierDebitNoteService.BuildAllocatedReturnDispatchLines(source, captured, null, variance);
+        lines.Should().HaveCount(2);
+        lines.Single(x => x.AccountId == accrual).DebitAmount.Should().Be(500);
+        lines.Single(x => x.AccountId == inventory).CreditAmount.Should().Be(500);
+    }
+
+    [Fact]
+    public void Allocated_return_requires_governed_accounts_before_posting()
+    {
+        var (source, captured, inventory, _, clearing, _) = AllocatedFixture(600);
+        Action missingClearing = () => SupplierDebitNoteService.BuildAllocatedReturnDispatchLines(source, captured, null, null);
+        missingClearing.Should().Throw<InvalidOperationException>().WithMessage("RTV_CLEARING_ACCOUNT_REQUIRED*");
+        Action missingVariance = () => SupplierDebitNoteService.BuildAllocatedReturnDispatchLines(source, captured, clearing, null);
+        missingVariance.Should().Throw<InvalidOperationException>().WithMessage("RTV_VARIANCE_ACCOUNT_REQUIRED*");
+        Action inventoryAsClearing = () => SupplierDebitNoteService.BuildAllocatedReturnDispatchLines(source, captured, inventory, Guid.NewGuid());
+        inventoryAsClearing.Should().Throw<InvalidOperationException>().WithMessage("RTV_ACCOUNTS_MUST_DIFFER*");
+    }
+
+    private static (PurchaseReturn Source, SupplierDebitNoteService.CapturedReturnAccounting Captured,
+        Guid Inventory, Guid Accrual, Guid Clearing, Guid Variance) AllocatedFixture(decimal carrying)
+    {
+        var source = new PurchaseReturn { Id = Guid.NewGuid(), ReturnNumber = "RTV-MIXED", ShippedDate = new DateTime(2026, 9, 27) };
+        var line = new PurchaseReturnItem { Id = Guid.NewGuid(), PurchaseReturnId = source.Id, ReturnQuantity = 50 };
+        source.Items.Add(line);
+        var inventory = Guid.NewGuid(); var accrual = Guid.NewGuid(); var clearing = Guid.NewGuid();
+        var receipt = new ProcurementReceiptCostEvidence { Source = new ProcurementAcceptedReceiptLineDto(),
+            FunctionalCurrency = "GHS", PurchaseCurrency = "GHS", AcceptedBaseQuantity = 100,
+            InventoryShares = [new(Guid.NewGuid(), inventory, 1000)], AccrualShares = [new(Guid.NewGuid(), accrual, 1000)] };
+        var uninv = new InventorySupplierReturnAccountingGroup { Id = Guid.NewGuid(), CarryingAmount = carrying * 0.8m, OriginalAccrualAmount = 400 };
+        var inv = new InventorySupplierReturnAccountingGroup { Id = Guid.NewGuid(), OriginalVendorInvoiceId = Guid.NewGuid(), CarryingAmount = carrying * 0.2m };
+        var captured = new SupplierDebitNoteService.CapturedReturnAccounting([new(line, receipt, [])], [uninv, inv],
+            [new() { Id = Guid.NewGuid(), InventoryPurchaseReturnItemId = line.Id, AccountingGroupId = uninv.Id, BaseQuantity = 40, CarryingAmount = uninv.CarryingAmount },
+             new() { Id = Guid.NewGuid(), InventoryPurchaseReturnItemId = line.Id, AccountingGroupId = inv.Id, BaseQuantity = 10, CarryingAmount = inv.CarryingAmount }],
+            [new() { Id = Guid.NewGuid(), AccountId = accrual, Amount = 400 }]);
+        return (source, captured, inventory, accrual, clearing, Guid.NewGuid());
+    }
+
     [Fact]
     public void Dispatch_carrying_allocation_does_not_push_a_negative_cent_to_the_last_return_line()
     {

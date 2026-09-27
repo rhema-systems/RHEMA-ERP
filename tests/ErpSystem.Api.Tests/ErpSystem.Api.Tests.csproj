@@ -30,6 +30,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSupplierInvoiceBoundaryTests.cs" />
@@ -41,6 +42,7 @@
     <Compile Include="Services\Finance\LandedCostSupplierInvoiceTests.cs" />
     <Compile Include="Services\Finance\FinanceSettingsWriteOffMappingTests.cs" />
     <Compile Include="Services\Finance\InventorySupplierReturnCreditTests.cs" />
+    <Compile Include="Services\Finance\InventorySupplierReturnGroupReadTests.cs" />
     <Compile Include="Controllers\Inventory\StockMovementCurrencyTests.cs" />
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
     <Compile Include="Configuration\StartupInitializationPolicyTests.cs" />
@@ -211,6 +213,7 @@
     <Compile Include="Services\Finance\FinanceSourceDimensionAssignmentStoreTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceDimensionServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceSettlementDimensionServiceTests.cs" />
+    <Compile Include="Services\Finance\SalesOrderInvoiceGuardTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceDimensionsApArMigrationTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionRouteConsumerContractTests.cs" />
     <Compile Include="Services\Finance\ExternalFinanceDimensionAdapterContractTests.cs" />
@@ -274,6 +277,9 @@
     <Compile Include="Services\Finance\VendorPaymentBatchCreationTests.cs" />
     <Compile Include="Services\Finance\VendorInvoiceMatchExceptionServiceTests.cs" />
     <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.Sales.cs" />
+    <Compile Include="Services\Finance\SupplierInvoiceCostDifferenceCalculatorTests.cs" />
+    <Compile Include="Services\Finance\SupplierInvoiceReceiptCostLifecycleTests.cs" />
     <Compile Include="Services\Finance\InvoiceTradeDiscountPolicyTests.cs" />
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArCreditNotePostingMigrationTests.cs" />

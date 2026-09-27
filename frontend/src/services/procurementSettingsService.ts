@@ -11,6 +11,7 @@ function getAuthHeaders(): HeadersInit {
 }
 
 export interface ProcurementSettingsDto {
+  purchasePriceDifferenceHandling?: 'RevalueInventory' | 'PurchasePriceVariance';
   autoCloseTenders: boolean;
   enforceSegregationOfDuties: boolean;
   id: string;
@@ -39,6 +40,7 @@ export interface ProcurementSettingsDto {
 }
 
 export interface UpdateProcurementSettingsDto {
+  purchasePriceDifferenceHandling?: 'RevalueInventory' | 'PurchasePriceVariance';
   autoCloseTenders?: boolean;
   enforceSegregationOfDuties?: boolean;
   autoCreateInventoryItems: boolean;
