@@ -526,6 +526,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateManagedAssetService, ErpSystem.Core.Services.Estate.EstateManagedAssetService>();
             services.AddScoped<ErpSystem.Api.Services.Estate.IEstateSalesListingApplicationHandoffService, ErpSystem.Api.Services.Estate.EstateSalesListingApplicationHandoffService>();
             services.AddScoped<ErpSystem.Api.Services.Estate.IGroundRentAdministrationService, ErpSystem.Api.Services.Estate.GroundRentAdministrationService>();
+            services.AddScoped<ErpSystem.Api.Services.Estate.EstateRecurringBillingService>();
+            services.AddHostedService<ErpSystem.Api.Services.Estate.EstateRecurringBillingBackgroundService>();
             services
                 .AddOptions<ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions>()
                 .Configure<IConfiguration>((options, configuration) =>
@@ -682,6 +684,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
               services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ConsolidatedBudgetDocumentBuilder>();
               services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BudgetScenarioComparisonDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.TrialBalanceDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BaseDeltaReportDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.IncomeStatementDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BalanceSheetDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CashFlowStatementDocumentBuilder>();
@@ -999,7 +1002,6 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISupplierDebitNoteService, ErpSystem.Api.Services.Finance.AP.SupplierDebitNoteService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IInventorySupplierReturnFinanceHandoff>(provider =>
                 (ErpSystem.Core.Interfaces.Finance.IInventorySupplierReturnFinanceHandoff)provider.GetRequiredService<ErpSystem.Core.Interfaces.Finance.ISupplierDebitNoteService>());
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IApSupplierIdentityService, ErpSystem.Api.Services.Finance.AP.ApSupplierIdentityService>();
             // FIN-INT-012/013 is a Finance-owned, fail-closed consumer only. Procurement/Inventory
             // supplies approved immutable envelopes, never Finance account ids, and remains the
             // owner of return approval, dispatch, quantities, locations and carrying-cost evidence.
@@ -1355,6 +1357,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPolicyService, ErpSystem.Core.Services.Procurement.ProcurementPolicyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementComplianceDecisionService, ErpSystem.Core.Services.Procurement.ProcurementComplianceDecisionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSodGuardService, ErpSystem.Core.Services.Procurement.ProcurementSodGuardService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSodPolicy, ErpSystem.Core.Services.Procurement.ProcurementSodPolicy>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAccessControlService, ErpSystem.Core.Services.Procurement.ProcurementAccessControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementControlEventService, ErpSystem.Core.Services.Procurement.ProcurementControlEventService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditRecordProvider, ErpSystem.Core.Services.Audit.PlatformAuditLogRecordProvider>();
@@ -1434,6 +1437,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Sales.IDeliveryService, ErpSystem.Core.Services.Sales.DeliveryService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSetupService, ErpSystem.Core.Services.Sales.SalesSetupService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAllocationService, ErpSystem.Core.Services.Sales.SalesAllocationService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.IOpportunityService, ErpSystem.Core.Services.Sales.OpportunityService>();
@@ -1499,6 +1503,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Notification dispatcher background service - sends pending notifications on schedule with dead-letter support
             services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.ProcurementCalendarBackgroundService>();
+            services.AddScoped<ErpSystem.Core.Services.Procurement.ProcurementTenderClosingProcessor>();
+            services.AddHostedService<ErpSystem.Api.Services.ProcurementTenderClosingBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.ProcurementSupplierDueDiligenceBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.ProcurementSupplierAvlBackgroundService>();
 
@@ -1672,6 +1678,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         FinancePermissions.SubmitJournalEntries,
                         FinancePermissions.WorkflowCancel)))
+                .AddPolicy(FinancePermissionPolicyMap.ProjectCurrencyLookupPolicy, policy =>
+                    policy.RequireAuthenticatedUser().Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.ViewFinance, "project.access")))
                 .AddPolicy(FinancePermissions.ViewTenderPaymentJournalPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
                         FinancePermissions.ViewFinance,

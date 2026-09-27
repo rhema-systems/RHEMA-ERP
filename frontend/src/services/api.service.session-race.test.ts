@@ -92,6 +92,32 @@ describe('API session changes during outstanding requests', () => {
     expect(blacklisted).not.toHaveBeenCalled();
   });
 
+  it('presents governed Finance failures as an explanation with a support reference', async () => {
+    fetchMock.mockResolvedValueOnce(response(400, {
+      message: 'DELTA_POSTING_WINDOW_CLOSED: The accounting date is outside this Delta book posting window.',
+    }, '/api/finance/journal-entries/entry/post'));
+
+    await expect(apiService.post('/finance/journal-entries/entry/post')).rejects.toMatchObject({
+      message: 'The accounting date is outside this Delta book posting window. Reference: DELTA_POSTING_WINDOW_CLOSED.',
+      financeTitle: 'Finance action failed',
+      status: 400,
+    });
+  });
+
+  it.each(['/api/ap/invoices/1/post', '/api/ar/invoices/1/post'])(
+    'normalizes Finance subledger feedback from %s',
+    async (path) => {
+      fetchMock.mockResolvedValueOnce(response(400, {
+        message: 'ACCOUNTING_EVENT_APPROVAL_REQUIRED: Independent approval is required before posting.',
+      }, path));
+
+      await expect(apiService.post(path.replace('/api', ''))).rejects.toMatchObject({
+        message: 'Independent approval is required before posting. Reference: ACCOUNTING_EVENT_APPROVAL_REQUIRED.',
+        financeTitle: 'Approval required',
+      });
+    },
+  );
+
   it('does not restore a logged-out session when its refresh finishes later', async () => {
     const refresh = deferred<Response>();
     fetchMock.mockReturnValueOnce(refresh.promise);

@@ -592,6 +592,38 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Complete disposable-reset PASS package did not validate.' }
     Write-Host 'PASS: complete disposable-development baseline reset package validates and writes a manifest'
 
+    $multiMigration = New-PackageRoot 'MULTI_MIGRATION_CHAIN'
+    Copy-Item -Path (Join-Path $pass '*') -Destination $multiMigration
+    $multiMigrationIds = @(
+        '20260916132000_DisposableDevelopmentCurrentModelBaseline',
+        '20260922095320_ReconcileCurrentModelAfterMergedFeatures'
+    )
+    @($multiMigrationIds + 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=dotnet') |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $multiMigration 'migration-discovery.log')
+    Write-HistoryFixture $multiMigration 'repository-migration-history.txt' $multiMigrationIds
+    Write-HistoryFixture $multiMigration 'target-migration-history.txt' $multiMigrationIds
+    $multiPhaseOne = Get-Content -Raw -LiteralPath (Join-Path $multiMigration 'phase-01.json') |
+        ConvertFrom-Json -AsHashtable
+    $multiPhaseOne.repositoryMigrationCount = $multiMigrationIds.Count
+    $multiPhaseOne.latestMigration = $multiMigrationIds[-1]
+    Write-Json (Join-Path $multiMigration 'phase-01.json') $multiPhaseOne
+    $multiPhaseSeven = Get-Content -Raw -LiteralPath (Join-Path $multiMigration 'phase-07.json') |
+        ConvertFrom-Json -AsHashtable
+    $multiPhaseSeven.finalMigrationCount = $multiMigrationIds.Count
+    Write-Json (Join-Path $multiMigration 'phase-07.json') $multiPhaseSeven
+    $multiStatus = Get-Content -Raw -LiteralPath (Join-Path $multiMigration 'reset-status.json') |
+        ConvertFrom-Json -AsHashtable
+    $multiStatus.repositoryMigrationCount = $multiMigrationIds.Count
+    $multiStatus.finalMigrationCount = $multiMigrationIds.Count
+    $multiStatus.latestMigration = $multiMigrationIds[-1]
+    Complete-Status $multiMigration $multiStatus
+    & pwsh -NoProfile -File $validator -EvidenceDirectory $multiMigration -PackageKind DisposableReset -WriteManifest
+    if ($LASTEXITCODE -ne 0) { throw 'Multi-migration disposable-reset PASS package did not validate.' }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validator `
+        -EvidenceDirectory $multiMigration -PackageKind DisposableReset
+    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell rejected the multi-migration disposable-reset package.' }
+    Write-Host 'PASS: ordered multi-migration reset evidence validates under PowerShell 7 and Windows PowerShell 5.1'
+
     foreach($completedPhaseArtifact in @('reset-seed-pass-1.log','reset-seed-pass-2.log',
         'reset-invariants-pass-1.txt','reset-invariants-pass-2.txt','reset-invariants.sha256','reset-dbcc.txt')){
         $tamperRoot=New-PackageRoot ('COMPLETED_PHASE_'+($completedPhaseArtifact -replace '[^A-Za-z0-9]','_'))

@@ -584,7 +584,7 @@ public class TenderService : ITenderService
                 if (recipient is null || recipient.IsDeleted ||
                     recipient.TenantId != _currentUserProvider.TenantId || recipient.TenantId != tender.TenantId ||
                     !recipient.IsActive || recipient.IsBlacklisted ||
-                    !(recipient.PartnerType is "Supplier" or "Contractor" or "Both"))
+                    !(BusinessPartnerRoles.CanProcure(recipient.PartnerType)))
                     throw new ProcurementRequisitionSourcingValidationException(
                         "TENDER_PUBLICATION_RECIPIENT_INVALID",
                         "Publication notices require an active, non-blacklisted supplier record in the current tenant.");
@@ -1665,7 +1665,7 @@ public class TenderService : ITenderService
     }
 
     // Mapping methods
-    private static TenderDto MapToDto(Tender tender)
+    private TenderDto MapToDto(Tender tender)
     {
         return new TenderDto
         {
@@ -1677,7 +1677,7 @@ public class TenderService : ITenderService
             Status = tender.Status,
             PublishDate = tender.PublishDate,
             SubmissionDeadline = tender.SubmissionDeadline,
-            EstimatedValue = tender.EstimatedValue,
+            EstimatedValue = _currentUserProvider.IsExternalUser ? null : tender.EstimatedValue,
             Currency = tender.Currency,
             SourcePurchaseRequisitionId = tender.SourcePurchaseRequisitionId,
             SourcingReleaseId = tender.SourcingReleaseId,
@@ -1690,7 +1690,7 @@ public class TenderService : ITenderService
         };
     }
 
-    private static TenderDetailDto MapToDetailDto(Tender tender, IEnumerable<TenderLot> lots, IEnumerable<TenderItem> items, IEnumerable<TenderDocument> documents, IEnumerable<TenderFee> fees, IEnumerable<TenderInvitation> invitations, IEnumerable<TenderClarification> clarifications, IEnumerable<TenderEvaluatorDto> evaluators, IEnumerable<TenderBid> bids)
+    private TenderDetailDto MapToDetailDto(Tender tender, IEnumerable<TenderLot> lots, IEnumerable<TenderItem> items, IEnumerable<TenderDocument> documents, IEnumerable<TenderFee> fees, IEnumerable<TenderInvitation> invitations, IEnumerable<TenderClarification> clarifications, IEnumerable<TenderEvaluatorDto> evaluators, IEnumerable<TenderBid> bids)
     {
         return new TenderDetailDto
         {
@@ -1705,7 +1705,7 @@ public class TenderService : ITenderService
             SubmissionDeadline = tender.SubmissionDeadline,
             OpeningDate = tender.OpeningDate,
             AwardDate = tender.AwardDate,
-            EstimatedValue = tender.EstimatedValue,
+            EstimatedValue = _currentUserProvider.IsExternalUser ? null : tender.EstimatedValue,
             Currency = tender.Currency,
             SourcePurchaseRequisitionId = tender.SourcePurchaseRequisitionId,
             SourcingReleaseId = tender.SourcingReleaseId,
@@ -2278,7 +2278,7 @@ public class TenderService : ITenderService
                 "The fee revenue GL account must be an active, direct-posting, non-control Revenue account.");
     }
 
-    private static TenderLotDto MapToLotDto(TenderLot lot)
+    private TenderLotDto MapToLotDto(TenderLot lot)
     {
         return new TenderLotDto
         {
@@ -2288,7 +2288,7 @@ public class TenderService : ITenderService
             LotCode = lot.LotCode,
             Title = lot.Title,
             Description = lot.Description,
-            EstimatedValue = lot.EstimatedValue,
+            EstimatedValue = _currentUserProvider.IsExternalUser ? null : lot.EstimatedValue,
             Currency = lot.Currency,
             Status = lot.Status,
             RequiredDeliveryDate = lot.RequiredDeliveryDate,

@@ -129,7 +129,7 @@ describe('transfer dialog', () => {
     expect(screen.queryByText('Receipt discrepancy register')).not.toBeInTheDocument();
     expect(screen.getByRole('dialog').className).toContain('h-[85vh]');
     expect(screen.getByRole('dialog').className).toContain('w-[800px]');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Close', exact: true })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(mocks.close).not.toHaveBeenCalled();
   });

@@ -189,7 +189,7 @@ public sealed class FinanceSettlementDimensionServiceTests
         var invoice = new VendorInvoice
         {
             Id = Guid.NewGuid(), TenantId = tenantId, InvoiceNumber = "VI-DIM-1",
-            SupplierId = Guid.NewGuid(), InvoiceDate = new DateTime(2026, 1, 1), CurrencyCode = "GHS",
+            BusinessPartnerId = Guid.NewGuid(), InvoiceDate = new DateTime(2026, 1, 1), CurrencyCode = "GHS",
             ExchangeRate = 1m
         };
         invoice.LineItems.Add(new VendorInvoiceLineItem
@@ -205,7 +205,7 @@ public sealed class FinanceSettlementDimensionServiceTests
         var payment = new VendorPayment
         {
             Id = Guid.NewGuid(), TenantId = tenantId, PaymentNumber = "VP-DIM-1",
-            SupplierId = invoice.SupplierId, PaymentDate = new DateTime(2026, 2, 1),
+            BusinessPartnerId = invoice.BusinessPartnerId, PaymentDate = new DateTime(2026, 2, 1),
             TotalAmount = 12m, CurrencyCode = "GHS", ExchangeRate = 1m
         };
         var allocation = new VendorPaymentAllocation
@@ -292,7 +292,7 @@ public sealed class FinanceSettlementDimensionServiceTests
         var payment = new CustomerPayment
         {
             Id = Guid.NewGuid(), TenantId = tenantId, PaymentNumber = "CR-DIM-1",
-            CustomerId = invoice.BusinessPartnerId, PaymentDate = new DateTime(2026, 2, 1),
+            BusinessPartnerId = invoice.BusinessPartnerId, PaymentDate = new DateTime(2026, 2, 1),
             TotalAmount = 13m, CurrencyCode = "GHS", ExchangeRate = 1m,
             PaymentMethod = "BankTransfer", Status = "Pending"
         };

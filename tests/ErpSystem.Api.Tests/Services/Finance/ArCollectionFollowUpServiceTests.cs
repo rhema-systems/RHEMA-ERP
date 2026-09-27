@@ -230,12 +230,26 @@ public sealed class ArCollectionFollowUpServiceTests
     [Fact]
     public void FinanceCollectionService_DoesNotReferenceLegacyCustomerStorage()
     {
-        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Api", "Services", "Finance", "AR", "ArCollectionFollowUpService.cs"));
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AR", "ArCollectionFollowUpService.cs"));
+        var entity = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Entities", "Sales", "CollectionEntities.cs"));
+        var migration = Directory.GetFiles(Path.Combine(root, "src", "ErpSystem.Data", "Migrations"), "*CanonicalCollectionBusinessPartnerIdentity.cs")
+            .Single(path => !path.EndsWith(".Designer.cs", StringComparison.Ordinal));
+        var migrationSource = File.ReadAllText(migration);
 
         source.Should().NotContain("Set<Customer>");
         source.Should().NotContain("Include(item => item.Customer)");
         source.Should().NotContain("task.Customer?.");
+        source.Should().NotContain("CustomerId");
         source.Should().Contain("_db.BusinessPartners");
+        entity.Should().Contain("public Guid BusinessPartnerId")
+            .And.Contain("public virtual BusinessPartner BusinessPartner")
+            .And.NotContain("public Guid CustomerId")
+            .And.NotContain("public virtual Customer Customer");
+        migrationSource.Should().Contain("requires CollectionActivities to be empty")
+            .And.Contain("requires PaymentPlans to be empty")
+            .And.Contain("FK_CollectionActivities_BusinessPartners_BusinessPartnerId")
+            .And.Contain("FK_PaymentPlans_BusinessPartners_BusinessPartnerId");
     }
 
     private static ApplicationDbContext CreateContext() => new(

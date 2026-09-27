@@ -142,6 +142,7 @@ public interface IGoodsReceiptNoteService
 /// </summary>
 public interface IInventoryTransferService
 {
+    Task<IEnumerable<InventoryTransferDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default);
     Task<IEnumerable<InventoryTransferDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null);
     Task<IEnumerable<InventoryTransferDto>> GetByWarehouseAsync(Guid warehouseId, bool isSource = true);
     Task<IEnumerable<InventoryTransferDto>> GetInTransitAsync();
@@ -197,6 +198,7 @@ public interface IInventoryTransferService
 /// </summary>
 public interface IPhysicalCountService
 {
+    Task<IEnumerable<PhysicalCountDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default);
     Task<bool> ReviewCountAsync(Guid countId, Guid userId, PhysicalCountMutationRequest request);
     Task<bool> SubmitReviewedCountAsync(Guid countId, Guid userId, PhysicalCountMutationRequest request);
     Task RetainImportedCountSheetAsync(Guid countId, PhysicalCountSheetBinding sheet, Guid userId, string idempotencyKey);
@@ -331,6 +333,7 @@ public interface IInventoryValuationService
 /// </summary>
 public interface ILandedCostService
 {
+    Task<LandedCostDetailDto> SetReceiptWeightAsync(Guid id, Guid receiptItemId, SetLandedCostReceiptWeightDto dto, Guid userId);
     Task<IEnumerable<LandedCostDto>> GetAllAsync();
     Task<IEnumerable<LandedCostDto>> GetByGRNAsync(Guid grnId);
     Task<LandedCostDetailDto?> GetByIdAsync(Guid id);
@@ -388,6 +391,7 @@ public interface IItemSupplierService
 /// </summary>
 public interface IInventoryRequisitionService
 {
+    Task<IEnumerable<InventoryRequisitionDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default);
     Task<IEnumerable<InventoryRequisitionDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null);
     Task<IEnumerable<InventoryRequisitionDto>> GetByProjectAsync(Guid projectId);
     Task<IEnumerable<InventoryRequisitionDto>> GetByWarehouseAsync(Guid warehouseId);
@@ -405,6 +409,7 @@ public interface IInventoryRequisitionService
     Task<IReadOnlyList<InventoryIssueReceiverDto>> GetIssueReceiversAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<InventoryIssueVoucherDto>> GetIssueVouchersAsync(Guid requisitionId, CancellationToken cancellationToken = default);
     Task<InventoryIssueVoucherDto?> GetIssueVoucherAsync(Guid voucherId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<InventoryIssueSearchDto>> SearchIssueVouchersAsync(string search, int take = 8, CancellationToken cancellationToken = default);
     Task<InventoryIssueVoucherDto> AcknowledgeIssueVoucherAsync(Guid voucherId, AcknowledgeInventoryIssueVoucherRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<bool> ReturnAsync(Guid id, ReturnRequisitionDto dto);
     Task<bool> CompleteAsync(Guid id);

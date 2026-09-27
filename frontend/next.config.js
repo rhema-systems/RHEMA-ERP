@@ -2,6 +2,10 @@
 const isStandaloneBuild = process.env.NEXT_OUTPUT === 'standalone';
 
 const nextConfig = {
+  // Keep production compilation isolated from `next dev`. Both commands mutate
+  // their output directory, so sharing `.next` can produce missing page modules.
+  // An explicit directory still wins for parallel or isolated verification runs.
+  distDir: process.env.NEXT_DIST_DIR || (process.env.NODE_ENV === 'development' ? '.next-dev' : '.next'),
   // `next start` is used for local UAT and needs the regular .next output. Docker opts into
   // standalone explicitly through NEXT_OUTPUT=standalone (see Dockerfile).
   output: isStandaloneBuild ? 'standalone' : undefined,
@@ -47,6 +51,10 @@ const nextConfig = {
   
   // Webpack configuration
   webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
+    if (!dev && !isServer && process.env.NEXT_DISABLE_CLIENT_MINIFY === 'true') {
+      config.optimization.minimize = false;
+    }
+
     return config;
   },
   

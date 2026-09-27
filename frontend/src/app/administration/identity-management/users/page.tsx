@@ -44,6 +44,7 @@ import * as z from 'zod';
 import { adminApiService, User, CreateUserRequest, UpdateUserRequest } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
 import PhoneInput from '../../../../components/ui/phone-input';
+import { useTenant } from '../../../../contexts/TenantContext';
 
 const userSchema = z.object({
   username: z.string().min(3, 'Username must be at least 3 characters'),
@@ -63,6 +64,7 @@ type UserFormData = z.infer<typeof userSchema>;
 const normalizeRoleName = (value: string) => value.trim().toLocaleLowerCase();
 
 export default function UsersPage() {
+  const { currentTenant } = useTenant();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
@@ -131,15 +133,22 @@ export default function UsersPage() {
         };
         return adminApiService.updateUser(editingUser.id, updateData);
       } else {
+        if (!userData.password) {
+          throw new Error('Enter a password for the new user.');
+        }
+        if (!currentTenant?.id) {
+          throw new Error('Select an organization before creating a user.');
+        }
         const createData: CreateUserRequest = {
           username: userData.username,
           email: userData.email,
-          password: userData.password || 'TempPassword123!',
+          password: userData.password,
           firstName: userData.firstName,
           lastName: userData.lastName,
           phoneNumber: userData.phoneNumber,
           isActive: userData.isActive,
           roles: userData.roles,
+          tenantId: currentTenant.id,
         };
         return adminApiService.createUser(createData);
       }
@@ -239,6 +248,10 @@ export default function UsersPage() {
   };
 
   const onSubmit = (data: UserFormData) => {
+    if (!editingUser && !data.password) {
+      form.setError('password', { message: 'Enter a password for the new user.' });
+      return;
+    }
     createUserMutation.mutate(data);
   };
 
@@ -547,6 +560,23 @@ export default function UsersPage() {
                       </FormItem>
                     )}
                   />
+
+                  {!editingUser && (
+                    <FormField
+                      control={form.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Password *</FormLabel>
+                          <FormControl>
+                            <Input type="password" autoComplete="new-password" placeholder="Enter a password" {...field} />
+                          </FormControl>
+                          <FormDescription>Use at least 8 characters and the configured password requirements.</FormDescription>
+                          <FormMessage>{form.formState.errors.password?.message}</FormMessage>
+                        </FormItem>
+                      )}
+                    />
+                  )}
 
                   <FormField
                     control={form.control}

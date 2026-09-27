@@ -121,7 +121,7 @@ describe('receipt landed costs', () => {
     expect(screen.queryByRole('button', { name: 'Edit draft costs' })).not.toBeInTheDocument();
   });
   it('cancel does not save', async () => {
-    await open(); fireEvent.click(screen.getByRole('button', { name: 'Cancel', exact: true }));
+    await open(); fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(inventoryManagementService.saveReceiptLandedCost).not.toHaveBeenCalled();
   });
   it('blocks repeated clicks while saving', async () => {

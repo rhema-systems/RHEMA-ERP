@@ -1,7 +1,9 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 
-const minimumHeapMb = process.env.NEXT_BUILD_MAX_OLD_SPACE_SIZE_MB || '6144';
+// The current route graph exceeds a 6 GiB V8 heap during optimized compilation.
+// Keep this build-only and overridable; runtime servers do not inherit the limit.
+const minimumHeapMb = process.env.NEXT_BUILD_MAX_OLD_SPACE_SIZE_MB || '12288';
 const currentNodeOptions = process.env.NODE_OPTIONS || '';
 const hasHeapLimit = /--max-old-space-size(?:=|\s+)/.test(currentNodeOptions);
 const nodeOptions = hasHeapLimit
@@ -13,7 +15,11 @@ const child = spawn(
   [require.resolve('next/dist/bin/next'), 'build'],
   {
     cwd: path.resolve(__dirname, '..'),
-    env: { ...process.env, NODE_OPTIONS: nodeOptions },
+    env: {
+      ...process.env,
+      NODE_OPTIONS: nodeOptions,
+      NEXT_DIST_DIR: process.env.NEXT_DIST_DIR || '.next-production',
+    },
     stdio: 'inherit',
   },
 );

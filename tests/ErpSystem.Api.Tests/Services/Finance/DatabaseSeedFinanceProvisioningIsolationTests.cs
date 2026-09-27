@@ -1,6 +1,8 @@
 using ErpSystem.Api.Extensions;
+using ErpSystem.Api.Services.Finance.Settings;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -32,6 +34,12 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
                          new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(keeper).Options))
         {
             var createScript = setup.Database.GenerateCreateScript()
+                // Preserve deterministic document references in this SQLite
+                // harness; production and migration tests use the SQL Server forms.
+                .Replace("N'PPL-' + LOWER(REPLACE(CONVERT(nvarchar(36), [Id]), N'-', N''))",
+                    "'PPL-' || lower(replace([Id], '-', ''))", StringComparison.Ordinal)
+                .Replace("'LCSD-' + LOWER(REPLACE(CONVERT(varchar(36), [Id]), '-', ''))",
+                    "'LCSD-' || lower(replace([Id], '-', ''))", StringComparison.Ordinal)
                 .Replace("nvarchar(max)", "TEXT", StringComparison.OrdinalIgnoreCase)
                 .Replace("N'", "'", StringComparison.Ordinal)
                 .Replace("LEN(", "LENGTH(", StringComparison.OrdinalIgnoreCase)
@@ -135,9 +143,39 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
         (await verify.AccountAccountingBooks.CountAsync(item =>
             item.TenantId == tenantId && accounts.Select(account => account.Id).Contains(item.AccountId)))
             .Should().Be(9);
+        var baselineBooks = await verify.AccountingBooks.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && new[] { "BASE", "IFRS_ADJUSTMENTS", "USD_PARALLEL" }.Contains(item.Code))
+            .ToListAsync();
+        baselineBooks.Should().HaveCount(3);
+        baselineBooks.Should().OnlyContain(item => item.IsActive && item.AllowsPosting
+            && item.LifecycleStatus == AccountingBookLifecycleStatus.Active,
+            "standard books must be immediately usable in a newly provisioned tenant");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.PrimaryFull && item.Code == "BASE");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.Delta && item.Code == "IFRS_ADJUSTMENTS");
+        baselineBooks.Should().ContainSingle(item => item.BookType == AccountingBookType.ParallelFull && item.Code == "USD_PARALLEL");
         (await verify.AccountAccountingBooks.Where(item => item.TenantId == tenantId)
-            .AllAsync(item => !item.IsEnabled)).Should().BeTrue(
-            "the three freshly configured books are deliberately non-posting until governed activation");
+            .AllAsync(item => item.IsEnabled)).Should().BeTrue(
+            "the executable baseline enables only mappings whose classification authority was validated");
+
+        var initializations = await verify.AccountingBookInitializations.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted).ToListAsync();
+        initializations.Should().HaveCount(3);
+        initializations.Should().OnlyContain(item =>
+            item.InitializationStatus == AccountingBookInitializationStatus.Approved
+            && item.RequiredAccountCount == item.CoveredAccountCount
+            && item.EvidenceFingerprint.Length == 64
+            && item.ReconciliationFingerprint != null && item.ReconciliationFingerprint.Length == 64);
+        var initializationService = new AccountingBookInitializationService(
+            verify, currentUser.Object, Mock.Of<IWorkflowService>(), Mock.Of<IFinanceAuditService>());
+        foreach (var book in baselineBooks)
+        {
+            var validation = await initializationService.ValidateCurrentApprovedEvidenceAsync(book.Id);
+            validation.IsValid.Should().BeTrue(validation.Blocker);
+        }
+
+        (await verify.AccountingBookApplicabilityPolicies.AsNoTracking()
+            .CountAsync(item => item.TenantId == tenantId && !item.IsDeleted)).Should().Be(0,
+            "ordinary posting now resolves Primary automatically and no routing policy is provisioned");
     }
 
     private static async Task AddSupplierPrerequisitesAsync(ApplicationDbContext db, Guid tenantId)
@@ -175,6 +213,21 @@ public sealed class DatabaseSeedFinanceProvisioningIsolationTests
             CreatedBy = "database-seed-order.tests"
         });
         db.AddRange(user, entityType, definition);
+        db.Accounts.Add(new Account
+        {
+            Id = Guid.Parse("00000005-1000-0000-0000-000000000001"),
+            TenantId = tenantId,
+            AccountCode = "1000",
+            AccountNumber = "1000",
+            AccountName = "Cash and Cash Equivalents",
+            AccountType = AccountType.Asset,
+            AccountCategory = "Current Assets",
+            CurrencyCode = "GHS",
+            IsSegmented = false,
+            IsSystemAccount = true,
+            CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            CreatedBy = "System"
+        });
         await db.SaveChangesAsync();
     }
 

@@ -222,6 +222,11 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         public bool AllowDirectPosting { get; set; }
 
+        /// <summary>
+        /// Indicates whether postings to this account participate in Finance budget control.
+        /// </summary>
+        public bool BudgetTrackingEnabled { get; set; }
+
         #endregion
 
         #region BusinessEntity Base Fields
@@ -458,6 +463,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool IsPostingAllowed { get; set; } = true;
 
         /// <summary>
+        /// Enables Finance budget control for postings to this account.
+        /// </summary>
+        public bool BudgetTrackingEnabled { get; set; } = false;
+
+        /// <summary>
         /// Optional human-readable reference number.
         /// 
         /// - Can be used to store external system references or custom codes.
@@ -623,6 +633,12 @@ namespace ErpSystem.Core.DTOs.Finance
         /// Indicates whether direct postings are allowed.
         /// </summary>
         public bool IsPostingAllowed { get; set; } = true;
+
+        /// <summary>
+        /// Enables or disables Finance budget control for postings to this account. Nullable so
+        /// older clients that omit the field do not silently change the existing configuration.
+        /// </summary>
+        public bool? BudgetTrackingEnabled { get; set; }
 
         /// <summary>
         /// Updated human-readable reference number.

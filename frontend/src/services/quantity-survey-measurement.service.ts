@@ -124,7 +124,7 @@ export const quantitySurveyMeasurementService = {
     id: string,
     request: { clientRequestId: string; rowVersion: string }
   ) => apiService.post<MeasurementSheet>(`${root}/${id}/record`, request),
-  addAttachment: (
+  addAttachment: async (
     id: string,
     request: {
       clientRequestId: string;
@@ -138,10 +138,23 @@ export const quantitySurveyMeasurementService = {
     form.append('evidenceType', request.evidenceType);
     form.append('title', request.title);
     form.append('file', request.file, request.file.name);
-    return apiService.post<MeasurementAttachment>(
-      `${root}/${id}/attachments`,
-      form
-    );
+    // Central DMS scanning may take 60 seconds, longer than the ordinary API timeout.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    try {
+      return await apiService.post<MeasurementAttachment>(
+        `${root}/${id}/attachments`,
+        form,
+        controller.signal
+      );
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error('Evidence upload timed out after 120 seconds. Check the sheet before retrying.');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   },
   history: (id: string) =>
     apiService.get<MeasurementRevision[]>(`${root}/${id}/history`),

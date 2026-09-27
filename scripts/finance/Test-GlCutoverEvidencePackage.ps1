@@ -19,6 +19,39 @@ function Get-RequiredNonNullJsonProperty($value, [string]$name, [string]$context
     return $property.Value
 }
 
+function Test-NonnegativeJsonInt64($value) {
+    # ConvertFrom-Json returns small JSON integers as Int32 in Windows
+    # PowerShell and as Int64 in newer PowerShell versions.
+    return (($value -is [int]) -or ($value -is [long])) -and [long]$value -ge 0
+}
+
+function Get-EvidenceRelativePath([string]$rootPath, [string]$filePath) {
+    $normalizedRoot = [System.IO.Path]::GetFullPath($rootPath).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $normalizedFile = [System.IO.Path]::GetFullPath($filePath)
+    $prefix = $normalizedRoot + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $normalizedFile.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Evidence manifest file resolved outside the evidence directory.'
+    }
+    return $normalizedFile.Substring($prefix.Length).Replace('\', '/')
+}
+
+function Move-AtomicManifestFile([string]$sourcePath, [string]$destinationPath) {
+    if (-not (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+        [System.IO.File]::Move($sourcePath, $destinationPath)
+        return
+    }
+    $rollbackPath = $destinationPath + '.' + [Guid]::NewGuid().ToString('N') + '.replace-backup'
+    try {
+        [System.IO.File]::Replace($sourcePath, $destinationPath, $rollbackPath)
+    }
+    finally {
+        if (Test-Path -LiteralPath $rollbackPath -PathType Leaf) {
+            [System.IO.File]::Delete($rollbackPath)
+        }
+    }
+}
+
 function Test-DisposableSourceFingerprintShape([string]$fingerprint) {
     if ([string]::IsNullOrWhiteSpace($fingerprint) -or
         $fingerprint -cnotmatch '^(?<count>\d+)\|(?<latest>EMPTY|\d{14}_[A-Za-z0-9_]+)\|\d+\|\d+\|\d+$') {
@@ -100,7 +133,7 @@ function Read-MigrationHistoryEvidence([string]$path, [string]$context, [bool]$a
         throw "$context evidence is empty or lacks its deterministic terminal newline."
     }
     $normalized = $raw.Replace("`r`n", "`n")
-    if ($normalized.Contains("`r", [StringComparison]::Ordinal)) { throw "$context evidence has a noncanonical line ending." }
+    if ($normalized.IndexOf("`r", [StringComparison]::Ordinal) -ge 0) { throw "$context evidence has a noncanonical line ending." }
     $lines = @($normalized.Substring(0, $normalized.Length - 1).Split("`n"))
     if ($lines[0] -cnotmatch '^RHEMA_MIGRATION_HISTORY_V1\|COUNT=(?<count>0|[1-9]\d*)\|STATE=(?<state>EMPTY|POPULATED)$') {
         throw "$context evidence has a missing or malformed migration-history marker."
@@ -408,10 +441,10 @@ if ($PackageKind -eq 'DisposableReset') {
         $repositoryIds = @(Get-Content -LiteralPath (Join-Path $root 'migration-discovery.log') | ForEach-Object {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
         })
-        if ($repositoryIds.Count -ne 1 -or $repositoryIds[-1] -cne '20260916132000_DisposableDevelopmentCurrentModelBaseline' -or
-            @($repositoryIds | Sort-Object -Unique).Count -ne 1 -or
+        if ($repositoryIds.Count -lt 1 -or $repositoryIds[0] -cne '20260916132000_DisposableDevelopmentCurrentModelBaseline' -or
+            @($repositoryIds | Sort-Object -Unique).Count -ne $repositoryIds.Count -or
             (@($repositoryIds | Sort-Object) -join "`n") -cne ($repositoryIds -join "`n")) {
-            throw 'Disposable-reset repository history is not the exact authoritative disposable-development baseline.'
+            throw 'Disposable-reset repository history does not start with the authoritative baseline followed by one exact ordered migration chain.'
         }
         $repositoryHistoryPath = Join-Path $root 'repository-migration-history.txt'
         $repositoryHistory = Read-MigrationHistoryEvidence $repositoryHistoryPath `
@@ -441,7 +474,8 @@ if ($PackageKind -eq 'DisposableReset') {
     }
     if ($failedOperation -ceq 'PHASE_07_PUBLICATION' -and
         ($durableOrdinal -ne 6 -or -not $validatedTargetHistoryPresent -or
-         $validatedTargetHistoryCount -ne 1 -or [long]$reset.finalMigrationCount -ne 1)) {
+         $validatedTargetHistoryCount -ne $repositoryIds.Count -or
+         [long]$reset.finalMigrationCount -ne $repositoryIds.Count)) {
         throw 'Phase-07 publication failure must bind the exact validated target migration history.'
     }
     $sourceIds = @()
@@ -480,7 +514,7 @@ if ($PackageKind -eq 'DisposableReset') {
         $reset.backupCompleted -is [bool] -and $reset.backupVerified -is [bool] -and $reset.resetStarted -is [bool] -and
         $reset.backupPhaseMarkerPublished -is [bool] -and $reset.backupHashMatchesVerified -is [bool] -and
         $reset.verifyEvidencePresent -is [bool] -and $reset.backupMaterialStateReconciled -is [bool] -and
-        $reset.backupByteLength -is [long]
+        (Test-NonnegativeJsonInt64 $reset.backupByteLength)
     $isApprovedLegacy = $legacyTypesExact -and $reset.reviewedCommit -ceq $approvedLegacyCommit -and $reset.reviewedTree -ceq $approvedLegacyTree -and
         $reset.status -ceq 'FAILED_NO_AUTOMATIC_RETRY' -and $reset.phase -ceq 'SOURCE_CAPTURE_COMPLETE' -and
         [string]$reset.backupMediaId -ceq $approvedLegacyMedia -and [long]$reset.backupByteLength -eq 453042176 -and
@@ -509,7 +543,7 @@ if ($PackageKind -eq 'DisposableReset') {
             if ($fieldValue -isnot [bool]) { throw "Disposable-reset V2 property '$field' must be Boolean." }
         }
         $byteLengthValue = Get-RequiredNonNullJsonProperty $reset 'backupByteLength' 'Disposable-reset V2 status'
-        if ($byteLengthValue -isnot [long] -or $byteLengthValue -lt 0) {
+        if (-not (Test-NonnegativeJsonInt64 $byteLengthValue)) {
             throw 'Disposable-reset V2 backupByteLength must be a nonnegative Int64.'
         }
         foreach ($field in @('backupMediaId','backupFileName','backupPathSha256','currentMaterialSha256','backupSha256')) {
@@ -522,15 +556,14 @@ if ($PackageKind -eq 'DisposableReset') {
         }
         foreach ($field in @('repositoryMigrationCount','finalMigrationCount','orphanMigrationCount')) {
             $fieldValue = Get-RequiredNonNullJsonProperty $reset $field 'Disposable-reset V2 status'
-            if ($fieldValue -isnot [long] -or $fieldValue -lt 0) {
+            if (-not (Test-NonnegativeJsonInt64 $fieldValue)) {
                 throw "Disposable-reset V2 property '$field' must be a nonnegative Int64."
             }
         }
         $latestMigrationValue = Get-RequiredNonNullJsonProperty $reset 'latestMigration' 'Disposable-reset V2 status'
         if ($latestMigrationValue -isnot [string] -or
-            $latestMigrationValue -cne '20260916132000_DisposableDevelopmentCurrentModelBaseline' -or
-            [long]$reset.repositoryMigrationCount -ne 1 -or [long]$reset.orphanMigrationCount -ne 0) {
-            throw 'Disposable-reset V2 repository migration count/latest/orphan identity is not the exact baseline contract.'
+            [long]$reset.repositoryMigrationCount -lt 1 -or [long]$reset.orphanMigrationCount -ne 0) {
+            throw 'Disposable-reset V2 repository migration count/latest/orphan identity is invalid.'
         }
         $expectedFinalMigrationCount = if ($phases -ccontains 'MIGRATIONS_APPLIED' -or $validatedTargetHistoryPresent) {
             $validatedTargetHistoryCount
@@ -544,14 +577,14 @@ if ($PackageKind -eq 'DisposableReset') {
             throw 'Disposable-reset V2 status disagrees with independently derived repository migration evidence.'
         }
         if ($phaseMarkers.Count -ge 1 -and
-            ([long]$phaseMarkers[0].repositoryMigrationCount -ne 1 -or
-             [string]$phaseMarkers[0].latestMigration -cne '20260916132000_DisposableDevelopmentCurrentModelBaseline')) {
-            throw 'Disposable-reset OFFLINE_GATES phase does not bind the exact baseline repository identity.'
+            ([long]$phaseMarkers[0].repositoryMigrationCount -ne $repositoryIds.Count -or
+             [string]$phaseMarkers[0].latestMigration -cne $repositoryIds[-1])) {
+            throw 'Disposable-reset OFFLINE_GATES phase does not bind the exact repository migration identity.'
         }
         if ($phases -ccontains 'MIGRATIONS_APPLIED') {
             $migrationPhaseIndex = [Array]::IndexOf($phases, 'MIGRATIONS_APPLIED')
-            if ([long]$phaseMarkers[$migrationPhaseIndex].finalMigrationCount -ne 1) {
-                throw 'Disposable-reset MIGRATIONS_APPLIED phase does not bind the exact baseline count.'
+            if ([long]$phaseMarkers[$migrationPhaseIndex].finalMigrationCount -ne $repositoryIds.Count) {
+                throw 'Disposable-reset MIGRATIONS_APPLIED phase does not bind the exact repository migration count.'
             }
         }
         if ($sourceIds.Count -gt 0 -or (Test-Path -LiteralPath (Join-Path $root 'source-migration-history.txt') -PathType Leaf)) {
@@ -587,7 +620,7 @@ if ($PackageKind -eq 'DisposableReset') {
                 $finalFingerprintMarkers = @($resetBoundaryTokens |
                     Where-Object { $_ -ceq $expectedFinalFingerprintToken })
                 $fingerprintMarkerLikeTokens = @($resetBoundaryTokens |
-                    Where-Object { $_.Contains('SOURCE_FINAL_FINGERPRINT=', [StringComparison]::Ordinal) })
+                    Where-Object { $_.IndexOf('SOURCE_FINAL_FINGERPRINT=', [StringComparison]::Ordinal) -ge 0 })
                 $boundaryCompletionClaimed =
                     $phases -ccontains 'DATABASE_RECREATED' -or $validatedTargetHistoryPresent -or
                     [long]$reset.finalMigrationCount -gt 0 -or
@@ -843,7 +876,7 @@ if ($PackageKind -eq 'DisposableReset') {
     if ($null -eq $reset.artifactSha256) { throw 'Disposable-reset status lacks artifact hash bindings.' }
     $actualArtifacts = @(Get-ChildItem -LiteralPath $root -File -Recurse | Where-Object Name -notin @('reset-status.json','manifest.sha256'))
     foreach ($file in $actualArtifacts) {
-        $relative = [System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('\','/')
+        $relative = Get-EvidenceRelativePath $root $file.FullName
         $property = $reset.artifactSha256.PSObject.Properties[$relative]
         if ($null -eq $property -or [string]$property.Value -cne (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash) {
             throw "Disposable-reset artifact hash binding is missing or invalid: $relative"
@@ -926,14 +959,13 @@ if ($PackageKind -eq 'FinalClone') {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
         }
     )
-    if ($migrationIds.Count -ne 1 -or $migrationIds[-1] -ne '20260916132000_DisposableDevelopmentCurrentModelBaseline') {
-        throw "Final-clone migration evidence is not the authoritative disposable-development baseline. Count=$($migrationIds.Count); Latest=$($migrationIds[-1])."
-    }
-    if (@($migrationIds | Sort-Object -Unique).Count -ne 1 -or
+    if ($migrationIds.Count -lt 1 -or
+        @($migrationIds | Sort-Object -Unique).Count -ne $migrationIds.Count -or
         (@($migrationIds | Sort-Object) -join "`n") -ne ($migrationIds -join "`n")) {
-        throw 'Final-clone migration evidence contains duplicate or out-of-order migration IDs.'
+        throw 'Final-clone migration evidence is empty or contains duplicate/out-of-order migration IDs.'
     }
-    if ($summary.repositoryMigrationCount -isnot [long] -or [long]$summary.repositoryMigrationCount -ne $migrationIds.Count -or
+    if (-not (Test-NonnegativeJsonInt64 $summary.repositoryMigrationCount) -or
+        [long]$summary.repositoryMigrationCount -ne $migrationIds.Count -or
         $summary.latestMigration -isnot [string] -or [string]$summary.latestMigration -cne $migrationIds[-1]) {
         throw 'Final-clone summary repository migration count/latest disagrees with independently derived discovery evidence.'
     }
@@ -1092,7 +1124,7 @@ if ($WriteManifest) {
         Where-Object FullName -ne $manifestPath |
         Sort-Object FullName |
         ForEach-Object {
-            $relative = [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+            $relative = Get-EvidenceRelativePath $root $_.FullName
             "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)  $relative"
         }) -join "`n"
     $manifestTemporaryPath = Join-Path $root ('.manifest.' + [Guid]::NewGuid().ToString('N') + '.tmp')
@@ -1105,7 +1137,7 @@ if ($WriteManifest) {
             finally { $writer.Dispose() }
         }
         finally { if ($null -ne $stream) { $stream.Dispose() } }
-        [System.IO.File]::Move($manifestTemporaryPath, $manifestPath, $true)
+        Move-AtomicManifestFile $manifestTemporaryPath $manifestPath
     }
     finally {
         if (Test-Path -LiteralPath $manifestTemporaryPath -PathType Leaf) { Remove-Item -LiteralPath $manifestTemporaryPath -Force }
@@ -1141,7 +1173,7 @@ foreach ($line in $manifestLines) {
 }
 $expectedManifestPaths = @(Get-ChildItem -LiteralPath $root -File -Recurse |
     Where-Object FullName -ne $manifestPath | ForEach-Object {
-        [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\','/')
+        Get-EvidenceRelativePath $root $_.FullName
     } | Sort-Object)
 if (@($manifestRelativePaths | Sort-Object -Unique).Count -ne $manifestRelativePaths.Count -or
     (($manifestRelativePaths | Sort-Object) -join "`n") -ne ($expectedManifestPaths -join "`n")) {

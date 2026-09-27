@@ -106,6 +106,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
     public async Task<BusinessPartnerRegistrationDetailDto> CreateAsync(CreateBusinessPartnerRegistrationDto dto, Guid userId)
     {
+        Entities.Procurement.BusinessPartnerRoles.Validate(dto.PartnerType);
         _logger.LogInformation("Creating business partner registration for user {UserId}, Company: {CompanyName}, PartnerType: {PartnerType}",
             userId, dto.CompanyName, dto.PartnerType);
 
@@ -1859,7 +1860,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         Entities.Procurement.BusinessPartnerRegistration registration)
     {
         if (_evidencePackService is null ||
-            !string.Equals(registration.PartnerType, "Supplier", StringComparison.OrdinalIgnoreCase))
+            !Entities.Procurement.BusinessPartnerRoles.HasSupplier(registration.PartnerType))
             return;
 
         result.EvidenceReadiness = await _evidencePackService

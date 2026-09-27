@@ -486,7 +486,8 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
             workflow.Status == WorkflowInstanceStatus.Completed && workflow.CompletedDate.HasValue,
             "PR_SOURCING_WORKFLOW_INCOMPLETE", "The workflow instance bound to the captured authority route must finish with the approved Completed outcome.",
             workflow is null ? null : $"workflow:{workflow.Id:N}");
-        Add(requirements, "SOD", "Initiator and approver segregation", workflow is not null && !initiatorApproved,
+        Add(requirements, "SOD", "Initiator and approver segregation", workflow is not null && (!initiatorApproved ||
+            !await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken)),
             "PR_SOURCING_SOD_VIOLATION", "The requisition initiator cannot process an approval in the completed authority workflow.");
         var evidenceComplete = submission.IsCompliant && templateComplete && budget.IsCompliant && route is not null && workflow?.CompletedDate is not null &&
             (!budget.IsOverride || (!string.IsNullOrWhiteSpace(budget.OverrideApprovalReference) && !string.IsNullOrWhiteSpace(budget.OverrideEvidenceReference)));

@@ -21,6 +21,7 @@ public static class InventoryStatutoryReportCatalogue
 
     public const string BalanceCode = "balance-register";
     public const string MovementCode = "movement-register";
+    public const string LedgerCode = "inventory-ledger";
     public const string AgeingCode = "ageing-register";
     public const string ReorderCode = "reorder-register";
     public const string CountVarianceCode = "count-variance-register";
@@ -31,6 +32,16 @@ public static class InventoryStatutoryReportCatalogue
 
     public static IReadOnlyList<InventorySystemReportDefinition> Definitions { get; } =
     [
+        Definition(LedgerCode, "Inventory Ledger",
+            "Posted inventory movements in chronological order. Balances are per item, warehouse and location, include earlier movements and remain complete when filtering transaction type.",
+            C("MovementDate", "Transaction time (UTC)", "DateTime"), C("MovementNumber", "Movement"),
+            C("ItemCode", "Item code"), C("ItemName", "Item description"), C("UnitOfMeasure", "Stock UOM"),
+            C("WarehouseCode", "Warehouse code"), C("WarehouseName", "Warehouse"), C("LocationCode", "Location"),
+            C("MovementType", "Transaction type"), C("ReferenceType", "Source document type"), C("ReferenceNumber", "Source document / reference"),
+            C("QuantityIn", "Quantity in", "Decimal", "N4"), C("QuantityOut", "Quantity out", "Decimal", "N4"),
+            C("BalanceBefore", "Balance before", "Decimal", "N4"), C("BalanceAfter", "Balance after", "Decimal", "N4"),
+            C("UnitCost", "Unit cost", "Decimal", "N2"), C("TotalValue", "Movement value", "Decimal", "N2"),
+            C("PostedBy", "Posted by")),
         Definition(BalanceCode, "Inventory Balance Register",
             "Current item, warehouse and exact-location quantities reconciled to the authoritative inventory balance owner.",
             C("ItemCode", "Item code"), C("ItemName", "Item"), C("Category", "Category"), C("UnitOfMeasure", "UOM"),

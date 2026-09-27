@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Inventory;
 
-public class LandedCostService : ILandedCostService
+public partial class LandedCostService : ILandedCostService
 {
     private static readonly HashSet<string> AllowedAllocationMethods = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -88,6 +88,15 @@ public class LandedCostService : ILandedCostService
 
         var grn = await _grnRepository.GetWithItemsAsync(landedCost.GoodsReceiptNoteId);
         var result = MapToDetailDto(landedCost, grn);
+        await PopulateReceiptWeightsAsync(landedCost, grn, result);
+        var supplierDocuments = await _unitOfWork.Repository<LandedCostSupplierDocument>().GetQueryable(d =>
+            d.TenantId == landedCost.TenantId && d.LandedCostId == landedCost.Id && !d.IsDeleted).AsNoTracking().ToListAsync();
+        foreach (var item in result.CostItems)
+        {
+            var document = supplierDocuments.SingleOrDefault(d => d.LandedCostItemId == item.Id);
+            item.SupplierDocumentId = document?.Id;
+            item.SupplierDocumentNumber = document?.DocumentNumber;
+        }
         var numbers = landedCost.Items.Where(i => !i.IsDeleted && i.InvoiceNumber != null).Select(i => i.InvoiceNumber!).Distinct().ToList();
         if (numbers.Count > 0)
         {
@@ -132,7 +141,7 @@ public class LandedCostService : ILandedCostService
         var cost = await _landedCostRepository.GetWithDetailsAsync(id) ?? throw new ArgumentException("Landed cost not found.");
         var item = cost.Items.SingleOrDefault(i => i.Id == itemId && !i.IsDeleted) ?? throw new ArgumentException("Cost line not found.");
         var invoice = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(i =>
-            i.Id == invoiceId && i.TenantId == cost.TenantId && !i.IsDeleted).Include(i => i.Supplier).SingleOrDefaultAsync()
+            i.Id == invoiceId && i.TenantId == cost.TenantId && !i.IsDeleted).Include(i => i.BusinessPartner).SingleOrDefaultAsync()
             ?? throw new ArgumentException("Invoice not found in this company.");
         var grn = await _grnRepository.GetWithItemsAsync(cost.GoodsReceiptNoteId) ?? throw new ArgumentException("Receipt not found.");
         if (cost.Status == "Cancelled" || invoice.Status == VendorInvoiceStatus.Voided || invoice.Status == VendorInvoiceStatus.Rejected || invoice.IsOpeningBalance)
@@ -141,18 +150,18 @@ public class LandedCostService : ILandedCostService
             throw new InvalidOperationException("The invoice belongs to a different purchase order.");
         if (!string.Equals(invoice.CurrencyCode, item.Currency, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The invoice and cost line currencies must match.");
-        // Use the same stable supplier code bridge as AP; supplier names are not identity keys.
-        var partners = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
-            !p.IsDeleted && p.TenantId == cost.TenantId && (p.Id == invoice.SupplierId ||
-                (invoice.Supplier.SupplierCode != "" && p.PartnerCode == invoice.Supplier.SupplierCode))).Take(2).ToListAsync();
-        if (partners.Count != 1 || (item.SupplierId.HasValue && item.SupplierId != partners[0].Id))
+        // AP and landed cost now share the same canonical Business Partner identity; no code/name
+        // matching or Finance Supplier bridge is permitted here.
+        var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
+            !p.IsDeleted && p.TenantId == cost.TenantId && p.Id == invoice.BusinessPartnerId).SingleOrDefaultAsync();
+        if (partner is null || (item.SupplierId.HasValue && item.SupplierId != invoice.BusinessPartnerId))
             throw new InvalidOperationException("The invoice supplier does not uniquely match this cost supplier. Review the supplier mapping before linking.");
         if (!string.IsNullOrWhiteSpace(item.InvoiceNumber) && item.InvoiceNumber != invoice.InvoiceNumber)
             throw new InvalidOperationException("This charge is already linked to another invoice. Review the existing link instead of replacing it.");
         item.InvoiceNumber = invoice.InvoiceNumber;
         item.InvoiceDate = invoice.InvoiceDate;
-        item.SupplierId = partners[0].Id;
-        item.SupplierName = partners[0].PartnerName;
+        item.SupplierId = partner.Id;
+        item.SupplierName = partner.PartnerName;
         item.LastModifiedById = userId; item.UpdatedAt = DateTime.UtcNow;
         cost.LastModifiedById = userId; cost.UpdatedAt = DateTime.UtcNow;
         await _landedCostItemRepository.UpdateAsync(item);
@@ -225,6 +234,7 @@ public class LandedCostService : ILandedCostService
         ValidateCostInput(dto);
         return SaveInTransactionAsync(async () =>
         {
+            await _unitOfWork.AcquireTransactionLockAsync($"InventoryLandedCost:{id:N}");
             var landedCost = await _landedCostRepository.GetWithDetailsAsync(id)
                 ?? throw new ArgumentException("Landed cost voucher was not found.");
             if (landedCost.Status != "Draft")
@@ -534,6 +544,9 @@ public class LandedCostService : ILandedCostService
             {
                 TenantId = receipt.TenantId,
                 GoodsReceiptNoteId = receipt.Id,
+                UnitWeightKg = receiptItem.UnitWeightKg,
+                WeightStockUom = receiptItem.WeightStockUom,
+                WeightOverridden = receiptItem.WeightOverridden,
                 InventoryItemId = inventoryItemId,
                 PurchaseOrderItemId = poItem.Id,
                 ItemCode = inventoryItem?.ItemCode ?? poItem.BusinessPartnerItemCode,
@@ -976,6 +989,8 @@ public class LandedCostService : ILandedCostService
 
             var qty = allocQtyByGrnItem.TryGetValue(grnItem.Id, out var q) ? q : 0;
             var allocated = RoundMoney(line.AllocatedAmount);
+            if (qty <= 0m && allocated != 0m)
+                throw new InvalidOperationException("Landed costs can only be allocated to accepted receipt quantities. Complete the inspection first.");
 
             var allocation = new LandedCostAllocation
             {
@@ -1003,8 +1018,9 @@ public class LandedCostService : ILandedCostService
         return true;
     }
 
-    public async Task<bool> AllocateCostsAsync(Guid landedCostId, Guid userId)
+    public Task<bool> AllocateCostsAsync(Guid landedCostId, Guid userId) => SaveInTransactionAsync(async () =>
     {
+        await _unitOfWork.AcquireTransactionLockAsync($"InventoryLandedCost:{landedCostId:N}");
         var landedCost = await _landedCostRepository.GetByIdAsync(landedCostId)
             ?? throw new ArgumentException($"Landed cost {landedCostId} not found");
 
@@ -1023,7 +1039,7 @@ public class LandedCostService : ILandedCostService
         var allocQtyByGrnItem = GetAllocatableQuantities(grn);
         var eligibleGrnItems = grn.Items.Where(i => allocQtyByGrnItem.TryGetValue(i.Id, out var q) && q > 0).ToList();
         if (!eligibleGrnItems.Any())
-            throw new InvalidOperationException("No received/accepted GRN lines available for allocation");
+            throw new InvalidOperationException("No accepted GRN lines are available for allocation. Complete the inspection first.");
 
         var costItems = await _landedCostItemRepository.GetByLandedCostAsync(landedCost.Id);
         foreach (var costItem in costItems)
@@ -1034,6 +1050,8 @@ public class LandedCostService : ILandedCostService
             {
                 // Validate manual allocations exist and sum correctly
                 var manual = await _landedCostAllocationRepository.FindAsync(a => a.LandedCostId == landedCost.Id && a.LandedCostItemId == costItem.Id);
+                if (manual.Any(a => a.AllocatedAmount != 0m && (!allocQtyByGrnItem.TryGetValue(a.GoodsReceiptNoteItemId, out var accepted) || accepted <= 0m || a.Quantity != accepted)))
+                    throw new InvalidOperationException("Manual allocations must use the current accepted receipt quantities. Refresh the allocations after inspection.");
                 if (costItem.PurchaseOrderItemId.HasValue && manual.Any(a =>
                     !eligibleGrnItems.Any(i => i.Id == a.GoodsReceiptNoteItemId && i.PurchaseOrderItemId == costItem.PurchaseOrderItemId)))
                     throw new InvalidOperationException("A line-specific landed cost has an allocation to a different PO line.");
@@ -1052,20 +1070,23 @@ public class LandedCostService : ILandedCostService
         await RecalculateHeaderTotalsAsync(landedCost.Id);
         await _unitOfWork.SaveChangesAsync();
         return true;
-    }
+    });
 
-    public async Task<bool> ApproveAsync(Guid landedCostId, Guid userId)
+    public Task<bool> ApproveAsync(Guid landedCostId, Guid userId) => SaveInTransactionAsync(async () =>
     {
+        await _unitOfWork.AcquireTransactionLockAsync($"InventoryLandedCost:{landedCostId:N}");
         var landedCost = await _landedCostRepository.GetByIdAsync(landedCostId)
             ?? throw new ArgumentException($"Landed cost {landedCostId} not found");
-
+        if (landedCost.Status == "Approved") return true;
+        if (landedCost.Status != "Allocated")
+            throw new InvalidOperationException("Only allocated landed costs can be approved.");
         landedCost.Status = "Approved";
         landedCost.ApprovedById = userId;
         landedCost.ApprovedDate = DateTime.UtcNow;
         await _landedCostRepository.UpdateAsync(landedCost);
         await _unitOfWork.SaveChangesAsync();
         return true;
-    }
+    });
 
     public Task<bool> PostToInventoryAsync(Guid landedCostId, Guid userId)
     {
@@ -1149,6 +1170,9 @@ public class LandedCostService : ILandedCostService
         var allocations = landedCost.Allocations?.Where(a => !a.IsDeleted).ToList() ?? [];
         if (allocations.Count == 0)
             throw new InvalidOperationException("No allocations found. Allocate costs first.");
+        var acceptedQuantities = GetAllocatableQuantities(grn);
+        if (allocations.Any(a => a.AllocatedAmount != 0m && (!acceptedQuantities.TryGetValue(a.GoodsReceiptNoteItemId, out var accepted) || accepted <= 0m || a.Quantity != accepted)))
+            throw new InvalidOperationException("Landed cost allocations no longer match the accepted receipt quantities. Reconcile the allocations before invoice posting.");
 
         var itemIds = allocations.Select(a => a.InventoryItemId).Where(id => id != Guid.Empty).Distinct().ToList();
         var inventoryItems = await _unitOfWork.Repository<InventoryItem>()
@@ -1450,10 +1474,14 @@ public class LandedCostService : ILandedCostService
         var amount = RoundMoney(costItem.AmountInBaseCurrency);
         if (amount <= 0) return;
 
+        var declarations = await _unitOfWork.Repository<LandedCostReceiptWeight>().GetQueryable(w =>
+            w.TenantId == landedCost.TenantId && w.LandedCostId == landedCost.Id && !w.IsDeleted)
+            .AsNoTracking().ToDictionaryAsync(w => w.GoodsReceiptNoteItemId);
+
         var weights = grnItems.Select(i => new
         {
             GrnItem = i,
-            Weight = GetBasisWeight(costItem.AllocationMethod, i, allocQtyByGrnItem[i.Id])
+            Weight = GetBasisWeight(costItem.AllocationMethod, i, allocQtyByGrnItem[i.Id], declarations.GetValueOrDefault(i.Id))
         }).ToList();
 
         var totalWeight = weights.Sum(w => w.Weight);
@@ -1489,7 +1517,7 @@ public class LandedCostService : ILandedCostService
         }
     }
 
-    private static decimal GetBasisWeight(string method, GoodsReceiptNoteItem item, decimal allocQty)
+    private static decimal GetBasisWeight(string method, GoodsReceiptNoteItem item, decimal allocQty, LandedCostReceiptWeight? declaration = null)
     {
         if (allocQty <= 0) return 0;
 
@@ -1507,8 +1535,13 @@ public class LandedCostService : ILandedCostService
 
         if (method.Equals("ByWeight", StringComparison.OrdinalIgnoreCase))
         {
-            var unitWeight = item.InventoryItem?.Weight ?? 0;
-            return unitWeight > 0 ? unitWeight * allocQty : 0;
+            if (declaration != null)
+            {
+                if (declaration.UnitWeightKg <= 0 || !string.Equals(declaration.StockUom, item.UnitOfMeasure, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The voucher weight must be positive kilograms per receipt stock unit.");
+                return ReceiptItemWeight.Validate(declaration.UnitWeightKg) * allocQty;
+            }
+            return ReceiptItemWeight.AllocationBasis(item, allocQty);
         }
 
         if (method.Equals("ByVolume", StringComparison.OrdinalIgnoreCase))
@@ -1523,9 +1556,9 @@ public class LandedCostService : ILandedCostService
     private static Dictionary<Guid, decimal> GetAllocatableQuantities(GoodsReceiptNote grn)
     {
         var dict = new Dictionary<Guid, decimal>();
-        foreach (var item in grn.Items)
+        foreach (var item in grn.Items.Where(item => !item.IsDeleted))
         {
-            var qty = item.AcceptedQuantity > 0 ? item.AcceptedQuantity : item.ReceivedQuantity;
+            var qty = item.AcceptedQuantity;
             if (qty < 0) qty = 0;
             dict[item.Id] = qty;
         }

@@ -1,4 +1,5 @@
 'use client';
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronsUpDown, Eye, Maximize2, Minimize2, Pencil, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
@@ -20,7 +21,7 @@ import { WorkflowApprovalHistoryPanel } from '@/components/workflow/WorkflowAppr
 import { useAuth } from '@/hooks/use-auth';
 import { documentManagementService, type CentralDocumentRecord } from '@/services/document-management.service';
 import { inventoryDisposalService, type DisposalEvidenceRequest, type InventoryDisposal, type InventoryDisposalMethod } from '@/services/inventoryDisposalService';
-import { inventoryManagementService, type InventoryItemDto, type WarehouseDto, type WarehouseLocationDto } from '@/services/inventoryManagementService';
+import { inventoryManagementService, type WarehouseInventoryItemDto, type WarehouseDto, type WarehouseLocationDto } from '@/services/inventoryManagementService';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { Account } from '@/types/finance';
 
@@ -39,6 +40,14 @@ const errorText = (error: unknown) => {
 };
 type Line = { inventoryItemId: string; locationId: string; quantity: number; itemCode?: string; itemName?: string; locationCode?: string;
   unitOfMeasure?: string; unitCost?: number; totalValue?: number; lotNumber?: string; batchNumber?: string; serialNumber?: string; conditionNotes?: string };
+// The warehouse endpoint returns the inventory-item identifier as
+// `inventoryItemId` and the display name as `itemName`. Tracking flags are
+// optional because this endpoint does not currently project them.
+type DisposalItem = WarehouseInventoryItemDto & {
+  isLotTracked?: boolean;
+  isBatchTracked?: boolean;
+  isSerialTracked?: boolean;
+};
 type Selection = { value: string; label: string };
 function SearchSelect({ label, value, options, onChange, disabled }: { label: string; value: string; options: Selection[]; onChange: (value: string) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -61,7 +70,7 @@ export default function InventoryDisposalsPage() {
   const [busy, setBusy] = useState(false);
   const createAttempt = useRef<{ payload: string; key: string } | undefined>(undefined);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
-  const [items, setItems] = useState<InventoryItemDto[]>([]);
+  const [items, setItems] = useState<DisposalItem[]>([]);
   const [locations, setLocations] = useState<WarehouseLocationDto[]>([]);
   const [documents, setDocuments] = useState<CentralDocumentRecord[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -97,7 +106,7 @@ export default function InventoryDisposalsPage() {
   const [proceeds, setProceeds] = useState('0');
   const [accountId, setAccountId] = useState('');
   const editable = mode === 'new' || mode === 'edit';
-  const currentItem = items.find(item => item.id === itemId);
+  const currentItem = items.find(item => item.inventoryItemId === itemId);
   const proceedsMethod = method === 1 || method === 2;
 
   const load = async () => {
@@ -114,7 +123,7 @@ export default function InventoryDisposalsPage() {
   useEffect(() => {
     if (!mode || !warehouseId) { setItems([]); setLocations([]); return; }
     let live = true; setLookupBusy(true);
-    Promise.all([inventoryManagementService.getInventoryByWarehouse(warehouseId), inventoryManagementService.getWarehouseLocations(warehouseId)])
+    Promise.all([inventoryManagementService.getWarehouseInventoryItems(warehouseId), inventoryManagementService.getWarehouseLocations(warehouseId)])
       .then(([itemRows, locationRows]) => {
         if (!live) return;
         setItems(itemRows.filter(item => item.itemType === 1)); const active = locationRows.filter(location => location.isActive);
@@ -195,7 +204,7 @@ export default function InventoryDisposalsPage() {
       toast.error('This item and bin are already listed. Change its quantity in the grid.'); return;
     }
     setLines(current => [...current, { inventoryItemId: itemId, locationId, quantity: value,
-      itemCode: currentItem?.itemCode, itemName: currentItem?.name, locationCode: locations.find(location => location.id === locationId)?.locationCode,
+      itemCode: currentItem?.itemCode, itemName: currentItem?.itemName, locationCode: locations.find(location => location.id === locationId)?.locationCode,
       unitOfMeasure: currentItem?.unitOfMeasure,
       lotNumber: lot.trim() || undefined, batchNumber: batch.trim() || undefined, serialNumber: serial.trim() || undefined }]);
     setItemId(''); setQuantity('1'); setLot(''); setBatch(''); setSerial(''); setLinePage(Math.ceil((lines.length + 1) / pageSize));
@@ -234,6 +243,10 @@ export default function InventoryDisposalsPage() {
   const tabs = ['details', 'items', 'documents', ...(selected?.approvalRequired && !editable ? ['workflow'] : []), ...(!editable ? ['history'] : [])];
 
   return <div className="space-y-4">
+    <GlobalSearchRecordOpener load={id => inventoryDisposalService.getById(id)} onOpen={value => {
+      applyRecord(value); setDocumentId(''); setAccountId(''); setMode('view'); setTab('details');
+      setFullscreen(false); setLineSearch(''); setLinePage(1);
+    }} />
     <div className="flex items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold">Inventory Disposals</h1>
       <p className="text-sm text-muted-foreground">Write off, donate or sell stock.</p></div><div className="flex gap-2">
       <Button variant="outline" aria-label="Refresh disposals" title="Refresh" disabled={loading || busy} onClick={() => void load()}><RefreshCw className="h-4 w-4" /></Button>
@@ -283,7 +296,7 @@ export default function InventoryDisposalsPage() {
           </TabsContent>
           <TabsContent value="items" className="min-h-0 flex-1 overflow-hidden flex-col data-[state=active]:flex gap-2">
             {editable && <div className="grid shrink-0 grid-cols-[minmax(0,2fr)_minmax(0,1fr)_90px_auto] items-end gap-2">
-              <div><Label>Item</Label><SearchSelect label="Item" value={itemId} options={items.map(item => ({ value: item.id, label: item.itemCode + ' — ' + item.name }))} onChange={value => { setItemId(value); setLot(''); setBatch(''); setSerial(''); }} disabled={!warehouseId || lookupBusy || busy} /></div>
+              <div><Label>Item</Label><SearchSelect label="Item" value={itemId} options={items.map(item => ({ value: item.inventoryItemId, label: item.itemCode + ' — ' + item.itemName }))} onChange={value => { setItemId(value); setLot(''); setBatch(''); setSerial(''); }} disabled={!warehouseId || lookupBusy || busy} /></div>
               <div><Label>Bin</Label><SearchSelect label="Bin" value={locationId} options={locations.map(location => ({ value: location.id, label: location.locationCode + (location.name && location.name !== location.locationCode ? ' — ' + location.name : '') }))} onChange={setLocationId} disabled={lookupBusy || busy} /></div>
               <div><Label htmlFor="disposal-quantity">Quantity</Label><Input id="disposal-quantity" type="number" min="0.0001" step="0.0001" value={quantity} onChange={event => setQuantity(event.target.value)} /></div><Button variant="outline" onClick={add} disabled={busy || lookupBusy}><Plus className="mr-1 h-4 w-4" />Add</Button>
             </div>}

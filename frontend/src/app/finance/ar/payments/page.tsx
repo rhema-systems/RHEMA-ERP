@@ -85,7 +85,7 @@ export default function ReceiptsPage() {
                 actionType,
                 financeArEntityId: payment.id,
                 financeArReference: payment.paymentNumber,
-                customerId: payment.customerId,
+                customerId: payment.businessPartnerId,
                 customerName: payment.customerName,
                 amount: payment.totalAmount,
                 currencyCode: payment.currencyCode,
@@ -236,7 +236,7 @@ export default function ReceiptsPage() {
                                                             View Details &amp; Ledger Trace
                                                         </DropdownMenuItem>
                                                         {payment.unallocatedAmount > 0 && payment.status === 'Posted' && (
-                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?customerId=${payment.customerId}&paymentId=${payment.id}`)}>
+                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${payment.businessPartnerId}&paymentId=${payment.id}`)}>
                                                                 <FileText className="mr-2 h-4 w-4" /> Allocate Receipt
                                                             </DropdownMenuItem>
                                                         )}

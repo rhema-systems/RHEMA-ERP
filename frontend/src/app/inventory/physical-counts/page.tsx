@@ -1,4 +1,5 @@
 'use client';
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
 
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
@@ -479,6 +480,10 @@ export default function PhysicalCountsPage() {
 
   return (
     <div className="space-y-6">
+      <GlobalSearchRecordOpener load={loadPhysicalCountDetail} onOpen={details => {
+        setSelectedCount(details); setCountItemsFullPage(false); setDraftNotes(details.notes || '');
+        setEditingItems(new Map()); setAddItemDialogOpen(false); setRemoveTarget(null); setDetailDialogOpen(true);
+      }} />
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>

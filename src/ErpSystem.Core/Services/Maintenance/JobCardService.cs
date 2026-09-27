@@ -420,8 +420,7 @@ public class JobCardService : IJobCardService
         }
 
         var isCustomer =
-            string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(partner.PartnerType, "Both", StringComparison.OrdinalIgnoreCase) ||
+            BusinessPartnerRoles.HasCustomer(partner.PartnerType) ||
             !string.IsNullOrWhiteSpace(partner.CustomerType) ||
             !string.IsNullOrWhiteSpace(partner.CustomerAccountNumber);
 

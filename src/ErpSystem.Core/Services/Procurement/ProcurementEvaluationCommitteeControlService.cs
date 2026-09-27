@@ -1298,7 +1298,8 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
             recall.RequestedByUserId,
             recall.ScoreSheet.SubmittedByUserId
         };
-        if (processedActors.Any(prohibitedWorkflowActors.Contains))
+        if (processedActors.Any(prohibitedWorkflowActors.Contains) &&
+            await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken))
             throw Conflict("EVALUATION_SCORE_RECALL_WORKFLOW_SOD_CONFLICT",
                 "The scorer or recall requester cannot approve the shared recall workflow.");
         var sod = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest

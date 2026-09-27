@@ -72,6 +72,12 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         _controlEvents = controlEvents;
     }
 
+    public Task<IReadOnlyList<InventoryDisposalDto>> SearchAsync(
+        string search, int take = 8, CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100
+            ? Task.FromResult<IReadOnlyList<InventoryDisposalDto>>([])
+            : GetSourceAsync(null, null, Math.Clamp(take, 1, 50), cancellationToken, search.Trim());
+
     public Task<IReadOnlyList<InventoryDisposalDto>> GetAsync(
         InventoryDisposalStatus? status,
         Guid? warehouseId,
@@ -89,12 +95,16 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         InventoryDisposalStatus? status,
         Guid? warehouseId,
         int? take,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? search = null)
     {
         EnsureActor();
         var query = FullQuery().AsNoTracking().Where(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted);
         if (status.HasValue) query = query.Where(value => value.Status == status.Value);
         if (warehouseId.HasValue) query = query.Where(value => value.WarehouseId == warehouseId.Value);
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(value => value.DisposalNumber.Contains(search) || value.Reason.Contains(search) ||
+                value.IdentificationDetails.Contains(search) || value.Warehouse.Name.Contains(search));
         var allowed = new List<InventoryDisposalDto>();
         var offset = 0;
         var pageSize = Math.Max(take ?? 500, 50);
@@ -268,11 +278,69 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
             line.IntegrityHash = Hash(new { line.InventoryItemId, line.LocationId, line.Quantity, line.UnitCost,
                 line.TotalValue, line.LotNumber, line.BatchNumber, line.SerialNumber });
             item.Lines.Add(line);
-            _db.InventoryDisposalLines.Add(line);
+            // Keep new lines in the aggregate until the disposal case is tracked.
+            // Location-scope enforcement records its audit event immediately; explicitly
+            // tracking the line here caused that intermediate SaveChanges to insert a
+            // child row before its parent case existed, producing an FK violation.
         }
         item.TotalQuantity = item.Lines.Where(value => !value.IsDeleted).Sum(value => value.Quantity);
         item.TotalValue = item.Lines.Where(value => !value.IsDeleted).Sum(value => value.TotalValue);
     }
+
+    private static bool DraftLinesMatch(
+        InventoryDisposalCase item,
+        IReadOnlyCollection<CreateInventoryDisposalLineRequest> inputs)
+    {
+        var activeLines = item.Lines.Where(value => !value.IsDeleted).ToList();
+        if (activeLines.Count != inputs.Count) return false;
+
+        var current = activeLines
+            .Select(value => new DraftLineSignature(
+                value.InventoryItemId,
+                value.LocationId,
+                value.Quantity,
+                value.LotNumber ?? string.Empty,
+                value.BatchNumber ?? string.Empty,
+                value.SerialNumber ?? string.Empty,
+                value.ConditionNotes ?? string.Empty))
+            .OrderBy(value => value.InventoryItemId)
+            .ThenBy(value => value.LocationId)
+            .ThenBy(value => value.Quantity)
+            .ThenBy(value => value.LotNumber, StringComparer.Ordinal)
+            .ThenBy(value => value.BatchNumber, StringComparer.Ordinal)
+            .ThenBy(value => value.SerialNumber, StringComparer.Ordinal)
+            .ThenBy(value => value.ConditionNotes, StringComparer.Ordinal)
+            .ToList();
+
+        var requested = inputs
+            .Select(value => new DraftLineSignature(
+                value.InventoryItemId,
+                value.LocationId,
+                value.Quantity,
+                Normalize(value.LotNumber, 100) ?? string.Empty,
+                Normalize(value.BatchNumber, 100) ?? string.Empty,
+                Normalize(value.SerialNumber, 100) ?? string.Empty,
+                Normalize(value.ConditionNotes, 1000) ?? string.Empty))
+            .OrderBy(value => value.InventoryItemId)
+            .ThenBy(value => value.LocationId)
+            .ThenBy(value => value.Quantity)
+            .ThenBy(value => value.LotNumber, StringComparer.Ordinal)
+            .ThenBy(value => value.BatchNumber, StringComparer.Ordinal)
+            .ThenBy(value => value.SerialNumber, StringComparer.Ordinal)
+            .ThenBy(value => value.ConditionNotes, StringComparer.Ordinal)
+            .ToList();
+
+        return current.SequenceEqual(requested);
+    }
+
+    private readonly record struct DraftLineSignature(
+        Guid InventoryItemId,
+        Guid LocationId,
+        decimal Quantity,
+        string LotNumber,
+        string BatchNumber,
+        string SerialNumber,
+        string ConditionNotes);
 
     public Task<InventoryDisposalDto> UpdateAsync(Guid id, UpdateInventoryDisposalRequest request, CancellationToken cancellationToken = default) =>
         MutateAsync(id, request, async item =>
@@ -284,8 +352,11 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
             item.Method = request.Method;
             item.Reason = Required(request.Reason, 1000, "Reason");
             item.IdentificationDetails = Normalize(request.IdentificationDetails, 2000) ?? string.Empty;
-            foreach (var line in item.Lines.Where(value => !value.IsDeleted)) line.IsDeleted = true;
-            await BuildLinesAsync(item, request.Lines, cancellationToken);
+            if (!DraftLinesMatch(item, request.Lines))
+            {
+                foreach (var line in item.Lines.Where(value => !value.IsDeleted)) line.IsDeleted = true;
+                await BuildLinesAsync(item, request.Lines, cancellationToken);
+            }
             await AddEvidenceAsync(item, request.Evidence, "Identification", required: false, cancellationToken);
             return InventoryDisposalActionType.Edited;
         }, cancellationToken);
@@ -531,9 +602,17 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         EnsureRowVersion(item.RowVersion, request.RowVersion);
         if (item.Status is not (InventoryDisposalStatus.Approved or InventoryDisposalStatus.ReadyForExecution or InventoryDisposalStatus.AdjustmentPending))
             throw State(item, "Only an approved disposal case can stage controlled stock/Finance execution.");
-        if (item.ApprovalRequired && item.RequestedById == _currentUser.UserId)
-            throw Error("INV_DISPOSAL_EXECUTION_SOD", "The disposal requester cannot stage execution of the same case.");
-        await RequireAccessAsync("procurement.inventory.disposal.approve", item, cancellationToken);
+        if (item.ApprovalRequired)
+        {
+            if (item.RequestedById == _currentUser.UserId)
+                throw Error("INV_DISPOSAL_EXECUTION_SOD", "The disposal requester cannot stage execution of the same case.");
+            await RequireAccessAsync("procurement.inventory.disposal.approve", item, cancellationToken);
+        }
+        else if (!await HasAccessAsync("procurement.inventory.disposal.approve", item, cancellationToken) &&
+                 !await HasAccessAsync("procurement.inventory.disposal.request", item, cancellationToken))
+        {
+            throw new InventoryDisposalAuthorizationException("You are not allowed to post this disposal.");
+        }
         ValidateExecution(item.Method, request);
         var executionReference = Required(request.ExecutionReference, 200, "Execution reference");
         var plan = await BuildFinancePlanAsync(item, decimal.Round(request.ProceedsAmount, 2),
@@ -1235,8 +1314,10 @@ IF @result < 0 THROW 51000, 'INV_DISPOSAL_LOCK_FAILED: disposal completion could
         dto.CanCancel = requestAllowed && !item.StockAdjustmentId.HasValue &&
             item.Status is not (InventoryDisposalStatus.Completed or InventoryDisposalStatus.Rejected or InventoryDisposalStatus.Cancelled or InventoryDisposalStatus.AdjustmentPending);
         var executionAllowed = await HasAccessAsync("procurement.inventory.disposal.approve", item, cancellationToken);
-        dto.CanStageExecution = executionAllowed && (item.Status is InventoryDisposalStatus.ReadyForExecution or InventoryDisposalStatus.Approved) &&
-            (!item.ApprovalRequired || item.RequestedById != _currentUser.UserId);
+        dto.CanStageExecution = (item.Status is InventoryDisposalStatus.ReadyForExecution or InventoryDisposalStatus.Approved) &&
+            (item.ApprovalRequired
+                ? executionAllowed && item.RequestedById != _currentUser.UserId
+                : executionAllowed || requestAllowed);
         dto.CanApprove = item.Status == InventoryDisposalStatus.PendingApproval && item.ApprovalRequired &&
             executionAllowed && item.RequestedById != _currentUser.UserId && item.AuditVerifiedById != _currentUser.UserId &&
             !item.CommitteeMembers.Any(value => value.MemberUserId == _currentUser.UserId) &&

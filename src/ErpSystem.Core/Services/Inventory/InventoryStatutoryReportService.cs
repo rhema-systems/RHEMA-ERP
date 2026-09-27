@@ -14,7 +14,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Core.Services.Inventory;
 
-public sealed class InventoryStatutoryReportService : IInventoryStatutoryReportService
+public sealed partial class InventoryStatutoryReportService : IInventoryStatutoryReportService
 {
     private const string SourceType = "InventoryStatutoryReport";
     private readonly IUnitOfWork _unitOfWork;
@@ -94,6 +94,8 @@ public sealed class InventoryStatutoryReportService : IInventoryStatutoryReportS
                 await ExecuteBalanceAsync(definition, filters, request, cancellationToken),
             InventoryStatutoryReportCatalogue.MovementCode =>
                 await ExecuteMovementAsync(definition, filters, request, cancellationToken),
+            InventoryStatutoryReportCatalogue.LedgerCode =>
+                await ExecuteLedgerAsync(definition, filters, request, cancellationToken),
             InventoryStatutoryReportCatalogue.AgeingCode =>
                 await ExecuteAgeingAsync(definition, filters, request, cancellationToken),
             InventoryStatutoryReportCatalogue.ReorderCode =>
@@ -404,7 +406,7 @@ public sealed class InventoryStatutoryReportService : IInventoryStatutoryReportS
     }
 
     private static Expression<Func<T, bool>> BuildScopePredicate<T>(IEnumerable<InventoryScope> scopes)
-        where T : StockMovement
+        where T : TenantEntity
     {
         var parameter = Expression.Parameter(typeof(T), "item");
         Expression body = Expression.Constant(false);
@@ -538,7 +540,10 @@ public sealed class InventoryStatutoryReportService : IInventoryStatutoryReportS
         string? MovementType,
         int SlowMovingDays,
         int NonMovingDays,
-        int ExpiryWarningDays)
+        int ExpiryWarningDays,
+        Guid? InventoryItemId,
+        string? ItemCode,
+        Guid? LocationId)
     {
         public static ReportFilters Parse(ExecuteReportDto request)
         {
@@ -559,7 +564,8 @@ public sealed class InventoryStatutoryReportService : IInventoryStatutoryReportS
             return new ReportFilters(start, endExclusive, GetGuid(request.Parameters, "warehouseId"),
                 GetGuid(request.Parameters, "categoryId"), GetGuid(request.Parameters, "fiscalPeriodId"),
                 GetString(request.Parameters, "status"), GetString(request.Parameters, "movementType"),
-                slow, non, expiry);
+                slow, non, expiry, GetGuid(request.Parameters, "inventoryItemId"),
+                GetString(request.Parameters, "itemCode"), GetGuid(request.Parameters, "locationId"));
         }
 
         public Dictionary<string, object> ToMetadata()
@@ -573,6 +579,9 @@ public sealed class InventoryStatutoryReportService : IInventoryStatutoryReportS
             if (StartUtc.HasValue) values["startDate"] = StartUtc.Value;
             if (EndExclusiveUtc.HasValue) values["endDate"] = EndExclusiveUtc.Value.AddDays(-1);
             if (WarehouseId.HasValue) values["warehouseId"] = WarehouseId.Value;
+            if (InventoryItemId.HasValue) values["inventoryItemId"] = InventoryItemId.Value;
+            if (LocationId.HasValue) values["locationId"] = LocationId.Value;
+            if (!string.IsNullOrWhiteSpace(ItemCode)) values["itemCode"] = ItemCode;
             if (CategoryId.HasValue) values["categoryId"] = CategoryId.Value;
             if (FiscalPeriodId.HasValue) values["fiscalPeriodId"] = FiscalPeriodId.Value;
             if (!string.IsNullOrWhiteSpace(Status)) values["status"] = Status;

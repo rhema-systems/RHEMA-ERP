@@ -22,6 +22,8 @@ export interface ExternalEstateListing {
   externalListingPrice?: number | null;
   externalSalePrice?: number | null;
   externalMonthlyRent?: number | null;
+  externalGroundRentRequired?: boolean | null;
+  externalPremiumChargeRequired?: boolean | null;
   externalLeaseTermMonths?: number | null;
   groundRentPayable?: number | null;
   groundRentRatePerAcre?: number | null;
@@ -67,6 +69,10 @@ export interface CreatePropertyListingEnquiry {
   message: string;
   businessPartnerId?: string;
   captchaToken?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  contactReference?: string;
 }
 
 export interface ExternalListingRequestDocument {
@@ -247,6 +253,17 @@ class ExternalEstateListingsService {
     const response = await apiService.post<ApiResponse<ExternalListingEnquiry>>(
       `/estate/external/listings/${listingId}/enquiries`,
       payload
+    );
+    return response.data;
+  }
+
+  async createPublicEnquiry(
+    listingId: string,
+    payload: CreatePropertyListingEnquiry
+  ): Promise<ExternalListingEnquiry> {
+    const response = await rawApiService.publicRequest<ApiResponse<ExternalListingEnquiry>>(
+      `/estate/public/listings/${listingId}/enquiries`,
+      { method: 'POST', body: JSON.stringify(payload) }
     );
     return response.data;
   }

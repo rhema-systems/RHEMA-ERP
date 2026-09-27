@@ -102,7 +102,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         var minimum = lineage.Case.SelectedMethod is ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase
             ? 1 : Math.Max(2, lineage.MethodRule.RequiresCompetition ? lineage.MethodRule.MinimumQuotationCount : 2);
         var suppliers = await Suppliers.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
-                item.IsActive && !item.IsBlacklisted && (item.PartnerType == "Supplier" || item.PartnerType == "Both" || item.PartnerType == "Contractor"))
+                item.IsActive && !item.IsBlacklisted && BusinessPartnerRoles.ProcurementTypes.Contains(item.PartnerType))
             .OrderBy(item => item.PartnerName).AsNoTracking().ToListAsync(cancellationToken);
         return new ProcurementExceptionalSourcingReadinessDto
         {

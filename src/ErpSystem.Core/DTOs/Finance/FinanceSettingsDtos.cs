@@ -12,6 +12,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public string CoaType { get; set; } = "Standard";
         public bool CoaConfigurationLocked { get; set; }
         public string BaseCurrency { get; set; } = "GHS";
+        public int WhtStatutoryYearStartMonth { get; set; } = 1;
+        public int WhtStatutoryYearStartDay { get; set; } = 1;
         public string BaseCurrencyName { get; set; } = "Ghana Cedi";
         public string BaseCurrencySymbol { get; set; } = "₵";
         public int BaseCurrencyDecimalPlaces { get; set; } = 2;
@@ -85,6 +87,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? PurchaseReturnVarianceAccountId { get; set; }
         public string? CoaType { get; set; }
         public string? BaseCurrency { get; set; }
+        public int? WhtStatutoryYearStartMonth { get; set; }
+        public int? WhtStatutoryYearStartDay { get; set; }
         public string? AccountSeparator { get; set; }
         public Guid? RetainedEarningsAccountId { get; set; }
         public Guid? UnrealizedGainLossAccountId { get; set; }

@@ -186,9 +186,16 @@ class CashManagementDataService {
         });
     }
 
-    async getBankDeposits(status?: BankDepositStatus): Promise<BankDeposit[]> {
-        const query = status ? `?status=${encodeURIComponent(status)}` : '';
-        return apiService.get<BankDeposit[]>(`/finance/banking/deposits${query}`);
+    async getBankDeposits(
+        status?: BankDepositStatus,
+        includeAllocations = false,
+        limit = 200,
+    ): Promise<BankDeposit[]> {
+        const params = new URLSearchParams();
+        if (status) params.set('status', status);
+        if (includeAllocations) params.set('includeAllocations', 'true');
+        params.set('limit', String(limit));
+        return apiService.get<BankDeposit[]>(`/finance/banking/deposits?${params.toString()}`);
     }
 
     async getBankDeposit(id: string): Promise<BankDeposit> {

@@ -14,6 +14,7 @@ import {
   Toolbar,
 } from '@syncfusion/ej2-react-pdfviewer';
 
+import { registerSyncfusionLicense } from '@/lib/syncfusion-license';
 import { apiService as rawApiService } from '@/services/api.service';
 
 interface ProcedurePdfViewerProps {
@@ -43,6 +44,8 @@ export default function ProcedurePdfViewer({
     if (!host || !fileUrl) return;
     let disposed = false;
     setLoadError(null);
+
+    registerSyncfusionLicense();
 
     PdfViewer.Inject(
       Toolbar,

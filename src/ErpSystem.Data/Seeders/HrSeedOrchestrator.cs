@@ -191,8 +191,17 @@ public class HrSeedOrchestrator
         // TDC organisation: levels, staff bands, the 8 salary grades, units and positions.
         new SeedStep(
             "TDC organisation structure",
-            ct => _context.Set<OrganizationStructure>()
-                          .AnyAsync(s => s.Code == "TDC" && s.TenantId == tenantId, ct),
+            async ct => await _context.Set<OrganizationUnit>()
+                                      .Where(unit =>
+                                          unit.TenantId == tenantId &&
+                                          (unit.Code == "DEPT-SALES" || unit.Code == "UNIT-MKT") &&
+                                          unit.OrganizationLevel.Code == "DEPT" &&
+                                          unit.OrganizationLevel.OrganizationStructure.Code == "TDC" &&
+                                          unit.IsActive &&
+                                          !unit.IsDeleted)
+                                      .Select(unit => unit.Code)
+                                      .Distinct()
+                                      .CountAsync(ct) == 2,
             ct => new TdcOrganogramSeeder(_context, Log<TdcOrganogramSeeder>()).SeedAsync()),
 
         // Depends on Countries above, to link Ghana.

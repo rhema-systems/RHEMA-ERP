@@ -544,7 +544,12 @@ namespace ErpSystem.Api.Controllers
                 // Prefer LDAP authentication when available. If a tenant code isn't provided, use the default tenant's LDAP config.
                 var tenantForLdap = tenant ?? defaultTenant;
 
-                if (tenantForLdap?.LdapEnabled == true)
+                // A tenant may support both local and directory identities. Do not send a known
+                // local user's credentials to LDAP: a slow or unavailable directory would then
+                // make local administrators appear unable to sign in. Unknown users still get the
+                // LDAP auto-provisioning path, and existing LDAP identities remain directory-only.
+                if (tenantForLdap is { LdapEnabled: true } &&
+                    (user == null || user.AuthenticationProvider == AuthenticationProvider.LDAP))
                 {
                     _logger.LogInformation(
                         "Attempting LDAP authentication for user {Username} using tenant {TenantId}. Server={LdapServer}, Port={LdapPort}, BaseDn={LdapBaseDn}",
@@ -655,9 +660,10 @@ namespace ErpSystem.Api.Controllers
                 else
                 {
                     _logger.LogDebug(
-                        "LDAP authentication skipped for user {Username}. Tenant is null or LDAP is disabled (TenantCode={TenantCode}).",
+                        "LDAP authentication skipped for user {Username}. Tenant LDAP is disabled or the identity uses local authentication (TenantCode={TenantCode}, AuthenticationProvider={AuthenticationProvider}).",
                         request.Username,
-                        request.TenantCode);
+                        request.TenantCode,
+                        user?.AuthenticationProvider);
                 }
 
                 // If LDAP is enabled and this user is an LDAP user, do not fall back to local password authentication.

@@ -3,11 +3,10 @@
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import React from 'react';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   CheckCircle2,
-  ChevronRight,
   ClipboardCheck,
   Download,
   Eye,
@@ -48,9 +47,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { CentralDocumentViewerDialog } from '@/components/document-management/CentralDocumentViewerDialog';
 import { useAuth } from '@/hooks/use-auth';
+import { getStatusBadgeClassName } from '@/lib/status-badge';
 import {
   procedureCaseService,
   type ProcedureCaseDetail,
@@ -70,6 +71,14 @@ const ENTITY_TYPE = 'EstatePropertyManagementListingApplication';
 const REQUESTS_PER_PAGE = 10;
 const SALE_CLOSEOUT_COMPLETED_QUEUE_KEY =
   'property-management.sale-closeout-completed-case-ids';
+
+const SYSTEM_MANAGED_AGREEMENT_FIELD_KEYS = new Set([
+  'signedAgreementReference',
+  'agreementExecutionStatus',
+  'internalApprovalStatus',
+  'internalSignatureStatus',
+  'finalSignedAgreementReference',
+]);
 
 const ProcedurePdfViewer = dynamic(
   () => import('@/components/procedures/ProcedurePdfViewer'),
@@ -95,6 +104,17 @@ const SUMMARY_FIELD_KEYS = [
   'listingPrice',
   'offerAmount',
   'currency',
+  'salesAmountPaid',
+  'salesPaymentReference',
+  'estateRemainingAmount',
+  'premiumChargeRequired',
+  'premiumChargeAmount',
+  'premiumChargeInvoiceId',
+  'premiumChargeInvoiceReference',
+  'premiumChargeInvoiceStatus',
+  'premiumChargePaidAmount',
+  'premiumChargeBalance',
+  'premiumChargePaymentStatus',
   'requestedLeaseTerm',
   'requestMessage',
   'decisionStatus',
@@ -128,13 +148,81 @@ const formatValue = (field: ProcedureCaseField): string => {
     : new Intl.DateTimeFormat('en-GB').format(date);
 };
 
+const formatMoney = (amount: number, currencyCode = 'GHS') =>
+  Number.isFinite(amount)
+    ? new Intl.NumberFormat('en-GH', {
+        style: 'currency',
+        currency: currencyCode || 'GHS',
+      }).format(amount)
+    : 'Not recorded';
+
 const caseFieldValue = (procedureCase: ProcedureCaseDetail, key: string) =>
   procedureCase.fields.find((field) => field.key === key)?.value?.trim() || '';
+
+const caseMoneyValue = (procedureCase: ProcedureCaseDetail, key: string) => {
+  const value = caseFieldValue(procedureCase, key).replace(/[^\d.-]/g, '');
+  return value ? Number(value) : Number.NaN;
+};
 
 const isApprovedDecision = (value: string) => {
   const normalized = value.toLowerCase();
   return normalized === 'approved' || normalized.startsWith('approved ');
 };
+
+const containsAny = (value: string, tokens: string[]) => {
+  const normalized = value.toLowerCase();
+  return tokens.some((token) => normalized.includes(token.toLowerCase()));
+};
+
+const isSalePaymentSatisfied = (procedureCase: ProcedureCaseDetail) => {
+  if (
+    caseFieldValue(procedureCase, 'salePaymentStatus').toLowerCase() ===
+    'paid in full'
+  ) {
+    return true;
+  }
+
+  const estateRemainingAmount = caseMoneyValue(
+    procedureCase,
+    'estateRemainingAmount'
+  );
+  if (Number.isFinite(estateRemainingAmount) && estateRemainingAmount <= 0) {
+    return true;
+  }
+
+  const saleInvoiceBalance = caseMoneyValue(procedureCase, 'saleInvoiceBalance');
+  return (
+    caseFieldValue(procedureCase, 'saleInvoiceStatus').toLowerCase() ===
+      'paid' &&
+    Number.isFinite(saleInvoiceBalance) &&
+    saleInvoiceBalance <= 0
+  );
+};
+
+const isPremiumChargeRequired = (procedureCase: ProcedureCaseDetail) => {
+  const value = caseFieldValue(procedureCase, 'premiumChargeRequired')
+    .trim()
+    .toLowerCase();
+  return value === 'yes' || value === 'true' || value === 'required';
+};
+
+const isPremiumChargeSettled = (procedureCase: ProcedureCaseDetail) => {
+  const status = caseFieldValue(procedureCase, 'premiumChargePaymentStatus')
+    .trim()
+    .toLowerCase();
+  return status === 'paid';
+};
+
+const PREMIUM_FIELD_KEYS = new Set([
+  'premiumChargeRequired',
+  'premiumChargeAmount',
+  'premiumChargeInvoiceId',
+  'premiumChargeInvoiceReference',
+  'premiumChargeInvoiceStatus',
+  'premiumChargePaidAmount',
+  'premiumChargeBalance',
+  'premiumChargePaymentStatus',
+]);
 
 const terminalCaseStatuses = [
   'completed',
@@ -150,6 +238,28 @@ const isCompletedCase = (procedureCase: ProcedureCaseDetail) =>
 
 const summaryFieldValue = (procedureCase: ProcedureCaseSummary, key: string) =>
   procedureCase.fieldValues?.[key]?.trim() || '';
+
+const requestTypeLabel = (procedureCase: ProcedureCaseSummary) => {
+  const rawType = firstNonBlank(
+    summaryFieldValue(procedureCase, 'requestType'),
+    summaryFieldValue(procedureCase, 'listingType'),
+    summaryFieldValue(procedureCase, 'transactionType'),
+    summaryFieldValue(procedureCase, 'applicationType')
+  );
+  const combined = `${rawType} ${procedureCase.title}`.toLowerCase();
+
+  if (combined.includes('lease')) return 'Lease';
+  if (combined.includes('rent') || combined.includes('rental')) return 'Rent';
+  if (
+    combined.includes('sale') ||
+    combined.includes('purchase') ||
+    combined.includes('buy')
+  ) {
+    return 'Sale';
+  }
+
+  return rawType || 'Request';
+};
 
 const isSaleSummary = (procedureCase: ProcedureCaseSummary) => {
   const requestType = summaryFieldValue(
@@ -200,30 +310,35 @@ const isArchivedQueueCase = (
   return true;
 };
 
-const queueStatusLabel = (
-  procedureCase: ProcedureCaseSummary,
-  queueView: 'active' | 'completed'
-) => {
-  const status = procedureCase.status.trim();
-  if (status.toLowerCase() === 'completed' && queueView === 'active') {
-    return 'Pending final closeout';
-  }
-
-  return status;
-};
+const queueStatusLabel = (procedureCase: ProcedureCaseSummary) =>
+  procedureCase.status.trim();
 
 const isRentalApplication = (procedureCase: ProcedureCaseDetail) => {
   const requestType = caseFieldValue(
     procedureCase,
     'requestType'
   ).toLowerCase();
+  if (requestType.includes('lease') || requestType.includes('rent')) return true;
+  if (requestType.includes('purchase') || requestType.includes('sale')) return false;
+  const listingType = caseFieldValue(
+    procedureCase,
+    'listingType'
+  ).toLowerCase();
   const title = procedureCase.title.toLowerCase();
+  const transactionText = `${requestType} ${listingType} ${title}`;
   return !(
-    requestType.includes('purchase') ||
-    requestType.includes('sale') ||
+    transactionText.includes('purchase') ||
+    transactionText.includes('sale') ||
     title.startsWith('purchase bid') ||
+    title.startsWith('purchase enquiry') ||
     title.startsWith('sale request')
   );
+};
+
+const isLeaseApplication = (procedureCase: ProcedureCaseDetail) => {
+  const requestType = caseFieldValue(procedureCase, 'requestType').toLowerCase();
+  const listingType = caseFieldValue(procedureCase, 'listingType').toLowerCase();
+  return requestType.includes('lease') || (!requestType && listingType.includes('lease'));
 };
 
 const isDecisionStage = (procedureCase: ProcedureCaseDetail) => {
@@ -236,15 +351,67 @@ const isDecisionStage = (procedureCase: ProcedureCaseDetail) => {
 };
 
 const editableFieldKeys = (procedureCase: ProcedureCaseDetail) => {
-  const keys = new Set(procedureCase.currentStageFieldKeys);
+  const keys = new Set(
+    procedureCase.currentStageFieldKeys.filter(
+      (key) => !SYSTEM_MANAGED_AGREEMENT_FIELD_KEYS.has(key)
+    )
+  );
   if (isDecisionStage(procedureCase)) {
     keys.add('decisionStatus');
     if (isRentalApplication(procedureCase)) {
       keys.add('moveInDate');
+      keys.add('requestedLeaseTerm');
     }
   }
   return keys;
 };
+
+const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
+  const approved = isApprovedDecision(caseFieldValue(procedureCase, 'decisionStatus'));
+  const rental = isRentalApplication(procedureCase);
+
+  switch (procedureCase.currentStageIndex) {
+    case 0:
+      return ['customerValidationStatus', 'listingValidationStatus'];
+    case 1:
+      return ['availabilityCheck', 'commercialReviewStatus', 'reservationStatus', 'premiumChargeRequired'];
+    case 2:
+      return rental && approved
+        ? ['decisionStatus', 'requestedLeaseTerm', 'moveInDate']
+        : ['decisionStatus'];
+    case 3:
+      return ['legalAgreementReviewStatus'];
+    case 4:
+      // These values are populated by the customer portal and DMS workflow.
+      // Stage completion still verifies them below with action-specific guidance.
+      return [];
+    case 5:
+      return rental && !isLeaseApplication(procedureCase)
+        ? ['billingStartDate', 'billingStartStatus']
+        : ['salePaymentStatus', 'salePaymentCheckStatus'];
+    case 6:
+      return rental
+        ? isLeaseApplication(procedureCase)
+          ? ['legalConveyanceStatus', 'moveInEffectiveStatus']
+          : ['moveInEffectiveStatus']
+        : ['legalConveyanceStatus', 'ownershipTransferStatus'];
+    case 7:
+    default:
+      return ['customerNotificationStatus', 'applicationStatus'];
+  }
+};
+
+const isStageFieldComplete = (procedureCase: ProcedureCaseDetail, key: string) => {
+  const value = caseFieldValue(procedureCase, key);
+  if (!value) return false;
+  if (key === 'moveInDate' || key === 'billingStartDate') {
+    return /^\d{4}-\d{2}-\d{2}$/.test(value);
+  }
+  return true;
+};
+
+const fieldLabel = (procedureCase: ProcedureCaseDetail, key: string) =>
+  procedureCase.fields.find((field) => field.key === key)?.label || key;
 
 const firstNonBlank = (...values: Array<string | null | undefined>) =>
   values.find((value) => value?.trim())?.trim() || '';
@@ -254,6 +421,8 @@ const buildAgreementMergeValues = (
   rentalApplication: boolean,
   moveInDate: string
 ) => {
+  const leaseApplication = isLeaseApplication(procedureCase);
+  const monthlyRental = rentalApplication && !leaseApplication;
   const fields = Object.fromEntries(
     procedureCase.fields.map((field) => [field.key, field.value ?? null])
   );
@@ -284,6 +453,12 @@ const buildAgreementMergeValues = (
   const generatedAgreementReference = firstNonBlank(
     fields.generatedAgreementReference
   );
+  const premiumCharge = fields.premiumChargeRequired === 'Yes'
+    ? firstNonBlank(fields.premiumChargeAmount, 'To be confirmed')
+    : 'Not applicable';
+  const annualGroundRent = fields.groundRentRequired === 'Yes'
+    ? firstNonBlank(fields.groundRentPayable, fields.groundRentComputed, 'To be confirmed')
+    : 'Not applicable';
 
   return {
     ...fields,
@@ -293,6 +468,10 @@ const buildAgreementMergeValues = (
     CaseReference: caseReference,
     PropertyNumber: propertyNumber,
     PropertyReference: propertyReference,
+    PropertyLocation: fields.listingLocation || '',
+    PropertyArea: [fields.listingArea, fields.listingAreaUnit]
+      .filter(Boolean)
+      .join(' '),
     SourceReference: firstNonBlank(
       fields.sourceReference,
       fields.listingReference,
@@ -304,10 +483,21 @@ const buildAgreementMergeValues = (
     GranteeName: customerName,
     CustomerReference: customerReference,
     RequestType: fields.requestType || '',
-    RentAmount: paymentAmount,
+    RentAmount: monthlyRental ? paymentAmount : '',
+    PurchasePrice: rentalApplication ? '' : paymentAmount,
+    FullTermLeaseAmount: leaseApplication ? paymentAmount : '',
+    MonthlyRent: monthlyRental ? paymentAmount : '',
     PaymentAmount: paymentAmount,
-    PaymentType: rentalApplication ? 'Monthly rent' : 'Purchase price',
-    PaymentSchedule: rentalApplication ? 'Monthly' : 'As agreed',
+    PaymentType: leaseApplication
+      ? 'Full term lease amount'
+      : monthlyRental
+        ? 'Monthly rent'
+        : 'Purchase price',
+    PaymentSchedule: monthlyRental ? 'Monthly' : 'As agreed',
+    PremiumCharge: premiumCharge,
+    PremiumChargeRequired: fields.premiumChargeRequired || 'No',
+    AnnualGroundRent: annualGroundRent,
+    AnnualGroundRentRequired: fields.groundRentRequired || 'No',
     Currency: fields.currency || '',
     LeaseTerm: fields.requestedLeaseTerm || '',
     MoveInDate: moveInDate,
@@ -324,19 +514,29 @@ const buildAgreementMergeValues = (
 
 export function ListingApplicationWorkspace() {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const { hasAnyRole } = useAuth();
   const requestedCaseId = searchParams.get('caseId');
+  const routeCaseIdMatch = pathname.match(/\/cases\/([^/?#]+)/i);
+  const routeCaseId = routeCaseIdMatch
+    ? decodeURIComponent(routeCaseIdMatch[1])
+    : null;
+  const targetCaseId = routeCaseId || requestedCaseId;
+  const detailOnly = Boolean(targetCaseId);
+  const registerOnly = !routeCaseId && !requestedCaseId;
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
-  const [queueView, setQueueView] = React.useState<'active' | 'completed'>(
-    'active'
-  );
   const [queuePage, setQueuePage] = React.useState(1);
+  const [caseTotalCount, setCaseTotalCount] = React.useState(0);
+  const [caseTotalPages, setCaseTotalPages] = React.useState(1);
   const [selectedCase, setSelectedCase] =
     React.useState<ProcedureCaseDetail | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [completionNotes, setCompletionNotes] = React.useState('');
+  const [dirtyStageFieldKeys, setDirtyStageFieldKeys] = React.useState<Set<string>>(
+    () => new Set()
+  );
   const [saleCloseoutChecklist, setSaleCloseoutChecklist] = React.useState({
     customerStatus: false,
     auditReferences: false,
@@ -420,29 +620,26 @@ export function ListingApplicationWorkspace() {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await procedureCaseService.listCases(
-        'PropertyManagement',
-        ENTITY_TYPE
-      );
-      setCases(data);
-      const activeCases = data.filter(
-        (item) => !isArchivedQueueCase(item, completedSaleOwnershipCaseIds)
-      );
-      const targetId =
-        requestedCaseId && data.some((item) => item.id === requestedCaseId)
-          ? requestedCaseId
-          : activeCases[0]?.id;
-      if (requestedCaseId) {
-        const requested = data.find((item) => item.id === requestedCaseId);
-        if (
-          requested &&
-          isArchivedQueueCase(requested, completedSaleOwnershipCaseIds)
-        ) {
-          setQueueView('completed');
-        } else {
-          setQueueView('active');
-        }
+      if (detailOnly && targetCaseId) {
+        const detail = await procedureCaseService.getCase(targetCaseId);
+        setCases([]);
+        setCaseTotalCount(0);
+        setCaseTotalPages(1);
+        setSelectedCase(detail);
+        return;
       }
+
+      const page = await procedureCaseService.listCasesPage(
+        'PropertyManagement',
+        ENTITY_TYPE,
+        queuePage,
+        REQUESTS_PER_PAGE
+      );
+      const data = page.items;
+      setCases(data);
+      setCaseTotalCount(page.totalCount);
+      setCaseTotalPages(Math.max(1, page.totalPages || 1));
+      const targetId = targetCaseId || (registerOnly ? null : data[0]?.id);
       setSelectedCase(
         targetId ? await procedureCaseService.getCase(targetId) : null
       );
@@ -453,8 +650,11 @@ export function ListingApplicationWorkspace() {
     }
   }, [
     completedSaleOwnershipCaseIds,
+    detailOnly,
     rememberSaleOwnershipCompletion,
-    requestedCaseId,
+    queuePage,
+    registerOnly,
+    targetCaseId,
   ]);
 
   React.useEffect(() => {
@@ -466,6 +666,7 @@ export function ListingApplicationWorkspace() {
       customerStatus: false,
       auditReferences: false,
     });
+    setDirtyStageFieldKeys(new Set());
   }, [selectedCaseId]);
 
   React.useEffect(() => {
@@ -518,23 +719,32 @@ export function ListingApplicationWorkspace() {
           await documentManagementService.getGenerationTemplates('Estate');
         if (!mounted) return;
         const rental = isRentalApplication(selectedCase);
+        const lease = isLeaseApplication(selectedCase);
         const applicableTemplates = templates.filter((template) => {
           const value =
             `${template.templateCode} ${template.title} ${template.documentType}`.toLowerCase();
           if (!value.includes('agreement')) return false;
-          return rental
-            ? value.includes('lease') ||
-                value.includes('tenancy') ||
-                value.includes('rent')
-            : value.includes('sale') || value.includes('purchase');
+          return lease
+            ? value.includes('lease')
+            : rental
+              ? (value.includes('tenancy') || value.includes('rent')) &&
+                !value.includes('lease')
+              : value.includes('sale') || value.includes('purchase');
         });
         setGenerationTemplates(applicableTemplates);
+        const preferredCode = lease
+          ? 'EST-LEASE-AGREEMENT'
+          : rental
+            ? 'EST-RENT-AGREEMENT'
+            : 'EST-SALE-AGREEMENT';
         setSelectedTemplateCode((current) =>
           applicableTemplates.some(
             (template) => template.templateCode === current
           )
             ? current
-            : applicableTemplates[0]?.templateCode || ''
+            : applicableTemplates.find(
+                (template) => template.templateCode === preferredCode
+              )?.templateCode || applicableTemplates[0]?.templateCode || ''
         );
       } catch {
         setGenerationTemplates([]);
@@ -567,14 +777,8 @@ export function ListingApplicationWorkspace() {
   }, [generationTemplates, selectedCase]);
 
   React.useEffect(() => {
-    const visibleCount = cases.filter((item) =>
-      queueView === 'completed'
-        ? isArchivedQueueCase(item, completedSaleOwnershipCaseIds)
-        : !isArchivedQueueCase(item, completedSaleOwnershipCaseIds)
-    ).length;
-    const totalPages = Math.max(1, Math.ceil(visibleCount / REQUESTS_PER_PAGE));
-    setQueuePage((current) => Math.min(current, totalPages));
-  }, [cases, completedSaleOwnershipCaseIds, queueView]);
+    setQueuePage((current) => Math.min(current, caseTotalPages));
+  }, [caseTotalPages]);
 
   const selectCase = async (caseId: string) => {
     setIsSaving(true);
@@ -593,6 +797,11 @@ export function ListingApplicationWorkspace() {
   };
 
   const updateField = (key: string, value: string) => {
+    setDirtyStageFieldKeys((current) => {
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
     setSelectedCase((current) =>
       current
         ? {
@@ -627,6 +836,7 @@ export function ListingApplicationWorkspace() {
           description: selectedCase.description,
         })
       );
+      setDirtyStageFieldKeys(new Set());
       toast.success('Stage updates saved.');
     } catch (saveError) {
       const message = errorMessage(
@@ -665,38 +875,184 @@ export function ListingApplicationWorkspace() {
   const completeStage = async () => {
     if (!selectedCase) return;
 
+    if (dirtyStageFieldKeys.size > 0) {
+      setError('Save the current stage updates before routing this request forward.');
+      return;
+    }
+
+    const missingStageFields = requiredStageFieldKeys(selectedCase)
+      .filter((key) => !isStageFieldComplete(selectedCase, key))
+      .map((key) => fieldLabel(selectedCase, key));
+    if (missingStageFields.length > 0) {
+      setError(
+        `Complete the required current-stage field(s) before routing forward: ${missingStageFields
+          .slice(0, 4)
+          .join(', ')}${missingStageFields.length > 4 ? ` and ${missingStageFields.length - 4} more` : ''}.`
+      );
+      return;
+    }
+
+    if (
+      isPremiumChargeRequired(selectedCase) &&
+      selectedCase.currentStageIndex >= 1 &&
+      !(caseMoneyValue(selectedCase, 'premiumChargeAmount') > 0)
+    ) {
+      setError('Enter and save the premium charge amount before routing this request forward.');
+      return;
+    }
+
+    if (
+      isPremiumChargeRequired(selectedCase) &&
+      selectedCase.currentStageIndex >= 2 &&
+      !isPremiumChargeSettled(selectedCase)
+    ) {
+      setError(
+        'Premium charge payment is pending. Wait for Finance payment confirmation before routing this request forward.'
+      );
+      return;
+    }
+
     const approved = isApprovedDecision(
       caseFieldValue(selectedCase, 'decisionStatus')
     );
-    const transactionHandoffStage = selectedCase.currentStageIndex >= 2;
+    const stageName = selectedCase.currentStageName.trim().toLowerCase();
     if (
-      transactionHandoffStage &&
+      stageName === 'commercial and availability review' &&
+      isPremiumChargeRequired(selectedCase) &&
+      !(caseMoneyValue(selectedCase, 'premiumChargeAmount') > 0)
+    ) {
+      setError('Enter the premium charge amount before continuing.');
+      return;
+    }
+    if (
+      stageName === 'estate decision and agreement' &&
       approved &&
       isRentalApplication(selectedCase) &&
       !caseFieldValue(selectedCase, 'moveInDate')
     ) {
-      setError('Set the approved move-in date before final approval.');
+      setError('Set the approved move-in date before generating the agreement.');
       return;
     }
     if (
-      transactionHandoffStage &&
+      stageName === 'estate decision and agreement' &&
+      approved &&
+      isRentalApplication(selectedCase) &&
+      !caseFieldValue(selectedCase, 'requestedLeaseTerm')
+    ) {
+      setError(
+        'Set the approved rental term before generating the agreement.'
+      );
+      return;
+    }
+    if (
+      stageName === 'estate decision and agreement' &&
+      approved &&
+      isPremiumChargeRequired(selectedCase) &&
+      !isPremiumChargeSettled(selectedCase)
+    ) {
+      setError(
+        'The premium charge must be paid in Finance before agreement generation can continue.'
+      );
+      return;
+    }
+    if (
+      stageName === 'estate decision and agreement' &&
       approved &&
       !caseFieldValue(selectedCase, 'generatedAgreementReference')
     ) {
-      setError('Generate the agreement before completing final approval.');
+      setError('Generate the agreement before routing to Legal review.');
       return;
     }
     if (
-      transactionHandoffStage &&
-      approved &&
+      stageName === 'legal agreement review' &&
+      !caseFieldValue(selectedCase, 'generatedAgreementReference')
+    ) {
+      setError('Generate the agreement before completing Legal review.');
+      return;
+    }
+    if (
+      stageName === 'legal agreement review' &&
       !caseFieldValue(selectedCase, 'legalAgreementReviewStatus')
         .toLowerCase()
         .includes('approved')
     ) {
       setError(
-        'Legal must approve the generated agreement before completing final approval.'
+        'Legal must approve the generated agreement before the customer can sign.'
       );
       return;
+    }
+    if (
+      stageName === 'customer agreement execution' &&
+      !caseFieldValue(selectedCase, 'signedAgreementReference')
+    ) {
+      setError('The customer must sign and submit the agreement first.');
+      return;
+    }
+    if (
+      stageName === 'customer agreement execution' &&
+      (caseFieldValue(selectedCase, 'agreementExecutionStatus').toLowerCase() !==
+        'fully executed' ||
+        !caseFieldValue(selectedCase, 'finalSignedAgreementReference'))
+    ) {
+      setError(
+        'Complete internal approval and digital signature in DMS before leaving customer agreement execution.'
+      );
+      return;
+    }
+    if (stageName === 'payment, billing and finance check') {
+      if (isRentalApplication(selectedCase) && !isLeaseApplication(selectedCase)) {
+        if (
+          !caseFieldValue(selectedCase, 'billingStartDate') ||
+          !containsAny(caseFieldValue(selectedCase, 'billingStartStatus'), [
+            'Ready for billing',
+            'Billing active',
+            'Rent billing activated',
+          ])
+        ) {
+          setError('Confirm rent billing readiness before completing this stage.');
+          return;
+        }
+      } else if (!isSalePaymentSatisfied(selectedCase)) {
+        setError(
+          'Complete the Estate sale or lease balance payment check before moving to Legal conveyance.'
+        );
+        return;
+      }
+    }
+    if (stageName === 'legal conveyance or lease follow-up') {
+      if (isRentalApplication(selectedCase)) {
+        if (
+          !containsAny(caseFieldValue(selectedCase, 'moveInEffectiveStatus'), [
+            'Effective',
+            'Move-in complete',
+            'Handover complete',
+          ])
+        ) {
+          setError(
+            'Confirm the executed lease and move-in readiness before Estate closeout.'
+          );
+          return;
+        }
+      } else {
+        if (
+          caseFieldValue(selectedCase, 'legalConveyanceStatus').toLowerCase() !==
+          'completed by legal'
+        ) {
+          setError(
+            'Legal must complete conveyance and registration before Estate closeout.'
+          );
+          return;
+        }
+
+        if (
+          !containsAny(caseFieldValue(selectedCase, 'ownershipTransferStatus'), [
+            'Completed',
+          ])
+        ) {
+          setError('Complete ownership transfer before Estate closeout.');
+          return;
+        }
+      }
     }
 
     setIsSaving(true);
@@ -769,9 +1125,28 @@ export function ListingApplicationWorkspace() {
 
     const rentalApplication = isRentalApplication(selectedCase);
     const moveInDate = caseFieldValue(selectedCase, 'moveInDate');
+    const requestedLeaseTerm = caseFieldValue(
+      selectedCase,
+      'requestedLeaseTerm'
+    );
     if (rentalApplication && !moveInDate) {
       setError(
         'Set the approved move-in date before generating the rental agreement.'
+      );
+      return;
+    }
+    if (rentalApplication && !requestedLeaseTerm) {
+      setError(
+        'Set the approved rental term before generating the rental agreement.'
+      );
+      return;
+    }
+    if (
+      isPremiumChargeRequired(selectedCase) &&
+      !isPremiumChargeSettled(selectedCase)
+    ) {
+      setError(
+        'The premium charge must be paid in Finance before generating the agreement.'
       );
       return;
     }
@@ -1064,6 +1439,52 @@ export function ListingApplicationWorkspace() {
     }
   };
 
+  const createPremiumChargeInvoice = async () => {
+    if (!selectedCase) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const result =
+        await estatePropertyManagementService.createPremiumChargeInvoice(
+          selectedCase.id
+        );
+      setSelectedCase(await procedureCaseService.getCase(selectedCase.id));
+      toast.success(result.message);
+    } catch (premiumError) {
+      const message = errorMessage(
+        premiumError,
+        'Unable to create the premium charge invoice.'
+      );
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const syncPremiumChargePaymentStatus = async () => {
+    if (!selectedCase) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const result =
+        await estatePropertyManagementService.syncPremiumChargePaymentStatus(
+          selectedCase.id
+        );
+      setSelectedCase(await procedureCaseService.getCase(selectedCase.id));
+      toast.success(result.message);
+    } catch (premiumError) {
+      const message = errorMessage(
+        premiumError,
+        'Unable to refresh the premium charge payment status.'
+      );
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const completeSaleOwnership = async () => {
     if (!selectedCase) return;
     setIsSaving(true);
@@ -1090,8 +1511,7 @@ export function ListingApplicationWorkspace() {
   const completeSaleCloseout = () => {
     if (!selectedCase) return;
     rememberSaleOwnershipCompletion(selectedCase.id);
-    setQueueView('completed');
-    toast.success('Sale closeout completed and moved to Archive.');
+    toast.success('Sale closeout completed.');
   };
 
   if (isLoading) {
@@ -1112,7 +1532,9 @@ export function ListingApplicationWorkspace() {
     ? selectedCase.fields.filter(
         (field) =>
           editableFieldKeys(selectedCase).has(field.key) &&
-          (field.key !== 'moveInDate' || isRentalApplication(selectedCase))
+          (field.key !== 'moveInDate' || isRentalApplication(selectedCase)) &&
+          (!PREMIUM_FIELD_KEYS.has(field.key) ||
+            selectedCase.currentStageIndex >= 1)
       )
     : [];
   const stageItems =
@@ -1128,33 +1550,72 @@ export function ListingApplicationWorkspace() {
   );
   const stageConfirmed = stageItems.every((item) => item.isCompleted);
   const caseIsCompleted = selectedCase ? isCompletedCase(selectedCase) : false;
-  const activeCases = cases.filter(
-    (item) => !isArchivedQueueCase(item, completedSaleOwnershipCaseIds)
-  );
-  const completedCases = cases.filter((item) =>
-    isArchivedQueueCase(item, completedSaleOwnershipCaseIds)
-  );
-  const visibleCases = queueView === 'active' ? activeCases : completedCases;
-  const queueTotalPages = Math.max(
-    1,
-    Math.ceil(visibleCases.length / REQUESTS_PER_PAGE)
-  );
-  const pagedVisibleCases = visibleCases.slice(
-    (queuePage - 1) * REQUESTS_PER_PAGE,
-    queuePage * REQUESTS_PER_PAGE
-  );
-
+  const requiredStageKeys = selectedCase
+    ? requiredStageFieldKeys(selectedCase)
+    : [];
+  const missingRequiredStageFields = selectedCase
+    ? requiredStageKeys
+        .filter((key) => !isStageFieldComplete(selectedCase, key))
+        .map((key) => fieldLabel(selectedCase, key))
+    : [];
+  const hasUnsavedStageUpdates = dirtyStageFieldKeys.size > 0;
   const approvedDecision = selectedCase
     ? isApprovedDecision(caseFieldValue(selectedCase, 'decisionStatus'))
     : false;
   const rentalApplication = selectedCase
     ? isRentalApplication(selectedCase)
     : false;
+  const leaseApplication = selectedCase
+    ? isLeaseApplication(selectedCase)
+    : false;
   const missingApprovedMoveInDate = Boolean(
     selectedCase &&
       approvedDecision &&
       rentalApplication &&
       !caseFieldValue(selectedCase, 'moveInDate')
+  );
+  const missingApprovedRentTerm = Boolean(
+    selectedCase &&
+      approvedDecision &&
+      rentalApplication &&
+      !caseFieldValue(selectedCase, 'requestedLeaseTerm')
+  );
+  const premiumChargeRequired = Boolean(
+    selectedCase && isPremiumChargeRequired(selectedCase)
+  );
+  const premiumChargeSettled = Boolean(
+    selectedCase && isPremiumChargeSettled(selectedCase)
+  );
+  const premiumChargeAmount = selectedCase
+    ? caseMoneyValue(selectedCase, 'premiumChargeAmount')
+    : Number.NaN;
+  const premiumChargeBalance = selectedCase
+    ? caseMoneyValue(selectedCase, 'premiumChargeBalance')
+    : Number.NaN;
+  const premiumChargeInvoiceId = selectedCase
+    ? caseFieldValue(selectedCase, 'premiumChargeInvoiceId')
+    : '';
+  const premiumChargeInvoiceReference = selectedCase
+    ? caseFieldValue(selectedCase, 'premiumChargeInvoiceReference')
+    : '';
+  const premiumChargePaymentStatus = selectedCase
+    ? caseFieldValue(selectedCase, 'premiumChargePaymentStatus') ||
+      (premiumChargeInvoiceId ? 'Payment pending' : 'Pending invoice')
+    : '';
+  const premiumChargeCurrency = selectedCase
+    ? caseFieldValue(selectedCase, 'currency') || 'GHS'
+    : 'GHS';
+  const missingPremiumChargePayment = Boolean(
+    selectedCase &&
+      premiumChargeRequired &&
+      selectedCase.currentStageIndex >= 2 &&
+      !premiumChargeSettled
+  );
+  const missingPremiumChargeAmount = Boolean(
+    selectedCase &&
+      premiumChargeRequired &&
+      selectedCase.currentStageIndex >= 1 &&
+      !(premiumChargeAmount > 0)
   );
   const missingApprovedAgreement = Boolean(
     selectedCase &&
@@ -1182,11 +1643,16 @@ export function ListingApplicationWorkspace() {
   );
   const legalAgreementReviewSubmitting =
     pendingLegalMatterType === 'agreementReview';
-  const legalAgreementReviewApproved = legalAgreementReviewStatus
-    .toLowerCase()
-    .includes('approved');
+  const legalAgreementSignedByHeadOfLegal =
+    legalAgreementReviewStatus.toLowerCase().includes('head of legal') &&
+    legalAgreementReviewStatus.toLowerCase().includes('signed');
+  const customerAgreementAccepted = Boolean(
+    selectedCase &&
+      caseFieldValue(selectedCase, 'customerAcceptanceStatus').toLowerCase() ===
+        'accepted'
+  );
   const missingLegalAgreementReview = Boolean(
-    selectedCase && approvedDecision && !legalAgreementReviewApproved
+    selectedCase && approvedDecision && !legalAgreementSignedByHeadOfLegal
   );
   const fullyExecuted = Boolean(
     selectedCase &&
@@ -1208,18 +1674,24 @@ export function ListingApplicationWorkspace() {
     ? caseFieldValue(selectedCase, 'salePaymentStatus').toLowerCase()
     : '';
   const saleInvoiceBalance = selectedCase
-    ? Number(
-        caseFieldValue(selectedCase, 'saleInvoiceBalance').replace(
-          /[^\d.-]/g,
-          ''
-        )
-      )
+    ? caseMoneyValue(selectedCase, 'saleInvoiceBalance')
     : Number.NaN;
+  const estateRemainingAmount = selectedCase
+    ? caseMoneyValue(selectedCase, 'estateRemainingAmount')
+    : Number.NaN;
+  const saleFullyPaidInSales = Boolean(
+    selectedCase &&
+      (!rentalApplication || leaseApplication) &&
+      salePaymentStatus === 'paid in full' &&
+      Number.isFinite(estateRemainingAmount) &&
+      estateRemainingAmount <= 0
+  );
   const saleInvoicePaid = Boolean(
     selectedCase &&
-      salePaymentStatus === 'paid in full' &&
-      Number.isFinite(saleInvoiceBalance) &&
-      saleInvoiceBalance <= 0
+      (saleFullyPaidInSales ||
+        (salePaymentStatus === 'paid in full' &&
+          Number.isFinite(saleInvoiceBalance) &&
+          saleInvoiceBalance <= 0))
   );
   const canCompleteSaleOwnership = saleInvoicePaid && legalConveyanceCompleted;
   const ownershipTransferCompleted = Boolean(
@@ -1356,108 +1828,118 @@ export function ListingApplicationWorkspace() {
           </div>
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="h-fit">
+        <div className="space-y-4">
+          {!detailOnly ? (
+          <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ClipboardCheck className="h-4 w-4" />
-                Request queue
-              </CardTitle>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ClipboardCheck className="h-4 w-4" />
+                  Request queue
+                </CardTitle>
+                <Badge variant="outline">
+                  {caseTotalCount} case{caseTotalCount === 1 ? '' : 's'}
+                </Badge>
+              </div>
             </CardHeader>
             <CardContent className="space-y-2">
-              <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={queueView === 'active' ? 'secondary' : 'ghost'}
-                  onClick={() => {
-                    setQueueView('active');
-                    setQueuePage(1);
-                    if (
-                      activeCases[0] &&
-                      !activeCases.some((item) => item.id === selectedCase?.id)
-                    ) {
-                      void selectCase(activeCases[0].id);
-                    }
-                  }}
-                >
-                  Active ({activeCases.length})
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={queueView === 'completed' ? 'secondary' : 'ghost'}
-                  onClick={() => {
-                    setQueueView('completed');
-                    setQueuePage(1);
-                    if (
-                      completedCases[0] &&
-                      !completedCases.some(
-                        (item) => item.id === selectedCase?.id
-                      )
-                    ) {
-                      void selectCase(completedCases[0].id);
-                    }
-                  }}
-                >
-                  Archive ({completedCases.length})
-                </Button>
-              </div>
-              {visibleCases.length === 0 ? (
+              {cases.length === 0 ? (
                 <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                  {queueView === 'active'
-                    ? 'Customer bids and rental requests will appear here after they are submitted from a published listing.'
-                    : 'Completed requests will appear here for audit and reference.'}
+                  Customer bids and rental requests will appear here after they
+                  are submitted from a published listing.
                 </p>
               ) : (
-                pagedVisibleCases.map((item) => (
-                  <button
-                    type="button"
-                    key={item.id}
-                    onClick={() => void selectCase(item.id)}
-                    className={`w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/60 ${
-                      selectedCase?.id === item.id
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-medium">
-                        {item.referenceNumber || item.title}
-                      </span>
-                      <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {item.applicantName || 'Customer'}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      <Badge variant="secondary">{item.currentStageName}</Badge>
-                      {!item.usesConfiguredWorkflow ? (
-                        <Badge variant="secondary">Manual</Badge>
-                      ) : null}
-                      {item.status.trim().toLowerCase() === 'completed' ? (
-                        <Badge>{queueStatusLabel(item, queueView)}</Badge>
-                      ) : null}
-                    </div>
-                  </button>
-                ))
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[900px] text-sm">
+                    <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Reference</th>
+                        <th className="px-3 py-2 font-medium">Customer</th>
+                        <th className="px-3 py-2 font-medium">Request</th>
+                        <th className="px-3 py-2 font-medium">Stage</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 text-right font-medium">
+                          Action
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {cases.map((item) => (
+                        <tr key={item.id} className="bg-background">
+                          <td className="px-3 py-3 align-top">
+                            <div className="font-medium">
+                              {item.referenceNumber || item.title}
+                            </div>
+                            <div className="mt-1 max-w-[20rem] truncate text-xs text-muted-foreground">
+                              {summaryFieldValue(item, 'listingReference') ||
+                                summaryFieldValue(item, 'propertyUnit') ||
+                                item.title}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 align-top text-muted-foreground">
+                            {item.applicantName ||
+                              summaryFieldValue(item, 'customerName') ||
+                              'Customer'}
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <Badge variant="secondary">
+                              {requestTypeLabel(item)}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <Badge variant="outline">
+                              {item.currentStageName}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            <div className="flex flex-wrap gap-1">
+                              <Badge
+                                variant="outline"
+                                className={getStatusBadgeClassName(
+                                  queueStatusLabel(item)
+                                )}
+                              >
+                                {queueStatusLabel(item)}
+                              </Badge>
+                              {!item.usesConfiguredWorkflow ? (
+                                <Badge variant="secondary">Manual</Badge>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-right align-top">
+                            <Button asChild size="sm" variant="outline">
+                              <Link
+                                href={`/estate/property-management/${ENTITY_TYPE}/cases/${encodeURIComponent(item.id)}`}
+                                className="gap-2"
+                              >
+                                <Eye className="h-4 w-4" />
+                                View
+                              </Link>
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
-              {visibleCases.length > REQUESTS_PER_PAGE ? (
+              {caseTotalCount > REQUESTS_PER_PAGE ? (
                 <Pagination
                   currentPage={queuePage}
-                  totalPages={queueTotalPages}
-                  totalItems={visibleCases.length}
+                  totalPages={caseTotalPages}
+                  totalItems={caseTotalCount}
                   pageSize={REQUESTS_PER_PAGE}
                   onPageChange={setQueuePage}
                 />
               ) : null}
             </CardContent>
           </Card>
+          ) : null}
 
-          {!selectedCase ? (
+          {registerOnly ? null : !selectedCase ? (
             <Card>
               <CardContent className="py-16 text-center text-sm text-muted-foreground">
-                Select a property request to begin.
+                The selected property request could not be opened.
               </CardContent>
             </Card>
           ) : (
@@ -1482,7 +1964,6 @@ export function ListingApplicationWorkspace() {
                   </CardContent>
                 </Card>
               ) : null}
-
               <Card>
                 <CardHeader className="space-y-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1495,7 +1976,14 @@ export function ListingApplicationWorkspace() {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Badge>{selectedStatusLabel}</Badge>
+                      <Badge
+                        variant="outline"
+                        className={getStatusBadgeClassName(
+                          selectedStatusLabel
+                        )}
+                      >
+                        {selectedStatusLabel}
+                      </Badge>
                       <Badge variant="outline">
                         {selectedCase.currentAssignedRole || 'Unassigned'}
                       </Badge>
@@ -1534,6 +2022,14 @@ export function ListingApplicationWorkspace() {
                 </CardHeader>
               </Card>
 
+              <Tabs defaultValue="request" className="space-y-4">
+                <TabsList className="flex h-auto flex-wrap justify-start">
+                  <TabsTrigger value="request">Request</TabsTrigger>
+                  <TabsTrigger value="documents">Documents</TabsTrigger>
+                  <TabsTrigger value="agreement">Agreement & legal</TabsTrigger>
+                  <TabsTrigger value="complete">Complete</TabsTrigger>
+                </TabsList>
+                <TabsContent value="request" className="space-y-4">
               <div className="grid gap-4 xl:grid-cols-2">
                 <Card>
                   <CardHeader>
@@ -1578,9 +2074,7 @@ export function ListingApplicationWorkspace() {
                             htmlFor={field.id}
                           >
                             {field.label}
-                            {field.key === 'moveInDate' &&
-                            rentalApplication &&
-                            isDecisionStage(selectedCase)
+                            {requiredStageKeys.includes(field.key)
                               ? ' *'
                               : ''}
                           </label>
@@ -1675,7 +2169,9 @@ export function ListingApplicationWorkspace() {
                   </CardContent>
                 </Card>
               </div>
+                </TabsContent>
 
+                <TabsContent value="documents" className="space-y-4">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -1765,6 +2261,121 @@ export function ListingApplicationWorkspace() {
                   )}
                 </CardContent>
               </Card>
+                </TabsContent>
+
+                <TabsContent value="agreement" className="space-y-4">
+              {premiumChargeRequired ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Send className="h-4 w-4" />
+                      Premium charge
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Estate initiates the premium charge invoice, then waits
+                      for Finance payment confirmation before the agreement can
+                      be generated.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-3 text-sm md:grid-cols-4">
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Amount
+                        </div>
+                        <div className="mt-1 font-medium">
+                          {formatMoney(
+                            premiumChargeAmount,
+                            premiumChargeCurrency
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Invoice
+                        </div>
+                        <div className="mt-1 font-medium">
+                          {premiumChargeInvoiceReference || 'Not created'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Payment
+                        </div>
+                        <Badge
+                          variant={
+                            premiumChargeSettled ? 'secondary' : 'outline'
+                          }
+                          className="mt-1"
+                        >
+                          {premiumChargePaymentStatus || 'Pending invoice'}
+                        </Badge>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Balance
+                        </div>
+                        <div className="mt-1 font-medium">
+                          {Number.isFinite(premiumChargeBalance)
+                            ? formatMoney(
+                                premiumChargeBalance,
+                                premiumChargeCurrency
+                              )
+                            : premiumChargeInvoiceId
+                              ? 'Awaiting Finance'
+                              : 'Not invoiced'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {premiumChargeInvoiceId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-2"
+                          disabled={isSaving || premiumChargeSettled}
+                          onClick={() =>
+                            void syncPremiumChargePaymentStatus()
+                          }
+                        >
+                          {isSaving ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                          {premiumChargeSettled
+                            ? 'Premium paid'
+                            : 'Refresh Finance payment'}
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          className="gap-2"
+                          disabled={
+                            isSaving ||
+                            premiumChargeSettled ||
+                            !(premiumChargeAmount > 0)
+                          }
+                          onClick={() => void createPremiumChargeInvoice()}
+                        >
+                          {isSaving ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                          Create premium invoice
+                        </Button>
+                      )}
+                      {premiumChargeSettled ? (
+                        <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+                          <CheckCircle2 className="h-4 w-4" />
+                          Agreement can continue
+                        </div>
+                      ) : null}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
 
               {showAgreementGeneration ? (
                 <Card>
@@ -1774,8 +2385,8 @@ export function ListingApplicationWorkspace() {
                       Agreement generation
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      Set the approval details, then generate the agreement
-                      before routing the approved request to the customer.
+                      Set the approval details, generate the agreement, and
+                      route it through Legal before customer execution.
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -1809,6 +2420,8 @@ export function ListingApplicationWorkspace() {
                           !selectedTemplateCode ||
                           !approvedDecision ||
                           missingApprovedMoveInDate ||
+                          missingApprovedRentTerm ||
+                          missingPremiumChargePayment ||
                           agreementAlreadyGenerated ||
                           caseIsCompleted
                         }
@@ -1828,6 +2441,19 @@ export function ListingApplicationWorkspace() {
                         No {rentalApplication ? 'lease' : 'sale'} agreement
                         template is available. Upload or activate the correct
                         transaction template in Central DMS first.
+                      </p>
+                    ) : null}
+                    {missingApprovedRentTerm ? (
+                      <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        Enter the approved rental term on the current stage
+                        before generating the agreement.
+                      </p>
+                    ) : null}
+                    {missingPremiumChargePayment ? (
+                      <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        Initiate the premium charge invoice and wait for Finance
+                        payment confirmation before generating the
+                        lease agreement.
                       </p>
                     ) : null}
                     {generatedAgreement ? (
@@ -1864,7 +2490,7 @@ export function ListingApplicationWorkspace() {
                         <div>
                           <div className="flex items-center gap-2 font-medium">
                             <Gavel className="h-4 w-4" />
-                            Legal agreement review
+                            Legal review and Head of Legal signature
                           </div>
                           <p className="mt-1 text-sm text-muted-foreground">
                             {legalAgreementReviewSubmitting
@@ -1876,14 +2502,14 @@ export function ListingApplicationWorkspace() {
                         <Button
                           type="button"
                           variant={
-                            legalAgreementReviewApproved ? 'outline' : 'default'
+                            legalAgreementSignedByHeadOfLegal ? 'outline' : 'default'
                           }
                           className="gap-2"
                           disabled={
                             isSaving ||
                             legalAgreementReviewSubmitting ||
                             legalAgreementReviewStarted ||
-                            legalAgreementReviewApproved
+                            legalAgreementSignedByHeadOfLegal
                           }
                           onClick={() =>
                             void lodgeLegalMatter('agreementReview')
@@ -1891,21 +2517,107 @@ export function ListingApplicationWorkspace() {
                         >
                           {legalAgreementReviewSubmitting ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : legalAgreementReviewApproved ? (
+                          ) : legalAgreementSignedByHeadOfLegal ? (
                             <CheckCircle2 className="h-4 w-4" />
                           ) : (
                             <Send className="h-4 w-4" />
                           )}
                           {legalAgreementReviewSubmitting
                             ? 'Submitting to Legal...'
-                            : legalAgreementReviewApproved
-                              ? 'Approved by Legal'
+                            : legalAgreementSignedByHeadOfLegal
+                              ? 'Signed by Head of Legal'
                               : legalAgreementReviewStarted
                                 ? 'Under Legal review'
                                 : 'Submit draft to Legal'}
                         </Button>
                       </div>
                     ) : null}
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              {agreementAlreadyGenerated && legalAgreementSignedByHeadOfLegal ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <FileSignature className="h-4 w-4" />
+                      Customer agreement execution
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      {rentalApplication ? 'Rent and lease' : 'Sale'} agreements
+                      follow the same signed Legal, customer, internal execution,
+                      and conveyance process.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="divide-y rounded-md border">
+                      <div className="flex items-start gap-3 p-3">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">
+                            Head of Legal signature
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            The agreement is signed and sent to the customer portal.
+                          </p>
+                        </div>
+                        <Badge variant="outline">Complete</Badge>
+                      </div>
+                      <div className="flex items-start gap-3 p-3">
+                        {hasActiveCustomerSignedAgreement ? (
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                        ) : (
+                          <Send className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">
+                            Customer signature
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {hasActiveCustomerSignedAgreement
+                              ? 'The signed customer agreement has been received.'
+                              : customerAgreementAccepted
+                                ? 'Customer accepted the agreement; waiting for the signed upload.'
+                                : 'Customer has been notified; waiting for review, acceptance, and signed upload.'}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={
+                            hasActiveCustomerSignedAgreement
+                              ? 'outline'
+                              : 'secondary'
+                          }
+                        >
+                          {hasActiveCustomerSignedAgreement
+                            ? 'Received'
+                            : 'Waiting'}
+                        </Badge>
+                      </div>
+                      <div className="flex items-start gap-3 p-3">
+                        {fullyExecuted ? (
+                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                        ) : (
+                          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">
+                            Internal approval and digital signature
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {fullyExecuted
+                              ? 'The final agreement is internally approved and digitally signed.'
+                              : hasActiveCustomerSignedAgreement
+                                ? 'Continue below with DMS approval and the authorised digital signature.'
+                                : 'This begins after the customer returns the signed agreement.'}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={fullyExecuted ? 'outline' : 'secondary'}
+                        >
+                          {fullyExecuted ? 'Complete' : 'Pending'}
+                        </Badge>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               ) : null}
@@ -1918,8 +2630,9 @@ export function ListingApplicationWorkspace() {
                       Agreement approval and signature
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      The approved move-in date remains inactive until the
-                      customer copy is internally approved and digitally signed.
+                      {rentalApplication
+                        ? 'The approved move-in date remains inactive until the customer copy is internally approved and digitally signed.'
+                        : 'The sale agreement must be internally approved and digitally signed before conveyance continues.'}
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -2059,7 +2772,9 @@ export function ListingApplicationWorkspace() {
                         <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
                           <CheckCircle2 className="h-4 w-4" />
                           {rentalApplication
-                            ? 'Final agreement signed; move-in is now effective'
+                            ? leaseApplication
+                              ? 'Final agreement signed; lease conveyance is next'
+                              : 'Final agreement signed; move-in is now effective'
                             : 'Final agreement signed; conveyance and registration has started'}
                         </div>
                       ) : null}
@@ -2068,34 +2783,40 @@ export function ListingApplicationWorkspace() {
                 </Card>
               ) : null}
 
-              {fullyExecuted ? (
+              {agreementAlreadyGenerated && legalAgreementSignedByHeadOfLegal && (!rentalApplication || leaseApplication) ? (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base">
                       <Gavel className="h-4 w-4" />
-                      Legal follow-up
+                      Legal transfer and conveyance
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      {rentalApplication
-                        ? 'Lodge later legal events from this property record. Legal receives and completes the matter in the Legal workspace.'
-                        : 'Complete the sale invoice, customer payment, and Legal conveyance before ownership transfer is marked complete.'}
+                      {!fullyExecuted
+                        ? 'This next Legal matter opens after the customer-signed agreement is internally approved and digitally signed.'
+                        : leaseApplication
+                        ? 'Confirm the full lease payment after signing, then start Legal conveyance. Ground rent remains separate from the full-term lease amount.'
+                        : saleFullyPaidInSales
+                          ? 'Sales has collected the full purchase amount, so Estate only completes Legal conveyance and ownership transfer.'
+                          : 'Complete the Estate balance invoice, customer payment, and Legal conveyance before ownership transfer is marked complete.'}
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {!rentalApplication ? (
+                    {(!rentalApplication || leaseApplication) ? (
                       <div className="space-y-3">
                         <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <p className="font-medium">
-                              Purchase invoice and payment
+                              {leaseApplication ? 'Lease balance invoice and payment' : 'Purchase invoice and payment'}
                             </p>
                             <p className="text-sm text-muted-foreground">
-                              {caseFieldValue(
-                                selectedCase,
-                                'saleInvoiceReference'
-                              )
-                                ? `${caseFieldValue(selectedCase, 'saleInvoiceReference')} · ${caseFieldValue(selectedCase, 'salePaymentStatus') || caseFieldValue(selectedCase, 'saleInvoiceStatus')}`
-                                : 'Create the one-time Finance AR invoice for the approved purchase price.'}
+                              {saleFullyPaidInSales
+                                ? 'Sales recorded full payment; no Estate invoice is required.'
+                                : caseFieldValue(
+                                      selectedCase,
+                                      'saleInvoiceReference'
+                                    )
+                                  ? `${caseFieldValue(selectedCase, 'saleInvoiceReference')} · ${caseFieldValue(selectedCase, 'salePaymentStatus') || caseFieldValue(selectedCase, 'saleInvoiceStatus')}`
+                                  : 'Create the Finance AR invoice for the remaining Estate balance after the agreement is fully signed.'}
                             </p>
                             {caseFieldValue(
                               selectedCase,
@@ -2126,13 +2847,24 @@ export function ListingApplicationWorkspace() {
                               type="button"
                               variant="outline"
                               className="gap-2"
-                              disabled={isSaving || Boolean(saleInvoiceId)}
+                              disabled={
+                                isSaving ||
+                                !fullyExecuted ||
+                                Boolean(saleInvoiceId) ||
+                                saleFullyPaidInSales
+                              }
                               onClick={() => void createSaleInvoice()}
                             >
-                              <Send className="h-4 w-4" />
-                              {saleInvoiceId
-                                ? 'Invoice created'
-                                : 'Create sale invoice'}
+                              {saleFullyPaidInSales ? (
+                                <CheckCircle2 className="h-4 w-4" />
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                              {saleFullyPaidInSales
+                                ? 'No Estate invoice required'
+                                : saleInvoiceId
+                                  ? 'Invoice created'
+                                  : 'Create balance invoice'}
                             </Button>
                           </div>
                         </div>
@@ -2146,13 +2878,13 @@ export function ListingApplicationWorkspace() {
                                 selectedCase,
                                 'legalConveyanceStatus'
                               ) ||
-                                'Required before Estate transfers ownership and marks the property sold.'}
+                                'Required after internal agreement execution before Estate completes the transaction.'}
                             </p>
                           </div>
                           <Button
                             type="button"
                             className="gap-2"
-                            disabled={isSaving || legalConveyanceStarted}
+                            disabled={isSaving || !fullyExecuted || !saleInvoicePaid || legalConveyanceStarted}
                             onClick={() =>
                               void lodgeLegalMatter('conveyanceRegistration')
                             }
@@ -2163,6 +2895,7 @@ export function ListingApplicationWorkspace() {
                               : 'Start conveyance'}
                           </Button>
                         </div>
+                        {!leaseApplication ? (
                         <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <p className="font-medium">
@@ -2188,7 +2921,9 @@ export function ListingApplicationWorkspace() {
                               canCompleteSaleOwnership ||
                               ownershipTransferCompleted
                                 ? undefined
-                                : 'Requires full payment and completed Legal conveyance'
+                                : saleFullyPaidInSales
+                                  ? 'Requires completed Legal conveyance'
+                                  : 'Requires full Estate balance payment and completed Legal conveyance'
                             }
                             onClick={() => void completeSaleOwnership()}
                           >
@@ -2202,67 +2937,50 @@ export function ListingApplicationWorkspace() {
                                   : 'Complete ownership transfer'}
                           </Button>
                         </div>
+                        ) : null}
                       </div>
                     ) : null}
-                    {rentalApplication ? (
-                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                        <Select
-                          value={selectedLegalMatterType}
-                          onValueChange={setSelectedLegalMatterType}
-                          disabled={isSaving}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="termination">
-                              Termination / recognition
-                            </SelectItem>
-                            <SelectItem value="leaseRenewal">
-                              Lease renewal
-                            </SelectItem>
-                            <SelectItem value="leaseVariation">
-                              Deed of variation
-                            </SelectItem>
-                            <SelectItem value="sublease">Sublease</SelectItem>
-                            <SelectItem value="assignment">
-                              Assignment / vesting
-                            </SelectItem>
-                            <SelectItem value="mortgage">
-                              Consent to mortgage
-                            </SelectItem>
-                            <SelectItem value="mortgageInPrinciple">
-                              Mortgage in principle
-                            </SelectItem>
-                            <SelectItem value="disputeAdvisory">
-                              Property dispute / advisory
-                            </SelectItem>
-                            <SelectItem value="courtProcess">
-                              Court process
-                            </SelectItem>
-                            <SelectItem value="otherCourtProcess">
-                              Other court process
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="gap-2"
-                          disabled={isSaving}
-                          onClick={() =>
-                            void lodgeLegalMatter(selectedLegalMatterType)
-                          }
-                        >
-                          <Gavel className="h-4 w-4" />
-                          Lodge with Legal
-                        </Button>
+                    {leaseApplication ? (
+                      <div className="space-y-3">
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                          <Select
+                            value={selectedLegalMatterType}
+                            onValueChange={setSelectedLegalMatterType}
+                            disabled={isSaving || !fullyExecuted}
+                          >
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="termination">Termination / recognition</SelectItem>
+                              <SelectItem value="leaseRenewal">Lease renewal</SelectItem>
+                              <SelectItem value="leaseVariation">Deed of variation</SelectItem>
+                              <SelectItem value="sublease">Sublease</SelectItem>
+                              <SelectItem value="assignment">Assignment / vesting</SelectItem>
+                              <SelectItem value="mortgage">Consent to mortgage</SelectItem>
+                              <SelectItem value="mortgageInPrinciple">Mortgage in principle</SelectItem>
+                              <SelectItem value="disputeAdvisory">Property dispute / advisory</SelectItem>
+                              <SelectItem value="courtProcess">Court process</SelectItem>
+                              <SelectItem value="otherCourtProcess">Other court process</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-2"
+                            disabled={isSaving || !fullyExecuted}
+                            onClick={() => void lodgeLegalMatter(selectedLegalMatterType)}
+                          >
+                            <Gavel className="h-4 w-4" />
+                            Lodge other Legal matter
+                          </Button>
+                        </div>
                       </div>
                     ) : null}
                   </CardContent>
                 </Card>
               ) : null}
+                </TabsContent>
 
+                <TabsContent value="complete" className="space-y-4">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
@@ -2367,8 +3085,13 @@ export function ListingApplicationWorkspace() {
                         : isSaving ||
                           caseIsCompleted ||
                           !selectedCase.canEditCurrentStage ||
+                          hasUnsavedStageUpdates ||
+                          missingRequiredStageFields.length > 0 ||
                           !stageConfirmed ||
+                          missingPremiumChargeAmount ||
                           missingApprovedMoveInDate ||
+                          missingApprovedRentTerm ||
+                          missingPremiumChargePayment ||
                           missingApprovedAgreement ||
                           missingLegalAgreementReview
                     }
@@ -2390,10 +3113,44 @@ export function ListingApplicationWorkspace() {
                           ? 'Complete stage and route forward'
                           : 'Complete manual stage'}
                   </Button>
+                  {hasUnsavedStageUpdates ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Save the current stage updates before routing this request
+                      forward.
+                    </p>
+                  ) : null}
+                  {missingRequiredStageFields.length > 0 ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Complete the required current-stage field(s):{' '}
+                      {missingRequiredStageFields.slice(0, 4).join(', ')}
+                      {missingRequiredStageFields.length > 4
+                        ? ` and ${missingRequiredStageFields.length - 4} more`
+                        : ''}
+                      .
+                    </p>
+                  ) : null}
                   {missingLegalAgreementReview && !missingApprovedAgreement ? (
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Submit the generated agreement to Legal and wait for Legal
-                      approval before routing this stage forward.
+                      Submit the generated agreement to Legal and wait for the
+                      Head of Legal signature before routing this stage forward.
+                    </p>
+                  ) : null}
+                  {missingApprovedRentTerm ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Enter the approved rental term before routing this rental
+                      case forward.
+                    </p>
+                  ) : null}
+                  {missingPremiumChargeAmount ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Enter and save the premium charge amount before routing
+                      this request forward.
+                    </p>
+                  ) : null}
+                  {missingPremiumChargePayment ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Premium charge payment is still pending. Refresh the
+                      Finance payment status after Finance receives payment.
                     </p>
                   ) : null}
                   {!caseIsCompleted && selectedCase.canEditCurrentStage ? (
@@ -2426,6 +3183,8 @@ export function ListingApplicationWorkspace() {
                   ) : null}
                 </CardContent>
               </Card>
+                </TabsContent>
+              </Tabs>
             </div>
           )}
         </div>

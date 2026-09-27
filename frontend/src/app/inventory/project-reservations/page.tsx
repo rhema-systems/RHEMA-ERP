@@ -120,9 +120,9 @@ export default function InventoryProjectReservationsPage() {
     if (!selected || !replacementItemId || substituteReason.trim().length < 5) { toast.error('Select a replacement item and record the substitution reason.'); return; }
     setSaving(true);
     try {
-      const value = await inventoryProjectReservationService.substitute(selected.id, { replacementInventoryItemId,
+      const value = await inventoryProjectReservationService.substitute(selected.id, { replacementInventoryItemId: replacementItemId,
         reason: substituteReason, idempotencyKey: newKey('substitute'), rowVersion: selected.rowVersion });
-      setReservations(current => [value, ...current.map(item => item.id === selected.id ? { ...item, status: 6, remainingQuantity: 0 } : item)]);
+      setReservations(current => [value, ...current.map((item): InventoryProjectReservation => item.id === selected.id ? { ...item, status: 6, remainingQuantity: 0 } : item)]);
       setSelected(value); setReplacementItemId(''); setSubstituteReason('');
       toast.success('Pre-fulfillment substitution completed atomically.');
     } catch (error) { toast.error(messageFrom(error, 'Unable to substitute reserved stock.')); }

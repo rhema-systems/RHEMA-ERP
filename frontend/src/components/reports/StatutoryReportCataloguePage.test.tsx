@@ -71,6 +71,12 @@ vi.mock('@tanstack/react-query', () => ({
         tags: ['certificate-tracking'],
       },
       {
+        id: '22222222-2222-2222-2222-222222222223', name: 'Inventory Ledger',
+        description: 'Published ledger report', type: 'inventory', status: 'published',
+        createdBy: 'system', createdAt: '2026-09-24T00:00:00Z', isScheduled: false,
+        isFavorite: false, tags: ['inventory-ledger'],
+      },
+      {
         id: '22222222-2222-2222-2222-222222222222',
         name: 'Balance Register',
         description: 'Published report',
@@ -216,6 +222,7 @@ vi.mock('@/services/businessPartnerService', () => ({
 vi.mock('@/services/inventoryManagementService', () => ({
   inventoryManagementService: {
     getWarehouses: vi.fn().mockResolvedValue([]),
+    getInventoryItems: vi.fn().mockResolvedValue([]),
     getInventoryCategories: vi.fn().mockResolvedValue([]),
     getStockMovementTypes: vi.fn().mockResolvedValue([]),
   },
@@ -306,6 +313,15 @@ describe('StatutoryReportCataloguePage navigation', () => {
     expect(within(navigator).getByRole('link', { name: 'All procurement reports' })).toHaveAttribute('href', '/reports/purchasing');
     expect(within(navigator).getByRole('link', { name: /APP vs Actual/ })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByText(/TDC-\d+/)).not.toBeInTheDocument();
+  });
+
+  it('offers the inventory ledger with item and transaction-type filters', async () => {
+    renderCatalogue('inventory-ledger', 'inventory');
+    expect(await screen.findByRole('heading', { name: 'Inventory Ledger' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Ledger item')).toBeInTheDocument();
+    expect(screen.getByLabelText('Movement type')).toBeInTheDocument();
+    expect(screen.getByLabelText('Start date')).toBeInTheDocument();
+    expect(screen.getByLabelText('End date')).toBeInTheDocument();
   });
 
   it('does not render irrelevant inventory filters', async () => {

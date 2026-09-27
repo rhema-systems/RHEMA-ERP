@@ -7,9 +7,9 @@ export function invoiceTaxTreatment(value?: string | number): number | undefined
   return typeof value === 'number' ? value : treatments[value] ?? Number(value);
 }
 
-export function landedCostTaxReviewPending(lines: Array<{ landedCostItemId?: string | null; taxTreatment?: number | string; taxGroupId?: string | null }>): boolean {
+export function landedCostTaxReviewPending(lines: Array<{ landedCostItemId?: string | null; taxTreatment?: number | string; taxGroupId?: string | null }>, allLines = false): boolean {
   return lines.some(line => {
-    if (!line.landedCostItemId) return false;
+    if (!allLines && !line.landedCostItemId) return false;
     const treatment = invoiceTaxTreatment(line.taxTreatment);
     return treatment === undefined || ![1, 2, 3, 4].includes(treatment) || (treatment === 1 && !line.taxGroupId);
   });

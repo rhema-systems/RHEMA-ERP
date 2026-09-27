@@ -125,6 +125,7 @@ public sealed partial class PurchaseReturnService
             {
                 Id = source.Id, TenantId = source.TenantId, GoodsReceiptNoteId = grn.Id, InventoryItemId = source.InventoryItemId,
                 PurchaseOrderItemId = source.PurchaseOrderItemId, ItemCode = source.ItemCode, ItemName = source.ItemName,
+                UnitWeightKg = source.UnitWeightKg, WeightStockUom = source.WeightStockUom, WeightOverridden = source.WeightOverridden,
                 AcceptedQuantity = accepted, ReceivedQuantity = line.ReceivedQuantity * conversion,
                 UnitCost = source.UnitCost, UnitOfMeasure = source.UnitOfMeasure, StorageLocationId = line.LocationId,
                 StorageLocation = source.StorageLocationId == line.LocationId ? source.StorageLocation : null,

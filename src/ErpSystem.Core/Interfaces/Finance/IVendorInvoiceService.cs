@@ -14,10 +14,17 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface IVendorInvoiceService
 {
+    Task<IReadOnlyList<ProcurementInvoiceReceiptDto>> GetAutoInvoiceReceiptsAsync(Guid businessPartnerId, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDto> CreateAutoInvoiceAsync(ProcurementAutoInvoiceRequestDto request, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<VendorInvoiceReceiptLinkDto>> GetReceiptLinksAsync(Guid invoiceId, CancellationToken cancellationToken = default);
     Task<VendorInvoiceDistributionDto> GetDistributionAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDistributionDto> SaveDistributionAsync(Guid id, SaveVendorInvoiceDistributionDto request, CancellationToken cancellationToken = default);
+    Task<VendorInvoiceDistributionDto> ResetDistributionAsync(Guid id, SaveVendorInvoiceDistributionDto request, CancellationToken cancellationToken = default);
     Task<ErpSystem.Core.DTOs.Procurement.PurchaseOrderSupplierDefaultsDto?> GetSupplierDefaultsAsync(
-        Guid supplierId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null);
+        Guid businessPartnerId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null, Guid? businessPartnerRoleId = null);
     Task<PostLandedCostResultDto> PostLandedCostAsync(Guid landedCostId,
+        PostLandedCostDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+    Task<PostLandedCostResultDto> PrepareLandedCostInvoicesAsync(Guid landedCostId,
         PostLandedCostDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
     Task<List<VendorInvoiceDto>> CreateFromLandedCostAsync(Guid landedCostId,
         CreateLandedCostInvoicesDto dto, FinancePostingProducerContext producer,

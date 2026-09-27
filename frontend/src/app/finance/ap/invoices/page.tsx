@@ -321,7 +321,7 @@ export default function VendorInvoicesPage() {
                                                             </DropdownMenuItem>
                                                         )}
                                                         {(invoice.status === 'Approved' || invoice.status === 'PartiallyPaid') && invoice.balanceAmount > 0 && (
-                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ap/payments/create?supplierId=${invoice.supplierId}&invoiceId=${invoice.id}`)}>
+                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ap/payments/create?supplierId=${invoice.businessPartnerId}&invoiceId=${invoice.id}`)}>
                                                                 <DollarSign className="mr-2 h-4 w-4" /> Pay Invoice
                                                             </DropdownMenuItem>
                                                         )}

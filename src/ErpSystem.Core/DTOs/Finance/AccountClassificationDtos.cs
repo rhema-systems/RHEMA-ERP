@@ -23,8 +23,12 @@ public sealed class AccountClassificationDto
     public int NonRetiredChildCount { get; set; }
     public int TotalAccountCount { get; set; }
     public int EnabledAccountCount { get; set; }
+    public bool HasDraftLayoutReference { get; set; }
     public bool IsLeaf => ChildCount == 0;
-    public bool CanRetire => EnabledAccountCount == 0 && NonRetiredChildCount == 0 && Status != "Retired";
+    public bool CanRetire => EnabledAccountCount == 0
+        && NonRetiredChildCount == 0
+        && !HasDraftLayoutReference
+        && Status != "Retired";
     public string RowVersion { get; set; } = string.Empty;
 }
 

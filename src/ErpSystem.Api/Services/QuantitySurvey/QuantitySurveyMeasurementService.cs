@@ -70,6 +70,18 @@ public sealed class QuantitySurveyMeasurementService(
         return new() { ApprovedBoqLines = lines, ApprovedDrawings = drawings };
     }
 
+    public async Task<IReadOnlyList<QuantitySurveyMeasurementDto>> SearchAsync(string search, int take = 8, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var query = Query().Where(value => value.SheetReference.Contains(term) || value.Title.Contains(term) ||
+                (value.SiteLocation != null && value.SiteLocation.Contains(term)))
+            .OrderByDescending(value => value.MeasurementDate).ThenBy(value => value.Id);
+        var rows = await QuantitySurveyAuthorizedSearch.ReadAsync(query, value => value.ProjectId,
+            projectService.HasProjectAccessAsync, take, token);
+        return rows.Select(Map).ToList();
+    }
+
     public async Task<QuantitySurveyMeasurementPageDto> ListAsync(QuantitySurveyMeasurementListRequest request, CancellationToken token = default)
     {
         if (!string.IsNullOrWhiteSpace(request.Status) && request.Status is not ("Draft" or "Recorded"))
@@ -160,32 +172,52 @@ public sealed class QuantitySurveyMeasurementService(
         var normalized = Normalize(request.Title, request.SiteLocation, request.Lines);
         var requestHash = Hash(new { MeasurementId = id, request.ProjectDrawingId, request.SourceType, normalized.Title,
             MeasurementDate = Utc(request.MeasurementDate), normalized.SiteLocation, Lines = normalized.Lines });
-        var entity = await RequiredAsync(id, true, token);
-        await RequireProjectAccessAsync(entity.ProjectId);
-        if (entity.LastMutationClientRequestId == request.ClientRequestId)
+        var retry = false;
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            if (!FixedEquals(entity.LastMutationRequestHash, requestHash)) throw RetryConflict();
-            return Map(entity);
-        }
-        EnsureDraft(entity);
-        var context = await ResolveContextAsync(entity.ProjectId, entity.ProjectBoqVersionLineId,
-            request.ProjectDrawingId, request.SourceType, Utc(request.MeasurementDate), normalized.SiteLocation, token);
-        ValidateFrozenLineage(entity, context);
-        ApplyRowVersion(entity, request.RowVersion);
-        var before = Snapshot(entity, entity.Lines);
-        db.QuantitySurveyMeasurementLines.RemoveRange(entity.Lines);
-        entity.Lines.Clear();
-        AddLines(entity, normalized.Lines);
-        entity.ProjectDrawingId = context.Drawing?.Id; entity.SourceType = request.SourceType;
-        entity.Title = normalized.Title; entity.MeasurementDate = Utc(request.MeasurementDate); entity.SiteLocation = normalized.SiteLocation;
-        entity.DrawingNumberSnapshot = context.Drawing?.DrawingNumber; entity.DrawingRevisionSnapshot = context.Drawing?.Revision;
-        entity.DrawingStatusSnapshot = context.Drawing?.Status; entity.TotalMeasuredQuantity = QuantitySurveyMeasurementRules.Total(normalized.Lines);
-        entity.LastMutationClientRequestId = request.ClientRequestId; entity.LastMutationRequestHash = requestHash;
-        Touch(entity, QuantitySurveyAuditEventMap.UpdateMeasurementSheet, correlationId);
-        var after = Snapshot(entity, normalized.Lines);
-        AddRevision(entity, QuantitySurveyAuditEventMap.UpdateMeasurementSheet, "Draft taking-off sheet updated.", before, after, correlationId);
-        AddAudit(entity, QuantitySurveyAuditEventMap.UpdateMeasurementSheet, before, after, correlationId);
-        await SaveAsync(token); return await GetAsync(id, token);
+            // Reload after a rolled-back attempt; never reuse accepted EF states from that attempt.
+            if (retry) db.ChangeTracker.Clear();
+            retry = true;
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
+            var entity = await RequiredAsync(id, true, token);
+            await RequireProjectAccessAsync(entity.ProjectId);
+            if (entity.LastMutationClientRequestId == request.ClientRequestId)
+            {
+                if (!FixedEquals(entity.LastMutationRequestHash, requestHash)) throw RetryConflict();
+                await transaction.CommitAsync(token);
+                return;
+            }
+            EnsureDraft(entity);
+            var context = await ResolveContextAsync(entity.ProjectId, entity.ProjectBoqVersionLineId,
+                request.ProjectDrawingId, request.SourceType, Utc(request.MeasurementDate), normalized.SiteLocation, token);
+            ValidateFrozenLineage(entity, context);
+            ApplyRowVersion(entity, request.RowVersion);
+            var before = Snapshot(entity, entity.Lines);
+            entity.ProjectDrawingId = context.Drawing?.Id; entity.SourceType = request.SourceType;
+            entity.Title = normalized.Title; entity.MeasurementDate = Utc(request.MeasurementDate); entity.SiteLocation = normalized.SiteLocation;
+            entity.DrawingNumberSnapshot = context.Drawing?.DrawingNumber; entity.DrawingRevisionSnapshot = context.Drawing?.Revision;
+            entity.DrawingStatusSnapshot = context.Drawing?.Status; entity.TotalMeasuredQuantity = QuantitySurveyMeasurementRules.Total(normalized.Lines);
+            entity.LastMutationClientRequestId = request.ClientRequestId; entity.LastMutationRequestHash = requestHash;
+            Touch(entity, QuantitySurveyAuditEventMap.UpdateMeasurementSheet, correlationId);
+
+            // Check the parent's row version before replacing draft-only dimension rows.
+            // The shared soft-delete path cannot release their unfiltered unique keys and is
+            // forbidden by the row trigger. Preserve before/after values in revision history.
+            await SaveAsync(token);
+            await db.QuantitySurveyMeasurementLines
+                .Where(line => line.TenantId == TenantId && line.MeasurementSheetId == id)
+                .ExecuteDeleteAsync(token);
+            foreach (var line in entity.Lines.ToList()) db.Entry(line).State = EntityState.Detached;
+            entity.Lines.Clear();
+            AddLines(entity, normalized.Lines);
+            db.QuantitySurveyMeasurementLines.AddRange(entity.Lines);
+            var after = Snapshot(entity, normalized.Lines);
+            AddRevision(entity, QuantitySurveyAuditEventMap.UpdateMeasurementSheet, "Draft taking-off sheet updated.", before, after, correlationId);
+            AddAudit(entity, QuantitySurveyAuditEventMap.UpdateMeasurementSheet, before, after, correlationId);
+            await SaveAsync(token);
+            await transaction.CommitAsync(token);
+        });
+        return await GetAsync(id, token);
     }
 
     public async Task<QuantitySurveyMeasurementDto> RecordAsync(Guid id, RecordQuantitySurveyMeasurementRequest request, string correlationId, CancellationToken token = default)
@@ -325,7 +357,7 @@ public sealed class QuantitySurveyMeasurementService(
     private IQueryable<QuantitySurveyMeasurementSheet> Query(bool tracking = false)
     {
         var query = tracking ? db.QuantitySurveyMeasurementSheets.AsTracking() : db.QuantitySurveyMeasurementSheets.AsNoTracking();
-        return query.Include(value => value.Project).Include(value => value.ProjectBoqVersion)
+        return query.AsSplitQuery().Include(value => value.Project).Include(value => value.ProjectBoqVersion)
             .Include(value => value.ProjectBoqVersionLine).Include(value => value.ProjectDrawing)
             .Include(value => value.EvidenceMetadataTemplate).Include(value => value.Lines)
             .Include(value => value.Attachments).ThenInclude(value => value.FileUploadRecord)

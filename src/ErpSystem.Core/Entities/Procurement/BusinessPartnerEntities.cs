@@ -260,6 +260,16 @@ public class BusinessPartner : TenantEntity
     public Guid? DefaultArAccountId { get; set; }
     public virtual Account? DefaultArAccount { get; set; }
 
+    // Customer posting defaults remain independent of the supplier defaults above.
+    public Guid? CustomerSalesAccountId { get; set; }
+    public Guid? CustomerCostOfSalesAccountId { get; set; }
+    public Guid? CustomerInventoryAccountId { get; set; }
+    public Guid? CustomerTermsDiscountsTakenAccountId { get; set; }
+    public Guid? CustomerSalesReturnsAccountId { get; set; }
+    public Guid? CustomerFinanceChargesAccountId { get; set; }
+    public Guid? CustomerWriteoffAccountId { get; set; }
+    public Guid? CustomerOverpaymentWriteoffAccountId { get; set; }
+
     public Guid? DefaultExpenseAccountId { get; set; }
     public virtual Account? DefaultExpenseAccount { get; set; }
 
@@ -394,6 +404,12 @@ public class BusinessPartner : TenantEntity
     public virtual ICollection<BusinessPartnerBankAccount> BankAccounts { get; set; } = new List<BusinessPartnerBankAccount>();
     public virtual ICollection<BusinessPartnerDocument> Documents { get; set; } = new List<BusinessPartnerDocument>();
     public virtual ICollection<BusinessPartnerFinancial> Financials { get; set; } = new List<BusinessPartnerFinancial>();
+
+    /// <summary>
+    /// Canonical multi-role capabilities. PartnerType remains only as transitional source data
+    /// until the approved reset removes the legacy single-choice representation.
+    /// </summary>
+    public virtual ICollection<BusinessPartnerRole> Roles { get; set; } = new List<BusinessPartnerRole>();
 }
 
 /// <summary>

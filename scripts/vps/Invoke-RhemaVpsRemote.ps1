@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Preflight', 'Backup', 'Apply', 'ResumeFrontend', 'Verify')]
+    [ValidateSet('Preflight', 'Backup', 'Apply', 'SeedOperational', 'ResumeFrontend', 'Verify', 'RollbackFresh', 'CompleteFresh')]
     [string]$Action,
 
     [string]$DeploymentId,
@@ -12,6 +12,8 @@ param(
     [string]$FrontendPackageName,
     [string]$ApiSha256,
     [string]$FrontendSha256,
+    [string]$FreshDatabaseName,
+    [string]$ExpectedPublicOrigin = 'https://63.141.230.56',
     [int]$ApiReadyTimeoutSeconds = 1800
 )
 
@@ -25,11 +27,23 @@ $PackagesRoot = Join-Path $RhemaRoot 'packages'
 $BackupsRoot = Join-Path $RhemaRoot 'backups'
 $LogsRoot = Join-Path $RhemaRoot 'logs'
 $ApiServiceXml = Join-Path $RhemaRoot 'services\api\RhemaERPAPI.xml'
-$ExpectedPublicOrigin = 'https://149.102.145.190:8443'
+$NssmParametersPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
+$FrontendNssmParametersPath = `
+    'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPFrontend\Parameters'
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
+}
+
+__RHEMA_FRESHDATABASEPROVISIONING_LIBRARY__
+__RHEMA_OPERATIONALUATVERIFICATION_LIBRARY__
+__RHEMA_FRESHDATABASECUTOVER_LIBRARY__
+
+$UsesNssmApiConfiguration = -not (Test-Path -LiteralPath $ApiServiceXml)
+if ($UsesNssmApiConfiguration) {
+    Assert-True (Test-Path -LiteralPath $NssmParametersPath) `
+        "API service configuration is missing: $ApiServiceXml or $NssmParametersPath"
 }
 
 function Assert-DeploymentId {
@@ -45,11 +59,122 @@ function Get-ApiConfigurationXml {
     return [xml](Get-Content -LiteralPath $ApiServiceXml)
 }
 
+function Get-NssmEnvironmentSnapshot {
+    $properties = Get-ItemProperty -LiteralPath $NssmParametersPath
+    $snapshot = [ordered]@{}
+    foreach ($name in @('AppEnvironment', 'AppEnvironmentExtra')) {
+        $exists = $null -ne $properties.PSObject.Properties[$name]
+        $snapshot[$name] = [ordered]@{
+            exists = $exists
+            values = if ($exists) { @($properties.$name | ForEach-Object { [string]$_ }) } else { @() }
+        }
+    }
+    return [pscustomobject]$snapshot
+}
+
+function Restore-NssmEnvironmentSnapshot {
+    param([Parameter(Mandatory = $true)]$Snapshot)
+
+    foreach ($name in @('AppEnvironment', 'AppEnvironmentExtra')) {
+        $entry = $Snapshot.$name
+        if ($entry.exists) {
+            Set-ItemProperty -LiteralPath $NssmParametersPath -Name $name `
+                -Value ([string[]]@($entry.values))
+        }
+        else {
+            Remove-ItemProperty -LiteralPath $NssmParametersPath -Name $name `
+                -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-ApiServiceEnvironment {
+    $environment = [ordered]@{}
+    if (-not $UsesNssmApiConfiguration) {
+        $xml = Get-ApiConfigurationXml
+        foreach ($node in @($xml.service.env)) {
+            $environment[[string]$node.name] = [string]$node.value
+        }
+        return $environment
+    }
+
+    $snapshot = Get-NssmEnvironmentSnapshot
+    foreach ($source in @($snapshot.AppEnvironment.values, $snapshot.AppEnvironmentExtra.values)) {
+        foreach ($entry in @($source)) {
+            $separator = $entry.IndexOf('=')
+            if ($separator -gt 0) {
+                $environment[$entry.Substring(0, $separator)] = $entry.Substring($separator + 1)
+            }
+        }
+    }
+    return $environment
+}
+
+function Set-ApiServiceEnvironmentValues {
+    param([Parameter(Mandatory = $true)][hashtable]$Values)
+
+    if (-not $UsesNssmApiConfiguration) {
+        $xml = Get-ApiConfigurationXml
+        foreach ($entry in $Values.GetEnumerator()) {
+            $node = @($xml.service.env | Where-Object { $_.name -eq $entry.Key })[0]
+            if ($null -eq $node) {
+                $node = $xml.CreateElement('env')
+                $node.SetAttribute('name', [string]$entry.Key)
+                [void]$xml.service.AppendChild($node)
+            }
+            $node.SetAttribute('value', [string]$entry.Value)
+        }
+        $settings = New-Object System.Xml.XmlWriterSettings
+        $settings.Indent = $true
+        $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
+        $writer = [System.Xml.XmlWriter]::Create($ApiServiceXml, $settings)
+        try { $xml.Save($writer) }
+        finally { $writer.Close() }
+        return
+    }
+
+    $environment = Get-ApiServiceEnvironment
+    foreach ($entry in $Values.GetEnumerator()) {
+        $environment[[string]$entry.Key] = [string]$entry.Value
+    }
+    $nssmValues = @($environment.GetEnumerator() | Sort-Object Key | ForEach-Object {
+        "{0}={1}" -f $_.Key, $_.Value
+    })
+    Set-ItemProperty -LiteralPath $NssmParametersPath -Name AppEnvironmentExtra `
+        -Value ([string[]]$nssmValues)
+}
+
+function Remove-ApiServiceEnvironmentValues {
+    param([Parameter(Mandatory = $true)][string[]]$Names)
+
+    if (-not $UsesNssmApiConfiguration) {
+        $xml = Get-ApiConfigurationXml
+        foreach ($name in $Names) {
+            @($xml.service.env | Where-Object { $_.name -eq $name }) |
+                ForEach-Object { [void]$xml.service.RemoveChild($_) }
+        }
+        $settings = New-Object System.Xml.XmlWriterSettings
+        $settings.Indent = $true
+        $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
+        $writer = [System.Xml.XmlWriter]::Create($ApiServiceXml, $settings)
+        try { $xml.Save($writer) }
+        finally { $writer.Close() }
+        return
+    }
+
+    $environment = Get-ApiServiceEnvironment
+    foreach ($name in $Names) { [void]$environment.Remove($name) }
+    $nssmValues = @($environment.GetEnumerator() | Sort-Object Key | ForEach-Object {
+        "{0}={1}" -f $_.Key, $_.Value
+    })
+    Set-ItemProperty -LiteralPath $NssmParametersPath -Name AppEnvironmentExtra `
+        -Value ([string[]]$nssmValues)
+}
+
 function Assert-SyncfusionLicenseConfigured {
-    $xml = Get-ApiConfigurationXml
-    $configured = @($xml.service.env | Where-Object {
-        $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
-        -not [string]::IsNullOrWhiteSpace([string]$_.value)
+    $environment = Get-ApiServiceEnvironment
+    $configured = @(@('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$environment[$_])
     })
     Assert-True ($configured.Count -gt 0) `
         'The protected Syncfusion license is missing from the API service environment.'
@@ -57,13 +182,44 @@ function Assert-SyncfusionLicenseConfigured {
 }
 
 function Get-DatabaseConnectionString {
-    $xml = Get-ApiConfigurationXml
-    $value = [string](($xml.service.env | Where-Object {
-        $_.name -eq 'ConnectionStrings__DefaultConnection'
-    }).value)
+    $environment = Get-ApiServiceEnvironment
+    $value = [string]$environment['ConnectionStrings__DefaultConnection']
     Assert-True (-not [string]::IsNullOrWhiteSpace($value)) `
         'Database connection setting is missing from the API service configuration.'
     return $value
+}
+
+function Get-RhemaOperationalPassword {
+    param([switch]$Optional)
+    $value = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [string](Get-ApiServiceEnvironment)['UatBootstrap__SharedPassword']
+    }
+    if ([string]::IsNullOrWhiteSpace($value) -and -not $Optional) {
+        throw 'Operational account bootstrap password is missing. Use the LocalVps secure prompt or protected UatBootstrap__SharedPassword setting.'
+    }
+    return $value
+}
+
+function Invoke-OperationalSeed {
+    Assert-DeploymentId
+    $connectionString = Get-DatabaseConnectionString
+    $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder $connectionString
+    $work = Join-Path $PackagesRoot "operational-$DeploymentId"
+    Assert-True (-not (Test-Path -LiteralPath $work)) 'Operational seed work directory already exists; review its evidence before retrying.'
+    [void](New-Item -ItemType Directory -Path $work)
+    $settings = @{ Logging=@{LogLevel=@{Default='Warning'}}; Serilog=@{MinimumLevel=@{Default='Warning'};WriteTo=@(@{Name='Console'})} }
+    [IO.File]::WriteAllText((Join-Path $work 'appsettings.json'), ($settings | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    try {
+        $command = Invoke-RhemaFreshApiCli -ApiExecutable (Join-Path $ApiRoot 'ErpSystem.Api.exe') `
+            -ContentRoot $work -ConnectionString $connectionString -Command 'seed-operational-uat' `
+            -OperationalUatPassword (Get-RhemaOperationalPassword)
+        $snapshot = Get-RhemaOperationalSeedSnapshot $connectionString $builder.InitialCatalog
+        Assert-RhemaOperationalSeedReadiness $snapshot
+        $evidence = [ordered]@{ database=$builder.InitialCatalog; command=$command; operationalSeed=$snapshot }
+        [IO.File]::WriteAllText((Join-Path $work 'verification.json'), ($evidence | ConvertTo-Json -Depth 7), (New-Object Text.UTF8Encoding($false)))
+        Write-Output 'OPERATIONAL_SEED|PASS'
+    } finally { $connectionString=$null; $builder=$null }
 }
 
 function Invoke-DatabaseTable {
@@ -113,44 +269,23 @@ function Invoke-RobocopyChecked {
     }
 }
 
-function Set-ServiceEnvironmentValue {
-    param(
-        [xml]$Xml,
-        [string]$Name,
-        [string]$Value
-    )
-
-    $node = @($Xml.service.env | Where-Object { $_.name -eq $Name })[0]
-    if ($null -eq $node) {
-        $node = $Xml.CreateElement('env')
-        $node.SetAttribute('name', $Name)
-        [void]$Xml.service.AppendChild($node)
-    }
-    $node.SetAttribute('value', $Value)
-}
-
 function Set-TestServerConfiguration {
-    $xml = Get-ApiConfigurationXml
-    @($xml.service.env | Where-Object {
-        $_.name -like 'CorsSettings__AllowedOrigins__*'
-    }) | ForEach-Object { [void]$xml.service.RemoveChild($_) }
-
-    Set-ServiceEnvironmentValue $xml 'CorsSettings__AllowedOrigins__0' `
-        $ExpectedPublicOrigin
-    Set-ServiceEnvironmentValue $xml `
-        'StartupInitialization__SeedDevelopmentData' 'true'
-    Set-ServiceEnvironmentValue $xml `
-        'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' 'true'
-    Set-ServiceEnvironmentValue $xml 'CandidatePortal__PortalUrl' `
-        $ExpectedPublicOrigin
-    Set-ServiceEnvironmentValue $xml 'FrontendUrl' $ExpectedPublicOrigin
-
-    $settings = New-Object System.Xml.XmlWriterSettings
-    $settings.Indent = $true
-    $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
-    $writer = [System.Xml.XmlWriter]::Create($ApiServiceXml, $settings)
-    try { $xml.Save($writer) }
-    finally { $writer.Close() }
+    $existingCorsNames = @((Get-ApiServiceEnvironment).Keys | Where-Object {
+        $_ -like 'CorsSettings__AllowedOrigins__*'
+    })
+    if ($existingCorsNames.Count -gt 0) {
+        Remove-ApiServiceEnvironmentValues $existingCorsNames
+    }
+    Set-ApiServiceEnvironmentValues @{
+        # The API gives this legacy variable precedence over CorsSettings.
+        # Keep both representations identical until the legacy setting is retired.
+        'ALLOWED_ORIGINS' = $ExpectedPublicOrigin
+        'CorsSettings__AllowedOrigins__0' = $ExpectedPublicOrigin
+        'StartupInitialization__SeedDevelopmentData' = 'true'
+        'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
+        'CandidatePortal__PortalUrl' = $ExpectedPublicOrigin
+        'FrontendUrl' = $ExpectedPublicOrigin
+    }
 }
 
 function Get-MigrationHistory {
@@ -557,6 +692,30 @@ SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
 
+function Invoke-CanonicalMigrationPreflight {
+    # Filled by New-RhemaVpsPreflightHelper before the helper is hashed/uploaded.
+    # No migration SQL is executed here: these probes only read data/catalogs.
+    $encoded = '__RHEMA_CANONICAL_PREFLIGHT_BUNDLE__'
+    if ($encoded.StartsWith('__RHEMA_')) { throw 'Run the supported Deploy-RhemaVps.ps1 entry point to package the reviewed preflight probes.' }
+    $bundle = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json
+    Assert-True ($bundle.schemaVersion -eq 1) 'Invalid canonical preflight bundle.'
+    $blockers = @()
+    foreach ($probe in $bundle.probes) {
+        $rows = @(Invoke-DatabaseTable ([string]$probe.sql))
+        foreach ($row in $rows) {
+            if ([long]$row.AffectedRows -gt 0) {
+                $blockers += $row
+                Write-Output "MIGRATION_GUARD|$($row.CheckName)|$($row.AffectedRows)"
+            }
+        }
+        foreach ($id in $probe.ids) { Write-Output "GUARD_COVERAGE|$id" }
+    }
+    Assert-True ($blockers.Count -eq 0) (
+        'Pending current-baseline migrations cannot safely apply. Blockers: ' +
+        (($blockers | ForEach-Object { "$($_.CheckName)=$($_.AffectedRows)" }) -join '; ') +
+        '. No data was changed. Keep the current application running; review a data-preserving cutover or a separately authorized fresh database. Do not delete rows or stamp migration history.')
+}
+
 function Get-DatabaseControlSummary {
     return Invoke-DatabaseTable @"
 SELECT
@@ -596,17 +755,43 @@ SELECT
 }
 
 function Write-ServiceState {
-    Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy |
-        ForEach-Object { Write-Output "SERVICE|$($_.Name)|$($_.Status)" }
+    Get-ManagedServices | ForEach-Object {
+        Write-Output "SERVICE|$($_.Name)|$($_.Status)"
+    }
+}
+
+function Get-ManagedServices {
+    $caddy = Get-Service RhemaERPCaddy -ErrorAction SilentlyContinue
+    if ($null -eq $caddy) {
+        throw 'Required HTTPS gateway service RhemaERPCaddy is missing.'
+    }
+    return @(Get-Service RhemaERPAPI,RhemaERPFrontend) + @($caddy)
 }
 
 function Invoke-Preflight {
     foreach ($path in @($RhemaRoot, $ApiRoot, $FrontendRoot, $PackagesRoot,
-            $BackupsRoot, $LogsRoot, $ApiServiceXml)) {
+            $BackupsRoot, $LogsRoot)) {
         Assert-True (Test-Path -LiteralPath $path) "Required VPS path is missing: $path"
     }
+    if (-not $UsesNssmApiConfiguration) {
+        Assert-True (Test-Path -LiteralPath $ApiServiceXml) `
+            "Required VPS path is missing: $ApiServiceXml"
+    }
+    Assert-True (Test-Path -LiteralPath $FrontendNssmParametersPath) `
+        "Frontend NSSM configuration is missing: $FrontendNssmParametersPath"
+    $frontendService = Get-ItemProperty -LiteralPath $FrontendNssmParametersPath
+    $frontendApplication = [string]$frontendService.Application
+    $frontendDirectory = [string]$frontendService.AppDirectory
+    $frontendParameters = [string]$frontendService.AppParameters
+    Write-Output "FRONTEND_RUNTIME|$frontendApplication|$frontendDirectory|$frontendParameters"
+    Assert-True ($frontendApplication -match '(?i)(^|\\)npm\.cmd$') `
+        'RhemaERPFrontend must run npm.cmd for the regular Next.js release package.'
+    Assert-True ($frontendDirectory.TrimEnd('\\') -eq $FrontendRoot.TrimEnd('\\')) `
+        "RhemaERPFrontend AppDirectory must be $FrontendRoot."
+    Assert-True ($frontendParameters -match '(?i)^\s*run\s+start\s+--\s+-p\s+3001\s*$') `
+        'RhemaERPFrontend must use: npm run start -- -p 3001.'
 
-    $services = Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy
+    $services = Get-ManagedServices
     $notRunning = @($services | Where-Object { $_.Status -ne 'Running' })
     Assert-True ($notRunning.Count -eq 0) `
         "Preflight requires all deployed services running. Not running: $($notRunning.Name -join ', ')"
@@ -616,29 +801,49 @@ function Invoke-Preflight {
     Write-Output "DISK_FREE_GB|$freeGb"
     Assert-True ($freeGb -ge 5) 'Less than 5 GB of free disk space remains on the VPS.'
 
-    $xml = Get-ApiConfigurationXml
+    $environment = Get-ApiServiceEnvironment
     Assert-SyncfusionLicenseConfigured
+    if ([string]::IsNullOrWhiteSpace((Get-RhemaOperationalPassword -Optional))) {
+        Write-Output 'UAT_CREDENTIAL|REQUIRED'
+    } else { Write-Output 'UAT_CREDENTIAL|CONFIGURED' }
     $requiredSettings = @{
-        'CorsSettings__AllowedOrigins__0' = $ExpectedPublicOrigin
         'StartupInitialization__SeedDevelopmentData' = 'true'
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
-        'CandidatePortal__PortalUrl' = $ExpectedPublicOrigin
-        'FrontendUrl' = $ExpectedPublicOrigin
     }
     foreach ($entry in $requiredSettings.GetEnumerator()) {
-        $actual = [string](($xml.service.env | Where-Object {
-            $_.name -eq $entry.Key
-        }).value)
+        $actual = [string]$environment[$entry.Key]
         Write-Output "CONFIG|$($entry.Key)|$actual"
         Assert-True ($actual -eq $entry.Value) `
             "Test VPS configuration is invalid for $($entry.Key)."
     }
-    $corsNodes = @($xml.service.env | Where-Object {
-        $_.name -like 'CorsSettings__AllowedOrigins__*'
+    foreach ($name in @(
+            'ALLOWED_ORIGINS',
+            'CorsSettings__AllowedOrigins__0',
+            'CandidatePortal__PortalUrl',
+            'FrontendUrl')) {
+        $actual = [string]$environment[$name]
+        Write-Output "CONFIG|$name|$actual"
+        if ($actual -ne $ExpectedPublicOrigin) {
+            # Apply reconciles public-origin settings before the API restarts.
+            # Existing servers may legitimately carry the previous origin into
+            # preflight, so record this as repairable drift instead of blocking
+            # the release before its backed-up apply phase.
+            Write-Output "CONFIG_DRIFT|$name|EXPECTED=$ExpectedPublicOrigin|ACTUAL=$actual"
+        }
+    }
+    $corsNodes = @($environment.Keys | Where-Object {
+        $_ -like 'CorsSettings__AllowedOrigins__*'
     })
     Assert-True ($corsNodes.Count -eq 1) `
         'The test VPS must expose exactly one HTTPS CORS origin.'
 
+    if (-not [string]::IsNullOrWhiteSpace($FreshDatabaseName)) {
+        Assert-FreshDatabaseServiceIdentity
+        Test-RhemaFreshDatabaseTarget -SourceConnectionString (Get-DatabaseConnectionString) -FreshDatabaseName $FreshDatabaseName | Out-Null
+        Write-Output "FRESH_TARGET_READY|$FreshDatabaseName"
+        Write-Output 'PREFLIGHT|PASS|Fresh target absent; source database preserved, not a migration target.'
+        return
+    }
     $history = @(Get-MigrationHistory)
     foreach ($row in $history) { Write-Output "MIGRATION_ID|$($row.MigrationId)" }
     Write-Output 'GUARD_COVERAGE|20260720181131_AddHRModule'
@@ -814,12 +1019,28 @@ function Invoke-Preflight {
     Write-Output 'GUARD_COVERAGE|20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue'
     # Inspection-plan governance binds future plans to existing shared workflow owners.
     Write-Output 'GUARD_COVERAGE|20260822003700_GovernCivilInspectionPlanWorkflow'
-    $guards = @(Get-MigrationGuardResults)
+    $currentBaselineId = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
+    $baselineApplied = @($history | Where-Object {
+        [string]$_.MigrationId -eq $currentBaselineId
+    }).Count -eq 1
+    if ($baselineApplied) {
+        # The baseline is the complete zero-to-current schema. Its archived predecessor
+        # migrations are neither compiled nor pending, so their destructive-data guards
+        # must not evaluate newly seeded current-model rows as legacy blockers.
+        Write-Output "MIGRATION_GUARDS|SKIPPED|$currentBaselineId"
+        $guards = @()
+    }
+    else {
+        $guards = @(Get-MigrationGuardResults)
+    }
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
     }
     Assert-True ($guards.Count -eq 0) `
-        'One or more guarded HR migrations would halt. Resolve and archive the reported data before deployment.'
+        'One or more guarded pre-baseline migrations would halt. Resolve and archive the reported data before deployment.'
+
+    # Skipping archived predecessor guards must never skip current-baseline guards.
+    Invoke-CanonicalMigrationPreflight
 
     $summary = @(Get-DatabaseControlSummary)[0]
     Write-Output "MIGRATION_COUNT|$($summary.MigrationCount)"
@@ -873,8 +1094,16 @@ function Invoke-Backup {
         (Join-Path $FrontendRoot 'logs'),
         '/XF', (Join-Path $FrontendRoot 'let')
     )
-    Copy-Item -LiteralPath $ApiServiceXml -Destination `
-        (Join-Path $serviceBackup 'RhemaERPAPI.xml') -Force
+    if ($UsesNssmApiConfiguration) {
+        [System.IO.File]::WriteAllText(
+            (Join-Path $serviceBackup 'RhemaERPAPI.nssm-environment.json'),
+            ((Get-NssmEnvironmentSnapshot) | ConvertTo-Json -Depth 6),
+            (New-Object System.Text.UTF8Encoding($false)))
+    }
+    else {
+        Copy-Item -LiteralPath $ApiServiceXml -Destination `
+            (Join-Path $serviceBackup 'RhemaERPAPI.xml') -Force
+    }
 
     $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder `
         (Get-DatabaseConnectionString)
@@ -986,6 +1215,23 @@ function Wait-FrontendReady {
 function Start-ApiWithControlledMigrations {
     param([DateTime]$StartedAt)
 
+    if ($UsesNssmApiConfiguration) {
+        $originalEnvironment = Get-NssmEnvironmentSnapshot
+        try {
+            Set-ApiServiceEnvironmentValues @{
+                'SkipStartupInitialization' = 'false'
+                'StartupInitialization__SeedDevelopmentData' = 'false'
+                'StartupInitialization__SeedWorkflowDefinitions' = 'false'
+            }
+            Start-Service RhemaERPAPI
+            Wait-ApiReady $StartedAt
+        }
+        finally {
+            Restore-NssmEnvironmentSnapshot $originalEnvironment
+        }
+        return
+    }
+
     $originalXml = Get-ApiConfigurationXml
     $migrationXml = Get-ApiConfigurationXml
     Set-ServiceEnvironmentValue $migrationXml 'SkipStartupInitialization' 'false'
@@ -1081,13 +1327,18 @@ function Invoke-Apply {
     $stageFrontend = Join-Path $stage 'frontend'
     Assert-True (Test-Path -LiteralPath (Join-Path $stageApi 'ErpSystem.Api.exe')) `
         'Staged API executable is missing.'
-    Assert-True (Test-Path -LiteralPath (Join-Path $stageFrontend 'server.js')) `
-        'Staged frontend server.js is missing.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $stageFrontend 'package-lock.json')) `
+        'Staged frontend dependency lock is missing.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $stageFrontend 'next.config.js')) `
+        'Staged frontend Next.js configuration is missing.'
     Assert-True (Test-Path -LiteralPath `
             (Join-Path $stageFrontend 'node_modules\next\package.json')) `
         'Staged frontend Next.js runtime is missing.'
     $stagedFrontendPackage = Get-Content `
         (Join-Path $stageFrontend 'package.json') -Raw | ConvertFrom-Json
+    Assert-True ($stagedFrontendPackage.scripts.start -eq 'next start' -and
+        -not $stagedFrontendPackage.scripts.PSObject.Properties['prestart']) `
+        'Staged frontend must start directly without repository-only wrapper scripts.'
     $stagedNextPackage = Get-Content `
         (Join-Path $stageFrontend 'node_modules\next\package.json') -Raw |
         ConvertFrom-Json
@@ -1107,6 +1358,10 @@ function Invoke-Apply {
     Assert-True ($serviceWorker -match [regex]::Escape($ExpectedCacheVersion)) `
         'Staged service-worker cache version differs from the release manifest.'
 
+    if (-not [string]::IsNullOrWhiteSpace($FreshDatabaseName)) {
+        Invoke-FreshDatabaseCutover -StageApi $stageApi -StageFrontend $stageFrontend -Backup $backup -Retired $retired
+    }
+    else {
     Set-TestServerConfiguration
     $apiStartedAt = Get-Date
     try {
@@ -1130,9 +1385,18 @@ function Invoke-Apply {
             '/XD', (Join-Path $ApiRoot 'wwwroot\uploads'),
             (Join-Path $ApiRoot 'logs'), (Join-Path $ApiRoot 'secure-file-storage')
         )
-        $serviceBackup = Join-Path $backup 'services\api\RhemaERPAPI.xml'
-        if (Test-Path -LiteralPath $serviceBackup) {
-            Copy-Item -LiteralPath $serviceBackup -Destination $ApiServiceXml -Force
+        if ($UsesNssmApiConfiguration) {
+            $serviceBackup = Join-Path $backup 'services\api\RhemaERPAPI.nssm-environment.json'
+            if (Test-Path -LiteralPath $serviceBackup) {
+                Restore-NssmEnvironmentSnapshot `
+                    (Get-Content -LiteralPath $serviceBackup -Raw | ConvertFrom-Json)
+            }
+        }
+        else {
+            $serviceBackup = Join-Path $backup 'services\api\RhemaERPAPI.xml'
+            if (Test-Path -LiteralPath $serviceBackup) {
+                Copy-Item -LiteralPath $serviceBackup -Destination $ApiServiceXml -Force
+            }
         }
         Start-Service RhemaERPAPI -ErrorAction SilentlyContinue
         throw "API apply failed and application files were rolled back: $($_.Exception.Message)"
@@ -1150,18 +1414,20 @@ function Invoke-Apply {
             Move-Item (Join-Path $FrontendRoot 'node_modules') `
                 (Join-Path $retired 'node_modules')
         }
-        Copy-Item (Join-Path $FrontendRoot 'server.js') `
-            (Join-Path $retired 'server.js') -Force
-        Copy-Item (Join-Path $FrontendRoot 'package.json') `
-            (Join-Path $retired 'package.json') -Force
+        foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+            $liveFile = Join-Path $FrontendRoot $name
+            if (Test-Path $liveFile) {
+                Copy-Item $liveFile (Join-Path $retired $name) -Force
+            }
+        }
         Move-Item (Join-Path $stageFrontend '.next') (Join-Path $FrontendRoot '.next')
         Move-Item (Join-Path $stageFrontend 'public') (Join-Path $FrontendRoot 'public')
         Move-Item (Join-Path $stageFrontend 'node_modules') `
             (Join-Path $FrontendRoot 'node_modules')
-        Copy-Item (Join-Path $stageFrontend 'server.js') `
-            (Join-Path $FrontendRoot 'server.js') -Force
-        Copy-Item (Join-Path $stageFrontend 'package.json') `
-            (Join-Path $FrontendRoot 'package.json') -Force
+        Copy-Item (Join-Path $stageFrontend 'package.json'), `
+            (Join-Path $stageFrontend 'package-lock.json'), `
+            (Join-Path $stageFrontend 'next.config.js') `
+            -Destination $FrontendRoot -Force
         Start-Service RhemaERPFrontend
         Wait-FrontendReady
     }
@@ -1174,14 +1440,17 @@ function Invoke-Apply {
             $oldPath = Join-Path $retired $name
             if (Test-Path $oldPath) { Move-Item $oldPath $livePath }
         }
-        Copy-Item (Join-Path $retired 'server.js') `
-            (Join-Path $FrontendRoot 'server.js') -Force
-        Copy-Item (Join-Path $retired 'package.json') `
-            (Join-Path $FrontendRoot 'package.json') -Force
+        foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+            $liveFile = Join-Path $FrontendRoot $name
+            if (Test-Path $liveFile) { Remove-Item $liveFile -Force }
+            $oldFile = Join-Path $retired $name
+            if (Test-Path $oldFile) { Copy-Item $oldFile $liveFile -Force }
+        }
         Start-Service RhemaERPFrontend -ErrorAction SilentlyContinue
         throw "Frontend apply failed and was rolled back: $($_.Exception.Message)"
     }
 
+    }
     $release = [ordered]@{
         deploymentId = $DeploymentId
         commit = $ExpectedCommit
@@ -1190,6 +1459,7 @@ function Invoke-Apply {
         deployedUtc = [DateTime]::UtcNow.ToString('o')
         apiSha256 = $ApiSha256
         frontendSha256 = $FrontendSha256
+        freshDatabase = $FreshDatabaseName
     }
     [System.IO.File]::WriteAllText(
         (Join-Path $LogsRoot 'current-release.json'),
@@ -1210,8 +1480,10 @@ function Invoke-ResumeFrontend {
     $failedFrontend = Join-Path $PackagesRoot "failed-$DeploymentId"
     $rollbackFrontend = Join-Path $PackagesRoot "resume-old-$DeploymentId"
     $retryFailed = Join-Path $PackagesRoot "resume-failed-$DeploymentId"
-    Assert-True (Test-Path (Join-Path $stageFrontend 'server.js')) `
-        'The staged frontend server is missing.'
+    Assert-True (Test-Path (Join-Path $stageFrontend 'package-lock.json')) `
+        'The staged frontend dependency lock is missing.'
+    Assert-True (Test-Path (Join-Path $stageFrontend 'next.config.js')) `
+        'The staged frontend Next.js configuration is missing.'
     Assert-True (Test-Path (Join-Path $failedFrontend '.next\BUILD_ID')) `
         'The failed frontend build is unavailable for retry.'
     Assert-True (Test-Path `
@@ -1242,15 +1514,19 @@ function Invoke-ResumeFrontend {
             Move-Item (Join-Path $FrontendRoot $name) `
                 (Join-Path $rollbackFrontend $name)
         }
-        Copy-Item (Join-Path $FrontendRoot 'server.js'), `
-            (Join-Path $FrontendRoot 'package.json') `
-            -Destination $rollbackFrontend -Force
+        foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+            $liveFile = Join-Path $FrontendRoot $name
+            if (Test-Path $liveFile) {
+                Copy-Item $liveFile (Join-Path $rollbackFrontend $name) -Force
+            }
+        }
         foreach ($name in @('.next', 'public', 'node_modules')) {
             Move-Item (Join-Path $failedFrontend $name) `
                 (Join-Path $FrontendRoot $name)
         }
-        Copy-Item (Join-Path $stageFrontend 'server.js'), `
-            (Join-Path $stageFrontend 'package.json') `
+        Copy-Item (Join-Path $stageFrontend 'package.json'), `
+            (Join-Path $stageFrontend 'package-lock.json'), `
+            (Join-Path $stageFrontend 'next.config.js') `
             -Destination $FrontendRoot -Force
         $swapped = $true
         Start-Service RhemaERPFrontend
@@ -1287,9 +1563,12 @@ function Invoke-ResumeFrontend {
                 $oldPath = Join-Path $rollbackFrontend $name
                 if (Test-Path $oldPath) { Move-Item $oldPath $livePath }
             }
-            Copy-Item (Join-Path $rollbackFrontend 'server.js'), `
-                (Join-Path $rollbackFrontend 'package.json') `
-                -Destination $FrontendRoot -Force
+            foreach ($name in @('package.json', 'package-lock.json', 'next.config.js')) {
+                $liveFile = Join-Path $FrontendRoot $name
+                if (Test-Path $liveFile) { Remove-Item $liveFile -Force }
+                $oldFile = Join-Path $rollbackFrontend $name
+                if (Test-Path $oldFile) { Copy-Item $oldFile $liveFile -Force }
+            }
             Start-Service RhemaERPFrontend -ErrorAction SilentlyContinue
         }
         throw "Frontend retry failed and rollback was attempted: $failure"
@@ -1298,22 +1577,56 @@ function Invoke-ResumeFrontend {
     Write-Output 'RESUME_FRONTEND|PASS'
 }
 
+function Invoke-LocalRouteWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [int]$DeadlineSeconds = 180,
+        [int]$AttemptTimeoutSeconds = 30
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($DeadlineSeconds)
+    $attempts = 0
+    $lastFailure = 'No request was attempted.'
+    do {
+        $attempts++
+        try {
+            $response = Invoke-WebRequest $Uri -UseBasicParsing `
+                -TimeoutSec $AttemptTimeoutSeconds
+            if ($response.StatusCode -eq 200) {
+                Write-Output "LOCAL_ROUTE|$Name|200|ATTEMPTS=$attempts"
+                return
+            }
+            $lastFailure = "HTTP $($response.StatusCode)"
+        }
+        catch {
+            $lastFailure = $_.Exception.Message
+        }
+
+        if ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Seconds 3
+        }
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "Local route '$Name' ($Uri) did not return HTTP 200 within $DeadlineSeconds seconds after $attempts attempt(s). Last failure: $lastFailure"
+}
+
 function Invoke-Verify {
     Assert-SyncfusionLicenseConfigured
     Write-ServiceState
-    $notRunning = @(Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy |
-        Where-Object { $_.Status -ne 'Running' })
+    $notRunning = @(Get-ManagedServices | Where-Object { $_.Status -ne 'Running' })
     Assert-True ($notRunning.Count -eq 0) 'One or more VPS services are not running.'
 
+    # Prove the process first, then dependencies and aggregate health. A freshly started
+    # NSSM service can report Running before ASP.NET or Next.js has completed initialization,
+    # so bounded retries distinguish normal warm-up from a genuinely unhealthy endpoint.
     foreach ($item in @(
-            @{ Uri = 'http://127.0.0.1:5000/health'; Name = 'api-health' },
-            @{ Uri = 'http://127.0.0.1:5000/health/ready'; Name = 'api-ready' },
-            @{ Uri = 'http://127.0.0.1:5000/health/live'; Name = 'api-live' },
-            @{ Uri = 'http://127.0.0.1:3001/login'; Name = 'frontend-login' })) {
-        $response = Invoke-WebRequest $item.Uri -UseBasicParsing -TimeoutSec 15
-        Write-Output "LOCAL_ROUTE|$($item.Name)|$($response.StatusCode)"
-        Assert-True ($response.StatusCode -eq 200) `
-            "Local route failed: $($item.Uri)"
+            @{ Uri = 'http://127.0.0.1:5000/health/live'; Name = 'api-live'; Deadline = 60; AttemptTimeout = 10 },
+            @{ Uri = 'http://127.0.0.1:5000/health/ready'; Name = 'api-ready'; Deadline = 180; AttemptTimeout = 30 },
+            @{ Uri = 'http://127.0.0.1:5000/health'; Name = 'api-health'; Deadline = 180; AttemptTimeout = 30 },
+            @{ Uri = 'http://127.0.0.1:3001/login'; Name = 'frontend-login'; Deadline = 180; AttemptTimeout = 30 })) {
+        Invoke-LocalRouteWithRetry -Uri $item.Uri -Name $item.Name `
+            -DeadlineSeconds $item.Deadline -AttemptTimeoutSeconds $item.AttemptTimeout
     }
 
     $history = @(Get-MigrationHistory)
@@ -1365,6 +1678,9 @@ switch ($Action) {
     'Preflight' { Invoke-Preflight }
     'Backup' { Invoke-Backup }
     'Apply' { Invoke-Apply }
+    'SeedOperational' { Invoke-OperationalSeed }
     'ResumeFrontend' { Invoke-ResumeFrontend }
     'Verify' { Invoke-Verify }
+    'RollbackFresh' { Restore-FreshDatabaseCutover }
+    'CompleteFresh' { Complete-FreshDatabaseCutover }
 }

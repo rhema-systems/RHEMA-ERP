@@ -45,6 +45,30 @@ const overview: VendorInvoiceMatchExceptionOverview = {
 };
 
 describe('InvoiceMatchExceptionControl', () => {
+  it('keeps relevant exception actions without internal labels in compact mode', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <InvoiceMatchExceptionControl compact invoiceId="invoice-0507" initialOverview={overview} />
+      </QueryClientProvider>
+    );
+    expect(markup).toContain('Matching exceptions');
+    expect(markup).toContain('Request exception');
+    expect(markup).not.toContain('AP-006');
+    expect(markup).not.toContain('DEC-001');
+    expect(markup).not.toContain('does not create, allocate');
+  });
+
+  it('omits the empty exception panel in compact mode', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <InvoiceMatchExceptionControl compact invoiceId="invoice-0507" initialOverview={{ ...overview, canRequest: false }} />
+      </QueryClientProvider>
+    );
+    expect(markup).toBe('');
+  });
+
   it('renders the dedicated AP-006 lifecycle and keeps payment allocation out of the control', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const markup = renderToStaticMarkup(

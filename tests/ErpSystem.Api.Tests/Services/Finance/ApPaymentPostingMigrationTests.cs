@@ -32,6 +32,57 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed partial class ApPaymentPostingMigrationTests
 {
     [Theory]
+    [InlineData("missing-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("draft-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("expired-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("future-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("cross-tenant-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("wrong-role-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("inactive-role", "AP_ROLE_INACTIVE")]
+    [InlineData("wrong-role-type", "AP_ROLE_REQUIRED")]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    public async Task FirstPosting_RequiresTheCapturedApprovedApProfile_ForTheDocumentDate(string defect, string code)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var document = fixture.Payment;
+        var role = await db.Set<BusinessPartnerRole>().SingleAsync(x => x.Id == document.BusinessPartnerRoleId);
+        var profile = await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == document.BusinessPartnerApProfileVersionId);
+        // An unrelated approved replacement must not silently replace captured authority.
+        db.Set<BusinessPartnerApProfileVersion>().Add(new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            VersionNumber = 99, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020, 1, 1)
+        });
+        switch (defect)
+        {
+            case "missing-profile": document.BusinessPartnerApProfileVersionId = Guid.NewGuid(); break;
+            case "draft-profile": profile.Status = BusinessPartnerFinanceProfileStatus.Draft; break;
+            case "expired-profile": profile.EffectiveTo = document.PaymentDate.AddDays(-1); break;
+            case "future-profile": profile.EffectiveFrom = document.PaymentDate.AddDays(1); break;
+            case "cross-tenant-profile": profile.TenantId = Guid.NewGuid(); break;
+            case "wrong-role-profile": profile.BusinessPartnerRoleId = Guid.NewGuid(); break;
+            case "inactive-role": role.Status = BusinessPartnerRoleStatus.Inactive; break;
+            case "wrong-role-type": role.RoleType = BusinessPartnerRoleType.Customer; break;
+        }
+        await db.SaveChangesAsync();
+        var beforeJournals = await db.JournalEntries.CountAsync();
+        var beforeTransactions = await db.AccountTransactions.CountAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        Func<Task> post = () => service.PostAsync(document.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(code + ":*");
+
+        (await db.JournalEntries.CountAsync()).Should().Be(beforeJournals);
+        (await db.AccountTransactions.CountAsync()).Should().Be(beforeTransactions);
+        (await db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "VendorPayment" && x.SourceDocumentId == document.Id))
+            .Should().Be(0);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(5)]
     public async Task InvoiceChosenRate_ShouldSurvivePaymentCalculationAndPosting(decimal chosenRate)
@@ -126,8 +177,10 @@ public sealed partial class ApPaymentPostingMigrationTests
 
         var calculate = () => calculator.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
-            SupplierId = otherSupplier.Id, TaxId = tax.Id, PaymentDate = fixture.Payment.PaymentDate,
-            TaxableBase = 100m, VendorInvoiceIds = new() { fixture.Invoice.Id }
+            BusinessPartnerId = otherSupplier.Id, TaxId = tax.Id, PaymentDate = fixture.Payment.PaymentDate,
+            TaxableBase = 100m, VendorInvoiceIds = new() { fixture.Invoice.Id },
+            ContractReference = fixture.Invoice.WithholdingContractReference,
+            SupplyCategory = fixture.Invoice.WithholdingSupplyCategory
         });
 
         await calculate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*does not belong to this supplier and tenant*");
@@ -158,8 +211,10 @@ public sealed partial class ApPaymentPostingMigrationTests
 
         var nextPayment = await calculator.CalculateApWithholdingAsync(new WhtCalculationRequestDto
         {
-            TaxId = tax.Id, SupplierId = fixture.Supplier.Id,
-            PaymentDate = fixture.Payment.PaymentDate.AddDays(1), TaxableBase = 50m
+            TaxId = tax.Id, BusinessPartnerId = fixture.Supplier.Id,
+            PaymentDate = fixture.Payment.PaymentDate.AddDays(1), TaxableBase = 50m,
+            ContractReference = fixture.Invoice.WithholdingContractReference,
+            SupplyCategory = fixture.Invoice.WithholdingSupplyCategory
         });
         nextPayment.CumulativeBefore.Should().Be(100m);
         nextPayment.ThresholdApplied.Should().BeTrue();
@@ -178,7 +233,7 @@ public sealed partial class ApPaymentPostingMigrationTests
 
         var post = () => service.PostAsync(fixture.Payment.Id);
 
-        await post.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WHT totals*requires*");
+        await post.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WHT allocations*requires*");
         (await db.FinancePostingEvents.CountAsync(value => value.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
     }
 
@@ -191,12 +246,45 @@ public sealed partial class ApPaymentPostingMigrationTests
         var tax = await SeedPaymentWithholdingTaxAsync(db, fixture, 150m);
         fixture.Allocation.WithholdingTaxAmount = 10m;
         fixture.Payment.WithholdingTaxAmount = 10m;
-        db.Set<VendorPayment>().Add(new VendorPayment
+        var book = await db.AccountingBooks.SingleAsync(value =>
+            value.TenantId == tenantId && value.BookType == AccountingBookType.PrimaryFull);
+        var priorJournal = new JournalEntry
         {
-            TenantId = tenantId, PaymentNumber = "VP-WHT-PRIOR", SupplierId = fixture.Supplier.Id,
+            Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryNumber = "JE-VP-WHT-PRIOR",
+            JournalType = "System Generated", EntryDate = fixture.Payment.PaymentDate.AddDays(-1),
+            Description = "Posted prior AP payment", SourceModule = "AP", SourceDocumentType = "VendorPayment",
+            PostingStatus = "Posted", AccountingBookId = book.Id, BookClassification = book.Code
+        };
+        var priorInvoice = new VendorInvoice
+        {
+            TenantId = tenantId, InvoiceNumber = "VI-WHT-PRIOR", SupplierInvoiceNumber = "VI-WHT-PRIOR",
+            BusinessPartnerId = fixture.Supplier.Id, BusinessPartnerRoleId = fixture.Invoice.BusinessPartnerRoleId,
+            BusinessPartnerApProfileVersionId = fixture.Invoice.BusinessPartnerApProfileVersionId,
+            SupplierName = fixture.Supplier.PartnerName, InvoiceDate = fixture.Payment.PaymentDate.AddDays(-2),
+            ReceivedDate = fixture.Payment.PaymentDate.AddDays(-2), DueDate = fixture.Payment.PaymentDate.AddDays(28),
+            SubTotal = 50m, TotalAmount = 50m, CurrencyCode = "GHS", ExchangeRate = 1m,
+            BaseCurrencyAmount = 50m, Status = VendorInvoiceStatus.Approved, ApprovalStatus = "Approved",
+            ApAccountId = fixture.ApAccount.Id, WithholdingContractReference = fixture.Invoice.WithholdingContractReference,
+            WithholdingSupplyCategory = fixture.Invoice.WithholdingSupplyCategory
+        };
+        var priorPayment = new VendorPayment
+        {
+            TenantId = tenantId, PaymentNumber = "VP-WHT-PRIOR", BusinessPartnerId = fixture.Supplier.Id,
             PaymentDate = fixture.Payment.PaymentDate.AddDays(-1), TotalAmount = 50m,
             CurrencyCode = "GHS", ExchangeRate = 1m, Status = VendorPaymentStatus.Processed,
-            WithholdingTaxId = tax.Id, WithholdingTaxBaseAmount = 50m
+            WithholdingTaxId = tax.Id, WithholdingTaxBaseAmount = 50m, JournalEntryId = priorJournal.Id
+        };
+        priorJournal.SourceDocumentId = priorPayment.Id;
+        db.JournalEntries.Add(priorJournal);
+        db.VendorInvoices.Add(priorInvoice);
+        db.Set<VendorPayment>().Add(priorPayment);
+        db.Set<VendorPaymentAllocation>().Add(new VendorPaymentAllocation
+        {
+            TenantId = tenantId, VendorPaymentId = priorPayment.Id, VendorPayment = priorPayment,
+            VendorInvoiceId = priorInvoice.Id, VendorInvoice = priorInvoice,
+            AllocatedAmount = 50m, PaymentCurrencyAmount = 50m, SettlementFunctionalAmount = 50m,
+            WithholdingTaxAmount = 0m, WithholdingTaxFunctionalAmount = 0m,
+            AllocationDate = priorPayment.PaymentDate
         });
         await db.SaveChangesAsync();
         var calculator = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
@@ -231,6 +319,10 @@ public sealed partial class ApPaymentPostingMigrationTests
         fixture.Payment.WithholdingTaxRate = 10m;
         fixture.Payment.WithholdingTaxBaseAmount = 100m;
         fixture.Payment.WithholdingTaxAccountId = payableAccount;
+        // These payment-posting regressions exercise the legacy payment-configured path.
+        // Tests for invoice-owned WHT decisions set the invoice tax/rate explicitly.
+        fixture.Invoice.WithholdingContractReference = "CONTRACT-PAYMENT-COMPLIANCE";
+        fixture.Invoice.WithholdingSupplyCategory = WhtSupplyCategory.Services;
         await db.SaveChangesAsync();
         return tax;
     }
@@ -346,8 +438,8 @@ public sealed partial class ApPaymentPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "USD",
-            Rate = 12.5m,
-            InverseRate = 0.08m,
+            Rate = 0.08m,
+            InverseRate = 12.5m,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -373,6 +465,9 @@ public sealed partial class ApPaymentPostingMigrationTests
         fixture.Invoice.ExchangeRate = 10m;
         fixture.Invoice.TotalAmount = 80m;
         fixture.Invoice.BaseCurrencyAmount = 800m;
+        fixture.Invoice.WithholdingTaxId = taxId;
+        fixture.Invoice.WithholdingContractReference = "CONTRACT-CROSS-CURRENCY-001";
+        fixture.Invoice.WithholdingSupplyCategory = WhtSupplyCategory.Services;
         fixture.Allocation.AllocatedAmount = 75m;
         fixture.Allocation.DiscountAmount = 2m;
         fixture.Allocation.WithholdingTaxAmount = 3m;
@@ -398,7 +493,9 @@ public sealed partial class ApPaymentPostingMigrationTests
         wht.Setup(service => service.CalculateApWithholdingAsync(
                 It.Is<WhtCalculationRequestDto>(request =>
                     request.TaxId == taxId &&
-                    request.TaxableBase == 1_000m),
+                    request.TaxableBase == 1_000m &&
+                    request.ContractReference == "CONTRACT-CROSS-CURRENCY-001" &&
+                    request.SupplyCategory == WhtSupplyCategory.Services),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WhtCalculationResultDto
             {
@@ -409,6 +506,8 @@ public sealed partial class ApPaymentPostingMigrationTests
                 TaxableBase = 1_000m,
                 WithholdingAmount = 37.50m,
                 TaxPayableAccountId = withholdingAccount.Id,
+                ContractReference = "CONTRACT-CROSS-CURRENCY-001",
+                SupplyCategory = WhtSupplyCategory.Services,
                 CalculationNote = "Regression fixture"
             });
         var (service, _) = CreateService(db, tenantId, fx.Object, wht.Object);
@@ -514,8 +613,8 @@ public sealed partial class ApPaymentPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "USD",
-            Rate = 10m,
-            InverseRate = 0.1m,
+            Rate = 0.1m,
+            InverseRate = 10m,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -530,8 +629,8 @@ public sealed partial class ApPaymentPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "EUR",
-            Rate = 13m,
-            InverseRate = 1m / 13m,
+            Rate = 1m / 13m,
+            InverseRate = 13m,
             EffectiveDate = new DateTime(2026, 7, 1),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -548,13 +647,13 @@ public sealed partial class ApPaymentPostingMigrationTests
         fixture.Payment.TotalAmount = 10m;
         fixture.Payment.AllocatedAmount = 0m;
         fixture.Payment.CurrencyCode = "USD";
-        fixture.Payment.ExchangeRate = originRate.Rate;
+        fixture.Payment.ExchangeRate = originRate.InverseRate;
         fixture.Payment.ExchangeRateId = originRate.Id;
         fixture.BankAccount.Currency = "USD";
         fixture.Invoice.TotalAmount = 8m;
         fixture.Invoice.PaidAmount = 0m;
         fixture.Invoice.CurrencyCode = "EUR";
-        fixture.Invoice.ExchangeRate = applicationRate.Rate;
+        fixture.Invoice.ExchangeRate = applicationRate.InverseRate;
         fixture.Invoice.BaseCurrencyAmount = 104m;
         fixture.Invoice.Status = VendorInvoiceStatus.Approved;
         EnableCurrencyForAccounts(db, tenantId, "USD", fixture.BankGlAccount, supplierAdvanceAccount);
@@ -689,14 +788,14 @@ public sealed partial class ApPaymentPostingMigrationTests
         var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherSupplier = SeedSupplier(db, otherTenantId, fixture.ApAccount.Id);
-        fixture.Payment.SupplierId = otherSupplier.Id;
+        fixture.Payment.BusinessPartnerId = otherSupplier.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
         var act = () => service.PostAsync(fixture.Payment.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP payment supplier was not found for this tenant.");
+            .WithMessage("The AP payment Business Partner was not found for this tenant.");
     }
 
     [Fact]
@@ -723,7 +822,7 @@ public sealed partial class ApPaymentPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task CrossTenantApControlAccount_ShouldBeRejected()
+    public async Task LegacySupplierApControlOverride_ShouldBeIgnoredInFavorOfFinanceSettings()
     {
         var tenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();
@@ -735,10 +834,12 @@ public sealed partial class ApPaymentPostingMigrationTests
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
-        var act = () => service.PostAsync(fixture.Payment.Id);
+        var result = await service.PostAsync(fixture.Payment.Id);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP payment posting AP control account was not found for this tenant.");
+        result.Status.Should().Be(VendorPaymentStatus.Processed);
+        var journal = await db.JournalEntries.Include(x => x.Transactions).SingleAsync(x => x.Id == result.JournalEntryId);
+        journal.Transactions.Should().Contain(line => line.AccountId == fixture.ApAccount.Id && line.DebitAmount > 0m);
+        journal.Transactions.Should().NotContain(line => line.AccountId == otherApAccount.Id);
     }
 
     [Fact]
@@ -809,6 +910,10 @@ public sealed partial class ApPaymentPostingMigrationTests
         var (service, _) = CreateService(db, tenantId);
 
         var first = await service.PostAsync(fixture.Payment.Id);
+        var capturedProfile = await db.Set<BusinessPartnerApProfileVersion>()
+            .SingleAsync(x => x.Id == fixture.Payment.BusinessPartnerApProfileVersionId);
+        capturedProfile.Status = BusinessPartnerFinanceProfileStatus.Superseded;
+        await db.SaveChangesAsync();
         var second = await service.PostAsync(fixture.Payment.Id);
 
         second.JournalEntryId.Should().Be(first.JournalEntryId);
@@ -1163,12 +1268,16 @@ public sealed partial class ApPaymentPostingMigrationTests
                     IntegrityValid = true
                 });
 
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(value => value.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+            It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => $"VP-{Guid.NewGuid():N}");
         var service = new VendorPaymentService(
             new UnitOfWork(db),
             currentUser.Object,
             tenantSettings.Object,
             Mock.Of<ILogger<VendorPaymentService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            numbering.Object,
             workflowService ?? Mock.Of<IWorkflowService>(),
             // Existing posting tests run with access-scope enforcement disabled. The no-op mock
             // isolates those posting assertions while dedicated scope tests exercise fail-closed
@@ -1227,6 +1336,11 @@ public sealed partial class ApPaymentPostingMigrationTests
         var taxAccount = SeedAccount(db, tenantId, "2300", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var discountAccount = SeedAccount(db, tenantId, "5100", AccountType.Revenue);
         var supplier = SeedSupplier(db, tenantId, apAccount.Id);
+        var supplierRole = db.Set<BusinessPartnerRole>().Local.Single(role =>
+            role.TenantId == tenantId && role.BusinessPartnerId == supplier.Id &&
+            role.RoleType == BusinessPartnerRoleType.Supplier);
+        var supplierProfile = db.Set<BusinessPartnerApProfileVersion>().Local.Single(profile =>
+            profile.TenantId == tenantId && profile.BusinessPartnerRoleId == supplierRole.Id);
         var bankAccount = SeedBankAccount(db, tenantId, bankGlAccount.Id);
 
         db.Set<FinanceSettings>().Add(new FinanceSettings
@@ -1249,7 +1363,13 @@ public sealed partial class ApPaymentPostingMigrationTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "VP-2026-00001",
-            SupplierId = supplier.Id,
+            BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = supplierRole.Id,
+            BusinessPartnerApProfileVersionId = supplierProfile.Id,
+            BusinessPartnerCode = supplier.PartnerCode,
+            BusinessPartnerName = supplier.PartnerName,
+            BusinessPartnerLegalName = supplier.LegalName,
+            BusinessPartnerTaxIdentificationNumber = supplier.TaxIdentificationNumber,
             PaymentDate = new DateTime(2026, 7, 5),
             TotalAmount = allocationAmount,
             AllocatedAmount = allocationAmount,
@@ -1423,23 +1543,42 @@ public sealed partial class ApPaymentPostingMigrationTests
         }
     }
 
-    private static Supplier SeedSupplier(ApplicationDbContext db, Guid tenantId, Guid apAccountId)
+    private static BusinessPartner SeedSupplier(ApplicationDbContext db, Guid tenantId, Guid apAccountId)
     {
-        var supplier = new Supplier
+        var supplier = new BusinessPartner
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            SupplierCode = $"SUP-{tenantId.ToString("N")[..6]}",
-            Name = "Test Supplier",
-            SupplierType = "Vendor",
+            PartnerCode = $"SUP-{tenantId.ToString("N")[..6]}",
+            PartnerName = "Test Supplier",
+            LegalName = "Test Supplier Limited",
+            TaxIdentificationNumber = $"TIN-{tenantId.ToString("N")[..8]}",
+            PartnerType = "Supplier",
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
+            Currency = "GHS",
             IsActive = true,
-            Status = "Active",
             DefaultApAccountId = apAccountId,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
+        var role = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = supplier.Id,
+            RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+            ActiveFromUtc = new DateTime(2025, 1, 1), CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
+        var profile = new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2025, 1, 1), ApprovedAtUtc = DateTime.UtcNow,
+            ApprovedById = Guid.NewGuid(), CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        };
 
-        db.Suppliers.Add(supplier);
+        db.BusinessPartners.Add(supplier);
+        db.Set<BusinessPartnerRole>().Add(role);
+        db.Set<BusinessPartnerApProfileVersion>().Add(profile);
         return supplier;
     }
 
@@ -1467,7 +1606,7 @@ public sealed partial class ApPaymentPostingMigrationTests
     private static VendorInvoice SeedPostedInvoice(
         ApplicationDbContext db,
         Guid tenantId,
-        Supplier supplier,
+        BusinessPartner supplier,
         Account apAccount,
         string invoiceNumber,
         DateTime invoiceDate,
@@ -1476,14 +1615,21 @@ public sealed partial class ApPaymentPostingMigrationTests
         bool seedPostingEvent = true)
     {
         var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        var role = db.Set<BusinessPartnerRole>().Local.FirstOrDefault(item =>
+            item.TenantId == tenantId && item.BusinessPartnerId == supplier.Id &&
+            item.RoleType == BusinessPartnerRoleType.Supplier);
+        var profile = role == null ? null : db.Set<BusinessPartnerApProfileVersion>().Local.FirstOrDefault(item =>
+            item.TenantId == tenantId && item.BusinessPartnerRoleId == role.Id);
         var invoice = new VendorInvoice
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             InvoiceNumber = invoiceNumber,
             SupplierInvoiceNumber = invoiceNumber,
-            SupplierId = supplier.Id,
-            SupplierName = supplier.Name,
+            BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = role?.Id,
+            BusinessPartnerApProfileVersionId = profile?.Id,
+            SupplierName = supplier.PartnerName,
             InvoiceDate = invoiceDate,
             ReceivedDate = invoiceDate,
             DueDate = invoiceDate.AddDays(30),
@@ -1564,7 +1710,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         VendorPayment Payment,
         VendorPaymentAllocation Allocation,
         VendorInvoice Invoice,
-        Supplier Supplier,
+        BusinessPartner Supplier,
         Account ApAccount,
         Account BankGlAccount,
         BankAccount BankAccount);

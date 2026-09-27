@@ -160,7 +160,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
         if (!string.IsNullOrWhiteSpace(partnerType))
         {
-            query = query.Where(bp => bp.PartnerType == partnerType);
+            query = FilterByRole(query, partnerType);
         }
 
         if (!string.IsNullOrWhiteSpace(status))
@@ -225,7 +225,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
              bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus));
         if (!string.IsNullOrWhiteSpace(partnerType))
         {
-            query = query.Where(bp => bp.PartnerType == partnerType);
+            query = FilterByRole(query, partnerType);
         }
 
         return await query.OrderBy(bp => bp.PartnerName).ToListAsync();
@@ -243,7 +243,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
              bp.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus));
         if (!string.IsNullOrWhiteSpace(partnerType))
         {
-            query = query.Where(bp => bp.PartnerType == partnerType);
+            query = FilterByRole(query, partnerType);
         }
 
         return await query.OrderBy(bp => bp.PartnerName).ToListAsync();
@@ -439,6 +439,13 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         return $"{prefix}{year}{nextSequence:D4}";
     }
 
+    private static IQueryable<BusinessPartner> FilterByRole(IQueryable<BusinessPartner> query, string role) => role switch
+    {
+        "Customer" => query.Where(bp => BusinessPartnerRoles.CustomerTypes.Contains(bp.PartnerType)),
+        "Supplier" => query.Where(bp => BusinessPartnerRoles.SupplierTypes.Contains(bp.PartnerType)),
+        _ => query.Where(bp => bp.PartnerType == role)
+    };
+
     public async Task<BusinessPartner?> GetWithCategoriesAsync(Guid id)
     {
         var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
@@ -578,6 +585,9 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             .Include(bp => bp.BankAccounts)
             .Include(bp => bp.Documents)
             .Include(bp => bp.Financials)
+            // Canonical role rows coexist with the legacy PartnerType projection while Procurement
+            // consumers migrate. Finance profile screens must receive the real multi-role state.
+            .Include(bp => bp.Roles)
             .Include(bp => bp.ApprovedBy)
             .FirstOrDefaultAsync();
     }

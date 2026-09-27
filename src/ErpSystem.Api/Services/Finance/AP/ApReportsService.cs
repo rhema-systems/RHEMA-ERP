@@ -62,7 +62,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         public async Task<SubledgerUnappliedSettlementReportDto> GetUnappliedSettlementsAsync(
             DateTime? asOfDate = null,
-            Guid? supplierId = null,
+            Guid? businessPartnerId = null,
             CancellationToken cancellationToken = default)
         {
             var date = asOfDate ?? DateTime.UtcNow;
@@ -76,16 +76,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             var balances = (await _settlementReadModelService.GetUnappliedBalancesAsync(
                     SubledgerSettlementModules.AccountsPayable,
                     date,
-                    supplierId,
+                    businessPartnerId,
                     cancellationToken))
                 .Where(b => b.UnappliedAmount != 0m)
                 .ToList();
 
-            var supplierIds = balances.Select(b => b.CounterpartyId).Distinct().ToList();
-            var supplierNames = await _unitOfWork.Repository<Supplier>()
-                .GetQueryable(s => s.TenantId == TenantId && supplierIds.Contains(s.Id) && !s.IsDeleted)
-                .Select(s => new { s.Id, s.Name })
-                .ToDictionaryAsync(s => s.Id, s => s.Name, cancellationToken);
+            var businessPartnerIds = balances.Select(b => b.CounterpartyId).Distinct().ToList();
+            var partnerNames = await _unitOfWork.Repository<BusinessPartner>()
+                .GetQueryable(partner => partner.TenantId == TenantId && businessPartnerIds.Contains(partner.Id) && !partner.IsDeleted)
+                .Select(partner => new { partner.Id, partner.PartnerName })
+                .ToDictionaryAsync(partner => partner.Id, partner => partner.PartnerName, cancellationToken);
 
             var report = new SubledgerUnappliedSettlementReportDto
             {
@@ -101,7 +101,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Id = b.Id,
                 SourceModule = b.SourceModule,
                 CounterpartyId = b.CounterpartyId,
-                CounterpartyName = supplierNames.GetValueOrDefault(b.CounterpartyId) ?? "Supplier",
+                CounterpartyName = partnerNames.GetValueOrDefault(b.CounterpartyId) ?? "Business Partner",
                 SettlementSourceType = b.SettlementSourceType,
                 SettlementSourceId = b.SettlementSourceId,
                 SettlementSourceNumber = b.SettlementSourceNumber,
@@ -127,12 +127,12 @@ namespace ErpSystem.Api.Services.Finance.AP
         // ═════════════════════════════════════════════════════════════════
 
         public async Task<ApAgingReportDto> GetAgingReportAsync(
-            DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default)
+            DateTime? asOfDate = null, Guid? businessPartnerId = null, CancellationToken cancellationToken = default)
         {
             // The constructor requires the projection service so production aging cannot
             // silently regress to mutable VendorInvoice.PaidAmount snapshots.
             if (_settlementReadModelService != null)
-                return await GetSettlementReadModelAgingReportAsync(asOfDate, supplierId, includeInvoiceDetails: false, cancellationToken);
+                return await GetSettlementReadModelAgingReportAsync(asOfDate, businessPartnerId, includeInvoiceDetails: false, cancellationToken);
 
             var date = asOfDate ?? DateTime.UtcNow;
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
@@ -145,11 +145,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     (i.TotalAmount - i.PaidAmount) > 0);
             queryable = ApplyPostedApInvoiceFilter(queryable);
 
-            if (supplierId.HasValue)
-                queryable = queryable.Where(i => i.SupplierId == supplierId.Value);
+            if (businessPartnerId.HasValue)
+                queryable = queryable.Where(i => i.BusinessPartnerId == businessPartnerId.Value);
 
             var invoices = await queryable.ToListAsync(cancellationToken);
-            var adjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
+            var adjustments = await GetPostedApAdjustmentsAsync(businessPartnerId, cancellationToken);
 
             var report = new ApAgingReportDto
             {
@@ -166,7 +166,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 var detail = new SupplierAgingDetailDto
                 {
-                    SupplierId = id,
+                    BusinessPartnerId = id,
                     SupplierName = name
                 };
                 detailBySupplier[id] = detail;
@@ -176,7 +176,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var invoice in invoices)
             {
-                var detail = GetOrCreateDetail(invoice.SupplierId, invoice.SupplierName);
+                var detail = GetOrCreateDetail(invoice.BusinessPartnerId, invoice.SupplierName);
                 var balance = invoice.TotalAmount - invoice.PaidAmount;
                 AddToSupplierAgingBucket(detail, balance, invoice.DueDate, invoice.InvoiceDate, date);
                 detail.InvoiceCount++;
@@ -187,14 +187,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var adjustment in adjustments)
             {
-                if (!adjustment.SupplierId.HasValue)
-                    continue;
-
                 var amount = GetSignedApSubledgerAmount(adjustment);
                 if (amount == 0)
                     continue;
 
-                var detail = GetOrCreateDetail(adjustment.SupplierId.Value, adjustment.Supplier?.Name ?? "Supplier");
+                var detail = GetOrCreateDetail(adjustment.BusinessPartnerId, adjustment.BusinessPartnerName);
                 AddToSupplierAgingBucket(detail, amount, adjustment.DueDate, adjustment.AdjustmentDate, date);
                 detail.InvoiceCount++;
 
@@ -218,13 +215,13 @@ namespace ErpSystem.Api.Services.Finance.AP
         }
 
         public async Task<ApAgingReportDto> GetDetailedAgingReportAsync(
-            DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default)
+            DateTime? asOfDate = null, Guid? businessPartnerId = null, CancellationToken cancellationToken = default)
         {
             // See GetAgingReportAsync: mandatory dependency prevents a silent legacy fallback.
             if (_settlementReadModelService != null)
-                return await GetSettlementReadModelAgingReportAsync(asOfDate, supplierId, includeInvoiceDetails: true, cancellationToken);
+                return await GetSettlementReadModelAgingReportAsync(asOfDate, businessPartnerId, includeInvoiceDetails: true, cancellationToken);
 
-            var report = await GetAgingReportAsync(asOfDate, supplierId, cancellationToken);
+            var report = await GetAgingReportAsync(asOfDate, businessPartnerId, cancellationToken);
             var date = report.AsOfDate;
 
             // Reload invoices to populate per-invoice details
@@ -236,20 +233,19 @@ namespace ErpSystem.Api.Services.Finance.AP
                     (i.TotalAmount - i.PaidAmount) > 0);
             queryable = ApplyPostedApInvoiceFilter(queryable);
 
-            if (supplierId.HasValue)
-                queryable = queryable.Where(i => i.SupplierId == supplierId.Value);
+            if (businessPartnerId.HasValue)
+                queryable = queryable.Where(i => i.BusinessPartnerId == businessPartnerId.Value);
 
             var invoices = await queryable.ToListAsync(cancellationToken);
-            var adjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
-            var bySupplier = invoices.GroupBy(i => i.SupplierId).ToDictionary(g => g.Key, g => g.ToList());
+            var adjustments = await GetPostedApAdjustmentsAsync(businessPartnerId, cancellationToken);
+            var bySupplier = invoices.GroupBy(i => i.BusinessPartnerId).ToDictionary(g => g.Key, g => g.ToList());
             var adjustmentsBySupplier = adjustments
-                .Where(a => a.SupplierId.HasValue)
-                .GroupBy(a => a.SupplierId!.Value)
+                .GroupBy(a => a.BusinessPartnerId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             foreach (var detail in report.SupplierDetails)
             {
-                if (bySupplier.TryGetValue(detail.SupplierId, out var supplierInvoices))
+                if (bySupplier.TryGetValue(detail.BusinessPartnerId, out var supplierInvoices))
                 {
                     detail.Invoices = supplierInvoices.Select(i =>
                     {
@@ -274,7 +270,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     }).ToList();
                 }
 
-                if (adjustmentsBySupplier.TryGetValue(detail.SupplierId, out var supplierAdjustments))
+                if (adjustmentsBySupplier.TryGetValue(detail.BusinessPartnerId, out var supplierAdjustments))
                 {
                     detail.Invoices.AddRange(supplierAdjustments.Select(a =>
                     {
@@ -502,13 +498,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .GetQueryable(item =>
                     item.TenantId == tenantId &&
                     !item.IsDeleted &&
-                    item.PurchaseOrderId.HasValue &&
-                    selectedPoIds.Contains(item.PurchaseOrderId.Value) &&
+                    ((item.PurchaseOrderId.HasValue && selectedPoIds.Contains(item.PurchaseOrderId.Value)) ||
+                     (item.AutoInvoiceRequestId.HasValue && item.LineItems.Any(line => !line.IsDeleted && line.TenantId == tenantId &&
+                         line.PurchaseOrderItem != null && selectedPoIds.Contains(line.PurchaseOrderItem.PurchaseOrderId)))) &&
                     item.InvoiceDate < cutoffExclusive &&
                     item.SubmittedDate.HasValue &&
                     item.SubmittedDate.Value < cutoffExclusive &&
                     item.ApprovedDate.HasValue &&
                     item.ApprovedDate.Value < cutoffExclusive)
+                .Include(item => item.LineItems.Where(line => !line.IsDeleted))
+                    .ThenInclude(line => line.PurchaseOrderItem)
                 .ToListAsync(cancellationToken);
             var invoiceIds = allInvoices.Select(item => item.Id).ToList();
             var invoiceResourceIds = invoiceIds.Select(item => item.ToString()).ToList();
@@ -666,8 +665,19 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var commercialState = purchaseOrderCommercialStates[purchaseOrder.Id];
                 var currency = NormalizeCurrency(commercialState.Currency, "GHS");
                 var poInvoices = allInvoices
-                    .Where(item => item.PurchaseOrderId == purchaseOrder.Id)
+                    .Where(item => item.PurchaseOrderId == purchaseOrder.Id || (item.AutoInvoiceRequestId.HasValue &&
+                        item.LineItems.Any(line => line.PurchaseOrderItem?.PurchaseOrderId == purchaseOrder.Id)))
                     .ToList();
+                // Payments settle the whole supplier bill. Attribute consolidated bills and
+                // their settlement to each PO by the invoice's fixed gross line amounts.
+                var invoiceShares = poInvoices.ToDictionary(item => item.Id, item =>
+                {
+                    if (!item.AutoInvoiceRequestId.HasValue) return 1m;
+                    var gross = item.LineItems.Sum(line => line.LineTotal - line.DiscountAmount + line.TaxAmount);
+                    if (gross <= 0m) return 0m;
+                    return item.LineItems.Where(line => line.PurchaseOrderItem?.PurchaseOrderId == purchaseOrder.Id)
+                        .Sum(line => line.LineTotal - line.DiscountAmount + line.TaxAmount) / gross;
+                });
                 var poInvoiceIds = poInvoices.Select(item => item.Id).ToHashSet();
                 var poAllocations = allocations
                     .Where(item => poInvoiceIds.Contains(item.VendorInvoiceId))
@@ -766,14 +776,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var acceptedReceiptAmount = RoundMoney(acceptedReceiptValue);
                 var settledAmount = RoundMoney(effectivePoAllocations
                     .Where(item => IsAllocationPostedAsOf(item, poPostings))
-                    .Sum(item => item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount));
+                    .Sum(item => (item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount) * invoiceShares[item.VendorInvoiceId]));
                 var invoicePostedAmount = RoundMoney(poPostings
                     .Where(item =>
                         item.SourceDocumentType == "VendorInvoice" &&
                         item.PostingAction == "Post" &&
                         activeInvoiceIds.Contains(item.SourceDocumentId) &&
                         GetActivePostingAsOf(poPostings, "VendorInvoice", item.SourceDocumentId)?.Id == item.Id)
-                    .Sum(item => GetTransactionDebit(item, currency)));
+                    .Sum(item => GetTransactionDebit(item, currency) * invoiceShares[item.SourceDocumentId]));
                 var activePoAllocations = effectivePoAllocations
                     .Where(item => IsAllocationPostedAsOf(item, poPostings))
                     .ToList();
@@ -797,7 +807,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                                         allocationId);
                                 return applicationPosting == null
                                     ? 0m
-                                    : GetTransactionDebit(applicationPosting, currency);
+                                    : GetTransactionDebit(applicationPosting, currency) * invoiceShares[group.Single(item => item.Id == allocationId).VendorInvoiceId];
                             });
                         }
 
@@ -811,7 +821,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             .GetValueOrDefault(payment.Id);
                         if (paymentSettlement <= 0m) return 0m;
                         var orderSettlement = RoundMoney(group.Sum(item =>
-                            item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount));
+                            (item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount) * invoiceShares[item.VendorInvoiceId]));
                         return RoundMoney(
                             GetTransactionDebit(paymentPosting, currency) * orderSettlement / paymentSettlement);
                     }));
@@ -830,7 +840,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         .Sum(item => item.ReservedAmount)),
                     CommitmentGroupOrderAmount = RoundMoney(commitmentGroupOrders.Sum(item => item.TotalAmount)),
                     AcceptedReceiptAmount = acceptedReceiptAmount,
-                    InvoiceAmount = RoundMoney(activeInvoices.Sum(item => item.TotalAmount)),
+                    InvoiceAmount = RoundMoney(activeInvoices.Sum(item => item.TotalAmount * invoiceShares[item.Id])),
                     SettledAmount = settledAmount,
                     InvoicePostedAmount = invoicePostedAmount,
                     PaymentPostedAmount = paymentPostedAmount,
@@ -1893,7 +1903,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private async Task<ApAgingReportDto> GetSettlementReadModelAgingReportAsync(
             DateTime? asOfDate,
-            Guid? supplierId,
+            Guid? businessPartnerId,
             bool includeInvoiceDetails,
             CancellationToken cancellationToken)
         {
@@ -1909,7 +1919,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var balances = (await _settlementReadModelService.GetBalancesAsync(
                     SubledgerSettlementModules.AccountsPayable,
                     date,
-                    supplierId,
+                    businessPartnerId,
                     cancellationToken))
                 .Where(b => b.OutstandingAmount != 0)
                 .ToList();
@@ -1920,7 +1930,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Select(i => new { i.Id, i.SupplierName })
                 .ToDictionaryAsync(i => i.Id, i => i.SupplierName, cancellationToken);
 
-            var adjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
+            var adjustments = await GetPostedApAdjustmentsAsync(businessPartnerId, cancellationToken);
             var report = new ApAgingReportDto
             {
                 AsOfDate = date,
@@ -1937,7 +1947,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 var detail = new SupplierAgingDetailDto
                 {
-                    SupplierId = id,
+                    BusinessPartnerId = id,
                     SupplierName = name,
                     Invoices = new List<ApAgingInvoiceDto>()
                 };
@@ -1970,14 +1980,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var adjustment in adjustments)
             {
-                if (!adjustment.SupplierId.HasValue)
-                    continue;
-
                 var amount = GetSignedApSubledgerFunctionalAmount(adjustment);
                 if (amount == 0)
                     continue;
 
-                var detail = GetOrCreateDetail(adjustment.SupplierId.Value, adjustment.Supplier?.Name ?? "Supplier");
+                var detail = GetOrCreateDetail(adjustment.BusinessPartnerId, adjustment.BusinessPartnerName);
                 AddToSupplierAgingBucket(detail, amount, adjustment.DueDate, adjustment.AdjustmentDate, date);
                 detail.InvoiceCount++;
 
@@ -2098,7 +2105,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         // ═════════════════════════════════════════════════════════════════
 
         public async Task<SupplierStatementDto> GetSupplierStatementAsync(
-            Guid supplierId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default)
+            Guid businessPartnerId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default)
         {
             // Keep this compatibility-shaped endpoint on the same supplier detailed-ledger path
             // used by the report screen and controlled exports. The previous implementation
@@ -2107,16 +2114,15 @@ namespace ErpSystem.Api.Services.Finance.AP
             var detailed = await GetSupplierDetailedLedgerAsync(
                 fromDate,
                 toDate,
-                new[] { supplierId },
+                new[] { businessPartnerId },
                 showSupplierCurrency: false,
                 cancellationToken);
-            var supplier = detailed.Suppliers.SingleOrDefault(item =>
-                item.SupplierId == supplierId || item.BusinessPartnerId == supplierId)
-                ?? throw new KeyNotFoundException($"Supplier with Id '{supplierId}' was not found in the current tenant.");
+            var supplier = detailed.Suppliers.SingleOrDefault(item => item.BusinessPartnerId == businessPartnerId)
+                ?? throw new KeyNotFoundException($"Business Partner with Id '{businessPartnerId}' was not found in the current tenant's AP register.");
 
             return new SupplierStatementDto
             {
-                SupplierId = supplier.SupplierId,
+                BusinessPartnerId = supplier.BusinessPartnerId,
                 SupplierName = supplier.SupplierName,
                 SupplierCode = supplier.SupplierCode,
                 FromDate = detailed.FromDate,
@@ -2145,7 +2151,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         public async Task<SupplierDetailedLedgerReportDto> GetSupplierDetailedLedgerAsync(
             DateTime fromDate,
             DateTime toDate,
-            IReadOnlyCollection<Guid>? supplierIds = null,
+            IReadOnlyCollection<Guid>? businessPartnerIds = null,
             bool showSupplierCurrency = false,
             CancellationToken cancellationToken = default)
         {
@@ -2156,12 +2162,12 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var endExclusive = endDate.AddDays(1);
             var baseCurrencyCode = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync(), "GHS");
-            var requestedSupplierIds = supplierIds?
+            var requestedBusinessPartnerIds = businessPartnerIds?
                 .Where(id => id != Guid.Empty)
                 .Distinct()
                 .ToList() ?? new List<Guid>();
 
-            var selections = await GetSupplierLedgerSelectionsAsync(requestedSupplierIds, endExclusive, cancellationToken);
+            var selections = await GetSupplierLedgerSelectionsAsync(requestedBusinessPartnerIds, endExclusive, cancellationToken);
             var report = new SupplierDetailedLedgerReportDto
             {
                 FromDate = startDate,
@@ -2176,9 +2182,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     ? NormalizeCurrency(selection.CurrencyCode, baseCurrencyCode)
                     : baseCurrencyCode;
 
-                var transactions = selection.SupplierId.HasValue
-                    ? await GetSupplierLedgerTransactionsAsync(selection, startDate, endExclusive, reportCurrencyCode, baseCurrencyCode, report.Warnings, cancellationToken)
-                    : new List<SupplierLedgerTransaction>();
+                var transactions = await GetSupplierLedgerTransactionsAsync(selection, startDate, endExclusive, reportCurrencyCode, baseCurrencyCode, report.Warnings, cancellationToken);
 
                 var openingBalance = transactions
                     .Where(t => t.TransactionDate.Date < startDate)
@@ -2217,12 +2221,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var totalCredits = lines.Sum(l => l.Credit);
                 var closingBalance = openingBalance + totalCredits - totalDebits;
 
-                if (requestedSupplierIds.Count == 0 && openingBalance == 0m && closingBalance == 0m && lines.Count == 0)
+                if (requestedBusinessPartnerIds.Count == 0 && openingBalance == 0m && closingBalance == 0m && lines.Count == 0)
                     continue;
 
                 report.Suppliers.Add(new SupplierDetailedLedgerAccountDto
                 {
-                    SupplierId = selection.SupplierId ?? selection.BusinessPartnerId ?? Guid.Empty,
                     BusinessPartnerId = selection.BusinessPartnerId,
                     SupplierCode = selection.SupplierCode,
                     SupplierName = selection.SupplierName,
@@ -2270,7 +2273,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     p.PaymentDate <= toDate &&
                     p.Status != VendorPaymentStatus.Voided &&
                     p.WithholdingTaxAmount > 0)
-                .Include(p => p.Supplier)
+                .Include(p => p.BusinessPartner)
                 .Include(p => p.Allocations)
                 .ToListAsync(cancellationToken);
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
@@ -2282,14 +2285,19 @@ namespace ErpSystem.Api.Services.Finance.AP
                 CurrencyCode = baseCurrencyCode,
                 TotalWithheld = payments.Sum(p => p.WithholdingTaxAmount),
                 TransactionCount = payments.Count,
-                SupplierCount = payments.Select(p => p.SupplierId).Distinct().Count()
+                SupplierCount = payments.Select(p => p.BusinessPartnerId).Distinct().Count()
             };
 
             summary.BySupplier = payments
-                .GroupBy(p => new { p.SupplierId, p.Supplier.Name, p.Supplier.TaxId })
+                .GroupBy(p => new
+                {
+                    BusinessPartnerId = p.BusinessPartnerId,
+                    Name = p.BusinessPartnerName,
+                    TaxId = p.BusinessPartnerTaxIdentificationNumber
+                })
                 .Select(g => new WithholdingTaxBySupplierDto
                 {
-                    SupplierId = g.Key.SupplierId,
+                    BusinessPartnerId = g.Key.BusinessPartnerId,
                     SupplierName = g.Key.Name,
                     TaxId = g.Key.TaxId,
                     // All summary money is labelled in functional currency. Allocation snapshots
@@ -2398,7 +2406,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             DateTime fromDate,
             DateTime toDate,
             VendorInvoiceMatchExceptionStatus? status = null,
-            Guid? supplierId = null,
+            Guid? businessPartnerId = null,
             CancellationToken cancellationToken = default)
         {
             var from = EnsureUtc(fromDate);
@@ -2411,12 +2419,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
                                       item.RequestedAtUtc >= from.Date && item.RequestedAtUtc < endExclusive)
                 .AsNoTracking()
-                .Include(item => item.VendorInvoice).ThenInclude(invoice => invoice.Supplier)
+                .Include(item => item.VendorInvoice).ThenInclude(invoice => invoice.BusinessPartner)
                 .Include(item => item.PurchaseOrder)
                 .Include(item => item.Variances)
                 .Include(item => item.Evidence);
-            if (supplierId.HasValue)
-                query = query.Where(item => item.VendorInvoice.SupplierId == supplierId.Value);
+            if (businessPartnerId.HasValue)
+                query = query.Where(item => item.VendorInvoice.BusinessPartnerId == businessPartnerId.Value);
 
             var source = await query.OrderByDescending(item => item.RequestedAtUtc).ToListAsync(cancellationToken);
             var rows = source.Select(item => new VendorInvoiceMatchExceptionReportRowDto
@@ -2424,7 +2432,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ExceptionId = item.Id,
                 VendorInvoiceId = item.VendorInvoiceId,
                 InvoiceNumber = item.VendorInvoice.InvoiceNumber,
-                SupplierId = item.VendorInvoice.SupplierId,
+                BusinessPartnerId = item.VendorInvoice.BusinessPartnerId,
+                BusinessPartnerRoleId = item.VendorInvoice.BusinessPartnerRoleId,
+                BusinessPartnerApProfileVersionId = item.VendorInvoice.BusinessPartnerApProfileVersionId,
+                BusinessPartnerCode = item.VendorInvoice.BusinessPartnerCode,
+                BusinessPartnerLegalName = item.VendorInvoice.BusinessPartnerLegalName,
+                BusinessPartnerTaxIdentificationNumber = item.VendorInvoice.BusinessPartnerTaxIdentificationNumber,
                 SupplierName = item.VendorInvoice.SupplierName,
                 PurchaseOrderId = item.PurchaseOrderId,
                 PurchaseOrderNumber = item.PurchaseOrder.OrderNumber,
@@ -2455,7 +2468,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 FromDate = from.Date,
                 ToDate = to.Date,
                 Status = status,
-                SupplierId = supplierId,
+                BusinessPartnerId = businessPartnerId,
                 TotalCount = rows.Count,
                 ApprovedCount = rows.Count(row => row.Status == VendorInvoiceMatchExceptionStatus.Approved),
                 ExpiredCount = rows.Count(row => row.Status == VendorInvoiceMatchExceptionStatus.Expired),
@@ -2475,14 +2488,14 @@ namespace ErpSystem.Api.Services.Finance.AP
             DateTime fromDate,
             DateTime toDate,
             VendorInvoiceMatchExceptionStatus? status = null,
-            Guid? supplierId = null,
+            Guid? businessPartnerId = null,
             string format = "Csv",
             CancellationToken cancellationToken = default)
         {
             if (!string.Equals(format, "Csv", StringComparison.OrdinalIgnoreCase))
                 throw new NotSupportedException("The AP-006 register currently supports CSV export only.");
             var report = await GetThreeWayMatchExceptionsAsync(
-                fromDate, toDate, status, supplierId, cancellationToken);
+                fromDate, toDate, status, businessPartnerId, cancellationToken);
             var csv = new StringBuilder();
             csv.AppendLine("Invoice,Supplier,Purchase Order,Status,Variance Type,Maximum Variance %,Root Cause,Corrective Action,Owner,Corrective Due,Corrective Status,Requested At,Expires At,Requester,Final Approver,Workflow Instance,Approval Event,Evidence Count");
             foreach (var row in report.Rows)
@@ -2504,7 +2517,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 report.FromDate,
                 report.ToDate,
                 report.Status,
-                report.SupplierId,
+                report.BusinessPartnerId,
                 report.TotalCount,
                 Format = "Csv"
             }, cancellationToken);
@@ -2555,7 +2568,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         }
 
         private Task<List<SubledgerAdjustmentJournal>> GetPostedApAdjustmentsAsync(
-            Guid? supplierId,
+            Guid? businessPartnerId,
             CancellationToken cancellationToken)
         {
             IQueryable<SubledgerAdjustmentJournal> query = _unitOfWork.Repository<SubledgerAdjustmentJournal>()
@@ -2564,10 +2577,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     a.Module == SubledgerModules.AccountsPayable &&
                     a.Status == SubledgerAdjustmentStatuses.Posted &&
                     !a.IsDeleted)
-                .Include(a => a.Supplier);
+                .Include(a => a.BusinessPartner);
 
-            if (supplierId.HasValue)
-                query = query.Where(a => a.SupplierId == supplierId.Value);
+            if (businessPartnerId.HasValue)
+                query = query.Where(a => a.BusinessPartnerId == businessPartnerId.Value);
 
             return query.ToListAsync(cancellationToken);
         }
@@ -2710,103 +2723,84 @@ namespace ErpSystem.Api.Services.Finance.AP
         }
 
         private async Task<List<SupplierLedgerSelection>> GetSupplierLedgerSelectionsAsync(
-            IReadOnlyCollection<Guid> requestedSupplierIds,
+            IReadOnlyCollection<Guid> requestedBusinessPartnerIds,
             DateTime endExclusive,
             CancellationToken cancellationToken)
         {
-            var suppliers = await _unitOfWork.Repository<Supplier>()
-                .GetQueryable(s => s.TenantId == TenantId)
+            var apPartnerIds = await _unitOfWork.Repository<BusinessPartnerRole>()
+                .GetQueryable(role => role.TenantId == TenantId && !role.IsDeleted &&
+                    (role.RoleType == BusinessPartnerRoleType.Supplier ||
+                     role.RoleType == BusinessPartnerRoleType.Contractor))
+                .Select(role => role.BusinessPartnerId)
+                .Distinct()
                 .ToListAsync(cancellationToken);
-
             var partners = await _unitOfWork.Repository<BusinessPartner>()
-                .GetQueryable(p =>
-                    p.TenantId == TenantId &&
-                    (p.PartnerType == "Supplier" || p.PartnerType == "Contractor" || p.PartnerType == "Both"))
+                .GetQueryable(partner => partner.TenantId == TenantId &&
+                    apPartnerIds.Contains(partner.Id))
                 .ToListAsync(cancellationToken);
 
-            var identityLinks = await _unitOfWork.Repository<ApSupplierIdentityLink>()
-                .GetQueryable(link => link.TenantId == TenantId && !link.IsDeleted)
-                .AsNoTracking()
-                .ToListAsync(cancellationToken);
-
-            var selectedIds = requestedSupplierIds.Count > 0
-                ? requestedSupplierIds.ToHashSet()
-                : await GetSupplierIdsWithLedgerActivityAsync(endExclusive, cancellationToken);
+            var selectedIds = requestedBusinessPartnerIds.Count > 0
+                ? requestedBusinessPartnerIds.ToHashSet()
+                : await GetBusinessPartnerIdsWithLedgerActivityAsync(endExclusive, cancellationToken);
 
             var selections = new List<SupplierLedgerSelection>();
             foreach (var id in selectedIds)
             {
-                var supplier = suppliers.FirstOrDefault(s => s.Id == id);
                 var partner = partners.FirstOrDefault(p => p.Id == id);
-
-                var identityLink = identityLinks.SingleOrDefault(link =>
-                    link.SupplierId == id || link.BusinessPartnerId == id);
-                if (supplier == null && identityLink != null)
-                    supplier = suppliers.SingleOrDefault(item => item.Id == identityLink.SupplierId);
-                if (partner == null && identityLink != null)
-                    partner = partners.SingleOrDefault(item => item.Id == identityLink.BusinessPartnerId);
-
-                if (supplier == null && partner != null)
-                    supplier = FindMatchingSupplier(partner, suppliers);
-
-                if (partner == null && supplier != null)
-                    partner = FindMatchingSupplierPartner(supplier, partners);
-
-                if (supplier == null && partner == null)
+                if (partner == null)
                     continue;
 
                 selections.Add(new SupplierLedgerSelection(
-                    supplier?.Id,
-                    partner?.Id,
-                    partner?.PartnerCode ?? supplier?.SupplierCode ?? string.Empty,
-                    partner?.PartnerName ?? supplier?.Name ?? "Supplier",
-                    partner?.Currency ?? "GHS"));
+                    partner.Id,
+                    partner.PartnerCode,
+                    partner.PartnerName,
+                    partner.Currency ?? "GHS"));
             }
 
             return selections
-                .GroupBy(s => s.BusinessPartnerId ?? s.SupplierId ?? Guid.Empty)
+                .GroupBy(s => s.BusinessPartnerId)
                 .Select(g => g.First())
                 .ToList();
         }
 
-        private async Task<HashSet<Guid>> GetSupplierIdsWithLedgerActivityAsync(DateTime endExclusive, CancellationToken cancellationToken)
+        private async Task<HashSet<Guid>> GetBusinessPartnerIdsWithLedgerActivityAsync(DateTime endExclusive, CancellationToken cancellationToken)
         {
-            var invoiceSupplierIds = await _unitOfWork.Repository<VendorInvoice>()
+            var invoicePartnerIds = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
                     i.InvoiceDate < endExclusive &&
                     i.Status != VendorInvoiceStatus.Draft &&
                     i.Status != VendorInvoiceStatus.Voided &&
                     i.Status != VendorInvoiceStatus.Rejected)
-                .Select(i => i.SupplierId)
+                .Select(i => i.BusinessPartnerId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
 
-            var paymentSupplierIds = await _unitOfWork.Repository<VendorPayment>()
+            var paymentPartnerIds = await _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
                     p.PaymentDate < endExclusive &&
                     p.Status != VendorPaymentStatus.Draft &&
                     p.Status != VendorPaymentStatus.Voided &&
                     p.Status != VendorPaymentStatus.Failed)
-                .Select(p => p.SupplierId)
+                .Select(p => p.BusinessPartnerId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
 
-            var adjustmentSupplierIds = await _unitOfWork.Repository<SubledgerAdjustmentJournal>()
+            var adjustmentPartnerIds = await _unitOfWork.Repository<SubledgerAdjustmentJournal>()
                 .GetQueryable(a =>
                     a.TenantId == TenantId &&
                     a.Module == SubledgerModules.AccountsPayable &&
                     a.Status == SubledgerAdjustmentStatuses.Posted &&
-                    a.SupplierId.HasValue &&
+                    a.BusinessPartnerId != Guid.Empty &&
                     a.AdjustmentDate < endExclusive)
-                .Select(a => a.SupplierId!.Value)
+                .Select(a => a.BusinessPartnerId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
 
-            return invoiceSupplierIds
-                .Concat(paymentSupplierIds)
-                .Concat(adjustmentSupplierIds)
+            return invoicePartnerIds
+                .Concat(paymentPartnerIds)
+                .Concat(adjustmentPartnerIds)
                 .ToHashSet();
         }
 
@@ -2819,16 +2813,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             ICollection<string> warnings,
             CancellationToken cancellationToken)
         {
-            if (!selection.SupplierId.HasValue)
-                return new List<SupplierLedgerTransaction>();
-
-            var supplierId = selection.SupplierId.Value;
+            var businessPartnerId = selection.BusinessPartnerId;
             var transactions = new List<SupplierLedgerTransaction>();
 
             var invoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    i.SupplierId == supplierId &&
+                    i.BusinessPartnerId == businessPartnerId &&
                     i.InvoiceDate < endExclusive &&
                     i.Status != VendorInvoiceStatus.Draft &&
                     i.Status != VendorInvoiceStatus.Voided &&
@@ -2863,7 +2854,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var payments = await _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(p =>
                     p.TenantId == TenantId &&
-                    p.SupplierId == supplierId &&
+                    p.BusinessPartnerId == businessPartnerId &&
                     p.PaymentDate < endExclusive &&
                     p.Status != VendorPaymentStatus.Draft &&
                     p.Status != VendorPaymentStatus.Voided &&
@@ -2959,7 +2950,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 }
             }
 
-            var adjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
+            var adjustments = await GetPostedApAdjustmentsAsync(businessPartnerId, cancellationToken);
             foreach (var adjustment in adjustments.Where(a => a.AdjustmentDate < endExclusive))
             {
                 var signedAmount = GetSignedApSubledgerAmount(adjustment);
@@ -2990,22 +2981,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
 
             return transactions;
-        }
-
-        private static Supplier? FindMatchingSupplier(BusinessPartner partner, IEnumerable<Supplier> suppliers)
-        {
-            return suppliers.SingleOrDefault(s =>
-                s.Id == partner.Id ||
-                (!string.IsNullOrWhiteSpace(partner.PartnerCode) &&
-                 string.Equals(s.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase)));
-        }
-
-        private static BusinessPartner? FindMatchingSupplierPartner(Supplier supplier, IEnumerable<BusinessPartner> partners)
-        {
-            return partners.SingleOrDefault(p =>
-                p.Id == supplier.Id ||
-                (!string.IsNullOrWhiteSpace(supplier.SupplierCode) &&
-                 string.Equals(p.PartnerCode, supplier.SupplierCode, StringComparison.OrdinalIgnoreCase)));
         }
 
         private static decimal AmountForLedgerCurrency(
@@ -3069,8 +3044,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         };
 
         private sealed record SupplierLedgerSelection(
-            Guid? SupplierId,
-            Guid? BusinessPartnerId,
+            Guid BusinessPartnerId,
             string SupplierCode,
             string SupplierName,
             string CurrencyCode);

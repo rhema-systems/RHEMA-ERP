@@ -149,8 +149,12 @@ public sealed class EhcInternalLookupsController : ControllerBase
     }
 
     [HttpGet("tickets")]
-    public async Task<ActionResult> SearchTickets([FromQuery] string? q = null, [FromQuery] int limit = 20, CancellationToken cancellationToken = default)
+    public async Task<ActionResult> SearchTickets([FromQuery] string? q = null, [FromQuery] int limit = 20, CancellationToken cancellationToken = default,
+        [FromQuery] string? scope = null)
     {
+        if (scope != null && scope != "enquiry-internal" && scope != "enquiry-external")
+            return BadRequest(new { success = false, message = "Unknown enquiry search scope." });
+
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         if (tenantId == Guid.Empty)
         {
@@ -171,6 +175,14 @@ public sealed class EhcInternalLookupsController : ControllerBase
         var query = _db.Set<EhcTicket>()
             .AsNoTracking()
             .Where(t => t.TenantId == tenantId && !t.IsDeleted);
+
+        if (scope != null)
+        {
+            query = query.Where(t => t.TicketType == EhcTicketType.Enquiry);
+            query = scope == "enquiry-internal"
+                ? query.Where(t => t.Source == EhcTicketSource.Internal)
+                : query.Where(t => t.Source != EhcTicketSource.Internal);
+        }
 
         query = query.Where(t =>
             t.TicketNumber.ToUpper().Contains(term) ||

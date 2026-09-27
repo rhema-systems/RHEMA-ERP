@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountingBooksSettingsPage from './page';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { AccountingBook } from '@/types/finance';
+import type { AccountingBook, AccountingBookInitialization } from '@/types/finance';
 
 let permissions = new Set<string>();
 let authLoading = false;
@@ -31,6 +31,15 @@ vi.mock('@/services/finance/finance-data.service', () => ({
         requestAccountingBookTransition: vi.fn(),
         approveAccountingBookTransition: vi.fn(),
         rejectAccountingBookTransition: vi.fn(),
+        requestPrimaryAccountingBookReplacement: vi.fn(),
+        approvePrimaryAccountingBookReplacement: vi.fn(),
+        rejectPrimaryAccountingBookReplacement: vi.fn(),
+        requestPrimaryAccountingBookReplacementReversal: vi.fn(),
+        approvePrimaryAccountingBookReplacementReversal: vi.fn(),
+        rejectPrimaryAccountingBookReplacementReversal: vi.fn(),
+        getAccountingBookInitialization: vi.fn(),
+        getAccountingBookActivationReadiness: vi.fn(),
+        getAccountingBookPeriods: vi.fn(),
     },
 }));
 
@@ -49,6 +58,21 @@ const initializingBook: AccountingBook = {
     allowsPosting: false, isSystemDefined: false, hasAccountingUse: false, rowVersion: 'BAUG',
 };
 
+const approvedInitialization: AccountingBookInitialization = {
+    id: 'init-1', accountingBookId: 'book-local', version: 1, accountingBookCode: 'LOCAL_STATUTORY',
+    mode: 'BaseBookCopyAtCutoff', status: 'Approved', cutoffDate: '2025-12-31T00:00:00Z',
+    cutoffFiscalPeriodId: 'period-2025-12', cutoffFiscalPeriodCode: '2025-12',
+    sourceAccountingBookId: 'book-primary', sourceAccountingBookCode: 'IFRS', idempotencyKey: 'LOCAL-INIT-2025-12-31-V1',
+    reason: 'Initialize the statutory book for FY2026.', totalDebits: 0, totalCredits: 0,
+    requiredAccountCount: 1, coveredAccountCount: 1, isBalanced: true, isCoverageComplete: true,
+    evidenceFingerprint: 'A'.repeat(64), reconciliationFingerprint: 'B'.repeat(64),
+    preparedByUserId: 'maker-id', preparedByName: 'System Administrator', preparedAtUtc: '2026-09-19T10:00:00Z',
+    approvedByUserId: 'checker-id', approvedByName: 'Abena Dapaah', approvedAtUtc: '2026-09-19T11:00:00Z',
+    decidedByUserId: 'checker-id', decidedByName: 'Abena Dapaah', decidedAtUtc: '2026-09-19T11:00:00Z',
+    decisionReason: 'Reconciliation evidence reviewed.', rowVersion: 'AQID',
+    lines: [{ accountId: 'account-1000', accountNumber: 'DEFAULT-1000', accountName: 'Cash and Cash Equivalents', accountType: 'Asset', currencyCode: 'GHS', openingDebit: 0, openingCredit: 0, baseBookSignedBalance: 0, openingAdjustment: 0 }],
+};
+
 describe('accounting book settings', () => {
     beforeEach(() => {
         vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -59,8 +83,14 @@ describe('accounting book settings', () => {
         authUserId = 'checker-id';
         vi.clearAllMocks();
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([primaryBook]);
-        vi.mocked(financeDataService.getCurrencies).mockResolvedValue([{ currencyCode: 'GHS', currencyName: 'Ghanaian Cedi', isActive: true }, { currencyCode: 'USD', currencyName: 'US Dollar', isActive: true }] as never);
+        vi.mocked(financeDataService.getCurrencies).mockResolvedValue([
+            { currencyCode: 'GHS', currencyName: 'Ghanaian Cedi', isActive: true, isBaseCurrency: true },
+            { currencyCode: 'USD', currencyName: 'US Dollar', isActive: true, isBaseCurrency: false },
+        ] as never);
         vi.mocked(financeDataService.getAccountingBook).mockResolvedValue(primaryBook);
+        vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue(approvedInitialization);
+        vi.mocked(financeDataService.getAccountingBookActivationReadiness).mockResolvedValue({ isReady: true, blockers: [], initializationFingerprint: 'A'.repeat(64), requiredPeriodCount: 1, readyPeriodCount: 1 });
+        vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([{ id: 'book-period-1', accountingBookId: 'book-local', accountingBookCode: 'LOCAL_STATUTORY', fiscalPeriodId: 'period-2026-01', fiscalPeriodCode: '2026-01', startDate: '2026-01-01', endDate: '2026-01-31', status: 'Open', rowVersion: 'AQID' }]);
     });
 
     it('shows auth loading and permission-denied states without issuing a data request', () => {
@@ -98,8 +128,44 @@ describe('accounting book settings', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'View details' }));
         await waitFor(() => expect(financeDataService.getAccountingBook).toHaveBeenCalledWith('book-primary'));
-        expect(await screen.findByText('Accounting use')).toBeInTheDocument();
-        expect(screen.getByText('Yes — structure locked')).toBeInTheDocument();
+        expect(await screen.findByText('Journal/posting activity')).toBeInTheDocument();
+        expect(screen.getByText('Activity exists — structure locked')).toBeInTheDocument();
+    });
+
+    it('offers a governed same-day reversal on the current primary designation', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Request');
+        const currentPrimary = {
+            ...primaryBook,
+            id: 'book-local',
+            code: 'LOCAL_STATUTORY',
+            name: 'Local Statutory',
+            reversiblePrimaryDesignationId: 'designation-1',
+            reversiblePrimaryDesignationPreviousBookId: 'book-primary',
+            reversiblePrimaryDesignationEffectiveDate: '2026-09-20T00:00:00Z',
+        };
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([
+            { ...primaryBook, isDefault: false, bookType: 'ParallelFull' },
+            currentPrimary,
+        ]);
+        vi.mocked(financeDataService.requestPrimaryAccountingBookReplacementReversal)
+            .mockResolvedValue(currentPrimary);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: "Reverse today's primary change" }));
+        expect(screen.getByText("Reverse today's primary-book replacement")).toBeInTheDocument();
+        expect(screen.getByText(/restoration of IFRS/)).toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText('Correction reason'), {
+            target: { value: 'Restore the intended IFRS authority' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Submit reversal for approval' }));
+
+        await waitFor(() => expect(
+            financeDataService.requestPrimaryAccountingBookReplacementReversal,
+        ).toHaveBeenCalledWith('book-local', {
+            reason: 'Restore the intended IFRS authority',
+            rowVersion: 'AQID',
+        }));
     });
 
     it('directs an initializing book with incomplete evidence to readiness', async () => {
@@ -125,11 +191,12 @@ describe('accounting book settings', () => {
 
         render(<AccountingBooksSettingsPage />);
         fireEvent.click(await screen.findByRole('button', { name: 'Request Active' }));
+        expect(await screen.findByText('Activation readiness confirmed')).toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: 'Target lifecycle state' })).toHaveTextContent('Active');
         expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeDisabled();
     });
 
-    it('creates a canonical full-book request without exposing lifecycle shortcuts', async () => {
+    it('excludes the tenant base currency when creating a Parallel book', async () => {
         permissions.add('Finance.AccountingBooks.Manage');
         vi.mocked(financeDataService.createAccountingBook).mockResolvedValue(initializingBook);
 
@@ -138,9 +205,14 @@ describe('accounting book settings', () => {
         fireEvent.change(screen.getByLabelText('Stable code'), { target: { value: 'tax_book' } });
         fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Tax Book' } });
         fireEvent.change(screen.getByLabelText('Accounting purpose / principle'), { target: { value: 'Tax basis' } });
+        fireEvent.click(screen.getByRole('combobox', { name: 'Base accounting book' }));
+        fireEvent.click(screen.getByRole('option', { name: 'IFRS — IFRS Primary' }));
+        fireEvent.change(screen.getByLabelText('Replication start date'), { target: { value: '2026-10-01' } });
         fireEvent.click(screen.getByRole('combobox', { name: 'Functional currency' }));
-        fireEvent.change(screen.getByPlaceholderText('Search code or name…'), { target: { value: 'Ghanaian' } });
-        fireEvent.click(screen.getByText('GHS — Ghanaian Cedi'));
+        expect(screen.queryByText('GHS — Ghanaian Cedi')).not.toBeInTheDocument();
+        expect(screen.getByText('Parallel books are foreign-currency replicas. The tenant base currency GHS is excluded.')).toBeInTheDocument();
+        fireEvent.change(screen.getByPlaceholderText('Search code or name…'), { target: { value: 'US Dollar' } });
+        fireEvent.click(screen.getByText('USD — US Dollar'));
         fireEvent.click(screen.getByRole('button', { name: 'Save book' }));
 
         await waitFor(() => expect(financeDataService.createAccountingBook).toHaveBeenCalledWith(expect.objectContaining({
@@ -148,8 +220,9 @@ describe('accounting book settings', () => {
             name: 'Tax Book',
             purpose: 'Tax basis',
             bookType: 'ParallelFull',
-            functionalCurrencyCode: 'GHS',
-            baseAccountingBookId: null,
+            functionalCurrencyCode: 'USD',
+            baseAccountingBookId: 'book-primary',
+            replicationStartDate: '2026-10-01T00:00:00.000Z',
         })));
         expect(screen.queryByLabelText('Lifecycle state')).not.toBeInTheDocument();
     });
@@ -162,8 +235,42 @@ describe('accounting book settings', () => {
         expect(screen.getByText('Structural identity locked')).toBeInTheDocument();
         expect(screen.getByLabelText('Stable code')).toBeDisabled();
         expect(screen.getByLabelText('Book type')).toHaveAttribute('data-disabled');
+        expect(screen.getByLabelText('Book type')).toHaveTextContent('Primary / base');
         expect(screen.getByLabelText('Accounting purpose / principle')).toBeDisabled();
         expect(screen.getByLabelText('Name')).not.toBeDisabled();
+    });
+
+    it('keeps the accounting-book editor within the viewport with a scrollable body and visible actions', async () => {
+        permissions.add('Finance.AccountingBooks.Manage');
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+        const dialog = screen.getByRole('dialog');
+        expect(dialog).toHaveClass('max-h-[calc(100dvh-2rem)]', 'overflow-hidden');
+        expect(dialog.querySelector('.overflow-y-auto')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Save book' }).parentElement)
+            .toHaveClass('shrink-0', 'border-t');
+    });
+
+    it('explains that a Delta inherits Primary activity as a live view rather than copying it', async () => {
+        permissions.add('Finance.AccountingBooks.Manage');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            code: 'IFRS_ADJUSTMENTS',
+            name: 'IFRS Adjustments',
+            bookType: 'Delta',
+            baseAccountingBookId: primaryBook.id,
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+        expect(screen.getByText('Primary activity remains available as a live inherited view'))
+            .toBeInTheDocument();
+        expect(screen.getByText(/Delta stores only explicit adjustment journals/))
+            .toBeInTheDocument();
+        expect(screen.queryByText('Earlier Primary activity will not be copied'))
+            .not.toBeInTheDocument();
     });
 
     it.each(['Initializing', 'Active', 'Suspended'] as const)(
@@ -238,18 +345,70 @@ describe('accounting book settings', () => {
         render(<AccountingBooksSettingsPage />);
         expect(await screen.findByText('Pending Suspended')).toBeInTheDocument();
         expect(screen.getByText('Pause configuration for review')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Review & approve' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Review & reject' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
         expect(screen.queryByRole('button', { name: 'Request Active' })).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Review & approve' }));
+        expect(screen.getByText('Lifecycle decision evidence')).toBeInTheDocument();
+        expect(screen.getByText('Initializing → Suspended')).toBeInTheDocument();
         fireEvent.change(screen.getByLabelText('Checker reason'), { target: { value: 'Independent evidence reviewed' } });
         fireEvent.click(screen.getByRole('button', { name: 'Approve transition' }));
         await waitFor(() => expect(financeDataService.approveAccountingBookTransition).toHaveBeenCalledWith('book-local', {
             reason: 'Independent evidence reviewed',
             rowVersion: 'BAUG',
         }));
+    });
+
+    it('explains the structural evidence and scope of an Initializing decision', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Approve');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            lifecycleStatus: 'Configuring',
+            pendingLifecycleStatus: 'Initializing',
+            pendingTransitionReason: 'Begin controlled opening preparation',
+            transitionRequestedByUserId: 'maker-id',
+            transitionRequestedAtUtc: '2026-09-19T09:00:00Z',
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Review & approve' }));
+
+        expect(screen.getByText('Configuring → Initializing')).toBeInTheDocument();
+        expect(screen.getAllByText('Not applicable — full book')).toHaveLength(2);
+        expect(screen.getAllByText('Begin controlled opening preparation')).toHaveLength(2);
+        expect(await screen.findByText(/Configuration-stage initialization evidence already exists/)).toBeInTheDocument();
+        expect(screen.getByText('What this approval authorizes')).toBeInTheDocument();
+        expect(screen.getByText('2026-01: Open')).toBeInTheDocument();
+        expect(screen.getByText('Account-level reconciliation')).toBeInTheDocument();
+        expect(financeDataService.getAccountingBookInitialization).toHaveBeenCalledWith('book-local');
+        expect(financeDataService.getAccountingBookPeriods).toHaveBeenCalledWith('book-local');
+    });
+
+    it('reuses approved initialization and period evidence for an Active decision', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Approve');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            activationReady: true,
+            readinessMessage: 'Ready for activation.',
+            pendingLifecycleStatus: 'Active',
+            pendingTransitionReason: 'Activate the statutory book',
+            transitionRequestedByUserId: 'maker-id',
+            transitionRequestedAtUtc: '2026-09-19T12:00:00Z',
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Review & approve' }));
+
+        expect(await screen.findByText('Activation readiness confirmed')).toBeInTheDocument();
+        expect(screen.getByText('2026-01: Open')).toBeInTheDocument();
+        expect(screen.getByText('Account-level reconciliation')).toBeInTheDocument();
+        expect(screen.getByText(/Reason: Reconciliation evidence reviewed/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Approve transition' })).toBeDisabled();
+
+        fireEvent.change(screen.getByLabelText('Checker reason'), { target: { value: 'Approved initialization and open-period evidence reviewed.' } });
+        expect(screen.getByRole('button', { name: 'Approve transition' })).toBeEnabled();
     });
 
     it('hides approval actions from the requester even when that user has approval permission', async () => {
@@ -263,9 +422,46 @@ describe('accounting book settings', () => {
 
         render(<AccountingBooksSettingsPage />);
         expect(await screen.findByText('Awaiting a different authorized checker.')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Review & approve' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Review & reject' })).not.toBeInTheDocument();
         expect(financeDataService.approveAccountingBookTransition).not.toHaveBeenCalled();
+    });
+
+    it('does not show an awaiting-checker label for a completed historical request', async () => {
+        authUserId = 'MAKER-ID';
+        permissions.add('Finance.AccountingBooks.Transitions.Request');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            lifecycleStatus: 'Active',
+            isActive: true,
+            allowsPosting: true,
+            activationReady: true,
+            pendingLifecycleStatus: undefined,
+            transitionRequestedByUserId: 'maker-id',
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+
+        expect(await screen.findByRole('button', { name: 'Request as primary' })).toBeInTheDocument();
+        expect(screen.queryByText('Awaiting a different authorized checker.')).not.toBeInTheDocument();
+    });
+
+    it('does not expose Request as primary to an approval-only checker', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Approve');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            lifecycleStatus: 'Active',
+            isActive: true,
+            allowsPosting: true,
+            activationReady: true,
+            pendingLifecycleStatus: undefined,
+            transitionRequestedByUserId: undefined,
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+
+        expect(await screen.findByText('LOCAL_STATUTORY — Local Statutory')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Request as primary' })).not.toBeInTheDocument();
     });
 
     it('does not let a checker approve Active before C4 readiness', async () => {
@@ -280,8 +476,8 @@ describe('accounting book settings', () => {
 
         render(<AccountingBooksSettingsPage />);
         expect(await screen.findByText(/C4 readiness is unavailable/)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Reject' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Review & approve' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Review & reject' })).toBeEnabled();
     });
 
     it('does not treat an action permission as a substitute for Finance.Read', () => {

@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Controllers.Ehc;
 public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICurrentUserService currentUser,
     IEhcTicketService tickets, IEstateSalesListingApplicationHandoffService estateHandoffs) : ControllerBase
 {
-    private const string SalesAndMarketingOrganizationUnitCode = "UNIT-MKT";
+    private static readonly string[] SalesAndMarketingOrganizationUnitCodes = ["DEPT-SALES", "UNIT-MKT"];
 
     private IQueryable<ErpSystem.Core.Entities.Ehc.EhcTicket> Query() => db.EhcTickets.AsNoTracking()
         .Where(t => t.TenantId == currentUser.TenantId && !t.IsDeleted && t.TicketType == EhcTicketType.Enquiry
@@ -28,8 +28,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             && t.AssignedOrganizationUnit != null
             && !t.AssignedOrganizationUnit.IsDeleted
             && t.AssignedOrganizationUnit.IsActive
-            && t.AssignedOrganizationUnit.Code == SalesAndMarketingOrganizationUnitCode
-            && t.Status != EhcTicketStatus.New);
+            && SalesAndMarketingOrganizationUnitCodes.Contains(t.AssignedOrganizationUnit.Code));
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] int page = 1, CancellationToken cancellationToken = default)
@@ -40,6 +39,22 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             .Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt,
                 RequesterName = t.RequesterUser.FirstName + " " + t.RequesterUser.LastName }).ToArrayAsync(cancellationToken);
         return Ok(new { success = true, data = items, totalCount = total, page, pageSize = 25 });
+    }
+
+    [HttpGet("search")]
+    public async Task<IActionResult> Search([FromQuery] string? search, [FromQuery] int take = 5,
+        CancellationToken cancellationToken = default)
+    {
+        var term = search?.Trim() ?? string.Empty;
+        if (term.Length < 2 || term.Length > 100) return Ok(new { success = true, data = Array.Empty<object>() });
+        term = term.ToLowerInvariant();
+        var items = await Query()
+            .Where(item => item.TicketNumber.ToLower().Contains(term) || item.Subject.ToLower().Contains(term))
+            .OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id)
+            .Take(Math.Clamp(take, 1, 10))
+            .Select(item => new { item.Id, item.TicketNumber, item.Subject, Status = item.Status.ToString() })
+            .ToArrayAsync(cancellationToken);
+        return Ok(new { success = true, data = items });
     }
 
     [HttpGet("{id:guid}")]
@@ -152,6 +167,19 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             return BadRequest(new { success = false, message = "Enter the completed Sales reference, up to 200 characters." });
         if (request.AgreedAmount is <= 0)
             return BadRequest(new { success = false, message = "Enter a positive agreed amount." });
+        if (ListingRequiresSalesDuration(property.ListingType)
+            && string.IsNullOrWhiteSpace(request.RequestedLeaseTerm))
+            return BadRequest(new { success = false, message = "Enter the Sales-agreed rent or lease duration before handing this enquiry to Estate." });
+        if (request.RequestedLeaseTerm?.Trim().Length > 120)
+            return BadRequest(new { success = false, message = "Sales-agreed duration must be 120 characters or fewer." });
+        if (request.SalesAmountPaid is < 0)
+            return BadRequest(new { success = false, message = "Sales amount paid cannot be negative." });
+        if (request.SalesAmountPaid.HasValue
+            && request.AgreedAmount.HasValue
+            && request.SalesAmountPaid.Value > request.AgreedAmount.Value)
+            return BadRequest(new { success = false, message = "Sales amount paid cannot be greater than the agreed amount." });
+        if (request.SalesPaymentReference?.Trim().Length > 200)
+            return BadRequest(new { success = false, message = "Sales payment reference must be 200 characters or fewer." });
         if (!string.IsNullOrWhiteSpace(request.Currency)
             && (request.Currency.Trim().Length != 3 || !request.Currency.Trim().All(char.IsLetter)))
             return BadRequest(new { success = false, message = "Currency must be a three-letter code." });
@@ -167,6 +195,9 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 ticket.CrmOpportunityId.Value,
                 request.SalesReference.Trim(),
                 request.AgreedAmount,
+                request.RequestedLeaseTerm,
+                request.SalesAmountPaid,
+                request.SalesPaymentReference,
                 request.Currency,
                 request.SalesCompletedAt,
                 request.Notes,
@@ -184,7 +215,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 TicketId = ticket.Id,
                 EventType = "EstateHandoff",
                 Title = "Sales handed the property enquiry to Estate",
-                Body = $"Sales reference: {request.SalesReference.Trim()}. Estate application: {result.ReferenceNumber ?? result.ProcedureCaseId.ToString()}.",
+                Body = $"Sales reference: {request.SalesReference.Trim()}. Sales amount paid: {request.SalesAmountPaid ?? 0m:0.00}. Estate application: {result.ReferenceNumber ?? result.ProcedureCaseId.ToString()}.",
                 IsInternal = true,
                 ActorUserId = actorUserId,
                 CreatedAt = DateTime.UtcNow,
@@ -195,7 +226,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
 
             await tickets.AddInternalCommentAsync(ticket.Id, new()
             {
-                Body = $"Sales completed CRM opportunity {ticket.CrmOpportunityId} and handed this enquiry to Estate. Estate application: {result.ReferenceNumber ?? result.ProcedureCaseId.ToString()}. Sales reference: {request.SalesReference.Trim()}."
+                Body = $"Sales completed CRM opportunity {ticket.CrmOpportunityId} and handed this enquiry to Estate. Estate application: {result.ReferenceNumber ?? result.ProcedureCaseId.ToString()}. Sales reference: {request.SalesReference.Trim()}. Sales amount paid: {request.SalesAmountPaid ?? 0m:0.00}."
             }, cancellationToken);
 
             await ResolveAfterEstateHandoffAsync(ticket, result.ReferenceNumber ?? result.ProcedureCaseId.ToString(), cancellationToken);
@@ -217,6 +248,12 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     private static bool IsEstateListingSource(string? source)
         => string.Equals(source, "estate-public-listing", StringComparison.OrdinalIgnoreCase)
             || string.Equals(source, "state-public-listing", StringComparison.OrdinalIgnoreCase);
+
+    private static bool ListingRequiresSalesDuration(string? listingType)
+        => string.Equals(listingType, "Rent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(listingType, "Lease", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(listingType, "SaleAndRent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(listingType, "SaleAndLease", StringComparison.OrdinalIgnoreCase);
 
     private async Task ResolveAfterEstateHandoffAsync(
         ErpSystem.Core.Entities.Ehc.EhcTicket ticket,
@@ -287,6 +324,9 @@ public sealed record PropertyEnquiryTransition(EhcTicketStatus Status, Guid? Tra
 public sealed record CreatePropertyEnquiryEstateHandoff(
     string? SalesReference,
     decimal? AgreedAmount,
+    string? RequestedLeaseTerm,
+    decimal? SalesAmountPaid,
+    string? SalesPaymentReference,
     string? Currency,
     DateTime? SalesCompletedAt,
     string? Notes);

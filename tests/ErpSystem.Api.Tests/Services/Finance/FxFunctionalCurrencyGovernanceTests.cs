@@ -23,6 +23,30 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FxFunctionalCurrencyGovernanceTests
 {
+    [Fact]
+    public async Task ExchangeRateContract_StoresAndReturnsSourceToTargetDirection()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId, "GHS");
+        SeedCurrency(db, tenantId, "GHS", isBase: true);
+        SeedCurrency(db, tenantId, "USD", isBase: false);
+        await db.SaveChangesAsync();
+
+        var dto = await CreateExchangeRateService(db, tenantId).CreateExchangeRateAsync(new CreateExchangeRateDto
+        {
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD", Rate = 0.08m,
+            EffectiveDate = new DateTime(2026, 9, 21), RateType = "Daily",
+            QuoteSide = "Mid", RateSource = "Bank of Ghana"
+        });
+
+        dto.Rate.Should().Be(0.08m, "the public contract is 1 source/base unit = Rate target units");
+        dto.InverseRate.Should().Be(12.5m);
+        var stored = await db.ExchangeRates.SingleAsync(item => item.Id == dto.Id);
+        stored.Rate.Should().Be(0.08m);
+        stored.InverseRate.Should().Be(12.5m);
+    }
+
     [Theory]
     [InlineData(52, 13, true)]
     [InlineData(52, 26, true)]
@@ -668,12 +692,12 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         var selling = SeedExchangeRate(db, tenantId, "GHS", "USD", 15.2m, new DateTime(2026, 7, 1), quoteSide: ExchangeRateQuoteSide.Selling);
         await db.SaveChangesAsync();
 
-        var arRequest = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, buying.Rate);
+        var arRequest = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, buying.InverseRate);
         arRequest.SourceModule = "AR";
         arRequest.SourceDocumentType = "CustomerPayment";
         var arResult = await CreatePostingEngine(db, tenantId).PostAsync(arRequest);
 
-        var apRequest = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, selling.Rate);
+        var apRequest = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, selling.InverseRate);
         apRequest.SourceModule = "AP";
         apRequest.SourceDocumentType = "VendorPayment";
         var apResult = await CreatePostingEngine(db, tenantId).PostAsync(apRequest);
@@ -712,7 +736,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         SeedExchangeRate(db, tenantId, "GHS", "USD", 14.8m, new DateTime(2026, 7, 1), quoteSide: ExchangeRateQuoteSide.Buying);
         await db.SaveChangesAsync();
 
-        var request = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, mid.Rate);
+        var request = CreateForeignPostingRequest(tenantId, debit.Id, credit.Id, 10m, mid.InverseRate);
         request.SourceModule = "AR";
         request.SourceDocumentType = "CustomerPayment";
         foreach (var line in request.Lines)
@@ -818,6 +842,9 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             book = new AccountingBook
             {
                 Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+                BookType = AccountingBookType.PrimaryFull,
+                LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                FunctionalCurrencyCode = "GHS",
                 IsDefault = true, IsActive = true, AllowsPosting = true
             };
             db.AccountingBooks.Add(book);
@@ -1030,8 +1057,8 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             TenantId = tenantId,
             BaseCurrencyCode = baseCurrency,
             TargetCurrencyCode = targetCurrency,
-            Rate = rate,
-            InverseRate = 1 / rate,
+            Rate = 1 / rate,
+            InverseRate = rate,
             EffectiveDate = effectiveDate.Date,
             EndDate = endDate?.Date,
             RateType = ExchangeRateType.Daily,

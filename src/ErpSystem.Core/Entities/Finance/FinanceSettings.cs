@@ -35,6 +35,16 @@ namespace ErpSystem.Core.Entities.Finance
         public string BaseCurrency { get; set; } = "GHS";
 
         /// <summary>
+        /// Tenant statutory WHT accumulation-year boundary. January 1 is the
+        /// backward-compatible default and may differ from the accounting fiscal year.
+        /// </summary>
+        [Range(1, 12)]
+        public int WhtStatutoryYearStartMonth { get; set; } = 1;
+
+        [Range(1, 31)]
+        public int WhtStatutoryYearStartDay { get; set; } = 1;
+
+        /// <summary>
         /// Indicates the tenant functional currency is locked because accounting activity exists.
         /// Functional currency changes after this point require a controlled migration process.
         /// </summary>

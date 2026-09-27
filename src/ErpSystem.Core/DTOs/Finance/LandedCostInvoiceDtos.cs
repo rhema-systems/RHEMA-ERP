@@ -5,6 +5,8 @@ namespace ErpSystem.Core.DTOs.Finance;
 public sealed class CreateLandedCostInvoicesDto
 {
     [System.Text.Json.Serialization.JsonIgnore]
+    public bool RequireAllVoucherCharges { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
     public bool UseSavedBillingDetails { get; set; }
     public DateTime InvoiceDate { get; set; }
     public List<LandedCostInvoiceChargeDto> Charges { get; set; } = new();
@@ -13,7 +15,8 @@ public sealed class CreateLandedCostInvoicesDto
 public sealed class LandedCostInvoiceChargeDto
 {
     public Guid CostItemId { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
     public string SupplierInvoiceNumber { get; set; } = string.Empty;
     public TaxTreatment? TaxTreatment { get; set; }
     public Guid? TaxGroupId { get; set; }
@@ -28,7 +31,8 @@ public sealed class PostLandedCostDto
 public sealed class LandedCostBillingChargeDto
 {
     public Guid CostItemId { get; set; }
-    public Guid SupplierId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid? BusinessPartnerRoleId { get; set; }
     public string SupplierInvoiceNumber { get; set; } = string.Empty;
 }
 

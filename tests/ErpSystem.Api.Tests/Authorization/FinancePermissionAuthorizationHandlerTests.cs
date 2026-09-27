@@ -16,6 +16,22 @@ public sealed class FinancePermissionAuthorizationHandlerTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-2")]
     [Trait("Category", "FinanceSecurity")]
+    public void FinancialControllerRoleContract_ShouldSeparateAccountingBookCheckerFromMaker()
+    {
+        FinancePermissions.FinancialControllerNames.Should().Contain(new[]
+        {
+            FinancePermissions.ApproveAccountingBookTransitions,
+            FinancePermissions.ApproveAccountingBookPeriods,
+            FinancePermissions.ApproveAccountingBookInitialization
+        });
+
+        FinancePermissions.FinancialControllerNames.Should().NotContain(
+            FinancePermissions.AccountingBookMakerNames);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-2")]
+    [Trait("Category", "FinanceSecurity")]
     public async Task PermissionAuthorization_ShouldDenyUnauthenticatedUsers()
     {
         await using var db = CreateContext();
@@ -137,6 +153,27 @@ public sealed class FinancePermissionAuthorizationHandlerTests
 
         inTenantAuthorized.Should().BeTrue();
         crossTenantAuthorized.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("project.access", true)]
+    [InlineData(FinancePermissions.ViewFinance, true)]
+    [InlineData("dashboard.view", false)]
+    public async Task Project_currency_lookup_requires_an_allowed_grant_in_the_active_tenant(string permission, bool expected)
+    {
+        await using var db = CreateContext();
+        var userId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await SeedUserWithPermissionAsync(db, userId, tenantId, permission);
+        await SeedTenantAsync(db, otherTenantId);
+        foreach (var activeTenantId in new[] { tenantId, otherTenantId })
+        {
+            var requirement = new PermissionRequirement(FinancePermissions.ViewFinance, "project.access");
+            var context = new AuthorizationHandlerContext(new[] { requirement }, CreatePrincipal(userId, activeTenantId), null);
+            await new PermissionAuthorizationHandler(db, NullLogger<PermissionAuthorizationHandler>.Instance).HandleAsync(context);
+            context.HasSucceeded.Should().Be(activeTenantId == tenantId && expected);
+        }
     }
 
     private static ApplicationDbContext CreateContext()

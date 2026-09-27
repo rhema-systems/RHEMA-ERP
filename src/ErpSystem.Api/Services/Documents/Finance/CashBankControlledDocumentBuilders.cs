@@ -316,7 +316,7 @@ public sealed class CustomerReceiptDocumentBuilder : IDocumentBuilder
             .FirstOrDefaultAsync(item => item.Id == tenantId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("The Finance tenant was not found.");
         var customer = await _context.Set<BusinessPartner>().AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == payment.CustomerId && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(item => item.Id == payment.BusinessPartnerId && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
         var postedByName = journal.PostedByUserId.HasValue
             ? await _context.Users.AsNoTracking()
                 .Where(item => item.Id == journal.PostedByUserId.Value)
@@ -351,7 +351,7 @@ public sealed class CustomerReceiptDocumentBuilder : IDocumentBuilder
             Status = payment.Status.ToUpperInvariant(),
             StatusDetail = statusDetail,
             PartyLabel = "Received from",
-            PartyName = customer?.PartnerName ?? payment.CustomerId.ToString(),
+            PartyName = payment.BusinessPartnerName,
             Amount = payment.TotalAmount,
             Currency = payment.CurrencyCode,
             Narrative = CashBankPaymentSlipDocumentBuilder.TextOrDash(payment.Notes),

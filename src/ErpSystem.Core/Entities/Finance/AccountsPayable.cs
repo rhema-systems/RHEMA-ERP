@@ -12,6 +12,9 @@ namespace ErpSystem.Core.Entities.Finance;
 
 #region Enums
 
+/// <summary>Server-owned land acquisition payable source.</summary>
+public enum EstatePayableKind { SurveyorFee = 1, VendorConsideration = 2, StampDuty = 3, OtherAcquisitionCosts = 4 }
+
 /// <summary>
 /// Status of a vendor/supplier invoice through its lifecycle.
 /// </summary>
@@ -104,10 +107,18 @@ public enum PaymentBatchStatus
 
 /// <summary>
 /// Represents a supplier/vendor invoice in the Accounts Payable module.
-/// Links to the Procurement Supplier entity and optionally to a Purchase Order for matching.
+/// The canonical counterparty is a Procurement Business Partner. Captured identity fields are
+/// immutable accounting evidence and are not re-derived from the mutable partner master.
 /// </summary>
 public class VendorInvoice : TenantEntity
 {
+    public Guid? EstateAcquisitionId { get; set; }
+    public EstatePayableKind? EstatePayableKind { get; set; }
+    /// <summary>Reviewed Procurement distribution overrides; applied by the shared posting builder.</summary>
+    public string? DistributionDraftJson { get; set; }
+    /// <summary>Server-owned receipt consolidation request identity; manual AP remains null.</summary>
+    public Guid? AutoInvoiceRequestId { get; set; }
+    [MaxLength(64)] public string? AutoInvoiceRequestHash { get; set; }
     // ── Identification ──────────────────────────────────────────────────
 
     [Required]
@@ -123,12 +134,28 @@ public class VendorInvoice : TenantEntity
     // ── Supplier ────────────────────────────────────────────────────────
 
     [Required]
-    public Guid SupplierId { get; set; }
-    public virtual Supplier Supplier { get; set; } = null!;
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public virtual BusinessPartnerRole? BusinessPartnerRole { get; set; }
+
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public virtual BusinessPartnerApProfileVersion? BusinessPartnerApProfileVersion { get; set; }
 
     [Required]
     [MaxLength(200)]
     public string SupplierName { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(50)]
+    public string BusinessPartnerCode { get; set; } = string.Empty;
+
+    [MaxLength(200)]
+    public string? BusinessPartnerLegalName { get; set; }
+
+    [MaxLength(100)]
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
 
     // ── Purchase Order Link (for matching) ──────────────────────────────
 
@@ -224,6 +251,15 @@ public class VendorInvoice : TenantEntity
 
     public DateTime? WithholdingCertificateDate { get; set; }
 
+    /// <summary>
+    /// Stable contract/reference used with the supply category to scope statutory WHT
+    /// threshold accumulation. Required whenever a WHT tax is selected.
+    /// </summary>
+    [MaxLength(100)]
+    public string? WithholdingContractReference { get; set; }
+
+    public WhtSupplyCategory? WithholdingSupplyCategory { get; set; }
+
     // ── Matching ────────────────────────────────────────────────────────
 
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
@@ -299,6 +335,13 @@ public class VendorInvoice : TenantEntity
 
     public Guid? ApAccountId { get; set; }
     public virtual Account? ApAccount { get; set; }
+
+    /// <summary>
+    /// Supplier input-tax fallback captured when a new invoice opts into partner defaults.
+    /// Tax-rule accounts take precedence; nonrecoverable tax never uses this account.
+    /// </summary>
+    public Guid? SupplierTaxFallbackAccountId { get; set; }
+    public virtual Account? SupplierTaxFallbackAccount { get; set; }
 
     public Guid? JournalEntryId { get; set; }
 
@@ -475,11 +518,29 @@ public class VendorPayment : TenantEntity
     [MaxLength(50)]
     public string PaymentNumber { get; set; } = string.Empty;
 
-    // ── Supplier ────────────────────────────────────────────────────────
+    // ── Canonical Business Partner ─────────────────────────────────────
 
     [Required]
-    public Guid SupplierId { get; set; }
-    public virtual Supplier Supplier { get; set; } = null!;
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
+
+    /// <summary>
+    /// Role/profile lineage is captured at payment creation. Settlement may continue after the
+    /// role is inactivated, but new advances must still resolve an approved effective AP profile.
+    /// </summary>
+    public Guid? BusinessPartnerRoleId { get; set; }
+    public virtual BusinessPartnerRole? BusinessPartnerRole { get; set; }
+    public Guid? BusinessPartnerApProfileVersionId { get; set; }
+    public virtual BusinessPartnerApProfileVersion? BusinessPartnerApProfileVersion { get; set; }
+
+    [Required, MaxLength(50)]
+    public string BusinessPartnerCode { get; set; } = string.Empty;
+    [Required, MaxLength(200)]
+    public string BusinessPartnerName { get; set; } = string.Empty;
+    [MaxLength(200)]
+    public string? BusinessPartnerLegalName { get; set; }
+    [MaxLength(100)]
+    public string? BusinessPartnerTaxIdentificationNumber { get; set; }
 
     // ── Financial ───────────────────────────────────────────────────────
 

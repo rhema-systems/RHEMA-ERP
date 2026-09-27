@@ -42,7 +42,7 @@ public static class QuantitySurveyAccessControlRegistry
         new(EstimatesManage, "Manage QS estimates", "Prepare cost plans, estimates, assumptions, and budget reconciliations."),
         new(MeasurementsManage, "Manage QS measurements", "Capture taking-off, measurement, and remeasurement records."),
         new(ValuationsManage, "Manage QS valuations", "Prepare and vet valuation worksheets within assigned projects and contracts."),
-        new(CertificatesManage, "Manage QS certificates", "Prepare payment certificates, retention, and advance-recovery records."),
+        new(CertificatesManage, "Manage QS certificates", "Prepare and submit payment certificates, route approved certificates to Finance, and manage retention and deductions."),
         new(VariationsManage, "Manage QS variations", "Prepare variation, change-order, and daywork commercial records."),
         new(ClaimsManage, "Manage QS claims", "Register and vet contractor or subcontractor claims."),
         new(FinalAccountsManage, "Manage QS final accounts", "Prepare and reconcile project and subcontract final accounts."),

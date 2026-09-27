@@ -30,6 +30,10 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
+    <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementSupplierInvoiceBoundaryTests.cs" />
+    <Compile Include="Controllers\Procurement\EstateSupplierInvoiceLineageTests.cs" />
     <Compile Include="Services\Workflow\OptionalApprovalConfigurationTests.cs" />
     <Compile Include="Services\Workflow\PurchaseReturnWorkflowRegistrationTests.cs" />
     <Compile Include="Services\Workflow\SalesAgreementOptionalApprovalTests.cs" />
@@ -53,12 +57,24 @@
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\WorkflowEvidenceControllerTests.cs" />
     <Compile Include="Controllers\DocumentManagement\PaymentDocumentScopeTests.cs" />
+    <Compile Include="Services\DocumentManagement\CentralDocumentWordConversionTests.cs" />
+    <Compile Include="Controllers\Estate\EstateManagedAssetImportTests.cs" />
+    <Compile Include="Controllers\Estate\LegalPropertyCaseContextTests.cs" />
     <Compile Include="Controllers\WorkflowApprovalResponseTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementLegacyRoleAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
+    <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
+    <Compile Include="Controllers\GlobalSearchEstateLegalTests.cs" />
+    <Compile Include="Controllers\GlobalSearchSafetyTests.cs" />
+    <Compile Include="Controllers\SalesDeliveryDependencyTests.cs" />
+    <Compile Include="Controllers\GlobalSearchAdministrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceRecordSearchTests.cs" />
+    <Compile Include="Services\Procurement\ProcurementRegisterSearchTranslationTests.cs" />
+    <Compile Include="Controllers\Estate\EstateManagedAssetReadTests.cs" />
     <Compile Include="Controllers\Finance\FinancePurchasingOptionalApprovalTests.cs" />
     <!-- Supplier-return ownership is shared with Procurement/Inventory, but Finance must keep
          its legacy mutation endpoints fail-closed until FIN-INT-012/013 producer contracts exist. -->
@@ -69,6 +85,7 @@
     <Compile Include="Controllers\Finance\ChequesControllerTests.cs" />
     <Compile Include="Controllers\Finance\BankStatementsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\BusinessPartnersControllerContactRouteTests.cs" />
+    <Compile Include="Controllers\Procurement\TenderBidDocumentBoundaryTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementConfigurationProfilesControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementComplianceDecisionsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementPolicySetsControllerTests.cs" />
@@ -152,11 +169,14 @@
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
     <Compile Include="Services\DatabaseSeedingWorkflowPreservationTests.cs" />
     <Compile Include="Services\DatabaseSeedingDependencyGraphTests.cs" />
+    <Compile Include="Services\OperationalUatBaselineSeederTests.cs" />
     <Compile Include="Services\UnitOfWorkTransactionLockTests.cs" />
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesDutyRosterScheduleTests.cs" />
+    <Compile Include="Services\Estate\EstateRecurringBillingServiceTests.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
     <Compile Include="Services\Finance\AccountCurrencyLinkPersistenceTests.cs" />
@@ -215,6 +235,18 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementClassificationLayoutPhase3Tests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.DistributionEditing.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementInvoiceDistributionControllerTests.cs" />
+    <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.PartnerDefaults.cs" />
+    <Compile Include="Services\Finance\PartnerReceivablesDefaultsCompatibilityTests.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.PartnerCharges.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.SupplierTax.cs" />
+    <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.SupplierWriteoffs.cs" />
+    <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.PartnerDefaults.cs" />
+    <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.PartnerDefaults.cs" />
+    <Compile Include="Services\Finance\CustomerPostingSettingsFixture.cs" />
+    <Compile Include="Services\Finance\CanonicalVendorInvoiceBusinessPartnerTests.cs" />
+    <Compile Include="Services\Finance\CanonicalCustomerProfileReadTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentEvidenceOptionalApprovalTests.cs" />
@@ -262,7 +294,7 @@
     <Compile Include="Services\Finance\ApSupplierStatementDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\SubledgerReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ManagementReportDocumentBuilderTests.cs" />
-    <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
+    <Compile Include="Services\Finance\BaseDeltaReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePartnerDefaultsTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
@@ -281,10 +313,11 @@
     <Compile Include="Services\Finance\AccountingBookLifecycleC3Tests.cs" />
     <Compile Include="Services\Finance\AccountingBookLifecycleC3ConcurrencySqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4Tests.cs" />
+    <Compile Include="Services\Finance\AccountingBookModelV2Tests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4ConcurrencySqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4MigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4MigrationSqlServerTests.cs" />
-    <Compile Include="Services\Finance\AccountingBookApplicabilityC5Tests.cs" />
+    <Compile Include="Services\Finance\AutomaticPrimaryBookSelectionTests.cs" />
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5MigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5MigrationSqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5ConcurrencySqlServerTests.cs" />
@@ -322,6 +355,7 @@
     <Compile Include="Services\Finance\LegacyPostingPathLockdownTests.cs" />
     <Compile Include="Services\Finance\FinanceConcurrencyHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceApprovalQueueProjectionTests.cs" />
+    <Compile Include="Services\Finance\WorkflowEntityDisplayServiceFinanceBookTests.cs" />
     <Compile Include="Services\Finance\FinanceSettingsMigrationGapTests.cs" />
     <Compile Include="Services\Finance\CrossCurrencyBankTransferMigrationTests.cs" />
     <!-- Cross-currency settlement is a Finance release gate. Keep both pure arithmetic and
@@ -379,6 +413,7 @@
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">
     <Compile Include="$(TdcFocusedTestFile)" />
     <Compile Include="$(TdcFocusedTestSupportFile)" Condition="'$(TdcFocusedTestSupportFile)' != ''" />
+    <Compile Include="$(TdcFocusedTestSupportFile2)" Condition="'$(TdcFocusedTestSupportFile2)' != ''" />
   </ItemGroup>
 
 </Project>

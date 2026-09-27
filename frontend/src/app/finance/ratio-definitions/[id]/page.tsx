@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { TrendingUp, Save, X, Trash2, AlertTriangle, Loader2, Calculator } from 'lucide-react';
 import type { RatioDefinition, UnitAccount } from '@/types/unit-accounts';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
+import { toast } from 'sonner';
 
 export default function EditRatioDefinitionPage() {
     const router = useRouter();
@@ -100,7 +101,7 @@ export default function EditRatioDefinitionPage() {
                 router.push('/finance/ratio-definitions');
             } catch (error) {
                 console.error('Failed to delete ratio:', error);
-                alert('Failed to delete ratio definition. Please try again.');
+                toast.error('The ratio definition was not deleted. It may still be referenced by a report; review its usage and retry.');
             }
         }
     };

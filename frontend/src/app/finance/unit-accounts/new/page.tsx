@@ -15,6 +15,7 @@ import { Calculator, Save, X, AlertTriangle, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import type { UnitType, UnitAccount } from '@/types/unit-accounts';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
+import { toast } from 'sonner';
 
 export default function NewUnitAccountPage() {
     const router = useRouter();
@@ -104,7 +105,7 @@ export default function NewUnitAccountPage() {
             router.push('/finance/unit-accounts');
         } catch (error) {
             console.error('Failed to create unit account:', error);
-            alert('Failed to create unit account. Please try again.');
+            toast.error('The unit account was not created. Review the required account fields and try again.');
         } finally {
             setSaving(false);
         }

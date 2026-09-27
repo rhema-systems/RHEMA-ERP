@@ -684,6 +684,59 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
             }
 
             // Finance approval notifications depend on these entity links, so keep them with the newer Sales workflow mappings below.
+            if (key == Normalize("AccountingBookLifecycle"))
+            {
+                var book = await _unitOfWork.Repository<AccountingBook>().FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "AccountingBookLifecycle";
+                info.EntityNumber = book?.Code;
+                info.EntityName = book?.Name;
+                info.ActionUrl = "/finance/settings/accounting-books";
+                return info;
+            }
+
+            if (key == Normalize("AccountingBookPeriodLifecycle"))
+            {
+                var period = await _unitOfWork.Repository<AccountingBookPeriod>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.AccountingBook);
+                info.EntityType = "AccountingBookPeriodLifecycle";
+                info.EntityNumber = period?.AccountingBook?.Code;
+                info.EntityName = period == null
+                    ? null
+                    : $"{period.AccountingBook?.Name ?? "Accounting book"} period {period.PeriodStatus}";
+                info.ActionUrl = period == null
+                    ? "/finance/settings/accounting-books"
+                    : $"/finance/settings/accounting-books/{period.AccountingBookId:D}/readiness";
+                return info;
+            }
+
+            if (key == Normalize("AccountingBookInitialization"))
+            {
+                var initialization = await _unitOfWork.Repository<AccountingBookInitialization>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.AccountingBook);
+                info.EntityType = "AccountingBookInitialization";
+                info.EntityNumber = initialization == null
+                    ? null
+                    : $"{initialization.AccountingBook?.Code}/V{initialization.Version}";
+                info.EntityName = initialization?.AccountingBook?.Name;
+                info.ActionUrl = initialization == null
+                    ? "/finance/settings/accounting-books"
+                    : $"/finance/settings/accounting-books/{initialization.AccountingBookId:D}/readiness";
+                return info;
+            }
+
+            // Historical policy workflows remain readable after policy authoring is retired,
+            // but they route to the accounting-book register rather than a configuration page.
+            if (key == Normalize("AccountingBookApplicabilityPolicy"))
+            {
+                var policy = await _unitOfWork.Repository<AccountingBookApplicabilityPolicy>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "AccountingBookApplicabilityPolicy";
+                info.EntityNumber = policy == null ? null : $"{policy.PolicyCode}/V{policy.Version}";
+                info.EntityName = policy?.Name;
+                info.ActionUrl = "/finance/settings/accounting-books";
+                return info;
+            }
+
             if (key == Normalize("JournalEntry"))
             {
                 var journal = await _unitOfWork.Repository<JournalEntry>().FirstOrDefaultAsync(x => x.Id == entityId);
@@ -727,10 +780,10 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 
             if (key == Normalize("VendorPayment"))
             {
-                var payment = await _unitOfWork.Repository<VendorPayment>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.Supplier);
+                var payment = await _unitOfWork.Repository<VendorPayment>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.BusinessPartner);
                 info.EntityType = "VendorPayment";
                 info.EntityNumber = payment?.PaymentNumber;
-                info.EntityName = payment?.Supplier?.Name;
+                info.EntityName = payment?.BusinessPartner?.PartnerName;
                 info.ActionUrl = $"/finance/ap/payments/{entityId}";
                 return info;
             }
@@ -829,10 +882,10 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
 
             if (key == Normalize("CustomerPayment"))
             {
-                var payment = await _unitOfWork.Repository<CustomerPayment>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.Customer);
+                var payment = await _unitOfWork.Repository<CustomerPayment>().FirstOrDefaultAsync(x => x.Id == entityId, x => x.BusinessPartner);
                 info.EntityType = "CustomerPayment";
                 info.EntityNumber = payment?.PaymentNumber;
-                info.EntityName = payment?.Customer?.CustomerName;
+                info.EntityName = payment?.BusinessPartnerName;
                 info.ActionUrl = $"/finance/ar/payments";
                 return info;
             }

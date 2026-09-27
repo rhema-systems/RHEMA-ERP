@@ -11,6 +11,23 @@ namespace ErpSystem.Api.Controllers.QuantitySurvey;
 [Route("api/quantity-survey/catalogues")]
 public sealed class QuantitySurveyCataloguesController(IProjectSetupService projectSetupService) : ControllerBase
 {
+    [HttpGet("search"), Authorize(Policy = QuantitySurveyAccessControlRegistry.Read)]
+    public Task<IActionResult> Search([FromQuery] string search, [FromQuery] int take = 8) => ExecuteAsync(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100)
+            return Ok(Array.Empty<ProjectCatalogEntryDto>());
+        var values = await projectSetupService.GetQuantitySurveyCatalogEntriesAsync(null, search.Trim(), null, null, true);
+        return Ok(values.Take(Math.Clamp(take, 1, 50)));
+    });
+
+    [HttpGet("{id:guid}"), Authorize(Policy = QuantitySurveyAccessControlRegistry.Read)]
+    public Task<IActionResult> Get(Guid id) => ExecuteAsync(async () =>
+    {
+        var values = await projectSetupService.GetQuantitySurveyCatalogEntriesAsync(null, null, null, null, true);
+        var value = values.SingleOrDefault(value => value.Id == id);
+        return value is null ? NotFound() : Ok(value);
+    });
+
     [HttpGet("lookups/units-of-measure")]
     [Authorize(Policy = QuantitySurveyAccessControlRegistry.Read)]
     public Task<IActionResult> UnitOfMeasureOptions()

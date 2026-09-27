@@ -546,7 +546,7 @@ function SupplierStatementsView() {
                 const report = await accountsPayableService.getSupplierDetailedLedger({
                     fromDate: params.fromDate,
                     toDate: params.toDate,
-                    supplierIds: params.partnerIds,
+                    businessPartnerIds: params.partnerIds,
                     showSupplierCurrency: params.showPartnerCurrency,
                 });
 
@@ -561,7 +561,7 @@ function SupplierStatementsView() {
                     currencyTotals: report.currencyTotals ?? [],
                     warnings: report.warnings ?? [],
                     accounts: report.suppliers.map((supplier) => ({
-                        id: supplier.businessPartnerId ?? supplier.supplierId,
+                        id: supplier.businessPartnerId,
                         code: supplier.supplierCode,
                         name: supplier.supplierName,
                         currencyCode: supplier.currencyCode,
@@ -576,26 +576,26 @@ function SupplierStatementsView() {
             downloadCsv={(params) => accountsPayableService.downloadSupplierStatementCsv({
                 fromDate: params.fromDate,
                 toDate: params.toDate,
-                supplierIds: params.partnerIds,
+                businessPartnerIds: params.partnerIds,
                 showSupplierCurrency: params.showPartnerCurrency,
             })}
             downloadPdf={(params) => accountsPayableService.downloadSupplierStatementDocument({
                 fromDate: params.fromDate,
                 toDate: params.toDate,
-                supplierIds: params.partnerIds,
+                businessPartnerIds: params.partnerIds,
                 showSupplierCurrency: params.showPartnerCurrency,
                 format: 'pdf',
             })}
             printPdf={(params) => accountsPayableService.printSupplierStatementDocument({
                 fromDate: params.fromDate,
                 toDate: params.toDate,
-                supplierIds: params.partnerIds,
+                businessPartnerIds: params.partnerIds,
                 showSupplierCurrency: params.showPartnerCurrency,
             })}
             downloadXlsx={(params) => accountsPayableService.downloadSupplierStatementDocument({
                 fromDate: params.fromDate,
                 toDate: params.toDate,
-                supplierIds: params.partnerIds,
+                businessPartnerIds: params.partnerIds,
                 showSupplierCurrency: params.showPartnerCurrency,
                 format: 'xlsx',
             })}

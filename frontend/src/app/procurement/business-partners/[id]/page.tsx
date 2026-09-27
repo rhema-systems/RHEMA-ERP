@@ -1,5 +1,9 @@
 'use client';
 
+import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
+import { BusinessPartnerCurrentAccountsPanel } from '@/components/procurement/BusinessPartnerCurrentAccountsPanel';
+
+
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -42,6 +46,7 @@ import { PerformanceReviewDetailDialog } from '@/components/procurement/Performa
 import { PerformanceTrendsChart } from '@/components/procurement/PerformanceTrendsChart';
 import { SupplierBankAccountsPanel, SupplierContactsPanel } from '@/components/procurement/SupplierContactBankDetails';
 import { bankAccountsFromRegistrationData, contactsFromRegistrationData } from '@/lib/supplier-registration-details';
+import { BusinessPartnerAccessSetup } from '@/components/procurement/BusinessPartnerAccessSetup';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -320,6 +325,7 @@ export default function BusinessPartnerDetailPage() {
         </div>
 
         <div className="flex gap-2">
+          <BusinessPartnerAccessSetup partnerId={id} onSaved={loadPartner} />
           <Button onClick={() => router.push(`/procurement/business-partners/${id}/edit`)}>
             <Edit className="w-4 h-4 mr-2" />
             Edit
@@ -452,7 +458,9 @@ export default function BusinessPartnerDetailPage() {
             )}
           </TabsTrigger>
           <TabsTrigger value="financial">Financial Info</TabsTrigger>
-          {(partner.partnerType === 'Supplier' || partner.partnerType === 'Both') && (
+          {(hasSupplierRole(partner.partnerType) || hasContractorRole(partner.partnerType)) && <TabsTrigger value="accounts-payable">Accounts Payable</TabsTrigger>}
+          {hasCustomerRole(partner.partnerType) && <TabsTrigger value="accounts-receivable">Accounts Receivable</TabsTrigger>}
+          {hasSupplierRole(partner.partnerType) && (
             <TabsTrigger value="purchase-orders">
               Purchase Orders ({purchaseOrders.length})
             </TabsTrigger>
@@ -469,6 +477,12 @@ export default function BusinessPartnerDetailPage() {
         </TabsList>
 
         {/* Company Details Tab */}
+        {(hasSupplierRole(partner.partnerType) || hasContractorRole(partner.partnerType)) && <TabsContent value="accounts-payable">
+          <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={partner.partnerType} ledger="payables" />
+        </TabsContent>}
+        {hasCustomerRole(partner.partnerType) && <TabsContent value="accounts-receivable">
+          <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={partner.partnerType} ledger="receivables" />
+        </TabsContent>}
         <TabsContent value="details" className="space-y-4">
           <Card>
             <CardHeader>
@@ -813,7 +827,7 @@ export default function BusinessPartnerDetailPage() {
         </TabsContent>
 
         {/* Purchase Orders Tab */}
-        {(partner.partnerType === 'Supplier' || partner.partnerType === 'Both') && (
+        {hasSupplierRole(partner.partnerType) && (
           <TabsContent value="purchase-orders">
             <Card>
               <CardHeader>

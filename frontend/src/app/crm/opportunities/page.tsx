@@ -1,8 +1,9 @@
 'use client';
 
+import { hasCustomerRole } from '@/lib/business-partner-roles';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -380,6 +381,17 @@ export default function CrmOpportunitiesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedOpportunityId, setSelectedOpportunityId] = useState(requestedOpportunityId);
   const [selectedOpportunity, setSelectedOpportunity] = useState<CrmOpportunityDetailDto | null>(null);
+  const requestedIdRef = useRef(requestedOpportunityId);
+  requestedIdRef.current = requestedOpportunityId;
+  const detailRequest = useRef(0);
+
+  useEffect(() => {
+    if (requestedOpportunityId) {
+      setSelectedOpportunityId(requestedOpportunityId);
+      setPage(1);
+    }
+  }, [requestedOpportunityId]);
+
 
   const [accounts, setAccounts] = useState<BusinessPartnerDto[]>([]);
   const [leads, setLeads] = useState<CrmLeadListItemDto[]>([]);
@@ -400,7 +412,7 @@ export default function CrmOpportunitiesPage() {
 
       const filteredAccounts = partnerData
         .filter((partner) => partner.status !== 'Inactive')
-        .filter((partner) => partner.partnerType === 'Customer' || partner.partnerType === 'Both' || !!partner.customerType)
+        .filter((partner) => hasCustomerRole(partner.partnerType) || !!partner.customerType)
         .sort((left, right) => left.partnerName.localeCompare(right.partnerName));
 
       setAccounts(filteredAccounts);
@@ -411,6 +423,7 @@ export default function CrmOpportunitiesPage() {
   };
 
   const loadOpportunities = async (requestedPage: number = page) => {
+    const requestedIdAtLoad = requestedIdRef.current;
     try {
       setLoading(true);
       const data = await crmService.getOpportunities({
@@ -423,6 +436,7 @@ export default function CrmOpportunitiesPage() {
         opportunityType: opportunityType === 'all' ? undefined : opportunityType,
       });
 
+      if (requestedIdAtLoad !== requestedIdRef.current) return;
       setResult(data);
 
       if (requestedOpportunityId && requestedPage === 1) {
@@ -443,19 +457,23 @@ export default function CrmOpportunitiesPage() {
   };
 
   const loadOpportunityDetail = async (opportunityId: string) => {
+    const request = ++detailRequest.current;
+    setSelectedOpportunity(null);
     if (!opportunityId) {
-      setSelectedOpportunity(null);
+      setDetailLoading(false);
       return;
     }
 
     try {
       setDetailLoading(true);
-      setSelectedOpportunity(await crmService.getOpportunity(opportunityId));
+      const detail = await crmService.getOpportunity(opportunityId);
+      if (request === detailRequest.current) setSelectedOpportunity(detail);
     } catch (error: unknown) {
+      if (request !== detailRequest.current) return;
       toast.error(getMessage(error, 'Failed to load CRM opportunity detail'));
       setSelectedOpportunity(null);
     } finally {
-      setDetailLoading(false);
+      if (request === detailRequest.current) setDetailLoading(false);
     }
   };
 
@@ -478,6 +496,7 @@ export default function CrmOpportunitiesPage() {
 
   useEffect(() => {
     void loadOpportunityDetail(selectedOpportunityId);
+    return () => { detailRequest.current++; };
   }, [selectedOpportunityId]);
 
   useEffect(() => {

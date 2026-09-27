@@ -49,6 +49,28 @@ public sealed class AccountingBookClassificationAuthorityTests
     }
 
     [Theory]
+    [InlineData("BAD CODE")]
+    [InlineData("1STARTS_WITH_NUMBER")]
+    [InlineData("BAD-HYPHEN")]
+    public async Task CreateAsync_RejectsNonPortableClassificationCode(string code)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
+
+        await service.Invoking(item => item.CreateAsync(new SaveAccountClassificationDto
+            {
+                AccountingBookId = book.Id, Code = code, Name = "Invalid portable identity",
+                CoreAccountType = nameof(AccountType.Asset), IsPostingClassification = true,
+                Status = nameof(AccountClassificationStatus.Active)
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*uppercase letters, numbers and underscores*");
+    }
+
+    [Theory]
     [InlineData(AccountType.Equity)]
     [InlineData(AccountType.Revenue)]
     [InlineData(AccountType.Expense)]
@@ -104,6 +126,119 @@ public sealed class AccountingBookClassificationAuthorityTests
         ]);
 
         (await db.AccountAccountingBooks.SingleAsync()).AccountClassificationId.Should().Be(classification.Id);
+    }
+
+    [Fact]
+    public async Task SyncAccountMappingsAsync_PreservesDisabledHistoryForInactiveBook()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var activeBook = SeedBook(db, tenantId);
+        var historicalBook = SeedBook(db, tenantId);
+        historicalBook.Code = "OLD_GAAP";
+        historicalBook.Name = "Retired GAAP";
+        historicalBook.IsDefault = false;
+        historicalBook.IsActive = false;
+        historicalBook.AllowsPosting = false;
+        historicalBook.LifecycleStatus = AccountingBookLifecycleStatus.Retired;
+        var classification = SeedClassification(db, tenantId, activeBook.Id, "EXPENSE", AccountType.Expense);
+        var account = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        db.AccountAccountingBooks.AddRange(
+            new AccountAccountingBook
+            {
+                TenantId = tenantId, AccountId = account.Id, AccountingBookId = activeBook.Id,
+                AccountClassificationId = classification.Id, IsEnabled = true, RowVersion = [1]
+            },
+            new AccountAccountingBook
+            {
+                TenantId = tenantId, AccountId = account.Id, AccountingBookId = historicalBook.Id,
+                IsEnabled = false, RowVersion = [2]
+            });
+        await db.SaveChangesAsync();
+        var service = new AccountingBookService(db, CurrentUser(tenantId).Object);
+
+        await service.SyncAccountMappingsAsync(account,
+        [
+            new AccountAccountingBookUpdateDto
+            {
+                AccountingBookId = activeBook.Id, AccountClassificationId = classification.Id,
+                IsEnabled = true, RowVersion = Convert.ToBase64String([1])
+            },
+            new AccountAccountingBookUpdateDto
+            {
+                AccountingBookId = historicalBook.Id, IsEnabled = false,
+                RowVersion = Convert.ToBase64String([2])
+            }
+        ]);
+
+        var historical = await db.AccountAccountingBooks.SingleAsync(item => item.AccountingBookId == historicalBook.Id);
+        historical.IsEnabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeltaClassifications_AreBaseGovernedAndRejectManualMaintenance()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var baseBook = SeedBook(db, tenantId);
+        var delta = SeedBook(db, tenantId);
+        delta.Code = "IFRS_ADJ";
+        delta.Name = "IFRS adjustments";
+        delta.BookType = AccountingBookType.Delta;
+        delta.BaseAccountingBookId = baseBook.Id;
+        delta.IsDefault = false;
+        delta.IsActive = false;
+        delta.AllowsPosting = false;
+        delta.LifecycleStatus = AccountingBookLifecycleStatus.Configuring;
+        var inherited = SeedClassification(db, tenantId, delta.Id, "EXPENSE", AccountType.Expense);
+        await db.SaveChangesAsync();
+        var service = new AccountClassificationService(db, CurrentUser(tenantId).Object, Audit().Object);
+        var request = Request(inherited, delta.Id);
+
+        await service.Invoking(item => item.CreateAsync(new SaveAccountClassificationDto
+            {
+                AccountingBookId = delta.Id, Code = "MANUAL", Name = "Manual",
+                CoreAccountType = nameof(AccountType.Expense), IsPostingClassification = true,
+                Status = nameof(AccountClassificationStatus.Active)
+            }))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*governed by the base book*");
+        await service.Invoking(item => item.UpdateAsync(inherited.Id, request))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*governed by the base book*");
+        await service.Invoking(item => item.RetireAsync(inherited.Id, new RetireAccountClassificationDto
+            {
+                Reason = "Manual retirement", RowVersion = Convert.ToBase64String([1])
+            }))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*governed by the base book*");
+    }
+
+    [Fact]
+    public async Task SyncAccountMappingsAsync_RecordsGovernanceAuditEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var book = SeedBook(db, tenantId);
+        var classification = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
+        var account = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        await db.SaveChangesAsync();
+        var audit = Audit();
+        var service = new AccountingBookService(
+            db, CurrentUser(tenantId).Object, new Mock<IWorkflowService>().Object, audit.Object);
+
+        await service.SyncAccountMappingsAsync(account,
+        [
+            new AccountAccountingBookUpdateDto
+            {
+                AccountingBookId = book.Id, AccountClassificationId = classification.Id, IsEnabled = true
+            }
+        ]);
+
+        audit.Verify(item => item.RecordAsync(
+            It.Is<FinanceAuditEventDto>(value =>
+                value.EventType == FinanceAuditEvents.AccountBookMappingsChanged
+                && value.SourceDocumentId == account.Id
+                && value.BeforeValues != null
+                && value.AfterValues != null),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -304,7 +439,10 @@ public sealed class AccountingBookClassificationAuthorityTests
         var firstMappings = await db.AccountAccountingBooks.CountAsync();
         var adminCash = await db.AccountClassifications.SingleAsync(item => item.Code == "CASH" && item.AccountingBook!.Code == "IFRS");
         adminCash.DefaultRevaluationTreatment = RevaluationTreatment.Exclude;
+        adminCash.SystemRole = null;
         adminCash.UpdatedBy = "finance.admin";
+        var legacyBank = await db.AccountClassifications.SingleAsync(item => item.Code == "BANK" && item.AccountingBook!.Code == "IFRS");
+        legacyBank.SystemRole = null;
         var cashAccountId = await db.Accounts.Where(item => item.AccountCode == "1000").Select(item => item.Id).SingleAsync();
         var reviewedMapping = await db.AccountAccountingBooks.Include(item => item.AccountingBook)
             .SingleAsync(item => item.AccountId == cashAccountId && item.AccountingBook.Code == "IFRS");
@@ -320,6 +458,9 @@ public sealed class AccountingBookClassificationAuthorityTests
         (await db.AccountAccountingBooks.CountAsync()).Should().Be(firstMappings);
         adminCash.DefaultRevaluationTreatment.Should().Be(RevaluationTreatment.Exclude,
             "the manifest must preserve an explicit administrator decision");
+        adminCash.SystemRole.Should().BeNull("administrator-managed classifications must not be rewritten");
+        legacyBank.SystemRole.Should().Be(AccountClassificationSystemRole.Bank,
+            "untouched classifications created by an older manifest must receive their canonical role");
         (await db.AccountClassifications.Where(item => item.Code == "CASH" && item.AccountingBook!.Code != "IFRS")
             .AllAsync(item => item.DefaultRevaluationTreatment == RevaluationTreatment.Include)).Should().BeTrue();
         (await db.AccountClassifications.Where(item => item.Code == "EXPENSE")
@@ -754,6 +895,16 @@ public sealed class AccountingBookClassificationAuthorityTests
         var rootUsage = await service.GetWhereUsedAsync(root.Id);
         rootUsage.DraftLayoutReferences.Should().Be(1);
         rootUsage.PublishedLayoutReferences.Should().Be(1);
+
+        (await db.AccountAccountingBooks.SingleAsync(item => item.AccountId == active.Id)).IsEnabled = false;
+        await db.SaveChangesAsync();
+        var classificationSummary = (await service.GetAsync(book.Id, true))
+            .Single(item => item.Id == classification.Id);
+        classificationSummary.EnabledAccountCount.Should().Be(0);
+        classificationSummary.HasDraftLayoutReference.Should().BeTrue(
+            "a descendant-inclusive Draft selector on the parent governs this classification");
+        classificationSummary.CanRetire.Should().BeFalse(
+            "the list contract should not offer an action that the retirement command will reject");
 
         var reparent = () => service.UpdateAsync(classification.Id, Request(classification, book.Id));
         await reparent.Should().ThrowAsync<InvalidOperationException>()

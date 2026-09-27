@@ -1,4 +1,6 @@
 import React from 'react';
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/inventory/disposals', useRouter: () => ({ replace: vi.fn() }) }));
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,7 +20,7 @@ vi.mock('@/services/inventoryDisposalService', () => ({ inventoryDisposalService
 } }));
 vi.mock('@/services/inventoryManagementService', () => ({ inventoryManagementService: {
   getWarehouses: async () => [{ id: 'warehouse', name: 'Project Demo Warehouse' }],
-  getInventoryByWarehouse: mocks.warehouseItems, getWarehouseLocations: mocks.locations,
+  getWarehouseInventoryItems: mocks.warehouseItems, getWarehouseLocations: mocks.locations,
 } }));
 vi.mock('@/services/document-management.service', () => ({ documentManagementService: {
   getRecords: mocks.records, getRecord: mocks.record,
@@ -54,9 +56,9 @@ beforeEach(() => {
   vi.clearAllMocks(); mocks.permission = true; mocks.rows = [disposal()];
   mocks.get.mockImplementation(async (id: string) => mocks.rows.find(row => row.id === id));
   mocks.warehouseItems.mockResolvedValue([
-    { id: 'pvc', itemCode: 'SKU-001', name: 'PVC Pipe', itemType: 1 },
-    { id: 'barcode', itemCode: 'PM-BARCODE', name: 'Barcode Device Kit', itemType: 1 },
-    { id: 'asset', itemCode: 'ASSET-001', name: 'Fixed asset', itemType: 2 },
+    { inventoryItemId: 'pvc', itemCode: 'SKU-001', itemName: 'PVC Pipe', itemType: 1 },
+    { inventoryItemId: 'barcode', itemCode: 'PM-BARCODE', itemName: 'Barcode Device Kit', itemType: 1 },
+    { inventoryItemId: 'asset', itemCode: 'ASSET-001', itemName: 'Fixed asset', itemType: 2 },
   ]);
   mocks.locations.mockResolvedValue([{ id: 'bin', warehouseId: 'warehouse', locationCode: 'LOC-001', name: 'Main bin', isActive: true, isDefault: true }]);
   mocks.records.mockResolvedValue([]); mocks.accounts.mockResolvedValue([]);

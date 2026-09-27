@@ -1,0 +1,30 @@
+.grid input,
+.grid [role='combobox'] {
+  height: 2rem;
+  min-height: 2rem;
+  font-size: 0.75rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.grid input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.grid input::-webkit-inner-spin-button,
+.grid input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.grid .description {
+  height: auto;
+  min-height: 2rem;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  padding: 5px 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+}

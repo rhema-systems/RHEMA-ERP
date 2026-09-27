@@ -71,8 +71,8 @@ export default function CustomersPage() {
                         Manage your customer base and view account statuses.
                     </p>
                 </div>
-                <Button onClick={() => router.push('/finance/ar/customers/new')}>
-                    <Plus className="mr-2 h-4 w-4" /> New Customer
+                <Button onClick={() => router.push('/procurement/business-partners/new')}>
+                    <Plus className="mr-2 h-4 w-4" /> New Business Partner
                 </Button>
             </div>
 
@@ -181,14 +181,14 @@ export default function CustomersPage() {
                                                         <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/customers/${customer.id}`); }}>
                                                             View Details
                                                         </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/customers/${customer.id}/edit`); }}>
-                                                            Edit Customer
+                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/procurement/business-partners/${customer.id}/edit`); }}>
+                                                            Edit Business Partner
                                                         </DropdownMenuItem>
                                                         <DropdownMenuSeparator />
-                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/invoices/new?customerId=${customer.id}`); }}>
+                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/invoices/new?businessPartnerId=${customer.id}`); }}>
                                                             <FileText className="mr-2 h-4 w-4" /> New Invoice
                                                         </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/receipts/new?customerId=${customer.id}`); }}>
+                                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); router.push(`/finance/ar/receipts/new?businessPartnerId=${customer.id}`); }}>
                                                             <DollarSign className="mr-2 h-4 w-4" /> Record Receipt
                                                         </DropdownMenuItem>
                                                     </DropdownMenuContent>

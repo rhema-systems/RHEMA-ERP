@@ -111,10 +111,12 @@ public interface ITenderBidService
     Task DeleteBidItemAsync(Guid itemId);
     
     // Bid Documents
+    Task ValidateBidDocumentChangeAsync(Guid bidId, Guid? tenderItemId = null);
     Task<TenderBidDocumentDto> UploadBidDocumentAsync(Guid bidId, UploadBidDocumentDto dto,
         string logicalFileReference, string? fileType, long? fileSize, Guid fileUploadRecordId,
         Guid centralDocumentRecordId, Guid centralDocumentVersionId);
     Task DeleteBidDocumentAsync(Guid documentId);
+    Task DeleteBidDocumentAsync(Guid documentId, Guid? expectedBidId);
     Task<IEnumerable<TenderBidDocumentDto>> GetBidDocumentsAsync(Guid bidId);
     
     // Bid Payments

@@ -402,11 +402,11 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
             if (rate.BaseCurrencyCode == toCurrency && rate.TargetCurrencyCode == fromCurrency)
             {
-                return amount * rate.Rate;
+                var targetToBase = rate.InverseRate > 0 ? rate.InverseRate : 1 / rate.Rate;
+                return amount * targetToBase;
             }
 
-            var inverseRate = rate.InverseRate > 0 ? rate.InverseRate : 1 / rate.Rate;
-            return amount * inverseRate;
+            return amount * rate.Rate;
         }
 
         public async Task<bool> IsCodeUniqueAsync(string code, Guid? excludeId = null, CancellationToken cancellationToken = default)

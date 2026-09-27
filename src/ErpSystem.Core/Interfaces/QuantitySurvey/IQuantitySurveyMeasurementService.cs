@@ -5,6 +5,7 @@ namespace ErpSystem.Core.Interfaces.QuantitySurvey;
 
 public interface IQuantitySurveyMeasurementService
 {
+    Task<IReadOnlyList<QuantitySurveyMeasurementDto>> SearchAsync(string search, int take = 8, CancellationToken token = default);
     Task<QuantitySurveyMeasurementLookupsDto> GetLookupsAsync(Guid projectId, CancellationToken token = default);
     Task<QuantitySurveyMeasurementPageDto> ListAsync(QuantitySurveyMeasurementListRequest request, CancellationToken token = default);
     Task<QuantitySurveyMeasurementDto> GetAsync(Guid id, CancellationToken token = default);

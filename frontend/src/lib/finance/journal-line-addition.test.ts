@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
     appendJournalLine,
     createFreshManualJournalLine,
@@ -6,6 +8,15 @@ import {
 } from './journal-line-addition';
 
 describe('journal line addition', () => {
+  it('keeps an add-line action beside the totals for long journals', () => {
+    const pageSource = readFileSync(
+      resolve(process.cwd(), 'src/app/finance/journal-entries/new/page.tsx'),
+      'utf8'
+    );
+    const footer = pageSource.slice(pageSource.indexOf('<tfoot>'), pageSource.indexOf('</tfoot>'));
+    expect(footer).toContain('Add another line');
+    expect(footer).toContain('onClick={handleAddLine}');
+  });
     it('keeps the first manual and unit lines blank and at fresh defaults', () => {
         expect(createFreshManualJournalLine('manual-1', 'GHS')).toEqual({
             id: 'manual-1',

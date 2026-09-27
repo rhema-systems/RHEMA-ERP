@@ -39,6 +39,11 @@ public class InventoryRequisitionsController : ControllerBase
         _logger = logger;
     }
 
+    [HttpGet("search")]
+    public async Task<ActionResult<IEnumerable<InventoryRequisitionDto>>> Search(
+        [FromQuery] string search, [FromQuery] int take = 8) =>
+        Ok(await _requisitionService.SearchAsync(search, take, HttpContext.RequestAborted));
+
     /// <summary>
     /// Gets all inventory requisitions with optional date filtering
     /// </summary>
@@ -443,7 +448,18 @@ public class InventoryRequisitionsController : ControllerBase
         }
     }
 
-    [HttpGet("issue-vouchers/{voucherId}")]
+    [HttpGet("issue-vouchers/search")]
+    public async Task<ActionResult<IReadOnlyList<InventoryIssueSearchDto>>> SearchIssueVouchers(
+        [FromQuery] string search = "", [FromQuery] int take = 8)
+    {
+        try { return Ok(await _requisitionService.SearchIssueVouchersAsync(search, take, HttpContext.RequestAborted)); }
+        catch (InventoryIssueAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_ISSUE_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+    }
+
+    [HttpGet("issue-vouchers/{voucherId:guid}")]
     public async Task<ActionResult<InventoryIssueVoucherDto>> GetIssueVoucher(Guid voucherId)
     {
         try
@@ -660,6 +676,11 @@ public class InventoryRequisitionsController : ControllerBase
         {
             await _requisitionService.CompleteAsync(id);
             return Ok(new { message = "Requisition completed successfully" });
+        }
+        catch (InventoryIssueControlException ex)
+        {
+            return StatusCode(StatusCodes.Status409Conflict,
+                new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
         catch (ArgumentException ex)
         {

@@ -11,6 +11,7 @@ import {
 } from './BusinessPartnerPostingFields';
 import type { Account } from '@/types/finance';
 import type { BankAccount } from '@/types/cash-management';
+import type { TaxGroup } from '@/types/tax';
 import type { PaymentTermListDto } from '@/services/financeCommonService';
 import {
   businessPartnerService,
@@ -31,6 +32,100 @@ Object.defineProperty(Element.prototype, 'scrollIntoView', {
 });
 
 describe('business partner posting fields', () => {
+  it.each(['Supplier', 'Vendor', 'Manufacturer', 'Contractor', 'Both', 'CustomerAndSupplier'])
+    ('keeps supplier withholding controls for %s roles', (partnerType) => {
+      render(<PartnerTaxDefaultsFields partnerType={partnerType}
+        value={{ ...emptyBusinessPartnerPostingDefaults(), subjectToWithholdingDeduction: true, withholdingTaxRate: 7.5, defaultWithholdingTaxId: 'saved-wht' }}
+        onChange={vi.fn()} taxGroups={[]} />);
+      expect(screen.getByRole('switch', { name: 'Subject To Withholding Deduction' })).toBeChecked();
+      expect(screen.getByLabelText('WHT Rate (%)')).toHaveValue(7.5);
+      expect(screen.getByRole('combobox', { name: 'WHT Configuration' })).toHaveTextContent('Saved selection (unavailable)');
+    });
+
+  it('hides supplier withholding for customers without clearing it when the customer tax schedule changes', () => {
+    const value = { ...emptyBusinessPartnerPostingDefaults(), subjectToWithholdingDeduction: true,
+      withholdingTaxRate: 7.5, defaultWithholdingTaxId: 'saved-wht' };
+    const onChange = vi.fn();
+    const { rerender } = render(<PartnerTaxDefaultsFields partnerType="Customer" value={value}
+      onChange={onChange} taxGroups={[{ id: 'sales-tax', code: 'SALES', name: 'Sales tax' }] as TaxGroup[]} />);
+    expect(screen.queryByRole('switch', { name: 'Subject To Withholding Deduction' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('WHT Rate (%)')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'WHT Configuration' })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Tax' }));
+    fireEvent.click(screen.getByRole('option', { name: 'SALES - Sales tax' }));
+    expect(onChange).toHaveBeenCalledWith({ ...value, defaultTaxGroupId: 'sales-tax' });
+    rerender(<PartnerTaxDefaultsFields partnerType="Both" value={value} onChange={onChange} taxGroups={[]} />);
+    expect(screen.getByRole('switch', { name: 'Subject To Withholding Deduction' })).toBeChecked();
+    expect(screen.getByLabelText('WHT Rate (%)')).toHaveValue(7.5);
+  });
+
+  it('offers only direct income or expense writeoff accounts and preserves an unsupported saved mapping', () => {
+    const accounts = [
+      { id: 'income', accountNumber: '4900', accountName: 'Writeoff income', status: 'Active', accountType: 'Revenue', isControlAccount: false, allowDirectPosting: true },
+      { id: 'expense', accountNumber: '6000', accountName: 'Writeoff expense', status: 'Active', accountType: 'Expense', isControlAccount: false, allowDirectPosting: true },
+      { id: 'asset', accountNumber: '1400', accountName: 'Legacy asset', status: 'Active', accountType: 'Asset', isControlAccount: false, allowDirectPosting: true },
+      { id: 'control', accountNumber: '4901', accountName: 'Income control', status: 'Active', accountType: 'Revenue', isControlAccount: true, allowDirectPosting: true },
+    ] as Account[];
+    const onChange = vi.fn();
+    render(<PartnerAccountsFields value={{ ...emptyBusinessPartnerPostingDefaults(), defaultWriteoffAccountId: 'asset' }}
+      onChange={onChange} accounts={accounts} bankAccounts={[]} />);
+    expect(screen.getByRole('combobox', { name: 'Writeoffs' })).toHaveTextContent('Saved account unavailable');
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Writeoffs' }));
+    expect(screen.getByRole('option', { name: /4900 — Writeoff income/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /6000 — Writeoff expense/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Legacy asset|Income control/ })).not.toBeInTheDocument();
+  });
+
+  it.each(['Supplier', 'Vendor', 'Manufacturer', 'Contractor', 'Both', 'CustomerAndSupplier'])
+    ('shows the AP chequebook for %s roles', (partnerType) => {
+      render(<PartnerOptionsFields partnerType={partnerType}
+        value={{ ...emptyBusinessPartnerPostingDefaults(), defaultBankAccountId: 'saved-bank' }}
+        onChange={vi.fn()} options={{ paymentTermId: '', taxNumber: '', creditLimit: '' }}
+        onOptionsChange={vi.fn()} paymentTerms={[]} bankAccounts={[]} />);
+      expect(screen.getByRole('combobox', { name: 'ChequeBook ID' })).toHaveTextContent('Saved selection (unavailable)');
+    });
+
+  it('hides the AP chequebook for a customer while preserving its saved supplier mapping', () => {
+    const value = { ...emptyBusinessPartnerPostingDefaults(), defaultBankAccountId: 'saved-bank' };
+    const onChange = vi.fn();
+    const props = { value, onChange, options: { paymentTermId: '', taxNumber: '', creditLimit: '' },
+      onOptionsChange: vi.fn(), paymentTerms: [], bankAccounts: [] };
+    const { rerender } = render(<PartnerOptionsFields {...props} partnerType="Customer" />);
+    expect(screen.queryByRole('combobox', { name: 'ChequeBook ID' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Payment Terms' })).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(value.defaultBankAccountId).toBe('saved-bank');
+    rerender(<PartnerOptionsFields {...props} partnerType="Both" />);
+    expect(screen.getByRole('combobox', { name: 'ChequeBook ID' })).toHaveTextContent('Saved selection (unavailable)');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('offers only eligible input-tax accounts and preserves an unsupported saved mapping until explicitly changed', () => {
+    const onChange = vi.fn();
+    const accounts = [
+      { id: 'input', accountNumber: '1400', accountName: 'Input VAT', status: 'Active', accountType: 'Asset', isControlAccount: true, allowDirectPosting: false },
+      { id: 'net', accountNumber: '2100', accountName: 'VAT Control', status: 'Active', accountType: 'Liability', isControlAccount: false, allowDirectPosting: true },
+      { id: 'legacy', accountNumber: '6000', accountName: 'Legacy Tax Expense', status: 'Active', accountType: 'Expense', isControlAccount: false, allowDirectPosting: true },
+      { id: 'inactive', accountNumber: '1401', accountName: 'Inactive VAT', status: 'Inactive', accountType: 'Asset', isControlAccount: true, allowDirectPosting: false },
+      { id: 'summary', accountNumber: '1402', accountName: 'Summary VAT', status: 'Active', accountType: 'Asset', isControlAccount: false, allowDirectPosting: false },
+    ] as Account[];
+    render(<PartnerAccountsFields
+      value={{ ...emptyBusinessPartnerPostingDefaults(), defaultTaxAccountId: 'legacy' }}
+      onChange={onChange} accounts={accounts} bankAccounts={[]} />);
+    expect(screen.getByText(/recoverable purchase tax only when the tax rule has no receivable account/)).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Input tax fallback' })).toHaveTextContent('Saved account unavailable');
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Input tax fallback' }));
+    expect(screen.getByRole('option', { name: /1400 — Input VAT/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /2100 — VAT Control/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Legacy Tax Expense/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Inactive VAT|Summary VAT/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: /1400 — Input VAT/ }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ defaultTaxAccountId: 'input' }));
+  });
+
   it('enables the WHT rate only when withholding deduction is selected', () => {
     function Form() {
       const [value, setValue] = useState(emptyBusinessPartnerPostingDefaults);
@@ -195,7 +290,7 @@ describe('business partner posting fields', () => {
     );
   });
 
-  it('allows system-posted liability control accounts for AP and accrued purchases only', () => {
+  it('allows liability control accounts for AP and accrued purchases while keeping freight on direct expense accounts', () => {
     const accounts = [
       {
         id: 'ap',

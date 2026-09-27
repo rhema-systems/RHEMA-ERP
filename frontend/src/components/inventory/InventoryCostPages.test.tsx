@@ -1,4 +1,6 @@
 import React from 'react';
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/inventory/items', useRouter: () => ({ replace: vi.fn() }) }));
 import { render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import InventoryItemsPage from '@/app/inventory/items/page';

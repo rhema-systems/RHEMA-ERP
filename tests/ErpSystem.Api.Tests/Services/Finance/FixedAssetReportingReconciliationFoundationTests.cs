@@ -907,6 +907,8 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
         var postingEventId = Guid.NewGuid();
         var totalDebit = lines.Sum(l => l.Debit);
         var totalCredit = lines.Sum(l => l.Credit);
+        var accountingBookId = db.AccountingBooks.Local.Single(book =>
+            book.TenantId == tenantId && book.Code == "IFRS").Id;
 
         db.JournalEntries.Add(new JournalEntry
         {
@@ -926,6 +928,7 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
             IsBalanced = totalDebit == totalCredit,
             PostingStatus = "Posted",
             BookClassification = "IFRS",
+            AccountingBookId = accountingBookId,
             CreatedAt = DateTime.UtcNow
         });
 
@@ -954,6 +957,7 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
                 SourceDocumentId = sourceDocumentId,
                 SourceReferenceNumber = line.Reference,
                 BookClassification = "IFRS",
+                AccountingBookId = accountingBookId,
                 LineNumber = i + 1,
                 TransactionTag = line.Tag,
                 Notes = line.Notes,
@@ -979,6 +983,7 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
                 TotalCreditAmount = totalCredit,
                 FunctionalCurrencyCode = "GHS",
                 BookClassification = "IFRS",
+                AccountingBookId = accountingBookId,
                 CreatedAt = DateTime.UtcNow
             });
         }

@@ -20,6 +20,47 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public class BusinessPartnersControllerContactRouteTests
 {
     [Fact]
+    public async Task SupplierAccountEndpointUsesCurrentUserAndOnlyReturnsPublicIdentity()
+    {
+        var userId = Guid.NewGuid();
+        var service = new Mock<IBusinessPartnerService>();
+        service.Setup(value => value.GetByUserIdAsync(userId)).ReturnsAsync(new BusinessPartnerDetailDto
+        {
+            Id = Guid.NewGuid(), PartnerCode = "SUP260123", PartnerName = "Supplier One",
+            PostingDefaults = new() { DefaultApAccountId = Guid.NewGuid() },
+            ReceivablesDefaults = new() { DefaultArAccountId = Guid.NewGuid() }
+        });
+        var current = new Mock<ICurrentUserProvider>();
+        current.SetupGet(value => value.UserId).Returns(userId);
+        current.SetupGet(value => value.IsExternalUser).Returns(true);
+        var controller = new ErpSystem.Api.Controllers.Procurement.BusinessPartnersController(service.Object,
+            current.Object, Mock.Of<IWorkflowService>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ErpSystem.Api.Controllers.Procurement.BusinessPartnersController>.Instance);
+
+        var result = (Microsoft.AspNetCore.Mvc.OkObjectResult)await controller.GetMyAccount();
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(result.Value));
+        json.RootElement.GetProperty("PartnerCode").GetString().Should().Be("SUP260123");
+        json.RootElement.EnumerateObject().Select(value => value.Name).Should().BeEquivalentTo("Id", "PartnerCode", "PartnerName");
+        service.Verify(value => value.GetByUserIdAsync(userId), Times.Once);
+    }
+
+    [Fact]
+    public async Task SupplierCannotLookUpAnotherUsersBusinessPartner()
+    {
+        var service = new Mock<IBusinessPartnerService>();
+        var current = new Mock<ICurrentUserProvider>();
+        current.SetupGet(value => value.UserId).Returns(Guid.NewGuid());
+        current.SetupGet(value => value.IsExternalUser).Returns(true);
+        var controller = new ErpSystem.Api.Controllers.Procurement.BusinessPartnersController(service.Object,
+            current.Object, Mock.Of<IWorkflowService>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ErpSystem.Api.Controllers.Procurement.BusinessPartnersController>.Instance)
+        { ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() } };
+        var result = await controller.GetPartnerByUserId(Guid.NewGuid());
+        ((Microsoft.AspNetCore.Mvc.ObjectResult)result.Result!).StatusCode.Should().Be(403);
+        service.Verify(value => value.GetByUserIdAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
     public async Task GetContacts_ShouldReturnBusinessPartnerContacts()
     {
         var partnerId = Guid.NewGuid();
@@ -113,6 +154,7 @@ public class BusinessPartnersControllerContactRouteTests
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
+            builder.UseSetting("CandidatePortal:PortalUrl", "https://candidate.test/");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IHostedService>();

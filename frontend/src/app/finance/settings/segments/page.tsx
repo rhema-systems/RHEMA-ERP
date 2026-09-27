@@ -336,7 +336,7 @@ function SegmentConfigurationContent() {
         // Simulate upload
         setTimeout(() => {
             setIsUploadDialogOpen(false);
-            alert('Values imported successfully! (Mock)');
+            toast.info('Spreadsheet import is not connected yet. No segment values were changed.');
         }, 1000);
     };
 

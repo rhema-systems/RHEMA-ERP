@@ -30,8 +30,8 @@ describe('award action chronology', () => {
       'Invite for Negotiation', 'Cancel Award',
     ]);
     for (const name of ['Send Notification', 'Performance Bond', 'Create PO / Contract', 'Invite for Negotiation', 'Cancel Award']) {
-      expect(screen.getByRole('button', { name, exact: true })).toBeVisible();
-      fireEvent.click(screen.getByRole('button', { name, exact: true }));
+      expect(screen.getByRole('button', { name })).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name }));
     }
     for (const action of Object.values(actions)) expect(action).toHaveBeenCalledTimes(1);
   });
@@ -45,7 +45,7 @@ describe('award action chronology', () => {
   ] as const)('does not expose an action when its permitted callback %s is absent', (key, label) => {
     const actions = allActions();
     render(<AwardActions {...actions} {...{ [key]: undefined }} />);
-    expect(screen.queryByRole('button', { name: label, exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument();
     expect(actions[key]).not.toHaveBeenCalled();
   });
 

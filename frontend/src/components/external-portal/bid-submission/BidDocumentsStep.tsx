@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
+import { parseBidDocumentRequirements } from './documentRequirements';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,13 +9,16 @@ import { FileText, Upload, X, CheckCircle, Download, Loader2 } from 'lucide-reac
 import { toast } from 'sonner';
 import { type CreateTenderBidDto, type TenderBidDocumentDto } from '@/services/tenderBidService';
 import { type TenderDetailDto, type TenderDocumentRequirement } from '@/services/tenderService';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { BidLotItemDocuments } from './BidLotItemDocuments';
+import { validateBidDocumentFile } from './bid-document-files';
 
 interface BidDocumentsStepProps {
   bidData: CreateTenderBidDto;
   updateBidData: (updates: Partial<CreateTenderBidDto>) => void;
   bidId?: string; // Bid ID if already created (for draft)
   uploadedDocuments?: TenderBidDocumentDto[]; // Already uploaded documents
-  onDocumentUpload?: (file: File, documentType: string) => Promise<void>;
+  onDocumentUpload?: (file: File, documentType: string, tenderItemId?: string) => Promise<void>;
   onDocumentDelete?: (documentId: string) => Promise<void>;
   tender?: TenderDetailDto | null; // Tender details with requirements
 }
@@ -30,82 +34,15 @@ export default function BidDocumentsStep({
 }: BidDocumentsStepProps) {
   const [uploading, setUploading] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({});
+  const [documentToDelete, setDocumentToDelete] = useState<string | null>(null);
 
-  // Parse tender requirements or use default
-  const documentRequirements = useMemo<TenderDocumentRequirement[]>(() => {
-    if (tender?.requiredDocuments) {
-      try {
-        return JSON.parse(tender.requiredDocuments) as TenderDocumentRequirement[];
-      } catch (error) {
-        console.error('Error parsing tender requirements:', error);
-      }
+  const { documentRequirements, requirementsError } = useMemo(() => {
+    try {
+      return { documentRequirements: parseBidDocumentRequirements(tender?.requiredDocuments), requirementsError: '' };
+    } catch (error) {
+      return { documentRequirements: [] as TenderDocumentRequirement[], requirementsError: (error as Error).message };
     }
-
-    // Default requirements if tender doesn't specify
-    return [
-      {
-        documentType: 'CompanyRegistration',
-        documentName: 'Company Registration Certificate',
-        isRequired: true,
-        description: 'Valid company registration certificate',
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,JPG,PNG'
-      },
-      {
-        documentType: 'TaxClearance',
-        documentName: 'Tax Clearance Certificate',
-        isRequired: true,
-        description: 'Current tax clearance certificate',
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,JPG,PNG'
-      },
-      {
-        documentType: 'FinancialStatements',
-        documentName: 'Financial Statements (Last 2 Years)',
-        isRequired: true,
-        description: 'Audited financial statements for the last 2 years',
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF'
-      },
-      {
-        documentType: 'CompanyProfile',
-        documentName: 'Company Profile',
-        isRequired: false,
-        description: 'Company profile and capabilities',
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,DOC,DOCX'
-      },
-      {
-        documentType: 'ProductBrochures',
-        documentName: 'Product Brochures/Catalogs',
-        isRequired: false,
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF'
-      },
-      {
-        documentType: 'QualityCertifications',
-        documentName: 'Quality Certifications (ISO, etc.)',
-        isRequired: false,
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,JPG,PNG'
-      },
-      {
-        documentType: 'References',
-        documentName: 'References/Past Performance',
-        isRequired: false,
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,DOC,DOCX'
-      },
-      {
-        documentType: 'Insurance',
-        documentName: 'Insurance Certificates',
-        isRequired: false,
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,JPG,PNG'
-      },
-    ];
-  }, [tender]);
-
+  }, [tender?.requiredDocuments]);
   const handleFileSelect = (documentType: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -113,37 +50,8 @@ export default function BidDocumentsStep({
     // Find the requirement for this document type
     const requirement = documentRequirements.find(req => req.documentType === documentType);
 
-    // Validate file size
-    const maxSizeMB = requirement?.maxFileSizeMB || 20;
-    const maxSizeBytes = maxSizeMB * 1024 * 1024;
-    if (file.size > maxSizeBytes) {
-      toast.error(`File size must be less than ${maxSizeMB}MB`);
-      return;
-    }
-
-    // Validate file type
-    if (requirement?.allowedFileTypes) {
-      const allowedExtensions = requirement.allowedFileTypes.split(',').map(ext => ext.trim().toLowerCase());
-      const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
-
-      if (!allowedExtensions.includes(fileExtension)) {
-        toast.error(`Only ${requirement.allowedFileTypes} files are allowed`);
-        return;
-      }
-    } else {
-      // Default validation
-      const allowedTypes = [
-        'application/pdf',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'image/jpeg',
-        'image/png'
-      ];
-      if (!allowedTypes.includes(file.type)) {
-        toast.error('Only PDF, DOC, DOCX, JPG, and PNG files are allowed');
-        return;
-      }
-    }
+    const fileError = validateBidDocumentFile(file, requirement);
+    if (fileError) { toast.error(fileError); return; }
 
     setSelectedFiles(prev => ({ ...prev, [documentType]: file }));
   };
@@ -166,34 +74,33 @@ export default function BidDocumentsStep({
       toast.success('Document uploaded successfully');
     } catch (error) {
       console.error('Error uploading document:', error);
-      toast.error('Failed to upload document');
+      toast.error(error instanceof Error ? error.message : 'Failed to upload document');
     } finally {
       setUploading(null);
     }
   };
 
-  const handleDelete = async (documentId: string) => {
-    if (!onDocumentDelete) return;
-
-    if (!confirm('Are you sure you want to delete this document?')) {
-      return;
-    }
+  const confirmDelete = async () => {
+    if (!onDocumentDelete || !documentToDelete) return false;
 
     try {
-      await onDocumentDelete(documentId);
+      await onDocumentDelete(documentToDelete);
       toast.success('Document deleted successfully');
+      setDocumentToDelete(null);
+      return true;
     } catch (error) {
       console.error('Error deleting document:', error);
-      toast.error('Failed to delete document');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete document');
+      return false;
     }
   };
 
   const getUploadedDocument = (documentType: string) => {
-    return uploadedDocuments.find(doc => doc.documentType === documentType);
+    return uploadedDocuments.find(doc => !doc.tenderBidItemId && doc.documentType === documentType);
   };
 
   const isDocumentUploaded = (documentType: string) => {
-    return uploadedDocuments.some(doc => doc.documentType === documentType);
+    return uploadedDocuments.some(doc => !doc.tenderBidItemId && doc.documentType === documentType);
   };
 
   return (
@@ -210,6 +117,8 @@ export default function BidDocumentsStep({
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {requirementsError ? <p role="alert" className="text-destructive">{requirementsError}</p>
+              : documentRequirements.length === 0 && <p>This tender has no supporting document requirements. You can continue to review your bid.</p>}
             {documentRequirements.map((doc) => {
               const uploadedDoc = getUploadedDocument(doc.documentType);
               const selectedFile = selectedFiles[doc.documentType];
@@ -268,7 +177,8 @@ export default function BidDocumentsStep({
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleDelete(uploadedDoc.id)}
+                            disabled={!onDocumentDelete}
+                            onClick={() => setDocumentToDelete(uploadedDoc.id)}
                           >
                             <X className="h-4 w-4 mr-1" />
                             Remove
@@ -332,8 +242,17 @@ export default function BidDocumentsStep({
         </CardContent>
       </Card>
 
+      <BidLotItemDocuments tender={tender} bidData={bidData} bidId={bidId}
+        documents={uploadedDocuments} onUpload={onDocumentUpload}
+        onDelete={onDocumentDelete ? setDocumentToDelete : undefined} />
+
+      <ConfirmationDialog open={documentToDelete !== null}
+        onOpenChange={open => { if (!open) setDocumentToDelete(null); }}
+        title="Remove bid document?" description="Remove this supporting document from the draft bid?"
+        confirmText="Remove document" variant="destructive" onConfirm={confirmDelete} />
+
       {/* Upload Guidelines */}
-      <Card className="bg-yellow-50 border-yellow-200">
+      {documentRequirements.length > 0 && <Card className="bg-yellow-50 border-yellow-200">
         <CardHeader>
           <CardTitle className="text-yellow-900">Document Upload Guidelines</CardTitle>
         </CardHeader>
@@ -348,7 +267,7 @@ export default function BidDocumentsStep({
             <li>• Required documents: {documentRequirements.filter(d => d.isRequired).length} of {documentRequirements.length}</li>
           </ul>
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Note about saving draft first */}
       {!bidId && (

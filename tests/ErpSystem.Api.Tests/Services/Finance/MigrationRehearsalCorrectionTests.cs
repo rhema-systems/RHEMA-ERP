@@ -1,4 +1,5 @@
 using ErpSystem.Data.Migrations;
+using ErpSystem.Data.Seeders;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
@@ -93,6 +94,60 @@ public sealed class MigrationRehearsalCorrectionTests
 
         source.Should().Contain("new[] { \"ASSETS\", \"LIABILITIES\", \"EQUITY_ROOT\" }");
         source.Should().NotContain("\"ASSET_ROOT\", \"LIABILITY_ROOT\"");
+    }
+
+    [Fact]
+    [Trait("Category", "Migration")]
+    public void AccountingBookReconciliation_RestoresGovernedColumnsAndKeysConditionally()
+    {
+        var sql = ReconcileAccountingBookGovernanceForExistingDatabases.ReconciliationSql;
+
+        foreach (var column in new[]
+                 {
+                     "BookType", "LifecycleStatus", "FunctionalCurrencyCode", "BaseAccountingBookId",
+                     "PendingLifecycleStatus", "TransitionWorkflowInstanceId", "RowVersion"
+                 })
+            sql.Should().Contain($"COL_LENGTH(N'dbo.AccountingBooks', N'{column}') IS NULL");
+
+        sql.Should().Contain("AK_AccountingBooks_TenantId_Id_Code");
+        sql.Should().Contain("IX_AccountingBooks_TenantId_IsDefault");
+        sql.Should().Contain("CK_AccountingBooks_PostingLifecycle");
+        sql.Should().Contain("CASE WHEN b.IsActive = 1 AND b.AllowsPosting = 1 THEN 4 ELSE 2 END");
+    }
+
+    [Fact]
+    [Trait("Category", "Migration")]
+    public void FinanceClassificationReconciliation_CreatesMissingAuthorityWithoutReplacingRows()
+    {
+        var tableSql = ReconcileFinanceClassificationTablesForExistingDatabases.TableSql;
+        var authoritySql = ReconcileFinanceClassificationTablesForExistingDatabases.AuthoritySql;
+
+        tableSql.Should().Contain("IF OBJECT_ID(N'dbo.AccountClassifications', N'U') IS NULL");
+        tableSql.Should().Contain("IF OBJECT_ID(N'dbo.AccountAccountingBooks', N'U') IS NULL");
+        tableSql.Should().Contain("COL_LENGTH(N'dbo.AccountAccountingBooks', N'AccountClassificationId') IS NULL");
+        authoritySql.Should().Contain("IX_AccountClassifications_TenantId_AccountingBookId_Code");
+        authoritySql.Should().Contain("IX_AccountAccountingBooks_TenantId_AccountId_AccountingBookId");
+        tableSql.Should().NotContain("DROP TABLE");
+    }
+
+    [Fact]
+    public void FinanceClassificationManifest_RecognizesOnlyUntouchedLegacySystemMappings()
+    {
+        FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(new()
+        {
+            CreatedBy = "System",
+            UpdatedBy = null
+        }).Should().BeTrue();
+        FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(new()
+        {
+            CreatedBy = "System",
+            UpdatedBy = "finance.admin"
+        }).Should().BeFalse();
+        FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(new()
+        {
+            CreatedBy = "finance.admin",
+            UpdatedBy = null
+        }).Should().BeFalse();
     }
 
     private static string FindRepositoryFile(params string[] segments)

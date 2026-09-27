@@ -132,9 +132,36 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="404">No invoice exists with the specified identifier.</response>
         /// <response code="500">Internal server error during invoice retrieval.</response>
         [HttpGet("{id}")]
-        public async Task<ActionResult<InvoiceDto>> GetById(Guid id)
+        public async Task<ActionResult<InvoiceDto>> GetById(string id)
         {
-            var invoice = await _invoiceService.GetByIdAsync(id, DimensionProducer);
+            InvoiceDto? invoice;
+            if (Guid.TryParse(id, out var invoiceId))
+            {
+                try
+                {
+                    invoice = await _invoiceService.GetByIdAsync(invoiceId, DimensionProducer);
+                }
+                catch (KeyNotFoundException)
+                {
+                    invoice = null;
+                }
+            }
+            else
+            {
+                invoice = await _invoiceService.GetByInvoiceNumberAsync(id);
+                if (invoice is not null)
+                {
+                    try
+                    {
+                        invoice = await _invoiceService.GetByIdAsync(invoice.Id, DimensionProducer) ?? invoice;
+                    }
+                    catch (KeyNotFoundException)
+                    {
+                        // Fall back to the number lookup so older links still show the invoice details.
+                    }
+                }
+            }
+
             return invoice == null ? NotFound() : Ok(invoice);
         }
 
@@ -889,8 +916,8 @@ namespace ErpSystem.Api.Controllers.Finance
         [Authorize(Policy = FinancePermissions.ViewFinance)]
         public async Task<ActionResult<SubledgerUnappliedSettlementReportDto>> GetUnappliedSettlements(
             [FromQuery] DateTime? asOfDate = null,
-            [FromQuery] Guid? customerId = null)
-            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, customerId));
+            [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, businessPartnerId));
 
         /// <summary>
         /// Generates a detailed AR aging report with per-customer and per-invoice breakdown by aging buckets.
@@ -946,7 +973,7 @@ namespace ErpSystem.Api.Controllers.Finance
         ///
         /// **Authorization:** Requires authenticated user with AR Reports read permission
         /// </remarks>
-        /// <param name="customerId">The unique identifier (GUID) of the customer for the statement.</param>
+        /// <param name="businessPartnerId">The canonical Business Partner identifier for the customer statement.</param>
         /// <param name="fromDate">The start date of the statement period (inclusive).</param>
         /// <param name="toDate">The end date of the statement period (inclusive).</param>
         /// <returns>A <see cref="CustomerStatementDto"/> containing the chronological transaction list and balances.</returns>
@@ -955,12 +982,12 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">User is not authenticated.</response>
         /// <response code="404">No customer exists with the specified identifier.</response>
         /// <response code="500">Internal server error during statement generation.</response>
-        [HttpGet("customer-statement/{customerId}")]
+        [HttpGet("customer-statement/{businessPartnerId}")]
         public async Task<ActionResult<CustomerStatementDto>> GetCustomerStatement(
-            Guid customerId,
+            Guid businessPartnerId,
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate)
-            => Ok(await _reportsService.GetCustomerStatementAsync(customerId, fromDate, toDate));
+            => Ok(await _reportsService.GetCustomerStatementAsync(businessPartnerId, fromDate, toDate));
 
         /// <summary>
         /// Generates a detailed customer ledger for one or more customer business partners.
@@ -969,12 +996,12 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<CustomerDetailedLedgerReportDto>> GetCustomerDetailedLedger(
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate,
-            [FromQuery] List<Guid>? customerIds = null,
+            [FromQuery] List<Guid>? businessPartnerIds = null,
             [FromQuery] bool showCustomerCurrency = false)
         {
             try
             {
-                return Ok(await _reportsService.GetCustomerDetailedLedgerAsync(fromDate, toDate, customerIds, showCustomerCurrency));
+                return Ok(await _reportsService.GetCustomerDetailedLedgerAsync(fromDate, toDate, businessPartnerIds, showCustomerCurrency));
             }
             catch (Exception ex)
             {

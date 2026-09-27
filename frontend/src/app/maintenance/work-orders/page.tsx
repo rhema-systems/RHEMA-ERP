@@ -1,5 +1,7 @@
 'use client';
 
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
+
 import React, { useState, useEffect, Suspense } from 'react';
 import type { DateRange } from 'react-day-picker';
 import { useSearchParams } from 'next/navigation';
@@ -1890,6 +1892,10 @@ function WorkOrdersPageContent() {
 
   return (
     <div className="space-y-6">
+      <GlobalSearchRecordOpener
+        load={id => maintenanceApiService.getWorkOrderById(id)}
+        onOpen={handleOpenWorkOrderDetails}
+      />
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>

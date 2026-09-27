@@ -51,17 +51,17 @@ namespace ErpSystem.Core.Entities.Finance
 
         /// <summary>
         /// Exchange rate value expressed as:
-        /// 1 unit of TargetCurrency = ExchangeRate units of BaseCurrency
+        /// 1 unit of BaseCurrency = ExchangeRate units of TargetCurrency
         /// 
         /// Example 1: 1 USD = 15.25 GHS
         /// - BaseCurrencyCode = "GHS"
         /// - TargetCurrencyCode = "USD"
-        /// - ExchangeRate = 15.25
+        /// - ExchangeRate = 0.065574
         /// 
         /// Example 2: 1 EUR = 17.50 GHS
         /// - BaseCurrencyCode = "GHS"
         /// - TargetCurrencyCode = "EUR"
-        /// - ExchangeRate = 17.50
+        /// - ExchangeRate = 0.057143
         /// 
         /// Precision: 6 decimal places to handle currencies with small denominations.
         /// </summary>
@@ -71,10 +71,10 @@ namespace ErpSystem.Core.Entities.Finance
 
         /// <summary>
         /// Inverse rate (calculated automatically) expressed as:
-        /// 1 unit of BaseCurrency = InverseRate units of TargetCurrency
+        /// 1 unit of TargetCurrency = InverseRate units of BaseCurrency
         /// 
-        /// Example: If Rate = 15.25 (1 USD = 15.25 GHS)
-        /// Then InverseRate = 0.065574 (1 GHS = 0.065574 USD)
+        /// Example: If Rate = 0.08 (1 GHS = 0.08 USD)
+        /// Then InverseRate = 12.5 (1 USD = 12.5 GHS)
         /// 
         /// Calculated as: InverseRate = 1 / Rate
         /// Stored for convenience and performance optimization.

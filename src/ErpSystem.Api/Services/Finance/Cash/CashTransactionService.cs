@@ -3213,7 +3213,7 @@ public class CashTransactionService : ICashTransactionService
 
         return new BankTransferRateSnapshot(
             rate.Id,
-            rate.Rate,
+            rate.InverseRate,
             string.IsNullOrWhiteSpace(rate.RateSource) ? "Approved tenant rate" : rate.RateSource.Trim(),
             rate.EffectiveDate.Date,
             rate.QuoteSide,

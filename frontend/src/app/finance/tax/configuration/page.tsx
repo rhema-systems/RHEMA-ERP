@@ -18,6 +18,7 @@ import {
     XCircle,
     Layers
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function TaxConfigurationPage() {
     const pathname = usePathname() ?? '';
@@ -75,10 +76,10 @@ export default function TaxConfigurationPage() {
                                 setLoading(true);
                                 await taxDataService.seedGhanaTaxes();
                                 await loadTaxes();
-                                alert('Ghana taxes seeded successfully!');
+                                toast.success('The standard Ghana tax configuration was created.');
                             } catch (e) {
                                 console.error(e);
-                                alert('Failed to seed taxes.');
+                                toast.error('The standard Ghana tax configuration was not created. Review the server response and retry.');
                             } finally {
                                 setLoading(false);
                             }

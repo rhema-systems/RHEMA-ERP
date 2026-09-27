@@ -22,11 +22,11 @@ using ErpSystem.Api.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using QuestPDF.Fluent;
-using QuestPDF.Helpers;
-using QuestPDF.Infrastructure;
+using Syncfusion.DocIO.DLS;
+using Syncfusion.DocIORenderer;
 using CentralDocumentMetadataTemplateEntity = ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate;
 using BusinessPartner = ErpSystem.Core.Entities.Procurement.BusinessPartner;
+using BusinessPartnerRoles = ErpSystem.Core.Entities.Procurement.BusinessPartnerRoles;
 
 namespace ErpSystem.Api.Controllers.DocumentManagement;
 
@@ -237,6 +237,7 @@ public sealed class DocumentManagementController : ControllerBase
     public async Task<IActionResult> GetMetadataTemplates(CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
+        await EnsureEstateAgreementMetadataTemplatesAsync(tenantId, cancellationToken);
         var templates = await _db.CentralDocumentMetadataTemplates
             .AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted)
@@ -987,8 +988,15 @@ public sealed class DocumentManagementController : ControllerBase
                 UpsertPropertyAgreementField(procedureCase, fields, "internalSignatureStatus", "Internal digital signature status", "select", $"Digitally signed by {actor}", actorId, now);
                 UpsertPropertyAgreementField(procedureCase, fields, "finalSignedAgreementReference", "Final signed agreement reference", "text", record.DocumentReference, actorId, now);
                 UpsertPropertyAgreementField(procedureCase, fields, "finalSignedAgreementVersion", "Final signed agreement version", "text", record.CurrentVersion, actorId, now);
-                var isRentalRequest = fields.TryGetValue("requestType", out var requestType)
-                    && requestType.Value?.Contains("rental", StringComparison.OrdinalIgnoreCase) == true;
+                var requestTypeValue = fields.TryGetValue("requestType", out var requestType)
+                    ? requestType.Value ?? string.Empty
+                    : string.Empty;
+                var isRentalRequest =
+                    (requestTypeValue.Contains("rental", StringComparison.OrdinalIgnoreCase)
+                        || requestTypeValue.Contains("rent", StringComparison.OrdinalIgnoreCase)
+                        || requestTypeValue.Contains("lease", StringComparison.OrdinalIgnoreCase))
+                    && !requestTypeValue.Contains("purchase", StringComparison.OrdinalIgnoreCase)
+                    && !requestTypeValue.Contains("sale", StringComparison.OrdinalIgnoreCase);
                 if (isRentalRequest
                     && fields.TryGetValue("moveInDate", out var moveInDate)
                     && !string.IsNullOrWhiteSpace(moveInDate.Value))
@@ -1164,7 +1172,7 @@ public sealed class DocumentManagementController : ControllerBase
             item.TenantId == procedureCase.TenantId
             && !item.IsDeleted
             && item.IsActive
-            && item.PartnerType == "Customer");
+            && BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType));
 
         if (Guid.TryParse(sourceReference, out var customerId))
         {
@@ -1434,16 +1442,35 @@ public sealed class DocumentManagementController : ControllerBase
 
     private async Task EnsureDefaultGenerationTemplatesAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var existingCodes = await _db.CentralDocumentGenerationTemplates
+        await EnsureEstateAgreementMetadataTemplatesAsync(tenantId, cancellationToken);
+        var existingTemplates = await _db.CentralDocumentGenerationTemplates
             .Where(item => item.TenantId == tenantId)
-            .Select(item => item.TemplateCode)
             .ToListAsync(cancellationToken);
-        var existing = existingCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existing = existingTemplates.Select(item => item.TemplateCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var template in existingTemplates.Where(item => !item.IsDeleted
+            && string.Equals(item.MetadataTemplateCode, "EST-LEASE-XFER", StringComparison.OrdinalIgnoreCase)))
+        {
+            var metadataCode = template.TemplateCode switch
+            {
+                "EST-LEASE-AGREEMENT" => "EST-LEASE-AGREEMENT",
+                "EST-SALE-AGREEMENT" or "CUSTOM_PROPERTY_SALE_AGREEMENT" => "EST-SALE-AGREEMENT",
+                "EST-RENT-AGREEMENT" => "EST-RENT-AGREEMENT",
+                _ => null
+            };
+            if (metadataCode is not null)
+            {
+                template.MetadataTemplateCode = metadataCode;
+            }
+        }
         var missingDefinitions = GeneratedDocumentTemplates
             .Where(definition => !existing.Contains(definition.TemplateCode))
             .ToList();
         if (missingDefinitions.Count == 0)
         {
+            if (_db.ChangeTracker.HasChanges())
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+            }
             return;
         }
 
@@ -1484,6 +1511,69 @@ public sealed class DocumentManagementController : ControllerBase
 
             // DMS setup can be hit by parallel first requests; if another request inserted the defaults, reload instead of returning a 500.
             if (!await DefaultGenerationTemplatesExistAsync(tenantId, cancellationToken))
+            {
+                throw;
+            }
+        }
+    }
+
+    private async Task EnsureEstateAgreementMetadataTemplatesAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var definitions = new[]
+        {
+            new { Code = "EST-SALE-AGREEMENT", Type = "Property Sale Agreement", Required = new[] { "AgreementReference", "AgreementDate", "GrantorName", "CustomerName", "PropertyReference", "PurchasePrice", "Currency" } },
+            new { Code = "EST-LEASE-AGREEMENT", Type = "Lease Agreement", Required = new[] { "AgreementReference", "AgreementDate", "GrantorName", "CustomerName", "PropertyReference", "FullTermLeaseAmount", "LeaseTerm", "Currency" } },
+            new { Code = "EST-RENT-AGREEMENT", Type = "Rent Agreement", Required = new[] { "AgreementReference", "AgreementDate", "GrantorName", "CustomerName", "PropertyReference", "MonthlyRent", "LeaseTerm", "Currency" } }
+        };
+        var codes = await _db.CentralDocumentMetadataTemplates
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+            .Select(item => item.TemplateCode)
+            .ToListAsync(cancellationToken);
+        var existing = codes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missing = definitions.Where(item => !existing.Contains(item.Code)).ToList();
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var definition in missing)
+        {
+            _db.CentralDocumentMetadataTemplates.Add(new CentralDocumentMetadataTemplateEntity
+            {
+                TenantId = tenantId,
+                Module = "Estate",
+                DocumentType = definition.Type,
+                TemplateCode = definition.Code,
+                SourceLabel = "Source: Estate / Property Management -> Central DMS",
+                RequiredFieldsJson = JsonSerializer.Serialize(definition.Required),
+                RelationshipsJson = JsonSerializer.Serialize(new[] { "Estate transaction", "Property or parcel", "Customer", "Legal matter", "Finance invoice" }),
+                RetentionRule = "Permanent legal and estate records",
+                AccessProfile = "Estate + Legal restricted",
+                IsActive = true,
+                PublishedAt = now,
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            foreach (var entry in _db.ChangeTracker.Entries<CentralDocumentMetadataTemplateEntity>()
+                .Where(entry => entry.State == EntityState.Added))
+            {
+                entry.State = EntityState.Detached;
+            }
+            var persisted = await _db.CentralDocumentMetadataTemplates.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+                .Select(item => item.TemplateCode)
+                .ToListAsync(cancellationToken);
+            if (!definitions.All(item => persisted.Contains(item.Code, StringComparer.OrdinalIgnoreCase)))
             {
                 throw;
             }
@@ -1618,6 +1708,16 @@ public sealed class DocumentManagementController : ControllerBase
             && !await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
         {
             return Forbid();
+        }
+
+        if (record is not null
+            && string.Equals(request.SourceEntityType, "LandAcquisition", StringComparison.OrdinalIgnoreCase))
+        {
+            return Conflict(new
+            {
+                success = false,
+                message = $"Agreement {record.DocumentReference} has already been generated for this land acquisition. Open the existing agreement instead of regenerating it."
+            });
         }
 
         var documentReference = record?.DocumentReference
@@ -1824,7 +1924,12 @@ public sealed class DocumentManagementController : ControllerBase
     }
 
     [HttpGet("records")]
-    public async Task<IActionResult> GetRecords([FromQuery] string? module = null, [FromQuery] int take = 100, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> GetRecords(
+        [FromQuery] string? module = null,
+        [FromQuery] string? documentReference = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int take = 100,
+        CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         take = Math.Clamp(take, 1, 500);
@@ -1835,6 +1940,18 @@ public sealed class DocumentManagementController : ControllerBase
         if (!string.IsNullOrWhiteSpace(module))
         {
             query = query.Where(item => item.SourceModule == module);
+        }
+
+        if (!string.IsNullOrWhiteSpace(documentReference))
+        {
+            var reference = documentReference.Trim();
+            query = query.Where(item => item.DocumentReference == reference);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(item => item.DocumentReference.Contains(term) || item.Title.Contains(term));
         }
 
         var records = await LoadViewableRecordsAsync(tenantId, query, take, cancellationToken);
@@ -1949,6 +2066,42 @@ public sealed class DocumentManagementController : ControllerBase
         }).ToList();
 
         return Ok(new { success = true, data = queueItems });
+    }
+
+    [HttpPost("records/{id:guid}/attach-to-case")]
+    public async Task<IActionResult> AttachRecordToCase(
+        Guid id,
+        [FromBody] AttachCentralDocumentToProcedureCaseRequest request,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var record = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (record is null)
+        {
+            return NotFound(new { success = false, message = "DMS document record was not found." });
+        }
+        if (!await CanViewRecordAsync(tenantId, record, cancellationToken))
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            var procedureCase = await _procedureCaseService.LinkCentralDocumentAsync(request.CaseId, request.DocumentId, id);
+            return procedureCase is null
+                ? NotFound(new { success = false, message = "Case document was not found." })
+                : Ok(new { success = true, data = procedureCase });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
     }
 
     [HttpGet("records/{id:guid}")]
@@ -2073,7 +2226,8 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
+        if (!CanUseSourceModuleForDms(record.SourceModule)
+            && !await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
         {
             return Forbid();
         }
@@ -2580,6 +2734,27 @@ public sealed class DocumentManagementController : ControllerBase
             CreatedById = GetUserId()
         };
 
+        if (string.Equals(version.Status, "Current", StringComparison.OrdinalIgnoreCase))
+        {
+            var currentVersions = await _db.CentralDocumentVersions
+                .Where(item => item.TenantId == tenantId
+                    && item.DocumentRecordId == record.Id
+                    && item.Status == "Current"
+                    && !item.IsDeleted)
+                .ToListAsync(cancellationToken);
+
+            foreach (var currentVersion in currentVersions)
+            {
+                currentVersion.Status = "Published";
+                currentVersion.UpdatedAt = now;
+                currentVersion.UpdatedBy = _currentUserService.UserName ?? "System";
+                currentVersion.LastModifiedById = GetUserId();
+            }
+
+            version.PublishedAt = now;
+            version.PublishedById = GetUserId();
+        }
+
         record.CurrentVersion = version.VersionNumber;
         record.VersionStatus = version.Status;
         record.RepositoryPath = version.RepositoryPath;
@@ -2725,6 +2900,7 @@ public sealed class DocumentManagementController : ControllerBase
     public async Task<IActionResult> GenerateVersionRendition(
         Guid id,
         Guid versionId,
+        [FromQuery] bool force,
         CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
@@ -2752,7 +2928,7 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
-        if (!string.IsNullOrWhiteSpace(version.RenditionPath))
+        if (!force && !string.IsNullOrWhiteSpace(version.RenditionPath))
         {
             return Ok(new { success = true, data = ToVersionDto(version) });
         }
@@ -3237,7 +3413,8 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanAnnotate, cancellationToken))
+        if (!CanUseSourceModuleForDms(record.SourceModule)
+            && !await CanUseRecordActionAsync(tenantId, record, rule => rule.CanAnnotate, cancellationToken))
         {
             return Forbid();
         }
@@ -3291,7 +3468,8 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS annotation review was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanAnnotate, cancellationToken))
+        if (!CanUseSourceModuleForDms(record.SourceModule)
+            && !await CanUseRecordActionAsync(tenantId, record, rule => rule.CanAnnotate, cancellationToken))
         {
             return Forbid();
         }
@@ -3788,19 +3966,19 @@ public sealed class DocumentManagementController : ControllerBase
             "EST-LEASE-AGREEMENT",
             "Lease Agreement",
             "Lease Agreement - {{ApplicantName}}",
-            "EST-LEASE-XFER",
-            ["ApplicantName", "CaseReference", "PropertyNumber", "LandUse", "LeaseTerm", "MoveInDate", "GroundRent", "PaymentFrequency"],
+            "EST-LEASE-AGREEMENT",
+            ["ApplicantName", "CaseReference", "PropertyReference", "LeaseTerm", "AgreementStartDate", "FullTermLeaseAmount", "PremiumCharge", "AnnualGroundRent", "Currency"],
             """
             LEASE AGREEMENT
 
             Estate reference: {{CaseReference}}
             Lessee: {{ApplicantName}}
-            Property / plot number: {{PropertyNumber}}
-            Permitted use: {{LandUse}}
+            Property / plot number: {{PropertyReference}}
             Lease term: {{LeaseTerm}}
-            Move-in / commencement date: {{MoveInDate}}
-            Ground rent payable: {{GroundRent}}
-            Payment frequency: {{PaymentFrequency}}
+            Commencement date: {{AgreementStartDate}}
+            Full term lease amount: {{Currency}} {{FullTermLeaseAmount}}
+            Separate premium charge: {{PremiumCharge}}
+            Separate annual ground rent: {{AnnualGroundRent}}
 
             This draft lease agreement is prepared from approved Estate records and is subject to legal review, execution by the parties, upload of signed copies, and registration where applicable.
 
@@ -3812,11 +3990,38 @@ public sealed class DocumentManagementController : ControllerBase
             Source: Estate / Facility -> Central DMS
             """),
         Template(
+            "EST-RENT-AGREEMENT",
+            "Rent Agreement",
+            "Rent Agreement - {{ApplicantName}}",
+            "EST-RENT-AGREEMENT",
+            ["ApplicantName", "CaseReference", "PropertyReference", "LeaseTerm", "AgreementStartDate", "MonthlyRent", "PremiumCharge", "AnnualGroundRent", "Currency"],
+            """
+            RENT AGREEMENT
+
+            Estate reference: {{CaseReference}}
+            Tenant: {{ApplicantName}}
+            Property / unit: {{PropertyReference}}
+            Rental term: {{LeaseTerm}}
+            Commencement date: {{AgreementStartDate}}
+            Monthly rent: {{Currency}} {{MonthlyRent}}
+            Separate premium charge: {{PremiumCharge}}
+            Separate annual ground rent: {{AnnualGroundRent}}
+
+            This draft rent agreement is subject to Legal review, execution by the parties, and upload of signed copies.
+
+            Tenant signature: ____________________
+            Authorised signatory: ____________________
+
+            Date: {{Today}}
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Property Management -> Central DMS
+            """),
+        Template(
             "EST-SALE-AGREEMENT",
             "Property Sale Agreement",
             "Property Sale Agreement - {{ApplicantName}}",
-            "EST-LEASE-XFER",
-            ["ApplicantName", "CustomerReference", "CaseReference", "PropertyNumber", "PropertyReference", "PaymentAmount", "Currency", "AgreementDate"],
+            "EST-SALE-AGREEMENT",
+            ["ApplicantName", "CustomerReference", "CaseReference", "PropertyNumber", "PropertyReference", "PurchasePrice", "PremiumCharge", "Currency", "AgreementDate"],
             """
             PROPERTY SALE AGREEMENT
 
@@ -3826,7 +4031,8 @@ public sealed class DocumentManagementController : ControllerBase
             Customer reference: {{CustomerReference}}
             Property / unit: {{PropertyNumber}}
             Property reference: {{PropertyReference}}
-            Agreed purchase price: {{Currency}} {{PaymentAmount}}
+            Agreed purchase price: {{Currency}} {{PurchasePrice}}
+            Separate premium charge: {{PremiumCharge}}
 
             This agreement records the approved sale of the property identified above, subject to verification of the purchaser's supporting documents, Legal review, execution by both parties, settlement of the approved consideration, and completion of conveyance and registration requirements.
 
@@ -3836,6 +4042,49 @@ public sealed class DocumentManagementController : ControllerBase
             Date: {{Today}}
             Prepared by: {{PreparedBy}}
             Source: Estate / Property Management -> Central DMS
+            """),
+        Template(
+            "EST-LAND-ACQ-AGREEMENT",
+            "Land Acquisition Agreement",
+            "Land Acquisition Agreement - {{CaseReference}}",
+            "EST-LEASE-XFER",
+            ["CaseReference", "Location", "EstimatedSize", "IntendedUse", "GrantorName", "GrantorAddress", "GranteeName", "GranteeAddress", "NegotiatedValue", "PaymentType", "PaymentAmount", "PaymentSchedule", "RootOfTitle", "SpecialConditions", "AgreementDate", "Witness1Name", "Witness2Name"],
+            """
+            LAND ACQUISITION AGREEMENT
+
+            Agreement date: {{AgreementDate}}
+            Estate acquisition reference: {{CaseReference}}
+            Parcel location: {{Location}}
+            Estimated size: {{EstimatedSize}}
+            Intended use: {{IntendedUse}}
+
+            Grantor / seller: {{GrantorName}}
+            Grantor address: {{GrantorAddress}}
+            Grantee / buyer: {{GranteeName}}
+            Grantee address: {{GranteeAddress}}
+
+            Root of title:
+            {{RootOfTitle}}
+
+            Negotiated consideration: {{NegotiatedValue}}
+            Payment type: {{PaymentType}}
+            Payment amount: {{PaymentAmount}}
+            Payment schedule:
+            {{PaymentSchedule}}
+
+            Special conditions:
+            {{SpecialConditions}}
+
+            This draft records the negotiated land acquisition terms and remains subject to Estate approval, execution by the parties, statutory consent, stamp duty processing, and registration.
+
+            Grantor signature: ____________________
+            Grantee / authorised signatory: ____________________
+            Witness 1: {{Witness1Name}}
+            Witness 2: {{Witness2Name}}
+
+            Date: {{Today}}
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Land Acquisition -> Central DMS
             """),
         Template(
             "EST-DEED-VARIATION",
@@ -4302,13 +4551,23 @@ public sealed class DocumentManagementController : ControllerBase
 
         var listingReference = Field("listingReference");
         var propertyUnit = Field("propertyUnit");
+        Guid.TryParse(Field("listingId"), out var listingId);
+        var demarcation = listingId == Guid.Empty ? null : await _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Include(item => item.EstateManagedAsset)
+            .FirstOrDefaultAsync(item => item.Id == listingId
+                && item.TenantId == tenantId
+                && !item.IsDeleted,
+                cancellationToken);
         var asset = await _db.EstateManagedAssets
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.TenantId == tenantId
                 && !item.IsDeleted
-                && ((listingReference != null && item.AssetCode == listingReference)
+                && ((listingId != Guid.Empty && item.Id == listingId)
+                    || (listingReference != null && item.AssetCode == listingReference)
                     || (propertyUnit != null && (item.AssetCode == propertyUnit || item.ProjectUnitCode == propertyUnit))),
                 cancellationToken);
+        asset ??= demarcation?.EstateManagedAsset;
 
         var acquisition = asset?.LandAcquisitionId is { } landAcquisitionId
             ? await _db.LandAcquisitions
@@ -4339,16 +4598,28 @@ public sealed class DocumentManagementController : ControllerBase
             JoinPopulated(asset?.Town, asset?.District, asset?.Region),
             acquisition?.Location);
         var intendedUse = FirstPopulated(asset?.Purpose, acquisition?.IntendedUse, asset?.ZoningClassification);
-        var estimatedSize = FormatEstateAssetSize(asset?.AreaSquareMeters, asset?.AreaValue, asset?.AreaUnit, acquisition?.EstimatedSize);
+        var estimatedSize = FirstPopulated(
+            demarcation is null ? null : $"{demarcation.AreaSquareFeet:0.##} square feet",
+            FormatEstateAssetSize(asset?.AreaSquareMeters, asset?.AreaValue, asset?.AreaUnit, acquisition?.EstimatedSize));
         var requestType = FirstPopulated(Field("requestType"), procedureCase.Title);
         var isPurchase = requestType?.Contains("purchase", StringComparison.OrdinalIgnoreCase) == true
             || requestType?.Contains("sale", StringComparison.OrdinalIgnoreCase) == true;
+        var isLease = !isPurchase && requestType?.Contains("lease", StringComparison.OrdinalIgnoreCase) == true;
         var paymentAmount = FirstPopulated(
             isPurchase ? Field("offerAmount") : Field("listingPrice"),
+            isPurchase ? demarcation?.ExternalSalePrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
             isPurchase ? asset?.ExternalSalePrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
-            !isPurchase ? asset?.ExternalMonthlyRent?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
+            isLease ? demarcation?.ExternalListingPrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
+            !isPurchase && !isLease ? demarcation?.ExternalMonthlyRent?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
+            !isPurchase && !isLease ? asset?.ExternalMonthlyRent?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
             asset?.ExternalListingPrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
         var currency = FirstPopulated(Field("currency"), asset?.ExternalListingCurrency, asset?.Currency, tenant?.BaseCurrency);
+        var premiumRequired = string.Equals(Field("premiumChargeRequired"), "Yes", StringComparison.OrdinalIgnoreCase);
+        var groundRentRequired = string.Equals(Field("groundRentRequired"), "Yes", StringComparison.OrdinalIgnoreCase);
+        var premiumCharge = premiumRequired ? FirstPopulated(Field("premiumChargeAmount"), "To be confirmed") : "Not applicable";
+        var annualGroundRent = groundRentRequired
+            ? FirstPopulated(Field("groundRentAmount"), demarcation?.GroundRentPayable?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), asset?.GroundRentPayable?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "To be confirmed")
+            : "Not applicable";
         var moveInDate = Field("moveInDate");
         var billingStartDate = FirstPopulated(Field("billingStartDate"), isPurchase ? null : moveInDate);
         var caseReference = FirstPopulated(procedureCase.ReferenceNumber, request.CaseReference, request.SourceRecordReference);
@@ -4365,6 +4636,8 @@ public sealed class DocumentManagementController : ControllerBase
         SetAuthoritativeMergeValue(values, "GrantorAddress", tenant?.Address);
         SetAuthoritativeMergeValue(values, "PropertyReference", resolvedPropertyReference);
         SetAuthoritativeMergeValue(values, "PropertyUnit", resolvedPropertyUnit);
+        SetAuthoritativeMergeValue(values, "PropertyLocation", propertyLocation);
+        SetAuthoritativeMergeValue(values, "PropertyArea", estimatedSize);
         SetAuthoritativeMergeValue(values, "ListingReference", resolvedPropertyReference);
         SetAuthoritativeMergeValue(values, "SourceReference", FirstPopulated(asset?.PropertyFileReference, resolvedPropertyReference));
         SetAuthoritativeMergeValue(values, "Location", propertyLocation);
@@ -4375,9 +4648,20 @@ public sealed class DocumentManagementController : ControllerBase
         SetAuthoritativeMergeValue(values, "SpecialConditions", acquisition?.Agreement?.SpecialConditions);
         SetAuthoritativeMergeValue(values, "RequestType", requestType);
         SetAuthoritativeMergeValue(values, "PaymentAmount", paymentAmount);
-        SetAuthoritativeMergeValue(values, "PaymentType", isPurchase ? "Purchase price" : "Monthly rent");
-        SetAuthoritativeMergeValue(values, "PaymentSchedule", isPurchase ? acquisition?.Agreement?.PaymentSchedule : "Monthly");
+        SetAuthoritativeMergeValue(values, "PurchasePrice", isPurchase ? paymentAmount : null);
+        SetAuthoritativeMergeValue(values, "FullTermLeaseAmount", isLease ? paymentAmount : null);
+        SetAuthoritativeMergeValue(values, "MonthlyRent", !isPurchase && !isLease ? paymentAmount : null);
+        SetAuthoritativeMergeValue(values, "RentAmount", !isPurchase && !isLease ? paymentAmount : null);
+        SetAuthoritativeMergeValue(values, "PaymentType", isPurchase ? "Purchase price" : isLease ? "Full term lease amount" : "Monthly rent");
+        SetAuthoritativeMergeValue(values, "PaymentSchedule", isPurchase ? acquisition?.Agreement?.PaymentSchedule : isLease ? "As agreed" : "Monthly");
         SetAuthoritativeMergeValue(values, "Currency", currency);
+        SetAuthoritativeMergeValue(values, "PremiumChargeRequired", premiumRequired ? "Yes" : "No");
+        SetAuthoritativeMergeValue(values, "PremiumCharge", premiumCharge);
+        SetAuthoritativeMergeValue(values, "AnnualGroundRentRequired", groundRentRequired ? "Yes" : "No");
+        SetAuthoritativeMergeValue(values, "AnnualGroundRent", annualGroundRent);
+        SetAuthoritativeMergeValue(values, "GroundRent", annualGroundRent);
+        SetAuthoritativeMergeValue(values, "SalesAmountPaid", Field("salesAmountPaid"));
+        SetAuthoritativeMergeValue(values, "EstateRemainingAmount", Field("estateRemainingAmount"));
         SetAuthoritativeMergeValue(values, "LeaseTerm", Field("requestedLeaseTerm"));
         SetAuthoritativeMergeValue(values, "MoveInDate", moveInDate);
         SetAuthoritativeMergeValue(values, "AgreementStartDate", moveInDate);
@@ -4628,12 +4912,16 @@ public sealed class DocumentManagementController : ControllerBase
             new("sourcelabel", "Source label", template.SourceLabel, "text")
         };
 
-        foreach (var field in EffectiveMergeFields(template))
+        var metadataFields = EffectiveMergeFields(template)
+            .Concat(["AgreementReference", "AgreementDate", "GrantorName", "CustomerName", "PropertyReference", "PurchasePrice", "FullTermLeaseAmount", "MonthlyRent", "LeaseTerm", "Currency"])
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in metadataFields)
         {
+            values.TryGetValue(field, out var value);
             metadata.Add(new UpsertDocumentMetadataValueRequest(
                 NormalizeMetadataField(field),
                 field,
-                values.TryGetValue(field, out var value) ? value : null,
+                string.IsNullOrWhiteSpace(value) || value == "____________________" ? null : value,
                 "text"));
         }
 
@@ -4696,12 +4984,12 @@ public sealed class DocumentManagementController : ControllerBase
             }
         }
 
-        var pdfBytes = BuildSimplePdf(title, content);
+        var wordBytes = BuildSimpleWord(title, content);
         return new GeneratedTemplateFile(
-            pdfBytes,
-            $"{SafeFileName(template.TemplateCode)}-{DateTime.UtcNow:yyyyMMddHHmmss}.pdf",
-            "application/pdf",
-            true);
+            wordBytes,
+            $"{SafeFileName(template.TemplateCode)}-{DateTime.UtcNow:yyyyMMddHHmmss}.docx",
+            WordDocumentContentType,
+            false);
     }
 
     private static void MergeWordPlaceholders(
@@ -4767,49 +5055,35 @@ public sealed class DocumentManagementController : ControllerBase
         }
     }
 
-    private static byte[] BuildSimplePdf(string title, string content)
+    private static byte[] BuildSimpleWord(string title, string content)
     {
-        QuestPDF.Settings.License = LicenseType.Community;
+        using var wordDocument = new WordDocument();
+        var section = wordDocument.AddSection();
+        section.PageSetup.Margins.All = 50;
 
-        // DMS generation: paginate tenant-editable templates and keep Unicode text intact in the PDF rendition.
-        return QuestPDF.Fluent.Document.Create(container =>
+        var titleParagraph = section.AddParagraph();
+        titleParagraph.ParagraphFormat.AfterSpacing = 12;
+        var titleText = titleParagraph.AppendText(title);
+        titleText.CharacterFormat.Bold = true;
+        titleText.CharacterFormat.FontName = "Times New Roman";
+        titleText.CharacterFormat.FontSize = 14;
+
+        foreach (var paragraph in SplitPdfParagraphs(content))
         {
-            container.Page(page =>
+            var wordParagraph = section.AddParagraph();
+            wordParagraph.ParagraphFormat.AfterSpacing = string.IsNullOrWhiteSpace(paragraph) ? 6 : 8;
+
+            if (!string.IsNullOrWhiteSpace(paragraph))
             {
-                page.Size(PageSizes.A4);
-                page.Margin(50);
-                page.DefaultTextStyle(text => text
-                    .FontFamily("Times New Roman")
-                    .FontSize(10)
-                    .FontColor(Colors.Black));
+                var text = wordParagraph.AppendText(paragraph);
+                text.CharacterFormat.FontName = "Times New Roman";
+                text.CharacterFormat.FontSize = 10;
+            }
+        }
 
-                page.Content().Column(column =>
-                {
-                    column.Spacing(8);
-                    column.Item().Text(title).FontSize(14).Bold();
-
-                    foreach (var paragraph in SplitPdfParagraphs(content))
-                    {
-                        if (string.IsNullOrWhiteSpace(paragraph))
-                        {
-                            column.Item().Height(6);
-                            continue;
-                        }
-
-                        column.Item().Text(paragraph);
-                    }
-                });
-
-                page.Footer()
-                    .AlignCenter()
-                    .Text(text =>
-                    {
-                        text.CurrentPageNumber();
-                        text.Span(" / ");
-                        text.TotalPages();
-                    });
-            });
-        }).GeneratePdf();
+        using var output = new MemoryStream();
+        wordDocument.Save(output, Syncfusion.DocIO.FormatType.Docx);
+        return output.ToArray();
     }
 
     private static IEnumerable<string> SplitPdfParagraphs(string value)
@@ -4845,6 +5119,7 @@ public sealed class DocumentManagementController : ControllerBase
         Guid tenantId,
         CancellationToken cancellationToken)
     {
+        await EnsureEstateAgreementMetadataTemplatesAsync(tenantId, cancellationToken);
         var templates = await _db.CentralDocumentMetadataTemplates
             .AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
@@ -6182,6 +6457,9 @@ public sealed class DocumentManagementController : ControllerBase
                 "Estate Manager",
                 "Land Registry Officer",
                 "Survey Officer",
+                "Acquisition Committee",
+                "Executive Approver",
+                "Head of Estate",
                 "Facilities Officer",
                 "Facilities Manager",
                 "Property Manager");
@@ -6213,6 +6491,10 @@ public sealed class DocumentManagementController : ControllerBase
     private bool IsDmsAccessAdministrator()
         => _currentUserService.IsInRole("SuperAdmin")
             || _currentUserService.IsInRole("TenantAdmin")
+            || _currentUserService.IsInRole("Admin")
+            || _currentUserService.IsInRole("Administrator")
+            || _currentUserService.IsInRole("SystemAdmin")
+            || _currentUserService.IsInRole("System Admin")
             || _currentUserService.IsInRole("Document Control Officer")
             || _currentUserService.IsInRole("Records Officer");
 
@@ -6603,7 +6885,8 @@ public sealed class DocumentManagementController : ControllerBase
         review.ClosedAt,
         review.ReviewNotes,
         review.AnnotationStateJson,
-        review.CreatedAt
+        review.CreatedAt,
+        review.UpdatedAt
     };
 
     private static object ToMetadataValueDto(CentralDocumentMetadataValue value) => new

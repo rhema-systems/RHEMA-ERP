@@ -75,6 +75,8 @@ public class EstateManagedAssetDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public DateTime? RentBillingActivatedAt { get; set; }
     public DateTime? NextRentBillingDate { get; set; }
     public Guid? LastRentInvoiceId { get; set; }
@@ -148,6 +150,8 @@ public class UpdateEstateManagedAssetListingDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -229,6 +233,9 @@ public class EstateLandDemarcationDto
     public decimal? AllocatedCost { get; set; }
     public decimal? CostPerAcre { get; set; }
     public decimal? TargetSalePrice { get; set; }
+    public decimal? GroundRentPayable { get; set; }
+    public decimal? GroundRentRatePerAcre { get; set; }
+    public decimal? GroundRentComputed { get; set; }
     public string? ParentLandAssetReference { get; set; }
     public string? ParentFixedAssetReference { get; set; }
     public string? ChildFixedAssetReference { get; set; }
@@ -241,6 +248,8 @@ public class EstateLandDemarcationDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -282,6 +291,8 @@ public class UpdateEstateLandDemarcationDispositionDto
     public decimal? ExternalListingPrice { get; set; }
     public decimal? ExternalSalePrice { get; set; }
     public decimal? ExternalMonthlyRent { get; set; }
+    public bool? ExternalGroundRentRequired { get; set; }
+    public bool? ExternalPremiumChargeRequired { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -297,14 +308,18 @@ public class UpdateEstateLandDemarcationCostingDto
 
 public class EstateManagedAssetQuery
 {
+    public Guid? AssetId { get; set; }
     public EstateManagedAssetType? AssetType { get; set; }
     public EstateManagedAssetStatus? Status { get; set; }
+    public List<EstateManagedAssetStatus> Statuses { get; set; } = new();
     public List<EstateManagedAssetStatus> ExcludedStatuses { get; set; } = new();
     public string? Search { get; set; }
     public bool? AvailableForLease { get; set; }
     public bool? AvailableForSale { get; set; }
     public bool? AvailableForSaleOrLease { get; set; }
     public bool? PortalListingCandidates { get; set; }
+    public bool? PublishedToExternalPortal { get; set; }
+    public int Skip { get; set; }
     public int Take { get; set; } = 100;
 }
 

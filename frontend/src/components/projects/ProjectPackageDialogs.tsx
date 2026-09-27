@@ -38,7 +38,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { BusinessPartnerDto } from '@/services/businessPartnerService';
-import type { ContractDto } from '@/services/contractService';
+import type { ProjectContractLookupDto } from '@/services/projectService';
 import type {
   InventoryItemDto,
   UnitOfMeasureDto,
@@ -190,7 +190,7 @@ type ProjectPackageDialogsProps = {
   boqDraft: CreateProjectBoqItemDto;
   setBoqDraft: Dispatch<SetStateAction<CreateProjectBoqItemDto>>;
   activeBusinessPartners: BusinessPartnerDto[];
-  activeContracts: ContractDto[];
+  activeContracts: ProjectContractLookupDto[];
   tenders: ProjectTenderLookupDto[];
   procurementPlanItems: ProjectProcurementPlanItemLookupDto[];
   purchaseRequisitions: ProjectPurchaseRequisitionLookupDto[];

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -398,6 +400,12 @@ export const navigationItems: NavItem[] = [
             title: 'Journal Entries',
             href: '/finance/journal-entries',
             icon: FileText,
+          },
+          {
+            title: 'Delta Ledger',
+            href: '/finance/delta-ledger',
+            icon: Layers3,
+            permissions: ['Finance.Read'],
           },
           {
             // Journal batches were delivered as a complete controlled workspace, but the
@@ -2013,7 +2021,7 @@ export const navigationItems: NavItem[] = [
             icon: BarChart3,
           },
           {
-            title: 'SOP Procedures',
+            title: 'Workspaces',
             href: '/development/planning',
             icon: ClipboardList,
           },
@@ -2422,6 +2430,20 @@ export const navigationItems: NavItem[] = [
             icon: BarChart3,
           },
         ],
+      },
+      {
+        title: 'Supplier Invoices',
+        href: '/procurement/supplier-invoices',
+        icon: FileText,
+        roles: PROCUREMENT_ROLES,
+        permissions: [
+          'procurement.records.read',
+          'procurement.purchase-order.read',
+          'Finance.AP.Invoices.Create',
+          'Finance.AP.Invoices.Manage',
+          'Finance.Read',
+        ],
+        accessMode: 'any',
       },
       {
         title: 'Tendering',
@@ -3068,11 +3090,6 @@ export const navigationItems: NavItem[] = [
             icon: Landmark,
           },
           {
-            title: 'Partially Serviced',
-            href: '/estate/EstateLandsPartiallyServiced',
-            icon: Home,
-          },
-          {
             title: 'Housing / HOS',
             href: '/estate/EstateHousingHomeOwnership',
             icon: Building2,
@@ -3081,11 +3098,6 @@ export const navigationItems: NavItem[] = [
             title: 'Traditional Lands',
             href: '/estate/EstateTraditionalLands',
             icon: Landmark,
-          },
-          {
-            title: 'Regularisation',
-            href: '/estate/EstateTenancyRegularisation',
-            icon: Award,
           },
           {
             title: 'Reporting Controls',
@@ -3595,6 +3607,8 @@ export const navigationItems: NavItem[] = [
       'admin.she',
       'Reference.Geography.Write',
       'Reference.Geography.Admin',
+      'quantity-survey.configuration.read',
+      'quantity-survey.workspace.read',
     ],
     accessMode: 'any',
     children: [
@@ -4149,12 +4163,12 @@ export const navigationItems: NavItem[] = [
             icon: BarChart3,
             permissions: ['quantity-survey.workspace.read'],
           },
-          {
+          ...(isQsOptionalFeatureEnabled('escalation') ? [{
             title: 'QS Escalation Formulas',
             href: '/administration/project-management/quantity-survey-escalation',
             icon: LineChart,
             permissions: ['quantity-survey.workspace.read'],
-          },
+          }] : []),
         ],
       },
       {

@@ -85,6 +85,50 @@ public sealed class ControlledFileUploadServiceTests
             It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
     }
 
+    [Fact]
+    public async Task CentralRepositoryRejectsSkippedUpload()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var uploadId = Guid.NewGuid();
+        await using var db = Database();
+        db.FileUploadRecords.Add(new FileUploadRecord
+        {
+            Id = uploadId,
+            TenantId = tenantId,
+            Category = ControlledFileUploadCategories.DocumentManagement,
+            FilePath = "private/document-management/unscanned.pdf",
+            StoredFileName = "unscanned.pdf",
+            OriginalFileName = "unscanned.pdf",
+            ContentType = "application/pdf",
+            FileSize = 25,
+            StorageProvider = "test",
+            UploadedByUserId = actorId,
+            VirusScanStatus = FileVirusScanStatus.Skipped
+        });
+        await db.SaveChangesAsync();
+        var service = new CentralDocumentRepositoryFileService(
+            db, new Mock<IFileStorageService>().Object,
+            new Mock<IControlledFileUploadService>().Object);
+
+        var action = () => service.RegisterAsync(new CentralDocumentRepositoryRegistration
+        {
+            TenantId = tenantId,
+            ActorUserId = actorId,
+            FileUploadRecordId = uploadId,
+            SourceRecordId = Guid.NewGuid(),
+            SourceModule = "Estate",
+            SourceLabel = "Estate agreement",
+            SourceEntityType = "EstatePropertyCase",
+            Title = "Unscanned agreement",
+            DocumentType = "Agreement",
+            AccessProfile = "Estate restricted"
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Only a clean controlled upload can be registered in the central DMS.");
+    }
+
     [Theory]
     [InlineData(ControlledFileUploadCategories.DocumentManagement)]
     [InlineData(ControlledFileUploadCategories.SupplierRegistrationEvidence)]

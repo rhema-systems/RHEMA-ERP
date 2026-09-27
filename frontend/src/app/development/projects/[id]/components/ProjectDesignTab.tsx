@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
 import { QuantitySurveyDesignRevisionImpactPanel } from '@/components/quantity-survey/QuantitySurveyDesignRevisionImpactPanel';
 import type {
   CreateProjectDrawingDto,
@@ -344,7 +345,7 @@ export function ProjectDesignTab({
         </Card>
       </div>
 
-      <QuantitySurveyDesignRevisionImpactPanel projectId={projectId} />
+      {isQsOptionalFeatureEnabled('design-impact') && <QuantitySurveyDesignRevisionImpactPanel projectId={projectId} />}
     </div>
   );
 }

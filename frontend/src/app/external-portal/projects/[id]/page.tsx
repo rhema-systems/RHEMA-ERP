@@ -17,6 +17,7 @@ import { QuantitySurveyJointMeasurementWorkspace } from '@/components/quantity-s
 import { QuantitySurveyValuationPortalWorkspace } from '@/components/quantity-survey/QuantitySurveyValuationPortalWorkspace';
 import { QuantitySurveyMaterialContractorWorkspace } from '@/components/quantity-survey/QuantitySurveyMaterialReconciliationDialog';
 import { QuantitySurveyContractClaimsWorkspace } from '@/components/quantity-survey/QuantitySurveyContractClaimsWorkspace';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
 import { QuantitySurveyDayworkWorkspace } from '@/components/quantity-survey/QuantitySurveyDayworkWorkspace';
 import { QuantitySurveySubcontractWorkspace } from '@/components/quantity-survey/QuantitySurveySubcontractWorkspace';
 import { AttachProjectDocumentDto, CreateProjectCommentDto, ProjectCatalogEntryDto, ProjectExternalDetailDto, projectService, SubmitProjectDeliverableDto, UpdateProjectWorkItemProgressDto } from '@/services/projectService';
@@ -346,14 +347,14 @@ export default function ExternalProjectDetailPage() {
       </Card>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3 gap-1 md:grid-cols-8">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
           <TabsTrigger value="plan">Plan</TabsTrigger>
           <TabsTrigger value="milestones">Milestones</TabsTrigger>
           <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="measurements">Measurements</TabsTrigger>
-          <TabsTrigger value="valuations">Valuations</TabsTrigger>
-          <TabsTrigger value="claims">Claims & dayworks</TabsTrigger>
+          {isQsOptionalFeatureEnabled('external-submissions') && isQsOptionalFeatureEnabled('joint-measurements') && <TabsTrigger value="measurements">Measurements</TabsTrigger>}
+          {isQsOptionalFeatureEnabled('external-submissions') && <TabsTrigger value="valuations">Valuations</TabsTrigger>}
+          {isQsOptionalFeatureEnabled('external-submissions') && <TabsTrigger value="claims">Claims</TabsTrigger>}
           <TabsTrigger value="updates">Updates</TabsTrigger>
         </TabsList>
 
@@ -625,8 +626,8 @@ export default function ExternalProjectDetailPage() {
           ) : null}
         </TabsContent>
 
-        <TabsContent value="measurements" className="space-y-6">
-          <QuantitySurveyJointMeasurementWorkspace projectId={project.id} external />
+        {isQsOptionalFeatureEnabled('external-submissions') && <><TabsContent value="measurements" className="space-y-6">
+          {isQsOptionalFeatureEnabled('joint-measurements') && <QuantitySurveyJointMeasurementWorkspace projectId={project.id} external />}
         </TabsContent>
 
         <TabsContent value="valuations" className="space-y-6">
@@ -635,10 +636,10 @@ export default function ExternalProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="claims" className="space-y-6">
-          <QuantitySurveyDayworkWorkspace projectId={project.id} external />
+          {isQsOptionalFeatureEnabled('daywork') && <QuantitySurveyDayworkWorkspace projectId={project.id} external />}
           <QuantitySurveyContractClaimsWorkspace projectId={project.id} external />
-          <QuantitySurveySubcontractWorkspace projectId={project.id} external />
-        </TabsContent>
+          {isQsOptionalFeatureEnabled('subcontracts') && <QuantitySurveySubcontractWorkspace projectId={project.id} external />}
+        </TabsContent></>}
 
         <TabsContent value="updates" className="space-y-6">
           <Card>

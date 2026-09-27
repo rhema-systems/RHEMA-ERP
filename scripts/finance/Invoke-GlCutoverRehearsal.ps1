@@ -35,8 +35,8 @@ $supersededMigrations = @(
     '20260312013725_AddProjectResourceRoutingRequirements'
 )
 $approvedNamePattern = '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$'
-$authoritativeMigrationCount = 1
-$authoritativeLatestMigration = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
+$authoritativeMigrationCount = 16
+$authoritativeLatestMigration = '20260925051637_CanonicalCollectionBusinessPartnerIdentity'
 $disposableMigrationCommandTimeoutSeconds = 600
 $migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
 $sqlcmdMaxVariableWidth = 8000
@@ -60,13 +60,33 @@ function Register-SensitiveEvidenceToken([string]$value) {
     }
 }
 
+function Replace-OrdinalIgnoreCase([string]$value, [string]$oldValue, [string]$newValue) {
+    # The case-insensitive String.Replace overload is unavailable in the
+    # Windows PowerShell .NET Framework runtime used by the VPS.
+    if ([string]::IsNullOrEmpty($oldValue)) { return $value }
+
+    $result = [System.Text.StringBuilder]::new()
+    $offset = 0
+    while ($true) {
+        $match = $value.IndexOf($oldValue, $offset, [StringComparison]::OrdinalIgnoreCase)
+        if ($match -lt 0) {
+            [void]$result.Append($value, $offset, $value.Length - $offset)
+            break
+        }
+        [void]$result.Append($value, $offset, $match - $offset)
+        [void]$result.Append($newValue)
+        $offset = $match + $oldValue.Length
+    }
+    return $result.ToString()
+}
+
 function ConvertTo-SanitizedEvidenceLine([string]$value) {
     $line = [string]$value
-    $line = $line.Replace($repositoryRoot, '<REPOSITORY>', [StringComparison]::OrdinalIgnoreCase)
+    $line = Replace-OrdinalIgnoreCase $line $repositoryRoot '<REPOSITORY>'
     $line = [regex]::Replace($line, 'C:\\Users\\[^\\\r\n]+', '<USER_PROFILE>', 'IgnoreCase')
     $line = [regex]::Replace($line, '(?i)\b[A-Z]:\\[^;\r\n]+', '<LOCAL_PATH>')
     foreach ($token in $script:sensitiveEvidenceTokens) {
-        $line = $line.Replace($token, '<LOCAL_SQL_SERVER>', [StringComparison]::OrdinalIgnoreCase)
+        $line = Replace-OrdinalIgnoreCase $line $token '<LOCAL_SQL_SERVER>'
     }
     $line = [regex]::Replace($line, '(?i)(Password|Pwd|User ID|UID|Data Source|Server|Integrated Security|Trusted_Connection)\s*=\s*[^;\r\n]+', '$1=<REDACTED>')
     $line = [regex]::Replace($line, '(?i)ClientConnectionId:[0-9a-f-]+', 'ClientConnectionId:<REDACTED>')
@@ -126,7 +146,9 @@ function Assert-FinalReviewedGitState([string]$operation = 'RehearseFinalClone')
         $ignoredRelevant = @(& git ls-files --others --ignored --exclude-standard -- '*.cs' '*.csproj' '*.props' '*.targets' `
             '*.json' '*.config' '*.ps1' '*.psm1' '*.sql' '*.cshtml' '*.ts' '*.tsx' '*.js' '*.jsx' '*.user' '*.suo' '.env' '.env.*' | Where-Object {
             $normalized = $_.Replace('\','/')
-            $isGeneratedPath = $normalized -match '(?i)(^|/)(bin|obj|out|publish|debug|debugpublic|release|releases|outputs|x64|x86|bld|log|artifacts|\.artifacts|node_modules|\.next|dist|coverage|testresults[^/]*|\.vs|\.idea|\.cache)/'
+            $isGeneratedPath = $normalized -match '(?i)(^|/)(bin|obj|out|publish|debug|debugpublic|release|releases|outputs|x64|x86|bld|log|artifacts|\.artifacts|node_modules|\.next(?:-[^/]+)?|dist|coverage|testresults[^/]*|\.vs|\.idea|\.cache)/' -or
+                $normalized -ceq 'frontend/next-env.d.ts' -or
+                $normalized -match '(?i)^frontend/public/syncfusion/'
             -not $isGeneratedPath
         })
         if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect ignored files for relevant workspace changes.' }
@@ -187,6 +209,41 @@ function Invoke-Native([string]$filePath, [string[]]$arguments) {
     }
 }
 
+function Get-BoundedApiBuildArguments() {
+    @(
+        'build', $apiProject,
+        '--configuration', 'Debug',
+        '--nologo',
+        '--disable-build-servers',
+        '/maxcpucount:1',
+        '/nodeReuse:false',
+        '/p:UseSharedCompilation=false'
+    )
+}
+
+function Move-AtomicEvidenceFile([string]$sourcePath, [string]$destinationPath, [bool]$replaceExisting = $false) {
+    # The three-argument File.Move overload is unavailable in Windows
+    # PowerShell's .NET Framework runtime. File.Replace preserves the atomic
+    # replacement boundary when an existing evidence file is deliberately updated.
+    if (-not $replaceExisting) {
+        [System.IO.File]::Move($sourcePath, $destinationPath)
+        return
+    }
+    if (Test-Path -LiteralPath $destinationPath -PathType Leaf) {
+        $rollbackPath = $destinationPath + '.' + [Guid]::NewGuid().ToString('N') + '.replace-backup'
+        try {
+            [System.IO.File]::Replace($sourcePath, $destinationPath, $rollbackPath)
+        }
+        finally {
+            if (Test-Path -LiteralPath $rollbackPath -PathType Leaf) {
+                [System.IO.File]::Delete($rollbackPath)
+            }
+        }
+        return
+    }
+    [System.IO.File]::Move($sourcePath, $destinationPath)
+}
+
 function Write-AtomicNativeCommandEvidence([string]$evidenceFile, [string[]]$sanitizedOutput,
     [string]$commandName, [int]$exitCode, [bool]$allowFailure) {
     $evidenceDirectory = Split-Path -Parent $evidenceFile
@@ -211,7 +268,7 @@ function Write-AtomicNativeCommandEvidence([string]$evidenceFile, [string[]]$san
             finally { $writer.Dispose() }
         }
         finally { if ($null -ne $stream) { $stream.Dispose() } }
-        [System.IO.File]::Move($temporaryFile, $evidenceFile, $false)
+        Move-AtomicEvidenceFile $temporaryFile $evidenceFile $false
     }
     finally {
         if (Test-Path -LiteralPath $temporaryFile) { Remove-Item -LiteralPath $temporaryFile -Force }
@@ -221,12 +278,18 @@ function Write-AtomicNativeCommandEvidence([string]$evidenceFile, [string[]]$san
 function Invoke-NativeWithEvidence([string]$filePath, [string[]]$arguments, [string]$evidenceFile,
     [switch]$AllowFailure) {
     $priorNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    $priorErrorActionPreference = $ErrorActionPreference
     try {
         $PSNativeCommandUseErrorActionPreference = $false
+        # Windows PowerShell 5.1 promotes native stderr records under Stop before
+        # the exit code and retained evidence can be processed. Capture them as
+        # ordinary command output, then enforce the native exit code below.
+        $ErrorActionPreference = 'Continue'
         $output = @(& $filePath @arguments 2>&1)
         $exitCode = $LASTEXITCODE
     }
     finally {
+        $ErrorActionPreference = $priorErrorActionPreference
         $PSNativeCommandUseErrorActionPreference = $priorNativeErrorPreference
     }
 
@@ -513,6 +576,21 @@ function Assert-LocalDisposableSqlServer([string]$dataSource) {
     }
 }
 
+function Test-LocalMachineIpAddress([string]$address) {
+    if ([string]::IsNullOrWhiteSpace($address)) { return $true }
+
+    [System.Net.IPAddress]$parsedAddress = $null
+    if (-not [System.Net.IPAddress]::TryParse($address.Trim(), [ref]$parsedAddress)) { return $false }
+    if ([System.Net.IPAddress]::IsLoopback($parsedAddress)) { return $true }
+
+    foreach ($networkInterface in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+        foreach ($unicastAddress in $networkInterface.GetIPProperties().UnicastAddresses) {
+            if ($parsedAddress.Equals($unicastAddress.Address)) { return $true }
+        }
+    }
+    return $false
+}
+
 function Assert-DisposableServerSideLocality([string]$dataSource, [string]$sqlMachineName,
     [string]$sqlInstanceName, [string]$sqlServerName, [string]$sqlLocalAddress, [string]$sqlLocalPort,
     [string]$executingMachineName) {
@@ -542,9 +620,8 @@ function Assert-DisposableServerSideLocality([string]$dataSource, [string]$sqlMa
         -not [string]::Equals($requestedPort, $sqlLocalPort, [StringComparison]::Ordinal)) {
         throw 'ResetDisposableDevelopment SQL TCP port does not exactly match the requested local endpoint.'
     }
-    if (-not [string]::IsNullOrWhiteSpace($sqlLocalAddress) -and
-        $sqlLocalAddress -notin @('127.0.0.1','::1')) {
-        throw 'ResetDisposableDevelopment SQL connection did not terminate on a loopback endpoint.'
+    if (-not (Test-LocalMachineIpAddress $sqlLocalAddress)) {
+        throw 'ResetDisposableDevelopment SQL connection did not terminate on an endpoint assigned to the executing host.'
     }
 }
 
@@ -601,8 +678,14 @@ function Get-DisposableBackupPath($databaseTarget, [string]$backupMediaId) {
 
 function Get-TextSha256([string]$value) {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
-    $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
-    [Convert]::ToHexString($hash)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha256.ComputeHash($bytes)
+    }
+    finally {
+        $sha256.Dispose()
+    }
+    ([System.BitConverter]::ToString($hash) -replace '-', '')
 }
 
 function Get-DisposableMaterialBackupState([string]$path) {
@@ -716,8 +799,7 @@ function Write-AtomicTextFile([string]$path, [string]$content, [bool]$replaceExi
             finally { $writer.Dispose() }
         }
         finally { if ($null -ne $stream) { $stream.Dispose() } }
-        if ($replaceExisting) { [System.IO.File]::Move($temporaryPath, $path, $true) }
-        else { [System.IO.File]::Move($temporaryPath, $path, $false) }
+        Move-AtomicEvidenceFile $temporaryPath $path $replaceExisting
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) { Remove-Item -LiteralPath $temporaryPath -Force }
@@ -747,7 +829,7 @@ function Read-MigrationHistoryEvidence([string]$path, [string]$context) {
         throw "$context evidence is empty or lacks its deterministic terminal newline."
     }
     $normalized = $raw.Replace("`r`n", "`n")
-    if ($normalized.Contains("`r", [StringComparison]::Ordinal)) {
+    if ($normalized.IndexOf("`r", [StringComparison]::Ordinal) -ge 0) {
         throw "$context evidence contains a noncanonical line ending."
     }
     $lines = @($normalized.Substring(0, $normalized.Length - 1).Split("`n"))
@@ -852,7 +934,13 @@ function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupV
 }
 
 function Write-DisposableResetEvidenceManifest([string]$directory) {
-    & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Test-GlCutoverEvidencePackage.ps1') `
+    $powerShellHost = if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+        'pwsh'
+    }
+    else {
+        'powershell.exe'
+    }
+    & $powerShellHost -NoProfile -File (Join-Path $PSScriptRoot 'Test-GlCutoverEvidencePackage.ps1') `
         -EvidenceDirectory $directory -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Disposable reset evidence package validation or manifest creation failed.' }
 }
@@ -881,7 +969,7 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
             $null = Invoke-NativeWithEvidence 'git' @('diff', '--check') (Join-Path $evidenceDirectory 'git-diff-check.log')
             $null = Invoke-NativeWithEvidence 'git' @('rev-list', '--parents', 'HEAD') (Join-Path $evidenceDirectory 'commit-ancestry.txt')
             $null = Invoke-NativeWithEvidence 'git' @('rev-parse', 'HEAD', 'HEAD^{tree}') (Join-Path $evidenceDirectory 'git-head-tree.txt')
-            $null = Invoke-NativeWithEvidence 'dotnet' @('build', $apiProject, '--configuration', 'Debug', '--nologo') `
+            $null = Invoke-NativeWithEvidence 'dotnet' @(Get-BoundedApiBuildArguments) `
                 (Join-Path $evidenceDirectory 'reset-build.log')
             $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'has-pending-model-changes',
                 '--project', $dataProject, '--startup-project', $apiProject, '--configuration', 'Debug',
@@ -893,13 +981,18 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
         finally { Pop-Location }
         $repositoryMigrations = @(Get-DiscoveredMigrationIds (Join-Path $evidenceDirectory 'migration-discovery.log'))
         $repositoryLatest = if ($repositoryMigrations.Count) { $repositoryMigrations[-1] } else { '<none>' }
-        if ($repositoryMigrations.Count -ne $authoritativeMigrationCount -or $repositoryLatest -ne $authoritativeLatestMigration) {
-            throw "Disposable reset requires the authoritative disposable-development baseline; found $($repositoryMigrations.Count)/$repositoryLatest."
+        if ($repositoryMigrations.Count -lt 1 -or
+            $repositoryMigrations[0] -ne '20260916132000_DisposableDevelopmentCurrentModelBaseline') {
+            throw "Disposable reset requires the current baseline as the first compiled migration; found $($repositoryMigrations.Count)/$repositoryLatest."
         }
-        if (@($repositoryMigrations | Sort-Object -Unique).Count -ne $authoritativeMigrationCount -or
+        if (@($repositoryMigrations | Sort-Object -Unique).Count -ne $repositoryMigrations.Count -or
             (@($repositoryMigrations | Sort-Object) -join "`n") -cne ($repositoryMigrations -join "`n")) {
-            throw 'Disposable reset requires the exact authoritative disposable-development baseline identity before DROP.'
+            throw 'Disposable reset requires an exact, unique, ordered compiled migration set before DROP.'
         }
+        # The baseline is a zero-to-current schema migration. Future migrations may
+        # legitimately follow it and must be applied and recorded as one exact set.
+        $script:authoritativeMigrationCount = $repositoryMigrations.Count
+        $script:authoritativeLatestMigration = $repositoryLatest
         $repositoryEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectory 'repository-migration-history.txt') $repositoryMigrations
         $repositoryMigrations = @($repositoryEvidence.ids)
         $repositoryHistoryHash = $repositoryEvidence.sha256
@@ -1098,8 +1191,6 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
         $escapedServerMachineName = $serverMachineName.Replace("'", "''")
         $escapedServerInstanceName = $serverInstanceName.Replace("'", "''")
         $escapedServerCanonicalName = $serverCanonicalName.Replace("'", "''")
-        $escapedServerLocalAddress = $serverLocalAddress.Replace("'", "''")
-        $escapedServerLocalPort = $serverLocalPort.Replace("'", "''")
         $sourceFingerprintParts = @($sourceFingerprint -split '\|')
         if ($sourceFingerprintParts.Count -ne 5 -or
             $sourceFingerprintParts[0] -notmatch '^\d+$' -or
@@ -1129,11 +1220,7 @@ IF CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) COLLATE Latin1_General_1
    COALESCE(CONVERT(nvarchar(128),SERVERPROPERTY('InstanceName')),N'') COLLATE Latin1_General_100_BIN2 <>
       N'$escapedServerInstanceName' COLLATE Latin1_General_100_BIN2 OR
    CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')) COLLATE Latin1_General_100_BIN2 <>
-      N'$escapedServerCanonicalName' COLLATE Latin1_General_100_BIN2 OR
-   COALESCE(CONVERT(nvarchar(128),CONNECTIONPROPERTY('local_net_address')),N'') COLLATE Latin1_General_100_BIN2 <>
-      N'$escapedServerLocalAddress' COLLATE Latin1_General_100_BIN2 OR
-   COALESCE(CONVERT(nvarchar(20),CONNECTIONPROPERTY('local_tcp_port')),N'') COLLATE Latin1_General_100_BIN2 <>
-      N'$escapedServerLocalPort' COLLATE Latin1_General_100_BIN2
+      N'$escapedServerCanonicalName' COLLATE Latin1_General_100_BIN2
     THROW 51204, 'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT', 1;
 IF (SELECT COUNT_BIG(*) FROM sys.databases
     WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_100_BIN2) <> 1 OR
@@ -1502,7 +1589,7 @@ if ($Mode -eq 'RehearseFinalClone') {
                 (Join-Path $evidenceDirectoryResolved 'commit-ancestry.txt')
             $null = Invoke-NativeWithEvidence 'git' @('rev-parse', 'HEAD', 'HEAD^{tree}') (Join-Path $evidenceDirectoryResolved 'git-head-tree.txt')
             $cloneBuildLog = Join-Path $evidenceDirectoryResolved 'clone-build.log'
-            $null = Invoke-NativeWithEvidence 'dotnet' @('build', $apiProject, '--configuration', 'Debug', '--nologo') $cloneBuildLog
+            $null = Invoke-NativeWithEvidence 'dotnet' @(Get-BoundedApiBuildArguments) $cloneBuildLog
             $modelLog = Join-Path $evidenceDirectoryResolved 'ef-no-pending-model.log'
             $migrationListLog = Join-Path $evidenceDirectoryResolved 'migration-discovery.log'
             $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'has-pending-model-changes',

@@ -10,7 +10,7 @@ public partial class VendorInvoiceService
     {
         var invoice = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(value =>
                 value.TenantId == TenantId && value.Id == id && !value.IsDeleted)
-            .AsNoTracking().Include(value => value.Supplier).Include(value => value.LineItems)
+            .AsNoTracking().Include(value => value.BusinessPartner).Include(value => value.LineItems)
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new KeyNotFoundException("Vendor invoice was not found for this tenant.");
         var posting = await _unitOfWork.Repository<FinancePostingEvent>().GetQueryable(value =>
@@ -58,6 +58,20 @@ public partial class VendorInvoiceService
         // Approval, budget reservation and tax-review actions are not performed by a preview.
         // All account/source/value resolution is identical to the actual posting builder.
         var request = await BuildApInvoiceDistributionRequestAsync(invoice, Array.Empty<Guid>(), null, cancellationToken);
+        var groups = DistributionGroups(invoice, request);
+        var basis = DistributionBasis(invoice, request);
+        var needsReview = false;
+        string? reviewReason = null;
+        try { await ApplySavedDistributionAsync(invoice, request, cancellationToken); }
+        catch (InvalidOperationException exception) when (!string.IsNullOrWhiteSpace(invoice.DistributionDraftJson))
+        {
+            needsReview = true;
+            reviewReason = exception.Message;
+        }
+        var savedRows = !needsReview && !string.IsNullOrWhiteSpace(invoice.DistributionDraftJson)
+            ? System.Text.Json.JsonSerializer.Deserialize<InvoiceDistributionDraft>(invoice.DistributionDraftJson)!.Lines
+                .OrderBy(row => int.Parse(row.GroupId, System.Globalization.CultureInfo.InvariantCulture)).ToList()
+            : null;
         var ids = request.Lines.Select(value => value.AccountId).Distinct().ToArray();
         var proposedAccounts = await _unitOfWork.Repository<Account>().GetQueryable(value =>
                 value.TenantId == TenantId && ids.Contains(value.Id))
@@ -65,12 +79,17 @@ public partial class VendorInvoiceService
         return new VendorInvoiceDistributionDto
         {
             InvoiceId = id, Currency = request.FunctionalCurrencyCode, Basis = "Current invoice posting distribution",
-            Lines = request.Lines.Select(value => new VendorInvoiceDistributionLineDto
+            CanEdit = DistributionEditable(invoice), Version = DistributionVersion(invoice), BasisVersion = basis,
+            Groups = groups, HasOverrides = !string.IsNullOrWhiteSpace(invoice.DistributionDraftJson), NeedsReview = needsReview,
+            EditBlockReason = reviewReason ?? (DistributionEditable(invoice) ? null : "Only draft or rejected Procurement invoices can be edited."),
+            Lines = request.Lines.Select((value, index) => new VendorInvoiceDistributionLineDto
             {
-                LineId = $"{id:N}:{value.LineNumber}", SourceDocumentLineId = value.SourceDocumentLineId,
+                LineId = savedRows?[index].LineId.ToString() ?? Guid.NewGuid().ToString(),
+                GroupId = savedRows?[index].GroupId ?? (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                SourceDocumentLineId = value.SourceDocumentLineId,
                 AccountId = value.AccountId, AccountCode = proposedAccounts[value.AccountId].AccountNumber,
                 AccountName = proposedAccounts[value.AccountId].AccountName,
-                Type = DistributionType(value.TransactionTag), Source = "Invoice posting rules", Description = value.Description,
+                Type = DistributionType(value.TransactionTag), Source = savedRows is null ? "Invoice posting rules" : "Saved distribution", Description = value.Description,
                 Debit = value.DebitAmount, Credit = value.CreditAmount
             }).ToList()
         };

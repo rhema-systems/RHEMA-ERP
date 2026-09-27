@@ -11,8 +11,8 @@ namespace ErpSystem.Data.Seeders;
 /// </summary>
 public sealed class FinanceClassificationManifestSeeder
 {
-    public const string ManifestVersion = "FIN-CLASSIFICATION-3.0";
-    private static readonly string[] BookCodes = ["IFRS", "LOCAL_STATUTORY", "MANAGEMENT"];
+    public const string ManifestVersion = "FIN-CLASSIFICATION-4.0";
+    private static readonly string[] BookCodes = ["BASE", "IFRS_ADJUSTMENTS", "USD_PARALLEL"];
 
     private sealed record Definition(string Code, string Name, AccountType Type, string? ParentCode = null,
         RevaluationTreatment Treatment = RevaluationTreatment.Exclude,
@@ -78,27 +78,45 @@ public sealed class FinanceClassificationManifestSeeder
 
         var books = await _db.AccountingBooks.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToListAsync(cancellationToken);
         EnsureUnique(books.Select(item => item.Code), "accounting-book");
+        AccountingBook? primary = books.SingleOrDefault(item =>
+            string.Equals(item.Code, "BASE", StringComparison.OrdinalIgnoreCase));
         foreach (var code in BookCodes)
         {
             if (books.All(item => !string.Equals(item.Code, code, StringComparison.OrdinalIgnoreCase)))
             {
+                if (code != "BASE" && primary == null)
+                    throw new InvalidOperationException("FINANCE_PRIMARY_BOOK_MISSING: BASE must be provisioned before derived accounting books.");
+                var isPrimary = code == "BASE";
+                var isDelta = code == "IFRS_ADJUSTMENTS";
                 var book = new AccountingBook
                 {
                     TenantId = tenantId, Code = code,
-                    Name = code switch { "IFRS" => "IFRS Primary", "LOCAL_STATUTORY" => "Local Statutory", _ => "Management Reporting" },
-                    Purpose = code == "IFRS" ? "Primary" : code == "LOCAL_STATUTORY" ? "Statutory" : "Management",
-                    BookType = code == "IFRS" ? AccountingBookType.PrimaryFull : AccountingBookType.ParallelFull,
-                    LifecycleStatus = AccountingBookLifecycleStatus.Configuring,
-                    FunctionalCurrencyCode = functionalCurrency,
-                    // Fresh C3 configuration is deliberately non-posting. Only migrated legacy
-                    // books may retain their pre-existing Active state; C4 will supply the first
-                    // governed readiness evidence for newly configured books.
-                    IsActive = false, IsDefault = code == "IFRS", AllowsPosting = false, IsSystemDefined = true,
+                    Name = code switch
+                    {
+                        "BASE" => "Ghana Statutory Primary",
+                        "IFRS_ADJUSTMENTS" => "IFRS Adjustments",
+                        _ => "USD Parallel"
+                    },
+                    Purpose = code switch
+                    {
+                        "BASE" => "Ghana Statutory",
+                        "IFRS_ADJUSTMENTS" => "IFRS reporting adjustments",
+                        _ => "Foreign-currency replication"
+                    },
+                    BookType = isPrimary ? AccountingBookType.PrimaryFull
+                        : isDelta ? AccountingBookType.Delta : AccountingBookType.ParallelFull,
+                    LifecycleStatus = isPrimary ? AccountingBookLifecycleStatus.Active : AccountingBookLifecycleStatus.Configuring,
+                    FunctionalCurrencyCode = isDelta ? null : isPrimary ? functionalCurrency : "USD",
+                    BaseAccountingBookId = isPrimary ? null : primary!.Id,
+                    ReplicationStartDate = !isPrimary && !isDelta ? seedDate.Date : null,
+                    ParallelOpeningMode = !isPrimary && !isDelta ? ParallelBookOpeningMode.ZeroOpening : null,
+                    IsActive = isPrimary, IsDefault = isPrimary, AllowsPosting = isPrimary, IsSystemDefined = true,
                     SortOrder = Array.IndexOf(BookCodes, code) * 10 + 10, CreatedAt = seedDate,
                     CreatedBy = $"System ({ManifestVersion})"
                 };
                 _db.AccountingBooks.Add(book);
                 books.Add(book);
+                if (isPrimary) primary = book;
             }
         }
         await _db.SaveChangesAsync(cancellationToken);
@@ -129,13 +147,24 @@ public sealed class FinanceClassificationManifestSeeder
                 {
                     throw new InvalidOperationException($"Classification {book.Code}/{definition.Code} has an incompatible core account type.");
                 }
-                else if (classification.CreatedBy?.Contains("FIN-CLASSIFICATION-", StringComparison.Ordinal) == true
-                    && classification.UpdatedBy == null)
+                else if (IsUntouchedManifestOwnedClassification(classification))
                 {
                     // Phase 4 owns the reviewed monetary defaults. Upgrade only untouched
                     // system rows; an administrator decision is authoritative even when it
                     // differs from this manifest.
                     classification.DefaultRevaluationTreatment = definition.Treatment;
+                    if (definition.Role.HasValue
+                        && classification.SystemRole == null
+                        && !classifications.Any(item => item.Id != classification.Id
+                            && item.AccountingBookId == book.Id
+                            && !item.IsDeleted
+                            && item.SystemRole == definition.Role))
+                    {
+                        // Older manifest versions created these exact system rows before
+                        // SystemRole existed. Backfill only an untouched manifest-owned row,
+                        // and never displace an administrator-assigned role.
+                        classification.SystemRole = definition.Role;
+                    }
                 }
             }
             await _db.SaveChangesAsync(cancellationToken);
@@ -144,8 +173,7 @@ public sealed class FinanceClassificationManifestSeeder
                 var classification = classifications.Single(item => item.AccountingBookId == book.Id && item.Code == definition.Code);
                 var parent = classifications.Single(item => item.AccountingBookId == book.Id && item.Code == definition.ParentCode);
                 if (classification.ParentClassificationId == null
-                    && classification.CreatedBy?.Contains("FIN-CLASSIFICATION-", StringComparison.Ordinal) == true
-                    && classification.UpdatedBy == null)
+                    && IsUntouchedManifestOwnedClassification(classification))
                     classification.ParentClassificationId = parent.Id;
             }
         }
@@ -194,6 +222,31 @@ public sealed class FinanceClassificationManifestSeeder
                 }
             }
         }
+        var usdParallel = books.Single(item => item.Code == "USD_PARALLEL");
+        var translationReserve = EnsureParallelOnlyAccount(accounts, tenantId, seedDate,
+            "USD_CTA", "USD-CTA", "Currency Translation Reserve", AccountType.Equity,
+            "Protected USD Parallel account for governed currency-translation differences.");
+        var rounding = EnsureParallelOnlyAccount(accounts, tenantId, seedDate,
+            "USD_ROUNDING", "USD-ROUNDING", "Currency Translation Rounding", AccountType.Expense,
+            "Protected USD Parallel account for immaterial conversion precision residuals.");
+        EnsureParallelOnlyMapping(existingMappings, classifications, usdParallel, translationReserve, "EQUITY", seedDate);
+        EnsureParallelOnlyMapping(existingMappings, classifications, usdParallel, rounding, "OTHER_EXPENSE", seedDate);
+        usdParallel.CurrencyTranslationReserveAccountId = translationReserve.Id;
+        usdParallel.CurrencyRoundingAccountId = rounding.Id;
+
+        foreach (var mapping in existingMappings.Where(item => item.IsEnabled && IsUntouchedManifestOwnedMapping(item)))
+        {
+            var account = accounts.SingleOrDefault(item => item.Id == mapping.AccountId);
+            var book = books.SingleOrDefault(item => item.Id == mapping.AccountingBookId);
+            var classification = mapping.AccountClassificationId.HasValue
+                ? classifications.SingleOrDefault(item => item.Id == mapping.AccountClassificationId.Value)
+                : null;
+            if (account is null || book is null || classification is null || !IsBookPostingReady(book)
+                || classification.IsDeleted || classification.Status != AccountClassificationStatus.Active
+                || !classification.IsPostingClassification || classification.AccountingBookId != mapping.AccountingBookId
+                 || classification.CoreAccountType != account.AccountType)
+                mapping.IsEnabled = false;
+        }
         AssertEnabledMappingLineage(tenantId, accounts, books, classifications, existingMappings);
         await _db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Applied Finance classification manifest {ManifestVersion} for tenant {TenantId}.", ManifestVersion, tenantId);
@@ -204,9 +257,18 @@ public sealed class FinanceClassificationManifestSeeder
 
     public static bool IsUntouchedManifestOwnedMapping(AccountAccountingBook mapping) =>
         mapping.UpdatedBy is null
-        && mapping.CreatedBy is "System (FIN-CLASSIFICATION-1.0)"
+        && mapping.CreatedBy is "System"
+            or "System (FIN-CLASSIFICATION-1.0)"
             or "System (FIN-CLASSIFICATION-2.0)"
-            or "System (FIN-CLASSIFICATION-3.0)";
+            or "System (FIN-CLASSIFICATION-3.0)"
+            or "System (FIN-CLASSIFICATION-4.0)";
+
+    public static bool IsUntouchedManifestOwnedClassification(AccountClassification classification) =>
+        classification.UpdatedBy is null
+        && classification.CreatedBy is "System (FIN-CLASSIFICATION-1.0)"
+            or "System (FIN-CLASSIFICATION-2.0)"
+            or "System (FIN-CLASSIFICATION-3.0)"
+            or "System (FIN-CLASSIFICATION-4.0)";
 
     private static void AssertEnabledMappingLineage(
         Guid tenantId,
@@ -229,19 +291,82 @@ public sealed class FinanceClassificationManifestSeeder
                 && classification.IsPostingClassification && classification.TenantId == tenantId
                 && classification.AccountingBookId == mapping.AccountingBookId
                 && classification.CoreAccountType == account.AccountType;
-            return new { Mapping = mapping, IsValid = valid };
+            return new { Mapping = mapping, Account = account, Book = book, Classification = classification, IsValid = valid };
         }).FirstOrDefault(item => !item.IsValid);
 
         if (invalid is not null)
         {
             throw new InvalidOperationException(
                 $"FINANCE_CLASSIFICATION_ENABLED_MAPPING_LINEAGE_INVALID: mapping '{invalid.Mapping.Id}' " +
-                $"for tenant '{tenantId}' is not bound to one active posting book and compatible active posting classification.");
+                $"for tenant '{tenantId}' is not bound to one active posting book and compatible active posting classification. " +
+                $"Account='{invalid.Account?.AccountCode ?? "missing"}', book='{invalid.Book?.Code ?? "missing"}', " +
+                $"classification='{invalid.Classification?.Code ?? "missing"}', createdBy='{invalid.Mapping.CreatedBy ?? "missing"}', " +
+                $"updatedBy='{invalid.Mapping.UpdatedBy ?? "missing"}'.");
         }
     }
 
     private static bool IsCanonicalCurrencyCode(string? value) =>
         value is { Length: 3 } && value.All(character => character is >= 'A' and <= 'Z');
+
+    private Account EnsureParallelOnlyAccount(List<Account> accounts, Guid tenantId, DateTime seedDate,
+        string code, string number, string name, AccountType type, string description)
+    {
+        var account = accounts.SingleOrDefault(item => item.AccountCode == code);
+        if (account != null) return account;
+        account = new Account
+        {
+            TenantId = tenantId,
+            AccountCode = code,
+            AccountNumber = number,
+            AccountName = name,
+            AccountType = type,
+            AccountCategory = type == AccountType.Equity ? "Other comprehensive income" : "Other expenses",
+            Description = description,
+            CurrencyCode = "USD",
+            IsMultiCurrency = false,
+            IsSegmented = false,
+            IsIFRSClassified = false,
+            IsBaseClassified = false,
+            IsLocalClassified = false,
+            AllowDirectPosting = false,
+            IsControlAccount = false,
+            BudgetTrackingEnabled = false,
+            Status = AccountStatus.Active,
+            IsSystemAccount = true,
+            CreatedAt = seedDate,
+            CreatedBy = $"System ({ManifestVersion})"
+        };
+        _db.Accounts.Add(account);
+        accounts.Add(account);
+        return account;
+    }
+
+    private void EnsureParallelOnlyMapping(List<AccountAccountingBook> mappings,
+        IReadOnlyCollection<AccountClassification> classifications, AccountingBook book,
+        Account account, string classificationCode, DateTime seedDate)
+    {
+        var mapping = mappings.SingleOrDefault(item => item.AccountId == account.Id && item.AccountingBookId == book.Id);
+        var classification = classifications.Single(item => item.AccountingBookId == book.Id && item.Code == classificationCode);
+        if (mapping == null)
+        {
+            mapping = new AccountAccountingBook
+            {
+                TenantId = book.TenantId,
+                AccountId = account.Id,
+                AccountingBookId = book.Id,
+                AccountClassificationId = classification.Id,
+                IsEnabled = IsBookPostingReady(book),
+                CreatedAt = seedDate,
+                CreatedBy = $"System ({ManifestVersion})"
+            };
+            _db.AccountAccountingBooks.Add(mapping);
+            mappings.Add(mapping);
+        }
+        else if (IsUntouchedManifestOwnedMapping(mapping))
+        {
+            mapping.AccountClassificationId = classification.Id;
+        }
+    }
 
     public static string? ResolveReviewedClassificationCode(string accountCode, AccountType accountType)
     {

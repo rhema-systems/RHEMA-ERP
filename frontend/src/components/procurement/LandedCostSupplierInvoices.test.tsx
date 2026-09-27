@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LandedCostSupplierInvoices } from './LandedCostSupplierInvoices';
 import type { LandedCostDetailDto } from '@/services/inventoryManagementService';
 
-const api = vi.hoisted(() => ({ suppliers: vi.fn(), post: vi.fn(), allowed: true }));
+const api = vi.hoisted(() => ({ suppliers: vi.fn(), prepare: vi.fn(), allowed: true }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasAnyPermission: () => api.allowed }) }));
-vi.mock('@/services/businessPartnerService', () => ({ businessPartnerService: { getAllPartnersForDropdown: api.suppliers } }));
-vi.mock('@/services/landedCostInvoiceService', () => ({ landedCostInvoiceService: { post: api.post } }));
+vi.mock('@/services/procurementSupplierInvoiceService', () => ({ accountsPayableService: { getInvoiceSupplierEntryOptions: api.suppliers } }));
+vi.mock('@/services/landedCostInvoiceService', () => ({ landedCostInvoiceService: { prepare: api.prepare } }));
 vi.mock('next/link', () => ({ default: ({ children, ...props }: any) => <a {...props}>{children}</a> }));
 const voucher = { id: 'costs', landedCostNumber: 'LC-1', status: 'Allocated', currency: 'GHS', costItems: [
   { id: 'freight', description: 'Freight', amount: 310, currency: 'GHS', supplierId: 'carrier', referenceNumber: 'CARRIER-1' },
@@ -16,70 +16,85 @@ const voucher = { id: 'costs', landedCostNumber: 'LC-1', status: 'Allocated', cu
 beforeEach(() => {
   vi.clearAllMocks(); api.allowed = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
-  api.suppliers.mockResolvedValue([{ id: 'carrier', partnerName: 'Carrier', partnerCode: 'C1', partnerType: 'Supplier', isActive: true, approvalStatus: 'Approved' }]);
-  api.post.mockResolvedValue({ inventoryPosted: true, invoicesPending: false, invoices: [
+  api.suppliers.mockResolvedValue([{ id: 'carrier', businessPartnerId: 'carrier', businessPartnerRoleId: 'carrier-role', name: 'Carrier', code: 'C1', roleType: 'Supplier', isTransactionReady: true }]);
+  api.prepare.mockResolvedValue({ inventoryPosted: false, invoicesPending: false, invoices: [
     { id: 'invoice', invoiceNumber: 'INV-1', supplierName: 'Carrier', currencyCode: 'GHS', totalAmount: 360, status: 'Draft' },
   ] });
 });
 afterEach(cleanup);
 async function open(posted = false) {
   const changed = vi.fn(); render(<LandedCostSupplierInvoices voucher={{ ...voucher, status: posted ? 'Posted' : 'Allocated' }} onCreated={changed} />);
-  await act(async () => fireEvent.click(screen.getByRole('button', { name: posted ? 'Retry Post' : 'Post', exact: true })));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Prepare supplier invoices' })));
   return changed;
 }
-describe('combined landed-cost Post', () => {
+describe('landed-cost invoice preparation', () => {
   it('requires receiving permission and prior allocation', () => {
     api.allowed = false; const { unmount } = render(<LandedCostSupplierInvoices voucher={voucher} onCreated={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Post', exact: true })).toBeDisabled(); unmount(); api.allowed = true;
+    expect(screen.getByRole('button', { name: 'Prepare supplier invoices' })).toBeDisabled(); unmount(); api.allowed = true;
     render(<LandedCostSupplierInvoices voucher={{ ...voucher, status: 'Draft' }} onCreated={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Post', exact: true })).toBeDisabled(); expect(api.post).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Prepare supplier invoices' })).toBeDisabled(); expect(api.prepare).not.toHaveBeenCalled();
   });
-  it('opens a pre-post review with no tax fields and makes no mutation', async () => {
+  it('opens a draft preparation review with no tax fields and makes no mutation', async () => {
     await open(); expect(screen.getByText('Carrier · CARRIER-1 · GHS 360.00')).toBeInTheDocument();
     expect(screen.queryByLabelText('Invoice charge 1 tax treatment')).not.toBeInTheDocument();
-    expect(api.post).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel', exact: true })); expect(api.post).not.toHaveBeenCalled();
+    expect(api.prepare).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); expect(api.prepare).not.toHaveBeenCalled();
   });
-  it('one confirmation posts and creates drafts without assigning tax', async () => {
+  it('prepares drafts without posting or assigning tax', async () => {
     const changed = await open();
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm Post' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
     await screen.findByRole('link', { name: 'INV-1 · Carrier' });
-    expect(api.post).toHaveBeenCalledTimes(1);
-    const request = api.post.mock.calls[0][1]; expect(request.charges).toHaveLength(2);
-    expect(request.charges[0]).toEqual({ costItemId: 'freight', supplierId: 'carrier', supplierInvoiceNumber: 'CARRIER-1' });
-    expect(changed).toHaveBeenCalledOnce(); expect(screen.getByText(/No invoice approval or financial posting/)).toBeInTheDocument();
+    expect(api.prepare).toHaveBeenCalledTimes(1);
+    const request = api.prepare.mock.calls[0][1]; expect(request.charges).toHaveLength(2);
+    expect(request.charges[0]).toEqual({ costItemId: 'freight', businessPartnerId: 'carrier', businessPartnerRoleId: 'carrier-role', supplierInvoiceNumber: 'CARRIER-1' });
+    expect(changed).toHaveBeenCalledOnce(); expect(screen.getByText(/review taxes, approve and post/)).toBeInTheDocument();
   });
   it('requires billing identities but does not require tax before creating a draft', async () => {
     await open(); fireEvent.change(screen.getByLabelText('Invoice charge 1 reference'), { target: { value: '' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm Post' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('enter its invoice reference'); expect(api.post).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('enter its invoice reference'); expect(api.prepare).not.toHaveBeenCalled();
+  });
+  it('shows the canonical supplier label and blocks an incomplete finance profile', async () => {
+    api.suppliers.mockResolvedValue([{ id: 'carrier', businessPartnerId: 'carrier', businessPartnerRoleId: 'carrier-role', name: 'Carrier', code: 'C1', roleType: 'Supplier', isTransactionReady: false, readinessMessage: 'Approved AP profile required' }]);
+    await open();
+    expect(screen.getByLabelText('Invoice charge 1 supplier')).toHaveTextContent('C1 — Carrier (Supplier)');
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Select a ready Supplier or Contractor role');
+    expect(api.prepare).not.toHaveBeenCalled();
+  });
+  it('requires an explicit role when the saved partner has both AP roles', async () => {
+    api.suppliers.mockResolvedValue(['Supplier', 'Contractor'].map(roleType => ({ id: 'carrier', businessPartnerId: 'carrier', businessPartnerRoleId: `carrier-${roleType}`, name: 'Carrier', code: 'C1', roleType, isTransactionReady: true })));
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Select a ready Supplier or Contractor role');
+    expect(api.prepare).not.toHaveBeenCalled();
   });
   it('retains inputs after a network error for an idempotent retry', async () => {
-    api.post.mockRejectedValueOnce(new Error('Connection lost.'));
+    api.prepare.mockRejectedValueOnce(new Error('Connection lost.'));
     const changed = await open();
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm Post' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
     await screen.findByRole('alert'); expect(screen.getByLabelText('Invoice charge 1 reference')).toHaveValue('CARRIER-1');
     expect(changed).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm Post' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
     await screen.findByRole('link', { name: 'INV-1 · Carrier' });
   });
-  it('shows partial success and retries only the pending invoice stage', async () => {
-    api.post.mockResolvedValueOnce({ inventoryPosted: true, invoicesPending: true, invoices: [], message: 'Inventory posted; invoice creation is pending.' });
+  it('shows server failure and preserves the billing inputs without reporting a partial posting', async () => {
+    api.prepare.mockRejectedValueOnce({ response: { data: { detail: 'Invoice preparation rolled back.' } } });
     const changed = await open();
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm Post' }));
-    await screen.findByRole('alert'); expect(screen.queryByRole('link', { name: 'INV-1 · Carrier' })).not.toBeInTheDocument();
-    expect(changed).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: 'Finish invoice drafts' }));
-    await screen.findByRole('link', { name: 'INV-1 · Carrier' });
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent('Invoice preparation rolled back.');
+    expect(screen.getByLabelText('Invoice charge 1 reference')).toHaveValue('CARRIER-1');
+    expect(changed).not.toHaveBeenCalled();
   });
   it('provides invoice-only recovery for an existing posted voucher', async () => {
-    await open(true); expect(screen.getByText(/Inventory is already posted/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Finish invoice drafts' }));
+    await open(true); expect(screen.getByText(/voucher was already posted/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare drafts' }));
     await screen.findByRole('link', { name: 'INV-1 · Carrier' });
   });
-  it('does not offer another Post when all invoices are linked', () => {
+  it('directs linked invoices to their posting process', () => {
     render(<LandedCostSupplierInvoices voucher={{ ...voucher, status: 'Posted', costItems: voucher.costItems.map(i => ({ ...i, invoiceNumber: 'INV-1' })) }} onCreated={vi.fn()} />);
-    expect(screen.queryByRole('button', { name: /Post/ })).not.toBeInTheDocument();
-    expect(screen.getByText('Posted · Supplier invoices linked')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Prepare/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Supplier invoices linked · Post from Invoices')).toBeInTheDocument();
   });
 });

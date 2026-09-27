@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -137,15 +138,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 // Check threshold for withholding taxes
                 if (tax.Category == TaxCategory.Withholding && tax.ThresholdAmount.HasValue)
                 {
-                    var entityId = request.SupplierId ?? request.CustomerId;
-                    var entityType = request.SupplierId.HasValue ? "Supplier" : "Customer";
-
-                    if (entityId.HasValue)
+                    if (request.BusinessPartnerId.HasValue)
                     {
                         var thresholdStatus = await CheckThresholdAsync(
                             tax.Id,
-                            entityType,
-                            entityId.Value,
+                            request.BusinessPartnerRole?.ToString() ?? "BusinessPartner",
+                            request.BusinessPartnerId.Value,
                             request.BaseAmount,
                             cancellationToken);
 
@@ -231,14 +229,13 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
             // Pre-fetch related data if needed for rules
             string? customerType = null;
-            if (request.CustomerId.HasValue)
+            if (request.BusinessPartnerId.HasValue && request.BusinessPartnerRole == BusinessPartnerRoleType.Customer)
             {
                 var customer = await _context.BusinessPartners
                     .FirstOrDefaultAsync(c =>
-                        c.Id == request.CustomerId.Value &&
+                        c.Id == request.BusinessPartnerId.Value &&
                         c.TenantId == TenantId &&
-                        !c.IsDeleted &&
-                        (c.PartnerType == "Customer" || c.PartnerType == "Both"),
+                        !c.IsDeleted,
                         cancellationToken);
                 customerType = customer?.CustomerType;
             }

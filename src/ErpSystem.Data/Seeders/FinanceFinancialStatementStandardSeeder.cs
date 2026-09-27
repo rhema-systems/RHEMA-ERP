@@ -8,7 +8,7 @@ namespace ErpSystem.Data.Seeders;
 /// <summary>Idempotently provides clone-only standard layouts for every canonical posting book.</summary>
 public sealed class FinanceFinancialStatementStandardSeeder
 {
-    private static readonly string[] CanonicalBookCodes = ["IFRS", "LOCAL_STATUTORY", "MANAGEMENT"];
+    private static readonly string[] CanonicalBookCodes = ["BASE", "IFRS_ADJUSTMENTS", "USD_PARALLEL"];
     private readonly ApplicationDbContext _db;
     private readonly ILogger _logger;
 

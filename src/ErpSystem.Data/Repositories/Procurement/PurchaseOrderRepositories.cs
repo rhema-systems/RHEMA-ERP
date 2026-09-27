@@ -274,9 +274,9 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
         // Apply filters
         if (!string.IsNullOrWhiteSpace(search))
         {
-            search = search.ToLower();
-            query = query.Where(po => po.OrderNumber.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
-                                    (po.BusinessPartner != null && po.BusinessPartner.PartnerName.Contains(search, StringComparison.CurrentCultureIgnoreCase)));
+            search = search.ToUpperInvariant();
+            query = query.Where(po => po.OrderNumber.ToUpper().Contains(search) ||
+                                    (po.BusinessPartner != null && po.BusinessPartner.PartnerName.ToUpper().Contains(search)));
         }
 
         if (!string.IsNullOrWhiteSpace(status))

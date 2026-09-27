@@ -492,6 +492,18 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         if (!supplier.IsActive)
             throw new InvalidOperationException($"Supplier {supplier.Name} is inactive; Finance cannot be invoiced for it.");
 
+        // Finance no longer accepts the legacy Procurement Supplier id as AP identity. HR still
+        // stores that source id, so cross the boundary only through an exact, tenant-scoped stable
+        // code match to the canonical Business Partner; never infer accounting identity by name.
+        var businessPartner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(partner => partner.TenantId == tenantId
+                                             && !partner.IsDeleted
+                                             && partner.PartnerCode == supplier.SupplierCode,
+                cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"Supplier {supplier.SupplierCode} has no canonical Business Partner identity for Finance posting.");
+
         var line = effectiveLines[0];
         var account = mappings[line.Role];
         var functional = (await _store.GetTenantContextAsync(tenantId, cancellationToken)).FunctionalCurrencyCode;
@@ -519,7 +531,7 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         var invoiceDate = (command.SourceDate ?? now).Date;
         var created = await _vendorInvoices.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = supplier.Id,
+            BusinessPartnerId = businessPartner.Id,
             SupplierInvoiceNumber = Truncate(command.SourceReference, 50),
             InvoiceDate = invoiceDate,
             ReceivedDate = now,
@@ -626,7 +638,8 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         var reference = $"HR-{definition.Code}:{command.SourceDocumentId:N}" + (record.Generation > 1 ? $"#{record.Generation}" : string.Empty);
         var created = await _customerInvoices.CreateAsync(new InvoiceCreateDto
         {
-            CustomerId = customer.Id,
+            // Finance's canonical cutover renamed CustomerId; the customer read above IS the partner.
+            BusinessPartnerId = customer.Id,
             InvoiceDate = (command.SourceDate ?? now).Date,
             CurrencyCode = currency,
             ExchangeRate = rate,

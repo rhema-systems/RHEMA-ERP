@@ -102,6 +102,30 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         _logger = logger;
     }
 
+    public async Task<IEnumerable<InventoryRequisitionDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var limit = Math.Clamp(take, 1, 50);
+        var query = _requisitionRepository.GetQueryable(value => !value.IsDeleted &&
+            value.TenantId == _currentUserProvider.TenantId &&
+            (value.RequisitionNumber.Contains(term) || value.Warehouse.Name.Contains(term) ||
+             (value.Description != null && value.Description.Contains(term)) ||
+             (value.ProjectCode != null && value.ProjectCode.Contains(term)) ||
+             (value.DepartmentName != null && value.DepartmentName.Contains(term))))
+            .AsNoTracking().Include(value => value.Warehouse).Include(value => value.Items)
+            .OrderByDescending(value => value.RequestDate).ThenBy(value => value.Id);
+        var allowed = new List<InventoryRequisitionDto>();
+        for (var offset = 0; allowed.Count < limit; offset += 50)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidates = await query.Skip(offset).Take(50).ToListAsync(cancellationToken);
+            allowed.AddRange((await MapReadScopeAsync(candidates)).Take(limit - allowed.Count));
+            if (candidates.Count < 50) break;
+        }
+        return allowed;
+    }
+
     public async Task<IEnumerable<InventoryRequisitionDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null)
     {
         var requisitions = await _requisitionRepository.GetByDateRangeAsync(
@@ -1019,6 +1043,41 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         return result;
     }
 
+    public async Task<IReadOnlyList<InventoryIssueSearchDto>> SearchIssueVouchersAsync(
+        string search, int take = 8, CancellationToken cancellationToken = default)
+    {
+        EnsureIssueActor();
+        var term = search?.Trim() ?? string.Empty;
+        if (term.Length < 2 || term.Length > 100) return Array.Empty<InventoryIssueSearchDto>();
+        take = Math.Clamp(take, 1, 50);
+        var query = IssueVouchers.AsNoTracking()
+            .Where(value => value.TenantId == _currentUserProvider.TenantId && !value.IsDeleted &&
+                !value.InventoryRequisition.IsDeleted && value.InventoryRequisition.TenantId == _currentUserProvider.TenantId &&
+                (value.VoucherNumber.Contains(term) || value.InventoryRequisition.RequisitionNumber.Contains(term)))
+            .Include(value => value.InventoryRequisition).ThenInclude(value => value.Warehouse)
+            .Include(value => value.InventoryRequisition).ThenInclude(value => value.Location)
+            .OrderByDescending(value => value.IssuedAtUtc).ThenBy(value => value.Id);
+        var result = new List<InventoryIssueSearchDto>();
+        const int batchSize = 50;
+        for (var offset = 0; result.Count < take; offset += batchSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidates = await query.Skip(offset).Take(batchSize).ToListAsync(cancellationToken);
+            foreach (var voucher in candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // The same designated-receiver and requisition evidence scope as GetIssueVoucherAsync.
+                if (voucher.ReceiverUserId != _currentUserProvider.UserId &&
+                    !await CanReadIssueEvidenceAsync(voucher.InventoryRequisition)) continue;
+                result.Add(new InventoryIssueSearchDto { Id = voucher.Id, VoucherNumber = voucher.VoucherNumber,
+                    RequisitionNumber = voucher.InventoryRequisition.RequisitionNumber, Status = voucher.Status.ToString() });
+                if (result.Count == take) break;
+            }
+            if (candidates.Count < batchSize) break;
+        }
+        return result;
+    }
+
     public async Task<InventoryIssueVoucherDto?> GetIssueVoucherAsync(
         Guid voucherId,
         CancellationToken cancellationToken = default)
@@ -1042,6 +1101,16 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         var normalizedCorrelation = NormalizeCorrelation(correlationId);
         var normalizedKey = NormalizeRequired(request.IdempotencyKey, 100, "Idempotency key");
         var normalizedComment = NormalizeRequired(request.Comment, 1000, "Receiver comment");
+        if (request.Lines is null || request.Lines.Count == 0 || request.Lines.Any(line => line is null ||
+                line.IssueVoucherLineId == Guid.Empty || line.ReceivedQuantity < 0 ||
+                line.ReceivedQuantity > 99999999999999.9999m || decimal.Round(line.ReceivedQuantity, 4) != line.ReceivedQuantity) ||
+            request.Lines.Select(line => line.IssueVoucherLineId).Distinct().Count() != request.Lines.Count ||
+            !request.Lines.Any(line => line.ReceivedQuantity > 0))
+            throw new InventoryIssueControlException("INV_ISSUE_RECEIPT_INVALID",
+                "Enter actual received quantities with at most four decimal places, without duplicate lines; at least one quantity must be positive.");
+        var receiptPayloadHash = Hash(new { voucherId, comment = normalizedComment,
+            lines = request.Lines.OrderBy(line => line.IssueVoucherLineId)
+                .Select(line => new { line.IssueVoucherLineId, line.ReceivedQuantity }).ToArray() });
 
         return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -1056,12 +1125,10 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                     throw new InventoryIssueAuthorizationException("Only the designated receiver can acknowledge this handover.");
 
                 var priorAcknowledgement = voucher.Actions.SingleOrDefault(action =>
-                    action.ActionType == InventoryIssueVoucherActionType.Acknowledged &&
-                    action.PayloadJson.Contains($"\"idempotencyKey\":\"{normalizedKey}\"", StringComparison.Ordinal));
+                    action.ReceiptIdempotencyKey == normalizedKey);
                 if (priorAcknowledgement is not null)
                 {
-                    if (voucher.Status == InventoryIssueVoucherStatus.Acknowledged &&
-                        string.Equals(voucher.ReceiverComment, normalizedComment, StringComparison.Ordinal))
+                    if (string.Equals(priorAcknowledgement.ReceiptPayloadHash, receiptPayloadHash, StringComparison.Ordinal))
                     {
                         await _unitOfWork.CommitAsync(cancellationToken);
                         return MapIssueVoucher(voucher);
@@ -1076,23 +1143,65 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 EnsureRowVersion(voucher.RowVersion, request.RowVersion, "Store Issue Voucher");
                 await EnsureActiveInternalUserAsync(_currentUserProvider.UserId, cancellationToken);
 
-                var before = new { voucher.Status, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc };
-                voucher.Status = InventoryIssueVoucherStatus.Acknowledged;
-                voucher.AcknowledgedById = _currentUserProvider.UserId;
-                voucher.AcknowledgedAtUtc = DateTime.UtcNow;
+                var sourceLines = voucher.Lines.Where(line => !line.IsDeleted).ToDictionary(line => line.Id);
+                if (request.Lines.Any(line => !sourceLines.ContainsKey(line.IssueVoucherLineId)))
+                    throw new InventoryIssueControlException("INV_ISSUE_RECEIPT_LINE_INVALID", "A receipt line does not belong to this issue voucher.");
+                var received = sourceLines.Keys.ToDictionary(id => id, id => ReceivedQuantity(voucher, id));
+                var sourceIds = sourceLines.Keys.ToArray();
+                var returns = await _unitOfWork.Repository<InventoryIssueReturnAllocation>().GetQueryable().AsNoTracking()
+                    .Where(allocation => allocation.TenantId == voucher.TenantId && !allocation.IsDeleted &&
+                        !allocation.ReversedAtUtc.HasValue &&
+                        allocation.InventoryIssueFinanceLineage.TenantId == voucher.TenantId &&
+                        sourceIds.Contains(allocation.InventoryIssueFinanceLineage.InventoryIssueVoucherLineId))
+                    .GroupBy(allocation => allocation.InventoryIssueFinanceLineage.InventoryIssueVoucherLineId)
+                    .Select(group => new { Id = group.Key, Quantity = group.Sum(allocation => allocation.Quantity) })
+                    .ToDictionaryAsync(group => group.Id, group => group.Quantity, cancellationToken);
+                foreach (var line in request.Lines)
+                {
+                    var source = sourceLines[line.IssueVoucherLineId];
+                    if (line.ReceivedQuantity > 0 && returns.GetValueOrDefault(source.Id) > received[source.Id])
+                        throw new InventoryIssueControlException("INV_ISSUE_RECEIPT_RETURN_RECONCILIATION",
+                            "Returned quantities exceed recorded receipts for this issue line. Reconcile whether the goods were received or returned before receipt before acknowledging further quantities.");
+                    if (!string.IsNullOrWhiteSpace(source.SerialNumber) && line.ReceivedQuantity != decimal.Truncate(line.ReceivedQuantity))
+                        throw new InventoryIssueControlException("INV_ISSUE_RECEIPT_SERIAL_QUANTITY", "Serial-tracked items must be received in whole units.");
+                    if (received[source.Id] + line.ReceivedQuantity > source.Quantity)
+                        throw new InventoryIssueControlException("INV_ISSUE_RECEIPT_EXCEEDS_ISSUED", "Actual received quantity exceeds the outstanding issued quantity.");
+                }
+                var fullyReceived = sourceLines.Values.All(line => received[line.Id] +
+                    (request.Lines.SingleOrDefault(input => input.IssueVoucherLineId == line.Id)?.ReceivedQuantity ?? 0m) == line.Quantity);
+                var statusAfter = fullyReceived ? InventoryIssueVoucherStatus.Acknowledged : InventoryIssueVoucherStatus.Issued;
+                var before = new { voucher.Status, voucher.ReceiptSequence, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc, received };
+                var receiptAction = await AddVoucherActionAsync(voucher,
+                    fullyReceived ? InventoryIssueVoucherActionType.Acknowledged : InventoryIssueVoucherActionType.PartiallyAcknowledged,
+                    statusAfter, normalizedComment, new { idempotencyKey = normalizedKey, receiptPayloadHash,
+                        lines = request.Lines.OrderBy(line => line.IssueVoucherLineId).ToArray() }, normalizedCorrelation);
+                receiptAction.ReceiptIdempotencyKey = normalizedKey;
+                receiptAction.ReceiptPayloadHash = receiptPayloadHash;
+                foreach (var line in request.Lines.Where(line => line.ReceivedQuantity > 0))
+                    receiptAction.ReceiptLines.Add(new InventoryIssueVoucherReceiptLine
+                    {
+                        TenantId = voucher.TenantId, InventoryIssueVoucherActionId = receiptAction.Id,
+                        InventoryIssueVoucherLineId = line.IssueVoucherLineId, ReceivedQuantity = line.ReceivedQuantity,
+                        CreatedById = _currentUserProvider.UserId
+                    });
+                // The SQL receipt guards validate the pending action against the unchanged parent.
+                // Persist immutable receipt evidence before its governed parent transition.
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                voucher.ReceiptSequence++;
+                voucher.Status = statusAfter;
+                if (fullyReceived)
+                {
+                    voucher.AcknowledgedById = _currentUserProvider.UserId;
+                    voucher.AcknowledgedAtUtc = receiptAction.OccurredAtUtc;
+                }
                 voucher.ReceiverComment = normalizedComment;
                 voucher.UpdatedAt = DateTime.UtcNow;
                 voucher.LastModifiedById = _currentUserProvider.UserId;
                 voucher.IntegrityHash = VoucherIntegrity(voucher);
-                // The append-only action trigger validates StatusAfter against the
-                // durable voucher row. Flush the governed parent first inside this
-                // transaction so EF cannot insert the dependent acknowledgement
-                // action before the Acknowledged status update.
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
-                await AddVoucherActionAsync(voucher, InventoryIssueVoucherActionType.Acknowledged,
-                    voucher.Status, normalizedComment, new { idempotencyKey = normalizedKey }, normalizedCorrelation);
                 await AddIssueAuditAsync("InventoryIssueVoucher.Acknowledge", voucher, before,
-                    new { voucher.Status, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc, voucher.ReceiverComment },
+                    new { voucher.Status, voucher.ReceiptSequence, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc,
+                        voucher.ReceiverComment, receiptAction.Id, receiptPayloadHash, lines = request.Lines },
                     normalizedCorrelation);
                 await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
                 {
@@ -1107,10 +1216,10 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                     SourceId = voucher.Id,
                     SourceReference = voucher.VoucherNumber,
                     Reason = normalizedComment,
-                    InputValues = new { voucher.ReceiverUserId, IdempotencyKey = normalizedKey },
-                    ResultValues = new { voucher.Status, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc },
+                    InputValues = new { voucher.ReceiverUserId, IdempotencyKey = normalizedKey, lines = request.Lines },
+                    ResultValues = new { voucher.Status, voucher.ReceiptSequence, voucher.AcknowledgedById, voucher.AcknowledgedAtUtc },
                     CorrelationId = normalizedCorrelation,
-                    OccurredAtUtc = voucher.AcknowledgedAtUtc.Value
+                    OccurredAtUtc = receiptAction.OccurredAtUtc
                 }, cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
@@ -1133,11 +1242,44 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
     public async Task<bool> CompleteAsync(Guid id)
     {
+        if (_unitOfWork.HasActiveTransaction)
+        {
+            await _unitOfWork.AcquireTransactionLockAsync($"inventory-requisition-issue:{_currentUserProvider.TenantId:N}:{id:N}");
+            return await CompleteCoreAsync(id);
+        }
+
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            _unitOfWork.ClearTrackedChanges();
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                // Serialize the receipt-completeness decision with new issue vouchers.
+                await _unitOfWork.AcquireTransactionLockAsync($"inventory-requisition-issue:{_currentUserProvider.TenantId:N}:{id:N}");
+                var result = await CompleteCoreAsync(id);
+                await _unitOfWork.CommitAsync();
+                return result;
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
+    }
+
+    private async Task<bool> CompleteCoreAsync(Guid id)
+    {
         var requisition = await _requisitionRepository.GetByIdAsync(id)
             ?? throw new ArgumentException($"Requisition {id} not found");
 
         if (requisition.Status != RequisitionStatus.Issued && requisition.Status != RequisitionStatus.PartiallyIssued)
             throw new InvalidOperationException("Only issued requisitions can be completed");
+
+        if (await IssueVouchers.AnyAsync(voucher => voucher.TenantId == _currentUserProvider.TenantId &&
+                voucher.InventoryRequisitionId == id && !voucher.IsDeleted && voucher.Status != InventoryIssueVoucherStatus.Acknowledged))
+            throw new InventoryIssueControlException("INV_ISSUE_RECEIPT_OUTSTANDING", "Receive all outstanding issue voucher quantities before completing this requisition.");
 
         requisition.Status = RequisitionStatus.Completed;
         requisition.CompletedDate = DateTime.UtcNow;
@@ -1391,10 +1533,13 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             .Include(value => value.IssuedBy)
             .Include(value => value.ReceiverUser)
             .Include(value => value.Lines).ThenInclude(value => value.InventoryItem)
+            .Include(value => value.Lines).ThenInclude(value => value.InventoryRequisitionItem)
             .Include(value => value.Lines).ThenInclude(value => value.Location)
-            .Include(value => value.Actions);
+            .Include(value => value.Actions).ThenInclude(value => value.ReceiptLines);
         if (!tracked) query = query.AsNoTracking();
-        return await query.SingleOrDefaultAsync(cancellationToken);
+        var voucher = await query.SingleOrDefaultAsync(cancellationToken);
+        if (voucher is not null) EnsureFinalizedReceiptHistory(voucher);
+        return voucher;
     }
 
     private async Task<string> GenerateIssueVoucherNumberAsync(
@@ -1407,7 +1552,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         return $"{prefix}{count + 1:D5}";
     }
 
-    private async Task AddVoucherActionAsync(
+    private async Task<InventoryIssueVoucherAction> AddVoucherActionAsync(
         InventoryIssueVoucher voucher,
         InventoryIssueVoucherActionType actionType,
         InventoryIssueVoucherStatus status,
@@ -1446,6 +1591,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             action.PayloadJson, action.CorrelationId });
         voucher.Actions.Add(action);
         await _unitOfWork.Repository<InventoryIssueVoucherAction>().AddAsync(action);
+        return action;
     }
 
     private async Task AddIssueAuditAsync(
@@ -1478,6 +1624,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         InventoryRequisitionId = voucher.InventoryRequisitionId,
         RequisitionNumber = voucher.InventoryRequisition?.RequisitionNumber ?? string.Empty,
         Status = voucher.Status,
+        IsLegacyAcknowledgement = voucher.Status == InventoryIssueVoucherStatus.Acknowledged && voucher.ReceiptSequence == 0,
         WarehouseId = voucher.WarehouseId,
         WarehouseName = voucher.Warehouse?.Name ?? string.Empty,
         LocationId = voucher.LocationId,
@@ -1506,7 +1653,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         FinancePostingEventId = voucher.FinancePostingEventId,
         FinanceJournalEntryId = voucher.FinanceJournalEntryId,
         RowVersion = Convert.ToBase64String(voucher.RowVersion ?? Array.Empty<byte>()),
-        Lines = voucher.Lines.OrderBy(value => value.InventoryItem.ItemCode).Select(value => new InventoryIssueVoucherLineDto
+        Lines = voucher.Lines.Where(value => !value.IsDeleted).OrderBy(value => value.InventoryItem?.ItemCode).Select(value => new InventoryIssueVoucherLineDto
         {
             Id = value.Id,
             InventoryRequisitionItemId = value.InventoryRequisitionItemId,
@@ -1517,6 +1664,9 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             LocationId = value.LocationId,
             LocationCode = value.Location?.LocationCode,
             Quantity = value.Quantity,
+            RequestedQuantity = value.InventoryRequisitionItem?.RequestedQuantity ?? value.Quantity,
+            ReceivedQuantity = ReceivedQuantity(voucher, value.Id),
+            OutstandingQuantity = Math.Max(0m, value.Quantity - ReceivedQuantity(voucher, value.Id)),
             UnitCost = value.UnitCost,
             TotalValue = value.TotalValue,
             UnitOfMeasure = value.UnitOfMeasure,
@@ -1537,6 +1687,50 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             Comment = value.Comment
         }).ToList()
     };
+
+    private static void EnsureFinalizedReceiptHistory(InventoryIssueVoucher voucher)
+    {
+        // SQL validates individual statements; the service transaction must commit the action,
+        // line evidence and parent sequence together. Never project or replay half a receipt
+        // left by an unsupported direct-SQL recovery write.
+        var receipts = voucher.Actions.Where(action => !action.IsDeleted &&
+            (action.ActionType == InventoryIssueVoucherActionType.PartiallyAcknowledged ||
+             action.ReceiptIdempotencyKey is not null || action.ReceiptPayloadHash is not null ||
+             action.ReceiptLines.Any())).OrderBy(action => action.Sequence).ToList();
+        var invalid = voucher.ReceiptSequence < 0 || receipts.Count != voucher.ReceiptSequence;
+        for (var index = 0; index < receipts.Count && !invalid; index++)
+        {
+            var action = receipts[index];
+            var isFinal = index == receipts.Count - 1 && voucher.Status == InventoryIssueVoucherStatus.Acknowledged;
+            invalid = action.Sequence != index + 2 || action.TenantId != voucher.TenantId ||
+                action.InventoryIssueVoucherId != voucher.Id || action.ActorUserId != voucher.ReceiverUserId ||
+                string.IsNullOrWhiteSpace(action.ReceiptIdempotencyKey) || action.ReceiptPayloadHash?.Length != 64 ||
+                action.ActionType != (isFinal ? InventoryIssueVoucherActionType.Acknowledged : InventoryIssueVoucherActionType.PartiallyAcknowledged) ||
+                action.StatusAfter != (isFinal ? InventoryIssueVoucherStatus.Acknowledged : InventoryIssueVoucherStatus.Issued) ||
+                !action.ReceiptLines.Any() || action.ReceiptLines.Any(line => line.IsDeleted ||
+                    line.TenantId != voucher.TenantId || line.InventoryIssueVoucherActionId != action.Id || line.ReceivedQuantity <= 0 ||
+                    !voucher.Lines.Any(source => !source.IsDeleted && source.Id == line.InventoryIssueVoucherLineId));
+        }
+        if (!invalid && receipts.Count > 0)
+        {
+            var totals = receipts.SelectMany(action => action.ReceiptLines)
+                .GroupBy(line => line.InventoryIssueVoucherLineId).ToDictionary(group => group.Key, group => group.Sum(line => line.ReceivedQuantity));
+            var sources = voucher.Lines.Where(line => !line.IsDeleted).ToList();
+            var complete = sources.All(line => totals.GetValueOrDefault(line.Id) == line.Quantity);
+            invalid = sources.Any(line => totals.GetValueOrDefault(line.Id) > line.Quantity) ||
+                complete != (voucher.Status == InventoryIssueVoucherStatus.Acknowledged);
+        }
+        if (invalid)
+            throw new InventoryIssueControlException("INV_ISSUE_RECEIPT_HISTORY_INCOMPLETE",
+                "Receipt evidence does not match the finalized issue voucher. An administrator must reconcile its history before viewing or acknowledging quantities.");
+    }
+
+    private static decimal ReceivedQuantity(InventoryIssueVoucher voucher, Guid lineId) =>
+        voucher.Status == InventoryIssueVoucherStatus.Acknowledged && voucher.ReceiptSequence == 0
+            ? voucher.Lines.Single(line => line.Id == lineId).Quantity
+            : voucher.Actions.Where(action => !action.IsDeleted).SelectMany(action => action.ReceiptLines)
+                .Where(line => !line.IsDeleted && line.InventoryIssueVoucherLineId == lineId)
+                .Sum(line => line.ReceivedQuantity);
 
     private static string UserName(ApplicationUser? user) => user is null
         ? string.Empty
@@ -1570,7 +1764,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         voucher.IdempotencyKey,
         voucher.PayloadHash,
         voucher.CorrelationId,
-        voucher.SourceSnapshotJson
+        voucher.SourceSnapshotJson,
+        voucher.ReceiptSequence
     });
 
     private static string Hash(object value) => Convert.ToHexString(

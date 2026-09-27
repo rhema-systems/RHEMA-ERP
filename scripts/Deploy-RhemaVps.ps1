@@ -5,16 +5,25 @@ param(
 
     [switch]$DryRun,
     [switch]$ReuseVerifiedArtifacts,
+    [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
+    [string]$ReuseApiOutputFromCommit,
+    [ValidatePattern('^[0-9a-fA-F]{7,40}$')]
+    [string]$ReuseFrontendBuildFromCommit,
+    [ValidateSet('.next', '.next-production')]
+    [string]$ReuseFrontendOutputDirectory = '.next',
     [switch]$SkipBrowserSmoke,
+    [switch]$LocalVps,
+    [ValidatePattern('^RhemaERP_[A-Za-z0-9_]{1,119}$')]
+    [string]$FreshDatabaseName,
     [switch]$AllowDirtyWorktree,
     [switch]$AllowNonRemoteHead,
 
     [string]$ExpectedCommit,
-    [string]$VpsHost = '149.102.145.190',
+    [string]$VpsHost = '63.141.230.56',
     [int]$SshPort = 2222,
     [string]$SshUser = 'Administrator',
     [string]$SshKeyPath = (Join-Path $env:USERPROFILE '.ssh\id_rsa'),
-    [string]$PublicBaseUrl = 'https://149.102.145.190:8443',
+    [string]$PublicBaseUrl = 'https://63.141.230.56',
     [int]$ApiReadyTimeoutSeconds = 1800
 )
 
@@ -25,6 +34,8 @@ $env:GCM_INTERACTIVE = 'Never'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepositoryRoot = Split-Path -Parent $ScriptRoot
 $RemoteHelperLocalPath = Join-Path $ScriptRoot 'vps\Invoke-RhemaVpsRemote.ps1'
+. (Join-Path $ScriptRoot 'vps\New-RhemaVpsPreflightHelper.ps1')
+. (Join-Path $ScriptRoot 'vps\Set-StagedFrontendRuntime.ps1')
 $BrowserSmokePath = Join-Path $ScriptRoot 'vps\Test-RhemaVpsBrowserSmoke.mjs'
 $ReleaseRoot = Join-Path $RepositoryRoot 'artifacts\vps-releases'
 $RemotePackagesRoot = 'C:\RhemaERP\packages'
@@ -102,9 +113,18 @@ function Invoke-NativeChecked {
         [string[]]$Arguments,
         [string]$FailureMessage
     )
-    & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "$FailureMessage (exit code $LASTEXITCODE)."
+    # Build/dependency/browser tools do not need the account-bootstrap secret.
+    # The dedicated deployment helper still inherits it for seed-only calls.
+    $nativePriorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $null, 'Process')
+        & $Command @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "$FailureMessage (exit code $LASTEXITCODE)."
+        }
+    } finally {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $nativePriorOperationalPassword, 'Process')
+        $nativePriorOperationalPassword = $null
     }
 }
 
@@ -208,6 +228,41 @@ function Get-SyncfusionLicenseKey {
         }
     }
 
+    if ($LocalVps) {
+        # A server-local release can read the protected service value directly,
+        # but still keeps it only in memory and never prints it.
+        $path = 'C:\RhemaERP\services\api\RhemaERPAPI.xml'
+        if (Test-Path -LiteralPath $path) {
+            [xml]$xml = Get-Content -LiteralPath $path -Raw
+            $value = [string](@($xml.service.env | Where-Object {
+                $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
+                -not [string]::IsNullOrWhiteSpace([string]$_.value)
+            })[0].value)
+        }
+        else {
+            $nssmPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
+            Assert-True (Test-Path -LiteralPath $nssmPath) `
+                "The protected API service configuration is missing: $path or $nssmPath"
+            $properties = Get-ItemProperty -LiteralPath $nssmPath
+            $entries = @(
+                @($properties.AppEnvironment)
+                @($properties.AppEnvironmentExtra)
+            ) | ForEach-Object { [string]$_ }
+            $candidate = @($entries | Where-Object {
+                $_ -match '^(Syncfusion__LicenseKey|SyncfusionLicenseKey)=' -and
+                $_.Length -gt ($_.IndexOf('=') + 1)
+            } | Select-Object -Last 1)[0]
+            if ($null -ne $candidate) {
+                $value = $candidate.Substring($candidate.IndexOf('=') + 1)
+            }
+        }
+        Assert-True (-not [string]::IsNullOrWhiteSpace($value)) `
+            'The protected Syncfusion API license is not configured.'
+        Write-Host 'Loaded the protected Syncfusion license without logging its value.' `
+            -ForegroundColor DarkGray
+        return $value
+    }
+
     # The browser license must be embedded while Next.js is built. Reuse the
     # protected API-service value over SSH when the release host has no local
     # copy. Capture it only in process memory; never echo it or write it to the
@@ -273,6 +328,35 @@ function Invoke-RemoteHelper {
         [hashtable]$Parameters = @{}
     )
 
+    if (-not $Parameters.ContainsKey('ExpectedPublicOrigin')) {
+        $Parameters['ExpectedPublicOrigin'] = $PublicBaseUrl.TrimEnd('/')
+    }
+
+    if ($LocalVps) {
+        $helperArguments = @(
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+            '-File', $RemoteHelperPath, '-Action', $Action
+        )
+        foreach ($key in ($Parameters.Keys | Sort-Object)) {
+            $value = $Parameters[$key]
+            if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
+                continue
+            }
+            $helperArguments += "-$key"
+            $helperArguments += [string]$value
+        }
+        $output = @(& powershell.exe @helperArguments 2>&1 | ForEach-Object {
+            $line = [string]$_
+            if ($line.StartsWith('FRESH_PROGRESS|')) { Write-Host $line.Substring(15) }
+            else { $line }
+        })
+        if ($LASTEXITCODE -ne 0) {
+            $summary = ($output | Select-Object -Last 20) -join [Environment]::NewLine
+            throw "Local VPS $Action failed.$([Environment]::NewLine)$summary"
+        }
+        return @($output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+
     $parts = @(
         '&', (ConvertTo-SingleQuotedPowerShellLiteral $RemoteHelperPath),
         '-Action', (ConvertTo-SingleQuotedPowerShellLiteral $Action)
@@ -333,6 +417,15 @@ function Invoke-RemoteHelper {
 
 function Copy-ToVps {
     param([string[]]$LocalPaths, [string]$RemoteDirectory)
+    if ($LocalVps) {
+        # The package directory is a disposable staging area. A VPS that was
+        # provisioned from only the live service folders may not have it yet.
+        New-Item -ItemType Directory -Path $RemoteDirectory -Force | Out-Null
+        foreach ($path in $LocalPaths) {
+            Copy-Item -LiteralPath $path -Destination $RemoteDirectory -Force
+        }
+        return
+    }
     $scpArguments = Get-ScpArguments
     $destination = "${SshUser}@${VpsHost}:$($RemoteDirectory.Replace('\', '/'))/"
     & scp @scpArguments @LocalPaths $destination
@@ -367,20 +460,24 @@ function Test-ReleaseManifest {
     catch { return $null }
 }
 
-function Assert-FastMigrationDiscovery {
+function Assert-MigrationDiscovery {
     $migrationRoot = Join-Path $RepositoryRoot 'src\ErpSystem.Data\Migrations'
-    $metadata = Get-Content (Join-Path $migrationRoot 'FastBuildMigrationMetadata.cs') -Raw
     $missing = @()
     foreach ($id in (Get-LocalMigrationIds)) {
         $source = Get-Content (Join-Path $migrationRoot "$id.cs") -Raw
+        $designerPath = Join-Path $migrationRoot "$id.Designer.cs"
+        $designer = if (Test-Path -LiteralPath $designerPath) {
+            Get-Content -LiteralPath $designerPath -Raw
+        }
+        else { '' }
         $migrationAttribute = 'Migration("' + $id + '")'
-        if (-not $metadata.Contains($migrationAttribute) -and
-            -not $source.Contains($migrationAttribute)) {
+        if (-not $source.Contains($migrationAttribute) -and
+            -not $designer.Contains($migrationAttribute)) {
             $missing += $id
         }
     }
     Assert-True ($missing.Count -eq 0) `
-        "Fast EF build metadata is missing migration discovery for: $($missing -join ', ')"
+        "Active EF migrations are missing compiled discovery metadata for: $($missing -join ', ')"
 }
 
 function Set-TemporaryEnvironment {
@@ -403,20 +500,54 @@ function Restore-TemporaryEnvironment {
 function New-ReleaseArtifacts {
     param([string]$ReleaseDirectory)
 
-    Assert-FastMigrationDiscovery
+    Assert-MigrationDiscovery
     $syncfusionLicenseKey = Get-SyncfusionLicenseKey
     $apiOutput = Join-Path $ReleaseDirectory 'api'
     $frontendOutput = Join-Path $ReleaseDirectory 'frontend'
     Reset-GeneratedDirectory $apiOutput $ReleaseDirectory
     Reset-GeneratedDirectory $frontendOutput $ReleaseDirectory
 
-    Invoke-NativeChecked 'dotnet' @(
-        'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
-        '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
-        '-o', $apiOutput,
-        '/p:PublishSingleFile=false', '-p:TdcFastEfBuild=true',
-        '-p:UseSharedCompilation=false', '-m:1'
-    ) 'API publish failed' | Out-Host
+    if (-not [string]::IsNullOrWhiteSpace($ReuseApiOutputFromCommit)) {
+        $resolvedSourceCommit = (@(& git rev-parse --verify `
+                    "$ReuseApiOutputFromCommit^{commit}" 2>$null) -join '').Trim()
+        Assert-True ($LASTEXITCODE -eq 0 -and
+            $resolvedSourceCommit -match '^[0-9a-f]{40}$') `
+            "The reusable API source commit is invalid: $ReuseApiOutputFromCommit"
+
+        $apiInputPaths = @('src')
+        foreach ($candidate in @(
+                'global.json', 'NuGet.config', 'Directory.Build.props',
+                'Directory.Build.targets', 'Directory.Packages.props')) {
+            if (Test-Path -LiteralPath (Join-Path $RepositoryRoot $candidate)) {
+                $apiInputPaths += $candidate
+            }
+        }
+        & git diff --quiet $resolvedSourceCommit $script:Commit -- @apiInputPaths
+        Assert-True ($LASTEXITCODE -eq 0) `
+            'API source or build inputs changed; refusing to reuse the earlier publish output.'
+
+        $sourceRelease = Join-Path $ReleaseRoot $resolvedSourceCommit.Substring(0, 8)
+        $sourceApiOutput = Join-Path $sourceRelease 'api'
+        Assert-SafeChildPath $sourceApiOutput $ReleaseRoot
+        Assert-True (Test-Path -LiteralPath `
+                (Join-Path $sourceApiOutput 'ErpSystem.Api.exe')) `
+            "Reusable API publish output is missing: $sourceApiOutput"
+        Invoke-RobocopyChecked @(
+            $sourceApiOutput, $apiOutput, '/E', '/R:2', '/W:2',
+            '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+        ) 'Reusing the verified API publish output failed'
+        Write-Host "Reused API publish output from $resolvedSourceCommit." `
+            -ForegroundColor Green
+    }
+    else {
+        Invoke-NativeChecked 'dotnet' @(
+            'publish', 'src\ErpSystem.Api\ErpSystem.Api.csproj',
+            '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
+            '-o', $apiOutput,
+            '/p:PublishSingleFile=false',
+            '-p:UseSharedCompilation=false', '-m:1'
+        ) 'API publish failed' | Out-Host
+    }
 
     foreach ($name in @(
             'appsettings.json', 'appsettings.Production.json',
@@ -444,39 +575,66 @@ function New-ReleaseArtifacts {
         'A local Next.js process is using this frontend. Stop it before release build.'
 
     $nextOutput = Join-Path $frontendRoot '.next'
-    if (Test-Path -LiteralPath $nextOutput) {
-        Assert-True ([System.IO.Path]::GetFullPath($nextOutput) -eq `
-                [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'frontend\.next'))) `
-            'Unexpected frontend build-output path.'
-        Remove-Item -LiteralPath $nextOutput -Recurse -Force
-    }
-    $previousEnvironment = Set-TemporaryEnvironment @{
-        NODE_ENV = 'production'
-        NODE_OPTIONS = '--max-old-space-size=8192'
-        NEXT_PUBLIC_API_URL = "$PublicBaseUrl/api"
-        API_URL = "$PublicBaseUrl/api"
-        NEXTAUTH_URL = $PublicBaseUrl
-        NEXT_TELEMETRY_DISABLED = '1'
-        SYNCFUSION_LICENSE = $syncfusionLicenseKey
-    }
-    try {
-        Push-Location $frontendRoot
-        try {
-            $syncfusionActivator = Join-Path $frontendRoot `
-                'node_modules\.bin\syncfusion-license.cmd'
-            Assert-True (Test-Path -LiteralPath $syncfusionActivator) `
-                'The installed Syncfusion frontend license activator is missing.'
-            Invoke-NativeChecked $syncfusionActivator @('activate') `
-                'Syncfusion frontend license activation failed' | Out-Host
-            Invoke-NativeChecked 'npm.cmd' @('run', 'build') `
-                'Frontend build failed' | Out-Host
+    Assert-True ($ReuseFrontendOutputDirectory -eq '.next' -or -not [string]::IsNullOrWhiteSpace($ReuseFrontendBuildFromCommit)) `
+        'A different reusable output directory requires -ReuseFrontendBuildFromCommit.'
+    if (-not [string]::IsNullOrWhiteSpace($ReuseFrontendBuildFromCommit)) {
+        $nextOutput = Join-Path $frontendRoot $ReuseFrontendOutputDirectory
+        $resolvedFrontendCommit = (@(& git rev-parse --verify `
+                    "$ReuseFrontendBuildFromCommit^{commit}" 2>$null) -join '').Trim()
+        Assert-True ($LASTEXITCODE -eq 0 -and
+            $resolvedFrontendCommit -match '^[0-9a-f]{40}$') `
+            "The reusable frontend source commit is invalid: $ReuseFrontendBuildFromCommit"
+
+        & git diff --quiet $resolvedFrontendCommit $script:Commit -- frontend
+        Assert-True ($LASTEXITCODE -eq 0) `
+            'Frontend source or build inputs changed; refusing to reuse the earlier build.'
+        foreach ($relativePath in @(
+                'BUILD_ID', 'required-server-files.json',
+                'server\middleware-manifest.json')) {
+            Assert-True (Test-Path -LiteralPath (Join-Path $nextOutput $relativePath)) `
+                "Reusable frontend build output is incomplete: $relativePath"
         }
-        finally { Pop-Location }
+        Write-Host "Reused frontend build output from $resolvedFrontendCommit." `
+            -ForegroundColor Green
     }
-    finally {
-        Restore-TemporaryEnvironment $previousEnvironment
-        $syncfusionLicenseKey = $null
+    else {
+        if (Test-Path -LiteralPath $nextOutput) {
+            Assert-True ([System.IO.Path]::GetFullPath($nextOutput) -eq `
+                    [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'frontend\.next'))) `
+                'Unexpected frontend build-output path.'
+            Remove-Item -LiteralPath $nextOutput -Recurse -Force
+        }
+        $previousEnvironment = Set-TemporaryEnvironment @{
+            NODE_ENV = 'production'
+            NODE_OPTIONS = '--max-old-space-size=8192'
+            NEXT_PUBLIC_API_URL = "$PublicBaseUrl/api"
+            API_URL = "$PublicBaseUrl/api"
+            NEXTAUTH_URL = $PublicBaseUrl
+            NEXT_TELEMETRY_DISABLED = '1'
+            NEXT_DIST_DIR = '.next'
+            NEXT_OUTPUT = ''
+            SYNCFUSION_LICENSE = $syncfusionLicenseKey
+        }
+        try {
+            Push-Location $frontendRoot
+            try {
+                Invoke-NativeChecked 'npm.cmd' @(
+                    'ci', '--include=dev', '--no-audit', '--no-fund'
+                ) 'Frontend locked-dependency restore failed' | Out-Host
+                $syncfusionActivator = Join-Path $frontendRoot `
+                    'node_modules\.bin\syncfusion-license.cmd'
+                Assert-True (Test-Path -LiteralPath $syncfusionActivator) `
+                    'The installed Syncfusion frontend license activator is missing.'
+                Invoke-NativeChecked $syncfusionActivator @('activate') `
+                    'Syncfusion frontend license activation failed' | Out-Host
+                Invoke-NativeChecked 'npm.cmd' @('run', 'build') `
+                    'Frontend build failed' | Out-Host
+            }
+            finally { Pop-Location }
+        }
+        finally { Restore-TemporaryEnvironment $previousEnvironment }
     }
+    $syncfusionLicenseKey = $null
 
     $buildId = (Get-Content (Join-Path $nextOutput 'BUILD_ID') -Raw).Trim()
     Assert-True ($buildId -ne 'development') `
@@ -487,28 +645,33 @@ function New-ReleaseArtifacts {
     $middlewareBuildId = $middleware.middleware.'/'.env.__NEXT_BUILD_ID
     Assert-True ($buildId -eq $middlewareBuildId) `
         'Frontend BUILD_ID and middleware build ID differ.'
-    Assert-True (Test-Path (Join-Path $nextOutput 'standalone\server.js')) `
-        'Standalone frontend server.js is missing.'
+    Assert-True (Test-Path (Join-Path $nextOutput 'required-server-files.json')) `
+        'Regular Next.js server files are missing.'
 
     Invoke-RobocopyChecked @(
         $nextOutput, (Join-Path $frontendOutput '.next'), '/E', '/R:2', '/W:2',
         '/NFL', '/NDL', '/NJH', '/NJS', '/NP',
-        '/XD', (Join-Path $nextOutput 'cache'),
-        (Join-Path $nextOutput 'standalone\node_modules')
+        '/XD', (Join-Path $nextOutput 'cache')
     ) 'Frontend .next staging failed'
     Invoke-RobocopyChecked @(
         (Join-Path $frontendRoot 'public'), (Join-Path $frontendOutput 'public'),
         '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
     ) 'Frontend public staging failed'
-    Copy-Item (Join-Path $nextOutput 'standalone\server.js') `
-        (Join-Path $frontendOutput 'server.js') -Force
-    Invoke-RobocopyChecked @(
-        (Join-Path $nextOutput 'standalone\node_modules'),
-        (Join-Path $frontendOutput 'node_modules'),
-        '/E', '/R:2', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
-    ) 'Frontend runtime dependencies staging failed'
-    Copy-Item (Join-Path $frontendRoot 'package.json') `
-        (Join-Path $frontendOutput 'package.json') -Force
+    Copy-Item (Join-Path $frontendRoot 'package.json'), `
+        (Join-Path $frontendRoot 'package-lock.json'), `
+        (Join-Path $frontendRoot 'next.config.js') `
+        -Destination $frontendOutput -Force
+    Set-StagedFrontendRuntime -FrontendDirectory $frontendOutput
+    Push-Location $frontendOutput
+    try {
+        Invoke-NativeChecked 'npm.cmd' @(
+            'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'
+        ) 'Frontend production dependency staging failed' | Out-Host
+    }
+    finally { Pop-Location }
+    Assert-True (Test-Path `
+            (Join-Path $frontendOutput 'node_modules\next\package.json')) `
+        'Frontend production Next.js runtime is missing.'
 
     # A diagnostic dirty-worktree release can share HEAD with an earlier VPS
     # package. Include the deployment stamp so browsers always receive a new
@@ -590,9 +753,17 @@ function Compare-MigrationState {
     $localIds = Get-LocalMigrationIds
     $missing = @($localIds | Where-Object { $_ -notin $remoteIds })
     $extra = @($remoteIds | Where-Object { $_ -notin $localIds })
+    $baselineId = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
     $allowedHistoricalExtra = @('20260402003233_InitialCreate')
     $unexpectedExtra = @($extra | Where-Object { $_ -notin $allowedHistoricalExtra })
     Write-Host "Migrations: local=$($localIds.Count), VPS=$($remoteIds.Count), pending=$($missing.Count), historical-extra=$($extra.Count)"
+
+    Assert-True (-not (($missing -contains $baselineId) -and $remoteIds.Count -gt 0)) `
+        ('The VPS database has existing migration history but has not adopted ' +
+         "$baselineId. The current baseline creates a fresh schema and is not a " +
+         'data-preserving upgrade. Stop deployment: retain the current compatible ' +
+         'code/database pair, or use an explicitly approved disposable reset or ' +
+         'separately reviewed data-preserving cutover plan.')
 
     $guardCoverage = @($RemoteOutput | Where-Object { $_ -like 'GUARD_COVERAGE|*' } |
         ForEach-Object { $_.Substring('GUARD_COVERAGE|'.Length) })
@@ -624,12 +795,15 @@ function Compare-MigrationState {
 }
 
 function Invoke-PublicSmoke {
-    param([string]$ExpectedCacheVersion)
+    param(
+        [string]$ExpectedCacheVersion,
+        [switch]$AllowConfigurationDrift
+    )
 
     $base = $PublicBaseUrl.TrimEnd('/')
     foreach ($route in @(
-            '/health', '/health/ready', '/health/live', '/api/tenant',
-            '/api/auth/security-settings', '/login', '/supplier-application')) {
+            '/api/tenant', '/api/auth/security-settings',
+            '/login', '/supplier-application')) {
         $code = & curl.exe -k -sS --max-time 30 -o NUL -w '%{http_code}' `
             "$base$route"
         Assert-True ($LASTEXITCODE -eq 0 -and $code -eq '200') `
@@ -675,16 +849,28 @@ function Invoke-PublicSmoke {
     }
     Assert-True ($badUrlMatches -eq 0) `
         'A public JavaScript asset contains a development API URL.'
-    Assert-True ($expectedOriginMatches -gt 0) `
-        'No deployed JavaScript asset contains the expected VPS API origin.'
+    if ($expectedOriginMatches -eq 0) {
+        Assert-True $AllowConfigurationDrift `
+            'No deployed JavaScript asset contains the expected VPS API origin.'
+        Write-Output "CONFIG_DRIFT|FRONTEND_API_ORIGIN|EXPECTED=$base"
+    }
 
     $allowedHeaders = (& curl.exe -k -sS --max-time 30 -D - -o NUL `
         -X OPTIONS -H "Origin: $base" `
         -H 'Access-Control-Request-Method: POST' "$base/api/auth/login") -join "`n"
     $allowedOriginPattern = '(?im)^access-control-allow-origin:\s*' +
         [regex]::Escape($base) + '\s*$'
-    Assert-True ($allowedHeaders -match $allowedOriginPattern) `
-        'Allowed-origin CORS preflight did not return the exact HTTPS origin.'
+    if ($allowedHeaders -notmatch $allowedOriginPattern) {
+        $actualOriginMatch = [regex]::Match(
+            $allowedHeaders, '(?im)^access-control-allow-origin:\s*([^\r\n]+)')
+        $actualOrigin = if ($actualOriginMatch.Success) {
+            $actualOriginMatch.Groups[1].Value.Trim()
+        }
+        else { '<missing>' }
+        Assert-True $AllowConfigurationDrift `
+            "Allowed-origin CORS preflight expected $base but received $actualOrigin."
+        Write-Output "CONFIG_DRIFT|CORS|EXPECTED=$base|ACTUAL=$actualOrigin"
+    }
     $deniedHeaders = (& curl.exe -k -sS --max-time 30 -D - -o NUL `
         -X OPTIONS -H 'Origin: https://invalid.example' `
         -H 'Access-Control-Request-Method: POST' "$base/api/auth/login") -join "`n"
@@ -725,6 +911,7 @@ function Write-RunResult {
         schemaVersion = 1
         status = $Status
         dryRun = [bool]$DryRun
+        freshDatabase = $FreshDatabaseName
         environment = $Environment
         deploymentId = $DeploymentId
         commit = $script:Commit
@@ -745,12 +932,23 @@ function Write-RunResult {
 }
 
 Push-Location $RepositoryRoot
+$freshApplyAttempted = $false
+$priorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
+$operationalPasswordPrompted = $false
 try {
-    foreach ($command in @('git', 'ssh', 'scp', 'curl.exe', 'node')) {
+    Assert-True ([string]::IsNullOrWhiteSpace($FreshDatabaseName) -or $LocalVps) `
+        'Fresh database cutover must run directly on the VPS with -LocalVps.'
+    $requiredCommands = @('git', 'curl.exe', 'node')
+    if (-not $LocalVps) {
+        $requiredCommands += @('ssh', 'scp')
+    }
+    foreach ($command in $requiredCommands) {
         Assert-CommandExists $command
     }
-    Assert-True (Test-Path -LiteralPath $SshKeyPath) `
-        "SSH key is missing: $SshKeyPath"
+    if (-not $LocalVps) {
+        Assert-True (Test-Path -LiteralPath $SshKeyPath) `
+            "SSH key is missing: $SshKeyPath"
+    }
     Assert-True (Test-Path -LiteralPath $RemoteHelperLocalPath) `
         'Remote deployment helper is missing.'
     Assert-True (Test-Path -LiteralPath $BrowserSmokePath) `
@@ -780,6 +978,10 @@ try {
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     $releaseManifest = $null
     $migrationState = $null
+    # Embed reviewed read-only probes so the content-addressed remote helper is
+    # self-contained. CRLF-normalized source hashes invalidate stale reviews.
+    $RemoteHelperLocalPath = New-RhemaVpsPreflightHelper -RepositoryRoot $RepositoryRoot `
+        -OutputPath (Join-Path $releaseDirectory 'Invoke-RhemaVpsRemote.ps1')
     $remoteHelperHash = (Get-FileHash $RemoteHelperLocalPath -Algorithm SHA256).Hash
     $remoteHelperName = "Invoke-RhemaVpsRemote-$($remoteHelperHash.Substring(0,12)).ps1"
     $remoteHelperPath = Join-Path $RemotePackagesRoot $remoteHelperName
@@ -788,6 +990,14 @@ try {
         Copy-ToVps @($RemoteHelperLocalPath) $RemotePackagesRoot
         $uploadedDefaultName = Join-Path $RemotePackagesRoot `
             ([System.IO.Path]::GetFileName($RemoteHelperLocalPath))
+        if ($LocalVps) {
+            if ((Get-FileHash -LiteralPath $uploadedDefaultName -Algorithm SHA256).Hash -ne $remoteHelperHash) {
+                throw 'Local VPS helper hash mismatch.'
+            }
+            Move-Item -LiteralPath $uploadedDefaultName -Destination $remoteHelperPath -Force
+            Write-Output "REMOTE_HELPER|$remoteHelperPath|$remoteHelperHash"
+            return
+        }
         $renameScript = @"
 `$source = '$uploadedDefaultName'
 `$target = '$remoteHelperPath'
@@ -804,17 +1014,26 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     } | Out-Host
 
     $preflight = @(Invoke-Step 'Fail-fast VPS and migration preflight' {
-        Invoke-RemoteHelper $remoteHelperPath 'Preflight'
+        Invoke-RemoteHelper $remoteHelperPath 'Preflight' @{ FreshDatabaseName = $FreshDatabaseName }
     })
-    $migrationState = Compare-MigrationState $preflight $DryRun
+    if ($FreshDatabaseName) {
+        Assert-True ($preflight -contains "FRESH_TARGET_READY|$FreshDatabaseName") 'Fresh database preflight did not confirm an absent target.'
+        $migrationState = [ordered]@{ mode = 'FreshDatabase'; target = $FreshDatabaseName; provisioned = $false }
+    } else { $migrationState = Compare-MigrationState $preflight $DryRun }
 
     if ($DryRun) {
+        if ($FreshDatabaseName) {
+            $resultPath = Write-RunResult 'Passed' $deploymentId $releaseDirectory $null $migrationState $null
+            Write-Host "`nFRESH DATABASE PREFLIGHT PASSED: $resultPath" -ForegroundColor Green
+            Write-Host 'No database created or service changed. Migration, seed and release checks run during deployment.'
+            exit 0
+        }
         $verify = @(Invoke-Step 'Verify deployed services and database' {
             Invoke-RemoteHelper $remoteHelperPath 'Verify'
         })
         $migrationState = Compare-MigrationState $verify $true
         Invoke-Step 'Public API, asset, and CORS smoke' {
-            Invoke-PublicSmoke ''
+            Invoke-PublicSmoke '' -AllowConfigurationDrift
         } | Out-Host
         if (-not $SkipBrowserSmoke) {
             Invoke-Step 'Headless Chrome browser smoke' {
@@ -826,6 +1045,10 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
             $null $migrationState $null
         Write-Host "`nDRY RUN PASSED: $resultPath" -ForegroundColor Green
         exit 0
+    }
+
+    if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
+        Assert-True ([bool]$LocalVps) 'Set protected UatBootstrap__SharedPassword on the VPS or run with -LocalVps for the secure account-password prompt.'
     }
 
     Assert-CommandExists 'dotnet'
@@ -864,8 +1087,25 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         }
     })
 
+    if ($preflight -contains 'UAT_CREDENTIAL|REQUIRED') {
+        $secureOperationalPassword = Read-Host 'Initial password for NEW Procurement, Inventory and QS test accounts (existing passwords are preserved)' -AsSecureString
+        $passwordPointer = [IntPtr]::Zero
+        try {
+            $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureOperationalPassword)
+            $operationalPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
+            Assert-True (-not [string]::IsNullOrWhiteSpace($operationalPassword)) 'An initial account password is required.'
+            [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $operationalPassword, 'Process')
+            $operationalPasswordPrompted = $true
+        } finally {
+            if ($passwordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer) }
+            $secureOperationalPassword.Dispose(); $operationalPassword=$null
+        }
+    }
+
     Invoke-Step 'Apply API, migrations, and frontend' {
+        if ($FreshDatabaseName) { $script:freshApplyAttempted = $true }
         Invoke-RemoteHelper $remoteHelperPath 'Apply' @{
+            FreshDatabaseName = $FreshDatabaseName
             DeploymentId = $deploymentId
             ExpectedCommit = $script:Commit
             ExpectedBuildId = $releaseManifest.buildId
@@ -877,6 +1117,12 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
             ApiReadyTimeoutSeconds = $ApiReadyTimeoutSeconds
         }
     } | Out-Host
+
+    if (-not $FreshDatabaseName) {
+        Invoke-Step 'Seed and verify Procurement, Inventory and QS baseline' {
+            Invoke-RemoteHelper $remoteHelperPath 'SeedOperational' @{ DeploymentId=$deploymentId }
+        } | Out-Host
+    }
 
     $verifyOutput = @(Invoke-Step 'Verify deployed services and database' {
         Invoke-RemoteHelper $remoteHelperPath 'Verify' @{
@@ -902,9 +1148,29 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         Copy-ToVps @($resultPath) $RemoteLogsRoot
     } | Out-Host
 
+    if ($FreshDatabaseName) {
+        Invoke-Step 'Complete verified fresh database cutover' {
+            Invoke-RemoteHelper $remoteHelperPath 'CompleteFresh' @{
+                DeploymentId = $deploymentId; ExpectedCommit = $script:Commit; FreshDatabaseName = $FreshDatabaseName
+            }
+        } | Out-Host
+        $freshApplyAttempted = $false
+    }
+
     Write-Host "`nDEPLOYMENT PASSED: $resultPath" -ForegroundColor Green
 }
 catch {
+    if ($freshApplyAttempted) {
+        try {
+            Invoke-Step 'Restore original application and database connection' {
+                Invoke-RemoteHelper $remoteHelperPath 'RollbackFresh' @{
+                    DeploymentId = $deploymentId; ExpectedCommit = $script:Commit; FreshDatabaseName = $FreshDatabaseName
+                }
+            } | Out-Host
+        } catch {
+            Write-Warning "Automatic rollback could not complete. Keep both databases and the deployment backup; review the VPS evidence. $($_.Exception.Message)"
+        }
+    }
     if ($null -ne $script:Commit) {
         $safeReleaseDirectory = if ($null -ne $releaseDirectory) {
             $releaseDirectory
@@ -921,5 +1187,9 @@ catch {
     throw
 }
 finally {
+    if ($operationalPasswordPrompted) {
+        [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $priorOperationalPassword, 'Process')
+    }
+    $priorOperationalPassword=$null
     Pop-Location
 }

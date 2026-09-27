@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -348,6 +348,7 @@ function LeadDialog({
 
 export default function CrmLeadsPage() {
   const searchParams = useSearchParams() ?? new URLSearchParams();
+  const requestedLeadId = searchParams.get('leadId') || '';
 
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [status, setStatus] = useState(searchParams.get('status') || 'all');
@@ -357,8 +358,19 @@ export default function CrmLeadsPage() {
   const [result, setResult] = useState<PagedResult<CrmLeadListItemDto> | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [selectedLeadId, setSelectedLeadId] = useState(searchParams.get('leadId') || '');
+  const [selectedLeadId, setSelectedLeadId] = useState(requestedLeadId);
   const [selectedLead, setSelectedLead] = useState<CrmLeadDetailDto | null>(null);
+  const requestedIdRef = useRef(requestedLeadId);
+  requestedIdRef.current = requestedLeadId;
+  const detailRequest = useRef(0);
+
+  useEffect(() => {
+    if (requestedLeadId) {
+      setSelectedLeadId(requestedLeadId);
+      setPage(1);
+    }
+  }, [requestedLeadId]);
+
 
   const [formOpen, setFormOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -367,6 +379,7 @@ export default function CrmLeadsPage() {
   const [saving, setSaving] = useState(false);
 
   const loadLeads = async (requestedPage: number = page) => {
+    const requestedIdAtLoad = requestedIdRef.current;
     try {
       setLoading(true);
       const data = await crmService.getLeads({
@@ -377,9 +390,9 @@ export default function CrmLeadsPage() {
         followUpOnly,
       });
 
+      if (requestedIdAtLoad !== requestedIdRef.current) return;
       setResult(data);
 
-      const requestedLeadId = searchParams.get('leadId');
       if (requestedLeadId && requestedPage === 1) {
         setSelectedLeadId(requestedLeadId);
         return;
@@ -398,19 +411,23 @@ export default function CrmLeadsPage() {
   };
 
   const loadLeadDetail = async (leadId: string) => {
+    const request = ++detailRequest.current;
+    setSelectedLead(null);
     if (!leadId) {
-      setSelectedLead(null);
+      setDetailLoading(false);
       return;
     }
 
     try {
       setDetailLoading(true);
-      setSelectedLead(await crmService.getLead(leadId));
+      const detail = await crmService.getLead(leadId);
+      if (request === detailRequest.current) setSelectedLead(detail);
     } catch (error: unknown) {
+      if (request !== detailRequest.current) return;
       toast.error(getMessage(error, 'Failed to load CRM lead detail'));
       setSelectedLead(null);
     } finally {
-      setDetailLoading(false);
+      if (request === detailRequest.current) setDetailLoading(false);
     }
   };
 
@@ -429,6 +446,7 @@ export default function CrmLeadsPage() {
 
   useEffect(() => {
     void loadLeadDetail(selectedLeadId);
+    return () => { detailRequest.current++; };
   }, [selectedLeadId]);
 
   const metrics = useMemo(() => {

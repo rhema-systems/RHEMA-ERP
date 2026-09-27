@@ -1,5 +1,6 @@
 'use client';
 
+import { hasSupplierRole } from '@/lib/business-partner-roles';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -51,7 +52,8 @@ import {
   PurchaseRequisitionLinkageOptionsDto,
   SavePurchaseRequisitionLinkageRequest
 } from '@/services/purchasingService';
-import { commonService, type DepartmentDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import { PurchaseRequisitionLinkageFields } from '@/components/procurement/PurchaseRequisitionLinkageFields';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
@@ -97,7 +99,7 @@ export default function NewPurchaseRequisitionPage() {
   // Form data
   const [requiredDate, setRequiredDate] = useState('');
   const [priority, setPriority] = useState('Normal');
-  const [departmentId, setDepartmentId] = useState('');
+  const [organizationUnitId, setOrganizationUnitId] = useState('');
   const [currency, setCurrency] = useState('');
   const [justification, setJustification] = useState('');
   const [notes, setNotes] = useState('');
@@ -109,7 +111,7 @@ export default function NewPurchaseRequisitionPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [linkageOptions, setLinkageOptions] = useState<PurchaseRequisitionLinkageOptionsDto>();
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [departments, setDepartments] = useState<OrganizationUnitSummary[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   
@@ -144,14 +146,14 @@ export default function NewPurchaseRequisitionPage() {
           inventoryManagementService.getInventoryItems({ isActive: true }),
           businessPartnerService.getActivePartners(),
           purchasingService.getPurchaseRequisitionLinkageOptions(),
-          commonService.getDepartments(),
+          organizationUnitService.getSummary(),
           procurementCurrencyService.getActive(),
         ]);
         
         setInventoryItems(itemsData || []);
         // Filter to only show Supplier or Both types
         setSuppliers((suppliersData || []).filter(bp => 
-          bp.partnerType === 'Supplier' || bp.partnerType === 'Both'
+          hasSupplierRole(bp.partnerType)
         ));
         setLinkageOptions(linkageData);
         setDepartments((departmentsData || []).filter((department) => department.isActive));
@@ -181,14 +183,14 @@ export default function NewPurchaseRequisitionPage() {
 
   function applyPlanItemSelection(option?: PurchaseRequisitionLinkageOptionDto) {
     if (!option) {
-      setDepartmentId('');
+      setOrganizationUnitId('');
       setItems([]);
       setCurrency(getProcurementBaseCurrency(currencies));
       return;
     }
 
     setLinkage((current) => applyPlanItemToRequisitionLinkage(current, option));
-    setDepartmentId(option.departmentId || '');
+    setOrganizationUnitId(option.organizationUnitId || '');
     setCurrency(normalizeProcurementCurrency(option.currency, getProcurementBaseCurrency(currencies)));
     if (option.requiredDate) setRequiredDate(option.requiredDate.slice(0, 10));
     setItems([{
@@ -354,8 +356,8 @@ export default function NewPurchaseRequisitionPage() {
       toast.error('Please add at least one item');
       return;
     }
-    if (!departmentId) {
-      toast.error('Select an HR department');
+    if (!organizationUnitId) {
+      toast.error('Select an HR organization unit');
       return;
     }
     const linkageError = validateExceptionLinkage(linkage);
@@ -381,7 +383,7 @@ export default function NewPurchaseRequisitionPage() {
         requestedById,
         requiredDate: requiredDate || undefined,
         priority,
-        departmentId,
+        organizationUnitId,
         currency: documentCurrency,
         justification: justification || undefined,
         notes: notes || undefined,
@@ -429,8 +431,8 @@ export default function NewPurchaseRequisitionPage() {
       toast.error('Please provide justification for this requisition');
       return;
     }
-    if (!departmentId) {
-      toast.error('Select an HR department');
+    if (!organizationUnitId) {
+      toast.error('Select an HR organization unit');
       return;
     }
     const linkageError = validateExceptionLinkage(linkage);
@@ -456,7 +458,7 @@ export default function NewPurchaseRequisitionPage() {
         requestedById,
         requiredDate: requiredDate || undefined,
         priority,
-        departmentId,
+        organizationUnitId,
         currency: documentCurrency,
         justification: justification || undefined,
         notes: notes || undefined,
@@ -594,10 +596,10 @@ export default function NewPurchaseRequisitionPage() {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="departmentId">Department *</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId} disabled={loadingData || Boolean(linkage.sourcePlanItemId)}>
-                <SelectTrigger id="departmentId">
-                  <SelectValue placeholder={loadingData ? 'Loading departments...' : 'Select HR department'} />
+              <Label htmlFor="organizationUnitId">Organization unit *</Label>
+              <Select value={organizationUnitId} onValueChange={setOrganizationUnitId} disabled={loadingData || Boolean(linkage.sourcePlanItemId)}>
+                <SelectTrigger id="organizationUnitId">
+                  <SelectValue placeholder={loadingData ? 'Loading organization units...' : 'Select organization unit'} />
                 </SelectTrigger>
                 <SelectContent>
                   {departments.map((department) => (

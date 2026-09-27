@@ -167,17 +167,34 @@ namespace ErpSystem.Api.Controllers.Finance
             WorkflowInstanceStatus.Suspended
         };
 
+        private const string JournalWorkflowEntityType = "JournalEntry";
+        private const string DeltaAdjustmentWorkflowEntityType = "DeltaAdjustmentJournal";
+        private const string DeltaAdjustmentJournalType = "Delta Adjustment";
+
+        private static string GetWorkflowEntityType(string? journalType) =>
+            string.Equals(journalType, DeltaAdjustmentJournalType, StringComparison.OrdinalIgnoreCase)
+                ? DeltaAdjustmentWorkflowEntityType
+                : JournalWorkflowEntityType;
+
+        private async Task<string> GetWorkflowEntityTypeAsync(Guid journalEntryId)
+        {
+            var journalType = await _dbContext.JournalEntries.AsNoTracking()
+                .Where(item => item.TenantId == TenantId && item.Id == journalEntryId && !item.IsDeleted)
+                .Select(item => item.JournalType)
+                .SingleAsync();
+            return GetWorkflowEntityType(journalType);
+        }
+
         private async Task<bool> HasActiveJournalWorkflowAsync(Guid journalEntryId)
         {
             var tenantId = TenantId;
+            var workflowEntityType = await GetWorkflowEntityTypeAsync(journalEntryId);
             return await _dbContext.WorkflowInstances
                 .AnyAsync(i =>
                     i.TenantId == tenantId &&
                     i.EntityId == journalEntryId &&
                     ActiveWorkflowStatuses.Contains(i.Status) &&
-                    (i.EntityType.Code == "JournalEntry" ||
-                     i.EntityType.Name == "JournalEntry" ||
-                     i.EntityType.Name == "Journal Entry"));
+                    i.EntityType.Code == workflowEntityType);
         }
 
         private async Task<bool> CanCurrentUserApproveJournalWorkflowAsync(Guid journalEntryId, Guid userId)
@@ -185,7 +202,7 @@ namespace ErpSystem.Api.Controllers.Finance
             if (!await HasActiveJournalWorkflowAsync(journalEntryId))
                 return true;
 
-            return await _workflowService.CanUserApproveAsync("JournalEntry", journalEntryId, userId);
+            return await _workflowService.CanUserApproveAsync(await GetWorkflowEntityTypeAsync(journalEntryId), journalEntryId, userId);
         }
 
         private async Task<HashSet<Guid>> GetWorkflowAssignedJournalIdsAsync(Guid userId)
@@ -197,9 +214,8 @@ namespace ErpSystem.Api.Controllers.Finance
                 .Where(i =>
                     i.TenantId == tenantId &&
                     ActiveWorkflowStatuses.Contains(i.Status) &&
-                    (i.EntityType.Code == "JournalEntry" ||
-                     i.EntityType.Name == "JournalEntry" ||
-                     i.EntityType.Name == "Journal Entry") &&
+                    (i.EntityType.Code == JournalWorkflowEntityType ||
+                     i.EntityType.Code == DeltaAdjustmentWorkflowEntityType) &&
                     i.StepInstances.Any(si =>
                         (si.Status == WorkflowStepInstanceStatus.Pending ||
                          si.Status == WorkflowStepInstanceStatus.InProgress) &&
@@ -227,9 +243,8 @@ namespace ErpSystem.Api.Controllers.Finance
                     i.TenantId == tenantId &&
                     ids.Contains(i.EntityId) &&
                     ActiveWorkflowStatuses.Contains(i.Status) &&
-                    (i.EntityType.Code == "JournalEntry" ||
-                     i.EntityType.Name == "JournalEntry" ||
-                     i.EntityType.Name == "Journal Entry"))
+                    (i.EntityType.Code == JournalWorkflowEntityType ||
+                     i.EntityType.Code == DeltaAdjustmentWorkflowEntityType))
                 .Select(i => i.EntityId)
                 .Distinct()
                 .ToListAsync();
@@ -287,8 +302,20 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Retrieves journal entries awaiting approval for the current finance approver.
+        /// Searches bounded journal summaries for Finance readers.
         /// </summary>
+        [HttpGet("search")]
+        public async Task<ActionResult<IReadOnlyList<FinanceRecordSearchDto>>> Search(
+            [FromQuery] string? search = null, [FromQuery] int take = 5, CancellationToken cancellationToken = default)
+        {
+            // A tender-payment verifier can view only its linked journal, not search the GL register.
+            if (!await HasAnyPermissionAsync(FinancePermissions.ViewFinance))
+                return Forbid();
+
+            return Ok(await _journalEntryService.SearchAsync(search, take, cancellationToken));
+        }
+
+        /// <summary>Retrieves journal entries awaiting approval for the current finance approver.</summary>
         [HttpGet("pending-approvals")]
         public async Task<ActionResult<List<JournalEntryDto>>> GetPendingApprovals()
         {
@@ -574,6 +601,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     return BadRequest($"Only draft journal entries can be submitted for approval. Current status: {entry.PostingStatus}");
 
                 await _journalEntryService.ValidateJournalEntryReadyForSubmissionAsync(id);
+                var workflowEntityType = GetWorkflowEntityType(entry.JournalType);
 
                 // Reserve before starting the approval workflow so concurrent journals cannot
                 // spend the same adopted budget while they wait in the approval queue.
@@ -583,7 +611,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 WorkflowIntegrationResult submission;
                 try
                 {
-                    submission = await _workflowIntegration.SubmitAsync("JournalEntry", id);
+                    submission = await _workflowIntegration.SubmitAsync(workflowEntityType, id);
                     workflowResult = submission.ExecutionResult;
                 }
                 catch
@@ -599,13 +627,18 @@ namespace ErpSystem.Api.Controllers.Finance
                         ? workflowResult.Message ?? "Unable to start approval workflow."
                         : "The no-approval decision is inconsistent. Refresh and retry submission.");
                 }
+                if (workflowEntityType == DeltaAdjustmentWorkflowEntityType && !submission.ApprovalRequired)
+                {
+                    await _budgetControl.ReleaseManualJournalAsync(id, "Delta adjustment approval workflow is required.");
+                    return BadRequest("A published DeltaAdjustmentJournal approval workflow is required; Delta adjustments cannot be auto-approved.");
+                }
 
                 var currentWorkflowStep = submission.ApprovalRequired
-                    ? await _workflowService.GetCurrentWorkflowStepAsync("JournalEntry", id) : null;
+                    ? await _workflowService.GetCurrentWorkflowStepAsync(workflowEntityType, id) : null;
                 if (submission.ApprovalRequired && (currentWorkflowStep == null ||
                     string.Equals(currentWorkflowStep.StepName, "Draft", StringComparison.OrdinalIgnoreCase)))
                 {
-                    await _workflowService.CancelWorkflowAsync("JournalEntry", id, "Journal workflow did not advance to an approval step.");
+                    await _workflowService.CancelWorkflowAsync(workflowEntityType, id, "Journal workflow did not advance to an approval step.");
                     await _budgetControl.ReleaseManualJournalAsync(id, "Journal workflow did not advance to an approval step.");
                     return BadRequest("Approval workflow did not advance to the approval step. Journal entry was not submitted.");
                 }
@@ -621,7 +654,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 catch
                 {
                     if (submission.ApprovalRequired)
-                        await _workflowService.CancelWorkflowAsync("JournalEntry", id, "Journal submission failed after workflow start.");
+                        await _workflowService.CancelWorkflowAsync(workflowEntityType, id, "Journal submission failed after workflow start.");
                     await _budgetControl.ReleaseManualJournalAsync(id, "Journal submission failed after workflow start.");
                     throw;
                 }
@@ -674,12 +707,13 @@ namespace ErpSystem.Api.Controllers.Finance
                     return BadRequest("A withdrawal reason is required.");
 
                 var canCancelAnyWorkflow = await HasAnyPermissionAsync(FinancePermissions.WorkflowCancel);
+                var workflowEntityType = GetWorkflowEntityType(entry.JournalType);
 
                 async Task<WorkflowExecutionResult> CancelWorkflowAndReturnToDraftAsync()
                 {
                     var workflowResult = canCancelAnyWorkflow
-                        ? await _workflowService.CancelWorkflowAsync("JournalEntry", id, reason)
-                        : await _workflowService.RecallWorkflowAsync("JournalEntry", id, currentUserId, reason);
+                        ? await _workflowService.CancelWorkflowAsync(workflowEntityType, id, reason)
+                        : await _workflowService.RecallWorkflowAsync(workflowEntityType, id, currentUserId, reason);
 
                     if (!workflowResult.Success)
                         return workflowResult;
@@ -765,6 +799,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     return BadRequest($"Only entries pending approval can be approved. Current status: {entry.PostingStatus}");
 
                 Guid.TryParse(_currentUserService.UserId, out var userId);
+                var workflowEntityType = GetWorkflowEntityType(entry.JournalType);
 
                 var hasActiveWorkflow = await HasActiveJournalWorkflowAsync(id);
                 if (!hasActiveWorkflow)
@@ -778,7 +813,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 // and only then fail the journal status update.
                 await _budgetControl.ValidateManualJournalForPostingAsync(id);
 
-                var workflowResult = await _workflowService.ProcessApprovalStepAsync("JournalEntry", id, userId, "Approve", request?.Comments);
+                var workflowResult = await _workflowService.ProcessApprovalStepAsync(workflowEntityType, id, userId, "Approve", request?.Comments);
                 if (!workflowResult.Success)
                     return BadRequest(workflowResult.Message ?? "Unable to process workflow approval.");
 
@@ -827,6 +862,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     return BadRequest($"Only entries pending approval can be rejected. Current status: {entry.PostingStatus}");
 
                 Guid.TryParse(_currentUserService.UserId, out var userId);
+                var workflowEntityType = GetWorkflowEntityType(entry.JournalType);
 
                 var hasActiveWorkflow = await HasActiveJournalWorkflowAsync(id);
                 if (!hasActiveWorkflow)
@@ -835,7 +871,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 if (!await CanCurrentUserApproveJournalWorkflowAsync(id, userId))
                     return StatusCode(403, "This journal entry is assigned to another workflow approver.");
 
-                var workflowResult = await _workflowService.ProcessApprovalStepAsync("JournalEntry", id, userId, "Reject", request.Reason);
+                var workflowResult = await _workflowService.ProcessApprovalStepAsync(workflowEntityType, id, userId, "Reject", request.Reason);
                 if (!workflowResult.Success)
                     return BadRequest(workflowResult.Message ?? "Unable to process workflow rejection.");
 

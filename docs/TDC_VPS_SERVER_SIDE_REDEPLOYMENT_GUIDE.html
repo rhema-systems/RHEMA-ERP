@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TDC ERP VPS Server-side Redeployment Guide</title>
+<style>
+:root{--ink:#172033;--muted:#536174;--panel:#fff;--line:#d8e0ea;--blue:#1357a6;--bg:#f4f7fb;--amber:#fff5db;--red:#fff0f0;--green:#e9f8ee}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}.wrap{max-width:1050px;margin:0 auto;padding:36px 24px 64px}h1{font-size:2rem;line-height:1.2;margin:0 0 10px}h2{font-size:1.35rem;margin:32px 0 12px;padding-top:8px}h3{font-size:1.05rem;margin:20px 0 8px}.lead{font-size:1.08rem;color:var(--muted);margin:0 0 24px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin:18px 0}.notice{border-left:5px solid #d08a00;background:var(--amber);padding:13px 16px;margin:16px 0}.stop{border-left:5px solid #b42318;background:var(--red);padding:13px 16px;margin:16px 0}.pass{border-left:5px solid #16803a;background:var(--green);padding:13px 16px;margin:16px 0}code,pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}pre{white-space:pre-wrap;word-break:break-word;background:#10233d;color:#eaf2ff;padding:16px;border-radius:8px;overflow:auto;margin:12px 0}a{color:var(--blue)}ol,ul{padding-left:24px}li{margin:7px 0}.step{font-weight:700;color:var(--blue)}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{border:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{background:#edf3fa}@media print{body{background:#fff}.wrap{max-width:none;padding:12px}.card{break-inside:avoid}}
+</style>
+</head>
+<body><main class="wrap">
+<h1>TDC ERP VPS server-side redeployment</h1>
+<p class="lead">A single procedure for updating the VPS from <code>master</code>, applying backend and frontend changes together, restarting the correct services, and verifying the live release.</p>
+<div class="notice"><strong>Use this on the Windows test VPS as Administrator.</strong> The live runtime is <code>C:\RhemaERP</code>. Do not run Git commands in <code>C:\RhemaERP\api</code> or <code>C:\RhemaERP\frontend</code>; those folders contain the deployed application, protected settings, uploads, and logs. Run Git only in the separate ERP source clone.</div>
+
+<section class="card"><h2>1. Find and prepare the source clone</h2>
+<p>Open an elevated PowerShell window on the VPS. Set <code>$repo</code> to the folder containing the ERP repository’s <code>.git</code> folder. It must be a normal clone of the same repository, not a copy of the deployed runtime.</p>
+<pre>$repo = 'C:\Path\To\erp-system-source'
+Set-Location $repo
+git rev-parse --show-toplevel
+git status --short
+git remote -v</pre>
+<p>Continue only when <code>git status --short</code> produces no output. If it lists files, stop: server-only edits must be preserved and reviewed before any pull. Do not use <code>git reset --hard</code>, <code>git clean</code>, or overwrite the runtime folders.</p></section>
+
+<section class="card"><h2>2. Pull the merged changes from master</h2>
+<p>The VPS should follow the already-merged <code>master</code> branch. A manual merge is normally unnecessary. Use a fast-forward-only pull so Git refuses an unexpected VPS-only branch or commit.</p>
+<pre>Set-Location $repo
+git fetch --prune origin
+git log --oneline HEAD..origin/master
+git diff --name-only HEAD..origin/master -- src/ErpSystem.Data/Migrations
+git pull --ff-only origin master
+git status -sb
+git log -1 --oneline</pre>
+<div class="stop"><strong>If Git says it cannot fast-forward, stop.</strong> Do not run a blind merge. That means the VPS clone has commits that are not on <code>origin/master</code>. Inspect them with <code>git log --oneline origin/master..HEAD</code>, decide whether they belong in a pull request, then return the VPS source clone to the approved release branch.</div>
+<p>The migration comparison is deliberate. It tells you whether this release changes the database before services are touched.</p></section>
+
+<section class="card"><h2>Baseline cutover decision</h2>
+<div class="stop"><strong>Do not deploy the current baseline to a VPS database with retained data and older migration history.</strong> The disposable-development baseline creates a fresh schema; it is not a data-preserving upgrade path. The deployment dry run intentionally stops in this condition.</div>
+<p>If the VPS database is empty or the owner has explicitly declared every record disposable, use the separately reviewed guarded reset procedure and its backup/evidence requirements. If the VPS data must be retained or ownership is uncertain, keep the previous compatible code/database pair running. A data-preserving migration or export/import cutover must be designed and reviewed separately before this branch can be deployed.</p>
+</section>
+
+<section class="card"><h2>Disposable test-data reset</h2>
+<p>Use this procedure only after the database owner has explicitly declared the VPS <code>RhemaERP</code> data disposable. It makes a verified <code>COPY_ONLY</code> SQL backup, records immutable reset evidence outside the repository, then drops and recreates the database. It does not run against a remote SQL server, a different database name, an unknown Git state, or enabled Finance accounting producers.</p>
+<div class="notice"><strong>Run this before the normal deployment gate.</strong> Stop the API and frontend so neither service reconnects while the reset owns the database. Do not delete the backup or evidence directory if the reset fails; the script deliberately does not retry or auto-restore.</div>
+<pre>Set-Location $repo
+Stop-Service RhemaERPFrontend
+Stop-Service RhemaERPAPI
+
+# Read the existing protected SQL setting into this PowerShell process only.
+# The command does not display the connection string.
+$parameters = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
+$allEntries = @(@($parameters.AppEnvironment) + @($parameters.AppEnvironmentExtra)) |
+  ForEach-Object { [string]$_ }
+$connectionEntry = @($allEntries | Where-Object {
+  $_ -like 'ConnectionStrings__DefaultConnection=*'
+} | Select-Object -Last 1)[0]
+if ([string]::IsNullOrWhiteSpace($connectionEntry)) {
+  throw 'The API NSSM configuration has no protected SQL connection setting.'
+}
+$env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION =
+  $connectionEntry.Substring('ConnectionStrings__DefaultConnection='.Length)
+
+$env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_RESET_ATTESTATION =
+  'I_ATTEST_RHEMAERP_DEVELOPMENT_DATA_IS_DISPOSABLE'
+$env:RHEMA_GL_REVIEWED_COMMIT = (git rev-parse HEAD).Trim()
+$env:RHEMA_GL_REVIEWED_TREE = (git rev-parse 'HEAD^{tree}').Trim()
+$env:Finance__AccountingEvents__Enabled = 'false'
+$env:Finance__ProducerIntents__Enabled = 'false'
+$env:Finance__ProducerIntentGroups__Enabled = 'false'
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$evidence = "C:\RhemaERP\backups\disposable-reset-$stamp"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\finance\Invoke-GlCutoverRehearsal.ps1 `
+  -Mode ResetDisposableDevelopment `
+  -ConfirmDisposableDevelopmentReset `
+  -EvidenceDirectory $evidence</pre>
+<p>Continue only when the reset reports a verified backup, exact final migration history, seed and invariant checks, and <code>DBCC CHECKDB</code>. Keep <code>$evidence</code> and its SQL backup. Then clear only the process-scoped sensitive variables, start the services, and use the normal dry run and deployment in the next section.</p>
+<pre>Remove-Item Env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION -ErrorAction SilentlyContinue
+Remove-Item Env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_RESET_ATTESTATION -ErrorAction SilentlyContinue
+Start-Service RhemaERPAPI
+Start-Service RhemaERPFrontend
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -LocalVps -DryRun
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -LocalVps</pre>
+</section>
+
+<section class="card"><h2>3. Run the deployment gate and build a production release</h2>
+<p>The repository deployment script is the supported release mechanism. Its <code>-LocalVps</code> mode runs entirely on the VPS: no SSH connection and no SSH key are used. It verifies the exact <code>origin/master</code> commit, checks database migration parity, creates application and SQL backups, publishes a self-contained API, builds a clean production frontend, applies both packages, restarts services, and records release evidence.</p>
+<pre>Set-Location $repo
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -LocalVps -DryRun</pre>
+<p>Read the dry-run result first. It must pass structural, migration, service and public-route checks. A <code>CONFIG_DRIFT</code> line for the former public origin is expected on the first run after this Caddy alignment; the backed-up apply stage reconciles those URL settings before restarting the API. Then run the release:</p>
+<pre>powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -LocalVps</pre>
+<p>For a new commit, omit <code>-ReuseVerifiedArtifacts</code> so the VPS builds fresh packages. The normal remote-workstation mode still uses SSH; use <code>-LocalVps</code> only when you are signed in directly to this VPS.</p>
+<p>The browser smoke automatically uses installed Google Chrome or Microsoft Edge. Set <code>RHEMA_BROWSER_PATH</code> only when the browser is installed in a non-standard location.</p>
+<p>The release restores frontend packages from <code>package-lock.json</code> before activating the already-configured Syncfusion licence. If a prior attempt completed API publishing or the frontend build but failed later, <code>-ReuseApiOutputFromCommit &lt;commit&gt;</code> and <code>-ReuseFrontendBuildFromCommit &lt;commit&gt;</code> may be used only when the script proves the corresponding source and build inputs are unchanged.</p>
+<div class="notice"><strong>Frontend rule:</strong> the VPS must run a production build through <code>npm run build</code> and the <code>RhemaERPFrontend</code> service runs the production server. Never use <code>npm run dev</code> on the VPS. The build embeds the public API URL <code>https://63.141.230.56/api</code>; changing an environment file after the build does not change compiled browser code.</div>
+<p>If you need to verify the intended production frontend variables before building, they are:</p>
+<pre>$env:NODE_ENV = 'production'
+$env:NEXT_PUBLIC_API_URL = 'https://63.141.230.56/api'
+$env:API_URL = 'https://63.141.230.56/api'
+$env:NEXTAUTH_URL = 'https://63.141.230.56'
+$env:NEXT_TELEMETRY_DISABLED = '1'</pre>
+</section>
+
+<section class="card"><h2>4. What the release changes and preserves</h2>
+<table><thead><tr><th>Component</th><th>Deployment behaviour</th></tr></thead><tbody>
+<tr><td>API</td><td>Published self-contained to a staged package, then copied to <code>C:\RhemaERP\api</code>. Protected configuration, uploads, logs, and secure file storage are preserved.</td></tr>
+<tr><td>Database</td><td>An application snapshot and SQL <code>COPY_ONLY</code>, compressed, checksummed backup are created and verified before services change. Startup applies migrations; allow several minutes for this stage.</td></tr>
+<tr><td>Frontend</td><td>A complete new <code>.next</code>, <code>public</code>, production <code>node_modules</code>, <code>package.json</code>, <code>package-lock.json</code>, and <code>next.config.js</code> set replaces the old build while the frontend service is stopped. The existing NSSM service continues to run <code>npm start -- -p 3001</code>.</td></tr>
+<tr><td>HTTPS gateway</td><td><code>RhemaERPCaddy</code> remains running and keeps its existing Caddyfile. It serves HTTPS on port <code>443</code>, manages the short-lived IP certificate, routes <code>/api/*</code> to the API, and routes other paths to the frontend.</td></tr>
+</tbody></table>
+<p>Do not mirror-delete API folders, deploy a frontend one folder at a time, or copy new files into a running <code>.next</code> directory. Those actions can remove runtime uploads or create stale/missing JavaScript and CSS chunks.</p></section>
+
+<section class="card"><h2>5. Service restart and local checks</h2>
+<p>The deployment script restarts the API and frontend itself. If you need to restart them after a completed deployment or after a controlled recovery, use:</p>
+<pre>Restart-Service RhemaERPAPI
+Restart-Service RhemaERPFrontend
+Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPCaddy
+
+Invoke-WebRequest 'http://127.0.0.1:5000/health' -UseBasicParsing
+Invoke-WebRequest 'http://127.0.0.1:3001/login' -UseBasicParsing</pre>
+<p>Expected result: all three services are <code>Running</code>, the local API health endpoint is healthy, and local frontend login returns HTTP 200. The API may take several minutes while startup migrations complete; do not repeatedly restart it during that window.</p>
+<p>Caddy owns public HTTPS and certificate renewal. A normal application deployment does not replace its configuration or install a separate ACME client.</p></section>
+
+<section class="card"><h2>6. Verify the public deployment</h2>
+<pre>$base = 'https://63.141.230.56'
+Invoke-WebRequest "$base/api/tenant" -SkipCertificateCheck -UseBasicParsing
+Invoke-WebRequest "$base/login" -SkipCertificateCheck -UseBasicParsing
+Invoke-WebRequest "$base/sw.js" -SkipCertificateCheck -UseBasicParsing
+Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPCaddy</pre>
+<p>Confirm local API health is healthy, public <code>/api/tenant</code> and <code>/login</code> return HTTP 200, and the service worker has the new cache version. Open the live site at <a href="https://63.141.230.56">https://63.141.230.56</a>, sign in, and test the affected feature.</p>
+<div class="pass"><strong>Release complete only after:</strong> the services are running, migrations completed, local API health is healthy, the public API and login work through Caddy, and the changed browser journey succeeds without 5xx responses or missing static assets.</div>
+<p>Browsers use Caddy HTTPS on the default port <code>443</code>. Do not expose or browse directly to public port <code>5000</code>; it is API loopback-only.</p></section>
+
+<section class="card"><h2>7. If the deployment fails</h2>
+<p>Do not repeatedly rerun the full release. Review the failed stage and the evidence under <code>artifacts\vps-releases</code> and <code>C:\RhemaERP\logs</code>. The deployment process keeps a commit-keyed application snapshot under <code>C:\RhemaERP\backups</code> and verifies the SQL backup before applying changes. Restore application files from the matching snapshot only when needed; restore the SQL backup only when a migration or data rollback is explicitly required.</p>
+<p>For the full package layout, backup, rollback, and browser smoke details, use the repository runbook: <a href="VPS_DEPLOYMENT_RUNBOOK.md">VPS_DEPLOYMENT_RUNBOOK.md</a>.</p></section>
+</main></body></html>

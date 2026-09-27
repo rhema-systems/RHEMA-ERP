@@ -27,6 +27,7 @@ vi.mock('./workflow-api.service', () => ({
 }));
 
 import {
+  ACQUISITION_STAGES,
   estateAcquisitionService,
   STAGE_WORKFLOW_REQUIREMENTS,
 } from './estate-acquisition.service';
@@ -66,9 +67,9 @@ describe('EstateAcquisitionService workflow requirements', () => {
   it('defines named required documents for every acquisition stage', () => {
     const stages = Object.values(STAGE_WORKFLOW_REQUIREMENTS);
 
-    expect(stages).toHaveLength(16);
+    expect(stages).toHaveLength(17);
     expect(stages.every((stage) => stage.documents.length > 0)).toBe(true);
-    expect(stages.flatMap((stage) => stage.documents)).toHaveLength(44);
+    expect(stages.flatMap((stage) => stage.documents)).toHaveLength(47);
   });
 
   it('keeps survey verification approval-only and clears overlap during ownership verification', () => {
@@ -107,10 +108,42 @@ describe('EstateAcquisitionService workflow requirements', () => {
       (step: any) => step.configuration?.qualityConfig?.qualityChecks || []
     );
 
-    expect(documentRequirements).toHaveLength(44);
+    expect(documentRequirements).toHaveLength(47);
     expect(approvalChecks.length).toBeGreaterThan(0);
     expect(approvalChecks.every((check: any) => check.requiresDocument === false)).toBe(true);
     expect(approvalChecks.some((check: any) => check.name.startsWith('Attach '))).toBe(false);
+  });
+
+  it('routes submission to the Estate Manager before cadastral survey while retaining procedure IDs', async () => {
+    mocks.createWorkflowDefinition.mockResolvedValue({});
+
+    await estateAcquisitionService.createWorkflowTemplate();
+
+    const definition = mocks.createWorkflowDefinition.mock.calls[0][0];
+    const steps = definition.steps;
+    expect(steps.map((step: any) => step.order)).toEqual(
+      Array.from({ length: 17 }, (_, index) => index + 1)
+    );
+    expect(steps.find((step: any) => step.order === 2)).toMatchObject({
+      name: 'Suitability Approval',
+      requiredRole: 'Estate Manager',
+    });
+    expect(steps.find((step: any) => step.order === 3)).toMatchObject({
+      name: 'Cadastral Survey',
+      requiredRole: 'Survey Officer',
+    });
+    expect(definition.transitions).toHaveLength(16);
+    definition.transitions.forEach((transition: any, index: number) => {
+      expect(transition).toMatchObject({
+        fromStepId: steps[index].id,
+        toStepId: steps[index + 1].id,
+        isDefault: true,
+      });
+    });
+    const procedureIds = Array.from({ length: 17 }, (_, index) => index);
+    expect(ACQUISITION_STAGES.map((stage) => stage.id)).toEqual(procedureIds);
+    expect(ACQUISITION_STAGES.map((stage) => stage.order)).toEqual(procedureIds);
+    expect(JSON.parse(definition.configuration).stages).toEqual(ACQUISITION_STAGES);
   });
 
   it('loads the active document catalog from the operational acquisition endpoint', async () => {

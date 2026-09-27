@@ -1,13 +1,17 @@
 import React from 'react';
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/inventory/physical-counts', useRouter: () => ({ replace: vi.fn() }) }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PhysicalCountsPage from './page';
 import { inventoryManagementService as service, type PhysicalCountDetailDto } from '@/services/inventoryManagementService';
 import { toast } from 'sonner';
 import { procurementCurrencyService } from '@/services/financeCommonService';
+import { workflowApiService } from '@/services/workflow-api.service';
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 vi.mock('@/services/financeCommonService', () => ({ procurementCurrencyService: { getActive: vi.fn().mockResolvedValue([{ code: 'GHS', isBaseCurrency: true }]) } }));
+vi.mock('@/services/workflow-api.service', () => ({ workflowApiService: { getWorkflowEntitySummary: vi.fn() } }));
 vi.mock('@/components/inventory/PhysicalCountControlPanel', () => ({ PhysicalCountControlPanel: () => null }));
 vi.mock('@/services/inventoryManagementService', () => ({ inventoryManagementService: {
   getPhysicalCounts: vi.fn(), getWarehouses: vi.fn(), getInventoryItems: vi.fn(),
@@ -21,14 +25,19 @@ vi.mock('@/services/inventoryManagementService', () => ({ inventoryManagementSer
 let count: PhysicalCountDetailDto;
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(workflowApiService.getWorkflowEntitySummary).mockImplementation(async (entityType, entityId) => ({
+    entityType, entityId, approvalRequired: true, hasActiveInstance: false,
+    canCurrentUserApprove: false, pendingApprovers: [],
+  }));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   Element.prototype.scrollIntoView = vi.fn();
   count = { id: 'count-1', countNumber: 'PC-TEST', warehouseId: 'warehouse-1', warehouseName: 'Demo Warehouse',
-    countType: 'FullCount', status: 'Draft', totalItems: 1, countedItems: 0, itemsWithVariance: 0,
+    countType: 'FullCount', status: 'Draft', countDate: '2026-09-01', rowVersion: 'AQID', totalItems: 1, countedItems: 0, itemsWithVariance: 0,
     totalVarianceValue: 0, freezeInventory: true, blindCount: true, systemQuantityVisible: false,
     canReview: true, notes: '', evidence: [], actions: [], items: [{ id: 'line-1', inventoryItemId: 'pvc', itemCode: 'PVC',
-      itemName: 'Pipe', locationName: 'Main', locationId: 'bin-1', systemQuantity: 0, countedQuantity: 0, varianceQuantity: 0 }],
-  } as PhysicalCountDetailDto;
+      itemName: 'Pipe', locationName: 'Main', locationId: 'bin-1', systemQuantity: 0, countedQuantity: 0, varianceQuantity: 0,
+      varianceValue: 0, variancePercent: 0, unitOfMeasure: 'EA', isCounted: false, countAttempts: 0, requiresRecount: false, rowVersion: 'BAUG' }],
+  };
   vi.mocked(service.getPhysicalCounts).mockImplementation(async () => [count]);
   vi.mocked(service.getPhysicalCountById).mockImplementation(async () => count);
   vi.mocked(service.getPhysicalCountEvidence).mockResolvedValue([]);
@@ -63,7 +72,7 @@ function tab(name: string | RegExp) { fireEvent.mouseDown(screen.getByRole('tab'
 
 async function choose(label: string, option: string) {
   await act(async () => { fireEvent.keyDown(screen.getByRole('combobox', { name: label }), { key: 'Enter' }); });
-  const choice = await screen.findByRole('option', { name: option, exact: true });
+  const choice = await screen.findByRole('option', { name: option });
   await act(async () => { fireEvent.click(choice); });
 }
 
@@ -80,16 +89,16 @@ describe('physical count posting eligibility', () => {
   it.each([false, undefined])('does not offer Post without server eligibility (%s)', async canPost => {
     count = { ...count, status: 'ReadyToPost', canPost };
     await open();
-    expect(screen.queryByRole('button', { name: 'Post', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Post' })).not.toBeInTheDocument();
   });
 
   it('offers Post to the eligible Finance actor in both dialog and full-page mode', async () => {
     count = { ...count, status: 'ReadyToPost', canPost: true };
     await open();
-    expect(screen.getByRole('button', { name: 'Post', exact: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Post' })).toBeEnabled();
     tab('Items (1)');
     fireEvent.click(await screen.findByRole('button', { name: 'View items in full page' }));
-    expect(screen.getByRole('button', { name: 'Post', exact: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Post' })).toBeEnabled();
   });
 
   it('uses the operational currency projection without requiring Finance module access', async () => {
@@ -118,7 +127,7 @@ describe('physical count creation scope', () => {
     expect(screen.getByRole('combobox', { name: 'Count scope' })).toHaveTextContent('Warehouse-wide');
     expect(screen.queryByRole('combobox', { name: 'Location *' })).not.toBeInTheDocument();
     expect(dialog).toHaveClass('h-[640px]', 'max-h-[90dvh]', 'overflow-hidden');
-    fireEvent.click(screen.getByRole('button', { name: 'Create Count', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Count' }));
     await waitFor(() => expect(service.createPhysicalCount).toHaveBeenCalledOnce());
     const request = vi.mocked(service.createPhysicalCount).mock.calls[0][0];
     expect(request.warehouseId).toBe('warehouse-1');
@@ -134,14 +143,14 @@ describe('physical count creation scope', () => {
     ] as never);
     await openCreate();
     await choose('Count scope', 'Selected location');
-    expect(screen.getByRole('button', { name: 'Create Count', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create Count' })).toBeDisabled();
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Location *' })).toBeEnabled());
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Location *' }), { key: 'Enter' });
     expect(await screen.findByRole('option', { name: 'LOC-001 - Main' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'CLOSED' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'OTHER' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('option', { name: 'LOC-001 - Main' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Create Count', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Count' }));
     await waitFor(() => expect(service.createPhysicalCount).toHaveBeenCalledWith(expect.objectContaining({ warehouseId: 'warehouse-1', locationId: 'bin-1' })));
   });
 
@@ -152,11 +161,11 @@ describe('physical count creation scope', () => {
     await choose('Location *', 'LOC-001 - Main');
     await choose('Count scope', 'Warehouse-wide');
     await choose('Count scope', 'Selected location');
-    expect(screen.getByRole('button', { name: 'Create Count', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create Count' })).toBeDisabled();
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Location *' })).toBeEnabled());
     await choose('Location *', 'LOC-001 - Main');
     await choose('Warehouse *', 'Second Warehouse');
-    expect(screen.getByRole('button', { name: 'Create Count', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create Count' })).toBeDisabled();
     expect(await screen.findByText('No active locations are available for this warehouse.')).toBeInTheDocument();
     expect(service.createPhysicalCount).not.toHaveBeenCalled();
   });
@@ -173,7 +182,7 @@ describe('physical count creation scope', () => {
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Location *' })).toBeEnabled());
     await act(async () => { resolveFirst([{ id: 'bin-1', warehouseId: 'warehouse-1', locationCode: 'LOC-001', name: 'Main', isActive: true }] as never); });
     await choose('Location *', 'LOC-002 - Second');
-    fireEvent.click(screen.getByRole('button', { name: 'Create Count', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Count' }));
     await waitFor(() => expect(service.createPhysicalCount).toHaveBeenCalledWith(expect.objectContaining({ warehouseId: 'warehouse-2', locationId: 'bin-2' })));
   });
 
@@ -182,7 +191,7 @@ describe('physical count creation scope', () => {
     await openCreate();
     await choose('Count scope', 'Selected location');
     expect(await screen.findByRole('alert')).toHaveTextContent('Locations could not be loaded. (LOCATION_ACCESS)');
-    expect(screen.getByRole('button', { name: 'Create Count', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create Count' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Location *' })).toBeEnabled());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -194,7 +203,7 @@ describe('physical count creation scope', () => {
     await choose('Count scope', 'Selected location');
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Location *' })).toBeEnabled());
     await choose('Location *', 'LOC-001 - Main');
-    fireEvent.click(screen.getByRole('button', { name: 'Create Count', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Count' }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('The selected location is no longer active. (LOCATION_INACTIVE)'));
     expect(screen.getByRole('dialog', { name: 'Create Physical Count' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Location *' })).toHaveTextContent('LOC-001 - Main');
@@ -220,7 +229,7 @@ describe('physical count draft editing', () => {
     render(<PhysicalCountsPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel draft count PC-TEST' }));
     const popup = screen.getByRole('dialog', { name: 'Cancel draft count?' });
-    const confirm = within(popup).getByRole('button', { name: 'Cancel count', exact: true });
+    const confirm = within(popup).getByRole('button', { name: 'Cancel count' });
     expect(confirm).toBeDisabled();
     expect(service.cancelPhysicalCount).not.toHaveBeenCalled();
     fireEvent.change(within(popup).getByLabelText('Cancellation reason'), { target: { value: '   ' } });
@@ -245,10 +254,10 @@ describe('physical count draft editing', () => {
     render(<PhysicalCountsPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel draft count PC-TEST' }));
     fireEvent.change(screen.getByLabelText('Cancellation reason'), { target: { value: 'Duplicate draft' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel count', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel count' }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('This count has already started approval. (COUNT_CHANGED)'));
     expect(screen.getByLabelText('Cancellation reason')).toHaveValue('Duplicate draft');
-    expect(screen.getByRole('button', { name: 'Cancel count', exact: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Cancel count' })).toBeEnabled();
   });
   it.each(['InProgress', 'UnderReview', 'PendingStoresApproval', 'ReadyToPost', 'Posted', 'Cancelled'])('hides the draft cancellation icon for %s', async status => {
     count.status = status; render(<PhysicalCountsPage />);
@@ -262,13 +271,13 @@ describe('physical count draft editing', () => {
     } } });
     await open();
     expect(screen.queryByRole('button', { name: 'Upload evidence' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Upload', exact: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeEnabled();
     fireEvent.click(screen.getByText(/Supporting files and upload history/));
     const file = new File(['count evidence'], 'counts.xlsx');
     fireEvent.change(screen.getByLabelText('Supporting evidence file'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: 'Attach supporting file', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Attach supporting file' }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('FILE_VIRUS_SCAN_INCOMPLETE')));
-    expect(screen.getByRole('button', { name: 'Upload', exact: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeEnabled();
     expect(service.uploadPhysicalCountEvidence).toHaveBeenCalledWith('count-1', file, '');
     expect(service.completePhysicalCount).not.toHaveBeenCalled();
   });
@@ -488,7 +497,7 @@ describe('physical count draft editing', () => {
     expect(await screen.findByText('new.xlsx')).toBeVisible();
     expect(screen.getAllByText('Current', { exact: true })).toHaveLength(1);
     expect(screen.getByText('old.xlsx')).not.toBeVisible();
-    expect(screen.getByRole('button', { name: 'Replace', exact: true })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Replace' })).toBeEnabled();
     fireEvent.click(screen.getByText(/Supporting files and upload history/));
     expect(screen.getByText('Previous count sheet')).toBeVisible();
     expect(screen.getByText('Attachment only')).toBeVisible();

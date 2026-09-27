@@ -463,7 +463,7 @@ export default function EstateOperationsPage() {
           Estate Casework &amp; Registers
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          SOP case workflows, departmental registers, operational queues,
+          Case workflows, departmental registers, operational queues,
           inspection events, and reporting controls.
         </p>
       </div>
@@ -510,18 +510,9 @@ export default function EstateOperationsPage() {
                       <CardTitle className="text-base leading-6">
                         {procedure.title}
                       </CardTitle>
-                      <CardDescription className="mt-1">
-                        {procedure.source}
-                      </CardDescription>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">{procedure.entityType}</Badge>
-                      <Badge variant="outline">
-                        {procedure.workspaceType ?? 'Case Workflow'}
-                      </Badge>
-                    </div>
                     <Button
                       variant="outline"
                       className="w-full justify-between"

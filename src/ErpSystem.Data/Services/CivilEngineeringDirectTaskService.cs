@@ -34,6 +34,45 @@ public sealed class CivilEngineeringDirectTaskService(
     private string UserName => string.IsNullOrWhiteSpace(currentUser.UserName) ? UserId.ToString() : currentUser.UserName.Trim();
     private string ActorRoles => string.Join(',', currentUser.Roles.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value));
 
+    public async Task<IReadOnlyList<CivilEngineeringDirectTaskDto>> SearchAsync(string search, int take = 8, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var query = Tasks(false).Where(value => value.WorkItem.Title.Contains(term) || value.Instructions.Contains(term))
+            .OrderByDescending(value => value.DueDate).ThenBy(value => value.Id);
+        var selected = new List<ProjectCivilDirectTaskControl>();
+        var access = new Dictionary<Guid, bool>();
+        var limit = Math.Clamp(take, 1, 50);
+        for (var offset = 0; selected.Count < limit; offset += 50)
+        {
+            token.ThrowIfCancellationRequested();
+            var batch = await query.Skip(offset).Take(50).ToListAsync(token);
+            foreach (var value in batch)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!access.TryGetValue(value.ProjectId, out var allowed))
+                {
+                    try { await RequireProjectAsync(value.ProjectId, token); allowed = true; }
+                    catch (UnauthorizedAccessException) { allowed = false; }
+                    access[value.ProjectId] = allowed;
+                }
+                if (allowed) selected.Add(value);
+                if (selected.Count == limit) break;
+            }
+            if (batch.Count < 50) break;
+        }
+        return await MapAsync(selected, token);
+    }
+
+    public async Task<CivilEngineeringDirectTaskDto> GetAsync(Guid id, CancellationToken token = default)
+    {
+        var value = await Tasks(false).SingleOrDefaultAsync(value => value.Id == id, token)
+            ?? throw new CivilEngineeringDirectTaskNotFoundException("The direct task was not found.");
+        await RequireProjectAsync(value.ProjectId, token);
+        return (await MapAsync(new[] { value }, token)).SingleOrDefault()
+            ?? throw new CivilEngineeringDirectTaskNotFoundException("The direct task was not found.");
+    }
+
     public async Task<CivilEngineeringDirectTaskLookupsDto> GetLookupsAsync(Guid projectId, CancellationToken token = default)
     {
         await RequireProjectAsync(projectId, token);

@@ -509,7 +509,9 @@ export const contractService = {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch contract');
+      throw await apiError(response, response.status === 403
+        ? 'Your account does not have access to Procurement contract records.'
+        : 'Failed to fetch contract');
     }
 
     return response.json();

@@ -67,26 +67,32 @@ public sealed class VendorPaymentBatchCreationTests
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
         await using var db = CreateContext();
-        var supplier = new Supplier
+        var supplier = new BusinessPartner
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            SupplierCode = "SUP-TDC0505",
-            Name = "TDC-0505 Supplier",
-            SupplierType = "Vendor",
-            Status = "Active",
+            PartnerCode = "SUP-TDC0505",
+            PartnerName = "TDC-0505 Supplier",
+            PartnerType = "Supplier",
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "Tests"
         };
+        var role = ReadyRole(tenantId, supplier.Id);
+        var profile = ReadyProfile(tenantId, role.Id);
         var invoice = new VendorInvoice
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             InvoiceNumber = "TDC0505-BATCH-INV",
             SupplierInvoiceNumber = "TDC0505-EXT",
-            SupplierId = supplier.Id,
-            SupplierName = supplier.Name,
+            BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = role.Id,
+            BusinessPartnerApProfileVersionId = profile.Id,
+            BusinessPartnerCode = supplier.PartnerCode,
+            SupplierName = supplier.PartnerName,
             InvoiceDate = DateTime.UtcNow.Date,
             DueDate = DateTime.UtcNow.Date.AddDays(30),
             SubTotal = 50m,
@@ -111,7 +117,9 @@ public sealed class VendorPaymentBatchCreationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
-        db.Suppliers.Add(supplier);
+        db.BusinessPartners.Add(supplier);
+        db.Set<BusinessPartnerRole>().Add(role);
+        db.Set<BusinessPartnerApProfileVersion>().Add(profile);
         db.VendorInvoices.Add(invoice);
         await db.SaveChangesAsync();
 
@@ -279,7 +287,11 @@ public sealed class VendorPaymentBatchCreationTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "VP-TDC0505-MANUAL",
-            SupplierId = supplier.Id,
+            BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = role.Id,
+            BusinessPartnerApProfileVersionId = profile.Id,
+            BusinessPartnerCode = supplier.PartnerCode,
+            BusinessPartnerName = supplier.PartnerName,
             PaymentDate = DateTime.UtcNow.Date,
             TotalAmount = 50m,
             CurrencyCode = "GHS",
@@ -304,9 +316,9 @@ public sealed class VendorPaymentBatchCreationTests
         var mixedCurrencyInvoices = new[]
         {
             NewOpeningBalanceInvoice(
-                tenantId, supplier, userId, "TDC0505-MIX-GHS", "GHS", 60m),
+                tenantId, supplier, role.Id, profile.Id, userId, "TDC0505-MIX-GHS", "GHS", 60m),
             NewOpeningBalanceInvoice(
-                tenantId, supplier, userId, "TDC0505-MIX-EUR", "EUR", 40m)
+                tenantId, supplier, role.Id, profile.Id, userId, "TDC0505-MIX-EUR", "EUR", 40m)
         };
         db.VendorInvoices.AddRange(mixedCurrencyInvoices);
         await db.SaveChangesAsync();
@@ -330,18 +342,21 @@ public sealed class VendorPaymentBatchCreationTests
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
         await using var db = CreateContext();
-        var supplier = new Supplier
+        var supplier = new BusinessPartner
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            SupplierCode = "SUP-PAGED",
-            Name = "Paged supplier",
-            SupplierType = "Vendor",
-            Status = "Active",
+            PartnerCode = "SUP-PAGED",
+            PartnerName = "Paged supplier",
+            PartnerType = "Supplier",
+            RegistrationStatus = "Approved",
+            ApprovalStatus = "Approved",
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "Tests"
         };
+        var role = ReadyRole(tenantId, supplier.Id);
+        var profile = ReadyProfile(tenantId, role.Id);
         db.Tenants.Add(new Tenant
         {
             Id = tenantId,
@@ -350,19 +365,25 @@ public sealed class VendorPaymentBatchCreationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
-        db.Suppliers.Add(supplier);
+        db.BusinessPartners.Add(supplier);
+        db.Set<BusinessPartnerRole>().Add(role);
+        db.Set<BusinessPartnerApProfileVersion>().Add(profile);
 
         for (var index = 0; index < 50; index++)
         {
             var invoice = NewOpeningBalanceInvoice(
-                tenantId, supplier, userId, $"RESERVED-{index:00}", "GHS", 10m);
+                tenantId, supplier, role.Id, profile.Id, userId, $"RESERVED-{index:00}", "GHS", 10m);
             invoice.DueDate = DateTime.UtcNow.Date;
             var payment = new VendorPayment
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 PaymentNumber = $"VP-RESERVED-{index:00}",
-                SupplierId = supplier.Id,
+                BusinessPartnerId = supplier.Id,
+                BusinessPartnerRoleId = role.Id,
+                BusinessPartnerApProfileVersionId = profile.Id,
+                BusinessPartnerCode = supplier.PartnerCode,
+                BusinessPartnerName = supplier.PartnerName,
                 PaymentDate = DateTime.UtcNow.Date,
                 TotalAmount = 10m,
                 CurrencyCode = "GHS",
@@ -384,7 +405,7 @@ public sealed class VendorPaymentBatchCreationTests
         }
 
         var selectable = NewOpeningBalanceInvoice(
-            tenantId, supplier, userId, "SELECTABLE-51", "GHS", 25m);
+            tenantId, supplier, role.Id, profile.Id, userId, "SELECTABLE-51", "GHS", 25m);
         selectable.DueDate = DateTime.UtcNow.Date.AddDays(1);
         db.VendorInvoices.Add(selectable);
         await db.SaveChangesAsync();
@@ -427,7 +448,9 @@ public sealed class VendorPaymentBatchCreationTests
 
     private static VendorInvoice NewOpeningBalanceInvoice(
         Guid tenantId,
-        Supplier supplier,
+        BusinessPartner supplier,
+        Guid roleId,
+        Guid profileId,
         Guid userId,
         string invoiceNumber,
         string currencyCode,
@@ -437,8 +460,11 @@ public sealed class VendorPaymentBatchCreationTests
         TenantId = tenantId,
         InvoiceNumber = invoiceNumber,
         SupplierInvoiceNumber = $"EXT-{invoiceNumber}",
-        SupplierId = supplier.Id,
-        SupplierName = supplier.Name,
+        BusinessPartnerId = supplier.Id,
+        BusinessPartnerRoleId = roleId,
+        BusinessPartnerApProfileVersionId = profileId,
+        BusinessPartnerCode = supplier.PartnerCode,
+        SupplierName = supplier.PartnerName,
         InvoiceDate = DateTime.UtcNow.Date,
         DueDate = DateTime.UtcNow.Date.AddDays(30),
         SubTotal = amount,
@@ -454,6 +480,21 @@ public sealed class VendorPaymentBatchCreationTests
         SubmittedDate = DateTime.UtcNow,
         CreatedAt = DateTime.UtcNow,
         CreatedBy = "Tests"
+    };
+
+    private static BusinessPartnerRole ReadyRole(Guid tenantId, Guid partnerId) => new()
+    {
+        Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = partnerId,
+        RoleType = BusinessPartnerRoleType.Supplier, Status = BusinessPartnerRoleStatus.Active,
+        ActiveFromUtc = new DateTime(2025, 1, 1)
+    };
+
+    private static BusinessPartnerApProfileVersion ReadyProfile(Guid tenantId, Guid roleId) => new()
+    {
+        Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = roleId,
+        VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+        EffectiveFrom = new DateTime(2025, 1, 1), SubjectToWithholding = false,
+        ApprovedAtUtc = new DateTime(2025, 1, 1), ApprovedById = Guid.NewGuid()
     };
 
     private static ApplicationDbContext CreateContext()

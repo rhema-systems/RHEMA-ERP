@@ -19,7 +19,9 @@ const { push, errorToast } = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push, back: vi.fn() }),
   useParams: () => ({ id: 'partner-1' }),
+  useSearchParams: () => new URLSearchParams(),
 }));
+vi.mock('@/components/finance/BusinessPartnerFinanceProfilesPanel', () => ({ BusinessPartnerFinanceProfilesPanel: () => <div>Governed profiles</div> }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: errorToast } }));
 vi.mock('@/services/businessPartnerService', () => ({
   businessPartnerService: {
@@ -96,51 +98,30 @@ async function openTab(name: string) {
   );
 }
 
-describe('business partner edit defaults', () => {
-  it('reopens stored WHT values and keeps Options and Accounts in equal-width tabs', async () => {
-    render(<EditBusinessPartnerPage />);
-    expect(await screen.findByLabelText('WHT Rate (%)')).toHaveValue(7.5);
-    expect(screen.getByRole('switch')).toBeChecked();
-    expect(screen.getByRole('tablist')).toHaveClass('grid-cols-4');
-    await openTab('Options');
-    expect(screen.getByLabelText('TIN')).toHaveValue('TIN-001');
-    expect(screen.getByLabelText('Credit Limit')).toHaveValue(1500);
-    await openTab('Accounts');
-    expect(screen.getByLabelText('Accounts Payable')).toHaveTextContent(
-      'Saved account unavailable'
-    );
-  });
-
-  it('saves changes without clearing saved IDs when reference catalogues fail', async () => {
-    vi.mocked(businessPartnerService.getPostingOptions).mockRejectedValue(
-      new Error('Unavailable')
-    );
+describe('business partner governed finance setup', () => {
+  it.each(['Approved', 'PendingApproval'])('preserves stored %s status while routing finance setup to profiles', async status => {
+    vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({ ...saved, status });
     render(<EditBusinessPartnerPage />);
     await screen.findByLabelText('Company Name *');
-    await openTab('Options');
-    fireEvent.change(screen.getByLabelText('Credit Limit'), {
-      target: { value: '2500' },
-    });
-    fireEvent.change(screen.getByLabelText('TIN'), {
-      target: { value: 'TIN-002' },
-    });
+    expect(screen.getByRole('tab', { name: 'Accounts Payable' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Accounts Receivable' })).not.toBeInTheDocument();
+    await openTab('Finance Profiles');
+    expect(screen.getByText('Governed profiles')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() =>
-      expect(businessPartnerService.updatePartner).toHaveBeenCalledWith(
-        'partner-1',
-        expect.objectContaining({
-          creditLimit: 2500,
-          taxNumber: 'TIN-002',
-          paymentTermId: 'term-1',
-          postingDefaults: saved.postingDefaults,
-        })
-      )
-    );
-    expect(push).toHaveBeenCalledWith(
-      '/procurement/business-partners/partner-1'
-    );
+    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith('partner-1', expect.objectContaining({ status })));
+    const request = vi.mocked(businessPartnerService.updatePartner).mock.calls[0][1];
+    expect(request).not.toHaveProperty('postingDefaults');
+    expect(request).not.toHaveProperty('receivablesDefaults');
   });
-
+  it('retains master TIN editing without exposing legacy WHT defaults', async () => {
+    render(<EditBusinessPartnerPage />);
+    await screen.findByLabelText('Company Name *');
+    expect(screen.queryByLabelText('WHT Rate (%)')).not.toBeInTheDocument();
+    await openTab('Options');
+    fireEvent.change(screen.getByLabelText('TIN'), { target: { value: 'TIN-002' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith('partner-1', expect.objectContaining({ taxNumber: 'TIN-002' })));
+  });
   it('retains edits after failed save and exposes the server reason', async () => {
     vi.mocked(businessPartnerService.updatePartner).mockRejectedValue(
       new Error('GL account has been deactivated. (PARTNER_ACCOUNT_INVALID)')

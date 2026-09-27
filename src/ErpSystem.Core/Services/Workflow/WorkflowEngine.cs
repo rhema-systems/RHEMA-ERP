@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Workflow;
@@ -30,6 +31,7 @@ public class WorkflowEngine : IWorkflowEngine
     private readonly IWorkflowSignatureSubmissionStore _signatureStore;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<WorkflowEngine> _logger;
+    private readonly IProcurementSodPolicy? _sodPolicy;
 
     public WorkflowEngine(
         IWorkflowDefinitionRepository workflowDefinitionRepository,
@@ -45,7 +47,8 @@ public class WorkflowEngine : IWorkflowEngine
         IWorkflowRuntimeGovernanceService runtimeGovernance,
         IWorkflowSignatureSubmissionStore signatureStore,
         ICurrentUserService currentUserService,
-        ILogger<WorkflowEngine> logger)
+        ILogger<WorkflowEngine> logger,
+        IProcurementSodPolicy? sodPolicy = null)
     {
         _workflowDefinitionRepository = workflowDefinitionRepository;
         _workflowStepRepository = workflowStepRepository;
@@ -61,6 +64,7 @@ public class WorkflowEngine : IWorkflowEngine
         _signatureStore = signatureStore;
         _currentUserService = currentUserService;
         _logger = logger;
+        _sodPolicy = sodPolicy;
     }
 
     public async Task<WorkflowInstance> StartWorkflowAsync(string workflowName, Guid entityId, Guid initiatedById, object? dataContext = null)
@@ -974,11 +978,13 @@ public class WorkflowEngine : IWorkflowEngine
                 };
             }
 
+            var enforceSeparation = _sodPolicy is null || await _sodPolicy.IsRequiredForSourceAsync(
+                instance.TenantId, instance.EntityType?.Name ?? instance.EntityType?.Code, instance.EntityId);
             var approvalGuardErrors = WorkflowApprovalGuardValidator.Validate(
                 config?.ApprovalConfig,
                 instance.InitiatedById,
                 approvals,
-                userId);
+                userId, enforceSeparation);
             if (approvalGuardErrors.Count > 0)
             {
                 return new WorkflowExecutionResult
@@ -997,12 +1003,12 @@ public class WorkflowEngine : IWorkflowEngine
                 };
             }
 
-            var crossStepSodErrors = await ValidateCrossStepSodAsync(
+            var crossStepSodErrors = enforceSeparation ? await ValidateCrossStepSodAsync(
                 config?.ApprovalConfig,
                 instance,
                 stepInstance,
                 resultData,
-                userId);
+                userId) : new List<string>();
             if (crossStepSodErrors.Count > 0)
             {
                 return new WorkflowExecutionResult
@@ -2036,6 +2042,23 @@ public class WorkflowEngine : IWorkflowEngine
                 Status = instance.Status,
                 WorkflowInstanceId = instance.Id,
                 Message = "Workflow already completed"
+            };
+        }
+
+        // A missing transition must not bypass a configured final approval. Retain
+        // compatibility with legacy definitions that never declared an end step.
+        var definitionSteps = (await _workflowStepRepository.GetByWorkflowDefinitionAsync(instance.WorkflowDefinitionId))
+            .Where(step => !step.IsDeleted).ToList();
+        if (definitionSteps.Any(step => step.IsEndStep)
+            && !definitionSteps.Any(step => step.Id == instance.CurrentStepId && step.IsEndStep))
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                CurrentStepId = instance.CurrentStepId,
+                Message = "The workflow has not reached its configured end step. Connect the remaining review/approval steps in Administration > Workflow Setup before completing this process."
             };
         }
 

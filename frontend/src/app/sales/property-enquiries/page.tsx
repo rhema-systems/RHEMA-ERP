@@ -48,6 +48,9 @@ type EstateHandoffState = {
 type EstateHandoffDraft = {
   salesReference: string;
   agreedAmount: string;
+  requestedLeaseTerm: string;
+  salesAmountPaid: string;
+  salesPaymentReference: string;
   currency: string;
   salesCompletedAt: string;
   notes: string;
@@ -57,11 +60,18 @@ const endpoint = '/ehc/internal/property-enquiries';
 function PropertyEnquiries() {
   const params = useSearchParams();
   const [selectedId, setSelectedId] = useState(params.get('id') || '');
+  const requestedId = params.get('id');
+  useEffect(() => {
+    if (requestedId) setSelectedId(requestedId);
+  }, [requestedId]);
   const [page, setPage] = useState(1);
   const [reply, setReply] = useState('');
   const [handoffDraft, setHandoffDraft] = useState<EstateHandoffDraft>({
     salesReference: '',
     agreedAmount: '',
+    requestedLeaseTerm: '',
+    salesAmountPaid: '',
+    salesPaymentReference: '',
     currency: '',
     salesCompletedAt: '',
     notes: '',
@@ -129,6 +139,12 @@ function PropertyEnquiries() {
         body: JSON.stringify({
           salesReference: handoffDraft.salesReference.trim(),
           agreedAmount: Number(handoffDraft.agreedAmount),
+          requestedLeaseTerm: handoffDraft.requestedLeaseTerm.trim() || null,
+          salesAmountPaid: handoffDraft.salesAmountPaid
+            ? Number(handoffDraft.salesAmountPaid)
+            : 0,
+          salesPaymentReference:
+            handoffDraft.salesPaymentReference.trim() || null,
           currency: handoffDraft.currency.trim().toUpperCase(),
           salesCompletedAt: handoffDraft.salesCompletedAt || null,
           notes: handoffDraft.notes.trim() || null,
@@ -163,6 +179,12 @@ function PropertyEnquiries() {
   const ticket = detail.data;
   const handoffState = handoff.data;
   const opportunity = handoffState?.opportunity;
+  const listingType = ticket?.propertyListing?.listingType || '';
+  const handoffRequiresDuration =
+    listingType === 'Rent' ||
+    listingType === 'Lease' ||
+    listingType === 'SaleAndRent' ||
+    listingType === 'SaleAndLease';
   useEffect(() => {
     if (!selectedId || !opportunity || handoffState?.estateCase) return;
 
@@ -185,6 +207,12 @@ function PropertyEnquiries() {
       handoffDraft.salesReference.trim() &&
       Number.isFinite(Number(handoffDraft.agreedAmount)) &&
       Number(handoffDraft.agreedAmount) > 0 &&
+      (!handoffRequiresDuration || handoffDraft.requestedLeaseTerm.trim()) &&
+      (!handoffDraft.salesAmountPaid ||
+        (Number.isFinite(Number(handoffDraft.salesAmountPaid)) &&
+          Number(handoffDraft.salesAmountPaid) >= 0 &&
+          Number(handoffDraft.salesAmountPaid) <=
+            Number(handoffDraft.agreedAmount))) &&
       /^[A-Za-z]{3}$/.test(handoffDraft.currency.trim())
   );
   return (
@@ -228,6 +256,9 @@ function PropertyEnquiries() {
                 setHandoffDraft({
                   salesReference: '',
                   agreedAmount: '',
+                  requestedLeaseTerm: '',
+                  salesAmountPaid: '',
+                  salesPaymentReference: '',
                   currency: '',
                   salesCompletedAt: '',
                   notes: '',
@@ -399,6 +430,66 @@ function PropertyEnquiries() {
                             setHandoffDraft((value) => ({
                               ...value,
                               currency: event.target.value.toUpperCase(),
+                            }))
+                          }
+                        />
+                      </div>
+                      {handoffRequiresDuration ? (
+                        <div className="space-y-1">
+                          <Label htmlFor="estate-requested-term">
+                            Agreed {listingType.includes('Lease') ? 'lease' : 'rent'} duration
+                          </Label>
+                          <Input
+                            id="estate-requested-term"
+                            value={handoffDraft.requestedLeaseTerm}
+                            maxLength={120}
+                            placeholder={
+                              listingType.includes('Lease')
+                                ? 'Example: 50 years'
+                                : 'Example: 12 months'
+                            }
+                            onChange={(event) =>
+                              setHandoffDraft((value) => ({
+                                ...value,
+                                requestedLeaseTerm: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      ) : null}
+                      <div className="space-y-1">
+                        <Label htmlFor="estate-sales-paid">
+                          Amount paid in Sales
+                        </Label>
+                        <Input
+                          id="estate-sales-paid"
+                          type="number"
+                          min="0"
+                          max={handoffDraft.agreedAmount || undefined}
+                          step="0.01"
+                          value={handoffDraft.salesAmountPaid}
+                          placeholder="0.00"
+                          onChange={(event) =>
+                            setHandoffDraft((value) => ({
+                              ...value,
+                              salesAmountPaid: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="estate-sales-payment-reference">
+                          Sales payment reference
+                        </Label>
+                        <Input
+                          id="estate-sales-payment-reference"
+                          value={handoffDraft.salesPaymentReference}
+                          maxLength={200}
+                          placeholder="Receipt or collection reference"
+                          onChange={(event) =>
+                            setHandoffDraft((value) => ({
+                              ...value,
+                              salesPaymentReference: event.target.value,
                             }))
                           }
                         />

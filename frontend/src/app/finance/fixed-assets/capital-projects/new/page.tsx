@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { capitalProjectService, type CreateCapitalProjectDto } from '@/services/finance/capitalProjectService';
+import { toast } from 'sonner';
 
 export default function NewCapitalProjectPage() {
   const router = useRouter();
@@ -30,7 +31,7 @@ export default function NewCapitalProjectPage() {
       const result = await capitalProjectService.create(form);
       router.push(`/finance/fixed-assets/capital-projects/${result.id}`);
     } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Failed to create project');
+      toast.error(error instanceof Error ? error.message : 'The capital project was not created. Review the required project details and retry.');
     } finally {
       setSaving(false);
     }

@@ -1,4 +1,6 @@
 import React from 'react';
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/administration/inventory/warehouses', useRouter: () => ({ replace: vi.fn() }) }));
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import WarehousesPage from './page';
@@ -28,7 +30,7 @@ beforeEach(() => {
 
 async function locations() {
   render(<WarehousesPage />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Locations', exact: true }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Locations' }));
   return screen.getByRole('dialog', { name: 'Locations - Demo Warehouse' });
 }
 async function edit(code: string) {
@@ -56,7 +58,7 @@ describe('warehouse default bin configuration', () => {
     const dialog = await locations();
     fireEvent.change(within(dialog).getByLabelText('Code'), { target: { value: 'new-bin' } });
     fireEvent.click(within(dialog).getByRole('switch', { name: 'Use as default bin' }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add', exact: true }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(service.createWarehouseLocation).toHaveBeenCalledWith(expect.objectContaining({ locationCode: 'NEW-BIN', isDefault: true, warehouseId: 'wh-1' })));
     await waitFor(() => expect(within(dialog).getByLabelText('Code')).toHaveValue(''));
     expect(within(dialog).getByRole('switch', { name: 'Use as default bin' })).not.toBeChecked();

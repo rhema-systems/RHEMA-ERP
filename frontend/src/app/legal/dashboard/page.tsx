@@ -127,9 +127,6 @@ export default function LegalDashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">
-          <Badge variant="outline" className="w-fit">
-            Legal
-          </Badge>
           <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
             Legal Dashboard
           </h1>
@@ -257,7 +254,7 @@ export default function LegalDashboardPage() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <BarChart3 className="h-5 w-5 text-primary" />
-              <CardTitle>Procedure Workspaces</CardTitle>
+              <CardTitle>Workspaces</CardTitle>
             </div>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
@@ -278,9 +275,6 @@ export default function LegalDashboardPage() {
                       </div>
                       <div className="min-w-0">
                         <div className="font-medium">{procedure.title}</div>
-                        <Badge variant="outline" className="mt-2">
-                          {procedure.source}
-                        </Badge>
                       </div>
                     </div>
                     <Button asChild size="icon" variant="outline">
@@ -326,28 +320,6 @@ export default function LegalDashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
-              <CardTitle>Setup</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              <Button asChild variant="outline" size="sm">
-                <Link href="/administration/workflow?q=Legal">
-                  Workflow Setup
-                </Link>
-              </Button>
-              <Button asChild variant="outline" size="sm">
-                <Link href="/administration/document-management/metadata-templates">
-                  DMS Metadata
-                </Link>
-              </Button>
-              <Button asChild variant="outline" size="sm">
-                <Link href="/administration/document-management/access-retention">
-                  Access & Retention
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>

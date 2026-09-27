@@ -1087,7 +1087,10 @@ public class BankReconciliationService : IBankReconciliationService
                 $"Posted bank GL movement is missing {bankCurrency} transaction-currency evidence required for reconciliation.");
         }
 
-        return RoundMoney(bankAccount.OpeningBalance + postedMovement);
+        // Governed bank openings are posted GL transactions. Adding the legacy master
+        // OpeningBalance would count that opening twice and lets an unaudited snapshot
+        // influence reconciliation authority.
+        return RoundMoney(postedMovement);
     }
 
     private async Task EnsureCashTransactionIsPostedForReconciliationAsync(CashTransaction transaction, Guid tenantId)

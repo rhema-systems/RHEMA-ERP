@@ -21,6 +21,26 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class TenderPersistenceRoundTripTests
 {
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SupplierProjectionConcealsTenderAndLotEstimatesWithoutChangingStoredValues(bool external)
+    {
+        var fixture = new Fixture(external: external);
+        var tender = fixture.SeedDraftTender();
+        tender.EstimatedValue = 125000m;
+        var lot = new TenderLot { Id = Guid.NewGuid(), TenderId = tender.Id, EstimatedValue = 50000m };
+        fixture.Lots.Setup(repository => repository.GetByTenderIdAsync(tender.Id)).ReturnsAsync(new[] { lot });
+        fixture.Lots.Setup(repository => repository.GetByIdWithItemsAsync(lot.Id)).ReturnsAsync(lot);
+
+        var detail = await fixture.Service.GetTenderByIdAsync(tender.Id);
+        detail!.EstimatedValue.Should().Be(external ? null : 125000m);
+        detail.Lots.Single().EstimatedValue.Should().Be(external ? null : 50000m);
+        (await fixture.Service.GetTenderLotsAsync(tender.Id)).Single().EstimatedValue.Should().Be(external ? null : 50000m);
+        tender.EstimatedValue.Should().Be(125000m);
+        lot.EstimatedValue.Should().Be(50000m);
+    }
+
+    [Theory]
     [InlineData("create", "Draft")]
     [InlineData("update", "Draft")]
     [InlineData("submit", "Draft")]
@@ -390,7 +410,7 @@ public sealed class TenderPersistenceRoundTripTests
         private readonly Dictionary<Guid, string> _templates = new();
         private Tender? _storedTender;
 
-        public Fixture(bool advanced = false, ProcurementMethodType method = ProcurementMethodType.NationalCompetitiveTendering)
+        public Fixture(bool advanced = false, ProcurementMethodType method = ProcurementMethodType.NationalCompetitiveTendering, bool external = false)
         {
             RequisitionId = Guid.NewGuid();
             EstimatedValue = 125000m;
@@ -432,6 +452,7 @@ public sealed class TenderPersistenceRoundTripTests
             clarifications.Setup(repository => repository.GetByTenderIdAsync(It.IsAny<Guid>()))
                 .ReturnsAsync(Array.Empty<TenderClarification>());
             var lots = new Mock<ITenderLotRepository>();
+            Lots = lots;
             lots.Setup(repository => repository.GetByTenderIdAsync(It.IsAny<Guid>()))
                 .ReturnsAsync(Array.Empty<TenderLot>());
 
@@ -467,6 +488,7 @@ public sealed class TenderPersistenceRoundTripTests
                 .ReturnsAsync(1);
 
             var currentUser = new Mock<ICurrentUserProvider>();
+            currentUser.SetupGet(provider => provider.IsExternalUser).Returns(external);
             currentUser.SetupGet(provider => provider.TenantId).Returns(tenantId);
             currentUser.SetupGet(provider => provider.UserId).Returns(userId);
             UserId = userId;
@@ -567,6 +589,7 @@ public sealed class TenderPersistenceRoundTripTests
         public Mock<IWorkflowStatusAdapterRegistry> StatusAdapters { get; } = new();
         public Mock<IUnitOfWork> UnitOfWork { get; }
         public Mock<ITenderRepository> Tenders => _tenders;
+        public Mock<ITenderLotRepository> Lots { get; }
 
         public Tender SeedDraftTender()
         {

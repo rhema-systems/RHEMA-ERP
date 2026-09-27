@@ -118,31 +118,15 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
         (supplier) => Boolean(supplier.businessPartnerId)
       ),
   });
-  const selectedSupplierOption = suppliers.find(
-    (supplier) => supplier.businessPartnerId === vendorId
-  );
-  const supplierIdentityQuery = useQuery({
-    queryKey: ['ap-supplier-identity', vendorId],
-    queryFn: () => accountsPayableService.getApSupplierIdentity(vendorId),
-    enabled: Boolean(vendorId && !selectedSupplierOption),
-  });
-  const resolvedSupplierId =
-    selectedSupplierOption?.supplierId ??
-    (supplierIdentityQuery.data?.businessPartnerId === vendorId
-      ? supplierIdentityQuery.data.supplierId
-      : undefined);
-  const willCreateApIdentity = Boolean(
-    selectedSupplierOption?.businessPartnerId && !selectedSupplierOption.supplierId
-  );
   const { data: invoicePage } = useQuery({
-    queryKey: ['posted-supplier-invoices', vendorId, resolvedSupplierId],
+    queryKey: ['posted-supplier-invoices', vendorId],
     queryFn: () =>
       accountsPayableService.getInvoices({
-        supplierId: resolvedSupplierId as string,
+        businessPartnerId: vendorId,
         page: 1,
         pageSize: 200,
       }),
-    enabled: Boolean(vendorId && resolvedSupplierId),
+    enabled: Boolean(vendorId),
   });
   const { data: accounts = [] } = useQuery({
     queryKey: ['supplier-debit-note-posting-accounts'],
@@ -202,6 +186,7 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
     setLines(
       existing.lineItems.map((line) => ({
         key: line.id,
+        lineItemType: line.lineItemType,
         originalVendorInvoiceLineItemId: line.originalVendorInvoiceLineItemId,
         glAccountId: line.glAccountId,
         description: line.description,
@@ -310,6 +295,7 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
       lines.some(
         (line) =>
           !line.description.trim() ||
+          (!isLinkedNote && !line.lineItemType) ||
           Number(line.quantity) <= 0 ||
           Number(line.unitPrice) <= 0
       )
@@ -317,7 +303,7 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
       toast({
         title: 'Invalid lines',
         description:
-          'Every line requires a description, positive quantity and positive price.',
+          'Every line requires a type, description, positive quantity and positive price.',
         variant: 'destructive',
       });
       return;
@@ -468,8 +454,6 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
               onValueChange={handleInvoiceChange}
               disabled={
                 !vendorId ||
-                !resolvedSupplierId ||
-                supplierIdentityQuery.isPending ||
                 Boolean(noteId)
               }
             >
@@ -488,23 +472,6 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
                 ))}
               </SelectContent>
             </Select>
-            {vendorId && !selectedSupplierOption && supplierIdentityQuery.isPending && (
-              <p className="text-xs text-muted-foreground">
-                Resolving the Finance partner to its AP supplier identity…
-              </p>
-            )}
-            {willCreateApIdentity && (
-              <p className="text-xs text-muted-foreground">
-                This approved Business Partner has no AP activity yet. Finance will create its
-                controlled AP identity when the first debit note is saved.
-              </p>
-            )}
-            {vendorId && !selectedSupplierOption && supplierIdentityQuery.isError && (
-              <p className="text-xs text-destructive">
-                Posted invoices are unavailable until this business partner has
-                one unambiguous AP supplier identity.
-              </p>
-            )}
           </div>
           <div className="space-y-2">
             <Label>Debit-note date *</Label>
@@ -629,6 +596,30 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
               key={line.key}
               className="grid gap-3 rounded-md border p-4 lg:grid-cols-12"
             >
+              {!isLinkedNote && (
+                <div className="space-y-2 lg:col-span-12">
+                  <Label htmlFor={`credit-type-${line.key}`}>Credit type *</Label>
+                  <Select value={line.lineItemType ?? ''} onValueChange={(value) =>
+                    updateLine(line.key, value === 'Writeoff' ? {
+                      lineItemType: value, glAccountId: undefined, taxGroupId: undefined,
+                      taxRate: 0, taxAmount: 0, discountPercentage: 0, discountAmount: 0,
+                    } : { lineItemType: value })}>
+                    <SelectTrigger id={`credit-type-${line.key}`}><SelectValue placeholder="Select credit type" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Expense">Expense credit</SelectItem>
+                      <SelectItem value="Service">Service credit</SelectItem>
+                      <SelectItem value="Inventory">Inventory credit</SelectItem>
+                      <SelectItem value="FixedAsset">Fixed asset credit</SelectItem>
+                      <SelectItem value="Writeoff">Supplier liability write-off</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {line.lineItemType === 'Writeoff' && <p className="text-sm text-muted-foreground">
+                    Records an agreed reduction in the amount owed to the supplier. Uses the supplier's Writeoffs account
+                    unless you select an override. Tax and discounts do not apply. Approval and posting are required;
+                    applying the credit to outstanding invoices is a separate step.
+                  </p>}
+                </div>
+              )}
               <div className="space-y-2 lg:col-span-3">
                 <Label>Description *</Label>
                 <Input
@@ -676,7 +667,7 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
                   max="99.99"
                   step="0.01"
                   value={line.discountPercentage ?? 0}
-                  disabled={isLinkedNote}
+                  disabled={isLinkedNote || line.lineItemType === 'Writeoff'}
                   onChange={(event) =>
                     updateLine(line.key, {
                       discountPercentage: Number(event.target.value),
@@ -698,6 +689,7 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
                 ) : (
                   <Select
                     value={line.taxGroupId ?? 'none'}
+                    disabled={line.lineItemType === 'Writeoff'}
                     onValueChange={(value) =>
                       updateLine(line.key, {
                         taxGroupId: value === 'none' ? undefined : value,
@@ -719,21 +711,22 @@ export function SupplierDebitNoteForm({ noteId }: { noteId?: string }) {
                 )}
               </div>
               <div className="space-y-2 lg:col-span-2">
-                <Label>{isLinkedNote ? 'Source coding' : 'GL account *'}</Label>
+                <Label>{isLinkedNote ? 'Source coding' : line.lineItemType === 'Writeoff' ? 'Write-off account' : 'GL account *'}</Label>
                 {isLinkedNote ? (
                   <Input disabled value="Reverses original invoice line" />
                 ) : (
                   <Select
-                    value={line.glAccountId ?? ''}
+                    value={line.glAccountId ?? (line.lineItemType === 'Writeoff' ? 'supplier-default' : '')}
                     onValueChange={(value) =>
-                      updateLine(line.key, { glAccountId: value })
+                      updateLine(line.key, { glAccountId: value === 'supplier-default' ? undefined : value })
                     }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select account" />
                     </SelectTrigger>
                     <SelectContent>
-                      {postingAccounts.map((account) => (
+                      {line.lineItemType === 'Writeoff' && <SelectItem value="supplier-default">Use supplier Writeoffs account</SelectItem>}
+                      {postingAccounts.filter(account => line.lineItemType !== 'Writeoff' || ['Revenue', 'Expense'].includes(account.accountType)).map((account) => (
                         <SelectItem key={account.id} value={account.id}>
                           {account.accountCode} — {account.accountName}
                         </SelectItem>

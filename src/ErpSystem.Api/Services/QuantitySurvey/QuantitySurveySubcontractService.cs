@@ -631,7 +631,7 @@ public sealed class QuantitySurveySubcontractService(
                 if (taxableBase < 0) throw Conflict("The certificate tax exceeds the payable amount.");
                 var invoice = await vendorInvoices.CreateAsync(new VendorInvoiceCreateDto
                 {
-                    SupplierId = value.Subcontract.SubcontractorBusinessPartnerId,
+                    BusinessPartnerId = value.Subcontract.SubcontractorBusinessPartnerId,
                     SupplierInvoiceNumber = certificate.CertificateNumber, InvoiceDate = certificate.IssueDate,
                     ReceivedDate = DateTime.UtcNow, CurrencyCode = certificate.Currency, ExchangeRate = 1m,
                     PaymentTermId = certificate.PaymentTermId, WithholdingTaxId = certificate.WithholdingTaxId,
@@ -891,7 +891,7 @@ public sealed class QuantitySurveySubcontractService(
         !value.IsDeleted && value.IsActive && !value.IsBlacklisted &&
         (value.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
          value.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
-        (value.PartnerType == "Supplier" || value.PartnerType == "Contractor" || value.PartnerType == "Both"));
+        BusinessPartnerRoles.ProcurementTypes.Contains(value.PartnerType));
 
     private IQueryable<QuantitySurveySubcontract> Query(bool tracked = false)
     {

@@ -12,6 +12,14 @@ namespace ErpSystem.Api.Controllers.QuantitySurvey;
 [Route("api/quantity-survey/contract-claims")]
 public sealed class QuantitySurveyContractClaimsController(IQuantitySurveyContractClaimService service) : ControllerBase
 {
+    [HttpPut, Authorize(Policy = QuantitySurveyAccessControlRegistry.ClaimsManage)]
+    public Task<IActionResult> Save([FromQuery] Guid projectId, [FromBody] SaveQuantitySurveyContractClaimRequest request, CancellationToken token) =>
+        ExecuteAsync(async () => Ok(await service.SaveInternalAsync(projectId, request, CorrelationId, token)));
+
+    [HttpPost("{id:guid}/submit"), Authorize(Policy = QuantitySurveyAccessControlRegistry.ClaimsManage)]
+    public Task<IActionResult> Submit(Guid id, [FromBody] QuantitySurveyContractClaimActionRequest request, CancellationToken token) =>
+        ExecuteAsync(async () => Ok(await service.SubmitInternalAsync(id, request, CorrelationId, token)));
+
     [HttpGet, Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public Task<IActionResult> Workspace([FromQuery] Guid projectId, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.GetWorkspaceAsync(projectId, false, token)));

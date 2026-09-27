@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -15,6 +16,30 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementInvoicePaymentSodServiceTests
 {
+    [Fact]
+    public async Task DisabledProcurementSeparationStillProducesApprovalAuditAndMatchingQueueState()
+    {
+        await using var fixture = await Fixture.CreateAsync(sameActor: true, enforceSeparation: false);
+        var readiness = await fixture.Service.EnforcePaymentApprovalAsync(fixture.PaymentId, "disabled-procurement-sod");
+        readiness.CanApprove.Should().BeTrue();
+        readiness.Code.Should().Be("SOD_DISABLED");
+        readiness.ControlEventId.Should().Be(fixture.EventId);
+        readiness.Invoices.Should().OnlyContain(item => !item.ConflictsWithCurrentActor);
+        fixture.Events.Should().ContainSingle(item => item.Result == ProcurementControlEventResult.Allowed);
+        var queue = await fixture.Service.GetQueueReadinessAsync(new[] { fixture.PaymentId }, Array.Empty<Guid>(), "disabled-procurement-queue");
+        queue.Payments[fixture.PaymentId].CanApprove.Should().BeTrue();
+        queue.Payments[fixture.PaymentId].Code.Should().Be("SOD_DISABLED");
+    }
+
+    [Fact]
+    public async Task DisabledProcurementSeparationDoesNotPermitMissingProcessorLineage()
+    {
+        await using var fixture = await Fixture.CreateAsync(sameActor: true, processorMissing: true, enforceSeparation: false);
+        var action = () => fixture.Service.EnforcePaymentApprovalAsync(fixture.PaymentId, "disabled-missing-lineage");
+        var blocked = await action.Should().ThrowAsync<ProcurementInvoicePaymentSodBlockedException>();
+        blocked.Which.Code.Should().Be(ProcurementInvoicePaymentSodRules.LineageCode);
+    }
+
     [Fact]
     public async Task SameInvoiceProcessorCannotApproveManualPaymentAndDenialIsAudited()
     {
@@ -136,7 +161,8 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
         public static async Task<Fixture> CreateAsync(
             bool sameActor,
             bool processorMissing = false,
-            bool reversedOriginalWithIndependentReplacement = false)
+            bool reversedOriginalWithIndependentReplacement = false,
+            bool enforceSeparation = true)
         {
             var tenantId = Guid.NewGuid();
             var actorId = Guid.NewGuid();
@@ -149,13 +175,24 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 .Options;
             var context = new ApplicationDbContext(options);
             var unitOfWork = new UnitOfWork(context);
+            var businessPartnerId = Guid.NewGuid();
+            context.BusinessPartners.Add(new BusinessPartner
+            {
+                Id = businessPartnerId,
+                TenantId = tenantId,
+                PartnerCode = "SUP-0506",
+                PartnerName = "TDC supplier",
+                PartnerType = "Supplier",
+                RegistrationStatus = "Approved"
+            });
 
             var originalInvoice = new VendorInvoice
             {
                 Id = invoiceId,
                 TenantId = tenantId,
                 InvoiceNumber = "INV-0506",
-                SupplierId = Guid.NewGuid(),
+                BusinessPartnerId = businessPartnerId,
+                BusinessPartnerCode = "SUP-0506",
                 SupplierName = "TDC supplier",
                 InvoiceDate = DateTime.UtcNow,
                 TotalAmount = 100m,
@@ -170,7 +207,9 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 Id = paymentId,
                 TenantId = tenantId,
                 PaymentNumber = "VP-0506",
-                SupplierId = Guid.NewGuid(),
+                BusinessPartnerId = businessPartnerId,
+                BusinessPartnerCode = "SUP-0506",
+                BusinessPartnerName = "TDC supplier",
                 TotalAmount = 100m,
                 CurrencyCode = "GHS",
                 Status = VendorPaymentStatus.PendingAuthorization
@@ -192,7 +231,8 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
                     InvoiceNumber = "INV-0506-REPLACEMENT",
-                    SupplierId = Guid.NewGuid(),
+                    BusinessPartnerId = businessPartnerId,
+                    BusinessPartnerCode = "SUP-0506",
                     SupplierName = "TDC supplier",
                     InvoiceDate = DateTime.UtcNow,
                     TotalAmount = 100m,
@@ -290,12 +330,14 @@ public sealed class ProcurementInvoicePaymentSodServiceTests
                 .Callback<ProcurementControlEventWriteRequest, CancellationToken>((request, _) => events.Add(request))
                 .ReturnsAsync(new ProcurementControlEventDto { Id = eventId, TenantId = tenantId });
 
+            var policy = new Mock<IProcurementSodPolicy>();
+            policy.Setup(item => item.IsRequiredForSourceAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(enforceSeparation);
             var service = new ProcurementInvoicePaymentSodService(
                 unitOfWork,
                 current.Object,
                 sod.Object,
                 controlEvents.Object,
-                NullLogger<ProcurementInvoicePaymentSodService>.Instance);
+                NullLogger<ProcurementInvoicePaymentSodService>.Instance, policy.Object);
             return new Fixture(context, unitOfWork, service, paymentId, eventId, sod, enforcedRequests, events);
         }
 

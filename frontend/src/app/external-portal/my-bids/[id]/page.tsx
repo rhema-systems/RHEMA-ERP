@@ -871,6 +871,7 @@ export default function BidDetailPage() {
                                       <CheckCircle className="h-5 w-5 text-green-600" />
                                       <div>
                                         <p className="font-medium text-sm">{doc.documentName}</p>
+                                        {doc.tenderBidItemId && <p className="text-xs text-gray-600">Lot {doc.lotNumber}: {doc.itemDescription}</p>}
                                         <p className="text-xs text-gray-500">
                                           Uploaded: {format(new Date(doc.uploadedDate), 'MMM dd, yyyy')}
                                           {doc.fileSize && ` • ${(doc.fileSize / 1024).toFixed(1)} KB`}
@@ -926,6 +927,7 @@ export default function BidDetailPage() {
                                       <div>
                                         <p className="font-medium text-sm">{doc.documentName}</p>
                                         <p className="text-xs text-gray-500">
+                                          {doc.tenderBidItemId && <span>Lot {doc.lotNumber}: {doc.itemDescription} • </span>}
                                           {doc.documentType}
                                           {doc.fileSize && ` • ${(doc.fileSize / 1024).toFixed(1)} KB`}
                                         </p>

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Data;
 using ErpSystem.Api.Configuration;
 using ErpSystem.Api.Data;
 using ErpSystem.Api.Extensions;
@@ -49,6 +50,74 @@ if (args.Length > 0 && args[0] == "apply-migrations")
     return;
 }
 
+// Add missing TDC demonstration values to the DEFAULT tenant's existing Finance
+// transaction dimensions. This command never assigns defaults or posts accounting data.
+if (args.Length > 0 && args[0] == "seed-finance-demo-dimensions")
+{
+    var dimensionBuilder = CreateSeedBuilder(args);
+    dimensionBuilder.Services.AddErpSystemLogging(dimensionBuilder.Configuration);
+    dimensionBuilder.Services.AddHttpContextAccessor();
+    dimensionBuilder.Services.AddErpSystemDatabase(dimensionBuilder.Configuration);
+    var dimensionApp = dimensionBuilder.Build();
+
+    using (var scope = dimensionApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var tenant = await db.Tenants.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Code == "DEFAULT" && !item.IsDeleted);
+        if (tenant is null)
+            throw new InvalidOperationException("FINANCE_DEMO_DIMENSION_TENANT_MISSING: DEFAULT tenant was not found.");
+
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<FinanceDemoDimensionValueSeeder>>();
+        await new FinanceDemoDimensionValueSeeder(db, logger).SeedAsync(tenant.Id, DateTime.UtcNow);
+    }
+
+    Console.WriteLine("Finance demo transaction dimensions seeded successfully.");
+    return;
+}
+
+// Converge the DEFAULT tenant's untouched standard Finance books to the executable
+// out-of-box baseline. The seeder refuses to overwrite user-touched books or books
+// with economic activity, and only fills canonical posting identities that have no
+// approved applicability rule.
+if (args.Length > 0 && args[0] == "seed-finance-baseline")
+{
+    var baselineBuilder = CreateSeedBuilder(args);
+    baselineBuilder.Services.AddErpSystemLogging(baselineBuilder.Configuration);
+    baselineBuilder.Services.AddHttpContextAccessor();
+    baselineBuilder.Services.AddErpSystemDatabase(baselineBuilder.Configuration);
+    baselineBuilder.Services.AddErpSystemIdentity();
+    baselineBuilder.Services.AddDatabaseSeeding();
+    var baselineApp = baselineBuilder.Build();
+
+    using (var scope = baselineApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var tenant = await db.Tenants.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Code == "DEFAULT" && !item.IsDeleted);
+        if (tenant is null)
+            throw new InvalidOperationException("FINANCE_BASELINE_TENANT_MISSING: DEFAULT tenant was not found.");
+
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<FinanceBaselineProvisioningSeeder>>();
+        await new FinanceBaselineProvisioningSeeder(db, logger).SeedAsync(tenant.Id, DateTime.UtcNow);
+
+        // Protected statement layouts depend on the canonical books and classification
+        // hierarchy established by the Finance baseline. Provision them through this same
+        // explicit, idempotent command so hosts that skip broad startup initialization still
+        // receive the clone-only reporting standards.
+        var statementLayoutLogger = scope.ServiceProvider
+            .GetRequiredService<ILogger<FinanceFinancialStatementStandardSeeder>>();
+        await new FinanceFinancialStatementStandardSeeder(db, statementLayoutLogger)
+            .SeedAsync(tenant.Id, DateTime.UtcNow);
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedFinanceWorkflowDefinitionsAsync();
+    }
+
+    Console.WriteLine("Finance executable baseline provisioning completed successfully.");
+    return;
+}
+
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
@@ -72,6 +141,35 @@ if (args.Length > 0 && args[0] == "seed")
         await seedingService.SeedTestUsersAsync();
     }
 
+    return;
+}
+
+// Reconcile reusable Procurement, Inventory, Finance and connected QS UAT actors
+// and master data. Existing passwords and tenant-owned master records are preserved.
+if (args.Length > 0 && args[0] == "seed-operational-uat")
+{
+    var migrationCommandOptions = MigrationCommandOptions.Parse(args);
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddHttpContextAccessor();
+    tempBuilder.Services.AddErpSystemCliDatabase(tempBuilder.Configuration, migrationCommandOptions.CommandTimeoutSeconds);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+
+    var tempApp = tempBuilder.Build();
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var result = await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.OperationalUatBaselineSeeder>()
+            .SeedAsync();
+        Console.WriteLine(
+            $"OPERATIONAL_UAT_RESULT|users={result.CreatedUsers}|roles={result.AddedRoleAssignments}|" +
+            $"uom={result.CreatedUnitsOfMeasure}|categories={result.CreatedCategories}|" +
+            $"warehouses={result.CreatedWarehouses}|locations={result.CreatedLocations}|" +
+            $"items={result.CreatedItems}|suppliers={result.CreatedSuppliers}|" +
+            $"responsibilities={result.CreatedResponsibilityAssignments}");
+    }
+
+    Console.WriteLine("Operational UAT baseline seeding completed successfully.");
     return;
 }
 
@@ -191,10 +289,13 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 }
 
 // Check for full database seeding command (roles, workflows, modules, etc.)
-if (args.Length > 0 && args[0] == "seed-db")
+if (args.Length > 0 && args[0] is "seed-db" or "seed-deployment-uat")
 {
     var migrationCommandOptions = MigrationCommandOptions.Parse(args);
     var tempBuilder = CreateSeedBuilder(args);
+    var includeOperationalUat = args[0] == "seed-deployment-uat";
+    if (includeOperationalUat && string.IsNullOrWhiteSpace(tempBuilder.Configuration["UatBootstrap:SharedPassword"]))
+        throw new InvalidOperationException("Deployment UAT seeding requires the protected UatBootstrap__SharedPassword setting.");
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
@@ -216,6 +317,11 @@ if (args.Length > 0 && args[0] == "seed-db")
 
         var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
         await seedingService.SeedAsync();
+        if (includeOperationalUat)
+        {
+            db.ChangeTracker.Clear();
+            await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.OperationalUatBaselineSeeder>().SeedAsync();
+        }
     }
 
     Console.WriteLine("✅ Database seeding completed!");
@@ -460,7 +566,6 @@ if (args.Length > 0 && args[0] == "repair-finance-po-schema")
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await RepairFinanceSettingsSchemaAsync(db);
-        await RepairCustomerPaymentSchemaAsync(db);
         await RepairFinancePurchaseOrderSchemaAsync(db);
     }
 
@@ -478,9 +583,9 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
         $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, "
-        + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, "
+        + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-deployment-uat, seed-operational-uat, seed-workflows, "
         + "seed-supplier-onboarding-e2e, seed-hr-all, seed-hr-org-authority, seed-hr-demo, "
-        + "rebuild-db, repair-finance-po-schema.");
+        + "seed-finance-baseline, seed-finance-demo-dimensions, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -601,6 +706,13 @@ builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementRec
 if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true))
 {
     builder.Services.RemoveAll<IHostedService>();
+}
+
+// Run Estate billing in the local launch profile without enabling every unrelated scheduler.
+if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true)
+    && builder.Configuration.GetValue("EstateRecurringBilling:Enabled", false))
+{
+    builder.Services.AddHostedService<ErpSystem.Api.Services.Estate.EstateRecurringBillingBackgroundService>();
 }
 
 // Add Award Letter Service for PDF award letter generation
@@ -808,8 +920,8 @@ app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 var skipStartupInitialization = app.Environment.IsEnvironment("Testing")
     || app.Configuration.GetValue<bool>("SkipStartupInitialization");
 var databaseConnectionTimeout = TimeSpan.FromSeconds(Math.Max(
-    1,
-    app.Configuration.GetValue("StartupInitialization:DatabaseConnectionTimeoutSeconds", 5)));
+    5,
+    app.Configuration.GetValue("StartupInitialization:DatabaseConnectionTimeoutSeconds", 30)));
 var migrationTimeout = TimeSpan.FromSeconds(Math.Max(
     5,
     app.Configuration.GetValue("StartupInitialization:MigrationTimeoutSeconds", 120)));
@@ -972,13 +1084,14 @@ async Task InitializeDatabaseAsync(
 
     using (var testCts = new CancellationTokenSource(databaseConnectionTimeout))
     {
+        var connection = context.Database.GetDbConnection();
+        var openedHere = false;
         try
         {
-            var canConnect = await context.Database.CanConnectAsync(testCts.Token);
-            if (!canConnect)
+            if (connection.State != ConnectionState.Open)
             {
-                throw new InvalidOperationException(
-                    $"Database connection check failed for provider '{providerName}' using '{connectionSummary}'. Startup migrations cannot continue.");
+                await connection.OpenAsync(testCts.Token);
+                openedHere = true;
             }
         }
         catch (OperationCanceledException ex)
@@ -986,6 +1099,20 @@ async Task InitializeDatabaseAsync(
             throw new TimeoutException(
                 $"Database connection timed out after {databaseConnectionTimeout.TotalSeconds:F0} seconds.",
                 ex);
+        }
+        catch (Exception ex)
+        {
+            var reason = ex.GetBaseException().Message;
+            throw new InvalidOperationException(
+                $"Database connection check failed for provider '{providerName}' using '{connectionSummary}'. Startup migrations cannot continue. Reason: {reason}",
+                ex);
+        }
+        finally
+        {
+            if (openedHere && connection.State != ConnectionState.Closed)
+            {
+                await connection.CloseAsync();
+            }
         }
     }
 
@@ -996,8 +1123,8 @@ async Task InitializeDatabaseAsync(
     {
         await RepairDevelopmentMigrationHistoryIfNeededAsync(app.Environment, context, logger, migrationCts.Token);
         await context.Database.MigrateAsync(migrationCts.Token);
+        await RepairFinanceBaselineSchemaAsync(context, migrationCts.Token);
         await RepairFinanceSettingsSchemaAsync(context, migrationCts.Token);
-        await RepairCustomerPaymentSchemaAsync(context, migrationCts.Token);
         await RepairFinancePurchaseOrderSchemaAsync(context, migrationCts.Token);
     }
     catch (OperationCanceledException ex)
@@ -1065,6 +1192,32 @@ static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(
     }
 
     var pendingMigrations = (await context.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+
+    const string disposableDevelopmentBaselineMigration =
+        "20260916132000_DisposableDevelopmentCurrentModelBaseline";
+    if (pendingMigrations.Contains(disposableDevelopmentBaselineMigration)
+        && await TableExistsAsync(context, "AspNetRoles", cancellationToken)
+        && await TableExistsAsync(context, "Tenants", cancellationToken)
+        && await TableExistsAsync(context, "ProcedureCases", cancellationToken))
+    {
+        await context.Database.ExecuteSqlRawAsync($"""
+IF OBJECT_ID(N'[dbo].[__EFMigrationsHistory]', N'U') IS NOT NULL
+   AND EXISTS (SELECT 1 FROM [dbo].[__EFMigrationsHistory])
+   AND NOT EXISTS (
+       SELECT 1
+       FROM [dbo].[__EFMigrationsHistory]
+       WHERE [MigrationId] = N'{disposableDevelopmentBaselineMigration}')
+BEGIN
+    INSERT INTO [dbo].[__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'{disposableDevelopmentBaselineMigration}', N'8.0.0');
+END
+""", cancellationToken);
+
+        logger.LogWarning(
+            "Stamped migration {MigrationId} as applied because the existing development database already contains the baseline schema.",
+            disposableDevelopmentBaselineMigration);
+    }
+
     if (!pendingMigrations.Contains("20260311184920_AddProjectMaterialCostLedger"))
     {
         return;
@@ -1154,43 +1307,72 @@ static async Task<bool> TableExistsAsync(
     }
 }
 
-static async Task RepairCustomerPaymentSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
+static async Task RepairFinanceBaselineSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
 {
     await context.Database.ExecuteSqlRawAsync("""
-IF OBJECT_ID(N'[dbo].[CustomerPayment]', N'U') IS NOT NULL
-   AND OBJECT_ID(N'[dbo].[BusinessPartners]', N'U') IS NOT NULL
+IF OBJECT_ID(N'[dbo].[AccountSegmentStructures]', N'U') IS NOT NULL
 BEGIN
-    DECLARE @legacyCustomerFk sysname;
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'IsMandatory') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM sys.default_constraints
+           WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[AccountSegmentStructures]')
+             AND [parent_column_id] = COLUMNPROPERTY(OBJECT_ID(N'[dbo].[AccountSegmentStructures]'), N'IsMandatory', 'ColumnId'))
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD CONSTRAINT [DF_AccountSegmentStructures_IsMandatory] DEFAULT CAST(0 AS bit) FOR [IsMandatory];
 
-    SELECT TOP (1) @legacyCustomerFk = fk.[name]
-    FROM sys.foreign_keys fk
-    INNER JOIN sys.foreign_key_columns fkc
-        ON fkc.constraint_object_id = fk.[object_id]
-    INNER JOIN sys.columns pc
-        ON pc.[object_id] = fkc.parent_object_id
-       AND pc.column_id = fkc.parent_column_id
-    WHERE fk.parent_object_id = OBJECT_ID(N'[dbo].[CustomerPayment]')
-      AND fk.referenced_object_id = OBJECT_ID(N'[dbo].[Customers]')
-      AND pc.[name] = N'CustomerId';
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'FrozenAtUtc') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [FrozenAtUtc] datetime2 NULL;
 
-    IF @legacyCustomerFk IS NOT NULL
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'FrozenByUserId') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [FrozenByUserId] uniqueidentifier NULL;
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'IsSystemDefined') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [IsSystemDefined] bit NOT NULL CONSTRAINT [DF_AccountSegmentStructures_IsSystemDefined] DEFAULT CAST(0 AS bit);
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'LifecycleStatus') IS NULL
     BEGIN
-        DECLARE @dropSql nvarchar(max) =
-            N'ALTER TABLE [dbo].[CustomerPayment] DROP CONSTRAINT [' + REPLACE(@legacyCustomerFk, N']', N']]') + N']';
-        EXEC sp_executesql @dropSql;
-    END;
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [LifecycleStatus] int NOT NULL CONSTRAINT [DF_AccountSegmentStructures_LifecycleStatus] DEFAULT 1;
+        EXEC(N'UPDATE [dbo].[AccountSegmentStructures]
+            SET [LifecycleStatus] = 2
+            WHERE [IsActive] = CAST(1 AS bit) AND [IsDeleted] = CAST(0 AS bit);');
+    END
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'RetirementReason') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [RetirementReason] nvarchar(500) NULL;
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'RowVersion') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [RowVersion] rowversion NOT NULL;
 
     IF NOT EXISTS (
         SELECT 1
-        FROM sys.foreign_keys
-        WHERE [name] = N'FK_CustomerPayment_BusinessPartners_CustomerId'
-          AND [parent_object_id] = OBJECT_ID(N'[dbo].[CustomerPayment]')
-    )
-    BEGIN
-        ALTER TABLE [dbo].[CustomerPayment] WITH NOCHECK
-            ADD CONSTRAINT [FK_CustomerPayment_BusinessPartners_CustomerId]
-            FOREIGN KEY ([CustomerId]) REFERENCES [dbo].[BusinessPartners] ([Id]);
-    END;
+        FROM sys.check_constraints
+        WHERE [name] = N'CK_AccountSegmentStructures_LifecycleActive'
+          AND [parent_object_id] = OBJECT_ID(N'[dbo].[AccountSegmentStructures]'))
+        EXEC(N'ALTER TABLE [dbo].[AccountSegmentStructures] ADD CONSTRAINT [CK_AccountSegmentStructures_LifecycleActive]
+            CHECK (([LifecycleStatus] IN (2, 3) AND [IsActive] = 1) OR ([LifecycleStatus] IN (1, 4) AND [IsActive] = 0));');
+END
+
+IF OBJECT_ID(N'[dbo].[RecurringJournalOccurrences]', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'[dbo].[RecurringJournalOccurrences]', N'ReversalAuthorizedAt') IS NULL
+        ALTER TABLE [dbo].[RecurringJournalOccurrences] ADD [ReversalAuthorizedAt] datetime2 NULL;
+
+    IF COL_LENGTH(N'[dbo].[RecurringJournalOccurrences]', N'ReversalAuthorizedByUserId') IS NULL
+        ALTER TABLE [dbo].[RecurringJournalOccurrences] ADD [ReversalAuthorizedByUserId] uniqueidentifier NULL;
+
+    IF COL_LENGTH(N'[dbo].[RecurringJournalOccurrences]', N'ReversalLastAttemptAt') IS NULL
+        ALTER TABLE [dbo].[RecurringJournalOccurrences] ADD [ReversalLastAttemptAt] datetime2 NULL;
+
+    IF COL_LENGTH(N'[dbo].[RecurringJournalOccurrences]', N'ReversalStatus') IS NULL
+        ALTER TABLE [dbo].[RecurringJournalOccurrences] ADD [ReversalStatus] int NOT NULL CONSTRAINT [DF_RecurringJournalOccurrences_ReversalStatus] DEFAULT 0;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_RecurringJournalOccurrences_TenantId_ReversalStatus_ReversalDueDate'
+          AND [object_id] = OBJECT_ID(N'[dbo].[RecurringJournalOccurrences]'))
+        EXEC(N'CREATE INDEX [IX_RecurringJournalOccurrences_TenantId_ReversalStatus_ReversalDueDate]
+            ON [dbo].[RecurringJournalOccurrences] ([TenantId], [ReversalStatus], [ReversalDueDate]);');
 END
 """, cancellationToken);
 }

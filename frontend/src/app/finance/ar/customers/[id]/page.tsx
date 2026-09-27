@@ -96,8 +96,8 @@ export default function CustomerDetailsPage() {
                     </div>
                 </div>
                 <div className="flex space-x-2">
-                    <Button variant="outline" onClick={() => router.push(`/finance/ar/customers/${id}/edit`)}>
-                        <Edit className="mr-2 h-4 w-4" /> Edit
+                    <Button variant="outline" onClick={() => router.push(`/procurement/business-partners/${id}/edit`)}>
+                        <Edit className="mr-2 h-4 w-4" /> Edit Business Partner
                     </Button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -107,15 +107,15 @@ export default function CustomerDetailsPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/new?customerId=${id}`)}>
+                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/invoices/new?businessPartnerId=${id}`)}>
                                 Create Invoice
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?customerId=${id}`)}>
+                            <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?businessPartnerId=${id}`)}>
                                 Record Receipt
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-red-600">
-                                Deactivate Customer
+                            <DropdownMenuItem onClick={() => router.push(`/procurement/business-partners/${id}`)}>
+                                Open canonical master record
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>

@@ -847,7 +847,8 @@ public class ContractService : IContractService
             {
                 throw new InvalidOperationException($"Amendment is already {amendment.Status}");
             }
-            if (dto.Approved && amendment.RequestedById == _currentUserProvider.UserId)
+            if (dto.Approved && amendment.RequestedById == _currentUserProvider.UserId &&
+                await _unitOfWork.IsProcurementSodEnabledAsync(_currentUserProvider.TenantId))
                 throw new UnauthorizedAccessException(
                     "The amendment requester cannot approve the same amendment.");
 

@@ -57,6 +57,7 @@ export default function StockMovementsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [warehouseFilter, setWarehouseFilter] = useState('all');
+  const [itemFilter, setItemFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -91,6 +92,7 @@ export default function StockMovementsPage() {
       setError(null);
       const params = {
         warehouseId: warehouseFilter !== 'all' ? warehouseFilter : undefined,
+        inventoryItemId: itemFilter !== 'all' ? itemFilter : undefined,
         movementType: typeFilter !== 'all' ? typeFilter : undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
@@ -119,7 +121,7 @@ export default function StockMovementsPage() {
     setDetailDialogOpen(true);
   };
 
-  useEffect(() => { fetchMovements(); }, [warehouseFilter, typeFilter, startDate, endDate]);
+  useEffect(() => { fetchMovements(); }, [warehouseFilter, itemFilter, typeFilter, startDate, endDate]);
 
   const getMovementType = (type: string) => {
     const found = MovementTypes.find(t => t.value === type);
@@ -168,6 +170,7 @@ export default function StockMovementsPage() {
           <p className="text-muted-foreground">Track all inventory transactions and movements</p>
         </div>
         <div className="flex items-center space-x-2">
+          <Button variant="outline" asChild><Link href="/reports/inventory/inventory-ledger">Inventory Ledger</Link></Button>
           <Button variant="outline" onClick={fetchMovements}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
           <Button variant="outline" asChild>
             <Link href={INVENTORY_MOVEMENT_REPORT_PATH}>
@@ -237,6 +240,10 @@ export default function StockMovementsPage() {
                 <Search className="h-4 w-4" />
               </Button>
             </div>
+            <select aria-label="Movement item" className="h-10 rounded-md border bg-background px-3" value={itemFilter} onChange={event => setItemFilter(event.target.value)}>
+              <option value="all">All items</option>
+              {items.map(item => <option key={item.id} value={item.id}>{item.itemCode} — {item.name}</option>)}
+            </select>
             <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
               <SelectTrigger><SelectValue placeholder="Warehouse" /></SelectTrigger>
               <SelectContent>

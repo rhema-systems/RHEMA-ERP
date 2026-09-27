@@ -15,6 +15,7 @@ export function PropertyEnquiryDetails({ property }: { property?: PropertyListin
       <p><span className="font-medium">Contact:</span> {property.contactName}</p>
       {property.contactEmail && <p>{property.contactEmail}</p>}
       {property.contactPhone && <p>{property.contactPhone}</p>}
+      {property.contactReference && <p><span className="font-medium">ID / card:</span> {property.contactReference}</p>}
     </div>
   </section>;
 }

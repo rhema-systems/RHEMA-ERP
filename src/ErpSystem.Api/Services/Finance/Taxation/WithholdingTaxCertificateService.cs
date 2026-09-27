@@ -179,7 +179,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         CancellationToken cancellationToken = default)
     {
         dto ??= new WhtCalculationRequestDto();
-        if (dto.TaxId == Guid.Empty || dto.SupplierId == Guid.Empty)
+        if (dto.TaxId == Guid.Empty || dto.BusinessPartnerId == Guid.Empty)
         {
             throw new InvalidOperationException("A configured WHT tax and supplier are required.");
         }
@@ -189,8 +189,15 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             throw new InvalidOperationException("WHT taxable base cannot be negative.");
         }
 
-        var supplierExists = await _context.Set<Supplier>().AsNoTracking().AnyAsync(supplier =>
-            supplier.TenantId == TenantId && !supplier.IsDeleted && supplier.Id == dto.SupplierId,
+        var contractReference = dto.ContractReference?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(contractReference) || !dto.SupplyCategory.HasValue)
+        {
+            throw new InvalidOperationException(
+                "WHT calculation requires the supplier contract/reference and Goods, Works, or Services category.");
+        }
+
+        var supplierExists = await _context.Set<BusinessPartner>().AsNoTracking().AnyAsync(supplier =>
+            supplier.TenantId == TenantId && !supplier.IsDeleted && supplier.Id == dto.BusinessPartnerId,
             cancellationToken);
         if (!supplierExists)
         {
@@ -211,33 +218,60 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         if (invoiceIds.Count > 0)
         {
             var invoices = await _context.Set<VendorInvoice>().AsNoTracking().Where(invoice =>
-                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.SupplierId == dto.SupplierId &&
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == dto.BusinessPartnerId &&
                 invoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
             if (invoices.Count != invoiceIds.Count)
                 throw new InvalidOperationException("A selected WHT invoice does not belong to this supplier and tenant.");
+            if (invoices.Any(invoice =>
+                    !string.Equals(invoice.WithholdingContractReference, contractReference, StringComparison.OrdinalIgnoreCase)
+                    || invoice.WithholdingSupplyCategory != dto.SupplyCategory))
+                throw new InvalidOperationException("Selected WHT invoices must share the requested contract/reference and supply category.");
             var decision = ApInvoiceWithholdingPolicy.Resolve(invoices, dto.TaxId);
             if (decision != null) effectiveRate = decision.Rate;
         }
-        var fiscalYearStart = new DateTime(paymentDate.Year, 1, 1);
+
+        var settings = await _context.Set<FinanceSettings>().AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
+        var statutoryMonth = settings?.WhtStatutoryYearStartMonth ?? 1;
+        var statutoryDay = settings?.WhtStatutoryYearStartDay ?? 1;
+        var boundaryThisYear = new DateTime(paymentDate.Year, statutoryMonth, statutoryDay);
+        var fiscalYearStart = paymentDate >= boundaryThisYear
+            ? boundaryThisYear
+            : boundaryThisYear.AddYears(-1);
         var fiscalYearEnd = fiscalYearStart.AddYears(1);
 
-        // Payments below the threshold still carry TaxId/BaseAmount and therefore contribute to
-        // the annual supplier aggregate. Cancelled/reversed/failed records are excluded because
-        // they no longer represent an eligible statutory payment.
-        var cumulativeQuery = _context.Set<VendorPayment>().AsNoTracking().Where(payment =>
-            payment.TenantId == TenantId && !payment.IsDeleted
-            && payment.SupplierId == dto.SupplierId && payment.WithholdingTaxId == dto.TaxId
-            && payment.PaymentDate >= fiscalYearStart && payment.PaymentDate < fiscalYearEnd
-            && payment.Status != VendorPaymentStatus.Voided
-            && payment.Status != VendorPaymentStatus.Reversed
-            && payment.Status != VendorPaymentStatus.Failed);
+        // Only posted allocation evidence contributes. Draft/authorized payments are reservations,
+        // not statutory payments, and abandoned drafts must never move the threshold. The invoice
+        // owns the contract/category scope, preventing unrelated engagements with one supplier
+        // from being combined.
+        var cumulativeQuery = _context.Set<VendorPaymentAllocation>().AsNoTracking().Where(allocation =>
+            allocation.TenantId == TenantId && !allocation.IsDeleted && !allocation.IsReversal
+            && allocation.VendorPayment.TenantId == TenantId && !allocation.VendorPayment.IsDeleted
+            && allocation.VendorPayment.BusinessPartnerId == dto.BusinessPartnerId
+            && allocation.VendorPayment.WithholdingTaxId == dto.TaxId
+            && allocation.VendorPayment.JournalEntryId.HasValue
+            && _context.Set<JournalEntry>().Any(journal =>
+                journal.TenantId == TenantId && !journal.IsDeleted
+                && journal.Id == allocation.VendorPayment.JournalEntryId.Value
+                && journal.PostingStatus == PostedStatus)
+            && allocation.VendorPayment.PaymentDate >= fiscalYearStart
+            && allocation.VendorPayment.PaymentDate < fiscalYearEnd
+            && allocation.VendorPayment.Status != VendorPaymentStatus.Voided
+            && allocation.VendorPayment.Status != VendorPaymentStatus.Reversed
+            && allocation.VendorPayment.Status != VendorPaymentStatus.Failed
+            && allocation.VendorInvoice.WithholdingContractReference == contractReference
+            && allocation.VendorInvoice.WithholdingSupplyCategory == dto.SupplyCategory
+            && !_context.Set<VendorPaymentAllocation>().Any(reversal =>
+                reversal.TenantId == TenantId && !reversal.IsDeleted && reversal.IsReversal
+                && reversal.OriginalAllocationId == allocation.Id));
         if (dto.ExcludeVendorPaymentId.HasValue)
         {
-            cumulativeQuery = cumulativeQuery.Where(payment => payment.Id != dto.ExcludeVendorPaymentId.Value);
+            cumulativeQuery = cumulativeQuery.Where(allocation =>
+                allocation.VendorPaymentId != dto.ExcludeVendorPaymentId.Value);
         }
 
         var cumulativeBefore = RoundMoney(await cumulativeQuery.SumAsync(
-            payment => payment.WithholdingTaxBaseAmount,
+            allocation => allocation.SettlementFunctionalAmount,
             cancellationToken));
         var taxableBase = RoundMoney(dto.TaxableBase);
         var cumulativeAfter = RoundMoney(cumulativeBefore + taxableBase);
@@ -252,8 +286,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var note = !threshold.HasValue
             ? $"{tax.Code} has no minimum threshold; {effectiveRate:N4}% applies to the full taxable base."
             : thresholdApplied
-                ? $"Annual supplier aggregate {cumulativeAfter:N2} meets/exceeds the configured {threshold.Value:N2} threshold; {effectiveRate:N4}% applies to the full current payment base."
-                : $"Annual supplier aggregate {cumulativeAfter:N2} remains below the configured {threshold.Value:N2} threshold; no WHT is deducted."
+                ? $"Statutory aggregate for {contractReference}/{dto.SupplyCategory} is {cumulativeAfter:N2} and meets/exceeds the configured {threshold.Value:N2} threshold; {effectiveRate:N4}% applies to the full current payment base."
+                : $"Statutory aggregate for {contractReference}/{dto.SupplyCategory} is {cumulativeAfter:N2} and remains below the configured {threshold.Value:N2} threshold; no WHT is deducted."
 ;
 
         return new WhtCalculationResultDto
@@ -270,7 +304,11 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             ThresholdApplied = thresholdApplied,
             WithholdingAmount = withholdingAmount,
             TaxPayableAccountId = tax.TaxPayableAccountId,
-            CalculationNote = note
+            CalculationNote = note,
+            ContractReference = contractReference,
+            SupplyCategory = dto.SupplyCategory.Value,
+            StatutoryPeriodStart = fiscalYearStart,
+            StatutoryPeriodEnd = fiscalYearEnd.AddDays(-1)
         };
     }
 
@@ -298,9 +336,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 VendorPaymentId = payment.Id,
                 PaymentNumber = payment.PaymentNumber,
                 PaymentDate = payment.PaymentDate,
-                SupplierId = payment.SupplierId,
-                SupplierName = payment.Supplier?.Name ?? string.Empty,
-                SupplierTin = payment.Supplier?.TaxId,
+                BusinessPartnerId = payment.BusinessPartnerId,
+                SupplierName = payment.BusinessPartnerName,
+                SupplierTin = payment.BusinessPartnerTaxIdentificationNumber,
                 CurrencyCode = functionalCurrency,
                 TaxCode = payment.WithholdingTax?.Code,
                 TaxableBase = ResolveTaxableBase(payment),
@@ -495,8 +533,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             {
                 Csv(payment.PaymentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
                 Csv(payment.PaymentNumber),
-                Csv(payment.Supplier?.Name),
-                Csv(payment.Supplier?.TaxId),
+                Csv(payment.BusinessPartnerName),
+                Csv(payment.BusinessPartnerTaxIdentificationNumber),
                 Csv(payment.WithholdingTax?.Code),
                 Csv(RoundRate(payment.WithholdingTaxRate != 0m ? payment.WithholdingTaxRate : payment.WithholdingTax?.Rate ?? 0m).ToString("0.####", CultureInfo.InvariantCulture)),
                 Csv(ResolveTaxableBase(payment).ToString("0.00", CultureInfo.InvariantCulture)),
@@ -757,12 +795,12 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 TenantId = TenantId,
                 VendorPaymentId = payment.Id,
                 CertificateId = activeCertificate?.Id,
-                SupplierId = payment.SupplierId,
+                BusinessPartnerId = payment.BusinessPartnerId,
                 TaxId = payment.WithholdingTaxId,
                 JournalEntryId = payment.JournalEntryId,
                 PaymentNumber = payment.PaymentNumber,
-                SupplierName = payment.Supplier?.Name ?? string.Empty,
-                SupplierTin = payment.Supplier?.TaxId,
+                SupplierName = payment.BusinessPartnerName,
+                SupplierTin = payment.BusinessPartnerTaxIdentificationNumber,
                 TaxCode = payment.WithholdingTax?.Code,
                 PaymentDate = payment.PaymentDate.Date,
                 TaxableBase = ResolveTaxableBase(payment),
@@ -783,7 +821,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var tenantId = TenantId;
         var payments = _context.Set<VendorPayment>()
             .AsNoTracking()
-            .Include(payment => payment.Supplier)
+            .Include(payment => payment.BusinessPartner)
             .Include(payment => payment.WithholdingTax)
             .Include(payment => payment.WithholdingTaxAccount)
             .Include(payment => payment.Allocations)
@@ -794,9 +832,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 && payment.JournalEntryId.HasValue
                 && _context.Set<JournalEntry>().Any(journal => journal.TenantId == tenantId && !journal.IsDeleted
                     && journal.Id == payment.JournalEntryId && journal.PostingStatus == PostedStatus));
-        if (query.SupplierId.HasValue)
+        if (query.BusinessPartnerId.HasValue)
         {
-            payments = payments.Where(payment => payment.SupplierId == query.SupplierId.Value);
+            payments = payments.Where(payment => payment.BusinessPartnerId == query.BusinessPartnerId.Value);
         }
         if (query.FromDate.HasValue)
         {
@@ -812,8 +850,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         {
             var term = query.SearchTerm.Trim();
             payments = payments.Where(payment => payment.PaymentNumber.Contains(term)
-                || (payment.Supplier != null && payment.Supplier.Name.Contains(term))
-                || (payment.Supplier != null && payment.Supplier.TaxId != null && payment.Supplier.TaxId.Contains(term))
+                || payment.BusinessPartnerName.Contains(term)
+                || (payment.BusinessPartnerTaxIdentificationNumber != null && payment.BusinessPartnerTaxIdentificationNumber.Contains(term))
                 || _context.WithholdingTaxCertificates.Any(certificate => certificate.TenantId == tenantId
                     && !certificate.IsDeleted && certificate.VendorPaymentId == payment.Id
                     && certificate.CertificateNumber.Contains(term)));
@@ -844,7 +882,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
     private async Task<VendorPayment?> LoadEligibleApPaymentAsync(Guid vendorPaymentId, bool asTracking, CancellationToken cancellationToken)
     {
         var query = _context.Set<VendorPayment>()
-            .Include(payment => payment.Supplier)
+            .Include(payment => payment.BusinessPartner)
             .Include(payment => payment.WithholdingTax)
             .Include(payment => payment.WithholdingTaxAccount)
             .Include(payment => payment.Allocations)
@@ -941,9 +979,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             SupersedesCertificateId = supersedesCertificateId,
             LifecycleReason = lifecycleReason,
             PaymentNumber = payment.PaymentNumber,
-            SupplierId = payment.SupplierId,
-            SupplierName = payment.Supplier?.Name ?? string.Empty,
-            SupplierTin = payment.Supplier?.TaxId,
+            BusinessPartnerId = payment.BusinessPartnerId,
+            SupplierName = payment.BusinessPartnerName,
+            SupplierTin = payment.BusinessPartnerTaxIdentificationNumber,
             PaymentDate = payment.PaymentDate.Date,
             // Certificate amounts are statutory functional values even when the supplier was
             // paid in another currency; label the immutable snapshot accordingly.
@@ -1118,9 +1156,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             VendorPaymentId = payment.Id,
             PaymentNumber = payment.PaymentNumber,
             PaymentStatus = payment.Status,
-            SupplierId = payment.SupplierId,
-            SupplierName = current?.SupplierName ?? payment.Supplier?.Name ?? string.Empty,
-            SupplierTin = current?.SupplierTin ?? payment.Supplier?.TaxId,
+            BusinessPartnerId = payment.BusinessPartnerId,
+            SupplierName = current?.SupplierName ?? payment.BusinessPartnerName,
+            SupplierTin = current?.SupplierTin ?? payment.BusinessPartnerTaxIdentificationNumber,
             PaymentDate = current?.PaymentDate ?? payment.PaymentDate,
             CurrencyCode = current?.CurrencyCode ?? NormalizeCurrency(payment.CurrencyCode),
             TaxId = current?.TaxId ?? payment.WithholdingTaxId,
@@ -1192,7 +1230,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                     CertificateId = line.CertificateId,
                     PaymentNumber = line.PaymentNumber,
                     PaymentDate = line.PaymentDate,
-                    SupplierId = line.SupplierId,
+                    BusinessPartnerId = line.BusinessPartnerId,
                     SupplierName = line.SupplierName,
                     SupplierTin = line.SupplierTin,
                     TaxCode = line.TaxCode,

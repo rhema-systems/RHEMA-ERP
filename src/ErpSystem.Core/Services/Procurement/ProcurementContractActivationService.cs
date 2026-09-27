@@ -344,6 +344,7 @@ public sealed class ProcurementContractActivationService :
             throw Conflict("CONTRACT_ACTIVATION_DECISION_NOT_ALLOWED",
                 "Only a pending contract activation may be decided.");
         if (request.Approved &&
+            await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken) &&
             !ProcurementContractActivationRules.IsIndependent(
                 _currentUser.UserId, activation.SubmittedById,
                 activation.Contract.CreatedById))
@@ -1318,9 +1319,8 @@ public sealed class ProcurementContractActivationService :
         CancellationToken cancellationToken)
     {
         var rows = requests.ToList();
-        if (rows.Count == 0)
-            throw Validation("CONTRACT_ACTIVATION_EVIDENCE_REQUIRED",
-                "Activation evidence is required.");
+        // EvaluateAsync checks the effective requirements; an unconfigured optional
+        // evidence policy must not prevent an otherwise valid submission.
         if (rows.GroupBy(item => item.RequirementKey.Trim(),
                 StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
             throw Validation("CONTRACT_ACTIVATION_EVIDENCE_DUPLICATE",

@@ -1,5 +1,10 @@
 'use client';
 
+import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
+import type { BusinessPartnerReceivablesDefaults } from '@/services/businessPartnerService';
+import { BusinessPartnerReceivablesFields } from '@/components/procurement/BusinessPartnerReceivablesFields';
+
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -70,11 +75,13 @@ import {
   useBusinessPartnerPostingCatalogues,
 } from '@/components/procurement/BusinessPartnerPostingFields';
 
-type PartnerType = 'Supplier' | 'Contractor' | 'Customer' | 'Both' | '';
+type PartnerType = 'Supplier' | 'Contractor' | 'Customer' | 'Both' | 'CustomerAndSupplier' | '';
+type CanonicalPartnerRole = 'Supplier' | 'Contractor' | 'Customer';
 
 interface FormData {
   // Common fields
   partnerType: PartnerType;
+  roleTypes: CanonicalPartnerRole[];
   partnerName: string;
   tradingName: string;
   registrationNumber: string;
@@ -112,6 +119,7 @@ interface FormData {
 
 const initialFormData: FormData = {
   partnerType: '',
+  roleTypes: [],
   partnerName: '',
   tradingName: '',
   registrationNumber: '',
@@ -146,6 +154,7 @@ const initialFormData: FormData = {
 };
 
 const partnerTypeOptions = [
+  { value: 'CustomerAndSupplier', label: 'Supplier & Customer', icon: Building2, description: 'One partner with separate payable and receivable accounts' },
   {
     value: 'Supplier',
     label: 'Supplier',
@@ -164,13 +173,20 @@ const partnerTypeOptions = [
     icon: Users,
     description: 'Customers/Debtors for sales transactions',
   },
-  {
-    value: 'Both',
-    label: 'Supplier & Contractor',
-    icon: Building2,
-    description: 'Partners who are both suppliers and contractors',
-  },
 ];
+
+// Procurement still exposes a legacy single PartnerType string to older consumers. New screens
+// select canonical role rows and send this compatibility projection alongside them until those
+// remaining Procurement queries have migrated to BusinessPartnerRole.
+const projectLegacyPartnerType = (
+  roles: CanonicalPartnerRole[]
+): PartnerType => {
+  if (roles.includes('Supplier') && roles.includes('Contractor')) return 'Both';
+  if (roles.includes('Supplier')) return 'Supplier';
+  if (roles.includes('Contractor')) return 'Contractor';
+  if (roles.includes('Customer')) return 'Customer';
+  return '';
+};
 
 const customerTypeOptions = [
   { value: 'Retail', label: 'Retail' },
@@ -216,6 +232,7 @@ export default function NewBusinessPartnerPage() {
   const [priceLists, setPriceLists] = useState<PriceListDto[]>([]);
   const [allPartners, setAllPartners] = useState<BusinessPartnerDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [receivablesDefaults, setReceivablesDefaults] = useState<BusinessPartnerReceivablesDefaults>({ defaultArAccountId: null });
   const [postingDefaults, setPostingDefaults] = useState(
     emptyBusinessPartnerPostingDefaults
   );
@@ -272,8 +289,8 @@ export default function NewBusinessPartnerPage() {
 
   const handleSubmit = async () => {
     // Validation
-    if (!formData.partnerType) {
-      toast.error('Please select a partner type');
+    if (formData.roleTypes.length === 0) {
+      toast.error('Select at least one Business Partner role');
       return;
     }
     if (!formData.partnerName.trim()) {
@@ -286,6 +303,7 @@ export default function NewBusinessPartnerPage() {
 
       const createData: CreateBusinessPartnerDto = {
         partnerType: formData.partnerType,
+        roleTypes: formData.roleTypes,
         partnerName: formData.partnerName,
         tradingName: formData.tradingName || undefined,
         registrationNumber: formData.registrationNumber || undefined,
@@ -309,11 +327,10 @@ export default function NewBusinessPartnerPage() {
           formData.creditLimit === ''
             ? undefined
             : Number(formData.creditLimit),
-        postingDefaults,
       };
 
       // Add customer-specific fields if partner type is Customer
-      if (formData.partnerType === 'Customer') {
+      if (formData.roleTypes.includes('Customer')) {
         createData.customerType = formData.customerType || undefined;
         createData.defaultDiscount = formData.defaultDiscount
           ? parseFloat(formData.defaultDiscount)
@@ -334,8 +351,10 @@ export default function NewBusinessPartnerPage() {
       }
 
       const result = await businessPartnerService.createPartner(createData);
-      toast.success('Business partner created successfully');
-      router.push(`/procurement/business-partners/${result.id}`);
+      toast.success('Business partner created. Prepare its governed Finance profiles next.');
+      router.push(
+        `/procurement/business-partners/${result.id}/edit?tab=finance-profiles`
+      );
     } catch (error: any) {
       console.error('Error creating business partner:', error);
       toast.error(error.message || 'Failed to create business partner');
@@ -344,7 +363,8 @@ export default function NewBusinessPartnerPage() {
     }
   };
 
-  const isCustomer = formData.partnerType === 'Customer';
+  const isCustomer = formData.roleTypes.includes('Customer');
+  const hasPayables = formData.roleTypes.some(role => role === 'Supplier' || role === 'Contractor');
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
@@ -367,7 +387,7 @@ export default function NewBusinessPartnerPage() {
         </div>
         <Button
           onClick={handleSubmit}
-          disabled={saving || !formData.partnerType}
+          disabled={saving || formData.roleTypes.length === 0}
         >
           {saving ? (
             <>
@@ -386,13 +406,18 @@ export default function NewBusinessPartnerPage() {
       {/* Partner Type Selection */}
       <Card>
         <CardHeader>
-          <CardTitle>Select Partner Type</CardTitle>
+          <CardTitle>Select Partner Roles</CardTitle>
+          <CardDescription>
+            Select every role this organization performs. One canonical identity can be a supplier,
+            contractor and customer at the same time.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {partnerTypeOptions.map((option) => {
               const Icon = option.icon;
-              const isSelected = formData.partnerType === option.value;
+              const role = option.value as CanonicalPartnerRole;
+              const isSelected = formData.roleTypes.includes(role);
               return (
                 <button
                   key={option.value}
@@ -400,10 +425,16 @@ export default function NewBusinessPartnerPage() {
                   aria-pressed={isSelected}
                   disabled={saving}
                   onClick={() =>
-                    handleInputChange(
-                      'partnerType',
-                      option.value as PartnerType
-                    )
+                    setFormData((previous) => {
+                      const roleTypes = previous.roleTypes.includes(role)
+                        ? previous.roleTypes.filter((item) => item !== role)
+                        : [...previous.roleTypes, role];
+                      return {
+                        ...previous,
+                        roleTypes,
+                        partnerType: projectLegacyPartnerType(roleTypes),
+                      };
+                    })
                   }
                   className={`
                     cursor-pointer rounded-lg border-2 p-3 transition-all
@@ -438,22 +469,15 @@ export default function NewBusinessPartnerPage() {
 
       {/* Form Tabs */}
       <PartnerCatalogueNotice unavailable={catalogues.unavailable} />
-      {formData.partnerType && (
+      {formData.roleTypes.length > 0 && (
         <Card>
           <CardContent className="pt-6">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList
-                className={
-                  isCustomer
-                    ? 'grid w-full grid-cols-6'
-                    : 'grid w-full grid-cols-5'
-                }
-              >
+              <TabsList className={`grid w-full ${isCustomer ? 'grid-cols-5' : 'grid-cols-4'}`}>
                 <TabsTrigger value="basic">Details</TabsTrigger>
                 <TabsTrigger value="contact">Contact</TabsTrigger>
                 <TabsTrigger value="banking">Banking</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
-                <TabsTrigger value="accounts">Accounts</TabsTrigger>
                 {isCustomer && (
                   <TabsTrigger value="customer">Customer Details</TabsTrigger>
                 )}
@@ -538,14 +562,6 @@ export default function NewBusinessPartnerPage() {
                       </p>
                     </div>
                   </div>
-
-                  <PartnerTaxDefaultsFields
-                    value={postingDefaults}
-                    onChange={setPostingDefaults}
-                    taxGroups={catalogues.taxGroups}
-                    withholdingTaxes={catalogues.withholdingTaxes}
-                    disabled={saving}
-                  />
 
                   <Separator />
 
@@ -740,31 +756,8 @@ export default function NewBusinessPartnerPage() {
                 </TabsContent>
 
                 <TabsContent value="options" className="py-4">
-                  <PartnerOptionsFields
-                    value={postingDefaults}
-                    onChange={setPostingDefaults}
-                    options={{
-                      paymentTermId: formData.paymentTermId,
-                      taxNumber: formData.taxNumber,
-                      creditLimit: formData.creditLimit,
-                    }}
-                    onOptionsChange={(patch) =>
-                      setFormData((previous) => ({ ...previous, ...patch }))
-                    }
-                    paymentTerms={paymentTerms}
-                    partnerType={formData.partnerType}
-                    bankAccounts={catalogues.bankAccounts}
-                    disabled={saving}
-                  />
-                </TabsContent>
-                <TabsContent value="accounts" className="py-4">
-                  <PartnerAccountsFields
-                    value={postingDefaults}
-                    onChange={setPostingDefaults}
-                    accounts={catalogues.accounts}
-                    bankAccounts={catalogues.bankAccounts}
-                    disabled={saving}
-                  />
+                  <div className="space-y-2"><Label htmlFor="partner-tin">TIN</Label><Input id="partner-tin" value={formData.taxNumber} disabled={saving} onChange={event => setFormData(previous => ({ ...previous, taxNumber: event.target.value }))} /></div>
+                  <p className="text-sm text-muted-foreground">Maintain payment, tax and withholding defaults in Finance Profiles after saving the partner.</p>
                 </TabsContent>
 
                 {/* Customer Details Tab */}

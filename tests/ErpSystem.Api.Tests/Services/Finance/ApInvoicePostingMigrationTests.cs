@@ -31,8 +31,124 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ApInvoicePostingMigrationTests
+public sealed partial class ApInvoicePostingMigrationTests
 {
+    [Theory]
+    [InlineData("profile")]
+    [InlineData("invoice")]
+    [InlineData("line")]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    public async Task ExpensePosting_UsesExplicitLineThenInvoiceThenCapturedProfile_NeverLegacySupplier(string precedence)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var profile = await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == fixture.Invoice.BusinessPartnerApProfileVersionId);
+        var profileExpense = SeedAccount(db, tenantId, "6101", AccountType.Expense);
+        var headerExpense = SeedAccount(db, tenantId, "6102", AccountType.Expense);
+        var legacyExpense = SeedAccount(db, tenantId, "6103", AccountType.Expense);
+        profile.DefaultExpenseAccountId = profileExpense.Id;
+        fixture.Supplier.DefaultExpenseAccountId = legacyExpense.Id;
+        fixture.Invoice.ExpenseAccountId = precedence == "profile" ? null : headerExpense.Id;
+        var line = fixture.Invoice.LineItems.Single();
+        line.GLAccountId = precedence == "line" ? fixture.ExpenseAccount.Id : null;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var posted = await service.PostAsync(fixture.Invoice.Id);
+
+        var actual = await db.AccountTransactions.SingleAsync(x => x.JournalEntryId == posted.JournalEntryId && x.TransactionTag == "AP-Expense");
+        actual.AccountId.Should().Be(precedence == "line" ? fixture.ExpenseAccount.Id : precedence == "invoice" ? headerExpense.Id : profileExpense.Id);
+        actual.AccountId.Should().NotBe(legacyExpense.Id);
+        if (precedence == "profile")
+        {
+            profile.DefaultExpenseAccountId = headerExpense.Id;
+            await db.SaveChangesAsync();
+            var changedDefaultReplay = await service.PostAsync(fixture.Invoice.Id);
+            changedDefaultReplay.JournalEntryId.Should().Be(posted.JournalEntryId);
+            profile.IsDeleted = true; // Historical source evidence still supports exact replay.
+            fixture.Supplier.DefaultExpenseAccountId = headerExpense.Id;
+            await db.SaveChangesAsync();
+            var replay = await service.PostAsync(fixture.Invoice.Id);
+            replay.JournalEntryId.Should().Be(posted.JournalEntryId);
+            (await db.JournalEntries.CountAsync(x => x.SourceDocumentType == "VendorInvoice")).Should().Be(1);
+        }
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    public async Task ExpensePosting_RejectsMissingCapturedProfileExpense_EvenWhenLegacyDefaultExists()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        (await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == fixture.Invoice.BusinessPartnerApProfileVersionId))
+            .DefaultExpenseAccountId = null;
+        fixture.Invoice.ExpenseAccountId = null;
+        fixture.Invoice.LineItems.Single().GLAccountId = null;
+        fixture.Supplier.DefaultExpenseAccountId.Should().NotBeNull();
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        Func<Task> post = () => service.PostAsync(fixture.Invoice.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No expense account specified for AP line*");
+
+        (await db.FinancePostingEvents.CountAsync(x => x.SourceDocumentId == fixture.Invoice.Id)).Should().Be(0);
+        (await db.JournalEntries.CountAsync(x => x.SourceDocumentId == fixture.Invoice.Id)).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("missing-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("draft-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("expired-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("future-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("cross-tenant-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("wrong-role-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("inactive-role", "AP_ROLE_INACTIVE")]
+    [InlineData("wrong-role-type", "AP_ROLE_REQUIRED")]
+    [Trait("Batch", "FinanceGoLive-APInvoicePosting")]
+    public async Task FirstPosting_RequiresTheCapturedApprovedApProfile_ForTheDocumentDate(string defect, string code)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var document = fixture.Invoice;
+        var role = await db.Set<BusinessPartnerRole>().SingleAsync(x => x.Id == document.BusinessPartnerRoleId);
+        var profile = await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == document.BusinessPartnerApProfileVersionId);
+        // An unrelated approved replacement must not silently replace captured authority.
+        db.Set<BusinessPartnerApProfileVersion>().Add(new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            VersionNumber = 99, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020, 1, 1)
+        });
+        switch (defect)
+        {
+            case "missing-profile": document.BusinessPartnerApProfileVersionId = Guid.NewGuid(); break;
+            case "draft-profile": profile.Status = BusinessPartnerFinanceProfileStatus.Draft; break;
+            case "expired-profile": profile.EffectiveTo = document.InvoiceDate.AddDays(-1); break;
+            case "future-profile": profile.EffectiveFrom = document.InvoiceDate.AddDays(1); break;
+            case "cross-tenant-profile": profile.TenantId = Guid.NewGuid(); break;
+            case "wrong-role-profile": profile.BusinessPartnerRoleId = Guid.NewGuid(); break;
+            case "inactive-role": role.Status = BusinessPartnerRoleStatus.Inactive; break;
+            case "wrong-role-type": role.RoleType = BusinessPartnerRoleType.Customer; break;
+        }
+        await db.SaveChangesAsync();
+        var beforeJournals = await db.JournalEntries.CountAsync();
+        var beforeTransactions = await db.AccountTransactions.CountAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        Func<Task> post = () => service.PostAsync(document.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(code + ":*");
+
+        (await db.JournalEntries.CountAsync()).Should().Be(beforeJournals);
+        (await db.AccountTransactions.CountAsync()).Should().Be(beforeTransactions);
+        (await db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "VendorInvoice" && x.SourceDocumentId == document.Id))
+            .Should().Be(0);
+    }
+
     [Fact]
     public async Task DraftDistribution_ShouldUseThePostingTaxEngineAndConfiguredInputTaxAccount()
     {
@@ -77,6 +193,7 @@ public sealed class ApInvoicePostingMigrationTests
             invoice.ApprovalStatus = "Draft";
             invoice.ApprovedById = null;
             invoice.ApprovedDate = null;
+            invoice.LineItems.Single().DiscountPercentage = 10m;
             invoice.LineItems.Single().DiscountAmount = 10m;
             invoice.DiscountAmount = 10m;
             invoice.SubTotal = 90m;
@@ -92,10 +209,10 @@ public sealed class ApInvoicePostingMigrationTests
 
         distribution.Status.Should().Be("Proposed");
         distribution.Currency.Should().Be("GHS");
-        distribution.Lines.Single(line => line.AccountId == fixture.ExpenseAccount.Id).Debit.Should().Be(100m);
+        distribution.Lines.Single(line => line.AccountId == fixture.ExpenseAccount.Id).Debit.Should().Be(90m);
         distribution.Lines.Single(line => line.AccountId == fixture.ApAccount.Id).Credit.Should().Be(90m);
-        distribution.Lines.Single(line => line.Type == "Purchase discount").Credit.Should().Be(10m);
-        distribution.TotalDebit.Should().Be(distribution.TotalCredit).And.Be(100m);
+        distribution.Lines.Should().NotContain(line => line.Type == "Purchase discount");
+        distribution.TotalDebit.Should().Be(distribution.TotalCredit).And.Be(90m);
         distribution.Lines.Should().NotContain(line => line.Type.Contains("WHT"));
         distribution.JournalEntryId.Should().BeNull();
         fixture.Invoice.Status.Should().Be(VendorInvoiceStatus.Draft);
@@ -159,7 +276,7 @@ public sealed class ApInvoicePostingMigrationTests
             db.ChangeTracker.DetectChanges();
             db.ChangeTracker.Entries<VendorInvoiceLineItem>()
                 .Should().NotContain(entry => entry.State == EntityState.Modified);
-            db.ChangeTracker.Entries<Supplier>()
+            db.ChangeTracker.Entries<BusinessPartner>()
                 .Should().NotContain(entry => entry.State == EntityState.Modified);
         };
         var (service, _) = CreateService(db, tenantId);
@@ -380,7 +497,7 @@ public sealed class ApInvoicePostingMigrationTests
 
         var created = await service.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             SupplierInvoiceNumber = "SUP-DISCOUNT-001",
             InvoiceDate = new DateTime(2026, 7, 6),
             DueDate = new DateTime(2026, 8, 5),
@@ -761,7 +878,7 @@ public sealed class ApInvoicePostingMigrationTests
     [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task ForeignApInvoice_ShouldRejectCreateWithoutRateEvidence(bool isOpeningBalance)
+    public async Task ForeignApInvoice_ShouldRequireApprovedRateEvidenceOnlyForOpeningBalances(bool isOpeningBalance)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -770,7 +887,7 @@ public sealed class ApInvoicePostingMigrationTests
 
         var action = () => service.CreateAsync(new VendorInvoiceCreateDto
         {
-            SupplierId = fixture.Supplier.Id,
+            BusinessPartnerId = fixture.Supplier.Id,
             InvoiceDate = new DateTime(2026, 7, 5),
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
@@ -790,9 +907,27 @@ public sealed class ApInvoicePostingMigrationTests
             }
         });
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*require an approved exchange-rate record*");
-        (await db.VendorInvoices.CountAsync()).Should().Be(1);
+        if (isOpeningBalance)
+        {
+            await action.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*require an approved exchange-rate record*");
+            (await db.VendorInvoices.CountAsync()).Should().Be(1);
+        }
+        else
+        {
+            // Ordinary invoices retain the existing editable-rate contract; the
+            // governed approved-rate requirement belongs to opening invoices.
+            var created = await action();
+            var draft = await db.VendorInvoices.SingleAsync(item => item.Id == created.Id);
+            draft.Status.Should().Be(VendorInvoiceStatus.Draft);
+            draft.CurrencyCode.Should().Be("USD");
+            draft.ExchangeRate.Should().Be(15m);
+            draft.ExchangeRateId.Should().BeNull();
+            draft.BaseCurrencyAmount.Should().Be(1500m);
+            (await db.VendorInvoices.CountAsync()).Should().Be(2);
+        }
+        (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
+        (await db.JournalEntries.AnyAsync()).Should().BeFalse();
     }
 
     [Fact]
@@ -851,14 +986,14 @@ public sealed class ApInvoicePostingMigrationTests
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherSupplier = SeedSupplier(db, otherTenantId, fixture.ApAccount.Id, fixture.ExpenseAccount.Id);
-        fixture.Invoice.SupplierId = otherSupplier.Id;
+        fixture.Invoice.BusinessPartnerId = otherSupplier.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
         var act = () => service.PostAsync(fixture.Invoice.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP invoice supplier was not found for this tenant.");
+            .WithMessage("The AP invoice Business Partner was not found for this tenant.");
     }
 
     [Fact]
@@ -885,7 +1020,7 @@ public sealed class ApInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task CrossTenantApControlAccount_ShouldBeRejected()
+    public async Task LegacyInvoiceApControlOverride_ShouldBeIgnoredInFavorOfFinanceSettings()
     {
         var tenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();
@@ -897,10 +1032,12 @@ public sealed class ApInvoicePostingMigrationTests
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
-        var act = () => service.PostAsync(fixture.Invoice.Id);
+        var result = await service.PostAsync(fixture.Invoice.Id);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AP posting AP control account was not found for this tenant.");
+        result.Status.Should().Be(VendorInvoiceStatus.Approved);
+        var journal = await db.JournalEntries.Include(x => x.Transactions).SingleAsync(x => x.Id == result.JournalEntryId);
+        journal.Transactions.Should().Contain(line => line.AccountId == fixture.ApAccount.Id && line.CreditAmount > 0m);
+        journal.Transactions.Should().NotContain(line => line.AccountId == otherApAccount.Id);
     }
 
     [Fact]
@@ -949,6 +1086,10 @@ public sealed class ApInvoicePostingMigrationTests
         var (service, _) = CreateService(db, tenantId);
 
         var first = await service.PostAsync(fixture.Invoice.Id);
+        var capturedProfile = await db.Set<BusinessPartnerApProfileVersion>()
+            .SingleAsync(x => x.Id == fixture.Invoice.BusinessPartnerApProfileVersionId);
+        capturedProfile.Status = BusinessPartnerFinanceProfileStatus.Superseded;
+        await db.SaveChangesAsync();
         var second = await service.PostAsync(fixture.Invoice.Id);
 
         second.JournalEntryId.Should().Be(first.JournalEntryId);
@@ -1452,8 +1593,13 @@ public sealed class ApInvoicePostingMigrationTests
             TenantId = tenantId,
             InvoiceNumber = "VI-2026-00001",
             SupplierInvoiceNumber = "SUP-001",
-            SupplierId = supplier.Id,
-            SupplierName = supplier.Name,
+            BusinessPartnerId = supplier.Id,
+            BusinessPartnerRoleId = db.Set<BusinessPartnerRole>().Local.Single(x => x.BusinessPartnerId == supplier.Id).Id,
+            BusinessPartnerApProfileVersionId = db.Set<BusinessPartnerApProfileVersion>().Local.Single(x => x.BusinessPartnerRole.BusinessPartnerId == supplier.Id).Id,
+            BusinessPartnerCode = supplier.PartnerCode,
+            BusinessPartnerLegalName = supplier.LegalName,
+            BusinessPartnerTaxIdentificationNumber = supplier.TaxIdentificationNumber,
+            SupplierName = supplier.PartnerName,
             InvoiceDate = new DateTime(2026, 7, 5),
             ReceivedDate = new DateTime(2026, 7, 5),
             DueDate = new DateTime(2026, 8, 4),
@@ -1698,7 +1844,7 @@ public sealed class ApInvoicePostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId,
         string targetCurrency,
-        decimal rate,
+        decimal functionalPerForeignUnit,
         ExchangeRateQuoteSide quoteSide = ExchangeRateQuoteSide.Mid)
     {
         var exchangeRate = new ExchangeRate
@@ -1707,8 +1853,9 @@ public sealed class ApInvoicePostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = targetCurrency,
-            Rate = rate,
-            InverseRate = decimal.Round(1m / rate, 6),
+            // Rate stores foreign units per functional unit; invoice conversion uses InverseRate.
+            Rate = decimal.Round(1m / functionalPerForeignUnit, 6),
+            InverseRate = functionalPerForeignUnit,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             QuoteSide = quoteSide,
@@ -1746,34 +1893,28 @@ public sealed class ApInvoicePostingMigrationTests
         }
     }
 
-    private static Supplier SeedSupplier(
-        ApplicationDbContext db,
-        Guid tenantId,
-        Guid apAccountId,
-        Guid expenseAccountId)
+    private static BusinessPartner SeedSupplier(ApplicationDbContext db, Guid tenantId, Guid apAccountId, Guid expenseAccountId)
     {
-        var supplier = new Supplier
+        var supplier = new BusinessPartner
         {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            SupplierCode = $"SUP-{tenantId.ToString("N")[..6]}",
-            Name = "Test Supplier",
-            SupplierType = "Vendor",
-            IsActive = true,
-            Status = "Active",
-            DefaultApAccountId = apAccountId,
-            DefaultExpenseAccountId = expenseAccountId,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = "seed"
+            TenantId = tenantId, PartnerCode = $"SUP-{tenantId:N}", PartnerName = "Test Supplier",
+            LegalName = "Test Supplier Limited", TaxIdentificationNumber = "TIN-TEST", PartnerType = "Supplier",
+            IsActive = true, RegistrationStatus = "Approved", ApprovalStatus = "Approved",
+            DefaultApAccountId = apAccountId, DefaultExpenseAccountId = expenseAccountId
         };
-
-        db.Suppliers.Add(supplier);
+        var role = new BusinessPartnerRole { TenantId = tenantId, BusinessPartnerId = supplier.Id,
+            BusinessPartner = supplier, RoleType = BusinessPartnerRoleType.Supplier,
+            Status = BusinessPartnerRoleStatus.Active, ActiveFromUtc = new DateTime(2020,1,1) };
+        var profile = new BusinessPartnerApProfileVersion { TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            BusinessPartnerRole = role, VersionNumber = 1, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020,1,1), DefaultExpenseAccountId = expenseAccountId };
+        db.BusinessPartners.Add(supplier); db.Set<BusinessPartnerRole>().Add(role); db.Set<BusinessPartnerApProfileVersion>().Add(profile);
         return supplier;
     }
 
     private sealed record ApInvoiceFixture(
         VendorInvoice Invoice,
-        Supplier Supplier,
+        BusinessPartner Supplier,
         Account ExpenseAccount,
         Account ApAccount,
         Account TaxAccount);

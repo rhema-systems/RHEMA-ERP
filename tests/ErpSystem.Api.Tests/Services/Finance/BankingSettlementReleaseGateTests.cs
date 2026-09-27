@@ -151,6 +151,41 @@ public sealed class BankingSettlementReleaseGateTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-ReadModels")]
+    public async Task DepositRegister_ShouldKeepSummaryBoundedAndLoadAllocationsOnlyWhenRequested()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var firstReceipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            500m);
+        var secondReceipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            300m);
+        db.LiquidityAccountEntries.AddRange(firstReceipt, secondReceipt);
+        await db.SaveChangesAsync();
+        var service = CreateBankingService(db, tenantId, Guid.NewGuid(), CreateWorkflow());
+        await service.CreateDepositAsync(CreateDepositRequest(setup, firstReceipt));
+        var secondRequest = CreateDepositRequest(setup, secondReceipt);
+        secondRequest.DepositReference = "SLIP-002";
+        await service.CreateDepositAsync(secondRequest);
+
+        var summary = await service.GetDepositsAsync(limit: 1);
+        summary.Should().ContainSingle();
+        summary.Single().Allocations.Should().BeEmpty();
+
+        var selectableEvidence = await service.GetDepositsAsync(includeAllocations: true, limit: 10);
+        selectableEvidence.Should().HaveCount(2);
+        selectableEvidence.Should().OnlyContain(item => item.Allocations.Count == 1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
     [Trait("Category", "CashBank")]
     public async Task Deposit_ShouldRequireMakerCheckerThenPostOneNetBankTransaction()
     {
@@ -352,10 +387,12 @@ public sealed class BankingSettlementReleaseGateTests
             .IsMatched.Should().BeTrue();
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait("Batch", "FinanceGoLive-BankingSettlement")]
     [Trait("Category", "CashBank")]
-    public async Task ReturnedCheque_ShouldRequireEvidenceAndApprovalThenReopenReceivable()
+    public async Task ReturnedCheque_ShouldRequireEvidenceAndApprovalThenReopenReceivable(bool originalDiscount)
     {
         var tenantId = Guid.NewGuid();
         var makerId = Guid.NewGuid();
@@ -363,6 +400,33 @@ public sealed class BankingSettlementReleaseGateTests
         await using var db = CreateContext();
         var setup = await SeedSetupAsync(db, tenantId);
         var receipt = SeedChequeReceipt(db, setup, amount: 100m);
+        Account? discountAccount = null;
+        if (originalDiscount)
+        {
+            discountAccount = SeedAccount(tenantId, "ORIGINAL-DISCOUNT", AccountType.Expense);
+            db.Accounts.Add(discountAccount);
+            FinancePostingAuthorityFixture.SeedEnabledBookMappings(
+                db, tenantId, db.AccountingBooks.Local.Single(book => book.TenantId == tenantId && book.Code == "IFRS"), discountAccount);
+            receipt.Allocation.DiscountAmount = 10m;
+            receipt.Invoice.TotalAmount = receipt.Invoice.SubTotal = receipt.Invoice.PaidAmount = 110m;
+            var journal = db.JournalEntries.Local.Single(entry => entry.Id == receipt.Payment.JournalEntryId);
+            var controlLine = journal.Transactions.Single(line => line.CreditAmount > 0m);
+            controlLine.CreditAmount += 10m;
+            controlLine.TransactionCreditAmount += 10m;
+            journal.TotalDebitAmount += 10m;
+            journal.TotalCreditAmount += 10m;
+            db.AccountTransactions.Add(new AccountTransaction
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryId = journal.Id,
+                AccountId = discountAccount.Id, DebitAmount = 10m,
+                TransactionDebitAmount = 10m, TransactionCurrency = "GHS", FunctionalCurrencyCode = "GHS",
+                AccountingBookId = journal.AccountingBookId, FiscalPeriodId = setup.Period.Id, PostingStatus = "Posted",
+                TransactionTag = "AR-Discount", TransactionDate = receipt.Payment.PaymentDate,
+                Description = "Original customer settlement discount"
+            });
+            // The current Finance default deliberately differs from the posted account.
+            setup.Settings.DiscountAllowedAccountId = setup.ExpenseAccount.Id;
+        }
         var queueEntry = SeedLiquidityEntry(
             setup,
             LiquidityEntryType.CustomerReceipt,
@@ -435,6 +499,9 @@ public sealed class BankingSettlementReleaseGateTests
         bankDebit.TransactionType.Should().Be(CashTransactionType.ReturnedCheque);
         bankDebit.Amount.Should().Be(105m);
         setup.BankAccount.CurrentBalance.Should().Be(-5m);
+        if (originalDiscount)
+            (await db.AccountTransactions.Where(line => line.AccountId == discountAccount!.Id && line.CreditAmount > 0m).ToListAsync())
+                .Should().ContainSingle().Which.CreditAmount.Should().Be(10m);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -920,7 +987,7 @@ public sealed class BankingSettlementReleaseGateTests
             Id = Guid.NewGuid(),
             TenantId = setup.TenantId,
             PaymentNumber = "CP-CHEQUE-001",
-            CustomerId = customer.Id,
+            BusinessPartnerId = customer.Id,
             PaymentDate = new DateTime(2026, 7, 5),
             TotalAmount = amount,
             AllocatedAmount = amount,

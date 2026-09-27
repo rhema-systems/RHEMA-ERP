@@ -375,7 +375,7 @@ class TaxDataService {
             page: query.page,
             pageSize: query.pageSize,
             searchTerm: query.searchTerm,
-            supplierId: query.supplierId,
+            businessPartnerId: query.businessPartnerId,
             fromDate: query.fromDate,
             toDate: query.toDate,
             status: query.status && query.status !== 'All' ? query.status : undefined,

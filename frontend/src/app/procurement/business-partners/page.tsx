@@ -148,6 +148,7 @@ export default function BusinessPartnersPage() {
       Supplier: { label: 'Supplier', className: 'bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100' },
       Contractor: { label: 'Contractor', className: 'bg-orange-100 text-orange-800 border-orange-200 hover:bg-orange-100' },
       Customer: { label: 'Customer', className: 'bg-green-100 text-green-800 border-green-200 hover:bg-green-100' },
+      CustomerAndSupplier: { label: 'Supplier & Customer', className: 'bg-indigo-100 text-indigo-800 border-indigo-200 hover:bg-indigo-100' },
       Both: { label: 'Supplier & Contractor', className: 'bg-purple-100 text-purple-800 border-purple-200 hover:bg-purple-100' },
     };
 
@@ -214,6 +215,7 @@ export default function BusinessPartnersPage() {
                 <SelectItem value="Supplier">Supplier</SelectItem>
                 <SelectItem value="Contractor">Contractor</SelectItem>
                 <SelectItem value="Customer">Customer</SelectItem>
+                <SelectItem value="CustomerAndSupplier">Supplier & Customer</SelectItem>
                 <SelectItem value="Both">Both (Supplier & Contractor)</SelectItem>
               </SelectContent>
             </Select>

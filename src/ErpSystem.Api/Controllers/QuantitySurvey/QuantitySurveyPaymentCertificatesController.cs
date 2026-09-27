@@ -13,6 +13,9 @@ namespace ErpSystem.Api.Controllers.QuantitySurvey;
 public sealed class QuantitySurveyPaymentCertificatesController(
     IQuantitySurveyPaymentCertificateService service) : ControllerBase
 {
+    [HttpGet("search"), Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<IActionResult> Search([FromQuery] string search, CancellationToken token, [FromQuery] int take = 8) =>
+        ExecuteAsync(async () => Ok(await service.SearchAsync(search, take, token)));
     [HttpGet("lookups"), Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public Task<IActionResult> Lookups([FromQuery] Guid projectId, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.GetLookupsAsync(projectId, token)));
@@ -25,17 +28,17 @@ public sealed class QuantitySurveyPaymentCertificatesController(
     public Task<IActionResult> Get(Guid id, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.GetAsync(id, token)));
 
-    [HttpPost, Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
+    [HttpPost, Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public Task<IActionResult> Generate([FromQuery] Guid projectId,
         [FromBody] GenerateQuantitySurveyPaymentCertificateRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.GenerateAsync(projectId, request, CorrelationId, token)));
 
-    [HttpPut("{id:guid}"), Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
+    [HttpPut("{id:guid}"), Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public Task<IActionResult> Update(Guid id,
         [FromBody] UpdateQuantitySurveyPaymentCertificateRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.UpdateAsync(id, request, CorrelationId, token)));
 
-    [HttpPost("{id:guid}/submit"), Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
+    [HttpPost("{id:guid}/submit"), Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public Task<IActionResult> Submit(Guid id,
         [FromBody] QuantitySurveyPaymentCertificateActionRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.SubmitAsync(id, request, CorrelationId, token)));
@@ -50,7 +53,7 @@ public sealed class QuantitySurveyPaymentCertificatesController(
         [FromBody] QuantitySurveyPaymentCertificateActionRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.RejectAsync(id, request, CorrelationId, token)));
 
-    [HttpPost("{id:guid}/handoff-ap"), Authorize(Policy = QuantitySurveyAccessControlRegistry.ValuationsManage)]
+    [HttpPost("{id:guid}/handoff-ap"), Authorize(Policy = QuantitySurveyAccessControlRegistry.CertificatesManage)]
     public Task<IActionResult> HandoffToAp(Guid id,
         [FromBody] QuantitySurveyPaymentCertificateActionRequest request, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.HandoffToApAsync(id, request, CorrelationId, token)));

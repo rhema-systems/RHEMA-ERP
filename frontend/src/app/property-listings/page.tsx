@@ -1,10 +1,11 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
+import { PropertyEnquiryDialog } from '@/components/estate/PropertyEnquiryDialog';
 import {
   Building2,
   CalendarDays,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -33,9 +34,9 @@ import {
 import {
   externalEstateListingsService,
   type ExternalEstateListing,
+  type ExternalListingEnquiry,
 } from '@/services/external-estate-listings.service';
-
-const salesPublicEnquiryPath = '/external-portal/property-listings';
+import { useToast } from '@/hooks/use-toast';
 
 function formatMoney(value?: number | null, currency = 'GHS') {
   if (value == null) return 'Price on request';
@@ -55,21 +56,22 @@ function formatLeaseTerm(months?: number | null) {
   return `${months} month${months === 1 ? '' : 's'}`;
 }
 
-function isLandListing(listing?: ExternalEstateListing | null) {
-  if (!listing) return false;
-  const assetType = String(listing.assetType).toLowerCase();
-  return assetType === '0' || assetType === 'land';
+function isLeaseListingType(value: string) {
+  return value === 'Lease' || value === 'SaleAndLease';
 }
 
 function listingPriceSummary(listing: ExternalEstateListing) {
   if (listing.externalListingType === 'Rent') {
-    if (isLandListing(listing)) {
-      return `${formatMoney(listing.groundRentPayable, listing.externalListingCurrency)} annual ground rent`;
-    }
     return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
+  }
+  if (listing.externalListingType === 'Lease') {
+    return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / year`;
   }
   if (listing.externalListingType === 'SaleAndRent') {
     return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Rent ${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
+  }
+  if (listing.externalListingType === 'SaleAndLease') {
+    return `Sale ${formatMoney(listing.externalSalePrice, listing.externalListingCurrency)} · Lease ${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / year`;
   }
   return formatMoney(
     listing.externalSalePrice ?? listing.externalListingPrice,
@@ -79,8 +81,10 @@ function listingPriceSummary(listing: ExternalEstateListing) {
 
 function listingTypeLabel(value: string) {
   if (value === 'SaleAndRent') return 'Sale and rent';
+  if (value === 'SaleAndLease') return 'Sale and lease';
   if (value === 'Sale') return 'For sale';
   if (value === 'Rent') return 'For rent';
+  if (value === 'Lease') return 'For lease';
   return value;
 }
 
@@ -140,19 +144,6 @@ function buildPublicImageUrl(listing: ExternalEstateListing) {
   return `${apiBase}${listing.primaryImageUrl}`;
 }
 
-function buildSalesEnquiryHref(listing: ExternalEstateListing) {
-  const params = new URLSearchParams({
-    source: 'estate-public-listing',
-    listingId: listing.id,
-    listingReference: listing.assetCode,
-    listingName: listing.name,
-    listingType: listing.externalListingType,
-    currency: listing.externalListingCurrency || 'GHS',
-  });
-
-  return `${salesPublicEnquiryPath}?${params.toString()}`;
-}
-
 function ListingImage({ listing }: { listing: ExternalEstateListing }) {
   const [failed, setFailed] = React.useState(false);
   const src = failed ? listingFallbackImage(listing) : buildPublicImageUrl(listing);
@@ -196,6 +187,7 @@ function ListingStat({
 
 export default function PublicPropertyListingsPage() {
   const pageSize = 10;
+  const { toast } = useToast();
   const [listings, setListings] = React.useState<ExternalEstateListing[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
@@ -209,6 +201,8 @@ export default function PublicPropertyListingsPage() {
   const [hasPreviousPage, setHasPreviousPage] = React.useState(false);
   const [hasNextPage, setHasNextPage] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [enquiryListing, setEnquiryListing] = React.useState<ExternalEstateListing | null>(null);
+  const [createdRequest, setCreatedRequest] = React.useState<ExternalListingEnquiry | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const selected = React.useMemo(
@@ -251,8 +245,23 @@ export default function PublicPropertyListingsPage() {
     void loadListings();
   }, [loadListings]);
 
+  const enquiryCreated = (ticket: ExternalListingEnquiry) => {
+    setCreatedRequest(ticket);
+    setEnquiryListing(null);
+    toast({ title: 'Enquiry sent', description: `${ticket.ticketNumber} is with Sales and Marketing.`, variant: 'success' });
+  };
+
   return (
     <div className="min-h-screen bg-slate-50">
+      {enquiryListing && (
+        <PropertyEnquiryDialog
+          key={enquiryListing.id}
+          listing={enquiryListing}
+          publicMode
+          onClose={() => setEnquiryListing(null)}
+          onCreated={enquiryCreated}
+        />
+      )}
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -304,6 +313,7 @@ export default function PublicPropertyListingsPage() {
                 <SelectItem value="all">All listings</SelectItem>
                 <SelectItem value="Sale">For sale</SelectItem>
                 <SelectItem value="Rent">For rent</SelectItem>
+                <SelectItem value="Lease">For lease</SelectItem>
               </SelectContent>
             </Select>
             <Input
@@ -335,6 +345,16 @@ export default function PublicPropertyListingsPage() {
           <Alert variant="destructive">
             <AlertTitle>Listings not available</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {createdRequest ? (
+          <Alert className="border-green-200 bg-green-50 text-green-800">
+            <CheckCircle2 className="h-4 w-4 text-green-700" />
+            <AlertTitle>Enquiry sent to Sales</AlertTitle>
+            <AlertDescription>
+              {createdRequest.ticketNumber} is with Sales and Marketing. Keep the reference number for follow-up.
+            </AlertDescription>
           </Alert>
         ) : null}
 
@@ -472,21 +492,12 @@ export default function PublicPropertyListingsPage() {
                       {selected.externalListingType !== 'Sale' ? (
                         <ListingStat
                           icon={CalendarDays}
-                          label="Rental duration"
-                          value={formatLeaseTerm(
-                            selected.externalLeaseTermMonths
-                          )}
-                        />
-                      ) : null}
-                      {selected.externalListingType !== 'Sale' &&
-                      isLandListing(selected) ? (
-                        <ListingStat
-                          icon={FileText}
-                          label="Annual ground rent"
-                          value={formatMoney(
-                            selected.groundRentPayable,
-                            selected.externalListingCurrency
-                          )}
+                          label={
+                            isLeaseListingType(selected.externalListingType)
+                              ? 'Lease duration'
+                              : 'Rental duration'
+                          }
+                          value="Duration on request"
                         />
                       ) : null}
                     </div>
@@ -495,8 +506,8 @@ export default function PublicPropertyListingsPage() {
                       <div className="text-xs text-slate-500">
                         {selected.externalListingType === 'Sale'
                           ? 'Sale price'
-                          : isLandListing(selected)
-                            ? 'Annual ground rent'
+                          : isLeaseListingType(selected.externalListingType)
+                            ? 'Lease amount per year'
                             : 'Rent per month'}
                       </div>
                       <div className="mt-1 text-xl font-semibold text-slate-900">
@@ -504,18 +515,14 @@ export default function PublicPropertyListingsPage() {
                           selected.externalListingType === 'Sale'
                             ? (selected.externalSalePrice ??
                                 selected.externalListingPrice)
-                            : isLandListing(selected)
-                              ? selected.groundRentPayable
-                              : (selected.externalMonthlyRent ??
-                                selected.externalListingPrice),
+                            : (selected.externalMonthlyRent ??
+                              selected.externalListingPrice),
                           selected.externalListingCurrency
                         )}
                       </div>
                       <div className="mt-1 text-sm text-slate-500">
                         {selected.externalListingType !== 'Sale'
-                          ? `${formatLeaseTerm(
-                              selected.externalLeaseTermMonths
-                            )} · Sales will continue the enquiry`
+                          ? 'Sales will continue the enquiry'
                           : listingTypeLabel(selected.externalListingType)}
                       </div>
                     </div>
@@ -527,11 +534,9 @@ export default function PublicPropertyListingsPage() {
                     ) : null}
                   </div>
 
-                  <Button className="w-full" asChild>
-                    <Link href={buildSalesEnquiryHref(selected)}>
-                      <Send className="mr-2 h-4 w-4" />
-                      Enquiry
-                    </Link>
+                  <Button className="w-full" onClick={() => setEnquiryListing(selected)}>
+                    <Send className="mr-2 h-4 w-4" />
+                    Enquiry
                   </Button>
                 </>
               ) : (

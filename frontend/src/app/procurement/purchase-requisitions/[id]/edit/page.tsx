@@ -1,5 +1,6 @@
 'use client';
 
+import { hasSupplierRole } from '@/lib/business-partner-roles';
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,7 +53,8 @@ import {
   PurchaseRequisitionLinkageOptionsDto,
   SavePurchaseRequisitionLinkageRequest
 } from '@/services/purchasingService';
-import { commonService, type DepartmentDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import { PurchaseRequisitionLinkageFields } from '@/components/procurement/PurchaseRequisitionLinkageFields';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { PurchaseRequisitionDocuments } from '@/components/procurement/PurchaseRequisitionDocuments';
@@ -100,8 +102,7 @@ export default function EditPurchaseRequisitionPage() {
   const [requisitionDate, setRequisitionDate] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
   const [priority, setPriority] = useState('Normal');
-  const [department, setDepartment] = useState('');
-  const [departmentId, setDepartmentId] = useState('');
+  const [organizationUnitId, setOrganizationUnitId] = useState('');
   const [currency, setCurrency] = useState('');
   const [justification, setJustification] = useState('');
   const [notes, setNotes] = useState('');
@@ -113,7 +114,7 @@ export default function EditPurchaseRequisitionPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
   const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
   const [linkageOptions, setLinkageOptions] = useState<PurchaseRequisitionLinkageOptionsDto>();
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [departments, setDepartments] = useState<OrganizationUnitSummary[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   
@@ -158,7 +159,7 @@ export default function EditPurchaseRequisitionPage() {
         setRequisitionDate(pr.requisitionDate);
         setRequiredDate(pr.requiredDate ? pr.requiredDate.split('T')[0] : '');
         setPriority(pr.priority);
-        setDepartment(pr.department || '');
+        setOrganizationUnitId(pr.organizationUnitId || '');
         setCurrency(pr.currency);
         setJustification(pr.justification || '');
         setNotes(pr.notes || '');
@@ -205,13 +206,13 @@ export default function EditPurchaseRequisitionPage() {
           inventoryManagementService.getInventoryItems({ isActive: true }),
           businessPartnerService.getActivePartners(),
           purchasingService.getPurchaseRequisitionLinkageOptions(),
-          commonService.getDepartments(),
+          organizationUnitService.getSummary(),
           procurementCurrencyService.getActive(),
         ]);
         
         setInventoryItems(itemsData || []);
         setSuppliers((suppliersData || []).filter(bp => 
-          bp.partnerType === 'Supplier' || bp.partnerType === 'Both'
+          hasSupplierRole(bp.partnerType)
         ));
         setLinkageOptions(linkageData);
         setDepartments((departmentsData || []).filter((value) => value.isActive));
@@ -232,20 +233,13 @@ export default function EditPurchaseRequisitionPage() {
   useEffect(() => {
     if (!linkage.sourcePlanItemId || !linkageOptions) return;
     const sourcePlanItem = linkageOptions.planItems.find((option) => option.id === linkage.sourcePlanItemId);
-    if (sourcePlanItem?.departmentId) setDepartmentId(sourcePlanItem.departmentId);
+    if (sourcePlanItem?.organizationUnitId) setOrganizationUnitId(sourcePlanItem.organizationUnitId);
     if (sourcePlanItem?.currency) setCurrency(normalizeProcurementCurrency(sourcePlanItem.currency));
   }, [linkage.sourcePlanItemId, linkageOptions]);
 
-  useEffect(() => {
-    if (departmentId || !department || departments.length === 0) return;
-    const match = departments.find((value) =>
-      value.name.localeCompare(department, undefined, { sensitivity: 'accent' }) === 0 ||
-      `${value.code} - ${value.name}`.localeCompare(department, undefined, { sensitivity: 'accent' }) === 0);
-    if (match) setDepartmentId(match.id);
-  }, [department, departmentId, departments]);
 
   const applyPlanItemDepartment = (option?: PurchaseRequisitionLinkageOptionDto) => {
-    setDepartmentId(option?.departmentId || '');
+    setOrganizationUnitId(option?.organizationUnitId || '');
     setCurrency(normalizeProcurementCurrency(option?.currency, getProcurementBaseCurrency(currencies)));
   };
 
@@ -403,8 +397,8 @@ export default function EditPurchaseRequisitionPage() {
       toast.error('Please add at least one item');
       return;
     }
-    if (!departmentId) {
-      toast.error('Select an active HR department before saving');
+    if (!organizationUnitId) {
+      toast.error('Select an active HR organization unit before saving');
       return;
     }
     const linkageError = validateExceptionLinkage(linkage);
@@ -430,7 +424,7 @@ export default function EditPurchaseRequisitionPage() {
         rowVersion,
         requiredDate: requiredDate || undefined,
         priority,
-        departmentId,
+        organizationUnitId,
         currency: documentCurrency,
         justification: justification || undefined,
         notes: notes || undefined,
@@ -569,10 +563,10 @@ export default function EditPurchaseRequisitionPage() {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="departmentId">Department *</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId} disabled={loadingData || Boolean(linkage.sourcePlanItemId)}>
-                <SelectTrigger id="departmentId">
-                  <SelectValue placeholder={loadingData ? 'Loading departments...' : 'Select HR department'} />
+              <Label htmlFor="organizationUnitId">Organization unit *</Label>
+              <Select value={organizationUnitId} onValueChange={setOrganizationUnitId} disabled={loadingData || Boolean(linkage.sourcePlanItemId)}>
+                <SelectTrigger id="organizationUnitId">
+                  <SelectValue placeholder={loadingData ? 'Loading organization units...' : 'Select organization unit'} />
                 </SelectTrigger>
                 <SelectContent>
                   {departments.map((value) => (

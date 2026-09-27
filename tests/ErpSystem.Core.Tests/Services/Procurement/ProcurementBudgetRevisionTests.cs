@@ -160,6 +160,20 @@ public sealed class ProcurementBudgetRevisionTests
     }
 
     [Fact]
+    public async Task RevisionDecreaseCannotReleaseAlreadyReservedExposure()
+    {
+        var budget = ApprovedBudget(100_000m);
+        budget.ReservedAmount = 60_000m;
+        budget.CommittedAmount = 20_000m;
+        budget.UtilizedAmount = 10_000m;
+        _budgets.Setup(value => value.GetByIdAsync(budget.Id)).ReturnsAsync(budget);
+        var action = () => CreateService(_makerId).CreateRevisionAsync(budget.Id, Revision(85_000m));
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*reserved, utilized and committed exposure*");
+        _revisions.Verify(value => value.AddAsync(It.IsAny<ProcurementBudgetRevision>()), Times.Never);
+        budget.AllocatedAmount.Should().Be(100_000m);
+    }
+
+    [Fact]
     public async Task RevisionDecreaseCannotFallBelowLinkedPlanExposure()
     {
         var budget = ApprovedBudget(100_000m);
@@ -194,6 +208,9 @@ public sealed class ProcurementBudgetRevisionTests
     {
         var approverId = Guid.NewGuid();
         var budget = ApprovedBudget(100_000m);
+        budget.ReservedAmount = 25_000m;
+        budget.CommittedAmount = 10_000m;
+        budget.UtilizedAmount = 5_000m;
         var revision = PendingRevision(budget, _makerId, 125_000m);
         _budgets.Setup(value => value.GetByIdAsync(budget.Id)).ReturnsAsync(budget);
         _revisions.Setup(value => value.GetByIdAsync(revision.Id)).ReturnsAsync(revision);
@@ -207,6 +224,7 @@ public sealed class ProcurementBudgetRevisionTests
 
         result.Status.Should().Be("Approved");
         budget.AllocatedAmount.Should().Be(125_000m);
+        budget.RemainingAmount.Should().Be(85_000m);
         revision.ApprovedById.Should().Be(approverId);
         _budgets.Verify(value => value.UpdateAsync(budget), Times.Once);
 

@@ -191,6 +191,9 @@ namespace ErpSystem.Tests.Services.Finance
 
         private class FakeJournalEntryService : IJournalEntryService
         {
+            public Task<IReadOnlyList<FinanceRecordSearchDto>> SearchAsync(string? search, int take = 5, CancellationToken cancellationToken = default)
+                => throw new NotSupportedException("This posting test double does not provide record search.");
+
             private readonly ApplicationDbContext _dbContext;
             private readonly Guid _tenantId;
 

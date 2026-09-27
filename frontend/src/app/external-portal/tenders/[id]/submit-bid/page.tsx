@@ -37,8 +37,10 @@ import {
 import BidItemsStep from '@/components/external-portal/bid-submission/BidItemsStep';
 import BidProposalsStep from '@/components/external-portal/bid-submission/BidProposalsStep';
 import BidDocumentsStep from '@/components/external-portal/bid-submission/BidDocumentsStep';
+import { parseBidDocumentRequirements } from '@/components/external-portal/bid-submission/documentRequirements';
 import BidReviewStep from '@/components/external-portal/bid-submission/BidReviewStep';
 import { QuantitySurveyTenderBoqSubmissionPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqSubmissionPanel';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
 import type { TenderBoqLine } from '@/services/quantity-survey-tender-boq.service';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import {
@@ -76,6 +78,7 @@ export default function SubmitBidPage() {
     TenderBidDocumentDto[]
   >([]);
   const [showSubmitConfirmDialog, setShowSubmitConfirmDialog] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [selectedLotIds, setSelectedLotIds] = useState<string[]>([]);
 
   // Bid form data
@@ -279,7 +282,7 @@ export default function SubmitBidPage() {
         // Validate required documents are uploaded
         if (tender?.requiredDocuments) {
           try {
-            const requirements = JSON.parse(tender.requiredDocuments);
+            const requirements = parseBidDocumentRequirements(tender.requiredDocuments);
             const requiredDocs = requirements.filter(
               (req: any) => req.isRequired
             );
@@ -294,7 +297,8 @@ export default function SubmitBidPage() {
               }
             }
           } catch (error) {
-            console.error('Error validating documents:', error);
+            toast.error(error instanceof Error ? error.message : 'Unable to read document requirements.');
+            return false;
           }
         }
         return true;
@@ -472,7 +476,7 @@ export default function SubmitBidPage() {
     }
   };
 
-  const handleDocumentUpload = async (file: File, documentType: string) => {
+  const handleDocumentUpload = async (file: File, documentType: string, tenderItemId?: string) => {
     if (!createdBidId) {
       toast.error('Please save the bid as draft first');
       return;
@@ -483,7 +487,8 @@ export default function SubmitBidPage() {
         createdBidId,
         file,
         documentType,
-        file.name
+        file.name,
+        tenderItemId
       );
       setUploadedDocuments((prev) => [...prev, uploadedDoc]);
     } catch (error) {
@@ -538,6 +543,7 @@ export default function SubmitBidPage() {
 
   const handleConfirmSubmit = async () => {
     try {
+      setSubmitError('');
       setSubmitting(true);
 
       let bidId = createdBidId;
@@ -549,6 +555,7 @@ export default function SubmitBidPage() {
           selectedLotIds,
         });
         bidId = createdBid.id;
+        setCreatedBidId(createdBid.id);
       } else {
         // Update existing draft
         await tenderBidService.updateBid(
@@ -565,7 +572,9 @@ export default function SubmitBidPage() {
       router.push(`/external-portal/my-bids/${bidId}`);
     } catch (error) {
       console.error('Error submitting bid:', error);
-      toast.error(getProcurementProblemMessage(error, 'Failed to submit bid'));
+      const message = getProcurementProblemMessage(error, 'Failed to submit bid');
+      setSubmitError(message);
+      toast.error(message);
       return false;
     } finally {
       setSubmitting(false);
@@ -744,12 +753,6 @@ export default function SubmitBidPage() {
                             </Label>
                           </div>
                           <div className="text-right">
-                            {lot.estimatedValue && (
-                              <div className="font-medium text-sm">
-                                {lot.currency || 'USD'}{' '}
-                                {lot.estimatedValue.toLocaleString()}
-                              </div>
-                            )}
                             <Badge
                               variant={
                                 selectedLotIds.includes(lot.id)
@@ -837,7 +840,7 @@ export default function SubmitBidPage() {
                   </AlertDescription>
                 </Alert>
               )}
-            {createdBidId && (
+            {createdBidId && isQsOptionalFeatureEnabled('tender-exchange') && (
               <QuantitySurveyTenderBoqSubmissionPanel
                 tenderBidId={createdBidId}
                 onCommitted={applyTenderBoqLines}
@@ -935,7 +938,7 @@ export default function SubmitBidPage() {
         open={showSubmitConfirmDialog}
         onOpenChange={setShowSubmitConfirmDialog}
         title="Submit Bid"
-        description="Are you sure you want to submit this bid? Once submitted, you will not be able to modify your bid. Please ensure all information is accurate and complete."
+        description={submitError || 'Are you sure you want to submit this bid? Once submitted, you will not be able to modify your bid. Please ensure all information is accurate and complete.'}
         confirmText="Yes, Submit Bid"
         cancelText="Cancel"
         variant="default"

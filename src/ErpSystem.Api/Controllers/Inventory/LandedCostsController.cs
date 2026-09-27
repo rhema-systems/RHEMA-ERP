@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces;
@@ -197,6 +197,37 @@ public class LandedCostsController : ControllerBase
         }
     }
 
+    [HttpPut("{id:guid}/receipt-weights/{receiptItemId:guid}")]
+    public async Task<ActionResult<LandedCostDetailDto>> SetReceiptWeight(Guid id, Guid receiptItemId, SetLandedCostReceiptWeightDto dto)
+    {
+        if (_db == null || _access == null || _actor == null || _actor.IsExternalUser ||
+            _actor.UserId == Guid.Empty || _actor.TenantId == Guid.Empty) return Forbid();
+        var source = await _db.LandedCosts.AsNoTracking().Where(c => c.Id == id && !c.IsDeleted &&
+            c.TenantId == _actor.TenantId && c.GoodsReceiptNote.TenantId == _actor.TenantId && !c.GoodsReceiptNote.IsDeleted)
+            .Select(c => new { c.LandedCostNumber, c.GoodsReceiptNote.WarehouseId }).SingleOrDefaultAsync(HttpContext.RequestAborted);
+        if (source == null) return NotFound();
+        try
+        {
+            var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = "procurement.inventory.receive", WarehouseId = source.WarehouseId,
+                SourceType = "InventoryLandedCost", SourceReference = source.LandedCostNumber
+            }, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+            if (!decision.Allowed) return Forbid();
+            return Ok(await _landedCostService.SetReceiptWeightAsync(id, receiptItemId, dto, _actor.UserId));
+        }
+        catch (ProcurementAccessAuthorizationException) { return Forbid(); }
+        catch (ArgumentException ex) { return WeightProblem(422, "LANDED_COST_WEIGHT_INVALID", ex.Message); }
+        catch (InvalidOperationException ex) { return WeightProblem(409, "LANDED_COST_WEIGHT_LOCKED", ex.Message); }
+    }
+
+    private static ObjectResult WeightProblem(int status, string code, string detail)
+    {
+        var problem = new ProblemDetails { Status = status, Title = "Landed cost weight could not be saved", Detail = detail };
+        problem.Extensions["code"] = code;
+        return new ObjectResult(problem) { StatusCode = status };
+    }
+
     [HttpPost("{id}/allocate")]
     public async Task<ActionResult> Allocate(Guid id)
     {
@@ -261,6 +292,10 @@ public class LandedCostsController : ControllerBase
         {
             return NotFound(ex.Message);
         }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new ProblemDetails { Status = 409, Title = "Landed cost approval is unavailable", Detail = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error approving landed cost {Id}", id);
@@ -268,10 +303,14 @@ public class LandedCostsController : ControllerBase
         }
     }
 
-    // Receiving permission permits only source-bound draft generation as a posting
-    // side effect. It does not grant manual AP creation, tax edit, approval or payment.
+    // Receiving permission permits only source-bound invoice draft preparation. It does not grant manual AP creation, tax edit, approval or payment.
     [HttpPost("{id:guid}/post")]
-    public async Task<ActionResult<PostLandedCostResultDto>> Post(Guid id, PostLandedCostDto dto)
+    public ActionResult<PostLandedCostResultDto> Post(Guid id, PostLandedCostDto dto)
+        => Conflict(new ProblemDetails { Status = 409, Title = "Posting moved to Invoices",
+            Detail = "Prepare supplier invoice drafts, then review and post them from the Invoice page." });
+
+    [HttpPost("{id:guid}/prepare-invoices")]
+    public async Task<ActionResult<PostLandedCostResultDto>> PrepareInvoices(Guid id, PostLandedCostDto dto)
     {
         if (_db == null || _invoices == null || _access == null || _actor == null ||
             _actor.IsExternalUser || _actor.UserId == Guid.Empty || _actor.TenantId == Guid.Empty) return Forbid();
@@ -288,38 +327,18 @@ public class LandedCostsController : ControllerBase
                 SourceType = "InventoryLandedCost", SourceReference = source.LandedCostNumber
             }, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
             if (!decision.Allowed) return StatusCode(403, new { message = decision.Message });
-            return Ok(await _invoices.PostLandedCostAsync(id, dto,
+            return Ok(await _invoices.PrepareLandedCostInvoicesAsync(id, dto,
                 new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceApVendorInvoice), HttpContext.RequestAborted));
         }
         catch (ProcurementAccessAuthorizationException) { return Forbid(); }
         catch (ArgumentException ex) { return BadRequest(new { code = "LANDED_COST_BILLING_REQUIRED", message = ex.Message }); }
-        catch (InvalidOperationException ex) { return UnprocessableEntity(new { code = "LANDED_COST_POST_NOT_READY", message = ex.Message }); }
+        catch (InvalidOperationException ex) { return UnprocessableEntity(new { code = "LANDED_COST_PREPARATION_NOT_READY", message = ex.Message }); }
     }
 
     [HttpPost("{id}/post-to-inventory")]
-    public async Task<ActionResult> PostToInventory(Guid id)
-    {
-        try
-        {
-            var userId = GetCurrentUserId();
-            var ok = await _landedCostService.PostToInventoryAsync(id, userId);
-            if (!ok) return BadRequest("Posting failed");
-            return Ok(new { message = "Landed cost posted to inventory successfully" });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error posting landed cost {Id} to inventory", id);
-            return StatusCode(500, "An error occurred while posting landed cost to inventory");
-        }
-    }
+    public ActionResult PostToInventory(Guid id)
+        => Conflict(new ProblemDetails { Status = 409, Title = "Posting moved to Invoices",
+            Detail = "Inventory valuation for landed costs is posted with the approved supplier invoice. Use the Invoice page." });
 
     [HttpPost("{id}/cancel")]
     public async Task<ActionResult> Cancel(Guid id, [FromQuery] string reason)

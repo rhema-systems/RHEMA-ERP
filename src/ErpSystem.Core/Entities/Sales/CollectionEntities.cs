@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 
 namespace ErpSystem.Core.Entities.Sales;
 
@@ -52,8 +53,12 @@ public static class CollectionActivityValues
 /// </summary>
 public class CollectionActivity : BusinessEntity
 {
-    public Guid CustomerId { get; set; }
-    public virtual Customer Customer { get; set; } = null!;
+    /// <summary>
+    /// Canonical counterparty identity. Collection work must never point to the retired Sales
+    /// Customer master; the Customer role/profile determines transaction readiness separately.
+    /// </summary>
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
 
     public Guid? InvoiceId { get; set; }
     public virtual Invoice? Invoice { get; set; }
@@ -143,8 +148,8 @@ public class CollectionActivity : BusinessEntity
 /// </summary>
 public class PaymentPlan : BusinessEntity
 {
-    public Guid CustomerId { get; set; }
-    public virtual Customer Customer { get; set; } = null!;
+    public Guid BusinessPartnerId { get; set; }
+    public virtual BusinessPartner BusinessPartner { get; set; } = null!;
 
     [Required]
     [StringLength(100)]

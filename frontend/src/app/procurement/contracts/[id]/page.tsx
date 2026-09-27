@@ -99,6 +99,7 @@ export default function ContractDetailPage() {
     : (params?.id ?? '');
   const [contract, setContract] = useState<ContractDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Edit contract dialog
@@ -143,10 +144,12 @@ export default function ContractDetailPage() {
   const loadContract = async (id: string) => {
     try {
       setLoading(true);
+      setLoadError(null);
       const data = await contractService.getContractById(id);
       setContract(data);
     } catch (error) {
       console.error('Error loading contract:', error);
+      setLoadError(getProcurementProblemMessage(error, 'Failed to load contract'));
       toast.error(getProcurementProblemMessage(error, 'Failed to load contract'));
     } finally {
       setLoading(false);
@@ -523,7 +526,7 @@ export default function ContractDetailPage() {
       <div className="container mx-auto py-6">
         <div className="text-center py-12">
           <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-          <p className="text-gray-500">Contract not found</p>
+          <p className="text-gray-500" role={loadError ? 'alert' : undefined}>{loadError || 'Contract not found'}</p>
           <Button
             variant="outline"
             className="mt-4"

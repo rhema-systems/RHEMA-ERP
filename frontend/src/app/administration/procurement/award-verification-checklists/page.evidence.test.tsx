@@ -23,7 +23,7 @@ describe('checklist document requirement configuration', () => {
     const toggle = screen.getByRole('switch', { name: 'Document required for check 1' });
     expect(toggle).not.toBeChecked();
     if (requiresDocument) fireEvent.click(toggle);
-    fireEvent.click(screen.getByRole('button', { name: 'Create Template', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Template' }));
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
     expect(mocks.create.mock.calls[0][0].items[0]).toMatchObject({ isRequired: true, requiresDocument });
   });

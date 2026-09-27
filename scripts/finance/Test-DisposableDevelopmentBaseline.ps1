@@ -8,8 +8,11 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $dataProject = Join-Path $repositoryRoot 'src\ErpSystem.Data\ErpSystem.Data.csproj'
 $migrationDirectory = Join-Path $repositoryRoot 'src\ErpSystem.Data\Migrations'
 $archiveDirectory = Join-Path $repositoryRoot 'src\ErpSystem.Data\LegacyMigrationsArchive'
+$supersededDirectory = Join-Path $repositoryRoot 'src\ErpSystem.Data\SupersededMigrationsArchive\PreBaselineLateMerges'
 $baselineId = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
+$reconciliationId = '20260922210000_ReconcilePreBaselineLateMerges'
 $baselinePath = Join-Path $migrationDirectory "$baselineId.cs"
+$reconciliationPath = Join-Path $migrationDirectory "$reconciliationId.cs"
 $designerPath = Join-Path $migrationDirectory "$baselineId.Designer.cs"
 $snapshotPath = Join-Path $migrationDirectory 'ApplicationDbContextModelSnapshot.cs'
 $authorityPath = Join-Path $migrationDirectory 'FinanceC1C8BaselineAuthoritySql.cs'
@@ -21,9 +24,9 @@ $archivedPettyPath = Join-Path $archiveDirectory '20260907033000_AlignPettyPurch
 $inspectorProject = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\ArchivedMigrationSqlInspector.csproj'
 $inspectorSource = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\Program.cs'
 
-foreach ($requiredPath in @($dataProject,$baselinePath,$designerPath,$snapshotPath,$authorityPath,$governancePath,
+foreach ($requiredPath in @($dataProject,$baselinePath,$reconciliationPath,$designerPath,$snapshotPath,$authorityPath,$governancePath,
     $governanceManifestPath,$archivedCheckModelPath,$inspectorProject,$inspectorSource,$archivedC8Path,$archivedPettyPath,
-    (Join-Path $archiveDirectory 'README.md'))) {
+    (Join-Path $archiveDirectory 'README.md'),(Join-Path $supersededDirectory 'README.md'))) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Disposable-development baseline artifact is missing: $requiredPath"
     }
@@ -31,8 +34,64 @@ foreach ($requiredPath in @($dataProject,$baselinePath,$designerPath,$snapshotPa
 
 $projectText = Get-Content -Raw -LiteralPath $dataProject
 if ($projectText -notmatch '<Compile Remove="LegacyMigrationsArchive\\\*\*\\\*\.cs"\s*/>' -or
+    $projectText -notmatch '<Compile Remove="SupersededMigrationsArchive\\\*\*\\\*\.cs"\s*/>' -or
+    $projectText -notmatch '<Compile Include="SupersededMigrationsArchive\\PreBaselineLateMerges\\\*\.cs"' -or
+    $projectText -notmatch 'Exclude="SupersededMigrationsArchive\\PreBaselineLateMerges\\\*\.Designer\.cs;SupersededMigrationsArchive\\PreBaselineLateMerges\\20260915093000_AddProcedureCaseOrganizationScope\.cs"' -or
     $projectText -match 'TdcFastEfBuild|RejectEfToolingBuild') {
-    throw 'The legacy migration archive is not cleanly excluded from normal EF compilation.'
+    throw 'The legacy and superseded migration archives are not cleanly excluded from normal EF compilation.'
+}
+
+$expectedSupersededIds = @(
+    '20260907003611_AddSheChecklistBuilder',
+    '20260909004030_AddGuarantorIdTypeAndDocuments',
+    '20260909013533_AddOrganizationUnitHistoryNotes',
+    '20260909071641_AddCertificationModel',
+    '20260909090940_AddProbationSourceAndContractKind',
+    '20260909133438_AddEmployeePayBasis',
+    '20260909161346_AddSalaryAssignmentWithdrawal',
+    '20260909204655_AddSalaryStructurePolicy',
+    '20260909225805_AddNamedSets',
+    '20260910001423_AddUnitFinanceAccount',
+    '20260910013025_AddSubRecordGeographyAndRelationshipTypes',
+    '20260910023951_AddTeamTermsObjectivesAndTasks',
+    '20260910031733_AddTeamMeetingsAndReviews',
+    '20260910043146_AddTeamApprovalRejectionReasons',
+    '20260910163909_AddManpowerBudgetLineSalaryScale',
+    '20260910201924_AddStaffRequisitionBudgetLink',
+    '20260910205043_AddStaffRequisitionCostPayeeAndApproval',
+    '20260911091344_AddEmployeeSalaryChangeRequest',
+    '20260911111931_AddCandidateIdentityLanguagesAndCertification',
+    '20260912211938_AddCriteriaCatalogueValues',
+    '20260913161339_AddPreEmploymentCheckProviders',
+    '20260913181139_AddUnionContactsDocumentsLogo',
+    '20260913214947_AddJobDescriptionProposedGrade',
+    '20260913224857_AddDisabilityTypes',
+    '20260913234443_DropContractLeaveColumns',
+    '20260914063456_AddTalentSegmentOwnership',
+    '20260915093000_AddProcedureCaseOrganizationScope'
+)
+$supersededSources = @(Get-ChildItem -LiteralPath $supersededDirectory -File -Filter '*.cs')
+$supersededIds = @($supersededSources | Where-Object Name -notlike '*.Designer.cs' |
+    ForEach-Object { $_.BaseName } | Sort-Object)
+if ($supersededSources.Count -ne 53 -or $supersededIds.Count -ne 27 -or
+    ($supersededIds -join "`n") -cne (($expectedSupersededIds | Sort-Object) -join "`n")) {
+    throw 'The exact 27 late-merged pre-baseline migrations are not preserved in the superseded archive.'
+}
+
+$reconciliationText = Get-Content -Raw -LiteralPath $reconciliationPath
+$expectedReplayClasses = @($expectedSupersededIds | Where-Object {
+    $_ -ne '20260915093000_AddProcedureCaseOrganizationScope'
+} | ForEach-Object { $_ -replace '^\d{14}_', '' })
+foreach ($className in $expectedReplayClasses) {
+    if ($reconciliationText -notmatch (':\s*' + [regex]::Escape($className) + '\b')) {
+        throw "The post-baseline reconciliation does not replay $className."
+    }
+}
+if ($expectedReplayClasses.Count -ne 26 -or
+    [regex]::Matches($reconciliationText, '\.Apply\(migrationBuilder\);').Count -ne 26 -or
+    $reconciliationText -notmatch ('\[Migration\("' + [regex]::Escape($reconciliationId) + '"\)\]') -or
+    $reconciliationText -match ':\s*AddProcedureCaseOrganizationScope\b') {
+    throw 'The post-baseline reconciliation must replay exactly the 26 guarded omissions and leave the baseline-owned ProcedureCases scope alone.'
 }
 
 $archivedSources = @(Get-ChildItem -LiteralPath $archiveDirectory -File -Filter '*.cs')
@@ -98,15 +157,15 @@ if (-not (Test-Path -LiteralPath $preD3Snapshot -PathType Leaf) -or
     throw 'The byte-preserved pre-D3 archive snapshot changed.'
 }
 
-$compiledDesignerFiles = @(Get-ChildItem -LiteralPath $migrationDirectory -File -Filter '*.Designer.cs')
-$compiledMigrationIds = @($compiledDesignerFiles | ForEach-Object {
+$compiledMigrationIds = @(Get-ChildItem -LiteralPath $migrationDirectory -File -Filter '*.cs' | ForEach-Object {
     $text = Get-Content -Raw -LiteralPath $_.FullName
     $match = [regex]::Match($text, '\[Migration\("(?<id>\d{14}_[A-Za-z0-9_]+)"\)\]')
-    if (-not $match.Success) { throw "Compiled migration designer lacks a safe migration identity: $($_.Name)" }
-    $match.Groups['id'].Value
-})
-if ($compiledMigrationIds.Count -ne 1 -or $compiledMigrationIds[0] -cne $baselineId) {
-    throw "Compiled migration discovery is not exactly the disposable-development baseline: $($compiledMigrationIds -join ',')."
+    if ($match.Success) { $match.Groups['id'].Value }
+} | Sort-Object)
+if ($compiledMigrationIds.Count -lt 1 -or $compiledMigrationIds[0] -cne $baselineId -or
+    $compiledMigrationIds -cnotcontains $reconciliationId -or
+    @($compiledMigrationIds | Sort-Object -Unique).Count -ne $compiledMigrationIds.Count) {
+    throw "Compiled migration discovery does not start with the unique disposable-development baseline: $($compiledMigrationIds -join ',')."
 }
 
 $baselineText = Get-Content -Raw -LiteralPath $baselinePath
@@ -122,6 +181,17 @@ $upText = $baselineText.Substring(0, $upEnd)
 if ($upText -match '\bDrop(?:Table|Column|ForeignKey|Index|PrimaryKey|UniqueConstraint)\s*\(' -or
     $upText -match '\bUpdateData\s*\(') {
     throw 'The zero-to-current baseline contains predecessor-dependent drop/update operations.'
+}
+$procedureCaseCreate = $upText.IndexOf('name: "ProcedureCases"', [StringComparison]::Ordinal)
+$organizationLevelCreate = $upText.IndexOf('name: "OrganizationLevels"', [StringComparison]::Ordinal)
+$organizationUnitCreate = $upText.IndexOf('name: "OrganizationUnits"', [StringComparison]::Ordinal)
+$procedureLevelForeignKey = $upText.LastIndexOf('name: "FK_ProcedureCases_OrganizationLevels_OrganizationLevelId"', [StringComparison]::Ordinal)
+$procedureUnitForeignKey = $upText.LastIndexOf('name: "FK_ProcedureCases_OrganizationUnits_OrganizationUnitId"', [StringComparison]::Ordinal)
+if ($procedureCaseCreate -lt 0 -or $organizationLevelCreate -le $procedureCaseCreate -or
+    $organizationUnitCreate -le $organizationLevelCreate -or
+    $procedureLevelForeignKey -le $organizationLevelCreate -or
+    $procedureUnitForeignKey -le $organizationUnitCreate) {
+    throw 'ProcedureCases organization foreign keys must be added only after both principal tables exist.'
 }
 if ([regex]::Matches($upText, 'ArchivedGovernanceBaselineSql\.Apply\(migrationBuilder\)').Count -ne 1 -or
     [regex]::Matches($upText, 'FinanceC1C8BaselineAuthoritySql\.Apply\(migrationBuilder\)').Count -ne 1 -or
@@ -151,8 +221,11 @@ foreach ($requiredModelToken in @(
     }
 }
 
+$baselineDesignerText = Get-Content -Raw -LiteralPath $designerPath
+$baselineModelTriggerNames = @([regex]::Matches($baselineDesignerText, 'HasTrigger\("(?<name>[^"]+)"\)') |
+    ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)
 $snapshotText = Get-Content -Raw -LiteralPath $snapshotPath
-$modelTriggerNames = @([regex]::Matches($snapshotText, 'HasTrigger\("(?<name>[^"]+)"\)') |
+$currentModelTriggerNames = @([regex]::Matches($snapshotText, 'HasTrigger\("(?<name>[^"]+)"\)') |
     ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)
 $governanceManifest = Get-Content -Raw -LiteralPath $governanceManifestPath | ConvertFrom-Json
 $archivedCheckModelText = Get-Content -Raw -LiteralPath $archivedCheckModelPath
@@ -160,8 +233,8 @@ $manifestTriggerNames = @($governanceManifest.triggerDefinitions | ForEach-Objec
 $manifestModelTriggerNames=@($governanceManifest.modelTriggerNames|Sort-Object -Unique)
 $activeNonModelTriggerNames=@($governanceManifest.activeNonModelTriggerNames|Sort-Object -Unique)
 if ($governanceManifest.schema -cne 'RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V2' -or
-    $modelTriggerNames.Count -ne 386 -or $manifestModelTriggerNames.Count -ne 386 -or
-    ($modelTriggerNames -join "`n") -cne ($manifestModelTriggerNames -join "`n") -or
+    $baselineModelTriggerNames.Count -ne 386 -or $manifestModelTriggerNames.Count -ne 386 -or
+    ($baselineModelTriggerNames -join "`n") -cne ($manifestModelTriggerNames -join "`n") -or
     $manifestTriggerNames.Count -ne 478 -or $activeNonModelTriggerNames.Count -ne 92 -or
     [int]$governanceManifest.archiveMigrationCount -ne 607 -or
     [int]$governanceManifest.archiveSqlOperationCount -ne 1818 -or
@@ -176,6 +249,12 @@ if ($governanceManifest.schema -cne 'RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V2' -o
     @($governanceManifest.finalArchivedCheckConstraints | ForEach-Object { "$($_.Table)|$($_.Name)" } | Sort-Object -Unique).Count -ne 675 -or
     [int]$governanceManifest.staticallyValidatedColumnReferenceCount -ne 16212) {
     throw 'Archived governance manifest lacks exact model and active non-model trigger coverage.'
+}
+$missingCurrentModelTriggers = @($baselineModelTriggerNames | Where-Object {
+    $currentModelTriggerNames -cnotcontains $_
+})
+if ($missingCurrentModelTriggers.Count -ne 0) {
+    throw "The current model snapshot dropped baseline trigger annotations: $($missingCurrentModelTriggers -join ',')."
 }
 $dispositions=@($governanceManifest.archivedTriggerDisposition)
 $expectedDispositions=[ordered]@{ACTIVE_NON_MODEL=92;CURRENT_MODEL=384;SEPARATE_FINANCE_AUTHORITY=10;SUPERSEDED_BY_EXACT_MODEL_ALIAS=2}
@@ -361,6 +440,20 @@ if ($GeneratedSqlPath) {
     }).Count -ne 0) {
         throw 'Generated zero-to-current SQL combines multiple trigger definitions in one executable batch.'
     }
+    $createdTablePositions = @{}
+    foreach ($createdTable in [regex]::Matches($generatedSql,
+        '(?im)^\s*CREATE\s+TABLE\s+(?:(?:\[dbo\]|dbo)\.)?\[(?<name>[^\]]+)\]')) {
+        $createdTablePositions[$createdTable.Groups['name'].Value] = $createdTable.Index
+    }
+    $lateForeignKeyPrincipals = @([regex]::Matches($generatedSql,
+        '(?im)\bREFERENCES\s+(?:(?:\[dbo\]|dbo)\.)?\[(?<name>[^\]]+)\]') | Where-Object {
+            $principalName = $_.Groups['name'].Value
+            $createdTablePositions.ContainsKey($principalName) -and
+            [int]$createdTablePositions[$principalName] -gt $_.Index
+        } | ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)
+    if ($lateForeignKeyPrincipals.Count -ne 0) {
+        throw "Generated zero-to-current SQL references principal tables before creation: $($lateForeignKeyPrincipals -join ',')."
+    }
     if ([regex]::Matches($generatedSql,'(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?FUNCTION\s+(?:\[dbo\]|dbo)\.(?:\[(?:InventoryAdjustmentExpectedLineValue|InventoryAdjustmentExpectedUnitCost|WorkflowApprovalEntityKey|WorkflowApprovalRequiredAtSubmission|fn_ProcurementRfqSourceLineIdentity)\]|(?:InventoryAdjustmentExpectedLineValue|InventoryAdjustmentExpectedUnitCost|WorkflowApprovalEntityKey|WorkflowApprovalRequiredAtSubmission|fn_ProcurementRfqSourceLineIdentity))').Count -ne 5 -or
         [regex]::Matches($generatedSql,'(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+\[dbo\]\.\[vw_ProcurementReceiptDocumentReconciliation\]').Count -ne 1 -or
         @($generatedBatches | Where-Object { $_ -match 'OBJECT_DEFINITION\s*\(' }).Count -ne 108 -or
@@ -383,7 +476,8 @@ if ($GeneratedSqlPath) {
     $grammarOutput | Where-Object { $_ -cmatch '^PASS:' } | ForEach-Object { Write-Host $_ }
 }
 
-Write-Host "PASS: exactly one compiled EF migration ($baselineId)"
+Write-Host "PASS: compiled EF migration chain starts at $baselineId and contains $($compiledMigrationIds.Count) unique ordered migrations"
+Write-Host 'PASS: exact 27 late-merged sources are preserved; 26 guarded bodies replay once after the baseline without original EF metadata'
 Write-Host 'PASS: complete 607-migration source chain retained as an uncompiled recoverable archive'
 Write-Host 'PASS: exact reviewed D3 migration/designer/snapshot hashes are preserved separately from the merged baseline'
 Write-Host 'PASS: zero-to-current Up has no predecessor-dependent drops/updates'

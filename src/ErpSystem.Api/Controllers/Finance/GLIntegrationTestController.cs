@@ -60,12 +60,39 @@ public class GLIntegrationTestController : ControllerBase
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
             // 1. Setup Master Data
-            var supplier = new Supplier 
-            { 
+            var supplier = new BusinessPartner
+            {
                 Id = Guid.NewGuid(),
-                Name = "Test AP Supplier", 
-                SupplierCode = "SUP-TEST-01",
-                TenantId = tenant.Id
+                PartnerName = "Test AP Supplier",
+                LegalName = "Test AP Supplier",
+                PartnerCode = "SUP-TEST-01",
+                PartnerType = "Supplier",
+                RegistrationStatus = "Approved",
+                ApprovalStatus = "Approved",
+                IsActive = true,
+                TenantId = tenant.Id,
+                Currency = baseCurrencyCode
+            };
+            var supplierRole = new BusinessPartnerRole
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenant.Id,
+                BusinessPartnerId = supplier.Id,
+                RoleType = BusinessPartnerRoleType.Supplier,
+                Status = BusinessPartnerRoleStatus.Active,
+                ActiveFromUtc = DateTime.UtcNow.Date
+            };
+            var supplierApProfile = new BusinessPartnerApProfileVersion
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenant.Id,
+                BusinessPartnerRoleId = supplierRole.Id,
+                VersionNumber = 1,
+                Status = BusinessPartnerFinanceProfileStatus.Approved,
+                EffectiveFrom = DateTime.UtcNow.Date,
+                SubjectToWithholding = false,
+                ApprovedAtUtc = DateTime.UtcNow,
+                ApprovedById = userId
             };
             var customer = new BusinessPartner
             { 
@@ -110,7 +137,9 @@ public class GLIntegrationTestController : ControllerBase
                 AverageCost = 50.0m
             };
 
-            await _context.Suppliers.AddAsync(supplier, cancellationToken);
+            await _context.BusinessPartners.AddAsync(supplier, cancellationToken);
+            await _context.Set<BusinessPartnerRole>().AddAsync(supplierRole, cancellationToken);
+            await _context.Set<BusinessPartnerApProfileVersion>().AddAsync(supplierApProfile, cancellationToken);
             await _context.BusinessPartners.AddAsync(customer, cancellationToken);
             await _context.InventoryCategories.AddAsync(category, cancellationToken);
             await _context.InventoryItems.AddAsync(inventoryItem, cancellationToken);
@@ -130,7 +159,12 @@ public class GLIntegrationTestController : ControllerBase
             // 2. AP Invoice (Inventory)
             var vendorInvoice = new VendorInvoice
             {
-                SupplierId = supplier.Id,
+                BusinessPartnerId = supplier.Id,
+                BusinessPartnerRoleId = supplierRole.Id,
+                BusinessPartnerApProfileVersionId = supplierApProfile.Id,
+                SupplierName = supplier.PartnerName,
+                BusinessPartnerCode = supplier.PartnerCode,
+                BusinessPartnerLegalName = supplier.LegalName,
                 InvoiceNumber = $"VINV-{DateTime.Now.Ticks}",
                 InvoiceDate = DateTime.UtcNow,
                 DueDate = DateTime.UtcNow.AddDays(30),
@@ -163,7 +197,7 @@ public class GLIntegrationTestController : ControllerBase
             // 3. AR Invoice (Inventory)
             var arInvoice = new Invoice
             {
-                CustomerId = customer.Id,
+                BusinessPartnerId = customer.Id,
                 InvoiceNumber = $"INV-{DateTime.Now.Ticks}",
                 InvoiceDate = DateTime.UtcNow,
                 DueDate = DateTime.UtcNow.AddDays(30),

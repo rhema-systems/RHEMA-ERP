@@ -112,9 +112,10 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
             VendorInvoiceMatchExceptionRules.CanDecide(active.Status))
         {
             var priorApprovers = await ApprovedActorIdsAsync(workflowId, cancellationToken);
+            var enforceSeparation = await new ProcurementSodPolicy(_unitOfWork).IsRequiredForSourceAsync(TenantId, "VendorInvoice", invoice.Id, cancellationToken);
             canDecide = canApproveApInvoices &&
-                        VendorInvoiceMatchExceptionRules.IsIndependent(
-                            ActorId, active.RequestedById, invoice.SubmittedById, priorApprovers) &&
+                        (!enforceSeparation || VendorInvoiceMatchExceptionRules.IsIndependent(
+                            ActorId, active.RequestedById, invoice.SubmittedById, priorApprovers)) &&
                         await _workflow.CanUserApproveAsync(
                             VendorInvoiceMatchExceptionRules.WorkflowEntityType,
                             active.Id,
@@ -220,7 +221,7 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
         }
 
         var invoice = await _db.VendorInvoices
-            .Include(item => item.Supplier)
+            .Include(item => item.BusinessPartner)
             .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == invoiceId && !item.IsDeleted,
                 cancellationToken)
             ?? throw NotFound("AP_INVOICE_NOT_FOUND", "The vendor invoice was not found in the current tenant.");
@@ -358,7 +359,8 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
         if (!item.WorkflowInstanceId.HasValue)
             throw Conflict("AP_MATCH_EXCEPTION_WORKFLOW_MISSING", "The exception has no shared workflow instance.");
         var priorApprovers = await ApprovedActorIdsAsync(item.WorkflowInstanceId.Value, cancellationToken);
-        if (!VendorInvoiceMatchExceptionRules.IsIndependent(
+        var enforceSeparation = await new ProcurementSodPolicy(_unitOfWork).IsRequiredForSourceAsync(TenantId, "VendorInvoice", item.VendorInvoiceId, cancellationToken);
+        if (enforceSeparation && !VendorInvoiceMatchExceptionRules.IsIndependent(
                 ActorId, item.RequestedById, item.VendorInvoice.SubmittedById, priorApprovers))
             throw Forbidden("AP_MATCH_EXCEPTION_SOD_BLOCKED",
                 "The requester, invoice processor, or a prior approver cannot decide this approval stage.");
@@ -382,10 +384,10 @@ public sealed class VendorInvoiceMatchExceptionService : IVendorInvoiceMatchExce
         {
             await RevalidateForFinalApprovalAsync(item, cancellationToken);
             var approvedActors = await ApprovedActorIdsAsync(item.WorkflowInstanceId.Value, cancellationToken);
-            if (approvedActors.Distinct().Count() < 2 || approvedActors.Any(actor =>
+            if (enforceSeparation && (approvedActors.Distinct().Count() < 2 || approvedActors.Any(actor =>
                     !VendorInvoiceMatchExceptionRules.IsIndependent(
                         actor, item.RequestedById, item.VendorInvoice.SubmittedById,
-                        approvedActors.Where(other => other != actor))))
+                        approvedActors.Where(other => other != actor)))))
                 throw Conflict("AP_MATCH_EXCEPTION_DUAL_APPROVAL_MISSING",
                     "Two distinct independent shared-workflow approvers are required.");
             var approvalEvent = await RecordEventAsync(item,

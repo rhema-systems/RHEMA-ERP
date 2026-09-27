@@ -14,6 +14,7 @@ interface InvoiceThreeWayMatchControlProps {
     invoiceId: string;
     canEvaluate: boolean;
     initialReadiness?: InvoiceMatchingResult;
+    compact?: boolean;
 }
 
 export const invoiceThreeWayMatchQueryKey = (invoiceId: string) =>
@@ -23,6 +24,7 @@ export function InvoiceThreeWayMatchControl({
     invoiceId,
     canEvaluate,
     initialReadiness,
+    compact = false,
 }: InvoiceThreeWayMatchControlProps) {
     const queryClient = useQueryClient();
     const readiness = useQuery({
@@ -73,11 +75,11 @@ export function InvoiceThreeWayMatchControl({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <CardTitle className="flex items-center gap-2 text-lg">
-                            <ShieldCheck className="h-5 w-5" /> Mandatory three-way matching
+                            <ShieldCheck className="h-5 w-5" /> {compact ? 'Invoice matching' : 'Mandatory three-way matching'}
                         </CardTitle>
-                        <CardDescription>
+                        {!compact && <CardDescription>
                             Invoice, purchase-order price, and independently accepted receipt quantity must agree before approval.
-                        </CardDescription>
+                        </CardDescription>}
                     </div>
                     <div className="flex items-center gap-2">
                         <Badge className={result.approvalReady ? 'bg-green-600' : 'bg-amber-600'}>
@@ -104,13 +106,13 @@ export function InvoiceThreeWayMatchControl({
                 </div>
             </CardHeader>
             <CardContent className="space-y-4">
-                <Alert variant={result.approvalReady ? 'default' : 'destructive'}>
+                {(!compact || !result.approvalReady) && <Alert variant={result.approvalReady ? 'default' : 'destructive'}>
                     {result.approvalReady
                         ? <CheckCircle2 className="h-4 w-4" />
                         : <AlertCircle className="h-4 w-4" />}
-                    <AlertTitle>{result.approvalReady ? 'Control passed' : 'Hard stop active'}</AlertTitle>
+                    <AlertTitle>{result.approvalReady ? 'Control passed' : compact ? 'Matching needs attention' : 'Hard stop active'}</AlertTitle>
                     <AlertDescription>{result.message}</AlertDescription>
-                </Alert>
+                </Alert>}
 
                 <div className="grid gap-3 text-sm sm:grid-cols-3">
                     <div className="rounded-md border p-3">
@@ -121,14 +123,14 @@ export function InvoiceThreeWayMatchControl({
                         <div className="text-xs text-muted-foreground">Cumulative quantity tolerance</div>
                         <div className="font-semibold">{result.quantityTolerancePercentage}%</div>
                     </div>
-                    <div className="rounded-md border p-3">
+                    {!compact && <div className="rounded-md border p-3">
                         <div className="text-xs text-muted-foreground">Configuration lineage</div>
                         <div className="font-semibold">
                             {result.configurationProfileCode
                                 ? `${result.configurationProfileCode} v${result.configurationProfileVersion}`
                                 : 'Not resolved'}
                         </div>
-                    </div>
+                    </div>}
                 </div>
 
                 {result.checks.length > 0 && (
@@ -167,15 +169,15 @@ export function InvoiceThreeWayMatchControl({
                                 </div>
                             </div>
                         ))}
-                        <p className="text-xs text-muted-foreground">
+                        {!compact && <p className="text-xs text-muted-foreground">
                             This control consumes only a current, independently approved AP-006 exception. Exception request and approval remain part of TDC-0507.
-                        </p>
+                        </p>}
                     </div>
                 )}
 
-                <div className="flex flex-wrap gap-1" aria-label="Decision register lineage">
+                {!compact && <div className="flex flex-wrap gap-1" aria-label="Decision register lineage">
                     {result.decisionKeys.map((key) => <Badge key={key} variant="outline">{key}</Badge>)}
-                </div>
+                </div>}
             </CardContent>
         </Card>
     );

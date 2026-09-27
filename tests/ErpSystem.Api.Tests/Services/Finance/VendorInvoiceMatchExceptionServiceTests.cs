@@ -368,7 +368,7 @@ public sealed class VendorInvoiceMatchExceptionServiceTests
             Id = Guid.NewGuid(),
             TenantId = TenantId,
             InvoiceNumber = $"INV-{Guid.NewGuid():N}",
-            SupplierId = Guid.NewGuid(),
+            BusinessPartnerId = Guid.NewGuid(),
             SupplierName = "Test supplier",
             InvoiceDate = DateTime.UtcNow,
             DueDate = DateTime.UtcNow.AddDays(30),

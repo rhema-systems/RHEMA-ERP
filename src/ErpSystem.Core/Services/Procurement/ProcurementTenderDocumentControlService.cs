@@ -979,7 +979,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 ?? throw NotFound("TENDER_DOCUMENT_RECIPIENT_NOT_FOUND",
                     "The supplier was not found in the current tenant.");
             if (!partner.IsActive || partner.IsBlacklisted ||
-                partner.PartnerType is not ("Supplier" or "Contractor" or "Both"))
+                !BusinessPartnerRoles.CanProcure(partner.PartnerType))
                 throw Validation("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE",
                     "The selected business partner is not an active eligible supplier.");
             // Access to an open NCT document is not a supplier invitation, bid qualification,
@@ -1016,7 +1016,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             var recipientName = request.RecipientName.Trim().ToLowerInvariant();
             var matchesSavedSupplier = await BusinessPartners.GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
-                    (item.PartnerType == "Supplier" || item.PartnerType == "Contractor" || item.PartnerType == "Both"))
+                    BusinessPartnerRoles.ProcurementTypes.Contains(item.PartnerType))
                 .AnyAsync(item => item.PartnerName.Trim().ToLower() == recipientName ||
                     (item.PrimaryEmail != null && item.PrimaryEmail.Trim().ToLower() == recipientEmail) ||
                     item.Contacts.Any(contact => !contact.IsDeleted && contact.TenantId == _currentUser.TenantId &&
@@ -1980,9 +1980,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                      BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
                  item.BusinessPartner.RegistrationStatus ==
                      BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
-                (item.BusinessPartner.PartnerType == "Supplier" ||
-                 item.BusinessPartner.PartnerType == "Contractor" ||
-                 item.BusinessPartner.PartnerType == "Both"))
+                BusinessPartnerRoles.ProcurementTypes.Contains(item.BusinessPartner.PartnerType))
             .Select(item => item.BusinessPartnerId).ToListAsync(cancellationToken)).ToHashSet();
     }
 
@@ -1999,9 +1997,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                      BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
                  item.BusinessPartner.RegistrationStatus ==
                      BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
-                (item.BusinessPartner.PartnerType == "Supplier" ||
-                 item.BusinessPartner.PartnerType == "Contractor" ||
-                 item.BusinessPartner.PartnerType == "Both"))
+                BusinessPartnerRoles.ProcurementTypes.Contains(item.BusinessPartner.PartnerType))
             .AnyAsync(cancellationToken);
 
     private async Task<(ProcurementPolicySet Policy, ProcurementConfigurationProfile Profile)>

@@ -3,7 +3,7 @@ import type { VendorInvoice } from '@/types/ap';
 
 export interface LandedCostInvoiceRequest {
   invoiceDate: string;
-  charges: Array<{ costItemId: string; supplierId: string; supplierInvoiceNumber: string;
+  charges: Array<{ costItemId: string; businessPartnerId: string; businessPartnerRoleId?: string; supplierInvoiceNumber: string;
     taxTreatment?: number; taxGroupId?: string }>;
 }
 export interface LandedCostPostResult {
@@ -11,8 +11,8 @@ export interface LandedCostPostResult {
 }
 
 export const landedCostInvoiceService = {
-  post(voucherId: string, data: LandedCostInvoiceRequest) {
-    return apiService.post<LandedCostPostResult>(`/inventory/landed-costs/${voucherId}/post`, data);
+  prepare(voucherId: string, data: LandedCostInvoiceRequest) {
+    return apiService.post<LandedCostPostResult>(`/inventory/landed-costs/${voucherId}/prepare-invoices`, data);
   },
   create(voucherId: string, data: LandedCostInvoiceRequest) {
     return apiService.post<VendorInvoice[]>(`/ap/invoices/from-landed-cost/${voucherId}`, data);

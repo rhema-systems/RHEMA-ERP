@@ -48,7 +48,7 @@ describe('saved award verification status', () => {
     expect(screen.getByText('Verification completed · read-only')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Verify Bidder' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Complete Verification' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Pass', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Pass' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Attach evidence' })).toBeDisabled();
     expect(screen.getByRole('textbox', { name: 'Review comments (optional)' })).toBeDisabled();
     expect(screen.getByRole('textbox', { name: 'Review comments (optional)' })).toHaveValue('Saved evidence reference');
@@ -64,14 +64,14 @@ describe('saved award verification status', () => {
     await screen.findByText('1 bidder(s) remaining');
     expect(screen.queryByText('All bidders verified!')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Complete Verification' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Award', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Award' })).not.toBeInTheDocument();
   });
 
   it('locks a cancelled review even when its bidder is pending', async () => {
     mocks.load.mockResolvedValue(record('Cancelled', 'Pending'));
     render(<AwardVerificationDialog {...props} />);
     await screen.findByText('Verification cancelled · read-only');
-    expect(screen.getByRole('button', { name: 'Pass', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Pass' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Verify Bidder' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Complete Verification' })).not.toBeInTheDocument();
   });
@@ -92,7 +92,7 @@ describe('saved award verification status', () => {
     mocks.verify.mockResolvedValue(record('InProgress', 'Failed').bidders[0]);
     render(<AwardVerificationDialog {...props} />);
     await screen.findByText('1 bidder(s) remaining');
-    fireEvent.click(screen.getByRole('button', { name: 'Fail', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fail' }));
     fireEvent.click(screen.getByRole('button', { name: 'Verify Bidder' }));
     await waitFor(() => expect(mocks.verify).toHaveBeenCalledTimes(1));
     expect(await screen.findAllByText('Failed', { exact: true })).toHaveLength(2);
@@ -121,7 +121,7 @@ describe('saved award verification status', () => {
     await screen.findByText('1 bidder(s) remaining');
     expect(screen.getByRole('textbox', { name: 'Review comments (optional)' })).toHaveValue(comments);
     expect(screen.getByText('Comments and attachments are optional. Click Verify Bidder to save your decisions.')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Pass', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pass' }));
     fireEvent.click(screen.getByRole('button', { name: 'Verify Bidder' }));
     await screen.findByText('All bidders verified!');
     expect(mocks.verify).toHaveBeenCalledWith('verification-1', expect.objectContaining({
@@ -150,7 +150,7 @@ describe('saved award verification status', () => {
     mocks.load.mockResolvedValue(data);
     render(<AwardVerificationDialog {...props} />);
     await screen.findByText('1 bidder(s) remaining');
-    fireEvent.click(screen.getByRole('button', { name: 'Pass', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pass' }));
     fireEvent.click(screen.getByRole('button', { name: 'Verify Bidder' }));
     expect(mocks.verify).not.toHaveBeenCalled();
     expect(screen.getByText('Document required: retain the supporting file for this check.')).toBeVisible();

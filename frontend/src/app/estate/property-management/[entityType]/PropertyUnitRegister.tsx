@@ -10,6 +10,7 @@ import {
   MapPin,
   RefreshCw,
   Search,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -24,7 +25,6 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import {
   Select,
   SelectContent,
@@ -47,6 +47,8 @@ import {
   EstateManagedAssetType,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
+import { useManagedAssetsPage } from './use-managed-assets-page';
+import { EstateAssetImportDialog } from './EstateAssetImportDialog';
 
 const statusLabels: Record<EstateManagedAssetStatus, string> = {
   [EstateManagedAssetStatus.LandBank]: 'Land bank',
@@ -71,6 +73,7 @@ const sourceLabels: Record<EstateManagedAssetSourceType, string> = {
   [EstateManagedAssetSourceType.Manual]: 'Estate records',
   [EstateManagedAssetSourceType.LandAcquisition]: 'Land acquisition',
   [EstateManagedAssetSourceType.ProjectUnit]: 'Project unit',
+  [EstateManagedAssetSourceType.Imported]: 'Excel import',
 };
 
 function formatArea(asset: EstateManagedAsset) {
@@ -126,51 +129,45 @@ function getCurrentLesseeOrOwner(asset: EstateManagedAsset) {
 
 export function PropertyUnitRegister() {
   const router = useRouter();
-  const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [searchDraft, setSearchDraft] = React.useState('');
   const [search, setSearch] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('all');
   const [statusFilter, setStatusFilter] = React.useState('all');
-  const [isLoading, setIsLoading] = React.useState(true);
   const [sendingListingId, setSendingListingId] = React.useState<string | null>(
     null
   );
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-  const assetPages = usePaginatedItems(assets, 10);
-
-  const loadAssets = React.useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      setAssets(
-        await estateLandManagementService.getManagedAssets({
-          search: search || undefined,
-          assetType:
-            typeFilter === 'all'
-              ? undefined
-              : (Number(typeFilter) as EstateManagedAssetType),
-          status:
-            statusFilter === 'all'
-              ? undefined
-              : (Number(statusFilter) as EstateManagedAssetStatus),
-          take: 500,
-        })
-      );
-    } catch {
-      setAssets([]);
-      setLoadError('Unable to load the Property and Unit Register.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [search, statusFilter, typeFilter]);
+  const [importOpen, setImportOpen] = React.useState(false);
 
   React.useEffect(() => {
-    void loadAssets();
-  }, [loadAssets]);
+    if (new URLSearchParams(window.location.search).get('import') === 'land') setImportOpen(true);
+  }, []);
+  const {
+    assets,
+    page,
+    setPage,
+    isLoading,
+    loadError,
+    loadAssets,
+    pageSize,
+    totalPages,
+    totalItems,
+  } = useManagedAssetsPage({
+    search: search || undefined,
+    assetType:
+      typeFilter === 'all'
+        ? undefined
+        : (Number(typeFilter) as EstateManagedAssetType),
+    status:
+      statusFilter === 'all'
+        ? undefined
+        : (Number(statusFilter) as EstateManagedAssetStatus),
+    errorMessage: 'Unable to load the Property and Unit Register.',
+  });
 
   const clearFilters = () => {
     setSearchDraft('');
     setSearch('');
+    setPage(1);
     setTypeFilter('all');
     setStatusFilter('all');
   };
@@ -182,9 +179,7 @@ export function PropertyUnitRegister() {
       setSendingListingId(asset.id);
       if (asset.externalListingType === 'None') {
         const listingType =
-          asset.isAvailableForSale && asset.isAvailableForLease
-            ? 'SaleAndRent'
-            : asset.isAvailableForSale
+          asset.isAvailableForSale
               ? 'Sale'
               : 'Rent';
         await estateLandManagementService.updateExternalListing(asset.id, {
@@ -260,13 +255,19 @@ export function PropertyUnitRegister() {
                 assignment and commercial terms are managed in Lease Management.
               </CardDescription>
             </div>
-            <Badge variant="outline">Estates Records</Badge>
+            <div className="flex items-center gap-2">
+              <Button type="button" onClick={() => setImportOpen(true)}>
+                <Upload className="mr-2 h-4 w-4" /> Import Excel
+              </Button>
+              <Badge variant="outline">Estates Records</Badge>
+            </div>
           </div>
 
           <form
             className="grid gap-2 lg:grid-cols-[minmax(16rem,1fr)_13rem_13rem_auto]"
             onSubmit={(event) => {
               event.preventDefault();
+              setPage(1);
               setSearch(searchDraft.trim());
             }}
           >
@@ -280,7 +281,7 @@ export function PropertyUnitRegister() {
                 aria-label="Search the Property and Unit Register"
               />
             </div>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <Select value={typeFilter} onValueChange={(value) => { setPage(1); setTypeFilter(value); }}>
               <SelectTrigger aria-label="Filter by record type">
                 <SelectValue placeholder="All record types" />
               </SelectTrigger>
@@ -293,7 +294,7 @@ export function PropertyUnitRegister() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(value) => { setPage(1); setStatusFilter(value); }}>
               <SelectTrigger aria-label="Filter by status">
                 <SelectValue placeholder="All statuses" />
               </SelectTrigger>
@@ -362,14 +363,14 @@ export function PropertyUnitRegister() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {assetPages.items.map((asset) => {
+                  {assets.map((asset) => {
                     const lesseeOrOwner = getCurrentLesseeOrOwner(asset);
                     const isPortalListing =
                       asset.externalListingType !== 'None';
                     const canSendProjectProperty =
-                      asset.sourceType ===
-                        EstateManagedAssetSourceType.ProjectUnit &&
-                      asset.isPublishedFromProject &&
+                      (asset.sourceType === EstateManagedAssetSourceType.Imported ||
+                        (asset.sourceType === EstateManagedAssetSourceType.ProjectUnit &&
+                          asset.isPublishedFromProject)) &&
                       asset.status === EstateManagedAssetStatus.Available &&
                       (asset.assetType === EstateManagedAssetType.Property ||
                         asset.assetType === EstateManagedAssetType.Facility);
@@ -488,9 +489,10 @@ export function PropertyUnitRegister() {
               </Table>
             </div>
           ) : null}
-          {assets.length > assetPages.pageSize ? <Pagination currentPage={assetPages.currentPage} totalPages={assetPages.totalPages} totalItems={assetPages.totalItems} pageSize={assetPages.pageSize} onPageChange={assetPages.setCurrentPage} /> : null}
+          {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
         </CardContent>
       </Card>
+      <EstateAssetImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={() => void loadAssets()} />
     </div>
   );
 }

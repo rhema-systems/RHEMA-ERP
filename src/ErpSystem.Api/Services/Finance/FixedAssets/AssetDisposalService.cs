@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
@@ -763,7 +764,7 @@ public class AssetDisposalService : IAssetDisposalService
         }).ToArray();
         var invoiceRequest = new InvoiceCreateDto
         {
-            CustomerId = disposal.BuyerBusinessPartnerId.Value,
+            BusinessPartnerId = disposal.BuyerBusinessPartnerId.Value,
             InvoiceDate = disposal.DisposalDate.Date,
             DueDate = disposal.SettlementMode == AssetDisposalSettlementMode.ImmediateReceipt
                 ? disposal.DisposalDate.Date
@@ -807,7 +808,7 @@ public class AssetDisposalService : IAssetDisposalService
 
         var receiptRequest = new PaymentCreateDto
         {
-            CustomerId = disposal.BuyerBusinessPartnerId.Value,
+            BusinessPartnerId = disposal.BuyerBusinessPartnerId.Value,
             PaymentDate = disposal.DisposalDate.Date,
             TotalAmount = invoice.TotalAmount,
             PaymentMethod = "Configured",
@@ -1091,7 +1092,7 @@ public class AssetDisposalService : IAssetDisposalService
                 && item.Id == dto.BuyerBusinessPartnerId.Value
                 && !item.IsDeleted
                 && item.IsActive
-                && (item.PartnerType == "Customer" || item.PartnerType == "Both"));
+                && BusinessPartnerRoles.CustomerTypes.Contains(item.PartnerType));
         if (buyer == null)
         {
             throw new InvalidOperationException("The selected disposal buyer must be an active same-tenant customer/business partner.");
@@ -2044,7 +2045,7 @@ public class AssetDisposalService : IAssetDisposalService
 
         return new ProceedsExchangeRateSnapshot(
             rate.Id,
-            rate.Rate,
+            rate.InverseRate,
             rate.RateSource,
             rate.EffectiveDate.Date,
             rate.RateType,

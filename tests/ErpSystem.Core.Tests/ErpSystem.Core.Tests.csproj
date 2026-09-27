@@ -162,6 +162,8 @@
     <Compile Include="Services\Inventory\InventoryTrackingControlServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDirectedOperationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryIssueControlTests.cs" />
+    <Compile Include="Services\Inventory\InventoryIssueReceiptTests.cs" />
+    <Compile Include="Services\Inventory\InventoryGlobalSearchTests.cs" />
     <Compile Include="Services\Inventory\InventoryIssueValuationTests.cs" />
     <Compile Include="Services\Inventory\InventoryCurrentCostProjectionTests.cs" />
     <Compile Include="Services\Inventory\InventoryTransferValuationTests.cs" />
@@ -194,6 +196,10 @@
     <Compile Include="Services\Inventory\StockAdjustmentCountFreezeOrderingTests.cs" />
     <Compile Include="Services\Inventory\StockAdjustmentDirectDisposalSourceTests.cs" />
     <Compile Include="Services\Finance\FinanceProducerApprovedExecutionContractTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260913090000_BusinessPartnerWithholdingTaxDefault.cs" Link="ArchivedMigrationTestSources\20260913090000_BusinessPartnerWithholdingTaxDefault.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">

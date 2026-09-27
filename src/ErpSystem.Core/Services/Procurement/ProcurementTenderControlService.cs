@@ -489,8 +489,9 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         if (!participants.Any(item => item.UserId == _currentUser.UserId) ||
             participants.Any(item => string.IsNullOrWhiteSpace(item.Role) || string.IsNullOrWhiteSpace(item.SignatureReference)))
             throw Validation("TENDER_OPENING_SIGNATURES_REQUIRED", "Every participant must sign, and the current opening officer must be included.");
-        if (participants.Where(item => item.UserId.HasValue).GroupBy(item => item.UserId).Any(group => group.Count() > 1) ||
-            participants.GroupBy(item => item.Name.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+        if (await _unitOfWork.IsProcurementSodEnabledAsync(_currentUser.TenantId, cancellationToken) &&
+            (participants.Where(item => item.UserId.HasValue).GroupBy(item => item.UserId).Any(group => group.Count() > 1) ||
+             participants.GroupBy(item => item.Name.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1)))
             throw Validation("TENDER_OPENING_PARTICIPANT_DUPLICATE", "Opening participants cannot be duplicated.");
         Require(request.EvidenceReference, "TENDER_OPENING_EVIDENCE_REQUIRED", "Public-opening evidence is required.");
 
@@ -693,7 +694,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             {
                 var separation = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
                 {
-                    ControlCode = "SOD-TENDER-TECHNICAL-FINANCIAL-EVALUATOR",
+                    ControlCode = "SOD-INITIATOR-APPROVER",
                     SourceType = SourceType,
                     SourceReference = control.Tender.TenderNumber,
                     ProhibitedActorUserIds = technicalEvaluators
@@ -913,7 +914,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         {
             var sod = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
             {
-                ControlCode = "SOD-TENDER-EVALUATOR-AWARD-APPROVER",
+                ControlCode = "SOD-EVALUATOR-AWARD-APPROVER",
                 SourceType = ApprovalSourceType,
                 SourceReference = control.Tender.TenderNumber,
                 ProhibitedActorUserIds = prohibited.ToList()

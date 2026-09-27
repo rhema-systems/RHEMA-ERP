@@ -35,13 +35,99 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class ArCreditNotePostingMigrationTests
 {
-    [Fact]
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
-    public async Task GovernedSalesCreditNote_PreparesNeutralIntentWithoutAutoApprovalOrOwnerMutation()
+    public async Task CreditNote_UsesOriginalInvoiceControlOrCentralStandaloneControl_IgnoresLegacyPartnerDefault(bool linked)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var replacement = SeedAccount(db, tenantId, "1201", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var legacy = SeedAccount(db, tenantId, "1202", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        fixture.Settings.ControlAccountArId = replacement.Id;
+        fixture.BusinessPartner.DefaultArAccountId = legacy.Id;
+        if (!linked) fixture.CreditNote.OriginalInvoiceId = null;
+        await db.SaveChangesAsync();
+        var producer = new Mock<IFinanceProducerIntentService>();
+        ProducerAccountingIntentDto? captured = null;
+        producer.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()))
+            .Callback<ProducerAccountingIntentDto, CancellationToken>((intent, _) => captured = intent)
+            .ReturnsAsync(new AccountingEventDto { Id = Guid.NewGuid(), Status = AccountingEventStatuses.PendingApproval,
+                ProducerDecisionStatus = ProducerIntentDecisionStatuses.Pending, RequestFingerprint = new string('A', 64) });
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, Mock.Of<IFinanceProducerApprovedExecutionService>());
+
+        await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        captured.Should().NotBeNull();
+        captured!.PostingRequest.Lines.Single(x => x.TransactionTag == "AR-Control").AccountId
+            .Should().Be(linked ? fixture.ArAccount.Id : replacement.Id);
+        captured.PostingRequest.Lines.Should().NotContain(x => x.AccountId == legacy.Id);
+    }
+
+    [Theory]
+    [InlineData("missing-line")]
+    [InlineData("duplicate-line")]
+    [InlineData("cross-tenant-line")]
+    [InlineData("reversed-journal")]
+    [InlineData("wrong-source-journal")]
+    [InlineData("wrong-posting-event")]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task LinkedCreditNote_RejectsIncompleteOrAmbiguousOriginalControlEvidence(string defect)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var line = await db.AccountTransactions.SingleAsync(x => x.JournalEntryId == fixture.Invoice.JournalEntryId);
+        var journal = await db.JournalEntries.SingleAsync(x => x.Id == fixture.Invoice.JournalEntryId);
+        switch (defect)
+        {
+            case "missing-line": db.AccountTransactions.Remove(line); break;
+            case "duplicate-line": db.AccountTransactions.Add(new AccountTransaction
+                { Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryId = journal.Id, AccountId = line.AccountId,
+                    AccountingBookId = line.AccountingBookId, FiscalPeriodId = line.FiscalPeriodId,
+                    PostingStatus = "Posted", TransactionTag = "AR-Control", DebitAmount = 1m }); break;
+            case "cross-tenant-line": line.TenantId = Guid.NewGuid(); break;
+            case "reversed-journal": journal.IsReversed = true; break;
+            case "wrong-source-journal": journal.SourceDocumentId = Guid.NewGuid(); break;
+            case "wrong-posting-event": (await db.FinancePostingEvents.SingleAsync()).JournalEntryId = Guid.NewGuid(); break;
+        }
+        await db.SaveChangesAsync();
+        var producer = new Mock<IFinanceProducerIntentService>();
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object);
+        var before = await CapturePostingSideEffectsAsync(db);
+
+        Func<Task> post = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>();
+
+        producer.VerifyNoOtherCalls();
+        execution.VerifyNoOtherCalls();
+        await AssertPostingSideEffectsUnchangedAsync(db, before,
+            expectedFailureAuditTenantId: tenantId,
+            expectedFailureAuditCreditNoteId: fixture.CreditNote.Id);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task GovernedSalesCreditNote_PreparesNeutralIntentWithoutAutoApprovalOrOwnerMutation(bool customerAccount)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, taxAmount: 20m);
+        var returnsAccountId = fixture.SalesReturnsAccount.Id;
+        if (customerAccount)
+        {
+            var returnsAccount = SeedAccount(db, tenantId, "CUSTOMER-RETURNS", AccountType.Expense);
+            returnsAccountId = returnsAccount.Id;
+            await db.SaveChangesAsync();
+            var saved = await CustomerPostingSettingsFixture.SaveAndReloadAsync(db, tenantId, fixture.BusinessPartner.Id,
+                new() { SalesReturnsAccountId = returnsAccount.Id });
+            saved.SalesReturnsAccountId.Should().Be(returnsAccount.Id);
+        }
         var producer = new Mock<IFinanceProducerIntentService>();
         var execution = new Mock<IFinanceProducerApprovedExecutionService>();
         var reversal = new Mock<IFinanceProducerReversalPreparationService>();
@@ -62,6 +148,7 @@ public sealed class ArCreditNotePostingMigrationTests
         captured.PostingRequest.PostingAction.Should().Be("Post");
         captured.PostingRequest.IdempotencyKey.Should().Be($"AR:SalesCreditNote:{tenantId:N}:{fixture.CreditNote.Id:N}:Post");
         captured.PostingRequest.Lines.Should().HaveCount(3);
+        captured.PostingRequest.Lines.Should().Contain(line => line.AccountId == returnsAccountId && line.DebitAmount == 100m);
         captured.PostingRequest.Lines.Sum(line => line.DebitAmount).Should().Be(120m);
         captured.PostingRequest.Lines.Sum(line => line.CreditAmount).Should().Be(120m);
         result.JournalEntryId.Should().BeNull();
@@ -546,7 +633,8 @@ public sealed class ArCreditNotePostingMigrationTests
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherAr = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
-        fixture.BusinessPartner.DefaultArAccountId = otherAr.Id;
+        var originalControl = await db.AccountTransactions.SingleAsync(t => t.JournalEntryId == fixture.Invoice.JournalEntryId);
+        originalControl.AccountId = otherAr.Id;
         await db.SaveChangesAsync();
         var governed = CreateApprovedGovernedProducerMock(db, tenantId);
         var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
@@ -793,7 +881,7 @@ public sealed class ArCreditNotePostingMigrationTests
 
         var act = () => service.CreateCreditNoteAsync(new CreditNoteCreateDto
         {
-            CustomerId = fixture.BusinessPartner.Id,
+            BusinessPartnerId = fixture.BusinessPartner.Id,
             CreditNoteDate = new DateTime(2026, 7, 5),
             Amount = 100m,
             Reason = "Commercial credit memo",
@@ -1467,7 +1555,7 @@ public sealed class ArCreditNotePostingMigrationTests
         {
             Id = Guid.NewGuid(),
             TenantId = fixture.CreditNote.TenantId,
-            CustomerId = fixture.Invoice.BusinessPartnerId,
+            BusinessPartnerId = fixture.Invoice.BusinessPartnerId,
             PaymentNumber = "CP-2026-00001",
             PaymentDate = fixture.CreditNote.DocumentDate,
             TotalAmount = amount,
@@ -1701,6 +1789,13 @@ public sealed class ArCreditNotePostingMigrationTests
 
         db.Invoices.Add(invoice);
         db.JournalEntries.Add(invoiceJournal);
+        db.AccountTransactions.Add(new AccountTransaction
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, JournalEntryId = invoiceJournal.Id,
+            AccountId = arAccount.Id, AccountingBookId = book.Id, FiscalPeriodId = fiscalPeriodId,
+            TransactionDate = invoiceDate, PostingStatus = "Posted", TransactionTag = "AR-Control",
+            DebitAmount = amount, SourceDocumentId = invoice.Id, SourceDocumentType = "CustomerInvoice"
+        });
 
         if (seedPostingEvent)
         {

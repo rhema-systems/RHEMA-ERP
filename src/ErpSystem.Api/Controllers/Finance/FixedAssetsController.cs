@@ -54,6 +54,11 @@ public class FixedAssetsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("search")]
+    public async Task<ActionResult<IReadOnlyList<FinanceRecordSearchDto>>> Search(
+        [FromQuery] string? search = null, [FromQuery] int take = 5, CancellationToken cancellationToken = default)
+        => Ok(await _fixedAssetService.SearchAsync(search, take, cancellationToken));
+
     /// <summary>
     /// Returns active, tenant-scoped HR/Payroll organization locations through a Finance-owned
     /// read-only contract for fixed-asset forms.

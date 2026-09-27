@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -20,6 +21,12 @@ public sealed class InventoryDisposalsController : ControllerBase
         _service = service;
         _logger = logger;
     }
+
+    [HttpGet("search")]
+    public Task<ActionResult<IReadOnlyList<InventoryDisposalDto>>> Search(
+        [FromQuery] string search, [FromQuery] int take = 8, CancellationToken cancellationToken = default) =>
+        ExecuteAsync<IReadOnlyList<InventoryDisposalDto>>(async () =>
+            Ok(await _service.SearchAsync(search, take, cancellationToken)));
 
     [HttpGet]
     public Task<ActionResult<IReadOnlyList<InventoryDisposalDto>>> Get(
@@ -121,6 +128,11 @@ public sealed class InventoryDisposalsController : ControllerBase
         catch (InventoryNegativeStockControlException exception)
         {
             return UnprocessableEntity(Problem(exception.Code, exception.Message));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return StatusCode(StatusCodes.Status409Conflict,
+                Problem("INV_DISPOSAL_CONCURRENCY", "This disposal was updated after the dialog was opened. Refresh the record and try again."));
         }
         catch (InvalidOperationException exception)
         {

@@ -72,6 +72,7 @@ export interface ItemUnitOfMeasureDto {
   isBaseUnit: boolean;
   isPurchaseUnit: boolean;
   isSalesUnit: boolean;
+  isStockingUnit: boolean;
   barcode?: string;
 }
 
@@ -179,6 +180,7 @@ export interface InventoryItemDto {
   lastPurchaseCost: number;
   sellingPrice: number;
   weight?: number;
+  weightUnit?: string;
   isSerialTracked: boolean;
   isLotTracked: boolean;
   isBatchTracked: boolean;
@@ -336,6 +338,7 @@ export interface CreateInventoryItemDto {
 
   // Physical Properties
   weight?: number;
+  weightUnit?: string;
   shippingWeight: number;
   length?: number;
   width?: number;
@@ -620,6 +623,8 @@ export interface LandedCostDto {
 }
 
 export interface LandedCostItemDto {
+  supplierDocumentId?: string | null;
+  supplierDocumentNumber?: string | null;
   invoiceDate?: string | null;
   invoiceId?: string | null;
   invoiceNumber?: string | null;
@@ -648,6 +653,8 @@ export interface LandedCostAllocationDto {
 }
 
 export interface LandedCostDetailDto extends LandedCostDto {
+  receiptWeights?: Array<{ goodsReceiptNoteItemId: string; itemCode: string; itemName: string; stockUom: string;
+    receiptUnitWeightKg?: number | null; unitWeightKg?: number | null; isOverridden: boolean; reason?: string | null }>;
   purchaseOrderId?: string | null;
   receiptId: string;
   editToken: string;
@@ -719,6 +726,10 @@ export interface GoodsReceiptNoteDetailDto extends GoodsReceiptNoteDto {
 }
 
 export interface GoodsReceiptNoteItemDto {
+  unitWeightKg?: number;
+  weightStockUom?: string;
+  weightOverridden?: boolean;
+
   id: string;
   inventoryItemId: string;
   itemCode?: string;
@@ -753,6 +764,8 @@ export interface CreateGoodsReceiptNoteDto {
 }
 
 export interface CreateGoodsReceiptNoteItemDto {
+  unitWeightKg?: number;
+
   purchaseOrderItemId: string;
   inventoryItemId: string;
   orderedQuantity: number;
@@ -1912,6 +1925,11 @@ class InventoryManagementService {
     const response = await axios.get(`${API_URL}/inventory/landed-costs/${id}`, {
       headers: this.getAuthHeaders()
     });
+    return response.data;
+  }
+
+  async setLandedCostReceiptWeight(id: string, itemId: string, value: { unitWeightKg: number; reason: string; editToken: string }): Promise<LandedCostDetailDto> {
+    const response = await axios.put(`${API_URL}/inventory/landed-costs/${id}/receipt-weights/${itemId}`, value, { headers: this.getAuthHeaders() });
     return response.data;
   }
 

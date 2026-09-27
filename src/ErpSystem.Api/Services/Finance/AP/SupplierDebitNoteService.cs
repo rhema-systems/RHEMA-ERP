@@ -7,6 +7,7 @@ using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -38,7 +39,6 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
     private readonly IFinancePostingEngine _posting;
     private readonly IFinanceAuditService _audit;
     private readonly ITaxCalculationEngine _taxEngine;
-    private readonly IApSupplierIdentityService _supplierIdentity;
     private readonly ILogger<SupplierDebitNoteService> _logger;
     private readonly IFinanceSourceDimensionService? _sourceDimensions;
 
@@ -51,7 +51,6 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         IFinancePostingEngine posting,
         IFinanceAuditService audit,
         ITaxCalculationEngine taxEngine,
-        IApSupplierIdentityService supplierIdentity,
         ILogger<SupplierDebitNoteService> logger,
         IFinanceSourceDimensionService? sourceDimensions = null)
     {
@@ -63,7 +62,6 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         _posting = posting;
         _audit = audit;
         _taxEngine = taxEngine;
-        _supplierIdentity = supplierIdentity;
         _logger = logger;
         _sourceDimensions = sourceDimensions;
     }
@@ -81,8 +79,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             notes = notes.Where(item => item.InventoryPurchaseReturnId == query.InventoryPurchaseReturnId.Value);
         if (query.VendorId.HasValue)
             notes = notes.Where(item => item.VendorId == query.VendorId.Value);
-        if (query.SupplierId.HasValue)
-            notes = notes.Where(item => item.SupplierId == query.SupplierId.Value);
+        if (query.BusinessPartnerId.HasValue)
+            notes = notes.Where(item => item.VendorId == query.BusinessPartnerId.Value);
         if (query.OriginalVendorInvoiceId.HasValue)
             notes = notes.Where(item => item.OriginalVendorInvoiceId == query.OriginalVendorInvoiceId.Value);
         if (query.Status.HasValue)
@@ -180,8 +178,9 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
     {
         var tenantId = TenantId;
         var vendor = await GetVendorAsync(dto.VendorId, cancellationToken);
-        var identity = await _supplierIdentity.ResolveByBusinessPartnerAsync(vendor.Id, cancellationToken);
-        var invoice = await ValidateInvoiceAsync(dto.OriginalVendorInvoiceId, identity.SupplierId, cancellationToken);
+        var apPartner = await ResolveCanonicalApPartnerAsync(
+            vendor, dto.BusinessPartnerRoleId, dto.DebitNoteDate, cancellationToken);
+        var invoice = await ValidateInvoiceAsync(dto.OriginalVendorInvoiceId, vendor.Id, cancellationToken);
         await ValidateSupplierReferenceUniqueAsync(
             vendor.Id,
             dto.SupplierCreditNoteReference,
@@ -208,7 +207,12 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 cancellationToken: cancellationToken),
             SupplierCreditNoteReference = TrimToNull(dto.SupplierCreditNoteReference),
             VendorId = vendor.Id,
-            SupplierId = identity.SupplierId,
+            BusinessPartnerRoleId = apPartner.Role.Id,
+            BusinessPartnerApProfileVersionId = apPartner.Profile.Id,
+            BusinessPartnerCode = vendor.PartnerCode,
+            BusinessPartnerName = vendor.PartnerName,
+            BusinessPartnerLegalName = vendor.LegalName,
+            BusinessPartnerTaxIdentificationNumber = vendor.TaxIdentificationNumber,
             OriginalVendorInvoiceId = invoice?.Id,
             DebitNoteDate = debitNoteDate,
             Reason = RequiredText(dto.Reason, "Supplier debit note reason"),
@@ -314,8 +318,9 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         ApplyConcurrencyToken(note, dto.RowVersion);
         var before = Snapshot(note);
         var vendor = await GetVendorAsync(dto.VendorId, cancellationToken);
-        var identity = await _supplierIdentity.ResolveByBusinessPartnerAsync(vendor.Id, cancellationToken);
-        var invoice = await ValidateInvoiceAsync(dto.OriginalVendorInvoiceId, identity.SupplierId, cancellationToken);
+        var apPartner = await ResolveCanonicalApPartnerAsync(
+            vendor, dto.BusinessPartnerRoleId, dto.DebitNoteDate, cancellationToken);
+        var invoice = await ValidateInvoiceAsync(dto.OriginalVendorInvoiceId, vendor.Id, cancellationToken);
         await ValidateSupplierReferenceUniqueAsync(vendor.Id, dto.SupplierCreditNoteReference, note.Id, cancellationToken);
 
         var currency = NormalizeCurrency(dto.CurrencyCode, invoice?.CurrencyCode ?? note.CurrencyCode);
@@ -324,7 +329,12 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
 
         note.SupplierCreditNoteReference = TrimToNull(dto.SupplierCreditNoteReference);
         note.VendorId = vendor.Id;
-        note.SupplierId = identity.SupplierId;
+        note.BusinessPartnerRoleId = apPartner.Role.Id;
+        note.BusinessPartnerApProfileVersionId = apPartner.Profile.Id;
+        note.BusinessPartnerCode = vendor.PartnerCode;
+        note.BusinessPartnerName = vendor.PartnerName;
+        note.BusinessPartnerLegalName = vendor.LegalName;
+        note.BusinessPartnerTaxIdentificationNumber = vendor.TaxIdentificationNumber;
         note.OriginalVendorInvoiceId = invoice?.Id;
         note.DebitNoteDate = dto.DebitNoteDate == default ? note.DebitNoteDate : dto.DebitNoteDate.Date;
         note.Reason = RequiredText(dto.Reason, "Supplier debit note reason");
@@ -378,7 +388,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         {
             var invoice = await ValidateInvoiceAsync(
                 note.OriginalVendorInvoiceId,
-                note.SupplierId ?? throw new InvalidOperationException("Supplier debit note has no canonical AP supplier identity."),
+                note.VendorId,
                 cancellationToken);
             await ValidateLinkedInvoiceCreditLimitAsync(note, invoice, note.Id, cancellationToken);
             return await SubmitCoreAsync(note, producer, cancellationToken);
@@ -465,7 +475,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         {
             var invoice = await ValidateInvoiceAsync(
                 note.OriginalVendorInvoiceId,
-                note.SupplierId ?? throw new InvalidOperationException("Supplier debit note has no canonical AP supplier identity."),
+                note.VendorId,
                 cancellationToken);
             await ValidateLinkedInvoiceCreditLimitAsync(note, invoice, note.Id, cancellationToken);
             return await ProcessApprovalCoreAsync(note, dto, producer, cancellationToken);
@@ -571,7 +581,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 failedNote = note;
                 var invoice = await ValidateInvoiceAsync(
                     note.OriginalVendorInvoiceId,
-                    note.SupplierId ?? throw new InvalidOperationException("Supplier debit note has no canonical AP supplier identity."),
+                    note.VendorId,
                     cancellationToken);
                 await ValidateLinkedInvoiceCreditLimitAsync(note, invoice, note.Id, cancellationToken);
                 return await PostCoreAsync(note, producer, cancellationToken);
@@ -786,7 +796,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
 
     private IQueryable<SupplierDebitNote> BaseQuery(Guid tenantId) => _db.SupplierDebitNotes
         .Include(item => item.Vendor)
-        .Include(item => item.Supplier)
+        .Include(item => item.BusinessPartnerRole)
+        .Include(item => item.BusinessPartnerApProfileVersion)
         .Include(item => item.OriginalVendorInvoice)
             .ThenInclude(invoice => invoice!.LineItems.Where(line => !line.IsDeleted))
         // FIN-INT-012/013 remain quarantined. SupplierReturnId stays as scalar historical
@@ -899,7 +910,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             item.Id == vendorId &&
             !item.IsDeleted &&
             item.IsActive &&
-            (item.PartnerType == "Supplier" || item.PartnerType == "Contractor" || item.PartnerType == "Both"),
+            BusinessPartnerRoles.ProcurementTypes.Contains(item.PartnerType),
             cancellationToken);
         return vendor ?? throw new KeyNotFoundException("Active supplier business partner was not found for this tenant.");
     }
@@ -913,13 +924,13 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             return null;
 
         var invoice = await _db.VendorInvoices
-            .Include(item => item.Supplier)
+            .Include(item => item.BusinessPartner)
             .Include(item => item.LineItems.Where(line => !line.IsDeleted))
             .FirstOrDefaultAsync(item =>
                 item.TenantId == TenantId && item.Id == invoiceId && !item.IsDeleted,
                 cancellationToken)
             ?? throw new KeyNotFoundException("Original supplier invoice was not found for this tenant.");
-        if (invoice.SupplierId != supplierId)
+        if (invoice.BusinessPartnerId != supplierId)
             throw new InvalidOperationException("Original invoice does not belong to the selected supplier.");
         if (!invoice.JournalEntryId.HasValue)
             throw new InvalidOperationException("A supplier debit note can only reference a posted supplier invoice.");
@@ -996,6 +1007,11 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         {
             if (dto.Quantity <= 0m || dto.UnitPrice <= 0m)
                 throw new InvalidOperationException("Supplier debit-note quantity and unit price must be positive.");
+            var isWriteoff = string.Equals(dto.LineItemType, "Writeoff", StringComparison.OrdinalIgnoreCase);
+            if (isWriteoff && (invoice != null || dto.OriginalVendorInvoiceLineItemId.HasValue ||
+                dto.TaxGroupId.HasValue || dto.TaxRate != 0m || dto.TaxAmount.GetValueOrDefault() != 0m ||
+                dto.DiscountAmount.GetValueOrDefault() != 0m || dto.DiscountPercentage != 0m))
+                throw new InvalidOperationException("AP_WRITEOFF_SETTLEMENT_ONLY: a supplier writeoff must be standalone, without invoice source lines, tax or discounts.");
             if (invoice != null)
             {
                 if (!dto.OriginalVendorInvoiceLineItemId.HasValue ||
@@ -1017,13 +1033,16 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 continue;
             }
 
-            if (!dto.GLAccountId.HasValue)
+            var lineItemType = RequireLineItemType(dto.LineItemType, dto.Description);
+            var effectiveAccountId = dto.GLAccountId;
+            if (!effectiveAccountId.HasValue)
             {
                 throw new InvalidOperationException($"Standalone debit-note line '{dto.Description}' requires a GL account.");
             }
 
-            var lineItemType = RequireLineItemType(dto.LineItemType, dto.Description);
-            var account = await RequireStandaloneAccountAsync(dto.GLAccountId.Value, note.DebitNoteDate, dto.Description, cancellationToken);
+            var account = await RequireStandaloneAccountAsync(effectiveAccountId.Value, note.DebitNoteDate, dto.Description, cancellationToken);
+            if (isWriteoff && account.AccountType is not (AccountType.Revenue or AccountType.Expense))
+                throw new InvalidOperationException("Supplier writeoffs require a Revenue or Expense GL account.");
 
             var gross = Round(dto.Quantity * dto.UnitPrice);
             var calculatedDiscount = dto.DiscountAmount ?? Round(gross * Math.Max(dto.DiscountPercentage, 0m) / 100m);
@@ -1040,7 +1059,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     TaxGroupId = dto.TaxGroupId,
                     TransactionDate = note.DebitNoteDate,
                     TransactionType = ResolveApTaxTransactionType(lineItemType),
-                    SupplierId = note.SupplierId
+                    BusinessPartnerId = note.VendorId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Supplier
                 }, cancellationToken)
                 : new TaxCalculationResultDto { BaseAmount = net, GrandTotal = net };
             var calculatedTax = Round(taxResult.TotalTaxAmount);
@@ -1057,7 +1077,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     : Guid.NewGuid(),
                 TenantId = TenantId,
                 SupplierDebitNoteId = note.Id,
-                GLAccountId = dto.GLAccountId,
+                GLAccountId = effectiveAccountId,
                 ResolvedCreditAccountId = account.Id,
                 LineItemType = lineItemType,
                 Description = RequiredText(dto.Description, "Debit-note line description"),
@@ -1213,9 +1233,12 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 item.SourceDocumentLineId == sourceLine.Id &&
                 item.DebitAmount > 0m &&
                 !IsTaxTransaction(item))
-            .ToList();
-        if (baseTransactions.Count != 1)
-            throw SourceLineageUnavailable(sourceLine, "exactly one posted base transaction was not found");
+            .OrderBy(item => item.LineNumber).ThenBy(item => item.Id).ToList();
+        if (baseTransactions.Count == 0)
+            throw SourceLineageUnavailable(sourceLine, "no posted base transactions were found");
+        if (baseTransactions.Select(item => item.TransactionTag).Distinct().Count() != 1 ||
+            baseTransactions.Select(item => item.ExchangeRateId).Distinct().Count() != 1)
+            throw SourceLineageUnavailable(sourceLine, "posted base splits do not share the same accounting purpose and exchange-rate evidence");
         var originalTransaction = baseTransactions[0];
         var ratio = sourceLine.Quantity <= 0m ? 0m : dto.Quantity / sourceLine.Quantity;
         var gross = Round(dto.Quantity * sourceLine.UnitPrice);
@@ -1334,10 +1357,13 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             .Where(item => item.HasValue)
             .Select(item => item!.Value)
             .ToHashSet();
+        var originalJournalId = linkedInvoice?.JournalEntryId;
         var originalTransactions = lineageIds.Count == 0
             ? new Dictionary<Guid, AccountTransaction>()
             : await _db.AccountTransactions.AsNoTracking()
-                .Where(item => item.TenantId == TenantId && lineageIds.Contains(item.Id) && !item.IsDeleted)
+                .Where(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    (lineageIds.Contains(item.Id) || (originalJournalId.HasValue &&
+                        item.JournalEntryId == originalJournalId.Value)))
                 .ToDictionaryAsync(item => item.Id, cancellationToken);
 
         AccountTransaction? originalApControl = null;
@@ -1373,6 +1399,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             decimal principalAmount;
             Guid accountId;
             Guid? exchangeRateId = null;
+            List<AccountTransaction>? baseSplits = null;
             if (linkedInvoice != null)
             {
                 if (!line.OriginalVendorInvoiceLineItemId.HasValue ||
@@ -1384,7 +1411,13 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     line.ResolvedCreditAccountId != sourceTransaction.AccountId)
                     throw SourceLineageUnavailable(sourceLine, "the frozen base transaction no longer reconciles to the source line");
                 var ratio = sourceLine.Quantity <= 0m ? 0m : line.Quantity / sourceLine.Quantity;
-                principalAmount = Round(SourceDebitAmount(sourceTransaction) * ratio);
+                baseSplits = originalTransactions.Values.Where(item => item.JournalEntryId == linkedInvoice.JournalEntryId &&
+                    item.SourceDocumentLineId == sourceLine.Id && item.DebitAmount > 0m && !IsTaxTransaction(item))
+                    .OrderBy(item => item.LineNumber).ThenBy(item => item.Id).ToList();
+                if (baseSplits.Count == 0 || baseSplits.Any(item => item.TransactionTag != sourceTransaction.TransactionTag ||
+                    item.ExchangeRateId != sourceTransaction.ExchangeRateId))
+                    throw SourceLineageUnavailable(sourceLine, "posted base splits no longer reconcile to the source line");
+                principalAmount = Round(baseSplits.Sum(SourceDebitAmount) * ratio);
                 accountId = sourceTransaction.AccountId;
                 exchangeRateId = sourceTransaction.ExchangeRateId;
             }
@@ -1392,6 +1425,12 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             {
                 accountId = line.ResolvedCreditAccountId
                     ?? throw new InvalidOperationException($"Debit-note line '{line.Description}' is missing its server-resolved posting account.");
+                if (string.Equals(line.LineItemType, "Writeoff", StringComparison.OrdinalIgnoreCase))
+                {
+                    var writeoffAccount = await RequireStandaloneAccountAsync(accountId, note.DebitNoteDate, line.Description, cancellationToken);
+                    if (writeoffAccount.AccountType is not (AccountType.Revenue or AccountType.Expense))
+                        throw new InvalidOperationException("Supplier writeoffs require a Revenue or Expense GL account.");
+                }
                 principalAmount = Round(line.LineTotal - line.TaxAmount);
             }
 
@@ -1407,7 +1446,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 note.DebitNoteDate,
                 note.DebitNoteNumber,
                 lineNumber++,
-                "AP-SupplierDebitNote-Line",
+                string.Equals(line.LineItemType, "Writeoff", StringComparison.OrdinalIgnoreCase)
+                    ? "AP-Writeoff" : "AP-SupplierDebitNote-Line",
                 line.Id,
                 exchangeRateId,
                 linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null);
@@ -1415,7 +1455,23 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 ? dimensionValues
                 : Array.Empty<FinancePostingDimensionValueDto>();
             principalLine.Dimensions = inheritedDimensions;
-            lines.Add(principalLine);
+            if (baseSplits is { Count: > 1 })
+            {
+                lineNumber--; // The aggregate principal line is replaced by its account splits.
+                var amounts = MonetaryAllocation.Allocate(baseSplits.Select(SourceDebitAmount).ToArray(), principalAmount);
+                for (var splitIndex = 0; splitIndex < baseSplits.Count; splitIndex++)
+                {
+                    if (amounts[splitIndex] == 0m) continue;
+                    var splitLine = PostingLine(baseSplits[splitIndex].AccountId, principalLine.Description!,
+                        0m, Functional(amounts[splitIndex], currency, functionalCurrency, rate), amounts[splitIndex],
+                        currency, functionalCurrency, rate, note.DebitNoteDate, note.DebitNoteNumber,
+                        lineNumber++, principalLine.TransactionTag!, line.Id, baseSplits[splitIndex].ExchangeRateId,
+                        "Original AP invoice exchange-rate snapshot");
+                    splitLine.Dimensions = inheritedDimensions;
+                    lines.Add(splitLine);
+                }
+            }
+            else lines.Add(principalLine);
 
             if (linkedInvoice != null
                 && !IsNetPostedSourceTransaction(originalTransactions[line.OriginalAccountTransactionId!.Value])
@@ -1648,7 +1704,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         string transactionCurrency,
         CancellationToken cancellationToken)
     {
-        foreach (var candidateId in new[] { note.Vendor.DefaultApAccountId, settings.ControlAccountApId }
+        foreach (var candidateId in new[] { settings.ControlAccountApId }
                      .Where(item => item.HasValue)
                      .Select(item => item!.Value)
                      .Distinct())
@@ -1703,6 +1759,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         string? description,
         bool sourceLineage = false)
     {
+        if (!sourceLineage && string.Equals(value, "Writeoff", StringComparison.OrdinalIgnoreCase))
+            return "Writeoff";
         if (string.Equals(value, "Expense", StringComparison.OrdinalIgnoreCase))
             return "Expense";
         if (string.Equals(value, "Service", StringComparison.OrdinalIgnoreCase))
@@ -1726,7 +1784,14 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
     {
         var sourceLineage = note.OriginalVendorInvoiceId.HasValue;
         foreach (var line in note.LineItems.Where(item => !item.IsDeleted))
+        {
             _ = RequireLineItemType(line.LineItemType, line.Description, sourceLineage);
+            if (string.Equals(line.LineItemType, "Writeoff", StringComparison.OrdinalIgnoreCase) &&
+                (line.OriginalVendorInvoiceLineItemId.HasValue || line.TaxGroupId.HasValue ||
+                 line.TaxAmount != 0m || line.TaxRate != 0m || line.TaxComponents.Any(component => !component.IsDeleted) ||
+                 line.DiscountAmount != 0m || line.DiscountPercentage != 0m))
+                throw new InvalidOperationException("AP_WRITEOFF_SETTLEMENT_ONLY: saved supplier writeoff evidence contains invoice source lines, tax or discounts.");
+        }
     }
 
     private static void EnsureOptionalAmountMatches(decimal? supplied, decimal calculated, string description, string label)
@@ -1852,10 +1917,10 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             ?? throw new InvalidOperationException(
                 $"No active approved {side} Daily exchange rate exists for {currency} to {functionalCurrency} on {effectiveDate:yyyy-MM-dd}. Load and approve the rate before saving this supplier debit note.");
 
-        if (suppliedRate <= 0m || RoundRate(suppliedRate) != RoundRate(rate.Rate))
+        if (suppliedRate <= 0m || RoundRate(suppliedRate) != RoundRate(rate.InverseRate))
             throw new InvalidOperationException(
                 $"The supplied exchange-rate snapshot does not match the active approved {side} Daily rate for {currency} to {functionalCurrency} on {effectiveDate:yyyy-MM-dd}. Refresh the approved rate before saving this supplier debit note.");
-        return rate.Rate;
+        return rate.InverseRate;
     }
 
     private async Task<decimal> ValidatePersistedExchangeRateEvidenceAsync(
@@ -1891,7 +1956,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
              item.ApprovalStatus == RateApprovalStatus.AutoApproved) &&
             item.EffectiveDate.Date <= effectiveDate &&
             (!item.EndDate.HasValue || item.EndDate.Value.Date >= effectiveDate) &&
-            item.Rate == storedRate,
+            item.InverseRate == storedRate,
             cancellationToken);
         if (!hasEvidence)
             throw new InvalidOperationException(
@@ -2017,7 +2082,11 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             DirectInvoiceAppliedAt = note.DirectInvoiceAppliedAt,
             SupplierCreditNoteReference = note.SupplierCreditNoteReference,
             VendorId = note.VendorId,
-            SupplierId = note.SupplierId,
+            BusinessPartnerRoleId = note.BusinessPartnerRoleId,
+            BusinessPartnerApProfileVersionId = note.BusinessPartnerApProfileVersionId,
+            BusinessPartnerCode = note.BusinessPartnerCode,
+            BusinessPartnerLegalName = note.BusinessPartnerLegalName,
+            BusinessPartnerTaxIdentificationNumber = note.BusinessPartnerTaxIdentificationNumber,
             VendorName = note.Vendor?.PartnerName ?? string.Empty,
             SupplierReturnId = note.SupplierReturnId,
             OriginalVendorInvoiceId = note.OriginalVendorInvoiceId,
@@ -2116,7 +2185,9 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         note.DebitNoteNumber,
         note.SupplierCreditNoteReference,
         note.VendorId,
-        note.SupplierId,
+        note.BusinessPartnerRoleId,
+        note.BusinessPartnerApProfileVersionId,
+        note.BusinessPartnerCode,
         note.OriginalVendorInvoiceId,
         note.DebitNoteDate,
         note.CurrencyCode,
@@ -2127,6 +2198,53 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         note.TotalAmount,
         note.Status
     };
+
+    private sealed record CanonicalApPartner(
+        BusinessPartnerRole Role,
+        BusinessPartnerApProfileVersion Profile);
+
+    private async Task<CanonicalApPartner> ResolveCanonicalApPartnerAsync(
+        BusinessPartner partner,
+        Guid? requestedRoleId,
+        DateTime accountingDate,
+        CancellationToken cancellationToken)
+    {
+        var roles = await _db.Set<BusinessPartnerRole>()
+            .Where(role =>
+                role.TenantId == TenantId &&
+                role.BusinessPartnerId == partner.Id &&
+                !role.IsDeleted &&
+                role.Status == BusinessPartnerRoleStatus.Active &&
+                (role.RoleType == BusinessPartnerRoleType.Supplier ||
+                 role.RoleType == BusinessPartnerRoleType.Contractor))
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        if (requestedRoleId.HasValue)
+            roles = roles.Where(role => role.Id == requestedRoleId.Value).ToList();
+        else if (roles.Count > 1)
+            throw new InvalidOperationException(
+                "Select the Supplier or Contractor role for this AP debit note because the Business Partner has both roles.");
+
+        var role = roles.SingleOrDefault();
+        var profiles = role is null
+            ? new List<BusinessPartnerApProfileVersion>()
+            : await _db.Set<BusinessPartnerApProfileVersion>()
+                .Where(profile =>
+                    profile.TenantId == TenantId &&
+                    profile.BusinessPartnerRoleId == role.Id &&
+                    !profile.IsDeleted)
+                .Include(profile => profile.WithholdingDefaults)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+        var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAp(
+            partner, role, profiles, accountingDate == default ? DateTime.UtcNow.Date : accountingDate.Date);
+        if (!readiness.IsReady || readiness.ApProfile is null || role is null)
+            throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
+
+        return new CanonicalApPartner(role, readiness.ApProfile);
+    }
 
     private void ApplyConcurrencyToken(SupplierDebitNote note, string token)
     {

@@ -142,7 +142,10 @@ public class InventoryItem : TenantEntity
 
     // Physical Properties
     public decimal ShippingWeight { get; set; }
+    [Column(TypeName = "decimal(22,6)")]
     public decimal? Weight { get; set; }
+    [MaxLength(2)]
+    public string? WeightUnit { get; set; }
     public decimal? Length { get; set; }
     public decimal? Width { get; set; }
     public decimal? Height { get; set; }

@@ -346,7 +346,8 @@ public sealed class ProcurementTenderControlServiceTests
         financial.RecommendedBidId.Should().Be(fixture.Bids[0].Id);
         fixture.SodGuard.Verify(service => service.EnforceAsync(
             It.Is<ProcurementSodGuardRequest>(request =>
-                request.ControlCode == "SOD-TENDER-TECHNICAL-FINANCIAL-EVALUATOR"),
+                request.ControlCode == "SOD-INITIATOR-APPROVER" &&
+                request.ProhibitedActorUserIds.Count > 0),
             It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 

@@ -141,7 +141,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         var otherPayment = new VendorPayment
         {
             Id = Guid.NewGuid(), TenantId = tenant, PaymentNumber = "VP-OTHER",
-            SupplierId = fixture.Payment.SupplierId, BankAccountId = fixture.Payment.BankAccountId,
+            BusinessPartnerId = fixture.Payment.BusinessPartnerId, BankAccountId = fixture.Payment.BankAccountId,
             PaymentDate = fixture.Payment.PaymentDate, CurrencyCode = "GHS", ExchangeRate = 1m, TotalAmount = 100m
         };
         db.Add(otherPayment);

@@ -2,10 +2,12 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -28,6 +30,8 @@ namespace ErpSystem.Api.Controllers.Finance
     [Authorize]
     [ApiController]
     [Route("api/ap/invoices")]
+    [Route("api/procurement/supplier-invoices")]
+    [TypeFilter(typeof(ProcurementSupplierInvoiceBoundaryFilter))]
     public class VendorInvoiceController : ControllerBase
     {
         private readonly IVendorInvoiceService _invoiceService;
@@ -36,6 +40,7 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IVendorInvoiceMatchExceptionService? _matchExceptionService;
         private readonly IProcurementAcceptedSupplyService? _acceptedSupplyService;
         private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
+        private readonly ICurrentUserProvider? _procurementActor;
 
         public VendorInvoiceController(
             IVendorInvoiceService invoiceService,
@@ -43,7 +48,8 @@ namespace ErpSystem.Api.Controllers.Finance
             ApplicationDbContext dbContext,
             IVendorInvoiceMatchExceptionService? matchExceptionService = null,
             IProcurementAcceptedSupplyService? acceptedSupplyService = null,
-            IFinanceBudgetCommitmentService? budgetCommitments = null)
+            IFinanceBudgetCommitmentService? budgetCommitments = null,
+            ICurrentUserProvider? procurementActor = null)
         {
             _invoiceService = invoiceService;
             _currentUserService = currentUserService;
@@ -51,17 +57,54 @@ namespace ErpSystem.Api.Controllers.Finance
             _matchExceptionService = matchExceptionService;
             _acceptedSupplyService = acceptedSupplyService;
             _budgetCommitments = budgetCommitments;
+            _procurementActor = procurementActor;
         }
+
+        private bool IsInternalAutoInvoiceActor => _procurementActor is { IsAuthenticated: true, IsExternalUser: false } &&
+            _procurementActor.TenantId != Guid.Empty && _procurementActor.UserId != Guid.Empty;
+
+        [HttpGet("auto-invoice/receipts")]
+        public async Task<ActionResult<IReadOnlyList<ProcurementInvoiceReceiptDto>>> AutoInvoiceReceipts([FromQuery] Guid businessPartnerId, CancellationToken cancellationToken)
+        {
+            if (!IsInternalAutoInvoiceActor || !await HasAnyPermissionAsync(FinancePermissions.CreateApInvoices, FinancePermissions.ManageApInvoices)) return Forbid();
+            try { return Ok(await _invoiceService.GetAutoInvoiceReceiptsAsync(businessPartnerId, cancellationToken)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException e) { return UnprocessableEntity(AutoInvoiceProblem(e.Message)); }
+        }
+
+        [HttpPost("auto-invoice")]
+        public async Task<ActionResult<VendorInvoiceDto>> AutoInvoice([FromBody] ProcurementAutoInvoiceRequestDto request, CancellationToken cancellationToken)
+        {
+            if (!IsInternalAutoInvoiceActor || !await HasAnyPermissionAsync(FinancePermissions.CreateApInvoices, FinancePermissions.ManageApInvoices)) return Forbid();
+            try { return Ok(await _invoiceService.CreateAutoInvoiceAsync(request, DimensionProducer, cancellationToken)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (ArgumentException e) { return UnprocessableEntity(AutoInvoiceProblem(e.Message)); }
+            catch (InvalidOperationException e) { return Conflict(AutoInvoiceProblem(e.Message, 409)); }
+        }
+
+        [HttpGet("{id:guid}/receipt-links")]
+        public async Task<ActionResult<IReadOnlyList<VendorInvoiceReceiptLinkDto>>> ReceiptLinks(Guid id, CancellationToken cancellationToken)
+        {
+            if (!IsInternalAutoInvoiceActor || !await HasAnyPermissionAsync(FinancePermissions.ViewFinance, FinancePermissions.ManageApInvoices, FinancePermissions.CreateApInvoices)) return Forbid();
+            try { return Ok(await _invoiceService.GetReceiptLinksAsync(id, cancellationToken)); }
+            catch (KeyNotFoundException) { return NotFound(); }
+        }
+
+        private static ProblemDetails AutoInvoiceProblem(string detail, int status = 422) => new()
+        {
+            Status = status, Title = "Auto Invoice unavailable", Detail = detail,
+            Extensions = { ["code"] = "PROCUREMENT_AUTO_INVOICE_VALIDATION" }
+        };
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
         [HttpGet("supplier-defaults")]
         public async Task<ActionResult<PurchaseOrderSupplierDefaultsDto?>> GetSupplierDefaults(
-            [FromQuery] Guid supplierId, [FromQuery] Guid? purchaseOrderId, CancellationToken cancellationToken,
-            [FromQuery] DateTime? invoiceDate = null)
+            [FromQuery] Guid businessPartnerId, [FromQuery] Guid? purchaseOrderId, CancellationToken cancellationToken,
+            [FromQuery] DateTime? invoiceDate = null, [FromQuery] Guid? businessPartnerRoleId = null)
         {
             if (!await HasAnyPermissionAsync(FinancePermissions.CreateApInvoices, FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices))
                 return Forbid();
-            try { return Ok(await _invoiceService.GetSupplierDefaultsAsync(supplierId, purchaseOrderId, cancellationToken, invoiceDate)); }
+            try { return Ok(await _invoiceService.GetSupplierDefaultsAsync(businessPartnerId, purchaseOrderId, cancellationToken, invoiceDate, businessPartnerRoleId)); }
             catch (KeyNotFoundException exception)
             { return NotFound(new ProblemDetails { Status = 404, Title = "Supplier defaults unavailable", Detail = exception.Message }); }
             catch (InvalidOperationException exception)
@@ -103,12 +146,67 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<VendorInvoiceDistributionDto>> GetDistribution(Guid id, CancellationToken cancellationToken)
         {
             // Same invoice-read authorization as GetById; this is not a GL maintenance operation.
-            try { return Ok(await _invoiceService.GetDistributionAsync(id, cancellationToken)); }
+            try
+            {
+                var distribution = await _invoiceService.GetDistributionAsync(id, cancellationToken);
+                distribution.CanEdit &= await HasAnyPermissionAsync(FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices);
+                if (!distribution.CanEdit && distribution.EditBlockReason is null && distribution.Status != "Posted")
+                    distribution.EditBlockReason = "Invoice maintenance permission is required to edit distributions.";
+                return Ok(distribution);
+            }
             catch (KeyNotFoundException exception)
             { return NotFound(new ProblemDetails { Status = 404, Title = "Invoice distribution unavailable", Detail = exception.Message }); }
             catch (InvalidOperationException exception)
             { return UnprocessableEntity(new ProblemDetails { Status = 422, Title = "Invoice distribution unavailable", Detail = exception.Message }); }
         }
+
+        [HttpGet("~/api/procurement/supplier-invoices/{id:guid}/distribution/accounts")]
+        public async Task<IActionResult> DistributionAccounts(Guid id, CancellationToken cancellationToken)
+        {
+            if (!await HasAnyPermissionAsync(FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices)) return Forbid();
+            var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            return Ok(await _dbContext.Accounts.AsNoTracking().Where(account => account.TenantId == tenantId && !account.IsDeleted &&
+                account.Status == ErpSystem.Core.Enums.AccountStatus.Active && account.AllowDirectPosting && !account.IsControlAccount &&
+                account.AccountType == ErpSystem.Core.Enums.AccountType.Expense && !account.BudgetTrackingEnabled)
+                .OrderBy(account => account.AccountNumber)
+                .Select(account => new { account.Id, AccountCode = account.AccountNumber, account.AccountNumber, account.AccountName,
+                    AccountType = "Expense", account.AllowDirectPosting, account.IsControlAccount }).ToListAsync(cancellationToken));
+        }
+
+        [HttpPut("~/api/procurement/supplier-invoices/{id:guid}/distribution")]
+        public Task<ActionResult<VendorInvoiceDistributionDto>> SaveDistribution(Guid id,
+            [FromBody] SaveVendorInvoiceDistributionDto request, CancellationToken cancellationToken) =>
+            WriteDistribution(id, request, false, cancellationToken);
+
+        [HttpPost("~/api/procurement/supplier-invoices/{id:guid}/distribution/reset")]
+        public Task<ActionResult<VendorInvoiceDistributionDto>> ResetDistribution(Guid id,
+            [FromBody] SaveVendorInvoiceDistributionDto request, CancellationToken cancellationToken) =>
+            WriteDistribution(id, request, true, cancellationToken);
+
+        private async Task<ActionResult<VendorInvoiceDistributionDto>> WriteDistribution(Guid id,
+            SaveVendorInvoiceDistributionDto request, bool reset, CancellationToken cancellationToken)
+        {
+            if (!await HasAnyPermissionAsync(FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices)) return Forbid();
+            try
+            {
+                return Ok(reset ? await _invoiceService.ResetDistributionAsync(id, request, cancellationToken)
+                    : await _invoiceService.SaveDistributionAsync(id, request, cancellationToken));
+            }
+            catch (KeyNotFoundException) { return NotFound(); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvoiceDistributionConflictException exception)
+            { return Conflict(DistributionProblem(exception.Message, 409)); }
+            catch (DbUpdateConcurrencyException)
+            { return Conflict(DistributionProblem("The invoice changed. Reload and review the distribution before saving.", 409)); }
+            catch (InvalidOperationException exception)
+            { return UnprocessableEntity(DistributionProblem(exception.Message, 422)); }
+        }
+
+        private static ProblemDetails DistributionProblem(string message, int status) => new()
+        {
+            Status = status, Title = "Supplier invoice distribution", Detail = message,
+            Extensions = { ["code"] = status == 409 ? "AP_DISTRIBUTION_CHANGED" : "AP_DISTRIBUTION_INVALID" }
+        };
 
         /// <summary>Retrieves a vendor invoice by its system-generated invoice number.</summary>
         [HttpGet("by-number/{invoiceNumber}")]
@@ -226,69 +324,50 @@ namespace ErpSystem.Api.Controllers.Finance
             try { tenantId = _currentUserService.GetRequiredFinanceTenantId(); }
             catch (InvalidOperationException) { return Forbid(); }
 
-            // Include inactive/deleted identities in collision checks; neither a stale link nor
-            // an approved partner may bypass an unavailable canonical Finance supplier.
-            var allSuppliers = await _dbContext.Suppliers.IgnoreQueryFilters().AsNoTracking()
-                .Where(s => s.TenantId == tenantId).ToListAsync(cancellationToken);
-            var allPartners = await _dbContext.BusinessPartners.IgnoreQueryFilters().AsNoTracking()
-                .Where(p => p.TenantId == tenantId).ToListAsync(cancellationToken);
-            var links = await _dbContext.ApSupplierIdentityLinks
-                .AsNoTracking()
-                .Where(link => link.TenantId == tenantId && !link.IsDeleted)
+            var partners = await _dbContext.BusinessPartners.AsNoTracking()
+                .Where(partner => partner.TenantId == tenantId && !partner.IsDeleted)
+                .OrderBy(partner => partner.PartnerName)
+                .ThenBy(partner => partner.PartnerCode)
                 .ToListAsync(cancellationToken);
-            var matchedPartnerIds = new HashSet<Guid>();
+            var roles = await _dbContext.Set<BusinessPartnerRole>().AsNoTracking()
+                .Where(role => role.TenantId == tenantId && !role.IsDeleted &&
+                    (role.RoleType == BusinessPartnerRoleType.Supplier ||
+                     role.RoleType == BusinessPartnerRoleType.Contractor))
+                .ToListAsync(cancellationToken);
+            var roleIds = roles.Select(role => role.Id).ToHashSet();
+            var profiles = await _dbContext.Set<BusinessPartnerApProfileVersion>().AsNoTracking()
+                .Include(profile => profile.WithholdingDefaults)
+                .Where(profile => profile.TenantId == tenantId && !profile.IsDeleted &&
+                    roleIds.Contains(profile.BusinessPartnerRoleId))
+                .ToListAsync(cancellationToken);
+
+            var accountingDate = DateTime.UtcNow.Date;
             var options = new List<ApInvoiceSupplierEntryOptionDto>();
-            foreach (var supplier in allSuppliers.Where(ApInvoiceSupplierEligibility.IsActiveSupplier))
+            foreach (var partner in partners)
             {
-                var exactMatches = allPartners.Where(partner =>
-                    ApInvoiceSupplierEligibility.IsLinked(supplier, partner)).ToList();
-                var supplierLinks = links.Where(link => link.SupplierId == supplier.Id).ToList();
-                if (exactMatches.Count > 1 || supplierLinks.Count > 1)
-                    continue;
-                var partner = supplierLinks.Count == 1
-                    ? allPartners.SingleOrDefault(candidate => candidate.Id == supplierLinks[0].BusinessPartnerId)
-                    : exactMatches.SingleOrDefault();
-                if (supplierLinks.Count == 1 &&
-                    (partner == null || links.Count(link => link.BusinessPartnerId == partner.Id) != 1 ||
-                     exactMatches.Any(candidate => candidate.Id != partner.Id)))
-                    continue;
-                if (partner != null &&
-                    (!ApInvoiceSupplierEligibility.IsEligiblePartner(partner, true) ||
-                     partner.ApprovalStatus != BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus ||
-                     links.Any(link => link.BusinessPartnerId == partner.Id && link.SupplierId != supplier.Id) ||
-                     allSuppliers.Any(other => other.Id != supplier.Id &&
-                         ApInvoiceSupplierEligibility.IsLinked(other, partner))))
-                    continue;
-
-                if (partner != null)
-                    matchedPartnerIds.Add(partner.Id);
-
-                options.Add(new ApInvoiceSupplierEntryOptionDto
+                var partnerRoles = roles.Where(role => role.BusinessPartnerId == partner.Id)
+                    .OrderBy(role => role.RoleType)
+                    .ToList();
+                foreach (var role in partnerRoles)
                 {
-                    Id = supplier.Id,
-                    SupplierId = supplier.Id,
-                    BusinessPartnerId = partner?.Id,
-                    Code = partner?.PartnerCode ?? supplier.SupplierCode,
-                    Name = partner?.PartnerName ?? supplier.Name,
-                    PaymentTermId = partner?.PaymentTermId ?? supplier.PaymentTermId,
-                    Currency = partner?.Currency
-                });
+                    var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAp(
+                        partner, role, profiles, accountingDate);
+                    options.Add(new ApInvoiceSupplierEntryOptionDto
+                    {
+                        Id = partner.Id,
+                        BusinessPartnerId = partner.Id,
+                        BusinessPartnerRoleId = role.Id,
+                        RoleType = role.RoleType.ToString(),
+                        Code = partner.PartnerCode,
+                        Name = partner.PartnerName,
+                        PaymentTermId = readiness.ApProfile?.PaymentTermId,
+                        Currency = partner.Currency,
+                        IsTransactionReady = readiness.IsReady,
+                        ReadinessCode = readiness.Code,
+                        ReadinessMessage = readiness.Message
+                    });
+                }
             }
-            options.AddRange(allPartners
-                .Where(partner => ApInvoiceSupplierEligibility.IsEligiblePartner(partner, false) &&
-                    partner.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
-                    !matchedPartnerIds.Contains(partner.Id) &&
-                    !links.Any(link => link.BusinessPartnerId == partner.Id) &&
-                    !allSuppliers.Any(supplier => ApInvoiceSupplierEligibility.IsLinked(supplier, partner)))
-                .Select(partner => new ApInvoiceSupplierEntryOptionDto
-                {
-                    Id = partner.Id,
-                    BusinessPartnerId = partner.Id,
-                    Code = partner.PartnerCode,
-                    Name = partner.PartnerName,
-                    PaymentTermId = partner.PaymentTermId,
-                    Currency = partner.Currency
-                }));
 
             return Ok(options
                 .OrderBy(option => option.Name)
@@ -1078,8 +1157,8 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <summary>Generates a summary AP aging report showing outstanding balances by aging bucket.</summary>
         [HttpGet("aging")]
         public async Task<ActionResult<ApAgingReportDto>> GetAgingReport(
-            [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? supplierId = null)
-            => Ok(await _reportsService.GetAgingReportAsync(asOfDate, supplierId));
+            [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetAgingReportAsync(asOfDate, businessPartnerId));
 
         /// <summary>Rebuilds the AP settlement read model from posted AP source documents and posting events.</summary>
         [HttpPost("settlements/rebuild")]
@@ -1147,14 +1226,14 @@ namespace ErpSystem.Api.Controllers.Finance
         [Authorize(Policy = FinancePermissions.ViewFinance)]
         public async Task<ActionResult<SubledgerUnappliedSettlementReportDto>> GetUnappliedSettlements(
             [FromQuery] DateTime? asOfDate = null,
-            [FromQuery] Guid? supplierId = null)
-            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, supplierId));
+            [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetUnappliedSettlementsAsync(asOfDate, businessPartnerId));
 
         /// <summary>Generates a detailed AP aging report with per-supplier, per-invoice breakdown.</summary>
         [HttpGet("aging/detailed")]
         public async Task<ActionResult<ApAgingReportDto>> GetDetailedAgingReport(
-            [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? supplierId = null)
-            => Ok(await _reportsService.GetDetailedAgingReportAsync(asOfDate, supplierId));
+            [FromQuery] DateTime? asOfDate = null, [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetDetailedAgingReportAsync(asOfDate, businessPartnerId));
 
         /// <summary>Generates a cash requirement forecast showing amounts due by period.</summary>
         [HttpGet("cash-forecast")]
@@ -1164,9 +1243,9 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <summary>Generates a supplier statement with opening balance, transactions, and closing balance.</summary>
         [HttpGet("supplier-statement")]
         public async Task<ActionResult<SupplierStatementDto>> GetSupplierStatement(
-            [FromQuery] Guid supplierId, [FromQuery] DateTime fromDate, [FromQuery] DateTime toDate)
+            [FromQuery] Guid businessPartnerId, [FromQuery] DateTime fromDate, [FromQuery] DateTime toDate)
         {
-            try { return Ok(await _reportsService.GetSupplierStatementAsync(supplierId, fromDate, toDate)); }
+            try { return Ok(await _reportsService.GetSupplierStatementAsync(businessPartnerId, fromDate, toDate)); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -1175,12 +1254,12 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<SupplierDetailedLedgerReportDto>> GetSupplierDetailedLedger(
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate,
-            [FromQuery] List<Guid>? supplierIds = null,
+            [FromQuery] List<Guid>? businessPartnerIds = null,
             [FromQuery] bool showSupplierCurrency = false)
         {
             try
             {
-                return Ok(await _reportsService.GetSupplierDetailedLedgerAsync(fromDate, toDate, supplierIds, showSupplierCurrency));
+                return Ok(await _reportsService.GetSupplierDetailedLedgerAsync(fromDate, toDate, businessPartnerIds, showSupplierCurrency));
             }
             catch (Exception ex)
             {
@@ -1206,8 +1285,8 @@ namespace ErpSystem.Api.Controllers.Finance
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate,
             [FromQuery] VendorInvoiceMatchExceptionStatus? status = null,
-            [FromQuery] Guid? supplierId = null)
-            => Ok(await _reportsService.GetThreeWayMatchExceptionsAsync(fromDate, toDate, status, supplierId));
+            [FromQuery] Guid? businessPartnerId = null)
+            => Ok(await _reportsService.GetThreeWayMatchExceptionsAsync(fromDate, toDate, status, businessPartnerId));
 
         /// <summary>Exports the AP-006 register without creating or allocating any payment.</summary>
         [HttpGet("three-way-match-exceptions/export")]
@@ -1216,11 +1295,11 @@ namespace ErpSystem.Api.Controllers.Finance
             [FromQuery] DateTime fromDate,
             [FromQuery] DateTime toDate,
             [FromQuery] VendorInvoiceMatchExceptionStatus? status = null,
-            [FromQuery] Guid? supplierId = null,
+            [FromQuery] Guid? businessPartnerId = null,
             [FromQuery] string format = "Csv")
         {
             var content = await _reportsService.ExportThreeWayMatchExceptionsAsync(
-                fromDate, toDate, status, supplierId, format);
+                fromDate, toDate, status, businessPartnerId, format);
             return File(content, "text/csv; charset=utf-8", $"ap-match-exceptions-{DateTime.UtcNow:yyyyMMddHHmmss}.csv");
         }
     }

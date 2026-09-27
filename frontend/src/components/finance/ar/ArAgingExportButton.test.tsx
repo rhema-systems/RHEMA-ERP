@@ -26,7 +26,7 @@ describe('ArAgingExportButton', () => {
             configurable: true,
             value: revokeObjectUrlMock,
         });
-        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
             downloadedFileName = this.download;
         });
     });

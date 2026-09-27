@@ -11,27 +11,27 @@ vi.mock('./api.service', () => ({
 describe('accounts payable supplier detailed ledger client', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('submits canonical Supplier.Id values and omits the filter for All Suppliers', async () => {
+  it('submits canonical Business Partner values and omits the filter for All Suppliers', async () => {
     vi.mocked(apiService.get).mockResolvedValue({ suppliers: [] });
 
     await accountsPayableService.getSupplierDetailedLedger({
       fromDate: '2025-01-01',
       toDate: '2025-01-31',
-      supplierIds: ['canonical-supplier-id'],
+      businessPartnerIds: ['canonical-partner-id'],
       showSupplierCurrency: false,
     });
     expect(apiService.get).toHaveBeenLastCalledWith(
-      expect.stringContaining('supplierIds=canonical-supplier-id')
+      expect.stringContaining('businessPartnerIds=canonical-partner-id')
     );
 
     await accountsPayableService.getSupplierDetailedLedger({
       fromDate: '2025-01-01',
       toDate: '2025-01-31',
-      supplierIds: [],
+      businessPartnerIds: [],
       showSupplierCurrency: false,
     });
     expect(apiService.get).toHaveBeenLastCalledWith(
-      expect.not.stringContaining('supplierIds=')
+      expect.not.stringContaining('businessPartnerIds=')
     );
   });
 });

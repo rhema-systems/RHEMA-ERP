@@ -26,7 +26,7 @@ public sealed class EhcTicketService : IEhcTicketService
     private const string EhcUploadCategory = "ehc-ticket";
     private const string PropertyListingLeadSource = "estate-public-listing";
     private const string LegacyPropertyListingLeadSource = "state-public-listing";
-    private const string SalesAndMarketingOrganizationUnitCode = "UNIT-MKT";
+    private static readonly string[] SalesAndMarketingOrganizationUnitCodes = ["DEPT-SALES", "UNIT-MKT"];
 
     private readonly IEhcTicketRepository _ticketRepository;
     private readonly IUnitOfWork _unitOfWork;
@@ -94,8 +94,8 @@ public sealed class EhcTicketService : IEhcTicketService
     }
 
     /// <summary>
-    /// Moves a public property enquiry into CRM only after Helpdesk has assigned it to the active
-    /// Sales and Marketing organization unit and advanced it from New. Every EHC interaction is linked once, so a
+    /// Moves a public property enquiry into CRM after Helpdesk has assigned it to the active
+    /// Sales and Marketing organization unit or department. Every EHC interaction is linked once, so a
     /// transient retry or later update can safely backfill the CRM timeline without duplicates.
     /// </summary>
     private async Task<bool> IsAssignedToActiveSalesOrganizationUnitAsync(EhcTicket ticket, CancellationToken cancellationToken)
@@ -106,14 +106,13 @@ public sealed class EhcTicketService : IEhcTicketService
                        unit.TenantId == ticket.TenantId &&
                        !unit.IsDeleted &&
                        unit.IsActive &&
-                       unit.Code == SalesAndMarketingOrganizationUnitCode)
+                       SalesAndMarketingOrganizationUnitCodes.Contains(unit.Code))
                    .AnyAsync(cancellationToken);
     }
 
     private async Task SynchronizePropertyEnquiryCrmAsync(EhcTicket ticket, CancellationToken cancellationToken)
     {
         if (ticket.TicketType != EhcTicketType.Enquiry ||
-            ticket.Status == EhcTicketStatus.New ||
             !ticket.AssignedOrganizationUnitId.HasValue ||
             string.IsNullOrWhiteSpace(ticket.PropertyListingContextJson))
         {
@@ -162,6 +161,8 @@ public sealed class EhcTicketService : IEhcTicketService
                 QualificationScore = 40,
                 EstimatedValue = property.Price ?? 0m,
                 AssignedToId = ticket.AssignedToUserId,
+                ConvertedCustomerId = property.BusinessPartnerId,
+                ConvertedDate = now,
                 Notes = Clip(BuildPropertySnapshotSummary(property, ticket), 2000),
                 CreatedAt = now,
                 CreatedBy = _currentUserService.UserName ?? "EHC property enquiry",
@@ -182,6 +183,7 @@ public sealed class EhcTicketService : IEhcTicketService
                 EffectiveDate = now,
                 Name = Clip($"Property enquiry: {property.ListingName}", 200)!,
                 Description = Clip($"{BuildPropertySnapshotSummary(property, ticket)}\n\n{ticket.Description}", 2000),
+                CustomerId = property.BusinessPartnerId,
                 LeadId = ticket.CrmLeadId,
                 Stage = "Qualification",
                 Probability = 10,
@@ -274,7 +276,7 @@ public sealed class EhcTicketService : IEhcTicketService
     private async Task PublishPropertyEnquirySalesReadyAsync(EhcTicket ticket, Guid? triggeredByUserId,
         CancellationToken cancellationToken)
     {
-        if (ticket.Status == EhcTicketStatus.New || !await IsAssignedToActiveSalesOrganizationUnitAsync(ticket, cancellationToken))
+        if (!await IsAssignedToActiveSalesOrganizationUnitAsync(ticket, cancellationToken))
         {
             return;
         }
@@ -404,14 +406,13 @@ public sealed class EhcTicketService : IEhcTicketService
 
                         if (activity is "Created" or "Message")
                         {
-                            var salesReady = propertyTicket.Status != EhcTicketStatus.New &&
-                                propertyTicket.AssignedOrganizationUnitId.HasValue &&
+                            var salesReady = propertyTicket.AssignedOrganizationUnitId.HasValue &&
                                 await _unitOfWork.Repository<OrganizationUnit>().GetQueryable(unit =>
                                         unit.Id == propertyTicket.AssignedOrganizationUnitId.Value &&
                                         unit.TenantId == tenantId &&
                                         !unit.IsDeleted &&
                                         unit.IsActive &&
-                                        unit.Code == SalesAndMarketingOrganizationUnitCode)
+                                        SalesAndMarketingOrganizationUnitCodes.Contains(unit.Code))
                                     .AnyAsync(cancellationToken);
                             if (salesReady && activity == "Message")
                             {
@@ -657,28 +658,85 @@ public sealed class EhcTicketService : IEhcTicketService
             throw new ArgumentException("A property listing and submission identifier are required.");
         if (!Guid.TryParse(_currentUserService.UserId, out var requesterId) || !_currentUserService.TenantId.HasValue)
             throw new InvalidOperationException("An authenticated tenant account is required.");
+
+        return await CreatePropertyEnquiryCoreAsync(
+            request,
+            property,
+            submissionId,
+            _currentUserService.TenantId.Value,
+            requesterId,
+            _currentUserService.UserName ?? "EHC property enquiry",
+            returnRequesterView: true,
+            cancellationToken);
+    }
+
+    public async Task<EhcTicketDetailDto> CreatePublicPropertyEnquiryAsync(
+        CreateEhcTicketRequestDto request,
+        EhcPropertyListingContextDto property,
+        Guid submissionId,
+        Guid tenantId,
+        Guid requesterUserId,
+        string requesterName,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsPropertyListingLeadSource(property.Source) || property.ListingId == Guid.Empty || submissionId == Guid.Empty)
+            throw new ArgumentException("A property listing and submission identifier are required.");
+        if (tenantId == Guid.Empty || requesterUserId == Guid.Empty)
+            throw new InvalidOperationException("A tenant and system requester are required.");
+
+        return await CreatePropertyEnquiryCoreAsync(
+            request,
+            property,
+            submissionId,
+            tenantId,
+            requesterUserId,
+            string.IsNullOrWhiteSpace(requesterName) ? "public property enquiry" : requesterName.Trim(),
+            returnRequesterView: false,
+            cancellationToken);
+    }
+
+    private async Task<EhcTicketDetailDto> CreatePropertyEnquiryCoreAsync(
+        CreateEhcTicketRequestDto request,
+        EhcPropertyListingContextDto property,
+        Guid submissionId,
+        Guid tenantId,
+        Guid requesterId,
+        string actorName,
+        bool returnRequesterView,
+        CancellationToken cancellationToken)
+    {
         EhcTicketDetailDto? result = null;
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             try
             {
-                await _unitOfWork.AcquireTransactionLockAsync($"property-enquiry:{_currentUserService.TenantId}:{requesterId}:{submissionId}", cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync($"property-enquiry:{tenantId}:{requesterId}:{submissionId}", cancellationToken);
                 var existing = await _ticketRepository.Query().AsNoTracking().FirstOrDefaultAsync(t =>
-                    t.TenantId == _currentUserService.TenantId && t.RequesterUserId == requesterId
+                    t.TenantId == tenantId && t.RequesterUserId == requesterId
                     && t.ExternalSubmissionId == submissionId && !t.IsDeleted, cancellationToken);
                 if (existing != null)
                 {
                     var saved = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(existing.PropertyListingContextJson!);
                     if (saved?.ListingId != property.ListingId || saved.BusinessPartnerId != property.BusinessPartnerId || existing.Description != request.Description.Trim())
                         throw new ArgumentException("This submission identifier has already been used for a different enquiry.");
-                    result = await GetMyTicketByIdAsync(existing.Id, cancellationToken);
+                    result = returnRequesterView
+                        ? await GetMyTicketByIdAsync(existing.Id, cancellationToken)
+                        : await GetTicketByIdAsync(existing.Id, cancellationToken);
                 }
                 else
                 {
                     request.TicketType = EhcTicketType.Enquiry;
                     request.Source = EhcTicketSource.Web;
-                    result = await CreateExternalTicketCoreAsync(request, property, submissionId, cancellationToken);
+                    result = await CreateExternalTicketCoreAsync(
+                        request,
+                        property,
+                        submissionId,
+                        cancellationToken,
+                        tenantId,
+                        requesterId,
+                        actorName,
+                        returnRequesterView);
                 }
                 await _unitOfWork.CommitAsync(cancellationToken);
             }
@@ -693,18 +751,29 @@ public sealed class EhcTicketService : IEhcTicketService
     }
 
     private async Task<EhcTicketDetailDto> CreateExternalTicketCoreAsync(CreateEhcTicketRequestDto request,
-        EhcPropertyListingContextDto? property, Guid? submissionId, CancellationToken cancellationToken)
+        EhcPropertyListingContextDto? property,
+        Guid? submissionId,
+        CancellationToken cancellationToken,
+        Guid? tenantIdOverride = null,
+        Guid? requesterUserIdOverride = null,
+        string? actorNameOverride = null,
+        bool returnRequesterView = true)
     {
-        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var tenantId = tenantIdOverride ?? _currentUserService.TenantId ?? Guid.Empty;
         if (tenantId == Guid.Empty)
         {
             throw new InvalidOperationException("Tenant context is required.");
         }
 
-        if (!Guid.TryParse(_currentUserService.UserId, out var requesterUserId) || requesterUserId == Guid.Empty)
+        var requesterUserId = requesterUserIdOverride ?? Guid.Empty;
+        if (requesterUserId == Guid.Empty &&
+            (!Guid.TryParse(_currentUserService.UserId, out requesterUserId) || requesterUserId == Guid.Empty))
         {
             throw new InvalidOperationException("Authenticated user context is required.");
         }
+        var actorName = string.IsNullOrWhiteSpace(actorNameOverride)
+            ? _currentUserService.UserName
+            : actorNameOverride.Trim();
 
         if (string.IsNullOrWhiteSpace(request.Description))
         {
@@ -777,7 +846,7 @@ public sealed class EhcTicketService : IEhcTicketService
             Status = EhcTicketStatus.New,
             RelatedEntityType = request.RelatedEntityType?.Trim(),
             RelatedEntityReference = request.RelatedEntityReference?.Trim(),
-            CreatedBy = _currentUserService.UserName,
+            CreatedBy = actorName,
             CreatedById = requesterUserId,
             CreatedAt = now
         };
@@ -822,7 +891,7 @@ public sealed class EhcTicketService : IEhcTicketService
             FromStatus = null,
             ToStatus = EhcTicketStatus.New,
             ChangedByUserId = requesterUserId,
-            CreatedBy = _currentUserService.UserName,
+            CreatedBy = actorName,
             CreatedById = requesterUserId,
             CreatedAt = now,
             Notes = "Ticket created"
@@ -886,6 +955,10 @@ public sealed class EhcTicketService : IEhcTicketService
             cancellationToken);
 
         var dto = await GetMyTicketByIdAsync(ticket.Id, cancellationToken);
+        if (!returnRequesterView)
+        {
+            dto = await GetTicketByIdAsync(ticket.Id, cancellationToken);
+        }
         if (dto == null)
         {
             throw new InvalidOperationException("Failed to load created ticket.");
@@ -1952,7 +2025,7 @@ public sealed class EhcTicketService : IEhcTicketService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
-        if (previousOrganizationUnit != ticket.AssignedOrganizationUnitId && ticket.Status != EhcTicketStatus.New)
+        if (previousOrganizationUnit != ticket.AssignedOrganizationUnitId)
         {
             await PublishPropertyEnquirySalesReadyAsync(ticket, actorUserId, cancellationToken);
         }

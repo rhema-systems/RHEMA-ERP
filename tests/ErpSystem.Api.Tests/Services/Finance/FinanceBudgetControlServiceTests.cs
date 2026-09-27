@@ -449,12 +449,26 @@ public sealed class FinanceBudgetControlServiceTests
             AccountName = "Accrued liabilities",
             AccountType = AccountType.Liability
         };
+        var book = new AccountingBook
+        {
+            TenantId = TenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            Purpose = "Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsActive = true,
+            IsDefault = true,
+            AllowsPosting = true
+        };
         var journal = new JournalEntry
         {
             TenantId = TenantId,
             JournalEntryNumber = "JE-2026-00001",
             EntryDate = new DateTime(2026, 1, 15),
             FiscalPeriodId = period.Id,
+            AccountingBookId = book.Id,
             JournalType = "General",
             Description = "Controlled expense",
             PostingStatus = "Draft",
@@ -464,8 +478,8 @@ public sealed class FinanceBudgetControlServiceTests
             IsBalanced = true,
             Transactions = new List<AccountTransaction>
             {
-                new() { TenantId = TenantId, AccountId = expense.Id, TransactionDate = new DateTime(2026, 1, 15), DebitAmount = 600m, CreditAmount = 0m, LineNumber = 1 },
-                new() { TenantId = TenantId, AccountId = clearing.Id, TransactionDate = new DateTime(2026, 1, 15), DebitAmount = 0m, CreditAmount = 600m, LineNumber = 2 }
+                new() { TenantId = TenantId, AccountId = expense.Id, AccountingBookId = book.Id, BookClassification = "IFRS", TransactionDate = new DateTime(2026, 1, 15), DebitAmount = 600m, CreditAmount = 0m, LineNumber = 1 },
+                new() { TenantId = TenantId, AccountId = clearing.Id, AccountingBookId = book.Id, BookClassification = "IFRS", TransactionDate = new DateTime(2026, 1, 15), DebitAmount = 0m, CreditAmount = 600m, LineNumber = 2 }
             }
         };
         var financeSettings = new FinanceSettings
@@ -475,7 +489,7 @@ public sealed class FinanceBudgetControlServiceTests
             CoaType = "Segmented",
             AccountSeparator = "-"
         };
-        db.AddRange(fiscalYear, period, expense, clearing, journal, financeSettings);
+        db.AddRange(fiscalYear, period, expense, clearing, book, journal, financeSettings);
         return new JournalFixture(fiscalYear, period, expense, journal);
     }
 

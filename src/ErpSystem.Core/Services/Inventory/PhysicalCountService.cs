@@ -63,6 +63,28 @@ public partial class PhysicalCountService : IPhysicalCountService
 
     #region Query Operations
 
+    public async Task<IEnumerable<PhysicalCountDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var limit = Math.Clamp(take, 1, 50);
+        var query = _countRepository.GetQueryable(value => !value.IsDeleted &&
+            value.TenantId == _currentUserService.TenantId &&
+            (value.CountNumber.Contains(term) || value.Warehouse.Name.Contains(term) ||
+             (value.Notes != null && value.Notes.Contains(term))))
+            .AsNoTracking().Include(value => value.Warehouse)
+            .OrderByDescending(value => value.CreatedAt).ThenBy(value => value.Id);
+        var allowed = new List<PhysicalCountDto>();
+        for (var offset = 0; allowed.Count < limit; offset += 50)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidates = await query.Skip(offset).Take(50).ToListAsync(cancellationToken);
+            allowed.AddRange((await FilterReadableAsync(candidates)).Select(MapToDto).Take(limit - allowed.Count));
+            if (candidates.Count < 50) break;
+        }
+        return allowed;
+    }
+
     public async Task<IEnumerable<PhysicalCountDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null)
     {
         var counts = await _countRepository.GetByDateRangeAsync(

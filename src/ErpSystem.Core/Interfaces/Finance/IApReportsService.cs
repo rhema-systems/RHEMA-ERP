@@ -19,9 +19,9 @@ public interface IApReportsService
     /// Groups outstanding invoices by age buckets: 0-30, 31-60, 61-90, 90+ days.
     /// </summary>
     /// <param name="asOfDate">Date to calculate aging from (default: today)</param>
-    /// <param name="supplierId">Optional: Filter by specific supplier</param>
+    /// <param name="businessPartnerId">Optional canonical Business Partner filter.</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    Task<ApAgingReportDto> GetAgingReportAsync(DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default);
+    Task<ApAgingReportDto> GetAgingReportAsync(DateTime? asOfDate = null, Guid? businessPartnerId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rebuilds AP settlement balances from posted supplier invoices, payments, allocations, withholding, and posting events.
@@ -54,13 +54,13 @@ public interface IApReportsService
     /// </summary>
     Task<SubledgerUnappliedSettlementReportDto> GetUnappliedSettlementsAsync(
         DateTime? asOfDate = null,
-        Guid? supplierId = null,
+        Guid? businessPartnerId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates detailed aging report with invoice-level breakdown per supplier.
     /// </summary>
-    Task<ApAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? supplierId = null, CancellationToken cancellationToken = default);
+    Task<ApAgingReportDto> GetDetailedAgingReportAsync(DateTime? asOfDate = null, Guid? businessPartnerId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates cash requirement forecast showing payables due in upcoming periods.
@@ -76,16 +76,16 @@ public interface IApReportsService
     /// - Payments made
     /// - Closing balance
     /// </summary>
-    Task<SupplierStatementDto> GetSupplierStatementAsync(Guid supplierId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
+    Task<SupplierStatementDto> GetSupplierStatementAsync(Guid businessPartnerId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Generates supplier detailed ledger balances and period movements for one or more suppliers.
-    /// Supplier ids may be legacy Supplier ids or unified Business Partner ids.
+    /// Identifiers are canonical Business Partner ids with an AP-capable role.
     /// </summary>
     Task<SupplierDetailedLedgerReportDto> GetSupplierDetailedLedgerAsync(
         DateTime fromDate,
         DateTime toDate,
-        IReadOnlyCollection<Guid>? supplierIds = null,
+        IReadOnlyCollection<Guid>? businessPartnerIds = null,
         bool showSupplierCurrency = false,
         CancellationToken cancellationToken = default);
 
@@ -109,7 +109,7 @@ public interface IApReportsService
         DateTime fromDate,
         DateTime toDate,
         VendorInvoiceMatchExceptionStatus? status = null,
-        Guid? supplierId = null,
+        Guid? businessPartnerId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Exports the same audited AP-006 register as CSV.</summary>
@@ -117,7 +117,7 @@ public interface IApReportsService
         DateTime fromDate,
         DateTime toDate,
         VendorInvoiceMatchExceptionStatus? status = null,
-        Guid? supplierId = null,
+        Guid? businessPartnerId = null,
         string format = "Csv",
         CancellationToken cancellationToken = default);
 

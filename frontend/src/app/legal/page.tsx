@@ -18,12 +18,10 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
@@ -106,12 +104,9 @@ export default function LegalProceduresPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">
-          <Badge variant="outline" className="w-fit">
-            Legal procedures
-          </Badge>
           <div>
             <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">
-              Legal Procedures
+              Legal Workspaces
             </h1>
           </div>
         </div>
@@ -144,28 +139,18 @@ export default function LegalProceduresPage() {
                 className="border-border bg-card text-card-foreground"
               >
                 <CardHeader className="space-y-3">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
                       <Icon className={`h-5 w-5 ${accent}`} />
                     </div>
-                    <Badge variant="secondary">
-                      {procedure.stageCount} stages
-                    </Badge>
                   </div>
                   <div>
                     <CardTitle className="text-base leading-6">
                       {procedure.title}
                     </CardTitle>
-                    <CardDescription className="mt-1">
-                      {procedure.source}
-                    </CardDescription>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{procedure.entityType}</Badge>
-                    <Badge variant="outline">Procedure workspace</Badge>
-                  </div>
                   <Button
                     variant="outline"
                     className="w-full justify-between"

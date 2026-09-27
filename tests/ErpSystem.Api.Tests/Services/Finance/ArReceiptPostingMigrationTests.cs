@@ -27,7 +27,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ArReceiptPostingMigrationTests
+public sealed partial class ArReceiptPostingMigrationTests
 {
     [Theory]
     [InlineData(InvoiceStatus.Draft)]
@@ -150,8 +150,10 @@ public sealed class ArReceiptPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "USD",
-            Rate = 12.5m,
-            InverseRate = 0.08m,
+            // Tenant rates are stored as 1 functional-currency unit = N transaction-currency
+            // units. Posting snapshots use the reciprocal transaction-to-functional multiplier.
+            Rate = 0.08m,
+            InverseRate = 12.5m,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -279,8 +281,8 @@ public sealed class ArReceiptPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "USD",
-            Rate = 10m,
-            InverseRate = 0.1m,
+            Rate = 0.1m,
+            InverseRate = 10m,
             EffectiveDate = new DateTime(2026, 7, 5),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -295,8 +297,8 @@ public sealed class ArReceiptPostingMigrationTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = "EUR",
-            Rate = 13m,
-            InverseRate = 1m / 13m,
+            Rate = 1m / 13m,
+            InverseRate = 13m,
             EffectiveDate = new DateTime(2026, 7, 1),
             RateType = ExchangeRateType.Daily,
             RateSource = "Regression fixture",
@@ -313,13 +315,13 @@ public sealed class ArReceiptPostingMigrationTests
         fixture.Payment.TotalAmount = 10m;
         fixture.Payment.AllocatedAmount = 0m;
         fixture.Payment.CurrencyCode = "USD";
-        fixture.Payment.ExchangeRate = originRate.Rate;
+        fixture.Payment.ExchangeRate = originRate.InverseRate;
         fixture.Payment.ExchangeRateId = originRate.Id;
         fixture.BankAccount.Currency = "USD";
         fixture.Invoice.TotalAmount = 8m;
         fixture.Invoice.PaidAmount = 0m;
         fixture.Invoice.CurrencyCode = "EUR";
-        fixture.Invoice.ExchangeRate = applicationRate.Rate;
+        fixture.Invoice.ExchangeRate = applicationRate.InverseRate;
         fixture.Invoice.BaseCurrencyAmount = 104m;
         fixture.Invoice.Status = InvoiceStatus.Sent;
         EnableCurrencyForAccounts(db, tenantId, "USD", fixture.BankGlAccount, customerAdvanceAccount);
@@ -501,7 +503,7 @@ public sealed class ArReceiptPostingMigrationTests
         SeedTenant(db, otherTenantId, "OTH");
         var otherArAccount = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var otherCustomer = SeedCustomer(db, otherTenantId, otherArAccount.Id);
-        fixture.Payment.CustomerId = otherCustomer.Id;
+        fixture.Payment.BusinessPartnerId = otherCustomer.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
@@ -631,7 +633,8 @@ public sealed class ArReceiptPostingMigrationTests
         var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
         var otherArAccount = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
-        fixture.Customer.DefaultArAccountId = otherArAccount.Id;
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.ControlAccountArId = otherArAccount.Id;
         await db.SaveChangesAsync();
         var (service, _) = CreateService(db, tenantId);
 
@@ -1126,6 +1129,29 @@ public sealed class ArReceiptPostingMigrationTests
         var taxAccount = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var discountAccount = SeedAccount(db, tenantId, "5200", AccountType.Expense);
         var customer = SeedCustomer(db, tenantId, arAccount.Id);
+        var customerRole = new BusinessPartnerRole
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerId = customer.Id,
+            RoleType = BusinessPartnerRoleType.Customer,
+            Status = BusinessPartnerRoleStatus.Active,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        var arProfile = new BusinessPartnerArProfileVersion
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BusinessPartnerRoleId = customerRole.Id,
+            VersionNumber = 1,
+            Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2026, 1, 1),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.BusinessPartnerRoles.Add(customerRole);
+        db.BusinessPartnerArProfileVersions.Add(arProfile);
         var bankAccount = SeedBankAccount(db, tenantId, bankGlAccount.Id);
 
         db.Set<FinanceSettings>().Add(new FinanceSettings
@@ -1160,7 +1186,13 @@ public sealed class ArReceiptPostingMigrationTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             PaymentNumber = "CP-2026-00001",
-            CustomerId = customer.Id,
+            BusinessPartnerId = customer.Id,
+            BusinessPartnerRoleId = customerRole.Id,
+            BusinessPartnerArProfileVersionId = arProfile.Id,
+            BusinessPartnerCode = customer.PartnerCode,
+            BusinessPartnerName = customer.PartnerName,
+            BusinessPartnerLegalName = customer.LegalName,
+            BusinessPartnerTaxIdentificationNumber = customer.TaxIdentificationNumber,
             PaymentDate = new DateTime(2026, 7, 5),
             TotalAmount = allocationAmount,
             AllocatedAmount = allocationAmount,

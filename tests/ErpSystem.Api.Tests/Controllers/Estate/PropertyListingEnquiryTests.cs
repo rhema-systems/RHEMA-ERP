@@ -26,6 +26,7 @@ using ErpSystem.Core.Services.Planning;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
@@ -49,7 +50,8 @@ public sealed class PropertyListingEnquiryTests
         return user;
     }
     private EstateExternalDocumentsController Controller(ApplicationDbContext db, Mock<IEhcTicketService> tickets)
-        => new(db, User().Object, null!, null!, null!, null!, null!, tickets.Object, Mock.Of<ICaptchaVerificationService>())
+        => new(db, User().Object, null!, null!, null!, null!, null!, tickets.Object, Mock.Of<ICaptchaVerificationService>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<EstateExternalDocumentsController>.Instance)
         { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
     private EstateManagedAsset Asset() => new()
     {
@@ -209,7 +211,9 @@ public sealed class PropertyListingEnquiryTests
         var service = new EstateSalesListingApplicationHandoffService(db, procedures.Object);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(tenantId,
-            new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1250000m, "GHS", DateTime.UtcNow, null)));
+            new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1250000m,
+                RequestedLeaseTerm: null, SalesAmountPaid: 0m, SalesPaymentReference: null,
+                Currency: "GHS", SalesCompletedAt: DateTime.UtcNow, Notes: null)));
 
         Assert.Equal("Close the linked Sales opportunity as Won before handing the enquiry to Estate.", error.Message);
         procedures.Verify(item => item.CreateCaseAsync(It.IsAny<CreateProcedureCaseRequest>()), Times.Never);
@@ -218,7 +222,37 @@ public sealed class PropertyListingEnquiryTests
     [Fact]
     public async Task EstateHandoffCreatesOneTraceableEstateCaseForClosedWonOpportunity()
     {
-        await using var db = Database();
+        // ExecuteUpdate requires a relational provider. Keep this fixture isolated from UAT.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        connection.CreateFunction<string?, int>("ISJSON", value =>
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            try
+            {
+                using var json = JsonDocument.Parse(value);
+                return json.RootElement.ValueKind is JsonValueKind.Object or JsonValueKind.Array ? 1 : 0;
+            }
+            catch (JsonException) { return 0; }
+        });
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        // This focused fixture exercises reservation persistence, not unrelated master-data FKs.
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+        var tables = new[] { typeof(EstateManagedAsset), typeof(BusinessPartner), typeof(Opportunity),
+            typeof(ProcedureCase), typeof(ProcedureCaseField) }
+            .Select(type => db.Model.FindEntityType(type)!.GetTableName()!).ToArray();
+        foreach (var statement in db.Database.GenerateCreateScript().Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Where(statement => tables.Any(table => statement.Contains($"CREATE TABLE \"{table}\"", StringComparison.Ordinal))))
+        {
+            await db.Database.ExecuteSqlRawAsync(statement
+                .Replace("nvarchar(max)", "TEXT", StringComparison.OrdinalIgnoreCase)
+                .Replace("varchar(max)", "TEXT", StringComparison.OrdinalIgnoreCase)
+                .Replace("varbinary(max)", "BLOB", StringComparison.OrdinalIgnoreCase)
+                .Replace("GETUTCDATE()", "CURRENT_TIMESTAMP", StringComparison.OrdinalIgnoreCase)
+                .Replace("NEWID()", "lower(hex(randomblob(16)))", StringComparison.OrdinalIgnoreCase)
+                .Replace("\"RowVersion\" BLOB NOT NULL", "\"RowVersion\" BLOB NOT NULL DEFAULT X''", StringComparison.Ordinal));
+        }
         var asset = Asset();
         var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-ESTATE", PartnerName = "Estate Customer", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
         var opportunity = new Opportunity { TenantId = tenantId, Name = "Property enquiry", Stage = "Closed Won", Amount = 1250000m, Currency = "GHS", ActualCloseDate = DateTime.UtcNow };
@@ -237,14 +271,22 @@ public sealed class PropertyListingEnquiryTests
         var service = new EstateSalesListingApplicationHandoffService(db, procedures.Object);
 
         var result = await service.CreateAsync(tenantId,
-            new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1200000m, "GHS", opportunity.ActualCloseDate,
-                "Accepted offer", Guid.NewGuid(), "EHC-26-000001"));
+            new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1200000m,
+                RequestedLeaseTerm: null, SalesAmountPaid: 250000m, SalesPaymentReference: "RCT-001",
+                Currency: "GHS", SalesCompletedAt: opportunity.ActualCloseDate,
+                Notes: "Accepted offer", EhcTicketId: Guid.NewGuid(), EhcTicketNumber: "EHC-26-000001"));
 
         Assert.False(result.AlreadyExists); Assert.Equal(caseId, result.ProcedureCaseId);
         Assert.NotNull(captured); Assert.Equal("AGR-001", captured!.FieldValues!["salesReference"]);
+        Assert.Equal("250000.00", captured.FieldValues["salesAmountPaid"]);
+        Assert.Equal("RCT-001", captured.FieldValues["salesPaymentReference"]);
+        Assert.Equal("950000.00", captured.FieldValues["estateRemainingAmount"]);
         Assert.Equal(opportunity.Id.ToString(), captured.FieldValues["salesOpportunityId"]);
         Assert.Equal("EHC-26-000001", captured.FieldValues["ehcTicketNumber"]);
         procedures.Verify(item => item.CreateCaseAsync(It.IsAny<CreateProcedureCaseRequest>()), Times.Once);
+        var reserved = await db.EstateManagedAssets.AsNoTracking().SingleAsync(item => item.Id == asset.Id);
+        Assert.False(reserved.IsPublishedToExternalPortal);
+        Assert.Equal("Reserved", reserved.ExternalListingStatus);
     }
 
     [Fact]
@@ -292,7 +334,9 @@ public sealed class PropertyListingEnquiryTests
         Assert.Equal("Estate intake review", created.CurrentStageName);
         Assert.True(created.CanEditCurrentStage);
         Assert.Contains("customerValidationStatus", created.CurrentStageFieldKeys);
-        Assert.Equal(new[] { 0, 1, 2, 3 }, await db.ProcedureCaseChecklistItems
+        var manualStages = new PropertyManagementProcedureCatalogService()
+            .GetProcedureWorkspace("EstatePropertyManagementListingApplication")!.Stages;
+        Assert.Equal(Enumerable.Range(0, manualStages.Count), await db.ProcedureCaseChecklistItems
             .Select(item => item.StageIndex)
             .Distinct()
             .OrderBy(item => item)
@@ -304,7 +348,11 @@ public sealed class PropertyListingEnquiryTests
     public async Task EstateHandoffResolvesAnAcknowledgedPropertyEnquiryAfterEstateAcceptsIt()
     {
         await using var db = Database();
-        var sales = new Department { TenantId = tenantId, Name = "Sales", Code = "SALES", AccountCode = "SALES", DepartmentType = DepartmentType.Sales, IsActive = true };
+        var structure = new OrganizationStructure { TenantId = tenantId, Name = "TDC structure", Code = "TDC", IsActive = true };
+        var level = new OrganizationLevel { TenantId = tenantId, OrganizationStructure = structure,
+            StructureId = structure.Id, Name = "Department", Code = "DEPT", LevelNumber = 3, IsActive = true };
+        var sales = new OrganizationUnit { TenantId = tenantId, OrganizationLevel = level,
+            OrganizationLevelId = level.Id, Name = "Marketing Unit", Code = "UNIT-MKT", Path = "/TDC/MKT", IsActive = true };
         var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-HANDOFF", PartnerName = "Estate Customer", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
         var opportunity = new Opportunity { TenantId = tenantId, Name = "Property enquiry", Stage = "Closed Won", Amount = 1250000m, Currency = "GHS", ActualCloseDate = DateTime.UtcNow };
         var listingId = Guid.NewGuid();
@@ -316,7 +364,7 @@ public sealed class PropertyListingEnquiryTests
             TicketType = EhcTicketType.Enquiry,
             Status = EhcTicketStatus.Acknowledged,
             Description = "Property enquiry",
-            AssignedDepartmentId = sales.Id,
+            AssignedOrganizationUnitId = sales.Id,
             CrmOpportunityId = opportunity.Id,
             PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
                 "estate-public-listing", listingId, "LAND-002-PORTION-002", "Parcel Two", "Sale", "GHS", "Accra", 1250000m,
@@ -334,7 +382,9 @@ public sealed class PropertyListingEnquiryTests
             .ReturnsAsync(new EstateSalesListingApplicationHandoffResult(estateCaseId, "ESTATE-001", "Purchase enquiry", "Open", "Estate review", DateTime.UtcNow, false));
 
         var controller = new EhcPropertyEnquiriesController(db, User().Object, tickets.Object, handoffs.Object);
-        var result = await controller.CreateEstateHandoff(ticket.Id, new("AGR-001", 1250000m, "GHS", opportunity.ActualCloseDate, null), default);
+        var result = await controller.CreateEstateHandoff(ticket.Id, new("AGR-001", 1250000m,
+            RequestedLeaseTerm: null, SalesAmountPaid: 1250000m, SalesPaymentReference: "RCT-FULL",
+            Currency: "GHS", SalesCompletedAt: opportunity.ActualCloseDate, Notes: null), default);
 
         Assert.IsType<OkObjectResult>(result);
         tickets.Verify(item => item.TransitionTicketAsync(ticket.Id, EhcTicketStatus.InProgress, It.IsAny<string>(), null, null, It.IsAny<CancellationToken>()), Times.Once);

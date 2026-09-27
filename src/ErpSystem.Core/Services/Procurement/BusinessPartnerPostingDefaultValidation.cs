@@ -7,7 +7,27 @@ namespace ErpSystem.Core.Services.Procurement;
 
 public static class BusinessPartnerPostingDefaultValidation
 {
-    public static async Task ValidateAsync(BusinessPartnerPostingDefaultsDto defaults, string partnerType, IUnitOfWork unitOfWork, ICurrentUserProvider currentUser)
+    public static async Task ValidateReceivablesAsync(BusinessPartnerReceivablesDefaultsDto defaults,
+        string partnerType, IUnitOfWork unitOfWork, ICurrentUserProvider currentUser)
+    {
+        if (currentUser.IsExternalUser || currentUser.TenantId == Guid.Empty)
+            throw new UnauthorizedAccessException("AR defaults are maintained by internal business-partner administrators.");
+        if (!Entities.Procurement.BusinessPartnerRoles.HasCustomer(partnerType))
+            throw new InvalidOperationException("Accounts Receivable settings require the Customer role.");
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultArAccountId,
+            "Accounts Receivable", true, AccountType.Asset);
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.SalesAccountId, "Customer Sales", false, AccountType.Revenue);
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.CostOfSalesAccountId, "Customer Cost of Sales", false, AccountType.Expense);
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.InventoryAccountId, "Customer Inventory", true, AccountType.Asset);
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.TermsDiscountsTakenAccountId, "Customer Terms Discounts Taken", false, AccountType.Revenue, AccountType.Expense);
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.SalesReturnsAccountId, "Customer Sales Returns", false, AccountType.Revenue, AccountType.Expense);
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.FinanceChargesAccountId, "Customer Finance Charges", false, AccountType.Revenue);
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.WriteoffAccountId, "Customer Writeoffs", false, AccountType.Expense);
+        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.OverpaymentWriteoffAccountId, "Customer Overpayment Writeoffs", false, AccountType.Revenue);
+    }
+
+    public static async Task ValidateAsync(BusinessPartnerPostingDefaultsDto defaults, string partnerType, IUnitOfWork unitOfWork, ICurrentUserProvider currentUser,
+        Guid? existingTaxAccountId = null)
     {
         if (currentUser.IsExternalUser)
             throw new UnauthorizedAccessException("Posting defaults are maintained by internal business-partner administrators.");
@@ -51,7 +71,16 @@ public static class BusinessPartnerPostingDefaultValidation
         await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultAccruedPurchasesAccountId, "Accrued Purchases", true, AccountType.Liability);
         await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultCashAccountId, "Cash", false, AccountType.Asset);
         await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultExpenseAccountId, "Purchases", false, AccountType.Asset, AccountType.Expense);
-        await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultTaxAccountId, "Tax", false, AccountType.Asset, AccountType.Liability, AccountType.Expense);
+        // Preserve an unchanged legacy expense mapping during unrelated master edits.
+        // It is not eligible as an invoice input-tax fallback; the invoice capture hook
+        // still rejects it until an administrator explicitly selects a supported account.
+        var retainsLegacyExpenseTax = defaults.DefaultTaxAccountId.HasValue &&
+            defaults.DefaultTaxAccountId == existingTaxAccountId &&
+            (await unitOfWork.Accounts.GetByIdAsync(defaults.DefaultTaxAccountId.Value))?.AccountType == AccountType.Expense;
+        if (retainsLegacyExpenseTax)
+            await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultTaxAccountId, "Tax", false, AccountType.Expense);
+        else
+            await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultTaxAccountId, "Input tax fallback", true, AccountType.Asset, AccountType.Liability);
         await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultPurchasePriceVarianceAccountId, "Purchase Price Variance", false, AccountType.Expense);
         await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultTermsDiscountsAvailableAccountId, "Terms Discounts Available", false);
         await ValidatePostingAccountAsync(unitOfWork, currentUser, defaults.DefaultTermsDiscountsTakenAccountId, "Terms Discounts Taken", false);

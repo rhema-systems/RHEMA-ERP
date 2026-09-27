@@ -144,7 +144,7 @@ export default function CustomerReceiptDetailsPage() {
             <Card className="print:shadow-none">
                 <CardHeader className="border-b">
                     <CardTitle>{payment.customerName}</CardTitle>
-                    <p className="text-sm text-muted-foreground">Customer ID: {payment.customerId}</p>
+                    <p className="text-sm text-muted-foreground">Business Partner: {payment.businessPartnerCode}</p>
                 </CardHeader>
                 <CardContent className="space-y-8 pt-6">
                     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">

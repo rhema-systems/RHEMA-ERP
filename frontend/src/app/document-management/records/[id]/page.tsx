@@ -6,7 +6,6 @@ import { useParams } from 'next/navigation';
 import {
   AlertCircle,
   ArrowLeft,
-  CalendarClock,
   CheckCircle2,
   Eye,
   ExternalLink,
@@ -20,22 +19,19 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   CentralDocumentViewerDialog,
   type CentralDocumentViewerFile,
 } from '@/components/document-management/CentralDocumentViewerDialog';
 import {
   documentManagementService,
+  type CentralDocumentAnnotationReview,
   type CentralDocumentRecordDetail,
+  type CentralDocumentVersion,
   type CentralDocumentVersionDownloadFormat,
 } from '@/services/document-management.service';
+import { getStatusBadgeClassName } from '@/lib/status-badge';
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not set';
@@ -70,6 +66,32 @@ function triggerBlobDownload(blob: Blob, fileName: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function timestamp(value?: string | null) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function compareVersionRecency(
+  left: CentralDocumentVersion,
+  right: CentralDocumentVersion
+) {
+  return (
+    timestamp(right.publishedAt || right.createdAt) -
+    timestamp(left.publishedAt || left.createdAt)
+  );
+}
+
+function compareAnnotationReviewRecency(
+  left: CentralDocumentAnnotationReview,
+  right: CentralDocumentAnnotationReview
+) {
+  return (
+    timestamp(right.updatedAt || right.createdAt) -
+    timestamp(left.updatedAt || left.createdAt)
+  );
 }
 
 export default function CentralDocumentRecordDetailPage() {
@@ -143,12 +165,21 @@ export default function CentralDocumentRecordDetailPage() {
     record.repositoryPath && /^https?:\/\//i.test(record.repositoryPath)
       ? record.repositoryPath
       : null;
+  const versionsByMostRecent = [...versions].sort(compareVersionRecency);
   const currentVersionRecord =
-    versions.find(
-      (version) =>
-        version.status === 'Current' ||
-        version.versionNumber === record.currentVersion
-    ) || versions[0];
+    versionsByMostRecent.find(
+      (version) => version.versionNumber === record.currentVersion
+    ) ||
+    versionsByMostRecent.find((version) => version.status === 'Current') ||
+    versionsByMostRecent[0];
+  const annotationStateForVersion = (versionId?: string | null) =>
+    [...annotationReviews]
+      .filter(
+        (review) =>
+          review.documentVersionId === versionId &&
+          review.annotationStateJson?.trim()
+      )
+      .sort(compareAnnotationReviewRecency)[0]?.annotationStateJson || null;
 
   const openViewer = (file: CentralDocumentViewerFile | null | undefined) => {
     if (file) {
@@ -163,7 +194,8 @@ export default function CentralDocumentRecordDetailPage() {
 
     const version = await documentManagementService.generateVersionRendition(
       file.documentRecordId,
-      file.versionId
+      file.versionId,
+      Boolean(file.renditionPath)
     );
 
     setDetail((current) =>
@@ -219,8 +251,9 @@ export default function CentralDocumentRecordDetailPage() {
         record.id,
         {
           file,
-          status: 'Submitted',
-          changeSummary: 'Edited workflow copy uploaded as a new DMS version.',
+          status: 'Current',
+          changeSummary:
+            'Edited workflow copy uploaded as the current DMS version.',
         }
       );
 
@@ -239,7 +272,14 @@ export default function CentralDocumentRecordDetailPage() {
                   ? 'PDF preview ready'
                   : current.record.annotationStatus,
               },
-              versions: [version, ...current.versions],
+              versions: [
+                version,
+                ...current.versions.map((item) =>
+                  item.status === 'Current'
+                    ? { ...item, status: 'Published' }
+                    : item
+                ),
+              ],
             }
           : current
       );
@@ -273,6 +313,94 @@ export default function CentralDocumentRecordDetailPage() {
     contentType: currentVersionRecord?.contentType,
     sourceLabel: record.sourceLabel,
     version: currentVersionRecord?.versionNumber || record.currentVersion,
+    annotationStateJson: annotationStateForVersion(currentVersionRecord?.id),
+  };
+
+  const saveAnnotations = async (
+    file: CentralDocumentViewerFile,
+    annotationStateJson: string | null,
+    annotatedPdfBlob: Blob | null
+  ) => {
+    if (!file.documentRecordId || !file.versionId) {
+      throw new Error('This DMS version cannot save annotations.');
+    }
+
+    const sourcePdf =
+      annotatedPdfBlob ||
+      (await documentManagementService.downloadVersionFile(
+        file.documentRecordId,
+        file.versionId,
+        'pdf'
+      ));
+    const baseName =
+      file.fileName?.replace(/\.[^.]+$/, '') ||
+      file.title ||
+      record.documentReference;
+    const annotatedFile = new File(
+      [sourcePdf],
+      safeDownloadName(`${baseName}-annotated.pdf`),
+      { type: 'application/pdf' }
+    );
+    const version = await documentManagementService.uploadVersionFile(
+      file.documentRecordId,
+      {
+        file: annotatedFile,
+        status: 'Current',
+        changeSummary:
+          'PDF annotations, comments, and signatures saved as a new current DMS version.',
+      }
+    );
+    const review = await documentManagementService.addAnnotationReview(
+      file.documentRecordId,
+      {
+        documentVersionId: version.id,
+        reviewTitle: `${record.documentReference} annotation save`,
+        status: 'Open',
+        syncfusionAnnotationStatus: 'Annotations saved',
+        reviewNotes:
+          'Annotations, comments, and signature marks were saved from the PDF viewer.',
+        annotationStateJson: annotationStateJson || '{}',
+      }
+    );
+
+    setDetail((current) =>
+      current
+        ? {
+            ...current,
+            record: {
+              ...current.record,
+              currentVersion: version.versionNumber,
+              versionStatus: version.status,
+              repositoryPath:
+                version.repositoryPath || current.record.repositoryPath,
+              repositoryStatus: 'Linked',
+              annotationStatus: 'Annotations saved',
+              commentStatus: 'Open comments',
+            },
+            versions: [
+              version,
+              ...current.versions.map((item) =>
+                item.status === 'Current'
+                  ? { ...item, status: 'Published' }
+                  : item
+              ),
+            ],
+            annotationReviews: [review, ...current.annotationReviews],
+          }
+        : current
+    );
+
+    return {
+      ...file,
+      versionId: version.id,
+      fileUploadRecordId: version.fileUploadRecordId,
+      fileName: version.fileName || file.fileName,
+      repositoryPath: version.repositoryPath || file.repositoryPath,
+      renditionPath: version.renditionPath || version.repositoryPath,
+      contentType: version.contentType || 'application/pdf',
+      version: version.versionNumber,
+      annotationStateJson: annotationStateJson || '{}',
+    };
   };
 
   return (
@@ -280,9 +408,10 @@ export default function CentralDocumentRecordDetailPage() {
       <CentralDocumentViewerDialog
         file={viewerFile}
         open={Boolean(viewerFile)}
-        enableAnnotations={false}
+        enableAnnotations
         onGenerateRendition={generateRendition}
         onDownload={downloadVersion}
+        onSaveAnnotations={saveAnnotations}
         onOpenChange={(open) => {
           if (!open) setViewerFile(null);
         }}
@@ -291,9 +420,6 @@ export default function CentralDocumentRecordDetailPage() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
-            <Badge variant="outline" className="w-fit">
-              {record.sourceLabel}
-            </Badge>
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary">{record.documentReference}</Badge>
@@ -345,34 +471,29 @@ export default function CentralDocumentRecordDetailPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="flex flex-wrap gap-x-6 gap-y-2 border-y py-3 text-sm">
           {[
             ['Repository', record.repositoryStatus],
             ['Version', record.currentVersion || record.versionStatus],
             ['Annotation', record.annotationStatus],
             ['Retention', record.retentionStatus],
           ].map(([label, value]) => (
-            <Card
-              key={label}
-              className="border-border bg-card text-card-foreground"
-            >
-              <CardHeader className="space-y-1 pb-2">
-                <CardDescription>{label}</CardDescription>
-                <CardTitle className="text-xl">{value}</CardTitle>
-              </CardHeader>
-            </Card>
+            <div key={label} className="flex gap-2">
+              <span className="text-muted-foreground">{label}</span>
+              <span className="font-medium">{value}</span>
+            </div>
           ))}
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+        <div className="space-y-4">
+          <Card className="border-0 bg-transparent shadow-none">
+            <CardHeader className="px-0">
               <div className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-primary" />
                 <CardTitle>Source & Repository</CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2">
+            <CardContent className="grid gap-x-6 gap-y-2 px-0 md:grid-cols-2">
               {[
                 ['Source module', record.sourceModule],
                 ['Source entity', record.sourceEntityType || 'Not set'],
@@ -388,25 +509,25 @@ export default function CentralDocumentRecordDetailPage() {
               ].map(([label, value]) => (
                 <div
                   key={label}
-                  className="rounded-md border bg-background p-3"
+                  className="flex items-start justify-between gap-3 border-b py-2"
                 >
-                  <div className="text-xs font-medium uppercase text-muted-foreground">
-                    {label}
+                  <div className="text-sm text-muted-foreground">{label}</div>
+                  <div className="max-w-[70%] break-words text-right text-sm">
+                    {value}
                   </div>
-                  <div className="mt-2 break-words text-sm">{value}</div>
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+          <Card className="border-0 bg-transparent shadow-none">
+            <CardHeader className="px-0">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-5 w-5 text-primary" />
                 <CardTitle>Governance</CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="divide-y px-0">
               {[
                 ['Access profile', record.accessProfile],
                 ['Lifecycle status', record.lifecycleStatus],
@@ -418,7 +539,7 @@ export default function CentralDocumentRecordDetailPage() {
               ].map(([label, value]) => (
                 <div
                   key={label}
-                  className="flex items-start justify-between gap-3 rounded-md border bg-background p-3"
+                  className="flex items-start justify-between gap-3 py-2"
                 >
                   <span className="text-sm text-muted-foreground">{label}</span>
                   <span className="text-right text-sm font-medium">
@@ -431,8 +552,8 @@ export default function CentralDocumentRecordDetailPage() {
         </div>
 
         {accessRetentionCompliance ? (
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+          <Card className="border-0 bg-transparent shadow-none">
+            <CardHeader className="px-0">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-5 w-5 text-primary" />
@@ -454,7 +575,7 @@ export default function CentralDocumentRecordDetailPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 px-0">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 {[
                   [
@@ -582,8 +703,8 @@ export default function CentralDocumentRecordDetailPage() {
           </Card>
         ) : null}
 
-        <Card className="border-border bg-card text-card-foreground">
-          <CardHeader>
+        <Card className="border-0 bg-transparent shadow-none">
+          <CardHeader className="px-0">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-primary" />
@@ -591,12 +712,13 @@ export default function CentralDocumentRecordDetailPage() {
               </div>
               <Badge
                 variant={metadataBadgeVariant(metadataCompleteness.status)}
+                className={getStatusBadgeClassName(metadataCompleteness.status)}
               >
                 {metadataCompleteness.status} {metadataCompleteness.percentage}%
               </Badge>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 px-0">
             <div className="grid gap-3 md:grid-cols-3">
               {[
                 [
@@ -678,9 +800,9 @@ export default function CentralDocumentRecordDetailPage() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+        <div className="space-y-4">
+          <Card className="border-0 bg-transparent shadow-none">
+            <CardHeader className="px-0">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
                   <GitBranch className="h-5 w-5 text-primary" />
@@ -718,162 +840,189 @@ export default function CentralDocumentRecordDetailPage() {
                 <p className="text-sm text-destructive">{uploadError}</p>
               ) : null}
             </CardHeader>
-            <CardContent className="space-y-3">
-              {versions.length === 0 ? (
-                <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
-                  No version history recorded.
-                </div>
-              ) : null}
-              {versions.map((version) => {
-                const isCurrent =
-                  version.status === 'Current' ||
-                  record.currentVersion === version.versionNumber;
-                const versionUrl =
-                  version.repositoryPath &&
-                  /^https?:\/\//i.test(version.repositoryPath)
-                    ? version.repositoryPath
-                    : null;
+            <CardContent className="px-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[680px] text-sm">
+                  <thead className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Version</th>
+                      <th className="px-3 py-2 font-medium">File</th>
+                      <th className="px-3 py-2 font-medium">Change</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {versions.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-3 py-6 text-center text-muted-foreground"
+                        >
+                          No version history recorded.
+                        </td>
+                      </tr>
+                    ) : null}
+                    {versions.map((version) => {
+                      const isCurrent =
+                        version.status === 'Current' ||
+                        record.currentVersion === version.versionNumber;
+                      const versionUrl =
+                        version.repositoryPath &&
+                        /^https?:\/\//i.test(version.repositoryPath)
+                          ? version.repositoryPath
+                          : null;
 
-                return (
-                  <div
-                    key={version.id}
-                    className="rounded-md border bg-background p-4"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="font-medium">
+                      return (
+                        <tr key={version.id}>
+                          <td className="px-3 py-2.5 font-medium">
                             {version.versionNumber}
-                          </div>
-                          {isCurrent ? <Badge>Current</Badge> : null}
-                        </div>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {version.fileName || 'No file name recorded'} /{' '}
-                          {formatFileSize(version.fileSize)}
-                        </p>
-                      </div>
-                      <Badge variant="outline">{version.status}</Badge>
-                    </div>
-
-                    <p className="mt-3 break-words text-xs text-muted-foreground">
-                      {version.repositoryPath || 'No repository path linked'}
-                    </p>
-                    {version.renditionPath ? (
-                      <p className="mt-2 break-words text-xs text-muted-foreground">
-                        PDF rendition: {version.renditionPath}
-                      </p>
-                    ) : null}
-                    {version.changeSummary ? (
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        {version.changeSummary}
-                      </p>
-                    ) : null}
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          openViewer({
-                            documentRecordId: record.id,
-                            versionId: version.id,
-                            fileUploadRecordId: version.fileUploadRecordId,
-                            title: `${record.title} / ${version.versionNumber}`,
-                            fileName: version.fileName || record.title,
-                            repositoryPath:
-                              version.repositoryPath || record.repositoryPath,
-                            renditionPath: version.renditionPath,
-                            externalDocumentUrl: record.externalDocumentUrl,
-                            contentType: version.contentType,
-                            sourceLabel: record.sourceLabel,
-                            version: version.versionNumber,
-                          })
-                        }
-                      >
-                        <Eye className="mr-2 h-4 w-4" />
-                        View
-                      </Button>
-                      {versionUrl ? (
-                        <Button asChild size="sm" variant="outline">
-                          <a
-                            href={versionUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <ExternalLink className="mr-2 h-4 w-4" />
-                            Open file
-                          </a>
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
+                            {isCurrent ? (
+                              <Badge variant="outline" className="ml-2">
+                                Current
+                              </Badge>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2">
+                            {version.fileName || 'No file name'}{' '}
+                            <span className="text-muted-foreground">
+                              ({formatFileSize(version.fileSize)})
+                            </span>
+                          </td>
+                          <td className="max-w-[260px] px-3 py-2 text-muted-foreground">
+                            {version.changeSummary || 'Not specified'}
+                          </td>
+                          <td className="px-3 py-2">{version.status}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  openViewer({
+                                    documentRecordId: record.id,
+                                    versionId: version.id,
+                                    fileUploadRecordId:
+                                      version.fileUploadRecordId,
+                                    title: `${record.title} / ${version.versionNumber}`,
+                                    fileName: version.fileName || record.title,
+                                    repositoryPath:
+                                      version.repositoryPath ||
+                                      record.repositoryPath,
+                                    renditionPath: version.renditionPath,
+                                    externalDocumentUrl:
+                                      record.externalDocumentUrl,
+                                    contentType: version.contentType,
+                                    sourceLabel: record.sourceLabel,
+                                    version: version.versionNumber,
+                                    annotationStateJson:
+                                      annotationStateForVersion(version.id),
+                                  })
+                                }
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                View
+                              </Button>
+                              {versionUrl ? (
+                                <Button asChild size="sm" variant="outline">
+                                  <a
+                                    href={versionUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                    Open file
+                                  </a>
+                                </Button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+          <Card className="border-0 bg-transparent shadow-none">
+            <CardHeader className="px-0">
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-5 w-5 text-primary" />
                 <CardTitle>Viewer Review History</CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {annotationReviews.length === 0 ? (
-                <div className="rounded-md border bg-background p-4">
-                  <div className="text-sm font-medium">
-                    No annotation review recorded
-                  </div>
-                </div>
-              ) : null}
-              {annotationReviews.map((review) => {
-                const linkedVersion = versions.find(
-                  (version) => version.id === review.documentVersionId
-                );
-
-                return (
-                  <div
-                    key={review.id}
-                    className="rounded-md border bg-background p-4"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="font-medium">{review.reviewTitle}</div>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {review.syncfusionAnnotationStatus}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Version:{' '}
-                          {linkedVersion
-                            ? `${linkedVersion.versionNumber} / ${linkedVersion.status}`
-                            : 'Not linked'}
-                        </p>
-                      </div>
-                      <Badge variant="outline">{review.status}</Badge>
-                    </div>
-                    <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                      <CalendarClock className="h-3.5 w-3.5" />
-                      Due {formatDate(review.dueDate)}
-                    </div>
-                    {review.reviewNotes ? (
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        {review.reviewNotes}
-                      </p>
+            <CardContent className="px-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[620px] text-sm">
+                  <thead className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Review</th>
+                      <th className="px-3 py-2 font-medium">Version</th>
+                      <th className="px-3 py-2 font-medium">Due</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {annotationReviews.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-3 py-6 text-center text-muted-foreground"
+                        >
+                          No annotation reviews.
+                        </td>
+                      </tr>
                     ) : null}
-                  </div>
-                );
-              })}
+                    {annotationReviews.map((review) => {
+                      const linkedVersion = versions.find(
+                        (version) => version.id === review.documentVersionId
+                      );
+
+                      return (
+                        <tr key={review.id}>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium">
+                              {review.reviewTitle}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {review.reviewNotes ||
+                                review.syncfusionAnnotationStatus}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            {linkedVersion?.versionNumber || 'Not linked'}
+                          </td>
+                          <td className="px-3 py-2">
+                            {formatDate(review.dueDate)}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Badge
+                              variant="outline"
+                              className={getStatusBadgeClassName(review.status)}
+                            >
+                              {review.status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
         </div>
 
         {record.notes ? (
-          <Card className="border-border bg-card text-card-foreground">
-            <CardHeader>
+          <Card className="border-0 bg-transparent shadow-none">
+            <CardHeader className="px-0">
               <CardTitle>Document Control Notes</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-0">
               <p className="text-sm leading-6 text-muted-foreground">
                 {record.notes}
               </p>

@@ -9,12 +9,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
-  estateLandManagementService,
   EstateManagedAssetStatus,
-  type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
 import {
   buildPropertyWorkspaceHref,
@@ -25,30 +22,30 @@ import {
   propertyReference,
   sourceReference,
 } from './property-workspace-utils';
+import { useManagedAssetsPage } from './use-managed-assets-page';
 
 export function TenantOccupantWorkspace() {
-  const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [searchDraft, setSearchDraft] = React.useState('');
   const [search, setSearch] = React.useState('');
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-
-  const loadAssets = React.useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      setAssets(await estateLandManagementService.getManagedAssets({ search: search || undefined, take: 500 }));
-    } catch {
-      setAssets([]);
-      setLoadError('Unable to load tenant and occupant records.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [search]);
-
-  React.useEffect(() => {
-    void loadAssets();
-  }, [loadAssets]);
+  const {
+    assets,
+    page,
+    setPage,
+    isLoading,
+    loadError,
+    loadAssets,
+    pageSize,
+    totalPages,
+    totalItems,
+  } = useManagedAssetsPage({
+    search: search || undefined,
+    statuses: [
+      EstateManagedAssetStatus.Reserved,
+      EstateManagedAssetStatus.Leased,
+      EstateManagedAssetStatus.Occupied,
+    ],
+    errorMessage: 'Unable to load tenant and occupant records.',
+  });
 
   const occupantAssets = React.useMemo(
     () => assets.filter(isActiveTenantAsset),
@@ -57,7 +54,6 @@ export function TenantOccupantWorkspace() {
   const activeCount = occupantAssets.filter((asset) =>
     [EstateManagedAssetStatus.Leased, EstateManagedAssetStatus.Occupied].includes(asset.status)
   ).length;
-  const occupantPages = usePaginatedItems(occupantAssets, 10);
 
   return (
     <div className="space-y-6">
@@ -76,9 +72,9 @@ export function TenantOccupantWorkspace() {
                 Operational view of customers already linked through Lease Management. Business Partner registration remains owned by the existing Business Partner module.
               </CardDescription>
             </div>
-            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void loadAssets()}><RefreshCw className="h-4 w-4" /></Button>
+            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void loadAssets(page)}><RefreshCw className="h-4 w-4" /></Button>
           </div>
-          <form className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_auto]" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}>
+          <form className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_auto]" onSubmit={(event) => { event.preventDefault(); setPage(1); setSearch(searchDraft.trim()); }}>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} className="pl-9" placeholder="Search tenant, property, or file reference" />
@@ -103,7 +99,7 @@ export function TenantOccupantWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {occupantPages.items.map((asset) => (
+                  {occupantAssets.map((asset) => (
                     <TableRow key={asset.id}>
                       <TableCell><div className="font-medium">{occupantName(asset)}</div><div className="text-xs text-muted-foreground">{asset.customerBusinessPartnerId || 'Manual occupant reference'}</div></TableCell>
                       <TableCell><div>{asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(asset)}</div></TableCell>
@@ -122,7 +118,7 @@ export function TenantOccupantWorkspace() {
               </Table>
             </div>
           ) : null}
-          {occupantAssets.length > occupantPages.pageSize ? <Pagination currentPage={occupantPages.currentPage} totalPages={occupantPages.totalPages} totalItems={occupantPages.totalItems} pageSize={occupantPages.pageSize} onPageChange={occupantPages.setCurrentPage} /> : null}
+          {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
           {!isLoading && !loadError && occupantAssets.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No tenant or occupant records have been linked yet.</div> : null}
         </CardContent>
       </Card>

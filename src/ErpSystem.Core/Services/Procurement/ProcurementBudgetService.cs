@@ -187,7 +187,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
         budget.ProcurementPlanId = dto.ProcurementPlanId;
         budget.FiscalYear = dto.FiscalYear;
         budget.AllocatedAmount = dto.AllocatedAmount;
-        budget.RemainingAmount = dto.AllocatedAmount - budget.UtilizedAmount - budget.CommittedAmount;
+        budget.RemainingAmount = dto.AllocatedAmount - budget.ReservedAmount - budget.UtilizedAmount - budget.CommittedAmount;
         budget.Currency = dto.Currency;
         budget.ControlLevel = dto.ControlLevel;
         budget.WarningThresholdPercent = dto.WarningThresholdPercent;
@@ -483,7 +483,8 @@ public class ProcurementBudgetService : IProcurementBudgetService
         if (!IsPendingRevisionStatus(revision.Status))
             throw new InvalidOperationException(
                 $"Only a pending procurement budget revision can be approved or rejected (current status: '{revision.Status}').");
-        if (revision.CreatedById == currentUserId)
+        if (revision.CreatedById == currentUserId &&
+            await _unitOfWork.IsProcurementSodEnabledAsync(_currentUserProvider.TenantId))
             throw new UnauthorizedAccessException("The user who requested a budget revision cannot approve or reject the same revision.");
 
         var budget = await RequireTenantBudgetAsync(revision.ProcurementBudgetId);
@@ -538,7 +539,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
 
         await ValidateRevisionAmountAsync(budget, revision.NewAmount);
         budget.AllocatedAmount = revision.NewAmount;
-        budget.RemainingAmount = revision.NewAmount - budget.UtilizedAmount - budget.CommittedAmount;
+        budget.RemainingAmount = revision.NewAmount - budget.ReservedAmount - budget.UtilizedAmount - budget.CommittedAmount;
         budget.UpdatedAt = DateTime.UtcNow;
         budget.UpdatedBy = _currentUserProvider.Username;
         budget.LastModifiedById = _currentUserProvider.UserId;
@@ -552,10 +553,10 @@ public class ProcurementBudgetService : IProcurementBudgetService
         if (newAmount == budget.AllocatedAmount)
             throw new InvalidOperationException("The revised amount must differ from the current approved budget amount.");
 
-        var committedAndUsed = budget.UtilizedAmount + budget.CommittedAmount;
+        var committedAndUsed = budget.ReservedAmount + budget.UtilizedAmount + budget.CommittedAmount;
         if (newAmount < committedAndUsed)
             throw new InvalidOperationException(
-                $"The revised amount cannot be lower than the utilized and committed exposure of {committedAndUsed:N2} {budget.Currency}.");
+                $"The revised amount cannot be lower than the reserved, utilized and committed exposure of {committedAndUsed:N2} {budget.Currency}.");
 
         var plannedExposure = await _planRepository.GetPlannedBudgetExposureAsync(budget.Id);
         if (newAmount < plannedExposure)

@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { accountsPayableService } from '@/services/procurementSupplierInvoiceService';
+import type { ApInvoiceSupplierEntryOption } from '@/types/ap';
 import { landedCostInvoiceService, type LandedCostInvoiceRequest } from '@/services/landedCostInvoiceService';
 import type { LandedCostDetailDto } from '@/services/inventoryManagementService';
 import type { VendorInvoice } from '@/types/ap';
@@ -28,7 +29,7 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [setupError, setSetupError] = useState('');
-  const [suppliers, setSuppliers] = useState<BusinessPartnerDto[]>([]);
+  const [suppliers, setSuppliers] = useState<ApInvoiceSupplierEntryOption[]>([]);
   const [inventoryPosted, setInventoryPosted] = useState(false);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [invoiceDate, setInvoiceDate] = useState('');
@@ -36,55 +37,66 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
   const pending = voucher.costItems.filter(c => !c.invoiceId && !c.invoiceNumber);
   const groups = groupLandedCostsBySupplier(charges.map(row => {
     const cost = voucher.costItems.find(c => c.id === row.costItemId)!;
-    return { ...cost, supplierId: row.supplierId,
-      supplierName: suppliers.find(s => s.id === row.supplierId)?.partnerName,
+    return { ...cost, supplierId: row.businessPartnerId,
+      supplierName: suppliers.find(s => s.businessPartnerId === row.businessPartnerId)?.name,
       referenceNumber: row.supplierInvoiceNumber };
   }));
   const load = async () => {
     setLoading(true); setSetupError('');
     try {
-      const partners = await businessPartnerService.getAllPartnersForDropdown();
-      setSuppliers(partners.filter(s => ['Supplier', 'Both', 'Contractor'].includes(s.partnerType) &&
-        (s.isActive ?? s.status === 'Active') && !s.isBlacklisted && s.approvalStatus === 'Approved'));
-    } catch { setSetupError('Could not load cost suppliers. Retry before posting.'); }
+      const options = await accountsPayableService.getInvoiceSupplierEntryOptions();
+      setSuppliers(options);
+      setCharges(rows => rows.map(row => {
+        if (row.businessPartnerRoleId) return row;
+        const matches = options.filter(option => option.businessPartnerId === row.businessPartnerId);
+        return matches.length === 1 ? { ...row, businessPartnerRoleId: matches[0].businessPartnerRoleId } : row;
+      }));
+    } catch { setSetupError('Could not load cost suppliers. Retry before preparing invoices.'); }
     finally { setLoading(false); }
   };
   const start = () => {
-    setCharges(voucher.costItems.map(c => ({ costItemId: c.id, supplierId: c.supplierId || '', supplierInvoiceNumber: c.referenceNumber || '' })));
+    setCharges(voucher.costItems.map(c => ({ costItemId: c.id, businessPartnerId: c.supplierId || '', supplierInvoiceNumber: c.referenceNumber || '' })));
     setInvoiceDate(voucher.costItems.find(c => c.invoiceDate)?.invoiceDate?.slice(0, 10) || new Date().toLocaleDateString('en-CA'));
     setError(''); setCreated([]); setInventoryPosted(voucher.status === 'Posted'); setOpen(true); void load();
   };
   const change = (id: string, patch: Partial<Charge>) => setCharges(rows => rows.map(c => c.costItemId === id ? { ...c, ...patch } : c));
   const save = async () => {
     if (submitting.current) return;
-    if (!invoiceDate || charges.length === 0 || charges.some(c => !c.supplierId || !c.supplierInvoiceNumber.trim())) {
+    if (!invoiceDate || charges.length === 0 || charges.some(c => !c.businessPartnerId || !c.supplierInvoiceNumber.trim())) {
       setError('Select a supplier and enter its invoice reference for every charge. Tax is completed later on the invoice draft.'); return;
+    }
+    if (charges.some(charge => {
+      const cost = voucher.costItems.find(item => item.id === charge.costItemId);
+      if (cost?.invoiceId || cost?.invoiceNumber) return false;
+      return !suppliers.some(option => option.businessPartnerId === charge.businessPartnerId &&
+        option.businessPartnerRoleId === charge.businessPartnerRoleId && option.isTransactionReady);
+    })) {
+      setError('Select a ready Supplier or Contractor role for every unlinked charge. Complete its Finance profile if required.'); return;
     }
     submitting.current = true; setBusy(true); onBusyChange?.(true); setError('');
     try {
-      const result = await landedCostInvoiceService.post(voucher.id, { invoiceDate,
+      const result = await landedCostInvoiceService.prepare(voucher.id, { invoiceDate,
         charges: charges.map(c => ({ ...c, supplierInvoiceNumber: c.supplierInvoiceNumber.trim() })) });
       setInventoryPosted(result.inventoryPosted);
-      if (result.invoicesPending) setError(result.message || 'Inventory posted; invoice creation is pending. Retry Post to finish invoices only.');
-      else setCreated(result.invoices);
+      setCreated(result.invoices);
       onCreated();
-    } catch (e) { setError(getProcurementProblemMessage(e, 'Posting could not be confirmed. Your entries are retained; retry safely. Already posted inventory will not be posted twice.')); }
+    } catch (e) { setError(getProcurementProblemMessage(e, 'Invoice preparation could not be confirmed. Your entries are retained; retry to recover the existing drafts.')); }
     finally { submitting.current = false; setBusy(false); onBusyChange?.(false); }
   };
-  if (!pending.length && !open) return <span className="self-center text-sm text-muted-foreground">Posted · Supplier invoices linked</span>;
+  if (!pending.length && !open) return <span className="self-center text-sm text-muted-foreground">Supplier invoices linked · Post from Invoices</span>;
   return <div className="space-y-1">
     <Button type="button" disabled={disabled || !canCreate || !['Allocated', 'Approved', 'Posted'].includes(voucher.status)} onClick={start}
-      title={!canCreate ? 'Receiving permission and warehouse access are required.' : 'Allocate first, then post inventory and create supplier invoice drafts.'}>
-      {voucher.status === 'Posted' ? 'Retry Post' : 'Post'}
+      title={!canCreate ? 'Receiving permission and warehouse access are required.' : 'Allocate first, then prepare supplier documents and invoice drafts.'}>
+      Prepare supplier invoices
     </Button>
     <Dialog open={open} onOpenChange={value => { if (!busy && !loading) setOpen(value); }}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" onInteractOutside={e => e.preventDefault()}>
-        <DialogHeader><DialogTitle>Post landed costs · {voucher.landedCostNumber}</DialogTitle>
-          <DialogDescription>{inventoryPosted ? 'Inventory is already posted. This completes supplier invoices only.' : 'Post allocated costs to inventory and create supplier invoice drafts in one action.'} Tax is completed later in AP.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>Prepare supplier invoices · {voucher.landedCostNumber}</DialogTitle>
+          <DialogDescription>{inventoryPosted ? 'This voucher was already posted; its existing valuation is retained.' : 'Prepare supplier documents and invoice drafts. Final posting happens from Invoices.'} Review taxes on each draft.</DialogDescription></DialogHeader>
         {created.length ? <div className="space-y-3">
-          <p>Inventory posted. {created.length} supplier invoice{created.length === 1 ? '' : 's'} linked. Open each draft in AP to complete tax review. No invoice approval or financial posting was performed.</p>
+          <p>{created.length} supplier invoice{created.length === 1 ? '' : 's'} linked. Open each draft to review taxes, approve and post.</p>
           {created.map(invoice => <div key={invoice.id} className="rounded-md border p-3 text-sm">
-            <Link className="text-primary underline" href={`/finance/ap/invoices/${invoice.id}`}>{invoice.invoiceNumber} · {invoice.supplierName}</Link>
+            <Link className="text-primary underline" href={`/procurement/supplier-invoices/${invoice.id}`}>{invoice.invoiceNumber} · {invoice.supplierName}</Link>
             <p>{invoice.currencyCode} {invoice.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} · {invoice.status}</p>
           </div>)}
           <Button type="button" onClick={() => setOpen(false)}>Close</Button>
@@ -97,9 +109,12 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
               <div className="flex justify-between gap-3"><p className="text-sm font-medium">{cost.description} · {cost.currency} {cost.amount.toFixed(2)}</p>
                 {cost.invoiceNumber && <span>{cost.invoiceNumber}</span>}</div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div><Label>Cost supplier</Label><Select value={row.supplierId} onValueChange={value => change(row.costItemId, { supplierId: value })}>
+                <div><Label>Cost supplier</Label><Select value={row.businessPartnerRoleId || ''} onValueChange={value => {
+                  const option = suppliers.find(supplier => supplier.businessPartnerRoleId === value);
+                  if (option) change(row.costItemId, { businessPartnerId: option.businessPartnerId, businessPartnerRoleId: option.businessPartnerRoleId });
+                }}>
                   <SelectTrigger aria-label={`Invoice charge ${i + 1} supplier`}><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                  <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.partnerCode} — {s.partnerName}</SelectItem>)}</SelectContent>
+                  <SelectContent>{suppliers.map(s => <SelectItem key={s.businessPartnerRoleId} value={s.businessPartnerRoleId} disabled={!s.isTransactionReady}>{s.code} — {s.name} ({s.roleType}){s.isTransactionReady ? '' : ` — ${s.readinessMessage}`}</SelectItem>)}</SelectContent>
                 </Select></div>
                 <div><Label>Supplier invoice reference</Label><Input aria-label={`Invoice charge ${i + 1} reference`} maxLength={100} value={row.supplierInvoiceNumber} onChange={e => change(row.costItemId, { supplierInvoiceNumber: e.target.value })} /></div>
               </div>
@@ -113,7 +128,7 @@ export function LandedCostSupplierInvoices({ voucher, onCreated, disabled, onBus
           </div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="button" disabled={busy || loading || Boolean(setupError) || !charges.length} onClick={() => void save()}>{busy ? 'Posting…' : inventoryPosted ? 'Finish invoice drafts' : 'Confirm Post'}</Button></DialogFooter>
+            <Button type="button" disabled={busy || loading || Boolean(setupError) || !charges.length} onClick={() => void save()}>{busy ? 'Preparing…' : 'Prepare drafts'}</Button></DialogFooter>
         </>}
       </DialogContent>
     </Dialog>

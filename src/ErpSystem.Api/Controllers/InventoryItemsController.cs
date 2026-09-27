@@ -198,7 +198,8 @@ public class InventoryItemsController : ControllerBase
     /// Search inventory items
     /// </summary>
     [HttpGet("search")]
-    public async Task<ActionResult<IEnumerable<InventoryItemDto>>> SearchInventoryItems([Required] string searchTerm)
+    public async Task<ActionResult<IEnumerable<InventoryItemDto>>> SearchInventoryItems(
+        [Required] string searchTerm, [FromQuery] int? take = null)
     {
         try
         {
@@ -207,7 +208,30 @@ public class InventoryItemsController : ControllerBase
                 return BadRequest("Search term is required");
             }
 
-            var items = await _inventoryItemRepository.SearchItemsAsync(searchTerm);
+            IEnumerable<InventoryItem> items;
+            if (take.HasValue)
+            {
+                if (_currentUserProvider.TenantId == Guid.Empty) return Unauthorized();
+                var term = searchTerm.Trim();
+                if (term.Length is < 2 or > 100) return Ok(Array.Empty<InventoryItemDto>());
+                items = await _inventoryItemRepository.GetQueryable(value => !value.IsDeleted &&
+                    value.TenantId == _currentUserProvider.TenantId &&
+                    (value.ItemCode.Contains(term) || value.Name.Contains(term) ||
+                     (value.Description != null && value.Description.Contains(term)) ||
+                     (value.Brand != null && value.Brand.Contains(term)) ||
+                     (value.Manufacturer != null && value.Manufacturer.Contains(term)) ||
+                     (value.Barcode != null && value.Barcode.Contains(term)) ||
+                     (value.AlternateBarcode != null && value.AlternateBarcode.Contains(term)) ||
+                     (value.QRCode != null && value.QRCode.Contains(term)) ||
+                     value.ItemUnitsOfMeasure.Any(unit => !unit.IsDeleted && unit.Barcode != null && unit.Barcode.Contains(term))))
+                    .AsNoTracking().Include(value => value.Category)
+                    .OrderBy(value => value.ItemCode).ThenBy(value => value.Id)
+                    .Take(Math.Clamp(take.Value, 1, 50)).ToListAsync(HttpContext.RequestAborted);
+            }
+            else
+            {
+                items = await _inventoryItemRepository.SearchItemsAsync(searchTerm);
+            }
             var itemDtos = _mapper.Map<IEnumerable<InventoryItemDto>>(items);
             return Ok(itemDtos);
         }

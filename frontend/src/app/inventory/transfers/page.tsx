@@ -1,4 +1,5 @@
 'use client';
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
 
 import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import React, { useState, useEffect } from 'react';
@@ -248,6 +249,7 @@ export default function InventoryTransfersPage() {
 
   return (
     <div className="space-y-6">
+      <GlobalSearchRecordOpener load={id => inventoryManagementService.getInventoryTransferById(id)} onOpen={openViewDialog} />
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>

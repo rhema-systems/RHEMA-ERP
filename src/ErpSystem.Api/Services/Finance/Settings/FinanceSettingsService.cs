@@ -388,6 +388,16 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.RequireDepreciationBeforePeriodClose = dto.RequireDepreciationBeforePeriodClose.Value;
             }
 
+            if (dto.WhtStatutoryYearStartMonth.HasValue || dto.WhtStatutoryYearStartDay.HasValue)
+            {
+                var month = dto.WhtStatutoryYearStartMonth ?? settings.WhtStatutoryYearStartMonth;
+                var day = dto.WhtStatutoryYearStartDay ?? settings.WhtStatutoryYearStartDay;
+                if (month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(2001, month))
+                    throw new InvalidOperationException("The WHT statutory-year start must be a valid month and day.");
+                settings.WhtStatutoryYearStartMonth = month;
+                settings.WhtStatutoryYearStartDay = day;
+            }
+
             // Procurement invoice matching consumes the same tenant Finance policy row. Keeping
             // these bounds in this service prevents report/UI integration from bypassing the
             // authoritative validation used by invoice readiness controls.
@@ -653,6 +663,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 CoaType = settings.CoaType,
                 CoaConfigurationLocked = settings.CoaConfigurationLocked,
                 BaseCurrency = baseCurrency.CurrencyCode,
+                WhtStatutoryYearStartMonth = settings.WhtStatutoryYearStartMonth,
+                WhtStatutoryYearStartDay = settings.WhtStatutoryYearStartDay,
                 BaseCurrencyName = baseCurrency.CurrencyName,
                 BaseCurrencySymbol = baseCurrency.CurrencySymbol,
                 BaseCurrencyDecimalPlaces = baseCurrency.DecimalPlaces,

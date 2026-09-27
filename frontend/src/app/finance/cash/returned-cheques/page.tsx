@@ -152,7 +152,7 @@ export default function ReturnedChequesPage() {
             const [cases, receiptPage, deposits, financeSettings] = await Promise.all([
                 cashManagementDataService.getReturnedCheques(),
                 arService.getPayments({ pageSize: 500, status: 'Posted' }),
-                cashManagementDataService.getBankDeposits('Posted'),
+                cashManagementDataService.getBankDeposits('Posted', true, 500),
                 financeDataService.getFinanceSettings(),
             ]);
             const configuredTreatment = financeSettings.defaultReturnedChequeChargeTreatment ?? 'CustomerRecoverable';

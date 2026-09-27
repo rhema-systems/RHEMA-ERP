@@ -203,7 +203,7 @@ public sealed class ManagementReportDocumentBuilderTests
                                 VendorPaymentId = Guid.NewGuid(),
                                 PaymentNumber = "VP-2025-001",
                                 PaymentDate = new DateTime(2025, 1, 20),
-                                SupplierId = Guid.NewGuid(),
+                                BusinessPartnerId = Guid.NewGuid(),
                                 SupplierName = "Tema Engineering Services Ltd",
                                 SupplierTin = "C000123",
                                 TaxCode = "WHT-SERVICES",

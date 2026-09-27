@@ -4,6 +4,7 @@ namespace ErpSystem.Api.Authorization;
 
 public static class FinancePermissionPolicyMap
 {
+    public const string ProjectCurrencyLookupPolicy = "Finance.Policy.ProjectCurrencyLookup";
     private static readonly HashSet<string> ReadOnlyActions = new(StringComparer.OrdinalIgnoreCase)
     {
         "GetAll",
@@ -127,13 +128,7 @@ public static class FinancePermissionPolicyMap
                 "Approve" or "Reject" => One(FinancePermissions.ApproveAccountingBookInitialization),
                 _ => One(FinancePermissions.ManageAccountingBookInitialization)
             },
-            "AccountingBookApplicability" => action switch
-            {
-                "GetPolicies" or "GetEligibleBooks" => One(FinancePermissions.ViewAccountingBookApplicabilityPolicy),
-                "Approve" or "Reject" or "ApproveRetirement" or "RejectRetirement" => One(FinancePermissions.ApproveAccountingBookApplicabilityPolicy),
-                "Resolve" or "Freeze" => One(FinancePermissions.ResolveAccountingBookApplicability),
-                _ => One(FinancePermissions.ManageAccountingBookApplicabilityPolicy)
-            },
+            "AccountingBookApplicability" => One(FinancePermissions.ResolveAccountingBookApplicability),
             "AccountingEvents" => action switch
             {
                 "Get" or "GetBook" => One(FinancePermissions.ViewAccountingEvents),
@@ -386,6 +381,11 @@ public static class FinancePermissionPolicyMap
 
     private static IReadOnlyList<string> CurrencyPolicy(string action, IReadOnlyCollection<string> methods)
     {
+        if (action is "GetActive" or "GetBaseCurrency" && methods.All(method => method == "GET"))
+        {
+            return One(ProjectCurrencyLookupPolicy);
+        }
+
         if (IsRead(action, methods) || IsValidationAction(action))
         {
             return One(FinancePermissions.ViewFinance);

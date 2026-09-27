@@ -679,6 +679,7 @@ public class TenderBidDocumentRepository : GenericRepository<TenderBidDocument>,
     {
         return await _dbSet
             .Where(d => d.TenderBidId == bidId && !d.IsDeleted)
+            .Include(d => d.TenderBidItem).ThenInclude(item => item!.TenderItem).ThenInclude(item => item.Lot)
             .OrderBy(d => d.DocumentType)
             .ThenBy(d => d.UploadedDate)
             .ToListAsync();

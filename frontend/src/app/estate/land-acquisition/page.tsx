@@ -2,6 +2,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
+import { SupplierInvoiceWorkspaceButton } from '@/components/procurement/SupplierInvoiceWorkspaceButton';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowRight,
@@ -80,6 +81,7 @@ import {
 } from '@/services/businessPartnerService';
 import {
   documentManagementService,
+  type CentralDocumentRecord,
   type CentralDocumentGenerationTemplate,
   type GeneratedCentralDocumentResult,
 } from '@/services/document-management.service';
@@ -105,6 +107,7 @@ const ProcedurePdfViewer = dynamic(
 );
 
 const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 11, 13]);
+const LAND_ACQUISITION_AGREEMENT_TEMPLATE_CODE = 'EST-LAND-ACQ-AGREEMENT';
 
 type FieldType =
   | 'text'
@@ -3921,6 +3924,10 @@ function WorkspaceDialog({
   const [generatingAgreement, setGeneratingAgreement] = React.useState(false);
   const [generatedAgreement, setGeneratedAgreement] =
     React.useState<GeneratedCentralDocumentResult | null>(null);
+  const [existingAgreementRecord, setExistingAgreementRecord] =
+    React.useState<CentralDocumentRecord | null>(null);
+  const [loadingAgreementRecord, setLoadingAgreementRecord] =
+    React.useState(false);
   const [preview, setPreview] = React.useState<{
     url: string;
     name: string;
@@ -3968,6 +3975,9 @@ function WorkspaceDialog({
   const isAgreementWorkspace =
     stage.workspaceKind === 'agreement-negotiation' ||
     stage.workspaceKind === 'agreement-approval';
+  const agreementDmsReference = `${values.agreementDmsReference || values.generatedAgreementReference || ''}`.trim();
+  const agreementAlreadyGenerated =
+    Boolean(agreementDmsReference) || Boolean(generatedAgreement);
   const accountsPayableSubject =
     stage.workspaceKind === 'cadastral-survey'
       ? 'external surveyor fee'
@@ -3983,6 +3993,8 @@ function WorkspaceDialog({
 
   React.useEffect(() => {
     setGeneratedAgreement(null);
+    setExistingAgreementRecord(null);
+    setSelectedTemplateCode('');
     setPayableEvidenceView(null);
   }, [item.id, open, stage.id]);
 
@@ -4112,6 +4124,7 @@ function WorkspaceDialog({
           const text =
             `${template.templateCode} ${template.title} ${template.documentType} ${template.body}`.toLowerCase();
           return (
+            template.templateCode === LAND_ACQUISITION_AGREEMENT_TEMPLATE_CODE ||
             text.includes('agreement') ||
             text.includes('conveyance') ||
             text.includes('assignment') ||
@@ -4123,8 +4136,13 @@ function WorkspaceDialog({
           ? agreementTemplates
           : templates;
         setGenerationTemplates(available);
+        const preferredTemplate =
+          available.find(
+            (template) =>
+              template.templateCode === LAND_ACQUISITION_AGREEMENT_TEMPLATE_CODE
+          ) ?? available[0];
         setSelectedTemplateCode(
-          (current) => current || available[0]?.templateCode || ''
+          (current) => current || preferredTemplate?.templateCode || ''
         );
       } catch {
         setGenerationTemplates([]);
@@ -4137,8 +4155,88 @@ function WorkspaceDialog({
     };
   }, [isAgreementWorkspace, open]);
 
+  React.useEffect(() => {
+    if (!open || !isAgreementWorkspace || !agreementDmsReference) {
+      setExistingAgreementRecord(null);
+      return;
+    }
+
+    if (
+      generatedAgreement?.record.documentReference === agreementDmsReference
+    ) {
+      setExistingAgreementRecord(generatedAgreement.record);
+      return;
+    }
+
+    let mounted = true;
+    const loadAgreementRecord = async () => {
+      try {
+        setLoadingAgreementRecord(true);
+        const record =
+          await documentManagementService.getRecordByDocumentReference(
+            agreementDmsReference,
+            'Estate'
+          );
+        if (mounted) setExistingAgreementRecord(record);
+      } catch (error) {
+        console.error(error);
+        if (mounted) setExistingAgreementRecord(null);
+      } finally {
+        if (mounted) setLoadingAgreementRecord(false);
+      }
+    };
+
+    void loadAgreementRecord();
+    return () => {
+      mounted = false;
+    };
+  }, [
+    agreementDmsReference,
+    generatedAgreement?.record,
+    isAgreementWorkspace,
+    open,
+  ]);
+
+  const openAgreementRecord = async () => {
+    const record = generatedAgreement?.record ?? existingAgreementRecord;
+    if (record?.id) {
+      router.push(`/document-management/records/${record.id}`);
+      return;
+    }
+
+    if (!agreementDmsReference) {
+      toast.error('No generated agreement reference was found.');
+      return;
+    }
+
+    try {
+      setLoadingAgreementRecord(true);
+      const resolved = await documentManagementService.getRecordByDocumentReference(
+        agreementDmsReference,
+        'Estate'
+      );
+      if (!resolved?.id) {
+        toast.error('The generated agreement could not be found in Central DMS.');
+        return;
+      }
+      setExistingAgreementRecord(resolved);
+      router.push(`/document-management/records/${resolved.id}`);
+    } catch (error: any) {
+      toast.error(error?.message || 'Unable to open the generated agreement.');
+    } finally {
+      setLoadingAgreementRecord(false);
+    }
+  };
+
   const generateAgreement = async () => {
     if (!item.id || !selectedTemplateCode || !workspaceCanEdit) {
+      return;
+    }
+
+    if (agreementAlreadyGenerated) {
+      toast.error('This agreement has already been generated.', {
+        description: 'Open the existing DMS agreement instead.',
+      });
       return;
     }
 
@@ -4202,6 +4300,7 @@ function WorkspaceDialog({
         values: nextValues,
       });
       setGeneratedAgreement(result);
+      setExistingAgreementRecord(result.record);
       await onReload();
       toast.success('Agreement generated.', {
         description: result.dmsReference,
@@ -4221,7 +4320,7 @@ function WorkspaceDialog({
 
     if (!accountsPayableInvoiceId || !accountsPayableSupplierId) return;
     const params = new URLSearchParams({
-      supplierId: accountsPayableSupplierId,
+      businessPartnerId: accountsPayableSupplierId,
       invoiceId: accountsPayableInvoiceId,
       amount: `${values.amountDue || ''}`,
       referenceNumber: item.projectReference,
@@ -4618,6 +4717,9 @@ function WorkspaceDialog({
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {accountsPayableInvoiceId && (
+                      <SupplierInvoiceWorkspaceButton invoiceId={accountsPayableInvoiceId} />
+                    )}
+                    {accountsPayableInvoiceId && (
                       <Button
                         type="button"
                         size="sm"
@@ -4640,6 +4742,7 @@ function WorkspaceDialog({
                       </Button>
                     )}
                     {accountsPayableInvoiceId ? (
+                      (Boolean(accountsPayablePaymentId) || ['Approved', 'PartiallyPaid', 'Overdue'].includes(String(values.accountsPayableInvoiceStatus))) &&
                       <Button
                         type="button"
                         size="sm"
@@ -4695,10 +4798,9 @@ function WorkspaceDialog({
                       <h3 className="text-sm font-semibold text-foreground">
                         Agreement generation
                       </h3>
-                      {values.agreementDmsReference ||
-                      values.generatedAgreementReference ? (
+                      {agreementDmsReference ? (
                         <Badge variant="secondary">
-                          {`${values.agreementDmsReference || values.generatedAgreementReference}`}
+                          {agreementDmsReference}
                         </Badge>
                       ) : (
                         <Badge variant="outline">Not generated</Badge>
@@ -4717,6 +4819,7 @@ function WorkspaceDialog({
                       disabled={
                         generationTemplates.length === 0 ||
                         generatingAgreement ||
+                        agreementAlreadyGenerated ||
                         !workspaceCanEdit
                       }
                     >
@@ -4739,12 +4842,17 @@ function WorkspaceDialog({
                       onClick={() => void generateAgreement()}
                       disabled={
                         generatingAgreement ||
+                        agreementAlreadyGenerated ||
                         generationTemplates.length === 0 ||
                         !selectedTemplateCode ||
                         !workspaceCanEdit
                       }
                       title={
-                        !workspaceCanEdit ? workspaceLockedMessage : undefined
+                        agreementAlreadyGenerated
+                          ? 'This agreement has already been generated.'
+                          : !workspaceCanEdit
+                            ? workspaceLockedMessage
+                            : undefined
                       }
                     >
                       {generatingAgreement ? (
@@ -4752,8 +4860,23 @@ function WorkspaceDialog({
                       ) : (
                         <FileSignature className="mr-2 h-4 w-4" />
                       )}
-                      Generate
+                      {agreementAlreadyGenerated ? 'Generated' : 'Generate'}
                     </Button>
+                    {agreementAlreadyGenerated ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void openAgreementRecord()}
+                        disabled={loadingAgreementRecord}
+                      >
+                        {loadingAgreementRecord ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Eye className="mr-2 h-4 w-4" />
+                        )}
+                        View Agreement
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
                 {generationTemplates.length === 0 ? (
@@ -4761,15 +4884,26 @@ function WorkspaceDialog({
                     No Estate agreement templates are active in Central DMS.
                   </p>
                 ) : null}
-                {generatedAgreement ? (
+                {agreementAlreadyGenerated ? (
                   <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
                     <span>
                       Generated DMS reference{' '}
                       <span className="font-semibold">
-                        {generatedAgreement.dmsReference}
+                        {agreementDmsReference || generatedAgreement?.dmsReference}
                       </span>
                     </span>
-                    {generatedAgreement.wordUrl ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto px-0 text-emerald-900"
+                      onClick={() => void openAgreementRecord()}
+                      disabled={loadingAgreementRecord}
+                    >
+                      <Eye className="mr-1 h-3.5 w-3.5" />
+                      View in DMS
+                    </Button>
+                    {generatedAgreement?.wordUrl ? (
                       <Button
                         asChild
                         variant="link"
@@ -4785,7 +4919,7 @@ function WorkspaceDialog({
                           Download Word
                         </a>
                       </Button>
-                    ) : generatedAgreement.pdfUrl ? (
+                    ) : generatedAgreement?.pdfUrl ? (
                       <Button
                         asChild
                         variant="link"
@@ -4833,7 +4967,9 @@ function WorkspaceDialog({
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {otherAccountsPayableInvoiceId && <SupplierInvoiceWorkspaceButton invoiceId={otherAccountsPayableInvoiceId} />}
                     {otherAccountsPayableInvoiceId ? (
+                      (Boolean(otherAccountsPayablePaymentId) || ['Approved', 'PartiallyPaid', 'Overdue'].includes(String(values.otherAccountsPayableInvoiceStatus))) &&
                       <Button
                         type="button"
                         size="sm"

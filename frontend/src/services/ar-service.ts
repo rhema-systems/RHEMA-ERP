@@ -40,7 +40,7 @@ export interface CustomerQuery {
 export interface InvoiceQuery {
     page?: number;
     pageSize?: number;
-    customerId?: string;
+    businessPartnerId?: string;
     startDate?: string;
     endDate?: string;
     status?: string;
@@ -51,7 +51,7 @@ export interface InvoiceQuery {
 export interface PaymentQuery {
     page?: number;
     pageSize?: number;
-    customerId?: string;
+    businessPartnerId?: string;
     startDate?: string;
     endDate?: string;
     status?: string;
@@ -114,7 +114,7 @@ class ArService {
         const params = new URLSearchParams();
         if (query.page) params.append('PageNumber', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
-        if (query.customerId) params.append('CustomerId', query.customerId);
+        if (query.businessPartnerId) params.append('BusinessPartnerId', query.businessPartnerId);
         if (query.startDate) params.append('StartDate', query.startDate);
         if (query.endDate) params.append('EndDate', query.endDate);
         if (query.status) params.append('Status', query.status);
@@ -150,7 +150,7 @@ class ArService {
         const params = new URLSearchParams();
         if (query.page) params.append('PageNumber', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
-        if (query.customerId) params.append('CustomerId', query.customerId);
+        if (query.businessPartnerId) params.append('BusinessPartnerId', query.businessPartnerId);
         if (query.startDate) params.append('StartDate', query.startDate);
         if (query.endDate) params.append('EndDate', query.endDate);
         if (query.status) params.append('Status', query.status);
@@ -242,23 +242,23 @@ class ArService {
         );
     }
 
-    public async getCustomerStatement(customerId: string, startDate: string, endDate: string): Promise<any> {
+    public async getCustomerStatement(businessPartnerId: string, startDate: string, endDate: string): Promise<any> {
         const params = new URLSearchParams();
         params.append('fromDate', startDate);
         params.append('toDate', endDate);
-        return apiService.get<any>(`${this.baseUrl}/reports/customer-statement/${customerId}?${params.toString()}`);
+        return apiService.get<any>(`${this.baseUrl}/reports/customer-statement/${businessPartnerId}?${params.toString()}`);
     }
 
     public async getCustomerDetailedLedger(query: {
         fromDate: string;
         toDate: string;
-        customerIds?: string[];
+        businessPartnerIds?: string[];
         showCustomerCurrency?: boolean;
     }): Promise<CustomerDetailedLedgerReport> {
         const params = new URLSearchParams();
         params.append('fromDate', query.fromDate);
         params.append('toDate', query.toDate);
-        query.customerIds?.forEach((customerId) => params.append('customerIds', customerId));
+        query.businessPartnerIds?.forEach((businessPartnerId) => params.append('businessPartnerIds', businessPartnerId));
         if (query.showCustomerCurrency !== undefined) {
             params.append('showCustomerCurrency', query.showCustomerCurrency.toString());
         }
@@ -269,7 +269,7 @@ class ArService {
     public async downloadCustomerStatementCsv(query: {
         fromDate: string;
         toDate: string;
-        customerIds?: string[];
+        businessPartnerIds?: string[];
         showCustomerCurrency?: boolean;
     }): Promise<Blob> {
         return apiService.postBlob('/finance/report-exports/export', {
@@ -277,7 +277,7 @@ class ArService {
             format: 'Csv',
             periodStart: query.fromDate,
             periodEnd: query.toDate,
-            customerIds: query.customerIds ?? [],
+            businessPartnerIds: query.businessPartnerIds ?? [],
             showCustomerCurrency: query.showCustomerCurrency === true,
         });
     }
@@ -285,7 +285,7 @@ class ArService {
     public async downloadCustomerStatementPdf(query: {
         fromDate: string;
         toDate: string;
-        customerIds?: string[];
+        businessPartnerIds?: string[];
         showCustomerCurrency?: boolean;
     }): Promise<void> {
         await documentOutputService.downloadReportDocument(
@@ -293,7 +293,7 @@ class ArService {
             {
                 fromDate: query.fromDate,
                 toDate: query.toDate,
-                customerIds: query.customerIds ?? [],
+                businessPartnerIds: query.businessPartnerIds ?? [],
                 showCustomerCurrency: query.showCustomerCurrency === true,
             },
             { format: 'pdf' }
@@ -303,7 +303,7 @@ class ArService {
     public async printCustomerStatement(query: {
         fromDate: string;
         toDate: string;
-        customerIds?: string[];
+        businessPartnerIds?: string[];
         showCustomerCurrency?: boolean;
     }): Promise<void> {
         await documentOutputService.printReportDocument(
@@ -311,7 +311,7 @@ class ArService {
             {
                 fromDate: query.fromDate,
                 toDate: query.toDate,
-                customerIds: query.customerIds ?? [],
+                businessPartnerIds: query.businessPartnerIds ?? [],
                 showCustomerCurrency: query.showCustomerCurrency === true,
             },
             { format: 'pdf' }

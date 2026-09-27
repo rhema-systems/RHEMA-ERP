@@ -41,6 +41,17 @@ public sealed class QuantitySurveyVariationService(
     private string UserName => string.IsNullOrWhiteSpace(currentUser.UserName) ? UserId.ToString() : currentUser.UserName.Trim();
     private string ActorRoles => string.Join(',', currentUser.Roles.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value));
 
+    public async Task<IReadOnlyList<QuantitySurveyVariationDto>> SearchAsync(string search, int take = 8, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var query = Query().Where(value => (value.ReferenceNumber != null && value.ReferenceNumber.Contains(term)) || value.Title.Contains(term))
+            .OrderByDescending(value => value.RequestedDate).ThenBy(value => value.Id);
+        var rows = await QuantitySurveyAuthorizedSearch.ReadAsync(query, value => value.ProjectId,
+            projectService.HasProjectAccessAsync, take, token);
+        return rows.Select(Map).ToList();
+    }
+
     public async Task<QuantitySurveyVariationWorkspaceDto> GetWorkspaceAsync(Guid projectId, CancellationToken token = default)
     {
         await RequireProjectAsync(projectId);
@@ -124,7 +135,9 @@ public sealed class QuantitySurveyVariationService(
                 ReferenceNumber = await NextNumberAsync(token), RequestedDate = DateTime.UtcNow, PreparedById = UserId,
                 CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId, IsQuantitySurveyGoverned = true
             };
-            if (existing is null) db.ProjectVariationOrders.Add(entity); else db.QuantitySurveyVariationValuationLines.RemoveRange(entity.ValuationLines);
+            if (existing is null) db.ProjectVariationOrders.Add(entity);
+            else entity.ValuationLines = await db.QuantitySurveyVariationValuationLines.IgnoreQueryFilters()
+                .Where(line => line.TenantId == TenantId && line.VariationOrderId == entity.Id).ToListAsync(token);
             entity.ContractId = contract.Id; entity.ContractorBusinessPartnerId = contract.BusinessPartnerId;
             entity.ApprovedBoqVersionId = version.Id; entity.VariationSourceType = request.SourceType;
             entity.SiteInstructionId = request.SiteInstructionId; entity.ChangeRequestId = request.ChangeRequestId;
@@ -140,7 +153,8 @@ public sealed class QuantitySurveyVariationService(
             entity.ApprovedAmount = null; entity.RevisedContractSumSnapshot = null; entity.WorkflowInstanceId = null; entity.RejectionReason = null;
             entity.CorrelationId = Correlation(correlationId); entity.UpdatedAt = DateTime.UtcNow; entity.UpdatedBy = UserName; entity.LastModifiedById = UserId;
             var lines = await BuildLinesAsync(entity, request.Lines, version.Id, contract.Currency, token);
-            entity.ValuationLines = lines; entity.EstimatedAmount = Round(lines.Sum(value => value.Amount));
+            ReconcileValuationLines(db, entity, lines, UserId, UserName);
+            entity.EstimatedAmount = Round(lines.Sum(value => value.Amount));
             entity.BudgetImpactAmount = policy.Value.UpdateBudget ? entity.EstimatedAmount : null;
             entity.ForecastImpactAmount = policy.Value.UpdateForecast ? entity.EstimatedAmount : null;
             id = entity.Id;
@@ -180,10 +194,14 @@ public sealed class QuantitySurveyVariationService(
             {
                 TenantId = TenantId, ActorUserId = UserId, ActorName = UserName, FileUploadRecordId = upload.Record.Id,
                 SourceModule = "QuantitySurvey", SourceLabel = "Quantity Survey variation evidence", SourceEntityType = nameof(QuantitySurveyVariationEvidence),
-                SourceRecordId = evidenceId, SourceRecordReference = entity.ReferenceNumber, Title = safeTitle, DocumentType = "Variation Evidence",
+                SourceRecordId = evidenceId, SourceRecordReference = entity.ReferenceNumber, Title = safeTitle, DocumentType = template.DocumentType,
                 MetadataTemplateCode = template.TemplateCode, AccessProfile = template.AccessProfile, VersionStatus = "Submitted",
                 ChangeSummary = "Clean scanned variation evidence retained in the central DMS.", RequirePublishedGovernance = true,
-                MetadataValues = [new("variationOrderId", "Variation order ID", entity.Id.ToString(), "guid"), new("projectId", "Project ID", entity.ProjectId.ToString(), "guid"), new("checksumSha256", "Checksum SHA-256", checksum)]
+                MetadataValues = [new("variationOrderId", "Variation order ID", entity.Id.ToString(), "guid"), new("projectId", "Project ID", entity.ProjectId.ToString(), "guid"),
+                    new("contractId", "Contract ID", entity.ContractId?.ToString(), "guid"),
+                    new("recordReference", "Variation reference", entity.ReferenceNumber ?? entity.Id.ToString()),
+                    new("evidenceDate", "Evidence date", DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), "date"),
+                    new("checksumSha256", "Checksum SHA-256", checksum)]
             }, token);
         }
         catch { await controlledFiles.DeleteAsync(TenantId, upload.Record.Id, UserId, token); throw; }
@@ -269,6 +287,8 @@ public sealed class QuantitySurveyVariationService(
                 var result = await workflow.ProcessApprovalAsync(QuantitySurveyWorkflowBindingRegistry.Variation, value.Id, UserId, approve ? "Approve" : "Reject", RequiredText(request.Reason, 5, 2000, "Decision reason"));
                 if (!result.ExecutionResult.Success) throw Conflict(result.ExecutionResult.Message ?? "The variation workflow decision failed."); outcome = result.Outcome;
             }
+            // Commit successful intermediate reviews; only the final outcome applies commercial changes.
+            if (approve && outcome == WorkflowOutcome.Pending) return;
             if (outcome != (approve ? WorkflowOutcome.Approved : WorkflowOutcome.Rejected)) throw Conflict("The shared workflow has not reached the requested final outcome.");
             workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Variation).ApplyApprovalOutcome(value, outcome, UserId, approve ? null : request.Reason.Trim());
             value.Status = approve ? ProjectVariationOrderStatuses.Approved : ProjectVariationOrderStatuses.Rejected;
@@ -370,6 +390,7 @@ public sealed class QuantitySurveyVariationService(
 
         ProjectBudgetRevision? budgetRevision = null;
         var project = await db.Projects.SingleAsync(item => item.TenantId == TenantId && item.Id == value.ProjectId && !item.IsDeleted, token);
+        var originalEstimatedBudget = project.EstimatedBudget;
         if (value.UpdateBudgetOnApplication)
         {
             if (await db.ProjectBudgetRevisions.AsNoTracking().AnyAsync(item => item.TenantId == TenantId && item.ProjectId == value.ProjectId && !item.IsDeleted &&
@@ -409,8 +430,7 @@ public sealed class QuantitySurveyVariationService(
             decimal forecastCost; decimal estimateAtCompletion;
             try
             {
-                forecastCost = QuantitySurveyVariationRules.CalculateNonNegativeDownstreamValue(active?.ForecastCost ?? project.EstimatedBudget ?? 0m, value.ApprovedAmount.Value, "the active project forecast");
-                estimateAtCompletion = QuantitySurveyVariationRules.CalculateNonNegativeDownstreamValue(active?.EstimateAtCompletion ?? active?.ForecastCost ?? project.EstimatedBudget ?? 0m, value.ApprovedAmount.Value, "the estimate at completion");
+                (forecastCost, estimateAtCompletion) = CalculateForecastVariation(active, originalEstimatedBudget, value.ApprovedAmount.Value);
             }
             catch (InvalidOperationException exception) { throw Conflict(exception.Message); }
             var forecastRevenue = active?.ForecastRevenue ?? revisedContractValue;
@@ -469,6 +489,50 @@ public sealed class QuantitySurveyVariationService(
             }
         });
         db.ChangeTracker.Clear(); return await GetAsync(id, token);
+    }
+
+    internal static string ResolveApplicationStatus(ProjectVariationOrder value) =>
+        value.DownstreamApplicationStatus == ProjectVariationApplicationStatuses.AppliedPendingBoqApproval &&
+        value.RevisedBoqVersion is { IsDeleted: false, Status: ProjectBoqVersionStatuses.Approved } revised &&
+        revised.TenantId == value.TenantId && revised.ProjectId == value.ProjectId
+            ? ProjectVariationApplicationStatuses.Applied : value.DownstreamApplicationStatus;
+
+    internal static (decimal ForecastCost, decimal EstimateAtCompletion) CalculateForecastVariation(
+        ProjectForecastVersion? active, decimal? originalEstimatedBudget, decimal approvedAmount) => (
+        QuantitySurveyVariationRules.CalculateNonNegativeDownstreamValue(active?.ForecastCost ?? originalEstimatedBudget ?? 0m,
+            approvedAmount, "the active project forecast"),
+        QuantitySurveyVariationRules.CalculateNonNegativeDownstreamValue(active?.EstimateAtCompletion ?? active?.ForecastCost ?? originalEstimatedBudget ?? 0m,
+            approvedAmount, "the estimate at completion"));
+
+    internal static void ReconcileValuationLines(ApplicationDbContext context, ProjectVariationOrder entity,
+        IReadOnlyList<QuantitySurveyVariationValuationLine> desired, Guid actorId, string actorName)
+    {
+        // The source-line key is unique even for soft-deleted rows. Preserve its identity
+        // when editing or restoring a line, and explicitly add only genuinely new rows.
+        var existing = entity.ValuationLines.ToDictionary(line => line.ProjectBoqVersionLineId);
+        var selected = desired.Select(line => line.ProjectBoqVersionLineId).ToHashSet();
+        var now = DateTime.UtcNow;
+        foreach (var line in entity.ValuationLines.Where(line => !line.IsDeleted && !selected.Contains(line.ProjectBoqVersionLineId)))
+        {
+            line.IsDeleted = true; line.DeletedAt = now; line.DeletedBy = actorName;
+            line.UpdatedAt = now; line.UpdatedBy = actorName; line.LastModifiedById = actorId;
+        }
+        foreach (var source in desired)
+        {
+            if (!existing.TryGetValue(source.ProjectBoqVersionLineId, out var line))
+            {
+                entity.ValuationLines.Add(source);
+                context.QuantitySurveyVariationValuationLines.Add(source);
+                continue;
+            }
+            line.BoqLineKey = source.BoqLineKey; line.Sequence = source.Sequence;
+            line.LineReferenceSnapshot = source.LineReferenceSnapshot; line.DescriptionSnapshot = source.DescriptionSnapshot;
+            line.UnitSnapshot = source.UnitSnapshot; line.QuantityChange = source.QuantityChange;
+            line.UnitRate = source.UnitRate; line.Amount = source.Amount;
+            line.ValuationReason = source.ValuationReason; line.SourceHash = source.SourceHash;
+            line.IsDeleted = false; line.DeletedAt = null; line.DeletedBy = null;
+            line.UpdatedAt = now; line.UpdatedBy = actorName; line.LastModifiedById = actorId;
+        }
     }
 
     private async Task<List<QuantitySurveyVariationValuationLine>> BuildLinesAsync(ProjectVariationOrder entity, IReadOnlyList<SaveQuantitySurveyVariationLineRequest> requests, Guid versionId, string currency, CancellationToken token)
@@ -601,7 +665,7 @@ public sealed class QuantitySurveyVariationService(
     private void AddRevision(ProjectVariationOrder value, Guid clientRequestId, string requestHash, string action, string reason, object? before, object after, string correlationId) => db.QuantitySurveyVariationRevisions.Add(new() { Id = Guid.NewGuid(), TenantId = TenantId, VariationOrderId = value.Id, ClientRequestId = clientRequestId, RequestHash = requestHash, Action = action, ActorUserId = UserId, ActorName = UserName, ActorRoles = ActorRoles, CorrelationId = Correlation(correlationId), Reason = reason, BeforeJson = before is null ? null : JsonSerializer.Serialize(before, JsonOptions), AfterJson = JsonSerializer.Serialize(after, JsonOptions), CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId });
     private void AddAudit(ProjectVariationOrder value, string action, object? before, object after, string correlationId) => db.AuditLogs.Add(new AuditLog { TenantId = TenantId, UserId = UserId, Username = UserName, Action = action, Resource = nameof(ProjectVariationOrder), ResourceId = value.Id.ToString(), OldValues = before is null ? null : JsonSerializer.Serialize(before, JsonOptions), NewValues = JsonSerializer.Serialize(new { correlationId = Correlation(correlationId), value = after }, JsonOptions), IpAddress = "api", UserAgent = "QuantitySurvey", Timestamp = DateTime.UtcNow, CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId });
     private async Task SaveChangesAsync(CancellationToken token) { try { await db.SaveChangesAsync(token); } catch (DbUpdateConcurrencyException) { throw Conflict("The variation changed. Refresh and retry."); } catch (DbUpdateException exception) when (exception.InnerException?.Message.Contains("IX_", StringComparison.OrdinalIgnoreCase) == true || exception.InnerException?.Message.Contains("5189", StringComparison.OrdinalIgnoreCase) == true) { throw Conflict("The variation conflicts with an existing governed source or lifecycle rule."); } }
-    private static QuantitySurveyVariationDto Map(ProjectVariationOrder value) => new() { Id = value.Id, ProjectId = value.ProjectId, ContractId = value.ContractId!.Value, ReferenceNumber = value.ReferenceNumber ?? string.Empty, Title = value.Title, VariationType = value.VariationType, SourceType = value.VariationSourceType, SiteInstructionId = value.SiteInstructionId, ChangeRequestId = value.ChangeRequestId, Status = value.Status, ApprovalStatus = value.ApprovalStatus, ContractNumber = value.Contract?.ContractNumber ?? string.Empty, ContractorName = value.Contract?.BusinessPartner?.PartnerName ?? string.Empty, Currency = value.Currency, ValuedAmount = value.EstimatedAmount ?? 0m, ApprovedAmount = value.ApprovedAmount, OriginalContractSum = value.OriginalContractSumSnapshot ?? 0m, RevisedContractSum = value.RevisedContractSumSnapshot, DownstreamApplicationStatus = value.DownstreamApplicationStatus == ProjectVariationApplicationStatuses.AppliedPendingBoqApproval && value.RevisedBoqVersion?.Status == ProjectBoqVersionStatuses.Approved ? ProjectVariationApplicationStatuses.Applied : value.DownstreamApplicationStatus, ContractAmendmentId = value.ContractAmendmentId, RevisedBoqVersionId = value.RevisedBoqVersionId, RevisedBoqVersionNumber = value.RevisedBoqVersion?.VersionNumber, RevisedBoqStatus = value.RevisedBoqVersion?.Status, BudgetRevisionId = value.BudgetRevisionId, ForecastVersionId = value.ForecastVersionId, AppliedAt = value.AppliedAt, CertificateEligible = value.UpdateCertificateOnApplication && value.RevisedBoqVersion?.Status == ProjectBoqVersionStatuses.Approved, ScheduleImpactDays = value.ScheduleImpactDays ?? 0, WorkflowInstanceId = value.WorkflowInstanceId, RejectionReason = value.RejectionReason, RowVersion = Convert.ToBase64String(value.RowVersion), Lines = value.ValuationLines.Where(line => !line.IsDeleted).OrderBy(line => line.Sequence).Select(line => new QuantitySurveyVariationLineDto { Id = line.Id, ProjectBoqVersionLineId = line.ProjectBoqVersionLineId, Reference = line.LineReferenceSnapshot, Description = line.DescriptionSnapshot, Unit = line.UnitSnapshot, QuantityChange = line.QuantityChange, UnitRate = line.UnitRate, Amount = line.Amount, ValuationReason = line.ValuationReason }).ToList(), Evidence = value.VariationEvidence.Where(item => !item.IsDeleted).OrderBy(item => item.CreatedAt).Select(MapEvidence).ToList() };
+    private static QuantitySurveyVariationDto Map(ProjectVariationOrder value) => new() { Id = value.Id, ProjectId = value.ProjectId, ContractId = value.ContractId!.Value, ReferenceNumber = value.ReferenceNumber ?? string.Empty, Title = value.Title, VariationType = value.VariationType, SourceType = value.VariationSourceType, SiteInstructionId = value.SiteInstructionId, ChangeRequestId = value.ChangeRequestId, Status = value.Status, ApprovalStatus = value.ApprovalStatus, ContractNumber = value.Contract?.ContractNumber ?? string.Empty, ContractorName = value.Contract?.BusinessPartner?.PartnerName ?? string.Empty, Currency = value.Currency, ValuedAmount = value.EstimatedAmount ?? 0m, ApprovedAmount = value.ApprovedAmount, OriginalContractSum = value.OriginalContractSumSnapshot ?? 0m, RevisedContractSum = value.RevisedContractSumSnapshot, DownstreamApplicationStatus = ResolveApplicationStatus(value), ContractAmendmentId = value.ContractAmendmentId, RevisedBoqVersionId = value.RevisedBoqVersionId, RevisedBoqVersionNumber = value.RevisedBoqVersion?.VersionNumber, RevisedBoqStatus = value.RevisedBoqVersion?.Status, BudgetRevisionId = value.BudgetRevisionId, ForecastVersionId = value.ForecastVersionId, AppliedAt = value.AppliedAt, CertificateEligible = value.UpdateCertificateOnApplication && value.RevisedBoqVersion?.Status == ProjectBoqVersionStatuses.Approved, ScheduleImpactDays = value.ScheduleImpactDays ?? 0, WorkflowInstanceId = value.WorkflowInstanceId, RejectionReason = value.RejectionReason, RowVersion = Convert.ToBase64String(value.RowVersion), Lines = value.ValuationLines.Where(line => !line.IsDeleted).OrderBy(line => line.Sequence).Select(line => new QuantitySurveyVariationLineDto { Id = line.Id, ProjectBoqVersionLineId = line.ProjectBoqVersionLineId, Reference = line.LineReferenceSnapshot, Description = line.DescriptionSnapshot, Unit = line.UnitSnapshot, QuantityChange = line.QuantityChange, UnitRate = line.UnitRate, Amount = line.Amount, ValuationReason = line.ValuationReason }).ToList(), Evidence = value.VariationEvidence.Where(item => !item.IsDeleted).OrderBy(item => item.CreatedAt).Select(MapEvidence).ToList() };
     private static QuantitySurveyVariationEvidenceDto MapEvidence(QuantitySurveyVariationEvidence value) => new() { Id = value.Id, Title = value.Title, FileName = value.OriginalFileName, ContentType = value.ContentType, FileSize = value.FileSize, ChecksumSha256 = value.ChecksumSha256, CentralDocumentRecordId = value.CentralDocumentRecordId, CentralDocumentVersionId = value.CentralDocumentVersionId };
     private static object Snapshot(ProjectVariationOrder value) => new { value.Id, value.ProjectId, value.ContractId, value.ReferenceNumber, value.Title, value.VariationType, value.VariationSourceType, value.SiteInstructionId, value.ChangeRequestId, value.Status, value.ApprovalStatus, value.EstimatedAmount, value.ApprovedAmount, value.ScheduleImpactDays, value.OriginalContractSumSnapshot, value.RevisedContractSumSnapshot, value.DownstreamApplicationStatus, value.ApplicationClientRequestId, value.ApplicationHash, value.AppliedById, value.AppliedAt, value.ContractAmendmentId, value.RevisedBoqVersionId, value.BudgetRevisionId, value.ForecastVersionId, value.ConfigurationProfileId, value.VariationDecisionId, value.ApprovalWorkflowDefinitionId, value.EvidenceMetadataTemplateId, value.PolicyHash, value.SubmittedById, value.ApprovedById, value.WorkflowInstanceId, Lines = value.ValuationLines.Where(line => !line.IsDeleted).OrderBy(line => line.Sequence).Select(line => new { line.ProjectBoqVersionLineId, line.BoqLineKey, line.QuantityChange, line.UnitRate, line.Amount, line.SourceHash }) };
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Finance
@@ -204,14 +205,14 @@ namespace ErpSystem.Core.DTOs.Finance
         public TaxTransactionType TransactionType { get; set; }
 
         /// <summary>
-        /// Customer ID (for threshold checks)
+        /// Canonical Business Partner identity used for threshold and counterparty rules.
         /// </summary>
-        public Guid? CustomerId { get; set; }
+        public Guid? BusinessPartnerId { get; set; }
 
         /// <summary>
-        /// Supplier ID (for WHT threshold checks)
+        /// Role in which the canonical partner participates in this transaction.
         /// </summary>
-        public Guid? SupplierId { get; set; }
+        public BusinessPartnerRoleType? BusinessPartnerRole { get; set; }
     }
 
     /// <summary>

@@ -51,6 +51,7 @@ public class SimpleWorkflowService : IWorkflowService
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SimpleWorkflowService> _logger;
+    private readonly IProcurementSodPolicy? _sodPolicy;
 
     public SimpleWorkflowService(
         IWorkflowEngine workflowEngine,
@@ -73,7 +74,8 @@ public class SimpleWorkflowService : IWorkflowService
         ICurrentUserService currentUserService,
         UserManager<ApplicationUser> userManager,
         IUnitOfWork unitOfWork,
-        ILogger<SimpleWorkflowService> logger)
+        ILogger<SimpleWorkflowService> logger,
+        IProcurementSodPolicy? sodPolicy = null)
     {
         _workflowEngine = workflowEngine;
         _entityTypeRepository = entityTypeRepository;
@@ -96,6 +98,7 @@ public class SimpleWorkflowService : IWorkflowService
         _userManager = userManager;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _sodPolicy = sodPolicy;
     }
 
     public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(string entityType, Guid entityId) =>
@@ -412,11 +415,13 @@ public class SimpleWorkflowService : IWorkflowService
         if (canApprove && isApprovalStep)
         {
             var approvalConfig = GetApprovalConfig(stepInstance);
+            var enforceSeparation = _sodPolicy is null || await _sodPolicy.IsRequiredForSourceAsync(
+                instance.TenantId, entityType, entityId);
             var guardErrors = WorkflowApprovalGuardValidator.Validate(
                 approvalConfig,
                 instance.InitiatedById,
                 approvals.ToList(),
-                workflowUserId);
+                workflowUserId, enforceSeparation);
             if (guardErrors.Count > 0)
             {
                 canApprove = false;
@@ -427,7 +432,7 @@ public class SimpleWorkflowService : IWorkflowService
                     string.Join(" ", guardErrors));
             }
 
-            if (canApprove)
+            if (canApprove && enforceSeparation)
             {
                 var crossStepErrors = await ValidateCrossStepSodAsync(
                     approvalConfig,
@@ -1089,7 +1094,7 @@ public class SimpleWorkflowService : IWorkflowService
             var payment = await _unitOfWork.Repository<VendorPayment>()
                 .FirstOrDefaultAsync(
                     item => item.TenantId == tenantId && item.Id == entityId,
-                    item => item.Supplier,
+                    item => item.BusinessPartner,
                     item => item.BankAccount)
                 ?? throw new InvalidOperationException("Vendor payment not found");
             var tenantCurrency = await _unitOfWork.Repository<Tenant>()
@@ -1117,8 +1122,8 @@ public class SimpleWorkflowService : IWorkflowService
             context["transactionCurrencyCode"] = payment.CurrencyCode;
             context["exchangeRate"] = payment.ExchangeRate;
             context["paymentMethod"] = payment.PaymentMethod.ToString();
-            context["supplierId"] = payment.SupplierId;
-            context["supplierName"] = payment.Supplier?.Name ?? string.Empty;
+            context["supplierId"] = payment.BusinessPartnerId;
+            context["supplierName"] = payment.BusinessPartnerName;
             context["bankAccountId"] = payment.BankAccountId ?? Guid.Empty;
             context["bankAccountName"] = payment.BankAccount?.AccountName ?? string.Empty;
             context["submittedById"] = payment.SubmittedById ?? Guid.Empty;

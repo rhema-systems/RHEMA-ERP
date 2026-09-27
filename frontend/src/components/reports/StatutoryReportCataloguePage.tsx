@@ -175,7 +175,14 @@ const procurementCatalogue: CatalogueItem[] = [
   },
 ];
 
+const inventoryLedgerMovementTypes = ['PurchaseReceipt', 'SalesIssue', 'TransferOut', 'TransferIn', 'AdjustmentIn', 'AdjustmentOut', 'ProductionReceipt', 'ProductionIssue', 'CustomerReturn', 'SupplierReturn', 'Scrap', 'OpeningBalance', 'CountAdjustment', 'RequisitionIssue', 'RequisitionReturn', 'LandedCostRevaluation'];
+
 const inventoryCatalogue: CatalogueItem[] = [
+  {
+    code: 'inventory-ledger', title: 'Inventory Ledger',
+    description: 'Follow posted movements chronologically, with balances before and after each movement by item, warehouse and location.',
+    group: 'Stock position and movement', icon: History,
+  },
   {
     code: 'balance-register',
     title: 'Balance Register',
@@ -630,7 +637,8 @@ export function StatutoryReportCataloguePage({
     (isCompliance && complianceWarehouseReports.has(selectedCode));
   const showCategory =
     isInventory && inventoryAnalyticsReports.has(selectedCode);
-  const showMovementType = isInventory && selectedCode === 'movement-register';
+  const isInventoryLedger = isInventory && selectedCode === 'inventory-ledger';
+  const showMovementType = isInventory && (selectedCode === 'movement-register' || isInventoryLedger);
   const showFiscalPeriod =
     isInventory && selectedCode === 'valuation-gl-register';
   const showMovementThresholds =
@@ -658,6 +666,7 @@ export function StatutoryReportCataloguePage({
   const [warehouseId, setWarehouseId] = useState('all');
   const [categoryId, setCategoryId] = useState('all');
   const [movementType, setMovementType] = useState('all');
+  const [inventoryItemId, setInventoryItemId] = useState('all');
   const [fiscalPeriodId, setFiscalPeriodId] = useState('all');
   const [slowMovingDays, setSlowMovingDays] = useState('90');
   const [nonMovingDays, setNonMovingDays] = useState('180');
@@ -718,10 +727,16 @@ export function StatutoryReportCataloguePage({
     enabled: canRead && showCategory,
     staleTime: 5 * 60 * 1000,
   });
+  const inventoryItemsQuery = useQuery({
+    queryKey: ['inventory-items', 'ledger-report-filter'],
+    queryFn: () => inventoryManagementService.getInventoryItems(),
+    enabled: canRead && isInventoryLedger,
+    staleTime: 5 * 60 * 1000,
+  });
   const movementTypesQuery = useQuery({
     queryKey: ['inventory-movement-types', 'statutory-report-filter'],
     queryFn: () => inventoryManagementService.getStockMovementTypes(),
-    enabled: canRead && showMovementType,
+    enabled: canRead && showMovementType && !isInventoryLedger,
     staleTime: 5 * 60 * 1000,
   });
   const fiscalPeriodsQuery = useQuery({
@@ -762,6 +777,7 @@ export function StatutoryReportCataloguePage({
       ...(showWarehouse && warehouseId !== 'all' ? { warehouseId } : {}),
       ...(showCategory && categoryId !== 'all' ? { categoryId } : {}),
       ...(showMovementType && movementType !== 'all' ? { movementType } : {}),
+      ...(isInventoryLedger && inventoryItemId !== 'all' ? { inventoryItemId } : {}),
       ...(showFiscalPeriod && fiscalPeriodId !== 'all'
         ? { fiscalPeriodId }
         : {}),
@@ -783,6 +799,8 @@ export function StatutoryReportCataloguePage({
       fiscalPeriodId,
       fiscalYear,
       movementType,
+      inventoryItemId,
+      isInventoryLedger,
       nonMovingDays,
       showCategory,
       showExpiryThreshold,
@@ -1214,6 +1232,15 @@ export function StatutoryReportCataloguePage({
                   </Select>
                 </div>
               )}
+              {isInventoryLedger && <div className="min-w-60 flex-1 space-y-1">
+                <Label className="text-xs">Item / code</Label>
+                <Select value={inventoryItemId} onValueChange={setInventoryItemId}>
+                  <SelectTrigger className="h-9" aria-label="Ledger item"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="all">All items</SelectItem>
+                    {(inventoryItemsQuery.data ?? []).map(item => <SelectItem key={item.id} value={item.id}>{item.itemCode} — {item.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>}
               {showMovementType && (
                 <div className="min-w-44 flex-1 space-y-1">
                   <Label className="text-xs">Movement type</Label>
@@ -1223,7 +1250,7 @@ export function StatutoryReportCataloguePage({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All movement types</SelectItem>
-                      {(movementTypesQuery.data ?? []).map((item) => (
+                      {(isInventoryLedger ? inventoryLedgerMovementTypes : movementTypesQuery.data ?? []).map((item) => (
                         <SelectItem key={item} value={item}>
                           {item}
                         </SelectItem>

@@ -19,7 +19,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
 import { arService } from '@/services/ar-service';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import { accountsPayableService } from '@/services/accountsPayableService';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financeService } from '@/services/finance.service';
 import { cn, formatCurrency } from '@/lib/utils';
@@ -27,48 +27,39 @@ import type { Account, Currency, SubledgerAdjustmentType, SubledgerModule } from
 import type { Customer } from '@/types/ar';
 
 const moduleSchema = z.enum(['AR', 'AP']);
-const purposeSchema = z.literal('StandardAdjustment');
+const purposeSchema = z.enum(['StandardAdjustment', 'FinanceCharge', 'Writeoff', 'OverpaymentWriteoff']);
 
 const adjustmentSchema = z.object({
     module: moduleSchema,
     purpose: purposeSchema,
-    customerId: z.string().optional(),
-    supplierId: z.string().optional(),
+    businessPartnerId: z.string().min(1, 'Business Partner is required'),
+    businessPartnerRoleId: z.string().optional(),
     adjustmentDate: z.string().min(1, 'Adjustment date is required'),
     dueDate: z.string().optional(),
     adjustmentType: z.enum(['Debit', 'Credit']),
     amount: z.number().min(0.01, 'Amount must be greater than zero'),
     currencyCode: z.string().min(3, 'Currency is required').max(3, 'Use a 3-letter currency code'),
     exchangeRate: z.number().min(0.000001, 'Exchange rate must be greater than zero'),
-    contraAccountId: z.string().min(1, 'Contra account is required'),
+    contraAccountId: z.string(),
     reference: z.string().max(100).optional(),
     reason: z.string().min(1, 'Reason is required').max(500, 'Reason cannot exceed 500 characters'),
     notes: z.string().max(2000).optional(),
 }).superRefine((value, ctx) => {
-    if (value.module === 'AR' && !value.customerId) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ['customerId'],
-            message: 'Customer is required',
-        });
+    if (value.purpose === 'StandardAdjustment' && !value.contraAccountId) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['contraAccountId'], message: 'Contra account is required' });
     }
-
-    if (value.module === 'AP' && !value.supplierId) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ['supplierId'],
-            message: 'Supplier is required',
-        });
-    }
-
 });
 
 type AdjustmentFormValues = z.infer<typeof adjustmentSchema>;
 
 interface SearchOption {
     id: string;
+    businessPartnerId?: string;
+    roleId?: string;
     label: string;
     secondary?: string;
+    currency?: string | null;
+    disabled?: boolean;
 }
 
 function todayAsInputValue() {
@@ -104,14 +95,15 @@ export default function NewSubledgerAdjustmentPage() {
     const [isRateLoading, setIsRateLoading] = useState(false);
     const [accountOpen, setAccountOpen] = useState(false);
     const rateRequestRef = useRef(0);
+    const [requestId] = useState(() => crypto.randomUUID());
 
     const form = useForm<AdjustmentFormValues>({
         resolver: zodResolver(adjustmentSchema),
         defaultValues: {
             module: initialModule,
             purpose: 'StandardAdjustment',
-            customerId: '',
-            supplierId: '',
+            businessPartnerId: '',
+            businessPartnerRoleId: '',
             adjustmentDate: todayAsInputValue(),
             dueDate: '',
             adjustmentType: initialModule === 'AP' ? 'Credit' : 'Debit',
@@ -126,11 +118,12 @@ export default function NewSubledgerAdjustmentPage() {
     });
 
     const selectedModule = form.watch('module');
+    const purpose = form.watch('purpose');
     const adjustmentType = form.watch('adjustmentType');
     const amount = Number(form.watch('amount')) || 0;
     const currencyCode = form.watch('currencyCode') || 'GHS';
-    const selectedCustomerId = form.watch('customerId');
-    const selectedSupplierId = form.watch('supplierId');
+    const selectedBusinessPartnerId = form.watch('businessPartnerId');
+    const selectedBusinessPartnerRoleId = form.watch('businessPartnerRoleId');
     const selectedAccountId = form.watch('contraAccountId');
 
     const { data: customersData, isLoading: customersLoading } = useQuery({
@@ -141,7 +134,7 @@ export default function NewSubledgerAdjustmentPage() {
 
     const { data: suppliers, isLoading: suppliersLoading } = useQuery({
         queryKey: ['subledger-adjustment-suppliers'],
-        queryFn: () => businessPartnerService.getActivePartners(),
+        queryFn: () => accountsPayableService.getInvoiceSupplierEntryOptions(),
         enabled: selectedModule === 'AP',
     });
 
@@ -169,14 +162,8 @@ export default function NewSubledgerAdjustmentPage() {
         return normalizeCurrencyCode(activeCurrencies.find((currency) => currency.isBaseCurrency)?.currencyCode) || 'GHS';
     }, [activeCurrencies]);
 
-    const supplierOptions = useMemo(() => {
-        return (suppliers ?? [])
-            .filter((partner: BusinessPartnerDto) =>
-                ['supplier', 'contractor', 'both'].includes((partner.partnerType ?? '').toLowerCase()) &&
-                !partner.isBlacklisted
-            )
-            .sort((a, b) => (a.partnerName || '').localeCompare(b.partnerName || ''));
-    }, [suppliers]);
+    const supplierOptions = useMemo(() => (suppliers ?? [])
+        .sort((a, b) => a.name.localeCompare(b.name)), [suppliers]);
 
     const postingAccounts = useMemo(() => {
         return (accounts ?? [])
@@ -187,13 +174,19 @@ export default function NewSubledgerAdjustmentPage() {
     const partnerOptions: SearchOption[] = selectedModule === 'AR'
         ? customers.map((customer: Customer) => ({
             id: customer.id,
+            businessPartnerId: customer.id,
             label: customer.customerName,
             secondary: customer.customerCode,
+            currency: customer.currencyCode,
         }))
         : supplierOptions.map((supplier) => ({
-            id: supplier.id,
-            label: supplier.partnerName || supplier.companyName || 'Unnamed supplier',
-            secondary: supplier.partnerCode,
+            id: supplier.businessPartnerRoleId,
+            businessPartnerId: supplier.businessPartnerId,
+            roleId: supplier.businessPartnerRoleId,
+            label: `${supplier.name} · ${supplier.roleType}`,
+            secondary: supplier.isTransactionReady ? supplier.code : supplier.readinessMessage,
+            currency: supplier.currency,
+            disabled: !supplier.isTransactionReady,
         }));
 
     const accountOptions: SearchOption[] = postingAccounts.map((account) => ({
@@ -218,13 +211,11 @@ export default function NewSubledgerAdjustmentPage() {
         return options;
     }, [activeCurrencies, baseCurrencyCode, currencyCode]);
 
-    const selectedPartner = partnerOptions.find((option) =>
-        option.id === (selectedModule === 'AR' ? selectedCustomerId : selectedSupplierId)
-    );
+    const selectedPartner = partnerOptions.find((option) => selectedModule === 'AP'
+        ? option.id === selectedBusinessPartnerRoleId
+        : option.businessPartnerId === selectedBusinessPartnerId);
     const selectedCurrency = currencyOptions.find((option) => option.id === normalizeCurrencyCode(currencyCode));
     const selectedAccount = accountOptions.find((option) => option.id === selectedAccountId);
-    const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId);
-    const selectedSupplier = supplierOptions.find((supplier) => supplier.id === selectedSupplierId);
 
     const applyCurrency = async (value?: string | null) => {
         const nextCurrencyCode = normalizeCurrencyCode(value) || baseCurrencyCode;
@@ -273,14 +264,16 @@ export default function NewSubledgerAdjustmentPage() {
 
     useEffect(() => {
         const currentCurrencyCode = normalizeCurrencyCode(form.getValues('currencyCode'));
-        if (currentCurrencyCode === 'GHS' && baseCurrencyCode !== 'GHS' && !selectedCustomerId && !selectedSupplierId) {
+        if (currentCurrencyCode === 'GHS' && baseCurrencyCode !== 'GHS' && !selectedBusinessPartnerId) {
             form.setValue('currencyCode', baseCurrencyCode, { shouldValidate: true });
         }
-    }, [baseCurrencyCode, form, selectedCustomerId, selectedSupplierId]);
+    }, [baseCurrencyCode, form, selectedBusinessPartnerId]);
 
     useEffect(() => {
-        form.setValue(selectedModule === 'AR' ? 'supplierId' : 'customerId', '');
+        form.setValue('businessPartnerId', '');
+        form.setValue('businessPartnerRoleId', '');
         form.setValue('adjustmentType', selectedModule === 'AP' ? 'Credit' : 'Debit');
+        form.setValue('purpose', 'StandardAdjustment');
     }, [form, selectedModule]);
 
     const signedSubledgerAmount = selectedModule === 'AR'
@@ -297,17 +290,11 @@ export default function NewSubledgerAdjustmentPage() {
     };
 
     const handlePartnerSelect = (id: string) => {
-        if (selectedModule === 'AR') {
-            const customer = customers.find((item) => item.id === id);
-            form.setValue('customerId', id, { shouldValidate: true });
-            form.setValue('supplierId', '');
-            void applyCurrency(customer?.currencyCode);
-        } else {
-            const supplier = supplierOptions.find((item) => item.id === id);
-            form.setValue('supplierId', id, { shouldValidate: true });
-            form.setValue('customerId', '');
-            void applyCurrency(supplier?.currency);
-        }
+        const option = partnerOptions.find(item => item.id === id);
+        if (!option || option.disabled || !option.businessPartnerId) return;
+        form.setValue('businessPartnerId', option.businessPartnerId, { shouldValidate: true });
+        form.setValue('businessPartnerRoleId', option.roleId || '');
+        void applyCurrency(option.currency);
         setPartnerOpen(false);
     };
 
@@ -315,17 +302,18 @@ export default function NewSubledgerAdjustmentPage() {
         setIsSubmitting(true);
         try {
             const result = await financeDataService.createSubledgerAdjustmentJournal({
+                requestId,
                 module: data.module,
                 purpose: data.purpose,
-                customerId: data.module === 'AR' ? data.customerId : undefined,
-                supplierId: data.module === 'AP' ? data.supplierId : undefined,
+                businessPartnerId: data.businessPartnerId,
+                businessPartnerRoleId: data.businessPartnerRoleId || undefined,
                 adjustmentDate: new Date(`${data.adjustmentDate}T00:00:00`).toISOString(),
                 dueDate: data.dueDate ? new Date(`${data.dueDate}T00:00:00`).toISOString() : undefined,
                 adjustmentType: data.adjustmentType,
                 amount: data.amount,
                 currencyCode: data.currencyCode.toUpperCase(),
                 exchangeRate: data.exchangeRate,
-                contraAccountId: data.contraAccountId,
+                contraAccountId: data.contraAccountId || '00000000-0000-0000-0000-000000000000',
                 reference: data.reference || undefined,
                 reason: data.reason,
                 notes: data.notes || undefined,
@@ -401,6 +389,24 @@ export default function NewSubledgerAdjustmentPage() {
             </Breadcrumb>
 
             <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+                {selectedModule === 'AR' && <Card className="xl:col-span-2"><CardContent className="pt-6 space-y-3">
+                    <Label htmlFor="customer-adjustment-purpose">Customer adjustment purpose</Label>
+                    <Select value={purpose} onValueChange={(value: AdjustmentFormValues['purpose']) => {
+                        form.setValue('purpose', value);
+                        form.setValue('adjustmentType', value === 'Writeoff' ? 'Credit' : 'Debit');
+                        form.setValue('contraAccountId', '');
+                        if (value !== 'StandardAdjustment') {
+                            form.setValue('currencyCode', baseCurrencyCode);
+                            form.setValue('exchangeRate', 1);
+                        }
+                    }}><SelectTrigger id="customer-adjustment-purpose"><SelectValue /></SelectTrigger><SelectContent>
+                        <SelectItem value="StandardAdjustment">Standard adjustment</SelectItem>
+                        <SelectItem value="FinanceCharge">Finance charge</SelectItem>
+                        <SelectItem value="Writeoff">Writeoff</SelectItem>
+                        <SelectItem value="OverpaymentWriteoff">Overpayment writeoff (AR credit balance)</SelectItem>
+                    </SelectContent></Select>
+                    {purpose !== 'StandardAdjustment' && <p className="text-sm text-muted-foreground">Uses the customer's configured account unless you select an eligible contra account override below. Posts a customer balance adjustment in the functional currency; individual invoice settlement and customer advances use their document workflows.</p>}
+                </CardContent></Card>}
                 <Card>
                     <CardHeader>
                         <CardTitle>Adjustment Details</CardTitle>
@@ -425,7 +431,7 @@ export default function NewSubledgerAdjustmentPage() {
                                 open={partnerOpen}
                                 onOpenChange={setPartnerOpen}
                                 options={partnerOptions}
-                                value={selectedModule === 'AR' ? selectedCustomerId : selectedSupplierId}
+                                value={selectedModule === 'AP' ? selectedBusinessPartnerRoleId : selectedBusinessPartnerId}
                                 selectedOption={selectedPartner}
                                 placeholder={partnerLoading ? `Loading ${partnerLabel.toLowerCase()}s...` : `Select ${partnerLabel.toLowerCase()}`}
                                 searchPlaceholder={`Search ${partnerLabel.toLowerCase()}s...`}
@@ -433,9 +439,9 @@ export default function NewSubledgerAdjustmentPage() {
                                 disabled={partnerLoading}
                                 onSelect={handlePartnerSelect}
                             />
-                            {(form.formState.errors.customerId || form.formState.errors.supplierId) && (
+                            {form.formState.errors.businessPartnerId && (
                                 <p className="text-sm text-destructive">
-                                    {form.formState.errors.customerId?.message || form.formState.errors.supplierId?.message}
+                                    {form.formState.errors.businessPartnerId.message}
                                 </p>
                             )}
                         </div>
@@ -457,6 +463,7 @@ export default function NewSubledgerAdjustmentPage() {
                             <Label>Adjustment Type</Label>
                             <Select
                                 value={adjustmentType}
+                                disabled={purpose !== 'StandardAdjustment'}
                                 onValueChange={(value: SubledgerAdjustmentType) => form.setValue('adjustmentType', value)}
                             >
                                 <SelectTrigger>
@@ -528,7 +535,7 @@ export default function NewSubledgerAdjustmentPage() {
                         </div>
 
                         <div className="space-y-2 md:col-span-2">
-                            <Label>Contra GL Account</Label>
+                            <Label>{purpose === 'StandardAdjustment' ? 'Contra GL Account' : 'Contra account override (optional)'}</Label>
                             {accountsLoading ? (
                                 <Skeleton className="h-10 w-full" />
                             ) : (
@@ -538,7 +545,7 @@ export default function NewSubledgerAdjustmentPage() {
                                     options={accountOptions}
                                     value={selectedAccountId}
                                     selectedOption={selectedAccount}
-                                    placeholder="Select contra account"
+                                    placeholder={purpose === 'StandardAdjustment' ? 'Select contra account' : 'Use customer account mapping'}
                                     searchPlaceholder="Search accounts..."
                                     emptyText="No posting accounts found."
                                     onSelect={(id) => {
@@ -596,7 +603,7 @@ export default function NewSubledgerAdjustmentPage() {
                                     {signedSubledgerAmount >= 0 ? '+' : ''}{formatCurrency(signedSubledgerAmount, currencyCode)}
                                 </div>
                                 <div className="mt-1 text-sm text-muted-foreground">
-                                    {selectedModule === 'AR' ? selectedCustomer?.customerName : selectedSupplier?.partnerName || selectedSupplier?.companyName || partnerLabel}
+                                    {selectedPartner?.label || partnerLabel}
                                 </div>
                             </div>
 
@@ -676,6 +683,7 @@ function SearchSelect({
                                 <CommandItem
                                     key={option.id}
                                     value={`${option.label} ${option.secondary ?? ''}`}
+                                    disabled={option.disabled}
                                     onSelect={() => onSelect(option.id)}
                                 >
                                     <Check className={cn('mr-2 h-4 w-4', value === option.id ? 'opacity-100' : 'opacity-0')} />

@@ -21,6 +21,24 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class ApReceiptAccountResolutionTests
 {
     [Fact]
+    public async Task Consolidated_prior_invoice_only_consumes_the_current_orders_accrual()
+    {
+        await using var fixture = new Fixture();
+        var (invoice, firstLine, _, account, _) = await fixture.SeedAsync(true);
+        var prior = await fixture.AddPostedInvoiceAsync(invoice, invoice.LineItems.Single(l => l.Id == firstLine), account, 60m);
+        prior.AutoInvoiceRequestId = Guid.NewGuid(); prior.PurchaseOrderId = null;
+        var otherItem = new PurchaseOrderItem { TenantId = fixture.Tenant, PurchaseOrderId = Guid.NewGuid(), InventoryItemId = Guid.NewGuid() };
+        var otherLine = new VendorInvoiceLineItem { TenantId = fixture.Tenant, VendorInvoiceId = prior.Id, PurchaseOrderItemId = otherItem.Id,
+            Quantity = 1, UnitPrice = 140, VendorInvoice = prior };
+        fixture.Context.PurchaseOrderItems.Add(otherItem);
+        fixture.Context.Set<VendorInvoiceLineItem>().Add(otherLine);
+        fixture.Context.AccountTransactions.Add(new AccountTransaction { TenantId = fixture.Tenant, AccountingBookId = fixture.BookId, JournalEntryId = prior.JournalEntryId!.Value,
+            SourceDocumentLineId = otherLine.Id, AccountId = account, DebitAmount = 140, TransactionTag = "AP-GRV" });
+        await fixture.Context.SaveChangesAsync();
+        (await fixture.SharesAsync(invoice))[firstLine].Should().ContainSingle(share => share.Account == account && share.Weight == 140m);
+    }
+
+    [Fact]
     public async Task Mixed_service_line_does_not_guess_a_stock_receipt_account()
     {
         await using var fixture = new Fixture();
@@ -59,7 +77,7 @@ public sealed class ApReceiptAccountResolutionTests
     {
         await using var fixture = new Fixture();
         var (invoice, _, _, firstAccount, _) = await fixture.SeedAsync(true);
-        fixture.Context.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = Guid.NewGuid(),
+        fixture.Context.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = Guid.NewGuid(), AccountingBookId = Guid.NewGuid(),
             SourceDocumentType = "ProcurementPurchaseOrderReceipt", SourceDocumentId = fixture.ReceiptId,
             PostingAction = "PostAcceptedInventoryReceipt", PostingStatus = "Posted", JournalEntryId = Guid.NewGuid() });
         await fixture.Context.SaveChangesAsync();
@@ -215,12 +233,15 @@ public sealed class ApReceiptAccountResolutionTests
     private sealed class Fixture : IAsyncDisposable
     {
         public Guid Tenant { get; } = Guid.NewGuid();
+        public Guid BookId { get; } = Guid.NewGuid();
         public Guid ReceiptId { get; } = Guid.NewGuid();
         public ApplicationDbContext Context { get; } = new(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         private readonly VendorInvoiceService service;
         public Fixture()
         {
+            Context.AccountingBooks.Add(new AccountingBook { Id = BookId, TenantId = Tenant, Code = "IFRS", Name = "Primary book",
+                IsDefault = true, IsActive = true, AllowsPosting = true, FunctionalCurrencyCode = "GHS", LifecycleStatus = AccountingBookLifecycleStatus.Active });
             var current = new Mock<ICurrentUserService>(); current.SetupGet(value => value.TenantId).Returns(Tenant);
             service = new VendorInvoiceService(new UnitOfWork(Context), current.Object, Mock.Of<IInventoryValuationService>(),
                 NullLogger<VendorInvoiceService>.Instance, Mock.Of<IDocumentNumberingService>(), Mock.Of<IWorkflowService>(), taxEngine: Mock.Of<ITaxCalculationEngine>());
@@ -234,14 +255,14 @@ public sealed class ApReceiptAccountResolutionTests
             Context.PurchaseOrderItems.AddRange(poLine1, poLine2);
             Context.PurchaseOrderReceipts.Add(new PurchaseOrderReceipt { Id = ReceiptId, TenantId = Tenant, PurchaseOrderId = order, ReceiptNumber = "REC-ORIGINAL" });
             var journal = Guid.NewGuid();
-            Context.JournalEntries.Add(new JournalEntry { Id = journal, TenantId = Tenant, JournalEntryNumber = "JE-RECEIPT", PostingStatus = "Posted" });
-            Context.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = Tenant,
+            Context.JournalEntries.Add(new JournalEntry { Id = journal, TenantId = Tenant, AccountingBookId = BookId, JournalEntryNumber = "JE-RECEIPT", PostingStatus = "Posted" });
+            Context.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = Tenant, AccountingBookId = BookId,
                 SourceDocumentType = "ProcurementPurchaseOrderReceipt", SourceDocumentId = ReceiptId,
                 PostingAction = "PostAcceptedInventoryReceipt", PostingStatus = "Posted", JournalEntryId = journal });
             Context.AccountTransactions.AddRange(
-                new AccountTransaction { TenantId = Tenant, JournalEntryId = journal, AccountId = firstAccount,
+                new AccountTransaction { TenantId = Tenant, AccountingBookId = BookId, JournalEntryId = journal, AccountId = firstAccount,
                     SourceDocumentLineId = legacy ? null : firstItem, CreditAmount = 120m, TransactionTag = "INV-RECEIPT-GRV-ACCRUAL" },
-                new AccountTransaction { TenantId = Tenant, JournalEntryId = journal, AccountId = secondAccount,
+                new AccountTransaction { TenantId = Tenant, AccountingBookId = BookId, JournalEntryId = journal, AccountId = secondAccount,
                     SourceDocumentLineId = legacy ? null : secondItem, CreditAmount = 80m, TransactionTag = "INV-RECEIPT-GRV-ACCRUAL" });
             if (movements)
                 Context.InventoryMovements.AddRange(
@@ -258,19 +279,21 @@ public sealed class ApReceiptAccountResolutionTests
         public async Task AddReceiptAsync(Guid order, Guid item, Guid account, decimal amount)
         {
             var receipt = new PurchaseOrderReceipt { TenantId = Tenant, PurchaseOrderId = order, ReceiptNumber = "REC-NEXT" };
-            var journal = new JournalEntry { TenantId = Tenant, JournalEntryNumber = "JE-NEXT", PostingStatus = "Posted" };
+            var journal = new JournalEntry { TenantId = Tenant, AccountingBookId = BookId, JournalEntryNumber = "JE-NEXT", PostingStatus = "Posted" };
             Context.PurchaseOrderReceipts.Add(receipt);
             Context.JournalEntries.Add(journal);
-            Context.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = Tenant, SourceDocumentType = "ProcurementPurchaseOrderReceipt",
+            Context.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = Tenant, AccountingBookId = BookId, SourceDocumentType = "ProcurementPurchaseOrderReceipt",
                 SourceDocumentId = receipt.Id, PostingAction = "PostAcceptedInventoryReceipt", PostingStatus = "Posted", JournalEntryId = journal.Id });
-            Context.AccountTransactions.Add(new AccountTransaction { TenantId = Tenant, JournalEntryId = journal.Id, AccountId = account,
+            Context.AccountTransactions.Add(new AccountTransaction { TenantId = Tenant, AccountingBookId = BookId, JournalEntryId = journal.Id, AccountId = account,
                 SourceDocumentLineId = item, CreditAmount = amount, TransactionTag = "INV-RECEIPT-GRV-ACCRUAL" });
             await Context.SaveChangesAsync();
         }
         public async Task<VendorInvoice> AddPostedInvoiceAsync(VendorInvoice source, VendorInvoiceLineItem sourceLine, Guid account, decimal amount, string state = "posted")
         {
             var tenant = state == "foreign" ? Guid.NewGuid() : Tenant;
-            var journal = new JournalEntry { TenantId = tenant, JournalEntryNumber = "JE-AP", PostingStatus = "Posted", IsReversed = state == "reversed" };
+            var bookId = state == "foreign" ? Guid.NewGuid() : BookId;
+            if (state == "foreign") Context.AccountingBooks.Add(new AccountingBook { Id = bookId, TenantId = tenant, Code = "IFRS", Name = "Other company book" });
+            var journal = new JournalEntry { TenantId = tenant, AccountingBookId = bookId, JournalEntryNumber = "JE-AP", PostingStatus = "Posted", IsReversed = state == "reversed" };
             var line = new VendorInvoiceLineItem { TenantId = tenant, PurchaseOrderItemId = sourceLine.PurchaseOrderItemId,
                 InventoryItemId = sourceLine.InventoryItemId, Quantity = 1, UnitPrice = amount };
             var invoice = new VendorInvoice { TenantId = tenant, PurchaseOrderId = source.PurchaseOrderId, JournalEntryId = journal.Id,
@@ -280,9 +303,9 @@ public sealed class ApReceiptAccountResolutionTests
             line.VendorInvoiceId = invoice.Id;
             Context.JournalEntries.Add(journal);
             Context.VendorInvoices.Add(invoice);
-            Context.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = tenant, SourceModule = "AP", SourceDocumentType = "VendorInvoice",
+            Context.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = tenant, AccountingBookId = bookId, SourceModule = "AP", SourceDocumentType = "VendorInvoice",
                 SourceDocumentId = invoice.Id, PostingAction = "Post", PostingStatus = "Posted", JournalEntryId = journal.Id });
-            Context.AccountTransactions.Add(new AccountTransaction { TenantId = tenant, JournalEntryId = journal.Id, AccountId = account,
+            Context.AccountTransactions.Add(new AccountTransaction { TenantId = tenant, AccountingBookId = bookId, JournalEntryId = journal.Id, AccountId = account,
                 SourceDocumentLineId = line.Id, DebitAmount = amount, TransactionTag = "AP-GRV" });
             await Context.SaveChangesAsync();
             return invoice;
@@ -309,10 +332,17 @@ public sealed class ApReceiptAccountResolutionTests
             foreach (var account in accounts.Append(ap))
                 Context.Accounts.Add(new Account { Id = account, TenantId = Tenant, AccountNumber = account.ToString("N"),
                     AccountName = "Posting account", AccountType = AccountType.Liability, Status = AccountStatus.Active, IsControlAccount = true });
-            var supplier = new Supplier { TenantId = Tenant, Name = "Invoice supplier", SupplierCode = "SUP-POST", IsActive = true, Status = "Active" };
-            Context.Suppliers.Add(supplier);
-            invoice.SupplierId = supplier.Id;
-            invoice.Supplier = supplier;
+            var supplier = new BusinessPartner
+            {
+                TenantId = Tenant,
+                PartnerName = "Invoice supplier",
+                PartnerCode = "SUP-POST",
+                PartnerType = "Supplier",
+                IsActive = true
+            };
+            Context.BusinessPartners.Add(supplier);
+            invoice.BusinessPartnerId = supplier.Id;
+            invoice.BusinessPartner = supplier;
             invoice.Status = VendorInvoiceStatus.Approved;
             invoice.ApprovalRequired = false;
             invoice.ApprovalStatus = "NotRequired";

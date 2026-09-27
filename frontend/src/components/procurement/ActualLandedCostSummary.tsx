@@ -43,7 +43,7 @@ export function ActualLandedCostSummary({ purchaseOrderId, invoiceId, poTotal, c
         <p className="text-sm font-medium">{voucher.landedCostNumber} · {voucher.status} · {money(voucher.totalCostAmount, voucher.currency)}
           {' · '}<Link className="text-primary underline" href={`/procurement/purchase-receipts/${voucher.receiptId}`}>Open receipt</Link></p>
         <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left"><th className="p-2">Charge</th><th className="p-2">Supplier</th><th className="p-2">Amount</th><th className="p-2">Supplier invoice</th></tr></thead>
-          <tbody>{voucher.costItems.map(item => <tr key={item.id} className="border-t"><td className="p-2">{item.description}</td><td className="p-2">{item.supplierName || 'Not specified'}</td><td className="p-2">{money(item.amount, item.currency)}</td>
+          <tbody>{voucher.costItems.map(item => <tr key={item.id} className="border-t"><td className="p-2">{item.description}{item.supplierDocumentNumber && <span className="block text-xs text-muted-foreground">Supplier document {item.supplierDocumentNumber}</span>}</td><td className="p-2">{item.supplierName || 'Not specified'}</td><td className="p-2">{money(item.amount, item.currency)}</td>
             <td className="p-2"><LandedCostInvoiceLink voucherId={voucher.id} item={item} onChanged={() => setRevision(v => v + 1)} />
               {invoiceId && <span className="block text-xs text-muted-foreground">{item.invoiceId === invoiceId ? 'Linked to this invoice' : item.invoiceId ? 'Linked to another invoice' : 'Related receipt cost — not linked to this invoice'}</span>}
             </td></tr>)}</tbody></table></div>

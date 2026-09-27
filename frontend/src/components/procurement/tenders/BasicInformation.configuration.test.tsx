@@ -40,7 +40,7 @@ async function openSelect(label: string) {
 }
 async function choose(label: string, option: string) {
   await openSelect(label);
-  await act(async () => { fireEvent.click(screen.getByRole('option', { name: option, exact: true })); });
+  await act(async () => { fireEvent.click(screen.getByRole('option', { name: option })); });
 }
 async function loaded() {
   await waitFor(() => expect(screen.queryByText('Loading templates...')).not.toBeInTheDocument());
@@ -96,6 +96,22 @@ it('filters QCBS, applies settings atomically, and clears selection on method ch
   expect(savedForm()).toMatchObject({ evaluationTemplateId: 'w', useQCBSEvaluation: false });
   await choose('1. Evaluation Method', 'QCBS — Quality and Cost-Based Selection');
   expect(savedForm()).toMatchObject({ evaluationTemplateId: null, useQCBSEvaluation: true });
+});
+
+it('selects an exact Works template without treating legacy Construction or Goods as Works', async () => {
+  const works = { ...template('works', 'WeightedAverage'), category: 'Works' };
+  api.active.mockResolvedValue([works, ...templates,
+    { ...template('legacy-construction', 'WeightedAverage'), category: 'Construction' }]);
+  api.details.mockResolvedValue(works);
+  render(<Harness category="Works" />);
+  await loaded();
+  await choose('1. Evaluation Method', 'Standard (non-QCBS)');
+  await openSelect('2. Evaluation Template');
+  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual([
+    'Select a matching template', 'works (works)',
+  ]);
+  await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'works (works)' })); });
+  await waitFor(() => expect(savedForm()).toMatchObject({ evaluationTemplateId: 'works', useQCBSEvaluation: false }));
 });
 
 it('retains an existing compatible draft and restores template-owned weights', async () => {

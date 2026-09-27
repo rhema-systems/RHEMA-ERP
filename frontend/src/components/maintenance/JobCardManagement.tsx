@@ -1,5 +1,7 @@
 'use client';
 
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
+
 import React, { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -2416,6 +2418,10 @@ export default function JobCardsPage() {
 
   return (
     <div className="space-y-6">
+      <GlobalSearchRecordOpener
+        load={id => jobCardService.getJobCardById(id)}
+        onOpen={card => handleViewJobCard(mapJobCardResponseToGridCard(card))}
+      />
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>

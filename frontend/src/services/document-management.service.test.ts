@@ -80,4 +80,20 @@ describe('document management API client', () => {
       })
     );
   });
+
+  it('searches viewable DMS records and links a selected record to a case document', async () => {
+    compatibleApi.get.mockResolvedValueOnce({ data: [{ id: 'record-1' }] });
+    compatibleApi.post.mockResolvedValueOnce({ data: { id: 'case-1' } });
+
+    const records = await documentManagementService.getRecords(undefined, { search: 'lease', take: 50 });
+    const linkedCase = await documentManagementService.attachRecordToCase('record-1', 'case-1', 'document-1');
+
+    expect(records).toEqual([{ id: 'record-1' }]);
+    expect(compatibleApi.get).toHaveBeenCalledWith('/document-management/records', { search: 'lease', take: 50 });
+    expect(compatibleApi.post).toHaveBeenCalledWith(
+      '/document-management/records/record-1/attach-to-case',
+      { caseId: 'case-1', documentId: 'document-1' }
+    );
+    expect(linkedCase.id).toBe('case-1');
+  });
 });

@@ -14,19 +14,22 @@ public sealed class ApInvoiceSupplierDto
 }
 
 /// <summary>
-/// Finance-owned entry option spanning Procurement's approved Business Partner identities and
-/// canonical Supplier identities. <see cref="Id"/> is safe to submit to the vendor-invoice
-/// command, which resolves either identity to the persisted Supplier foreign key.
+/// Finance-owned entry option for one canonical Business Partner AP role. Incomplete profiles are
+/// returned with a corrective readiness explanation so the UI never hides master-data problems.
 /// </summary>
 public sealed class ApInvoiceSupplierEntryOptionDto
 {
     public Guid Id { get; set; }
-    public Guid? SupplierId { get; set; }
-    public Guid? BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerId { get; set; }
+    public Guid BusinessPartnerRoleId { get; set; }
+    public string RoleType { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public Guid? PaymentTermId { get; set; }
     public string? Currency { get; set; }
+    public bool IsTransactionReady { get; set; }
+    public string ReadinessCode { get; set; } = string.Empty;
+    public string ReadinessMessage { get; set; } = string.Empty;
 }
 
 public sealed class ApGoodsInvoiceEntryDto
@@ -40,5 +43,7 @@ public sealed class ApGoodsInvoiceEntryLineDto
     public Guid PurchaseOrderItemId { get; init; }
     public decimal AcceptedQuantity { get; init; }
     public decimal InvoicedQuantity { get; init; }
-    public decimal AvailableQuantity => Math.Max(0m, AcceptedQuantity - InvoicedQuantity);
+    // AP quantities are persisted to four decimal places. A converted return must
+    // never round an invoice's remaining quantity up beyond accepted supply.
+    public decimal AvailableQuantity => decimal.Floor(Math.Max(0m, AcceptedQuantity - InvoicedQuantity) * 10000m) / 10000m;
 }

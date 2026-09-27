@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { hasSupplierRole } from '@/lib/business-partner-roles';
+import React, { useState, useEffect } from 'react';
 import { type TenderFormData } from '@/app/procurement/tenders/new/page';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -52,10 +53,10 @@ export default function TenderInvitations({ formData, updateFormData, tenderId, 
     try {
       setLoading(true);
       // RFQ/Tender invitations should support approved + pending + inactive suppliers.
-      // We'll fetch all partners and filter on the client to Supplier/Both for selection.
+      // We'll fetch all partners and filter on the client to supplier roles for selection.
       const partnerResult = await businessPartnerService.getPartners({ page: 1, pageSize: 1000 });
       const partners = (partnerResult.items || []).filter(
-        (p) => p.partnerType === 'Supplier' || p.partnerType === 'Both'
+        (p) => hasSupplierRole(p.partnerType)
       );
 
       let suggested: SuggestedSupplierDto[] = [];

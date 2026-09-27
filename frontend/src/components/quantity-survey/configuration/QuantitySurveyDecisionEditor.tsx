@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { quantitySurveyConfigurationError as message } from '@/lib/quantity-survey-configuration-error';
 import { documentManagementService } from '@/services/document-management.service';
 import { quantitySurveyConfigurationService } from '@/services/quantity-survey-configuration.service';
 import type {
@@ -50,11 +51,6 @@ const evidenceTypes = [
   'Contract clause',
   'Approval memorandum',
 ];
-const message = (error: unknown) =>
-  (error as { response?: { detail?: string }; message?: string }).response
-    ?.detail ||
-  (error as Error)?.message ||
-  'The request failed.';
 
 export function QuantitySurveyDecisionEditor({
   profileId,
@@ -259,6 +255,12 @@ export function QuantitySurveyDecisionEditor({
 
   return (
     <div className="space-y-6">
+      {(save.error || submit.error || decide.error || linkEvidence.error || unlink.error) && (
+        <Alert variant="destructive">
+          <AlertTitle>The decision could not be updated</AlertTitle>
+          <AlertDescription>{message(save.error || submit.error || decide.error || linkEvidence.error || unlink.error)}</AlertDescription>
+        </Alert>
+      )}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Badge variant="outline">{schema.configurationKey}</Badge>
         <Badge variant="secondary">Owner: {schema.ownerGroup}</Badge>

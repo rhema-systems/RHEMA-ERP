@@ -25,6 +25,13 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
   documentManagementService,
@@ -71,6 +78,88 @@ const initialAccessForm = {
   canArchive: false,
 };
 
+const anyRoleValue = '__any_role__';
+
+const dmsModuleRoleOptions = [
+  {
+    module: 'Estate / Facilities',
+    roles: [
+      'Estate Officer',
+      'Estate Manager',
+      'Head of Estate',
+      'Land Registry Officer',
+      'Survey Officer',
+      'Acquisition Committee',
+      'Executive Approver',
+      'Facilities Officer',
+      'Facilities Manager',
+      'Property Manager',
+    ],
+  },
+  {
+    module: 'Estate / Property Management',
+    roles: [
+      'Estate Officer',
+      'Estate Manager',
+      'Head of Estate',
+      'Property Manager',
+      'Executive Approver',
+      'Records Officer',
+    ],
+  },
+  {
+    module: 'Legal Department',
+    roles: [
+      'Legal Admin Assistant',
+      'Legal Officer',
+      'Legal Manager',
+      'Head of Legal',
+      'Records Officer',
+    ],
+  },
+  {
+    module: 'DocumentManagement',
+    roles: [
+      'Document Control Officer',
+      'Records Officer',
+      'Admin',
+      'SystemAdmin',
+      'TenantAdmin',
+      'SuperAdmin',
+    ],
+  },
+  {
+    module: 'Finance',
+    roles: [
+      'Finance Officer',
+      'Finance Manager',
+      'Accounts Payable',
+      'Accounts Receivable',
+    ],
+  },
+  {
+    module: 'HR',
+    roles: ['HR Officer', 'HR Manager', 'HR Admin', 'TenantAdmin'],
+  },
+  {
+    module: 'Procurement',
+    roles: [
+      'Procurement Officer',
+      'Procurement Manager',
+      'Tender Committee',
+      'Records Officer',
+    ],
+  },
+  {
+    module: 'Planning',
+    roles: ['Planning Officer', 'Planning Manager'],
+  },
+  {
+    module: 'Project',
+    roles: ['Project Officer', 'Project Manager', 'PMO'],
+  },
+];
+
 const initialRetentionForm = {
   policyCode: '',
   name: '',
@@ -82,6 +171,14 @@ const initialRetentionForm = {
   allowDestruction: false,
   notes: '',
 };
+
+function formatSaveError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return fallback;
+}
 
 export default function DmsAccessRetentionSetupPage() {
   const [accessRules, setAccessRules] = React.useState<
@@ -132,6 +229,24 @@ export default function DmsAccessRetentionSetupPage() {
     setAccessForm((current) => ({ ...current, [field]: value }));
   };
 
+  const selectedModuleRoles =
+    dmsModuleRoleOptions.find((option) => option.module === accessForm.module)
+      ?.roles || [];
+
+  const updateAccessModule = (module: string) => {
+    setAccessForm((current) => ({
+      ...current,
+      module,
+      roleName:
+        !current.roleName ||
+        dmsModuleRoleOptions
+          .find((option) => option.module === module)
+          ?.roles.includes(current.roleName)
+          ? current.roleName
+          : '',
+    }));
+  };
+
   const updateRetentionForm = (
     field: keyof typeof initialRetentionForm,
     value: string | boolean
@@ -150,8 +265,8 @@ export default function DmsAccessRetentionSetupPage() {
       });
       setAccessRules((current) => [created, ...current]);
       setAccessForm(initialAccessForm);
-    } catch {
-      setError('Could not save the access rule.');
+    } catch (saveError) {
+      setError(formatSaveError(saveError, 'Could not save the access rule.'));
     } finally {
       setIsSavingAccess(false);
     }
@@ -184,8 +299,10 @@ export default function DmsAccessRetentionSetupPage() {
       });
       setRetentionPolicies((current) => [created, ...current]);
       setRetentionForm(initialRetentionForm);
-    } catch {
-      setError('Could not save the retention policy.');
+    } catch (saveError) {
+      setError(
+        formatSaveError(saveError, 'Could not save the retention policy.')
+      );
     } finally {
       setIsSavingRetention(false);
     }
@@ -244,24 +361,47 @@ export default function DmsAccessRetentionSetupPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="dms-access-module">Module</Label>
-                  <Input
-                    id="dms-access-module"
+                  <Select
                     value={accessForm.module}
-                    onChange={(event) =>
-                      updateAccessForm('module', event.target.value)
-                    }
-                  />
+                    onValueChange={updateAccessModule}
+                  >
+                    <SelectTrigger id="dms-access-module">
+                      <SelectValue placeholder="Select module" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dmsModuleRoleOptions.map((option) => (
+                        <SelectItem key={option.module} value={option.module}>
+                          {option.module}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="dms-access-role">Role</Label>
-                  <Input
-                    id="dms-access-role"
-                    value={accessForm.roleName}
-                    onChange={(event) =>
-                      updateAccessForm('roleName', event.target.value)
+                  <Select
+                    value={accessForm.roleName || anyRoleValue}
+                    onValueChange={(value) =>
+                      updateAccessForm(
+                        'roleName',
+                        value === anyRoleValue ? '' : value
+                      )
                     }
-                    placeholder="Estate Officer"
-                  />
+                  >
+                    <SelectTrigger id="dms-access-role">
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={anyRoleValue}>
+                        Any configured role
+                      </SelectItem>
+                      {selectedModuleRoles.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {role}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="dms-access-permission">Permission key</Label>
@@ -348,13 +488,23 @@ export default function DmsAccessRetentionSetupPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="dms-retention-module">Module</Label>
-                  <Input
-                    id="dms-retention-module"
+                  <Select
                     value={retentionForm.module}
-                    onChange={(event) =>
-                      updateRetentionForm('module', event.target.value)
+                    onValueChange={(value) =>
+                      updateRetentionForm('module', value)
                     }
-                  />
+                  >
+                    <SelectTrigger id="dms-retention-module">
+                      <SelectValue placeholder="Select module" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dmsModuleRoleOptions.map((option) => (
+                        <SelectItem key={option.module} value={option.module}>
+                          {option.module}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="dms-retention-type">Document type</Label>

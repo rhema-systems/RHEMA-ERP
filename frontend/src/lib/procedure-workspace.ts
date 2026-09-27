@@ -61,7 +61,7 @@ const terminologyByType: Record<
     selectMessage: 'Select or create an event to start work.',
   },
   'Legal Matter': {
-    title: 'Live Legal Matter Workspace',
+    title: 'Legal matters',
     collectionLabel: 'Legal Matters',
     emptyMessage: 'No legal matters have been opened for this procedure yet.',
     createHeading: 'Open Legal Matter',

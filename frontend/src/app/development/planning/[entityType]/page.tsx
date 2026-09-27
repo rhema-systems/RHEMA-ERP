@@ -3,11 +3,11 @@
 import React from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ClipboardCheck, FileText, Landmark, Loader2, Map, Settings } from 'lucide-react';
+import { ArrowLeft, FileText, Loader2, Settings } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { ProcedureCaseWorkspace } from '@/components/procedures/ProcedureCaseWorkspace';
 import {
   planningProcedureService,
@@ -100,11 +100,7 @@ export default function PlanningProcedureWorkspacePage() {
         </Button>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-2">
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="outline">{procedure.entityType}</Badge>
-              <Badge variant="secondary">{procedure.source}</Badge>
-              <Badge variant="secondary">Workflow configured in setup</Badge>
-            </div>
+            <Badge variant="outline">{procedure.entityType}</Badge>
             <h1 className="text-3xl font-bold tracking-tight">{procedure.title}</h1>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -124,73 +120,7 @@ export default function PlanningProcedureWorkspacePage() {
         </div>
       </div>
 
-      <PlanningSopOperations entityType={procedure.entityType} />
-
       <ProcedureCaseWorkspace module="Planning" entityType={procedure.entityType} defaultTitle={procedure.title} />
     </div>
-  );
-}
-
-function PlanningSopOperations({ entityType }: { entityType: string }) {
-  const cards = [
-    {
-      title: 'Configured Workflow',
-      description: 'Planning stages, required documents, checklists, approvals, and assignments are maintained in Workflow Setup.',
-      href: `/administration/workflow?q=${encodeURIComponent(entityType)}`,
-      icon: Settings,
-    },
-    {
-      title: 'Central DMS',
-      description: 'Planning plans, layouts, site reports, committee evidence, searches, and responses should be stored in Central DMS.',
-      href: `/document-management?module=Planning&entityType=${encodeURIComponent(entityType)}`,
-      icon: FileText,
-    },
-    {
-      title: 'Estate / Land Bank Check',
-      description: 'Use Estate records and land bank references when Planning needs parcel, allocation, ownership, or regularization context.',
-      href: '/estate/land-management',
-      icon: Landmark,
-    },
-    {
-      title: 'Project / HOD Approval',
-      description: 'Route completed Planning recommendations, site plans, reports, and committee outputs back to Project/HOD approvals.',
-      href: '/development/project-approvals',
-      icon: ClipboardCheck,
-    },
-    {
-      title: 'Planning Reports',
-      description: 'Planning activity and SOP reports should be created in the central Reports module under Planning.',
-      href: '/reports?module=planning',
-      icon: Map,
-    },
-  ];
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Planning SOP Operations</CardTitle>
-        <CardDescription>
-          Operational controls around the live case workspace. The workflow itself is not hard-coded here.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Button key={card.title} asChild variant="outline" className="h-auto justify-start whitespace-normal p-4 text-left">
-              <Link href={card.href}>
-                <span className="flex items-start gap-3">
-                  <Icon className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>
-                    <span className="block font-medium">{card.title}</span>
-                    <span className="block text-xs font-normal text-muted-foreground">{card.description}</span>
-                  </span>
-                </span>
-              </Link>
-            </Button>
-          );
-        })}
-      </CardContent>
-    </Card>
   );
 }

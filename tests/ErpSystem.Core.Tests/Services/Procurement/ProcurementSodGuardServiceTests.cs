@@ -21,6 +21,35 @@ public sealed class ProcurementSodGuardServiceTests
     private static readonly DateTime Moment = new(2026, 7, 21, 9, 0, 0, DateTimeKind.Utc);
 
     [Fact]
+    public async Task DisabledProcurementSwitchAllowsSameParticipantAndRecordsThePolicyDecision()
+    {
+        await using var fixture = new GuardFixture();
+        fixture.Context.Add(new ProcurementSettings { TenantId = fixture.TenantId, EnforceSegregationOfDuties = false });
+        await fixture.Context.SaveChangesAsync();
+        var request = Request("SOD-PO-CREATOR-RECEIVER", fixture.UserId);
+        request.SourceType = "PurchaseOrder";
+        var decision = await fixture.Service.EnforceAsync(request, "procurement-sod-disabled");
+        decision.Allowed.Should().BeTrue();
+        decision.Code.Should().Be("SOD_DISABLED");
+        var recorded = await fixture.Context.ProcurementControlEvents.SingleAsync();
+        recorded.Result.Should().Be(ProcurementControlEventResult.Allowed);
+        recorded.ResultValuesJson.Should().Contain("SOD_DISABLED");
+    }
+
+    [Fact]
+    public async Task DisabledProcurementSwitchDoesNotRelaxUnrelatedStockAdjustment()
+    {
+        await using var fixture = new GuardFixture();
+        fixture.Context.Add(new ProcurementSettings { TenantId = fixture.TenantId, EnforceSegregationOfDuties = false });
+        await fixture.Context.SaveChangesAsync();
+        var request = Request("SOD-STOCK-ISSUER-ADJUSTMENT", fixture.UserId);
+        request.SourceType = "StockAdjustment";
+        var decision = await fixture.Service.EnforceAsync(request, "stock-sod-retained");
+        decision.Allowed.Should().BeFalse();
+        decision.Code.Should().Be("SOD_CONFLICT");
+    }
+
+    [Fact]
     public void RequiredRegistryContainsTheSixDistinctSrsControls()
     {
         ProcurementSodRequiredControlRegistry.Definitions.Should().HaveCount(6);
@@ -258,7 +287,7 @@ public sealed class ProcurementSodGuardServiceTests
                 NullLogger<ProcurementControlEventService>.Instance);
             Service = new ProcurementSodGuardService(_unitOfWork, _currentUser.Object,
                 PolicyService.Object, _roleService.Object, controlEvents,
-                NullLogger<ProcurementSodGuardService>.Instance);
+                NullLogger<ProcurementSodGuardService>.Instance, new ProcurementSodPolicy(_unitOfWork));
         }
 
         public Guid TenantId { get; }

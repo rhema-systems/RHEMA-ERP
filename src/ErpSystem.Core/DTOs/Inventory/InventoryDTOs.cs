@@ -10,6 +10,8 @@ namespace ErpSystem.Core.DTOs.Inventory;
 /// </summary>
 public class InventoryItemDto
 {
+    public decimal? Weight { get; set; }
+    public string? WeightUnit { get; set; }
     public InventoryItemPostingAccountsDto PostingAccounts { get; set; } = new();
     public Guid Id { get; set; }
     public string ItemCode { get; set; } = string.Empty;
@@ -249,7 +251,10 @@ public class CreateInventoryItemDto
     public string? SalesTaxScheduleId { get; set; }
 
     // === PHYSICAL PROPERTIES TAB ===
+    [Range(typeof(decimal), "0", "9999999999999999.999999")]
     public decimal? Weight { get; set; }
+    [RegularExpression("^(kg|g|lb)$")]
+    public string? WeightUnit { get; set; }
     public decimal ShippingWeight { get; set; }
     public decimal? Length { get; set; }
     public decimal? Width { get; set; }
@@ -997,6 +1002,10 @@ public class PurchaseOrderReceiptDto
 /// </summary>
 public class PurchaseOrderReceiptItemDto
 {
+    public decimal? UnitWeightKg { get; set; }
+    public string? WeightStockUom { get; set; }
+    public bool WeightOverridden { get; set; }
+
     public Guid Id { get; set; }
     public Guid PurchaseOrderItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
@@ -1039,6 +1048,10 @@ public class ReceivePurchaseOrderDto
 /// </summary>
 public class ReceivePurchaseOrderItemDto
 {
+    /// <summary>Optional transaction override in kg per stock base unit; omission copies the item master.</summary>
+    [Range(typeof(decimal), "0", "9999999999999999.999999")]
+    public decimal? UnitWeightKg { get; set; }
+
     [Required]
     public Guid PurchaseOrderItemId { get; set; }
 
