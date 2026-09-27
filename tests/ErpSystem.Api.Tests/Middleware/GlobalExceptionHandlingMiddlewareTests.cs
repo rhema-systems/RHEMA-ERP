@@ -15,6 +15,23 @@ namespace ErpSystem.Api.Tests.Middleware;
 public sealed class GlobalExceptionHandlingMiddlewareTests
 {
     [Fact]
+    public async Task InvalidOperation_PreservesActionableValidationWithoutChangingResponseContract()
+    {
+        const string message = "Select an open fiscal period before posting this invoice.";
+        var context = CreateContext(new ServiceCollection().BuildServiceProvider());
+        var middleware = new GlobalExceptionHandlingMiddleware(
+            _ => throw new InvalidOperationException(message),
+            NullLogger<GlobalExceptionHandlingMiddleware>.Instance);
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        var document = await ReadResponseAsync(context);
+        document.RootElement.GetProperty("code").GetString().Should().Be("INVALID_OPERATION");
+        document.RootElement.GetProperty("detail").GetString().Should().Be(message);
+    }
+
+    [Fact]
     public async Task UnexpectedException_ReturnsFriendlyProblemWithoutDiagnosticDetails()
     {
         const string sensitiveMessage = "database password=top-secret failed";

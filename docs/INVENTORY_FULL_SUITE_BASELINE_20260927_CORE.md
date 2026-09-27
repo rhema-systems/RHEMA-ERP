@@ -53,3 +53,11 @@ Recovery SQL acceptance: **35/35 passed** in isolated fixture `RhemaERP_CountGua
 Committee UI acceptance: **12/12 passed**, single worker, `tmp/count-recovery-ui.log`; includes required investigation reason, permission-gated recovery and existing lookup, selection, error-retention and retry behavior. The compiled C# recovery lifecycle remains pending the next build.
 
 No compiler, application-database migration, server restart, permission grant or unrelated test rewrite was performed by this triage pass. The SQL fixture is separate from the application database and retained as evidence.
+
+## Current full-suite rerun and Inventory fixture follow-up
+
+The explicitly unfiltered current build discovered 3,642 tests and completed with **3,552 passed, 55 failed and 35 skipped** in 8m6s. Evidence: `tmp/inventory-current-full-core-results/inventory-current-full-core.trx` and `tmp/inventory-current-full-core-summary.json`. All 55 failed identities also occurred in the preceding 75-failure run; 20 earlier failures now pass. This comparison is not a clean-master execution or proof that every remaining failure is harmless.
+
+Three remaining Inventory failures were traced to obsolete fixtures/assertions. E2E010 now seeds the required active tenant HR organization hierarchy and binds `OrganizationUnitId`, preserving stock, cost and notification assertions and verifying organization lineage. The source-oriented return/adjustment test no longer requires obsolete local-variable spellings or the old receipt persistence order. Actual posting-sign behavior is exercised in API C9 tests, and receipt behavior remains covered by `InventoryIssueReceiptTests` and the separate SQL guard/concurrency acceptance.
+
+The final follow-up of those two Core families plus receipt tests passed **45/45**, with zero product-code changes for these fixture corrections. Evidence: `tmp/inventory-current-full-core-results/inventory-core-fixture-final.trx`; normal test-only compile passed with zero errors and eight warnings. The full suite was not rerun after this bounded follow-up; its remaining 52 failed identities still need separate triage.

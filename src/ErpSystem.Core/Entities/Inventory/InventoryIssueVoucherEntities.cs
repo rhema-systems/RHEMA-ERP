@@ -32,7 +32,7 @@ public sealed class InventoryIssueVoucher : TenantEntity
     public Guid? ProjectId { get; set; }
     [MaxLength(100)] public string? ProjectCode { get; set; }
     public Guid RequestedById { get; set; }
-    public Guid ApprovedById { get; set; }
+    public Guid? ApprovedById { get; set; }
     public Guid IssuedById { get; set; }
     public Guid ReceiverUserId { get; set; }
     public Guid? AcknowledgedById { get; set; }
@@ -54,7 +54,7 @@ public sealed class InventoryIssueVoucher : TenantEntity
     public Warehouse Warehouse { get; set; } = null!;
     public WarehouseLocation? Location { get; set; }
     public ApplicationUser RequestedBy { get; set; } = null!;
-    public ApplicationUser ApprovedBy { get; set; } = null!;
+    public ApplicationUser? ApprovedBy { get; set; }
     public ApplicationUser IssuedBy { get; set; } = null!;
     public ApplicationUser ReceiverUser { get; set; } = null!;
     public ApplicationUser? AcknowledgedBy { get; set; }

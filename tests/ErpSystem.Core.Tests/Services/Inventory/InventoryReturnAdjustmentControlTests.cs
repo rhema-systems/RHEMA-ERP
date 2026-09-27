@@ -397,17 +397,10 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
             "soft-deleted immutable adjustment numbers still occupy the non-filtered unique index");
         repository.Should().Contain("sa.TenantId == tenantId && sa.AdjustmentNumber.StartsWith",
             "number generation must include deleted numbers without crossing tenant boundaries");
-        var financePosting = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Api", "Services", "Finance",
-            "StockAdjustmentValuationIntentBuilder.cs"));
-        financePosting.Should().Contain("var expenseAccount = expense");
-        financePosting.Should().Contain("var recoveryAccount = recovery");
-        financePosting.Should().NotContain("Guid? expense = !isOpeningStock",
-            "a positive adjustment must not require an unused expense account and vice versa");
-        var requisitionService = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory",
-            "InventoryRequisitionService.cs")).Replace("\r\n", "\n");
-        requisitionService.Should().Contain("Flush the governed parent first inside this");
-        requisitionService.Should().Contain("await _unitOfWork.SaveChangesAsync(cancellationToken);\n                await AddVoucherActionAsync(voucher, InventoryIssueVoucherActionType.Acknowledged",
-            "the append-only action trigger must see the durable Acknowledged parent status");
+        // Sign-specific account requirements are exercised through the real Finance builder in
+        // StockAdjustmentValuationIntentBuilderC9Tests rather than local-variable source spelling.
+        // Receipt history, final acknowledgement and replay are covered by InventoryIssueReceiptTests
+        // and the SQL receipt acceptance harness; the current guard requires receipt evidence first.
     }
 
     [Fact]

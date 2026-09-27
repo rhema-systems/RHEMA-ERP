@@ -248,7 +248,7 @@ public class GlobalExceptionHandlingMiddleware
                 response.Status = (int)HttpStatusCode.BadRequest;
                 response.Detail = string.IsNullOrWhiteSpace(invalidOperationException.Message)
                     ? "The operation is not valid for the current state of the object."
-                    : invalidOperationException.Message;
+                    : SensitiveDataRedactor.Redact(invalidOperationException.Message);
                 break;
 
             case ArgumentException:
