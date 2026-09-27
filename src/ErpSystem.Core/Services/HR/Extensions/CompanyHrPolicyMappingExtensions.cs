@@ -68,7 +68,6 @@ public static class CompanyHrPolicyMappingExtensions
             QueryResponseWindowHours              = entity.QueryResponseWindowHours,
             InvestigationDays                     = entity.InvestigationDays,
             DisciplineBacklogHorizonDays          = entity.DisciplineBacklogHorizonDays,
-            SettlementDaysPerYear                 = entity.SettlementDaysPerYear,
             SettlementLeaveDaysCap                = entity.SettlementLeaveDaysCap,
             MedicalBoardQuorum                    = entity.MedicalBoardQuorum,
             PermanentTotalIncapacityMonths        = entity.PermanentTotalIncapacityMonths,
@@ -76,7 +75,6 @@ public static class CompanyHrPolicyMappingExtensions
             CompensationEarningsCeiling           = entity.CompensationEarningsCeiling,
             AttendanceRateIncludesApprovedLeave   = entity.AttendanceRateIncludesApprovedLeave,
             AllowInServiceEncashment              = entity.AllowInServiceEncashment,
-            EncashmentWorkingDaysPerMonth         = entity.EncashmentWorkingDaysPerMonth,
             LeaveStartingReminderDays             = entity.LeaveStartingReminderDays,
             LeaveClosureGraceDays                 = entity.LeaveClosureGraceDays,
             LeaveUndecidedChaseDays               = entity.LeaveUndecidedChaseDays,
@@ -146,7 +144,6 @@ public static class CompanyHrPolicyMappingExtensions
         entity.QueryResponseWindowHours            = dto.QueryResponseWindowHours;
         entity.InvestigationDays                   = dto.InvestigationDays;
         entity.DisciplineBacklogHorizonDays        = dto.DisciplineBacklogHorizonDays;
-        entity.SettlementDaysPerYear               = dto.SettlementDaysPerYear;
         entity.SettlementLeaveDaysCap              = dto.SettlementLeaveDaysCap;
         entity.MedicalBoardQuorum                  = dto.MedicalBoardQuorum;
         entity.PermanentTotalIncapacityMonths      = dto.PermanentTotalIncapacityMonths;
@@ -154,7 +151,6 @@ public static class CompanyHrPolicyMappingExtensions
         entity.CompensationEarningsCeiling         = dto.CompensationEarningsCeiling;
         entity.AttendanceRateIncludesApprovedLeave = dto.AttendanceRateIncludesApprovedLeave;
         entity.AllowInServiceEncashment           = dto.AllowInServiceEncashment;
-        entity.EncashmentWorkingDaysPerMonth      = dto.EncashmentWorkingDaysPerMonth;
         entity.LeaveStartingReminderDays          = dto.LeaveStartingReminderDays;
         entity.LeaveClosureGraceDays              = dto.LeaveClosureGraceDays;
         entity.LeaveUndecidedChaseDays            = dto.LeaveUndecidedChaseDays;

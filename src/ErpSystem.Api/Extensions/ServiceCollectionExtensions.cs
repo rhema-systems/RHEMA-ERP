@@ -1945,7 +1945,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         HrPermissions.AdministerSeparation)))
                 .AddPolicy(HrPermissions.SeparationAdminPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
-                        HrPermissions.AdministerSeparation)));
+                        HrPermissions.AdministerSeparation)))
+                // Finance's valuation of the pay HR records (leave settings audit 2, P2). Not on
+                // the separation ladder: Administer Separation must NOT imply it — the one who
+                // counts is not the one who prices.
+                .AddPolicy(HrPermissions.PayValuePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ValueHrPay)));
 
             // Staff Awards & Recognition. Same ladder: Administer implies Write implies
             // Read. What is deliberately NOT gated on this family is the employee's own surface:

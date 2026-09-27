@@ -138,22 +138,10 @@ public class LeaveType : TenantEntity
     /// </remarks>
     public bool AllowOffsetAgainstAnnual { get; set; }
 
-    // ===== ENCASHMENT RATE POLICY (Phase 4) =====
-
-    /// <summary>
-    /// How the per-day encashment rate is derived for this leave type:
-    /// <see cref="EncashmentRateBasis.DerivedFromEmoluments"/> = (monthly basic + linked
-    /// allowances) / <see cref="EncashmentWorkingDaysPerMonth"/>; or
-    /// <see cref="EncashmentRateBasis.Manual"/> = the fixed <see cref="EncashmentRatePerDay"/>.
-    /// </summary>
-    public EncashmentRateBasis EncashmentRateBasis { get; set; } = EncashmentRateBasis.DerivedFromEmoluments;
-
-    /// <summary>Manual per-day encashment rate, used when <see cref="EncashmentRateBasis"/> is Manual.</summary>
-    [Column(TypeName = "decimal(18,2)")]
-    public decimal? EncashmentRatePerDay { get; set; }
-
-    /// <summary>Working-days-per-month divisor used to turn a monthly emolument into a daily rate.</summary>
-    public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+    // ⚠ The encashment RATE policy that sat here (rate basis, rate per day, working days per month,
+    // and the LeaveTypeAllowance links) was removed in leave settings audit 2 (L-73): pay is
+    // Finance's. It valued nothing a leaver was paid, while the form said it did. HR records the
+    // days; Finance puts the money on them (HR.Pay.Value).
 
     // ── Medical evidence (residue plan R-15a) ────────────────────────────────────────────────
     //
@@ -217,26 +205,6 @@ public class LeaveType : TenantEntity
     public virtual ICollection<LeaveAccrualPolicy> AccrualPolicies { get; set; } = new List<LeaveAccrualPolicy>();
     public virtual ICollection<LeaveBalance> LeaveBalances { get; set; } = new List<LeaveBalance>();
     public virtual ICollection<LeaveRequest> LeaveRequests { get; set; } = new List<LeaveRequest>();
-
-    /// <summary>Allowance pay components that feed this leave type's derived encashment rate (Phase 4).</summary>
-    public virtual ICollection<LeaveTypeAllowance> LeaveTypeAllowances { get; set; } = new List<LeaveTypeAllowance>();
-}
-
-/// <summary>
-/// Join row linking a leave type to an allowance <see cref="PayComponent"/> whose value is added
-/// to basic pay when deriving the leave type's per-day encashment rate (Phase 4, comment 13).
-/// </summary>
-public class LeaveTypeAllowance : TenantEntity
-{
-    public Guid LeaveTypeId { get; set; }
-
-    public Guid PayComponentId { get; set; }
-
-    [ForeignKey(nameof(LeaveTypeId))]
-    public virtual LeaveType LeaveType { get; set; } = null!;
-
-    [ForeignKey(nameof(PayComponentId))]
-    public virtual PayComponent PayComponent { get; set; } = null!;
 }
 
 /// <summary>
@@ -254,9 +222,14 @@ public class LeaveSubType : TenantEntity
     public string? Description { get; set; }
 
     /// <summary>
-    /// Caps days for this subtype. Takes precedence over LeaveCategoryAllocation
-    /// when both exist — enforce this rule in the domain/service layer.
+    /// Caps this sub-type's days in a year, <b>inside</b> the leave type's own pot: a sub-type draws
+    /// on its type's days, and this limits how many of them it may take (round 5 lane N,
+    /// <c>EnsureSubTypeCapAsync</c>). Allocations are the type's, per staff level; a sub-type has none.
     /// </summary>
+    /// <remarks>
+    /// ⚠ This comment said the cap "takes precedence over LeaveCategoryAllocation". It has not since
+    /// lane N — the entitlement deliberately never reads the sub-type (leave settings audit 2, L-96).
+    /// </remarks>
     public int? MaxDaysAllowed { get; set; }
 
     public bool IsActive { get; set; } = true;
@@ -264,21 +237,22 @@ public class LeaveSubType : TenantEntity
     [ForeignKey(nameof(LeaveTypeId))]
     public virtual LeaveType LeaveType { get; set; } = null!;
 
-    public virtual List<LeaveCategoryAllocation> LeaveCategoryAllocations { get; set; } = new List<LeaveCategoryAllocation>();
     public virtual ICollection<LeaveBalance> LeaveBalances { get; set; } = new List<LeaveBalance>();
     public virtual ICollection<LeaveRequest> LeaveRequests { get; set; } = new List<LeaveRequest>();
     public virtual ICollection<LeavePlan> LeavePlans { get; set; } = new List<LeavePlan>();
 }
 
 /// <summary>
-/// Leave day allocations by staff level, optionally scoped to a subtype.
-/// When LeaveSubType.MaxDaysAllowed is also set, the subtype cap takes precedence.
+/// A leave type's entitlement for one staff level — the whole type's days, never a sub-type's.
 /// </summary>
+/// <remarks>
+/// ⚠ It carried an optional sub-type id until leave settings audit 2 (L-76). Lane N retired
+/// sub-type allocations (the entitlement never read them) but left the column, which no screen could
+/// set and nothing read. It is gone; a sub-type is limited by <c>LeaveSubType.MaxDaysAllowed</c>.
+/// </remarks>
 public class LeaveCategoryAllocation : TenantEntity
 {
     public Guid LeaveTypeId { get; set; }
-
-    public Guid? LeaveSubTypeId { get; set; }
 
     public Guid StaffLevelId { get; set; }
 
@@ -290,9 +264,6 @@ public class LeaveCategoryAllocation : TenantEntity
 
     [ForeignKey(nameof(LeaveTypeId))]
     public virtual LeaveType LeaveType { get; set; } = null!;
-
-    [ForeignKey(nameof(LeaveSubTypeId))]
-    public virtual LeaveSubType? LeaveSubType { get; set; }
 
     [ForeignKey(nameof(StaffLevelId))]
     public virtual StaffLevel StaffLevel { get; set; } = null!;

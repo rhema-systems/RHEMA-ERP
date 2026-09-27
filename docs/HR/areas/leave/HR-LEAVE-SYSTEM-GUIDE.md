@@ -235,7 +235,7 @@ designed. Everything the second build added to the **rulebook** ships **off**, d
 |---|---|---|
 | **Excuse duty** — a certificate demanded past N days | **on for Sick Leave** (3 days on the employee's word) and **Maternity** (0 days); off on the other seven *(UAT, re-checked 2026-09-26)* | already works on Sick Leave — § 2.6c |
 | **The medical board threshold** | **90 days on Sick Leave**; Maternity **blank** on purpose (L-58). The other types store 90, which does nothing while their certificate is off | lower Sick Leave's to 10 for the demo — § 2.6c |
-| **Allowances in the encashment rate** | **linked on Annual (2) and Sick (1)** | chapter 4 |
+| ~~**Allowances in the encashment rate**~~ | **gone** — leave settings audit 2 (2026-09-27) removed HR's encashment rate and its allowance links: pay is Finance's | chapter 15 |
 | **In-service encashment** | **off**, for this tenant and every new one (round 5 lane L1) — leave is cashed only on exit | § 4b says why; the portal hides its screen |
 | **`InProgress`** — leave that is happening now | assigned by a **nightly sweep**; **four** demo requests carry it today | § 2.6b |
 
@@ -764,8 +764,8 @@ answers most configuration questions on the spot:
 
 | Level | Holds | Screen |
 |---|---|---|
-| **The tenant** — `CompanyHrPolicySettings` | **when the leave year begins**, in-service encashment on or off (off), the settlement's days per year and leave cap, the reminder windows, the medical board's quorum and compensation figures | **chapter 4b**, admin only |
-| **The leave type** — `LeaveTypes` | days a year, notice, carry-over, weekends and holidays, the encashment rate and its allowances, **excuse duty and the board threshold** | chapter 4 |
+| **The tenant** — `CompanyHrPolicySettings` | **when the leave year begins**, in-service encashment on or off (off), the settlement's leave cap, the reminder windows, the medical board's quorum and compensation figures | **chapter 4b**, admin only |
+| **The leave type** — `LeaveTypes` | days a year, notice, carry-over, weekends and holidays, whether it may be cashed in, **excuse duty and the board threshold** | chapter 4 |
 | **The sub-type and the allocation** | the annual cap for one variant; days per staff level, effective-dated | chapter 4's tabs |
 
 > **Say this if a room asks how you keep it straight:**
@@ -1123,10 +1123,12 @@ entitlement numbers come from, where the accrual rules live, and where you answe
 starts "can somebody…". Four screens: a register, a detail page with five tabs, a create form and
 an edit form.
 
-**Two things were added to the form in the second build**, and both decide something real: the
+**Two things were added to the form in the second build**, and both decided something real: the
 **medical evidence** rules (what a sick note has to be, and when a board must sit) and the
-**allowances that go into the encashment rate** — which is to say, what a day of encashed leave is
-actually worth. Neither had any control anywhere before.
+**allowances that went into the encashment rate**. ⚠ **The second has since gone** (leave settings
+audit 2, 2026-09-27, L-73): HR works out no rate — it records the days, and Finance values them
+(chapter 15). The rate block, its allowances and its preview left the form together; *Allow cash
+conversion* stays, and its hint now says only what it governs: cashing in while employed.
 
 ### 👁 The kind — Annual, Maternity or Other *(round 5, lane A, 2026-09-25)*
 
@@ -1227,7 +1229,8 @@ then refuse.
 ### 👁 On the page — the detail, and its five tabs
 
 **Overview** is a read-only summary in four cards: entitlement, counting and workflow, the
-carry-over and forfeiture policy, and the encashment rate settings.
+carry-over and forfeiture policy, and encashment — now only whether the type may be cashed in
+(the rate settings left in leave settings audit 2).
 
 **Three rows on it are new:**
 
@@ -1236,7 +1239,7 @@ carry-over and forfeiture policy, and the encashment rate settings.
 | Entitlement | **Requires excuse duty** | *Yes* / *No* |
 | Entitlement | **Self-certification** *(only when the above is Yes)* | *3 day(s) on the employee's own word* |
 | Entitlement | **Medical board threshold** *(same)* | *10 day(s) cumulative in a year*, or **No board required** |
-| Encashment | **Allowance components** | a badge — *2 linked* — or blank when the rate is basic alone |
+| ~~Encashment~~ | ~~**Allowance components**~~ | gone with HR's rate (leave settings audit 2, 2026-09-27) |
 
 The other four tabs are editable child collections, all the same shape — a table, an **Add**
 button, and a row menu with **Edit** and **Remove** (⚠ Eligibility has **Remove** only — there is no
@@ -1420,7 +1423,7 @@ of leave is worth in cash. §4.4.6 lists those, and chapter 4b is the screen the
 | **Holiday → Active** | an inactive holiday no longer suppresses a leave day |
 | **Holiday → Substitution date** | the day given in lieu is now a non-working day for leave |
 | **Which calendar a holiday belongs to** | only the tenant's **default, active** calendar counts |
-| **Leave type → Allowance components** *(new)* | they were already read by the encashment rate — what was missing was any way to **set** them. Now a checkbox list on the leave type, and the payout prints the sentence they produced |
+| ~~**Leave type → Allowance components**~~ *(removed 2026-09-27)* | fed HR's encashment rate; leave settings audit 2 removed the rate, and them with it (L-73) — Finance values leave cashed in |
 | **Leave type → Requires excuse duty / self-certification days** *(new)* | refused at submit, naming the document and the threshold |
 | **Leave type → Medical board threshold** *(new)* | refused at submit on **cumulative days in the year**, satisfied by a concluded board or its attached recommendation |
 
@@ -1454,6 +1457,9 @@ when N is less than M, some of those days already had attendance recorded, and *
 not reach the payroll export as leave**.
 
 ### 4.4.4 ⚠ One more trap on this screen, and it was silent
+
+> ⚠ **History since 2026-09-27.** There are no allowance links any more — leave settings audit 2
+> removed them with HR's encashment rate (L-73). What follows is kept as the record of L-13.
 
 **A leave-type save that did not mention the allowances used to delete every one of them.** The
 edit form always sends the whole record, so the *screen* was never the danger — but anything else
@@ -1499,7 +1505,7 @@ So that this section is not read as a list of everything being broken: **twenty-
 traced and are fully honoured.** Minimum notice · Requires approval · Requires a reliever · Min
 service to access · Allow carry-over and its cap · Carry-over expiry · Forfeit unused after ·
 Mandatory annual leave *(now the Annual kind)* · Count weekends · Count holidays · Allow cash conversion · the three
-encashment rate settings · Default days · Max days *(as a ceiling on everything below it)* · Has
+encashment rate settings *(removed 2026-09-27 — they valued nothing a leaver was paid, L-73)* · Default days · Max days *(as a ceiling on everything below it)* · Has
 sub-types · all four eligibility rule types, including the gender qualifier that ANDs onto an
 org-scoped rule · accrual frequency, mode, rate, min-service and pro-rate-on-join · allocation
 effective dating.
@@ -1587,11 +1593,11 @@ we are in, not the calendar year. None of it shows on a January leave year, whic
 the leave year are separate settings on purpose — plenty of organisations run them apart, and
 coupling them is invisible until somebody wants a July leave year on a January fiscal year.
 
-**2 — Disciplinary & settlement clocks → *Final settlement — days per year*.** Default **365**.
+**2 — Disciplinary & settlement clocks.** ⚠ *Final settlement — days per year* (365 — *"a daily
+rate is monthly pay × 12 ÷ this"*) is **gone** since leave settings audit 2 (2026-09-27, L-74): HR
+works out no rate. Finance values a leaver's pay in its own step — chapter 15, *Pay to value*.
 
-> *This one moves money. A daily rate is monthly pay × 12 ÷ this.*
-
-**…and beneath it, *Final settlement — most days of annual leave paid*** *(round 5, lane L2b)*.
+**What remains is *Final settlement — most days of annual leave paid*** *(round 5, lane L2b)*.
 Default **56** (FR-HR-152); **empty means no cap**. It was a constant in the program until 26
 September. It caps the days on a leaver's *Annual leave owed on exit* line — this leave year's share
 built up to the last day, plus carried days not yet lapsed, plus adjustments, less leave taken,
@@ -1599,23 +1605,17 @@ cashed in or awaiting a decision — and the line says when it capped and from h
 paid on summary dismissal, whatever it says (Labour Act s.30(3)). With TDC's figures (at most 30 +
 5 days) it rarely binds; the point is that it can be seen and changed.
 
-**3 — Leave — encashment.** A switch and a number, and a worked example between them:
+**3 — Leave — encashment.** One switch *(the number left in round 5 lane N; the worked example in
+leave settings audit 2)*:
 
 | Control | Default | What it does |
 |---|---|---|
 | **Allow leave to be encashed while still employed** | **off** — for a new tenant and, since round 5 lane L1, for this one | off, the in-service encashment path refuses outright, naming the setting, and the portal hides its screen. On, only annual leave, this leave year, up to *can take now* (lane L3) — the leave type's own *Allow cash conversion* still decides which type may use it |
-| ~~**Encashment — working days per month**~~ | — | **Gone from the page** *(round 5 lane N, § 23 L-38)*. It could never apply: every leave type carries its own figure, 22 unless the type says otherwise, and the type's form will not take less than 1. The value is still stored and saved unchanged; the example below uses a type's 22 |
+| ~~**Encashment — working days per month**~~ | — | **Gone from the page** *(round 5 lane N, § 23 L-38)*. It could never apply: every leave type carries its own figure, 22 unless the type says otherwise, and the type's form will not take less than 1. The stored value itself was dropped in leave settings audit 2 (2026-09-27, L-75) |
 
-**…and inside that card, the worked example** — the whole point of it, updating as you type:
-
-```
-On a salary of 6,000.00 a month, the two bases in force right now:
-
-  Encashed leave, per day        6,000.00 / 22          272.73
-  Final settlement, per day      6,000.00 x 12 / 365    197.26
-
-The same day of leave is worth 38% more under one basis than the other.
-```
+~~**…and inside that card, the worked example**~~ — **gone** since leave settings audit 2
+(2026-09-27). It compared HR's two daily-rate bases, 38% apart on the same salary, and HR keeps
+neither now: HR records the days, and Finance values them (chapter 15).
 
 **4 — Leave — reminder cadence.** The five windows chapter 18 sweeps on:
 
@@ -1647,24 +1647,11 @@ value is in force on the next reminder run, the next payout and the next confirm
 > trusting anybody to remember: once there is leave on record, it refuses to move and tells you what
 > is already filed under the current year."
 
-**2 — Scroll to *Leave — encashment*. Read the worked example aloud.**
+**2 — (Removed with the worked example — leave settings audit 2, 2026-09-27.)** *It read HR's two
+daily-rate bases aloud, thirty-eight per cent apart. Neither is HR's now: HR records the days, and
+Finance values them in its own step — chapter 15.*
 
-> "Two numbers, on one screen, on the same salary. A day of unused leave cashed in while you work
-> here is worth two hundred and seventy-three cedis. A day of the same leave paid out when you
-> leave is worth a hundred and ninety-seven. **Thirty-eight per cent apart**, on identical facts.
->
-> That is not a bug and we have not quietly averaged it. They are different events — encashing five
-> days you did not take is not a final settlement on exit — and different organisations genuinely
-> want different bases for each. What was wrong was that the two were configured on different
-> screens in different modules, so **no client could see the gap until it turned up in somebody's
-> payout**. Now you meet it here, before anybody is paid."
-
-**3 — Say where the divisor lives now.** *(Round 5 lane N: this step used to change a company-wide
-field on this page, which never reached a payout — § 23, L-38.)*
-
-> "A day of encashed leave is worth the monthly pay divided by the leave type's working days — set
-> on the leave type, 22 unless it says otherwise. At thirty days a month the two bases would agree
-> almost exactly, and that is a choice made on the leave type, where it actually takes effect."
+**3 — (Removed — the divisor it pointed at left in leave settings audit 2, L-73.)**
 
 **4 — (Removed with the field it changed.)**
 
@@ -3664,8 +3651,8 @@ sentence rather than a constraint error.
 
 ### 📖 What it is
 
-Converting untaken leave into money. Four checks, a server-derived payout, and a lifecycle that
-ends in *Processed*. ⚠ **Since round 5 lane L3 an encashment holds its days from *Approved***, not
+Converting untaken leave into money. Four checks, the days recorded by HR and **valued by Finance**
+when it pays them *(leave settings audit 2, 2026-09-27)*, and a lifecycle that ends in *Processed*. ⚠ **Since round 5 lane L3 an encashment holds its days from *Approved***, not
 only once *Processed*: before, an approved encashment's days could be taken as leave in the weeks
 before Finance paid it — the same days sold and spent.
 
@@ -3677,7 +3664,9 @@ before Finance paid it — the same days sold and spent.
 > final settlement** — the separation's settlement statement, where the line *Annual leave owed on
 > exit* shows the days and how each was reached (built up to the last day, carried, adjusted, taken,
 > cashed in, awaiting a decision), capped by the policy page's *most days of annual leave paid*, and
-> marked indicative for Finance to confirm.
+> left **unvalued for Finance**, which enters the amount in *Pay to value* (leave settings audit 2 —
+> until 2026-09-27 it carried an "indicative" HR figure, which went into Finance's books unless
+> somebody overwrote it).
 >
 > Where an organisation switches the route **on**, lane L3 limits it: **annual leave only**, from the
 > **current leave year** only (a closed year's days were carried or lapsed), and no more than **can be
@@ -3706,93 +3695,85 @@ demo tenant (decision A3); a leaver's settlement is where leave becomes money.
 **Filters:** Year · Status. ⚠ *(Fixed 2026-09-26, round 5 lane M.)* The Status filter did nothing
 until then: the page sent it and the API never read it.
 
-**The table:** Employee · Leave type · Year · Days · **Amount** · **How it was worked out** *(new)* ·
+**The table:** Employee · Leave type · Year · Days · **Amount** · **How it was worked out** ·
 Status · Payment ref · **Finance** *(whether the payout has posted to the books — HR finish plan
 lane 8)* · row actions.
 
-**The new column is the audit of the figure**, in a sentence, on the row:
+⚠ **Since leave settings audit 2 (2026-09-27) the amount is Finance's.** HR records the days and
+approves them; **Finance marks the encashment paid**, entering **the amount it paid**, how it was
+worked out and the payment reference — and the posting to the books carries Finance's amount. Until
+then the *Amount* cell reads *awaiting Finance* and the basis *Finance values the days when it pays
+them*: a zero is not a figure.
 
-> *7,390.00 (basic + linked allowances) ÷ 22 working days = 335.91 per day, per the 'Annual Leave' leave type.*
+**The basis column is the audit of the figure**, stored on the payout rather than recomputed:
 
-⚠ **It is stored on the payout, not recomputed for display**, and that is the important part. The
-divisor behind it is each leave type's own *working days per month* (default 22) — recomputing the
-sentence would quietly restate old payouts the moment somebody edited it. Rows paid before the sentence was kept say so plainly —
-*not recorded — paid before the basis was kept* — rather than showing a blank and implying there was
-nothing to record.
+> *Valued by Finance when paid: 2 days at the payroll daily rate*
 
-The sentence also names **where the divisor came from** — today always *per the '…' leave type*.
-Older rows read *per HR policy settings*: that tenant figure left the policy page in round 5 lane N1,
-because the type's own figure always won (L-38). The figure and the
-words are built from the same number, so the words cannot describe a basis other than the one that
-produced the amount.
+Rows paid **before** audit 2 keep HR's own sentence — *7,390.00 (basic + linked allowances) ÷ 22
+working days = 335.91 per day, per the 'Annual Leave' leave type* — because that is what they were
+paid on; restating them would rewrite history. Rows paid before any sentence was kept say *not
+recorded — paid before the basis was kept*.
 
 **Row actions:** **Approve** *(Submitted / PendingApproval)* · **Reject…** *(required reason)* ·
-**Mark as paid…** *(Approved — opens a required payment-reference dialog)*.
+**Mark as paid…** *(Approved — **Finance only**: shown to holders of `HR.Pay.Value` — by default
+Finance Officer, Senior Accountant and Chief Accountant — and refused by the API for anyone else, HR
+included. The dialog asks the amount paid, how it was worked out (optional) and the payment
+reference.)* Finance also finds every approved encashment in its own queue, **Pay to value**
+(`/hr/pay-valuation`, under Finance in the sidebar), beside leavers' statements awaiting a figure.
 
 ⚠ **"Mark as paid" works.** It used to send the login's user id into an `Employees` foreign key and
-fail on the constraint every time, so the action was unusable. The processor is now stamped from
-the caller's own employee record, and the field has been removed from the request body altogether —
-so every caller, not just this screen, is fixed.
+fail on the constraint every time. The payer is stamped from the caller's own employee record, so an
+account with no employee record is refused with a message rather than recorded as nobody.
 
 ### ▶ Walk it
 
 **1 — Arrive on this year and point at Efua Seidu's row** — 5 days, 1,679.55, *Processed*. ⚠ On
-UAT the year holds nine rows (26 September); the other eight are the verification harness's fixtures
-(*A11Ver Actor…*, at 300.00 a day). Point at hers.
+UAT the year also holds the verification harness's fixtures (*A11Ver Actor…*, *Audit A2AStaff*).
+Point at hers.
 
-> "An encashment, already paid. Read the amount — nobody typed it. The employee asked to convert
-> days; the system worked out what those days are worth from her salary and the allowances the
-> leave type is linked to."
+> "An encashment, already paid — before the change I am about to show you, so HR's system worked
+> out that figure from her salary and the allowances on the leave type. It no longer does."
 
-**2 — Walk the lifecycle without pressing anything.**
+**2 — Say what changed, and why.**
 
-> "Requested, approved — twice, like everything else here — then marked paid with a reference.
-> Approving it **holds** the days: from then on they cannot also be taken as leave. Paying it spends
-> them."
+> "Our stakeholders asked HR to leave the money to Finance and hand over the facts — the days. So
+> that is how it works now: HR approves the days; Finance marks them paid and enters the amount it
+> actually paid, with the reference. The one who counts is not the one who prices."
 
-**3 — Read the *How it was worked out* column aloud.**
+**3 — Read the *How it was worked out* column.**
 
-> "Seven thousand three hundred and ninety — her basic plus the allowances this leave type counts —
-> divided by twenty-two working days: three hundred and thirty-five cedis ninety-one a day. And the
-> last clause tells you *where that twenty-two came from*: the Annual Leave type's own setting.
->
-> Before this, the row showed an amount and nothing else. Anybody querying their payout had nothing
-> to read, and the honest answer from HR was 'the system worked it out'. That is not an answer."
+> "Every paid row says how its figure was reached, stored with the payment. Her row still carries
+> HR's old sentence, because that is what she was paid on — we do not rewrite history. A row paid
+> from today reads *Valued by Finance when paid*, in Finance's own words."
 
 **4 — Point at the *Finance* column.**
 
-> "And here is where it meets Finance. This is real money leaving the company, so marking it paid
-> **posts it to the books** — the general ledger — in the same step: the payout is recorded as a
-> leave-encashment expense. HR does not keep a second set of books for it. Every HR money event
-> goes through one posting route, so this register and the ledger cannot disagree about whether it
-> was paid."
+> "And marking it paid **posts it to the books** in the same step, at Finance's amount. HR does not
+> keep a second set of books, and it never puts a figure of its own into Finance's."
 
 ### ⚙ Behind the page
 
 `GET /api/hr/leave-encashments?year=&status=` *(`status` read since lane M)* · `PATCH …/{id}/approve`
-· `/reject` · `/process` — marking paid **posts to Finance in the same transaction** (HR finish plan
-lane 8); if the posting fails, the payment is not marked either.
-
-**The payout is derived server-side** from the employee's emoluments and the leave type's rate
-policy. The caller cannot assert it.
+· `/reject` · `/process` — gated on **`HR.Pay.Value`** since leave settings audit 2; it takes
+`{ amount, paymentReference, basis? }` and refuses no amount, no reference, or a basis over 440
+characters. Marking paid **posts to Finance in the same transaction** (HR finish plan lane 8), at
+Finance's amount; if the posting fails, the payment is not marked either. The request itself records
+days only — its amount is 0 until Finance pays it.
 
 ### ⚠ Known gaps
 
 | | |
 |---|---|
-| **Still no encashment detail page**, but the thing the finding was really about — *no audit of the rate* — is on the row. Whether a detail page is worth building is now a preference rather than a gap | |
+| **Still no encashment detail page**; the audit of the figure is on the row | |
 | ✅ **Posted to the general ledger** *(corrected 2026-09-26)* — since lane 8, marking paid posts it; the *Finance* column shows each row's posting. Rows paid before lane 8 have none | |
+| **TDC is asked who in Finance values pay** — the permission goes to Finance Officer, Senior Accountant and Chief Accountant by default (`HR-OPEN-QUESTIONS-FOR-TDC.md`) | |
 
-> **The two questions this section used to end on are settled, and it is worth knowing how**, because
-> somebody in the room may have been told they were open:
+> **The two questions this section used to end on are settled:**
 >
-> - **the two daily-rate bases** — encashment on working-days-per-month, settlement on
->   calendar-days-per-year, about **38% apart** — are **not merged and will not be.** They are
->   different money events, and plenty of organisations will want different bases for each. What was
->   defective was that no client could *see* the gap: both are now on **one screen with a live worked
->   example** (chapter 4b), and every payout on either side records the basis that produced it;
-> - **in-service encashment** is a **tenant switch**, defaulting to the specification's reading. Both
->   readings were live in the product at once; now it is a choice somebody made.
+> - **the two daily-rate bases** (encashment on working days per month, settlement on calendar days
+>   per year, 38% apart) — **both are gone** since leave settings audit 2: they were HR's rates for
+>   money HR no longer values. Finance works out what a day is worth, as payroll configures it;
+> - **in-service encashment** is a **tenant switch**, defaulting to the specification's reading — off.
 
 ---
 
@@ -4530,7 +4511,7 @@ the strongest new material and neither needs much setup:
 | # | Screen | Minutes | The one thing |
 |---|---|---|---|
 | 3b | the same request → **📞 Recall** *(needs §2.6b)* | 4 | *"she was on leave, we needed her back, and the record still says she was validly granted it"* — then the attendance tail coming off |
-| 1b | `/administration/hr/settings/policy` *(needs Window C)* | 3 | the worked example: **the same day of leave, 38% apart** under two bases, on one screen, before anybody is paid |
+| 1b | `/hr/pay-valuation` *(as a Finance user — the demo cast has none yet)* | 3 | **pay is Finance's**: a leaver's statement in days, waiting for Finance's figures — *"HR counts, Finance prices"* (leave settings audit 2; the old worked example is gone) |
 
 Cut, in this order if you must: the register export, then the calendar, then balances.
 
@@ -4557,6 +4538,10 @@ below so that nobody promises a stakeholder a button.
 > record) and **L-72** (the employee is not told when HR raises and approves leave for them). Every
 > other finding is closed, and the one capability with no screen is the reminder engine's operator
 > endpoints.
+
+> **2026-09-27 — leave settings audit 2 opened twenty-four more, L-73 to L-96** (the block after
+> round 5 lane I): its slice A closed **L-73 to L-76** — pay is Finance's — and **L-77 to L-96 are
+> open**, scheduled as the audit's slices B and C. With the four above, **twenty-four are open.**
 
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
@@ -4651,7 +4636,7 @@ plain-terms account is `HR-LEAVE-ROUND-5-WHAT-CHANGES.md` § 15.
 | **L-43** | ch. 4 | Eligibility rules are OR'd under a tab that says "restrict"; the gender qualifier on an organisation rule cannot be set from the tab | N2 — **closed** 2026-09-25: the tab says any rule lets people in, and a unit, level or position rule takes a gender |
 | **L-44** | ch. 4, §1.7 | Editing a draft skips the sub-type cap and validates no sub-type; creating a sub-type ignores *Active*; a sub-type's cap replaces the type's whole entitlement for requests carrying it | N2, N3 — **closed** 2026-09-25: an edit checks the sub-type and its cap; creating one honours *Active*; the cap limits the sub-type inside its type's pot |
 | **L-45** | ch. 6 | Save-as-draft then submit skips minimum notice, the reliever requirement and the balance check — submit re-checks only the medical evidence — and the form advises that route for sick leave | N3 — **closed** 2026-09-25: submit re-runs notice, the reliever requirement, the balance and the cap |
-| **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 — **closed** 2026-09-26: annual leave only, the leave year the person leaves in, owed at the last day (the leave owed report's working) less requests awaiting a decision; *pro-rate on exit* decides where the build-up stops (the line is asked of the year's end); none on summary dismissal, stated at zero; the cap a setting (L2b). The per-type encashment rates still apply in service only, which stays off |
+| **L-46** | ch. 15 | The exit settlement pays every leave type from every year (whole-year figures, capped at 56 days) and ignores every per-type encashment setting and *pro-rate on exit*. With in-service encashment off, those settings never fire | L2 — **closed** 2026-09-26: annual leave only, the leave year the person leaves in, owed at the last day (the leave owed report's working) less requests awaiting a decision; *pro-rate on exit* decides where the build-up stops (the line is asked of the year's end); none on summary dismissal, stated at zero; the cap a setting (L2b). The per-type encashment rates were removed in leave settings audit 2 (L-73) — Finance values leave cashed in |
 | **L-47** | ch. 7b | The board threshold ignores Pending requests; reschedule, suggested dates and the counter-proposal skip the evidence gate; any concluded board about the employee satisfies it, whatever its purpose or date | N3, K6 — **closed**: N3's part 2026-09-25 (Pending counts; a lengthening move re-runs the gate); K6's 2026-09-26 — a linked board counts only if it was asked about an absence (extended sick leave, injury on duty or other) and reported on or after the start of the leave year being counted, and the refusal says which test the linked board failed. Since K-II-a (same day) every test reads **this employee's case** on the board: a board that decided somebody else's case does not count |
 | **L-48** | ch. 4b, 18 | First-year pro-rating and the untaken-leave reminder ignore a non-January leave year; every leave reminder reaches the HR role only, whatever the settings' comments say | C4, I — C4's part **closed** 2026-09-25: pro-rating counts months of the leave year, the reminder's month is the month of the leave year, and a call naming no year gets the current leave year. The reminders' recipients: ✅ **closed by lane I (2026-09-26)** — each reaches the people who can act on it, in the app and by email, and HR when nobody else can be told |
 
@@ -4756,6 +4741,45 @@ the round 5 plan's § 8.
 | **L-71** | ch. 16 | **The compliance register lists only people with a balance record** — 97 of 2,377 on the demo — while the September chase covers everybody serving. HR's summary therefore opens the balances page, whose annual view (chapter 13) lists everybody | Open |
 | **L-72** | ch. 7 | **When HR raises leave on somebody's behalf, the employee is not told it was approved.** The engine's *Approval completed* notice goes to whoever submitted the request, which is HR | Open — a notice, not a reminder; noted by lane I |
 
+### Leave settings audit 2 — 2026-09-27 — twenty-four found; slice A closed four
+
+The user asked whether every leave setting is used and enforced — no dead or ghost settings. Four
+reviewers traced about seventy settings, and every finding below was verified in the code first. The
+plan and its live log: [`HR-LEAVE-SETTINGS-AUDIT-2-PLAN.md`](../../programme/HR-LEAVE-SETTINGS-AUDIT-2-PLAN.md).
+Slice A is proved by `dev-harness/hr-leave/run-audit2-a.mjs` (145 assertions, green twice).
+
+| # | Where | Finding | State |
+|---|---|---|---|
+| **L-73** | ch. 4, 15 | **The Annual type's encashment block** (rate basis, rate per day, working days per month, allowances included) valued nothing a leaver was paid, while its hint said it did; with in-service encashment off it changed no payment at all | ✅ **Closed** by slice A: removed, with the rate preview and the policy page's worked example — pay is Finance's |
+| **L-74** | ch. 4b, 15 | **A leaver's leave line and notice pay in lieu were HR's calculation** (monthly × 12 ÷ 365), posted to Finance's books on Internal Audit's release; *"Finance confirms the amount"* was a label, not a step | ✅ **Closed** by slice A: days only; Finance values every pay line in *Pay to value* (`HR.Pay.Value`); Internal Audit cannot release a statement that still carries HR's figures |
+| **L-75** | ch. 4b | The company's encashment working days per month: no screen set it, and it was read only when a type's own figure was 0 | ✅ **Closed** by slice A: dropped |
+| **L-76** | ch. 4 | `LeaveCategoryAllocations.LeaveSubTypeId`: retired in lane N, still a column (0 rows used it) | ✅ **Closed** by slice A: dropped |
+| **L-77** | ch. 7b | Medical evidence could be withdrawn after it passed: attachments deletable at any status, a board unlinkable at any status, and approval never re-checked | Open — slice B |
+| **L-78** | ch. 6, 7 | The service-length gate and eligibility were checked only when a request was made; a draft saved before a rule changed could be submitted, and moving dates earlier got past the service gate | Open — slice B |
+| **L-79** | ch. 4 | A retired leave type was still reachable (a pre-retirement draft, plans, in-service encashment), and an API save that left out `isActive` revived one | Open — slice B |
+| **L-80** | ch. 7 | Maternity leave could be recalled, although its dates never move and the Labour Act gives at least 12 weeks (s.57) | Open — slice B |
+| **L-81** | ch. 13, 17 | Carried-over days stayed bookable after their expiry date until somebody ran the expiry job | Open — slice B |
+| **L-82** | ch. 7 | *Requires approval: off* was ignored when dates were moved: the moved request went back to an approver | Open — slice B |
+| **L-83** | ch. 15 | The in-service switch was checked only at request time; an encashment could be approved and paid after it was switched off | Open — slice B |
+| **L-84** | ch. 7b | The board threshold was not re-checked when a request moved, unchanged in length, into another leave year | Open — slice B |
+| **L-85** | ch. 7 | Reliever availability was not re-checked when dates moved | Open — slice B |
+| **L-86** | ch. 12 | Plans validated neither eligibility nor the sub-type until the request was raised, after approval | Open — slice B |
+| **L-87** | ch. 4 | *Pro-rate on exit* said a leaver's settlement does not read it — it has since round 5 lane L | Open — slice C |
+| **L-88** | ch. 4 | Self-certification and the board threshold count chargeable days; the hints said days | Open — slice C |
+| **L-89** | ch. 4 | An allocation's *effective from* covers its whole leave year, and an edited allocation did not reach balances until *Repair entitlements* ran | Open — slice C |
+| **L-90** | ch. 17 | Forfeiture could run for a leave year still open | Open — slice C |
+| **L-91** | ch. 20 | The job offer found annual leave by the word *Annual* in its name, ignoring staff-level allocations and the ceiling | Open — slice C |
+| **L-92** | ch. 4 | Accrual frequency *None* was offered and shown in force, accrued nothing, and blocked adding a real policy | Open — slice C |
+| **L-93** | ch. 4 | An organisation-unit eligibility rule matched the exact unit only; HR's own audience rule covers the units beneath | Open — slice C |
+| **L-94** | ch. 4 | Eligibility rules were not validated on the server (a Position rule with no position matched nobody) | Open — slice C |
+| **L-95** | ch. 4b, 13 | Six desk leave screens opened on the calendar year; the leave-year change guard skipped a tenant with no settings row and did not count plans | Open — slice C |
+| **L-96** | — | Two code comments said the opposite of the code (sub-type allocations take precedence; "no entitlement keyed on grade") | Open — slice C |
+
+**Found in passing by slice A, and fixed:** a settlement Internal Audit **returns** keeps its
+finalised date as history, and the statement read that date — so it said *"finalised and with
+Internal Audit"* and could never be finalised again from the screen. It is keyed on the
+separation's status now, as the editing rule already was.
+
 ### ✅ Wave 3 — the leave year, added 2026-09-18
 
 **The calendar year was the last assumption in the module**, and it is now a setting: *Leave year
@@ -4846,7 +4870,7 @@ defect because nothing errors. Neither waits on anybody now.
 
 | | Was | Is |
 |---|---|---|
-| **L-D7 · Two daily-rate bases** | leave encashment on *(basic + linked allowances) ÷ 22*, the separation settlement on *monthly × 12 ÷ 365* — **38% apart**, configured on different screens in different modules, so no client could see the gap | **deliberately not merged** — they are different money events — but **both on one screen with a live worked example** (chapter 4b), and every payout on either side stores the basis that produced it |
+| **L-D7 · Two daily-rate bases** | leave encashment on *(basic + linked allowances) ÷ 22*, the separation settlement on *monthly × 12 ÷ 365* — **38% apart**, configured on different screens in different modules, so no client could see the gap | **deliberately not merged** — they are different money events — but **both on one screen with a live worked example** (chapter 4b), and every payout on either side stores the basis that produced it. ⚠ **Both bases removed** in leave settings audit 2 (2026-09-27, L-73/L-74): pay is Finance's |
 | **L-D8 · In-service encashment** | FR-HR-046 says *"only on exit"*; the module shipped an in-service path anyway | **a tenant switch**, defaulting to the specification's reading. ~~This demo tenant has it on, deliberately and by an explicit seed line~~ — **off for TDC too since round 5 lane L1** (decision A3: Act 651 s.31, public-service practice), the seed line reversed and UAT switched through HR's own save; the portal hides the screen. TDC's confirmation is still owed (R5-Q2) |
 | **L-D9 · The five reminder windows** | constants in the source, with a comment admitting they were ours | settings, chapter 4b, each proved in **both** positions |
 | **L-D10 · Excuse-duty thresholds** | *"blocked on TDC's numbers"* | built in full with defaults **stated on screen as defaults**, on the leave type where they belong |
@@ -4918,7 +4942,8 @@ module enforces one of them. That second one is a question of fact, not of polic
 | **Link a request to a medical board** | *(self or `HR.Leave.Write`)* — the Medical board panel on the request overview | | |
 | Plans | `HR.Leave.Read` | `HR.Leave.Write` | — |
 | Balances · Adjustments | `HR.Leave.Read` | `HR.Leave.Write` | **delete an adjustment** |
-| Encashments | `HR.Leave.Read` | `HR.Leave.Write` | — |
+| Encashments | `HR.Leave.Read` | `HR.Leave.Write` *(request, approve)* | — |
+| **Mark an encashment paid** · **value a leaver's pay lines** (*Pay to value*) | — | **`HR.Pay.Value`** — Finance's (Finance Officer, Senior Accountant, Chief Accountant by default); HR does not hold it | — |
 | Compliance *(and its export)* | `HR.Leave.Read` | — | — |
 | **Year-end runs** *(and their dry run)* | — | — | **`HR.Leave.Admin`** |
 | **Reminder engine — all six endpoints** | — | — | **`HR.Leave.Admin`** |

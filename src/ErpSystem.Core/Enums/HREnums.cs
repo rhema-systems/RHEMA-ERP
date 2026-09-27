@@ -3965,8 +3965,20 @@ public enum SettlementLineComputation
     /// The system knows this line is owed but cannot value it — no salary on record, no leave
     /// balance, no payroll figure. Carries no amount, and holds the statement open.
     /// </summary>
+    /// <remarks>
+    /// Since leave settings audit 2 this is also every PAY line HR records (unpaid salary, notice
+    /// pay, leave owed, gratuity, pension, tax) until Finance values it: HR records the days, and
+    /// the statement stays open until Finance has put the money on them.
+    /// </remarks>
     [Description("Cannot Compute")]
-    CannotCompute = 3
+    CannotCompute = 3,
+
+    /// <summary>
+    /// Valued by Finance — the holder of <c>HR.Pay.Value</c> — with <c>SourceReference</c> naming
+    /// where the figure came from (leave settings audit 2, P2). The line records who and when.
+    /// </summary>
+    [Description("Valued by Finance")]
+    ValuedByFinance = 4
 }
 
 /// <summary>
@@ -10482,16 +10494,6 @@ public enum PayComponentCalculationBasis
 {
     FixedAmount = 0,
     PercentageOfBasic = 1
-}
-
-/// <summary>
-/// How a leave type's per-day encashment rate is derived: computed from the employee's
-/// emoluments (basic + linked allowances) or entered manually per leave type.
-/// </summary>
-public enum EncashmentRateBasis
-{
-    DerivedFromEmoluments = 0,
-    Manual = 1
 }
 
 /// <summary>

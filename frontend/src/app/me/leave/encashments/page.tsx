@@ -130,8 +130,8 @@ export default function MyLeaveEncashmentsPage() {
         leaveTypeId: selectedRequest.leaveTypeId,
         // The leave year the request falls in — which, by the filter above, is the current one.
         year: leaveYearOf(selectedRequest.startDate, startMonth),
+        // Days only (leave settings audit 2): Finance puts the money on them when it pays.
         daysEncashed: Number(days),
-        amountPaid: 0, // derived server-side from emoluments; 0 = no client-side claim
         notes: notes || null,
       });
     },

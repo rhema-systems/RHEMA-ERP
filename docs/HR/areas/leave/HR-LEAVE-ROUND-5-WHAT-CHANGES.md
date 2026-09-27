@@ -603,14 +603,16 @@ to pay cash or the encashment".)*
     zero, saying why;
   - the 56-day cap is now a setting on the HR Policy Settings page, 56 by default, empty for no cap.
     With this year's days plus at most five carried, it will rarely be reached.
-- **HR decides the days, Finance the money** — which is what the stakeholders asked for. HR's figure
-  on the settlement is marked **indicative**; Finance confirms it, and a correction is entered on
-  the settlement line with its source, before Internal Audit releases the payment.
+- **HR decides the days, Finance the money** — which is what the stakeholders asked for. ⚠ **Since
+  2026-09-27 (leave settings audit 2) this is a step, not a label:** HR records the days and puts no
+  figure on them; **Finance enters the amount and its source** on its own screen, *Pay to value*; and
+  the statement cannot be finalised — nor released by Internal Audit — until it has. (Until then HR's
+  figure was marked *indicative* and went into Finance's books unless somebody corrected it.)
 - **If an organisation does switch in-service cashing on** (not TDC), it is limited: annual leave
   only, this leave year only, and no more than the days built up so far.
 
-⏳ **Waiting on TDC:** which daily rate is used to value a day of leave. Two different formulas exist
-in the system today, about 38% apart.
+✅ **No longer waiting on TDC for a daily rate** (2026-09-27): Finance values the days, so neither of
+HR's two formulas remains. TDC is asked instead **which Finance roles** do the valuing.
 
 ---
 
@@ -780,7 +782,7 @@ These need TDC's own documents or answers. Until they come, the system runs on t
 | # | Question | Interim default |
 |---|---|---|
 | 1 | TDC's **conditions of service or collective agreement**: days by grade, the first-year rule, carry-over, casual and compassionate days, sick pay, and when a medical board sits | Today's demo figures; 12 months before first leave |
-| 2 | **Cashing in leave while employed** — confirm it is not allowed — and **which daily rate** values a day of leave | Off; the rates as they are |
+| 2 | **Cashing in leave while employed** — confirm it is not allowed — and **who in Finance** values a day of leave *(the daily rate is Finance's since 2026-09-27)* | Off; Finance Officer, Senior Accountant and Chief Accountant value pay |
 | 3 | Is a **leave allowance** or salary advance paid when staff go on annual leave? | None |
 | 4 | **Who keeps the holiday calendar up to date**, including holidays the President moves | HR; the demo list updated to 2025 |
 | 5 | **The medical board's defaults** — how many medical members decide a case, and whether TDC pays the statutory compensation or more *(reframed 2026-09-26: nothing waits on it)* | One member; the law's figures ([section 14](#14-the-medical-board)) |

@@ -24,7 +24,7 @@ the round 5 plan's *What exploration found* (repo copy to come:
 | Setting | This register said | Actually | Round 5 fix |
 |---|---|---|---|
 | `LeaveType.IsPaid` | clean (§ 3.2) | **Ghost** in HR — display only; what unpaid leave deducts is payroll's (L-D6) | N1: **done** — relabelled as a label for readers; payroll decides the deduction |
-| `EncashmentWorkingDaysPerMonth` (tenant) | Enforced (§ 1) | **Unreachable** — the leave type's own divisor always wins, and the form's minimum is 1 (default 22). Slice 6 proved it only by POSTing a type divisor of 0, which no form can send | N1: **done** — off the policy page; the column stays |
+| `EncashmentWorkingDaysPerMonth` (tenant) | Enforced (§ 1) | **Unreachable** — the leave type's own divisor always wins, and the form's minimum is 1 (default 22). Slice 6 proved it only by POSTing a type divisor of 0, which no form can send | N1: **done** — off the policy page. **Leave settings audit 2 (L-75): dropped, 2026-09-27** |
 | `LeaveAccrualPolicy.IsActive` | enforced (§ 3.2b) | **Unreachable** — no DTO field, mapping or update writes it; always true | N1: **done** — the *In force* switch; the one-in-force rule follows it |
 | `LeaveAccrualPolicy.ProRateOnJoin` | Unreachable (§ 0, § 3.2b) | **Enforced** — fixed by entitlement plan B1; both positions work | — |
 | `MaxDaysPerYear` | clean | **Misleading** — only ever lowers the entitlement. Default 0 with Max 90 means the type can never be booked (UNPAID and INJ on the demo) | N2, N4: **done** — binds on annual leave only, as the highest allocation allowed; UNPAID 90 and INJ 180 |
@@ -128,7 +128,7 @@ the survivors rather than counting them.
 |---|---|---|---|---|
 | `AllowInServiceEncashment` | **`false`** — and the demo tenant's seed is **off too** since round 5 lane L1 (UAT switched through the API, 2026-09-26) | **Enforced** | `LeaveEncashmentService.RequestEncashmentAsync` — asked **before** the leave type, so the refusal names the real reason; `GET leave-encashments/availability` lets the portal hide its screen when off. On, it takes only annual leave, the current leave year, up to *can take now* less requests awaiting a decision (lane L3) | slice 6 [1] — refused off, accepted on, same request; `run-round5-l.mjs` [1] off, [4] the three L3 limits on |
 | `SettlementLeaveDaysCap` *(round 5 lane L2b)* | **`56`** (FR-HR-152); empty = no cap. A save that omits it keeps 56 — only an explicit empty clears it | **Enforced** | `SeparationService.AddLeaveEncashmentLineAsync` — the most days of annual leave a leaver's settlement pays; the line says when it capped and from what. On the HR policy page beside the settlement's days per year. Migration `AddSettlementLeaveDaysCap` wrote 56 on every existing tenant row | `run-round5-l.mjs` [2] (56, empty on purpose, 56 back when omitted) and [3e] (cap 2 pays 2; no cap pays the full 10.5, same leaver) |
-| `EncashmentWorkingDaysPerMonth` | `22` | **Unreachable** *(corrected 2026-09-25 — see the top)* | `EmolumentService.GetEncashmentDailyRateAsync` — only when the leave type's own divisor is 0, which the form cannot send | slice 6 [2] — 6,600 ÷ 22 vs ÷ 30, exact figures, **via an API-only type divisor of 0** |
+| ~~`EncashmentWorkingDaysPerMonth`~~ | — | **Removed** *(leave settings audit 2, 2026-09-27, L-75 — was unreachable, corrected 2026-09-25)* | `EmolumentService.GetEncashmentDailyRateAsync` — only when the leave type's own divisor is 0, which the form cannot send | slice 6 [2] — 6,600 ÷ 22 vs ÷ 30, exact figures, **via an API-only type divisor of 0** |
 
 **⚠ `AllowInServiceEncashment` settles a requirements conflict, not a preference.** FR-HR-046 says
 leave is encashed *"only on exit, no other route"*, and the module ships an in-service path with
@@ -140,7 +140,15 @@ it on deliberately rather than inheriting it by accident.
 screen has already been demonstrated to stakeholders, and defaulting it off without that seed line
 would make a shown feature vanish.
 
-### The two daily-rate bases — and why they are NOT merged
+### The two daily-rate bases — ⚠ both removed (leave settings audit 2, 2026-09-27)
+
+> **Pay is Finance's.** HR records the days — a leaver's notice paid in lieu and annual leave owed,
+> leave cashed in while employed — and Finance values them in its own step, *Pay to value*
+> (`HR.Pay.Value`). Both divisors went (`EncashmentWorkingDaysPerMonth` on the tenant and the leave
+> type, `SettlementDaysPerYear`), with the leave type's rate basis and rate per day and the
+> `LeaveTypeAllowances` links (L-73 to L-75). A settlement prepared since carries no daily rate; an
+> encashment's `RateBasis` is Finance's sentence. **What follows is the record of how the two bases
+> stood**, kept because released statements and paid encashments still carry them.
 
 | | Divisor setting | Formula |
 |---|---|---|
@@ -724,11 +732,11 @@ owed a pass, most cheaply as part of that module's own closure plan.
 | Recruitment, performance, medical, separation, discipline | not looked at |
 | The rest of `CompanyHrPolicySettings` | 35 fields predating this register — retirement ages, notice periods, the FR-HR-092 threshold, the alert lead times, the grievance clocks |
 
-⚠ **`SettlementDaysPerYear` is in that last group and it moves money.** It is enforced
-(`SeparationService.DailyRateAsync`) and it records its basis in words on every settlement line —
-but TDC has never chosen the basis, and the entity's own remark says not to run real final
-settlements until they do. That warning stands; making the value configurable did not answer the
-question, it only made the question answerable by each client rather than by a deploy.
+⚠ **`SettlementDaysPerYear` was in that last group and it moved money** — **removed** in leave
+settings audit 2 (2026-09-27, L-74). HR works out no daily rate: Finance values every pay line on a
+leaver's statement in *Pay to value*, and the statement cannot be finalised until it has. The TDC
+question it raised (which basis) is answered by that step; TDC is asked instead **who in Finance**
+values pay (`HR-OPEN-QUESTIONS-FOR-TDC.md`).
 
 ---
 

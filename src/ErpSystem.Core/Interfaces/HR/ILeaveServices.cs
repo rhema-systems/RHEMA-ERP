@@ -361,4 +361,10 @@ public interface ILeaveEncashmentService
         string?   search       = null,
         LeaveEncashmentStatus? status = null);
     Task<LeaveEncashmentDto>              GetByIdAsync(Guid id);
+
+    /// <summary>
+    /// Finance's queue (leave settings audit 2, P4): leave cashed in, approved, awaiting payment —
+    /// the days, for Finance to value when it marks them paid.
+    /// </summary>
+    Task<IReadOnlyList<PayToValueItemDto>> GetAwaitingPaymentAsync();
 }

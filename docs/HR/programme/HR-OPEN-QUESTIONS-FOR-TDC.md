@@ -239,6 +239,11 @@ is worth resolving before it causes a grant to land on the empty one.
 
 ## How is a daily rate worked out for exit pay? (raised 2026-08-20)
 
+> ✅ **Answered by design, 2026-09-27 (leave settings audit 2).** HR no longer works out a daily
+> rate. It records the days — notice paid in lieu, annual leave owed — and **Finance values them** in
+> its own step, entering each amount and its source; a statement cannot be finalised until it has.
+> The question becomes *who in Finance does it* — see the last section. Kept below as raised.
+
 The final settlement (FR-HR-184) turns a monthly salary into a daily rate to value **notice pay in
 lieu** and **leave encashment**. The system currently uses **monthly salary × 12 ÷ 365** — a
 calendar-day basis — and writes that basis in words onto every computed line so the figure can be
@@ -551,7 +556,9 @@ re-opens the approval.** Anything else would let an approval mean something it d
 leave and the days; what that is worth is payroll's. Raised separately in
 `docs/HR/integration/handoffs/HANDOFF-PAYROLL-LEAVE.md`. **Not built, and should not be built inside HR.**
 
-### L-D7 · ⚠ One daily-rate basis, or two? *(NOT built — needs an answer)*
+### L-D7 · ⚠ One daily-rate basis, or two? *(✅ settled 2026-09-27 — neither is HR's)*
+
+> Leave settings audit 2 removed both HR rates: Finance values leave cashed in and a leaver's pay.
 
 Two formulas are live in one product. **Leave encashment** uses `(basic + linked allowances) ÷ 22`;
 the **separation settlement** uses `monthly × 12 ÷ 365`. On GHS 6,000/month those differ by about
@@ -668,9 +675,8 @@ the end of service; and FR-HR-046 says leave is encashed *"only on exit"*.
 the employee portal no longer offers it. Unused annual leave is paid only in a leaver's settlement:
 this leave year's days built up to the last day, plus carried days not yet lapsed, less what was
 taken or cashed in — the line says how each number was reached — capped at 56 days (now a setting),
-nothing on summary dismissal, and marked indicative for Finance to confirm. **Please confirm this,
-and name the daily rate used to value a day of leave** (L-D7 — two formulas about 38% apart are in
-the system today; the settlement uses *monthly × 12 ÷ 365*).
+nothing on summary dismissal. **Please confirm this.** *(The daily rate this asked about is no
+longer HR's: since 2026-09-27 HR records the days and Finance values them — see the last section.)*
 
 ### R5-Q3 · Is a leave allowance paid?
 
@@ -751,3 +757,21 @@ They then show as confirmed staff.
 **Meanwhile:** until the correction runs, the system shows most TDC staff as on probation.
 
 ---
+
+---
+
+## Who in Finance values a leaver's final pay? *(raised 2026-09-27)*
+
+TDC's stakeholders asked HR to leave the money to Finance and hand over the facts, such as the days
+of leave encashed. The system now works that way: **HR records the days** — notice paid in lieu,
+annual leave owed on exit, leave cashed in — **and Finance puts the money on them** in its own screen,
+*Pay to value*, entering each amount and where it came from. A leaver's statement cannot be finalised
+until Finance has valued every pay line, and nothing HR priced reaches Finance's books.
+
+**We need from TDC:** **which roles in Finance should do this** — often the payroll unit within
+Finance. The system gives it to **Finance Officer, Senior Accountant and Chief Accountant** by default.
+
+This also answers the 2026-08-20 question *"How is a daily rate worked out for exit pay?"*: Finance
+works it out.
+
+**Meanwhile:** the three default roles can value pay; HR cannot.

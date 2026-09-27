@@ -89,7 +89,6 @@ const schema = z
     queryResponseWindowHours: z.coerce.number().int().min(1).max(720),
     investigationDays: z.coerce.number().int().min(1).max(365),
     disciplineBacklogHorizonDays: z.coerce.number().int().min(1).max(3650),
-    settlementDaysPerYear: z.coerce.number().int().min(1).max(366),
     // Round 5, lane L2b: empty means no cap, so '' is a real answer here.
     settlementLeaveDaysCap: z.union([z.coerce.number().int().min(1).max(366), z.literal('')]).optional(),
     medicalBoardQuorum: z.coerce.number().int().min(1).max(20),
@@ -100,7 +99,6 @@ const schema = z
     attendanceRateIncludesApprovedLeave: z.boolean(),
 
     allowInServiceEncashment: z.boolean(),
-    encashmentWorkingDaysPerMonth: z.coerce.number().int().min(1).max(31),
     leaveStartingReminderDays: z.coerce.number().int().min(0).max(180),
     leaveClosureGraceDays: z.coerce.number().int().min(0).max(180),
     leaveUndecidedChaseDays: z.coerce.number().int().min(0).max(180),
@@ -218,7 +216,6 @@ export default function PolicySettingsPage() {
       queryResponseWindowHours: data.queryResponseWindowHours,
       investigationDays: data.investigationDays,
       disciplineBacklogHorizonDays: data.disciplineBacklogHorizonDays,
-      settlementDaysPerYear: data.settlementDaysPerYear,
       settlementLeaveDaysCap: data.settlementLeaveDaysCap ?? '',
       medicalBoardQuorum: data.medicalBoardQuorum ?? 1,
       permanentTotalIncapacityMonths: data.permanentTotalIncapacityMonths ?? '',
@@ -226,7 +223,6 @@ export default function PolicySettingsPage() {
       compensationEarningsCeiling: data.compensationEarningsCeiling ?? '',
       attendanceRateIncludesApprovedLeave: data.attendanceRateIncludesApprovedLeave,
       allowInServiceEncashment: data.allowInServiceEncashment,
-      encashmentWorkingDaysPerMonth: data.encashmentWorkingDaysPerMonth,
       leaveStartingReminderDays: data.leaveStartingReminderDays,
       leaveClosureGraceDays: data.leaveClosureGraceDays,
       leaveUndecidedChaseDays: data.leaveUndecidedChaseDays,
@@ -244,25 +240,8 @@ export default function PolicySettingsPage() {
   const genderSpecific = !!form.watch('useGenderSpecificRetirementAge');
   const proceduralDays = Number(form.watch('proceduralAbsenceDays') ?? 0);
 
-  // ⚠ The whole point of showing these two together. Encashment divides monthly emoluments by
-  // WORKING DAYS PER MONTH; a final settlement divides annualised pay by CALENDAR DAYS PER YEAR. At
-  // the defaults that is ~38% apart on the same salary. They are different money events and are
-  // deliberately not merged — but a client should meet that gap here, on a settings screen,
-  // rather than in a payout somebody has already queried.
-  const SAMPLE_MONTHLY = 6000;
-  // Round 5, lane N1: each leave type carries its own working-days figure (22 unless it says
-  // otherwise), and the tenant one it would fall back to can never apply — the type's form has a
-  // minimum of 1. So the comparison shows the default a type starts with.
-  const encashDivisor = 22;
-  const settleDivisor = Number(form.watch('settlementDaysPerYear') ?? 0);
-  const encashDaily = encashDivisor > 0 ? SAMPLE_MONTHLY / encashDivisor : null;
-  const settleDaily = settleDivisor > 0 ? (SAMPLE_MONTHLY * 12) / settleDivisor : null;
-  const spreadPct =
-    encashDaily && settleDaily
-      ? Math.abs(encashDaily - settleDaily) / Math.min(encashDaily, settleDaily)
-      : null;
-  const money = (n: number) =>
-    n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // The "two daily-rate bases" comparison that sat here left with leave settings audit 2 (L-73,
+  // L-74): HR holds no rate at all now. It records days, and Finance values them.
 
   // The weights are relative, so what actually matters is their share. Show it.
   const weights = [
@@ -322,7 +301,6 @@ export default function PolicySettingsPage() {
         queryResponseWindowHours: Number(v.queryResponseWindowHours),
         investigationDays: Number(v.investigationDays),
         disciplineBacklogHorizonDays: Number(v.disciplineBacklogHorizonDays),
-        settlementDaysPerYear: Number(v.settlementDaysPerYear),
         // ⚠ Sent every time, as null when emptied: the server keeps its default (56) for a save
         // that leaves the field out, so only an explicit null removes the cap.
         settlementLeaveDaysCap: orNullNumber(v.settlementLeaveDaysCap),
@@ -335,7 +313,6 @@ export default function PolicySettingsPage() {
         compensationEarningsCeiling: orNullNumber(v.compensationEarningsCeiling),
         attendanceRateIncludesApprovedLeave: v.attendanceRateIncludesApprovedLeave,
         allowInServiceEncashment: v.allowInServiceEncashment,
-        encashmentWorkingDaysPerMonth: Number(v.encashmentWorkingDaysPerMonth),
         leaveStartingReminderDays: Number(v.leaveStartingReminderDays),
         leaveClosureGraceDays: Number(v.leaveClosureGraceDays),
         leaveUndecidedChaseDays: Number(v.leaveUndecidedChaseDays),
@@ -662,28 +639,11 @@ export default function PolicySettingsPage() {
               engine that shouts for ever trains people to ignore it.
             </p>
 
-            {/* ⚠ The one setting on this page that changes what a person is paid. */}
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
-              <NumberField
-                form={form}
-                name="settlementDaysPerYear"
-                label="Final settlement — days per year"
-                required
-              />
-              <p className="mt-2 text-sm">
-                <strong>This one moves money.</strong> A daily rate is monthly pay × 12 ÷ this
-                number: <strong>365</strong> for calendar days, <strong>360</strong> for thirty-day
-                months, <strong>264</strong> for a 22-day working month. On TDC&apos;s own worked
-                example the answers run from <strong>GHS 3,156.16</strong> to{' '}
-                <strong>GHS 4,363.64</strong> — a 38% spread on the same facts.
-              </p>
-              <p className="mt-2 text-sm">
-                Every settlement records which basis produced it, so changing this never rewrites
-                one already computed. That makes an early settlement auditable; it does not make it
-                right. <strong>Do not run real final settlements until TDC has confirmed the
-                basis.</strong>
-              </p>
-            </div>
+            {/*
+              Leave settings audit 2 (L-74): "Final settlement — days per year" was the divisor HR
+              used to price notice pay and leave owed on exit. Finance values a leaver's pay now, so
+              HR holds no rate.
+            */}
 
             {/* Round 5, lane L2b: FR-HR-152's cap, visible and changeable instead of a constant. */}
             <div className="space-y-2">
@@ -770,8 +730,8 @@ export default function PolicySettingsPage() {
           <CardHeader>
             <CardTitle>Leave — encashment</CardTitle>
             <CardDescription>
-              Whether unused leave can be cashed in while still employed, and what a day of it is
-              worth.
+              Whether unused leave can be cashed in while still employed. HR approves the days;
+              Finance puts the money on them when it pays.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -789,57 +749,11 @@ export default function PolicySettingsPage() {
               leave year, up to the days built up so far, can be cashed in.
             </p>
 
-            {/* The two daily-rate bases, shown together on purpose. */}
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
-              <p className="text-sm">
-                <strong>What a day of encashed leave is worth</strong> is set on each leave type:
-                monthly basic plus linked allowances, divided by that type&apos;s working days per
-                month — 22 unless the type says otherwise.
-              </p>
-
-              <div className="mt-3 rounded border bg-background/60 p-3 text-sm">
-                <p className="font-medium">
-                  On a salary of {money(SAMPLE_MONTHLY)} a month, the two bases in force right now:
-                </p>
-                <table className="mt-2 w-full">
-                  <tbody>
-                    <tr>
-                      <td className="py-1 pr-3">Encashed leave, per day</td>
-                      <td className="py-1 pr-3 text-muted-foreground">
-                        {money(SAMPLE_MONTHLY)} / {encashDivisor || '-'}
-                      </td>
-                      <td className="py-1 text-right font-medium">
-                        {encashDaily === null ? '-' : money(encashDaily)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-1 pr-3">Final settlement, per day</td>
-                      <td className="py-1 pr-3 text-muted-foreground">
-                        {money(SAMPLE_MONTHLY)} x 12 / {settleDivisor || '-'}
-                      </td>
-                      <td className="py-1 text-right font-medium">
-                        {settleDaily === null ? '-' : money(settleDaily)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                {spreadPct !== null && spreadPct > 0.005 && (
-                  <p className="mt-2">
-                    The same day of leave is worth{' '}
-                    <strong>{(spreadPct * 100).toFixed(0)}% more</strong> under one basis than the
-                    other.
-                  </p>
-                )}
-              </div>
-
-              <p className="mt-2 text-sm">
-                <strong>That gap is not necessarily wrong.</strong> Encashing unused days while
-                employed is not the same event as a final settlement on exit, and the two are
-                deliberately configurable apart. What matters is that it is a choice: every
-                encashment and every settlement records the basis that produced it, so changing
-                either number never rewrites an amount already paid.
-              </p>
-            </div>
+            {/*
+              Leave settings audit 2 (L-73): what a day of cashed-in leave is worth is Finance's
+              figure, entered when it marks the days paid. HR holds no rate, so the comparison of
+              two bases that sat here is gone.
+            */}
           </CardContent>
         </Card>
 

@@ -42,9 +42,6 @@ public class LeaveTypeDto
     /// final approval (round 5, decision A5). Other kinds only.
     /// </summary>
     public bool AllowOffsetAgainstAnnual { get; set; }
-    public EncashmentRateBasis EncashmentRateBasis { get; set; }
-    public decimal? EncashmentRatePerDay { get; set; }
-    public int EncashmentWorkingDaysPerMonth { get; set; }
 
     /// <summary>Whether this leave type requires excuse duty (a medical certificate).</summary>
     public bool RequiresMedicalCertificate { get; set; }
@@ -106,9 +103,6 @@ public class CreateLeaveTypeDto
     /// Annual or Maternity type, and on a type that does not require approval.
     /// </summary>
     public bool? AllowOffsetAgainstAnnual { get; set; }
-    public EncashmentRateBasis EncashmentRateBasis { get; set; } = EncashmentRateBasis.DerivedFromEmoluments;
-    public decimal? EncashmentRatePerDay { get; set; }
-    public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
 
     /// <summary>
     /// Whether this leave type requires excuse duty — a medical certificate — once the
@@ -125,36 +119,22 @@ public class CreateLeaveTypeDto
     /// </summary>
     [Range(1, 365)] public int? MedicalBoardThresholdDays { get; set; } = 90;
 
-    /// <summary>Allowance pay-component IDs whose value feeds this leave type's derived encashment rate.</summary>
-    public List<Guid> AllowanceComponentIds { get; set; } = new();
+    // ⚠ The encashment rate fields (basis, rate per day, working days per month) and the
+    // allowance links left with leave settings audit 2 (L-73): Finance values leave, HR records days.
 }
 
 /// <summary>
 /// Updating a leave type. ⚠ <b>A PUT here is a REPLACE</b>, as the verb says: every field sent
-/// becomes the new value and every field omitted becomes its default.
+/// becomes the new value and every field omitted becomes its default — except the fields that say
+/// otherwise (<see cref="CreateLeaveTypeDto.Category"/>, <see cref="CreateLeaveTypeDto.AllowOffsetAgainstAnnual"/>).
 /// </summary>
 /// <remarks>
-/// <para>⚠ <b>That is dangerous for the allowance links, and finding L-13 is about exactly this.</b>
-/// <c>LeaveTypeAllowance</c> rows decide what a day of encashed leave is <b>worth</b> — they feed
-/// the derived rate — and a caller who sent a partial body used to have every one of them silently
-/// deleted, changing people's money with no trace of what was removed.</para>
-///
-/// <para><b>So this one property is nullable and the others are not.</b> <c>null</c> means "I am not
-/// touching the allowances" and an empty list means "remove them all". A PUT that omits the field
-/// now leaves the links alone; a caller who genuinely wants none sends <c>[]</c> and says so. The
-/// replace-set semantics stay for every other field, because that is what PUT means and the screens
-/// send the whole object — but a flag reset to false is visible on the next read, whereas a deleted
-/// link is not.</para>
+/// The allowance links, which were the first nullable exception here (finding L-13), left with the
+/// encashment rate in leave settings audit 2.
 /// </remarks>
 public class UpdateLeaveTypeDto : CreateLeaveTypeDto
 {
     public bool IsActive { get; set; } = true;
-
-    /// <summary>
-    /// ⚠ <c>null</c> = leave the allowance links untouched. <c>[]</c> = remove them all.
-    /// Shadows the non-nullable property on the create DTO, deliberately.
-    /// </summary>
-    public new List<Guid>? AllowanceComponentIds { get; set; }
 }
 
 public class LeaveTypeDetailDto : LeaveTypeDto
@@ -163,7 +143,6 @@ public class LeaveTypeDetailDto : LeaveTypeDto
     public List<LeaveCategoryAllocationDto> Allocations { get; set; } = new();
     public List<LeaveTypeEligibilityDto> Eligibilities { get; set; } = new();
     public List<LeaveAccrualPolicyDto> AccrualPolicies { get; set; } = new();
-    public List<Guid> AllowanceComponentIds { get; set; } = new();
 }
 
 // ─── Leave Sub Type ───────────────────────────────────────────────────────────
@@ -195,8 +174,6 @@ public class LeaveCategoryAllocationDto
     public Guid Id { get; set; }
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
-    public Guid? LeaveSubTypeId { get; set; }
-    public string? LeaveSubTypeName { get; set; }
     public Guid StaffLevelId { get; set; }
     public string StaffLevelName { get; set; } = string.Empty;
     public int AllocationDays { get; set; }
@@ -207,7 +184,6 @@ public class LeaveCategoryAllocationDto
 public class CreateLeaveCategoryAllocationDto
 {
     public Guid LeaveTypeId { get; set; }
-    public Guid? LeaveSubTypeId { get; set; }
     public Guid StaffLevelId { get; set; }
     public int AllocationDays { get; set; }
     public DateOnly EffectiveFrom { get; set; }
@@ -1195,6 +1171,12 @@ public class LeaveEncashmentAvailabilityDto
     public string Explanation { get; set; } = string.Empty;
 }
 
+/// <summary>Asking to cash in leave while employed: DAYS only (leave settings audit 2, P4).</summary>
+/// <remarks>
+/// ⚠ There is no amount here any more. HR records the days; Finance puts the money on them when it
+/// marks the encashment paid (<see cref="ProcessLeaveEncashmentDto"/>). An older caller that still
+/// sends <c>amountPaid</c> is ignored by the serializer.
+/// </remarks>
 public class CreateLeaveEncashmentDto
 {
     public Guid LeaveRequestId { get; set; }
@@ -1202,18 +1184,27 @@ public class CreateLeaveEncashmentDto
     public Guid LeaveTypeId { get; set; }
     public int Year { get; set; }
     public decimal DaysEncashed { get; set; }
-    public decimal AmountPaid { get; set; }
     public string? Notes { get; set; }
 }
 
 /// <summary>
-/// Marking an encashment paid. The actor is NOT taken from the body: <c>ProcessedByEmployeeId</c>
-/// is an <c>Employees</c> foreign key and is stamped from the caller's own employee id, the same
-/// house rule that adjustments and plans follow.
+/// Marking an encashment paid — Finance's step (<c>HR.Pay.Value</c>, leave settings audit 2, P4):
+/// the amount paid, where it came from, and the payment reference.
 /// </summary>
+/// <remarks>
+/// The actor is NOT taken from the body: <c>ProcessedByEmployeeId</c> is an <c>Employees</c>
+/// foreign key and is stamped from the caller's own employee id, the house rule adjustments and plans
+/// follow.
+/// </remarks>
 public class ProcessLeaveEncashmentDto
 {
     public string PaymentReference { get; set; } = string.Empty;
+
+    /// <summary>The amount Finance paid for the days. Required, above zero.</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>How Finance worked it out, in words — optional, and stored with the payout.</summary>
+    public string? Basis { get; set; }
 }
 
 // ─── Leave Balance Recalculation ──────────────────────────────────────────────

@@ -17,7 +17,6 @@ public class LeaveTypeService : ILeaveTypeService
     private readonly IGenericRepository<LeaveCategoryAllocation> _allocationRepository;
     private readonly IGenericRepository<LeaveTypeEligibility> _eligibilityRepository;
     private readonly IGenericRepository<LeaveAccrualPolicy> _accrualPolicyRepository;
-    private readonly IGenericRepository<LeaveTypeAllowance> _leaveTypeAllowanceRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
@@ -29,7 +28,6 @@ public class LeaveTypeService : ILeaveTypeService
         IGenericRepository<LeaveCategoryAllocation> allocationRepository,
         IGenericRepository<LeaveTypeEligibility> eligibilityRepository,
         IGenericRepository<LeaveAccrualPolicy> accrualPolicyRepository,
-        IGenericRepository<LeaveTypeAllowance> leaveTypeAllowanceRepository,
         IGenericRepository<Employee> employeeRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
@@ -40,7 +38,6 @@ public class LeaveTypeService : ILeaveTypeService
         _allocationRepository = allocationRepository;
         _eligibilityRepository = eligibilityRepository;
         _accrualPolicyRepository = accrualPolicyRepository;
-        _leaveTypeAllowanceRepository = leaveTypeAllowanceRepository;
         _employeeRepository = employeeRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
@@ -155,19 +152,11 @@ public class LeaveTypeService : ILeaveTypeService
             ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
             Category = entity.Category,
             AllowOffsetAgainstAnnual = entity.AllowOffsetAgainstAnnual,
-            EncashmentRateBasis = entity.EncashmentRateBasis,
-            EncashmentRatePerDay = entity.EncashmentRatePerDay,
-            EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
             IsActive = entity.IsActive,
             SubTypes = (await GetSubTypesAsync(id)).ToList(),
             Allocations = (await GetAllocationsAsync(id)).ToList(),
             Eligibilities = (await GetEligibilityRulesAsync(id)).ToList(),
             AccrualPolicies = (await GetAccrualPoliciesAsync(id)).ToList(),
-            AllowanceComponentIds = await _leaveTypeAllowanceRepository
-                .GetQueryable()
-                .Where(la => la.TenantId == GetTenantId() && la.LeaveTypeId == id)
-                .Select(la => la.PayComponentId)
-                .ToListAsync()
         };
     }
 
@@ -189,9 +178,6 @@ public class LeaveTypeService : ILeaveTypeService
             await RefuseSecondActiveAnnualAsync(tenantId, exceptId: null);
         RefuseOffsetWhereItCannotBind(entity);
         await _leaveTypeRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
-
-        await SyncAllowanceLinksAsync(entity.Id, dto.AllowanceComponentIds);
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Leave type created: {name}", entity.Name);
@@ -245,9 +231,6 @@ public class LeaveTypeService : ILeaveTypeService
         // Null leaves it as it is, for the same reason (round 5, lane H).
         if (dto.AllowOffsetAgainstAnnual is bool offset)
             entity.AllowOffsetAgainstAnnual = offset;
-        entity.EncashmentRateBasis = dto.EncashmentRateBasis;
-        entity.EncashmentRatePerDay = dto.EncashmentRatePerDay;
-        entity.EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth;
         entity.IsActive = dto.IsActive;
 
         // Both doors: making a type Annual, and re-activating an Annual one.
@@ -258,70 +241,8 @@ public class LeaveTypeService : ILeaveTypeService
         RefuseOffsetWhereItCannotBind(entity);
 
         await _leaveTypeRepository.UpdateAsync(entity);
-        await SyncAllowanceLinksAsync(entity.Id, dto.AllowanceComponentIds);
         await _unitOfWork.SaveChangesAsync();
         return entity.ToDto();
-    }
-
-    /// <summary>
-    /// Replaces the leave type's allowance-component links with the supplied set.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ <b><paramref name="componentIds"/> of <c>null</c> means DO NOTHING</b>, and an empty list
-    /// means remove them all. The two are different requests and used to be indistinguishable
-    /// (finding L-13): an update that simply did not mention allowances deleted every one of them,
-    /// silently changing what a day of encashed leave is worth.
-    /// </remarks>
-    private async Task SyncAllowanceLinksAsync(Guid leaveTypeId, List<Guid>? componentIds)
-    {
-        // ⚠ Not `?? new()`. That is precisely the bug: it turns "unmentioned" into "clear them".
-        if (componentIds is null) return;
-
-        var tenantId = GetTenantId();
-
-        // ⚠ INCLUDING DELETED, and that is load-bearing. The unique index
-        // IX_LeaveTypeAllowance_Tenant_LeaveType_Component is NOT filtered on IsDeleted, while
-        // GetQueryable() hides soft-deleted rows — so a link removed earlier still holds its slot
-        // invisibly, and re-adding the same allowance threw a 500 on the index. Once an allowance
-        // was taken off a leave type it could never be put back, which quietly caps what a day of
-        // encashed leave can be worth. Found by slice 9 while proving L-13.
-        var existing = await _leaveTypeAllowanceRepository
-            .GetQueryableIncludingDeleted(la => la.TenantId == tenantId && la.LeaveTypeId == leaveTypeId)
-            .ToListAsync();
-
-        var desired = componentIds.Distinct().ToList();
-
-        foreach (var stale in existing.Where(e => !e.IsDeleted && !desired.Contains(e.PayComponentId)))
-        {
-            // ⚠ HARD delete, for the reason above: a soft delete leaves an invisible row holding
-            // the index slot. These are join rows carrying no human input — there is nothing to
-            // preserve, and the same reasoning governs LeaveAttendancePostingService's reversal.
-            await _leaveTypeAllowanceRepository.HardDeleteAsync(stale);
-        }
-
-        var liveIds = existing.Where(e => !e.IsDeleted).Select(e => e.PayComponentId).ToHashSet();
-
-        foreach (var add in desired.Where(d => !liveIds.Contains(d)))
-        {
-            // A row soft-deleted by the OLD code still occupies the slot. Revive it rather than
-            // inserting a duplicate that the index would refuse.
-            var buried = existing.FirstOrDefault(e => e.IsDeleted && e.PayComponentId == add);
-            if (buried is not null)
-            {
-                buried.IsDeleted = false;
-                buried.DeletedAt = null;
-                buried.DeletedBy = null;
-                await _leaveTypeAllowanceRepository.UpdateAsync(buried);
-                continue;
-            }
-
-            await _leaveTypeAllowanceRepository.AddAsync(new LeaveTypeAllowance
-            {
-                TenantId = tenantId,
-                LeaveTypeId = leaveTypeId,
-                PayComponentId = add
-            });
-        }
     }
 
     public async Task DeactivateLeaveTypeAsync(Guid id)
@@ -431,7 +352,6 @@ public class LeaveTypeService : ILeaveTypeService
         var items = await _allocationRepository
             .GetQueryable()
             .Include(a => a.LeaveType)
-            .Include(a => a.LeaveSubType)
             .Include(a => a.StaffLevel)
             .Where(a => a.TenantId == tenantId && a.LeaveTypeId == leaveTypeId)
             .OrderBy(a => a.StaffLevelId)
@@ -450,7 +370,6 @@ public class LeaveTypeService : ILeaveTypeService
         await _unitOfWork.SaveChangesAsync();
         return (await _allocationRepository.GetQueryable()
             .Include(a => a.LeaveType)
-            .Include(a => a.LeaveSubType)
             .Include(a => a.StaffLevel)
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == entity.Id))!.ToDto();
     }
@@ -462,8 +381,7 @@ public class LeaveTypeService : ILeaveTypeService
         var tenantId = entity.TenantId;
 
         entity.LeaveTypeId = dto.LeaveTypeId;
-        // Always the whole type (round 5, lane N2) — see the mapper.
-        entity.LeaveSubTypeId = null;
+        // Always the whole type (round 5, lane N2); there is no sub-type column any more (L-76).
         entity.StaffLevelId = dto.StaffLevelId;
         entity.AllocationDays = dto.AllocationDays;
         entity.EffectiveFrom = dto.EffectiveFrom;
@@ -473,7 +391,6 @@ public class LeaveTypeService : ILeaveTypeService
         await _unitOfWork.SaveChangesAsync();
         return (await _allocationRepository.GetQueryable()
             .Include(a => a.LeaveType)
-            .Include(a => a.LeaveSubType)
             .Include(a => a.StaffLevel)
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id))!.ToDto();
     }

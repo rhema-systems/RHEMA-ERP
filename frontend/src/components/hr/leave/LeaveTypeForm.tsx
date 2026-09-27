@@ -20,10 +20,8 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useQuery } from '@tanstack/react-query';
 import { Loader2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import {
   Card,
   CardContent,
@@ -33,7 +31,6 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import {
-  ENCASHMENT_RATE_BASIS_OPTIONS,
   LEAVE_TYPE_CATEGORY_OPTIONS,
   LEAVE_YEAR_END_BASIS_OPTIONS,
   type LeaveTypeCategory,
@@ -48,7 +45,6 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
-import { payComponentService } from '@/services/hr/compensation.service';
 import { cn } from '@/lib/utils';
 
 export const leaveTypeSchema = z
@@ -80,10 +76,6 @@ export const leaveTypeSchema = z
     selfCertificationDays: z.string().optional().or(z.literal('')),
     medicalBoardThresholdDays: z.string().optional().or(z.literal('')),
     minServiceMonthsToAccess: z.string().optional().or(z.literal('')),
-    encashmentRateBasis: z.enum(['DerivedFromEmoluments', 'Manual']),
-    allowanceComponentIds: z.array(z.string()),
-    encashmentRatePerDay: z.string().optional().or(z.literal('')),
-    encashmentWorkingDaysPerMonth: z.coerce.number().int().min(1, 'Must be at least 1'),
     isActive: z.boolean(),
   })
   // ⚠ Annual only (round 5, lane N2): the highest allocation allowed is an annual-leave setting
@@ -98,11 +90,6 @@ export const leaveTypeSchema = z
   .refine((v) => v.category !== 'Other' || !v.allowOffsetAgainstAnnual || v.requiresApproval, {
     message: 'Charging annual leave is decided at approval, so this leave must require approval',
     path: ['allowOffsetAgainstAnnual'],
-  })
-  // A manual encashment basis is meaningless without the rate it refers to.
-  .refine((v) => v.encashmentRateBasis !== 'Manual' || !!v.encashmentRatePerDay, {
-    message: 'Enter a rate, or derive it from emoluments',
-    path: ['encashmentRatePerDay'],
   });
 
 export type LeaveTypeFormValues = z.infer<typeof leaveTypeSchema>;
@@ -134,10 +121,6 @@ export const emptyLeaveType: LeaveTypeFormValues = {
   selfCertificationDays: '3',
   medicalBoardThresholdDays: '90',
   minServiceMonthsToAccess: '',
-  encashmentRateBasis: 'DerivedFromEmoluments',
-  allowanceComponentIds: [],
-  encashmentRatePerDay: '',
-  encashmentWorkingDaysPerMonth: 22,
   isActive: true,
 };
 
@@ -147,12 +130,12 @@ const ADVANCED_FIELDS: Record<LeaveTypeCategory, (keyof LeaveTypeFormValues)[]> 
   Maternity: [
     'minDaysNotice', 'minServiceMonthsToAccess', 'allowCarryOver', 'maxCarryOverDays',
     'carryOverExpiryMonths', 'forfeitUnusedAfterMonths', 'yearEndBasis', 'proRateFirstYearEntitlement',
-    'allowCashConversion', 'encashmentRateBasis', 'encashmentRatePerDay', 'encashmentWorkingDaysPerMonth',
+    'allowCashConversion',
   ],
   Other: [
     'minServiceMonthsToAccess', 'allowCarryOver', 'maxCarryOverDays',
     'carryOverExpiryMonths', 'forfeitUnusedAfterMonths', 'yearEndBasis', 'proRateFirstYearEntitlement',
-    'allowCashConversion', 'encashmentRateBasis', 'encashmentRatePerDay', 'encashmentWorkingDaysPerMonth',
+    'allowCashConversion',
   ],
 };
 
@@ -190,20 +173,9 @@ export function LeaveTypeForm({
 
   const category = form.watch('category');
   const allowCarryOver = form.watch('allowCarryOver');
-  const allowCashConversion = form.watch('allowCashConversion');
-  const rateBasis = form.watch('encashmentRateBasis');
-  const selectedAllowances = form.watch('allowanceComponentIds') ?? [];
   const requiresCertificate = form.watch('requiresMedicalCertificate');
   const selfCertDays = form.watch('selfCertificationDays');
   const boardDays = form.watch('medicalBoardThresholdDays');
-
-  // Only allowances feed the derived rate — a deduction or a tax component would make the
-  // arithmetic meaningless, so the list is filtered rather than left for somebody to get right.
-  const { data: payComponents, isLoading: componentsLoading } = useQuery({
-    queryKey: ['hr', 'pay-components', 'allowances'],
-    queryFn: () => payComponentService.getAll(true),
-  });
-  const allowanceOptions = (payComponents ?? []).filter((c) => c.componentType === 'Allowance');
 
   // A failed save whose error sits under Advanced opens it, so the reason is on screen.
   const onInvalid = (errors: Partial<Record<keyof LeaveTypeFormValues, unknown>>) => {
@@ -345,7 +317,7 @@ export function LeaveTypeForm({
       <SectionHeading
         hint={
           category === 'Annual'
-            ? 'Exit only. Leave is cashed in when somebody leaves, not while they are employed (round 5, decision A3). These settings value a leaver’s unused days.'
+            ? 'A leaver’s unused annual leave is paid in their final settlement whatever this says: HR records the days, Finance values them. This switch governs only cashing in while still employed, which the company allows or not on the HR policy page.'
             : 'Only annual leave is ever cashed in; the setting has no effect on this kind.'
         }
       >
@@ -354,80 +326,15 @@ export function LeaveTypeForm({
       <SwitchField
         form={form}
         name="allowCashConversion"
-        label="Allow cash conversion"
-        description="Lets unused days be encashed."
+        label="Allow cash conversion while employed"
+        description="Lets unused days be cashed in before leaving, where the company allows it. HR approves the days; Finance pays them."
       />
-      {allowCashConversion && (
-        <>
-          <FieldRow>
-            <SelectField
-              form={form}
-              name="encashmentRateBasis"
-              label="Rate basis"
-              required
-              options={ENCASHMENT_RATE_BASIS_OPTIONS}
-            />
-            <NumberField form={form} name="encashmentRatePerDay" label="Rate per day" step="0.01" />
-          </FieldRow>
-          <NumberField
-            form={form}
-            name="encashmentWorkingDaysPerMonth"
-            label="Working days per month"
-            required
-          />
-
-          {/*
-            ⚠ L-12. These links decide what a day of encashed leave is WORTH: the derived rate is
-            (monthly basic + the allowances ticked here) divided by the working-days figure above.
-          */}
-          {rateBasis === 'DerivedFromEmoluments' && (
-            <div className="space-y-2">
-              <Label>Allowances included in the rate</Label>
-              {componentsLoading ? (
-                <p className="text-sm text-muted-foreground">Loading allowances…</p>
-              ) : allowanceOptions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No allowance pay components are defined. Payroll owns the component master; HR
-                  mirrors it.
-                </p>
-              ) : (
-                <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
-                  {allowanceOptions.map((c) => {
-                    const checked = selectedAllowances.includes(c.id);
-                    return (
-                      <label key={c.id} className="flex items-start gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          className="mt-1"
-                          checked={checked}
-                          onChange={(e) =>
-                            form.setValue(
-                              'allowanceComponentIds',
-                              e.target.checked
-                                ? [...selectedAllowances, c.id]
-                                : selectedAllowances.filter((x) => x !== c.id),
-                              { shouldDirty: true },
-                            )
-                          }
-                        />
-                        <span>
-                          {c.name}
-                          {c.code && <span className="ml-1 text-xs text-muted-foreground">({c.code})</span>}
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground">
-                Tick nothing and an encashed day is worth basic pay alone.{' '}
-                <strong>Removing one lowers what people are paid</strong> for leave they have already
-                earned, so it is not a change to make casually.
-              </p>
-            </div>
-          )}
-        </>
-      )}
+      {/*
+        ⚠ Leave settings audit 2 (L-73): the rate basis, rate per day, working days per month and
+        "allowances included" that sat here valued nothing a leaver was paid, while the hint said
+        they did. Pay is Finance's now: HR records the days, and Finance enters the amount — on a
+        leaver's settlement, and when it marks leave cashed in as paid.
+      */}
     </section>
   );
 
@@ -624,14 +531,7 @@ export function LeaveTypeForm({
   );
 }
 
-/**
- * Shared by the new and edit pages: form values -> API payload.
- *
- * ⚠ `allowanceComponentIds` comes from the FORM, not from a caller. It used to be a parameter each
- * page had to remember to echo back, and forgetting it sent an empty array — which the server reads
- * as "remove them all" and which silently changed what a day of encashed leave was worth (finding
- * L-13). The form owns the value, so there is nothing to forget.
- */
+/** Shared by the new and edit pages: form values -> API payload. */
 export function leaveTypeFormToRequest(v: LeaveTypeFormValues) {
   const num = (s?: string) => (s && s.trim() ? Number(s) : null);
   return {
@@ -666,9 +566,5 @@ export function leaveTypeFormToRequest(v: LeaveTypeFormValues) {
     selfCertificationDays: Number(v.selfCertificationDays || 0),
     // Blank means no board is ever required, which is not the same as a threshold of zero.
     medicalBoardThresholdDays: v.medicalBoardThresholdDays ? Number(v.medicalBoardThresholdDays) : null,
-    encashmentRateBasis: v.encashmentRateBasis,
-    encashmentRatePerDay: num(v.encashmentRatePerDay),
-    encashmentWorkingDaysPerMonth: v.encashmentWorkingDaysPerMonth,
-    allowanceComponentIds: v.allowanceComponentIds ?? [],
   };
 }

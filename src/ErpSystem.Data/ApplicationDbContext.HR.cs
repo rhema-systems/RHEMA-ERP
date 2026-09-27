@@ -103,7 +103,6 @@ public partial class ApplicationDbContext
     public DbSet<LeaveEncashment> LeaveEncashments { get; set; } = null!;
     public DbSet<LeaveAdjustment> LeaveAdjustments { get; set; } = null!;
     public DbSet<EmployeeReliever> EmployeeRelievers { get; set; } = null!;
-    public DbSet<LeaveTypeAllowance> LeaveTypeAllowances { get; set; } = null!;
     public DbSet<PayComponent> PayComponents { get; set; } = null!;
     public DbSet<PositionPayComponent> PositionPayComponents { get; set; } = null!;
     public DbSet<EmployeePayComponent> EmployeePayComponents { get; set; } = null!;
@@ -2432,23 +2431,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // Configure LeaveTypeAllowance entity
-        builder.Entity<LeaveTypeAllowance>(entity =>
-        {
-            entity.HasIndex(la => new { la.TenantId, la.LeaveTypeId, la.PayComponentId })
-                .IsUnique()
-                .HasDatabaseName("IX_LeaveTypeAllowance_Tenant_LeaveType_Component");
-
-            entity.HasOne(la => la.LeaveType)
-                .WithMany(lt => lt.LeaveTypeAllowances)
-                .HasForeignKey(la => la.LeaveTypeId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(la => la.PayComponent)
-                .WithMany()
-                .HasForeignKey(la => la.PayComponentId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
+        // LeaveTypeAllowance (the pay components that fed HR's encashment rate) was removed in leave
+        // settings audit 2 (L-73): pay is Finance's, so HR holds no rate and nothing to feed it.
 
         // Configure Division entity
         builder.Entity<Division>(entity =>
@@ -3141,16 +3125,12 @@ private void ConfigureHREntities(ModelBuilder builder)
         // Configure Leave Category Allocation entity
         builder.Entity<LeaveCategoryAllocation>(entity =>
         {
-            entity.HasIndex(x => new { x.LeaveTypeId, x.LeaveSubTypeId, x.StaffLevelId, x.EffectiveFrom });
+            // The sub-type left this index with its column (leave settings audit 2, L-76).
+            entity.HasIndex(x => new { x.LeaveTypeId, x.StaffLevelId, x.EffectiveFrom });
 
             entity.HasOne(x => x.LeaveType)
                 .WithMany(x => x.LeaveCategoryAllocations)
                 .HasForeignKey(x => x.LeaveTypeId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            entity.HasOne(x => x.LeaveSubType)
-                .WithMany(x => x.LeaveCategoryAllocations)
-                .HasForeignKey(x => x.LeaveSubTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.StaffLevel)
@@ -4380,9 +4360,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 QueryResponseWindowHours       = 72,
                 InvestigationDays              = 28,
                 DisciplineBacklogHorizonDays   = 90,
-                // ⚠ Moves money: monthly × 12 ÷ this. 365 calendar / 360 thirty-day / 264 working,
-                // a 38% spread on the same facts, and TDC has not chosen. See the entity.
-                SettlementDaysPerYear          = 365,
+                // SettlementDaysPerYear (the settlement's daily-rate divisor) left with leave settings
+                // audit 2: Finance values a leaver's pay, so HR holds no rate (L-74).
                 // Round 5, lane L2b: FR-HR-152's cap, a setting now rather than a constant in
                 // SeparationService. ⚠ Nullable, so leaving it out of this anonymous seed would seed
                 // "no cap" rather than fail the build — it must be named.
@@ -4404,11 +4383,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 // public-service practice settled that leave is cashed only on exit, and TDC's own
                 // FR-HR-046 says the same.
                 AllowInServiceEncashment       = false,
-                // The divisor that decides what a day of unused leave is worth. Was a private const
-                // in EmolumentService. ⚠ Read it against SettlementDaysPerYear above — 22 working
-                // days a month against 365 calendar days a year is ~38% apart on the same salary.
-                // Different money events, deliberately not merged; see the entity.
-                EncashmentWorkingDaysPerMonth  = 22,
+                // EncashmentWorkingDaysPerMonth left with leave settings audit 2 (L-75): no screen
+                // set it, and Finance values leave now.
                 // The reminder cadence, previously five private consts in LeaveReminderService.
                 // Each value is exactly what its constant was, so the seeded tenant is nagged today
                 // on the same schedule as yesterday.
@@ -9734,6 +9710,13 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Settlement)
                 .WithMany(x => x.Lines)
                 .HasForeignKey(x => x.SettlementId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Leave settings audit 2 (P2): who in Finance valued the line. Restrict, as the
+            // settlement's own staff references are — a line is never deleted with a person.
+            entity.HasOne(x => x.ValuedByEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.ValuedByEmployeeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

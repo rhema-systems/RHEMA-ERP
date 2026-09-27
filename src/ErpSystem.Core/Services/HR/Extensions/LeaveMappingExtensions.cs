@@ -40,9 +40,6 @@ namespace ErpSystem.Application.Extensions
             ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
             Category = entity.Category,
             AllowOffsetAgainstAnnual = entity.AllowOffsetAgainstAnnual,
-            EncashmentRateBasis = entity.EncashmentRateBasis,
-            EncashmentRatePerDay = entity.EncashmentRatePerDay,
-            EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
             RequiresMedicalCertificate = entity.RequiresMedicalCertificate,
             SelfCertificationDays = entity.SelfCertificationDays,
             MedicalBoardThresholdDays = entity.MedicalBoardThresholdDays,
@@ -75,9 +72,6 @@ namespace ErpSystem.Application.Extensions
             ProRateFirstYearEntitlement = dto.ProRateFirstYearEntitlement,
             Category = dto.Category ?? LeaveTypeCategory.Other,
             AllowOffsetAgainstAnnual = dto.AllowOffsetAgainstAnnual ?? false,
-            EncashmentRateBasis = dto.EncashmentRateBasis,
-            EncashmentRatePerDay = dto.EncashmentRatePerDay,
-            EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth,
             RequiresMedicalCertificate = dto.RequiresMedicalCertificate,
             SelfCertificationDays = dto.SelfCertificationDays,
             MedicalBoardThresholdDays = dto.MedicalBoardThresholdDays
@@ -120,8 +114,6 @@ namespace ErpSystem.Application.Extensions
             Id = entity.Id,
             LeaveTypeId = entity.LeaveTypeId,
             LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
-            LeaveSubTypeId = entity.LeaveSubTypeId,
-            LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
             StaffLevelId = entity.StaffLevelId,
             StaffLevelName = entity.StaffLevel?.Name ?? string.Empty,
             AllocationDays = entity.AllocationDays,
@@ -132,10 +124,9 @@ namespace ErpSystem.Application.Extensions
         public static LeaveCategoryAllocation ToEntity(this CreateLeaveCategoryAllocationDto dto) => new LeaveCategoryAllocation
         {
             LeaveTypeId = dto.LeaveTypeId,
-            // ⚠ Always the whole type (round 5, lane N2): a balance is kept per type, so an
-            // allocation to one sub-type matched almost nothing. The field stays on the DTO for
-            // older callers and is ignored.
-            LeaveSubTypeId = null,
+            // Always the whole type (round 5, lane N2): a balance is kept per type. The sub-type
+            // field left the DTO and the table in leave settings audit 2 (L-76); an older caller
+            // that still sends it is ignored by the serializer.
             StaffLevelId = dto.StaffLevelId,
             AllocationDays = dto.AllocationDays,
             EffectiveFrom = dto.EffectiveFrom,

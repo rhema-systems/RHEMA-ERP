@@ -108,7 +108,6 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int QueryResponseWindowHours { get; set; }
     public int InvestigationDays { get; set; }
     public int DisciplineBacklogHorizonDays { get; set; }
-    public int SettlementDaysPerYear { get; set; }
 
     /// <summary>The most days of annual leave a leaver's settlement pays for; null = no cap (lane L2b).</summary>
     public int? SettlementLeaveDaysCap { get; set; }
@@ -129,7 +128,6 @@ public class CompanyHrPolicySettingsDto : BaseDto
 
     // Leave encashment and the reminder cadence (residue plan G2).
     public bool AllowInServiceEncashment { get; set; }
-    public int EncashmentWorkingDaysPerMonth { get; set; }
     public int LeaveStartingReminderDays { get; set; }
     public int LeaveClosureGraceDays { get; set; }
     public int LeaveUndecidedChaseDays { get; set; }
@@ -235,12 +233,6 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(1, 3650)] public int DisciplineBacklogHorizonDays { get; set; } = 90;
 
     /// <summary>
-    /// ⚠ Moves money: 365 calendar, 360 for thirty-day months, 264 for a 22-day working month —
-    /// a 38% spread on the same facts. See the entity.
-    /// </summary>
-    [Range(1, 366)] public int SettlementDaysPerYear { get; set; } = 365;
-
-    /// <summary>
     /// The most days of annual leave a leaver's settlement pays for (FR-HR-152); empty = no cap.
     /// </summary>
     /// <remarks>
@@ -277,12 +269,6 @@ public class UpdateCompanyHrPolicySettingsDto
     /// reading. See the entity.
     /// </summary>
     public bool AllowInServiceEncashment { get; set; } = false;
-
-    /// <summary>
-    /// ⚠ Read beside <see cref="SettlementDaysPerYear"/> and expect them to differ — roughly 38% on
-    /// the same salary at the defaults. They are different money events and deliberately not merged.
-    /// </summary>
-    [Range(1, 31)] public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
 
     [Range(0, 180)] public int LeaveStartingReminderDays { get; set; } = 7;
     [Range(0, 180)] public int LeaveClosureGraceDays { get; set; } = 2;

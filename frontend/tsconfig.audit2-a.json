@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave.ts",
+    "src/types/hr/leave-request.ts",
+    "src/types/hr/separation.ts",
+    "src/types/hr/policy-settings.ts",
+    "src/types/hr/compensation.ts",
+    "src/services/hr/compensation.service.ts",
+    "src/services/hr/pay-valuation.service.ts",
+    "src/services/hr/leave.service.ts",
+    "src/components/hr/leave/LeaveTypeForm.tsx",
+    "src/components/hr/leave/LeaveAllocationsTab.tsx",
+    "src/app/administration/hr/leave-types/[id]/page.tsx",
+    "src/app/administration/hr/leave-types/[id]/edit/page.tsx",
+    "src/app/administration/hr/leave-types/new/page.tsx",
+    "src/app/administration/hr/settings/policy/page.tsx",
+    "src/app/hr/separations/[id]/page.tsx",
+    "src/app/hr/leave/encashments/page.tsx",
+    "src/app/me/leave/encashments/page.tsx",
+    "src/app/hr/pay-valuation/page.tsx",
+    "src/components/hr/common/PermissionGate.tsx",
+    "src/components/layout/sidebar.tsx"
+  ]
+}

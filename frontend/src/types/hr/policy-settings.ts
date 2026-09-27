@@ -82,8 +82,7 @@ export interface CompanyHrPolicySettings {
   queryResponseWindowHours: number;
   investigationDays: number;
   disciplineBacklogHorizonDays: number;
-  /** ⚠ Moves money: 365 calendar / 360 thirty-day / 264 working — a 38% spread on the same facts. */
-  settlementDaysPerYear: number;
+  // settlementDaysPerYear left with leave settings audit 2 (L-74): Finance values a leaver's pay.
   /**
    * The most days of annual leave a leaver's settlement pays for (FR-HR-152); `null` = no cap
    * (round 5, lane L2b). ⚠ Send it on every save: the server keeps 56 for a save that omits it.
@@ -116,13 +115,7 @@ export interface CompanyHrPolicySettings {
    * tenant has it ON, because the encashment screen has already been demonstrated.
    */
   allowInServiceEncashment: boolean;
-  /**
-   * ⚠ Read beside `settlementDaysPerYear` and expect them to disagree — 22 working days a month
-   * against 365 calendar days a year is roughly 38% apart on the same salary. They are different
-   * money events and deliberately not merged; the settings screen shows both with a worked example
-   * so the gap is met there rather than in a payout.
-   */
-  encashmentWorkingDaysPerMonth: number;
+  // encashmentWorkingDaysPerMonth left with leave settings audit 2 (L-75).
 
   /** The leave reminder cadence. All five were private constants before. */
   leaveStartingReminderDays: number;

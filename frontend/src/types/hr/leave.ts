@@ -7,7 +7,6 @@
  * parent id travels in the body). Enums serialize as strings.
  */
 
-export type EncashmentRateBasis = 'DerivedFromEmoluments' | 'Manual';
 export type LeaveEligibilityType = 'Gender' | 'OrganizationLevel' | 'OrganizationUnit' | 'Position';
 export type AccrualFrequency = 'None' | 'Monthly' | 'Annual' | 'PerPayPeriod' | 'Quarterly' | 'SemiAnnual';
 export type AccrualMode = 'AccrueIncrementally' | 'FullGrantOnEligibility';
@@ -56,11 +55,6 @@ export const LEAVE_TYPE_CATEGORY_OPTIONS: {
     drives:
       'Everything else: sick, casual, compassionate, study. Each has a limit per year, shown to staff as “limit · used · left”, and HR can give fewer days by suggesting other dates.',
   },
-];
-
-export const ENCASHMENT_RATE_BASIS_OPTIONS: { value: EncashmentRateBasis; label: string }[] = [
-  { value: 'DerivedFromEmoluments', label: 'Derived from emoluments' },
-  { value: 'Manual', label: 'Manual rate' },
 ];
 
 export const LEAVE_ELIGIBILITY_TYPE_OPTIONS: { value: LeaveEligibilityType; label: string }[] = [
@@ -146,9 +140,7 @@ export interface LeaveType {
    * final approval (round 5, decision A5). Other kinds only.
    */
   allowOffsetAgainstAnnual: boolean;
-  encashmentRateBasis: EncashmentRateBasis;
-  encashmentRatePerDay?: number | null;
-  encashmentWorkingDaysPerMonth: number;
+  // The encashment rate fields left with leave settings audit 2 (L-73): Finance values leave.
 
   /**
    * Excuse duty and the medical board (R-15a). ⚠ All three live on the LEAVE TYPE, not the
@@ -168,7 +160,6 @@ export interface LeaveTypeDetail extends LeaveType {
   allocations: LeaveCategoryAllocation[];
   eligibilities: LeaveTypeEligibility[];
   accrualPolicies: LeaveAccrualPolicy[];
-  allowanceComponentIds: string[];
 }
 
 export interface CreateLeaveTypeRequest {
@@ -210,9 +201,6 @@ export interface CreateLeaveTypeRequest {
    * Annual or Maternity type, and on a type that does not require approval.
    */
   allowOffsetAgainstAnnual?: boolean | null;
-  encashmentRateBasis: EncashmentRateBasis;
-  encashmentRatePerDay?: number | null;
-  encashmentWorkingDaysPerMonth: number;
 
   /**
    * Excuse duty and the medical board (R-15a). ⚠ All three live on the LEAVE TYPE, not the
@@ -224,8 +212,6 @@ export interface CreateLeaveTypeRequest {
   selfCertificationDays: number;
   /** Cumulative days in a year past which a board must sit. Null = never. ⚠ Counted per YEAR. */
   medicalBoardThresholdDays?: number | null;
-  /** Pay components an encashment pays through — owned by the Emoluments area. */
-  allowanceComponentIds: string[];
 }
 
 export interface UpdateLeaveTypeRequest extends CreateLeaveTypeRequest {
@@ -259,8 +245,6 @@ export interface LeaveCategoryAllocation {
   id: string;
   leaveTypeId: string;
   leaveTypeName: string;
-  leaveSubTypeId?: string | null;
-  leaveSubTypeName?: string | null;
   staffLevelId: string;
   staffLevelName: string;
   allocationDays: number;
@@ -271,7 +255,6 @@ export interface LeaveCategoryAllocation {
 
 export interface LeaveCategoryAllocationRequest {
   leaveTypeId: string;
-  leaveSubTypeId?: string | null;
   staffLevelId: string;
   allocationDays: number;
   effectiveFrom: string;

@@ -238,7 +238,6 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             .GetQueryable()
             .Where(a => a.TenantId == tenantId
                      && a.LeaveTypeId == leaveTypeId
-                     && a.LeaveSubTypeId == null
                      && a.EffectiveFrom <= yearEnd
                      && (a.EffectiveTo == null || a.EffectiveTo >= yearStart))
             .ToListAsync(ct);

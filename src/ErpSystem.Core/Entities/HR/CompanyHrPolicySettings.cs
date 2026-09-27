@@ -374,22 +374,11 @@ public class CompanyHrPolicySettings : TenantEntity
     [Range(1, 3650)]
     public int DisciplineBacklogHorizonDays { get; set; } = 90;
 
-    /// <summary>
-    /// Days per year used to turn a monthly salary into a daily rate in a final settlement
-    /// (FR-HR-184). Calendar days by default: monthly × 12 ÷ 365.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ <b>This one moves money and TDC has not answered it.</b> The four bases TDC was asked
-    /// about are all expressible here — 365 calendar, 360 for thirty-day months, 264 for a 22-day
-    /// working month — and they differ by <b>38% on the same facts</b> (GHS 3,156.16 against
-    /// GHS 4,363.64 on the worked example in the open-questions document).
-    /// <para>The settlement writes the basis onto every computed line <i>in words</i>, derived from
-    /// this number, so a settlement computed under one basis still says which one it used after the
-    /// setting changes. That makes an early settlement auditable — <b>it does not make it right.</b>
-    /// Do not run real final settlements until TDC has answered, or expect a correction exercise.</para>
-    /// </remarks>
-    [Range(1, 366)]
-    public int SettlementDaysPerYear { get; set; } = 365;
+    // ⚠ SettlementDaysPerYear — the divisor HR used to turn a monthly salary into a daily rate for
+    // notice pay and leave owed on exit — was removed in leave settings audit 2 (L-74). Pay is
+    // Finance's: HR records the days on a settlement's pay lines and Finance values them
+    // (HR.Pay.Value), so HR holds no rate. The open question "how is a daily rate worked out for
+    // exit pay?" (2026-08-20) is answered by that: Finance works it out.
 
     /// <summary>
     /// The most days of annual leave a leaver's final settlement pays for (FR-HR-152). Empty means
@@ -490,29 +479,9 @@ public class CompanyHrPolicySettings : TenantEntity
     /// </remarks>
     public bool AllowInServiceEncashment { get; set; } = false;
 
-    /// <summary>
-    /// Working days in a month, used to turn monthly emoluments into a daily encashment rate when a
-    /// leave type does not set its own divisor.
-    /// </summary>
-    /// <remarks>
-    /// <para>Was a private const in <c>EmolumentService</c> — the last genuinely hardcoded piece of
-    /// the encashment rate, and the fallback every leave type lands on until somebody edits it.</para>
-    ///
-    /// <para>⚠ <b>Read this beside <see cref="SettlementDaysPerYear"/>, and expect them to
-    /// disagree.</b> Encashment computes <c>(basic + linked allowances) ÷ this</c>; a settlement
-    /// computes <c>monthly × 12 ÷ SettlementDaysPerYear</c>. At the defaults — 22 working days a
-    /// month against 365 calendar days a year — that is roughly a <b>38% spread on the same
-    /// salary</b>.</para>
-    ///
-    /// <para><b>That is not necessarily wrong, and the two are deliberately not merged.</b>
-    /// Encashing five unused days while employed is not the same money event as a final settlement
-    /// on exit, and plenty of clients will want different bases for each. What was wrong is that
-    /// they sat on different screens at different scopes, so nobody could see the gap. They are now
-    /// presented together with a worked example, and leave stamps its basis onto the payout the way
-    /// the settlement already did.</para>
-    /// </remarks>
-    [Range(1, 31)]
-    public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+    // ⚠ EncashmentWorkingDaysPerMonth — the tenant fallback divisor for leave cashed in — was removed
+    // in leave settings audit 2 (L-75). No screen could set it after round 5 lane N1, it was read
+    // only when a leave type's own figure was 0, and since the audit Finance values leave anyway.
 
     // ── Leave reminder windows (residue plan G2) ─────────────────────────────────────────────
     //

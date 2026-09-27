@@ -4,7 +4,6 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -15,7 +14,6 @@ import { LeaveAllocationsTab } from '@/components/hr/leave/LeaveAllocationsTab';
 import { LeaveEligibilityTab } from '@/components/hr/leave/LeaveEligibilityTab';
 import { LeaveAccrualPoliciesTab } from '@/components/hr/leave/LeaveAccrualPoliciesTab';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
-import { ENCASHMENT_RATE_BASIS_OPTIONS } from '@/types/hr/leave';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -160,25 +158,9 @@ export default function LeaveTypeDetailPage() {
             />
           </InfoCard>
 
+          {/* Leave settings audit 2 (L-73): no rate here — HR records days, Finance values them. */}
           <InfoCard title="Encashment">
-            <InfoRow label="Allow cash conversion" value={yn(t.allowCashConversion)} />
-            <InfoRow
-              label="Rate basis"
-              value={
-                ENCASHMENT_RATE_BASIS_OPTIONS.find((o) => o.value === t.encashmentRateBasis)
-                  ?.label ?? t.encashmentRateBasis
-              }
-            />
-            <InfoRow label="Rate per day" value={t.encashmentRatePerDay} />
-            <InfoRow label="Working days / month" value={t.encashmentWorkingDaysPerMonth} />
-            <InfoRow
-              label="Allowance components"
-              value={
-                t.allowanceComponentIds?.length ? (
-                  <Badge variant="secondary">{t.allowanceComponentIds.length} linked</Badge>
-                ) : undefined
-              }
-            />
+            <InfoRow label="Cash conversion while employed" value={yn(t.allowCashConversion)} />
           </InfoCard>
         </TabsContent>
 

@@ -250,6 +250,16 @@ public interface ISeparationService
     Task<bool> DeleteSettlementLineAsync(Guid lineId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Finance values one pay line HR recorded in days or facts (leave settings audit 2, P2). The
+    /// caller holds <c>HR.Pay.Value</c>; the line records who valued it and when.
+    /// </summary>
+    Task<SeparationSettlementLineDto> ValueSettlementLineAsync(
+        Guid lineId, ValueSettlementLineDto dto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Finance's queue: statements with pay lines awaiting a figure, oldest last day first.</summary>
+    Task<IReadOnlyList<PayToValueItemDto>> GetSettlementsAwaitingValuationAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Closes the statement for Internal Audit's review (FR-HR-185). Refused while any line could
     /// not be valued: a settlement is not finalised with an unknown amount showing as zero.
     /// </summary>

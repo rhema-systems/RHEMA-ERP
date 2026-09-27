@@ -153,6 +153,7 @@ import {
   hrOperationalTrainingLinks,
   hrSetupNavChildren,
 } from '../../config/hr-setup-nav';
+import { PAY_VALUER_ROLES } from '../hr/common/PermissionGate';
 
 export interface NavItem {
   title: string;
@@ -369,6 +370,18 @@ export const navigationItems: NavItem[] = [
           'Financial Controller',
           'Managing Director',
         ],
+      },
+      {
+        // Leave settings audit 2 (P2): Finance values the pay HR records in days — a leaver's
+        // settlement pay lines and leave cashed in. The page lives under /hr, whose gate every
+        // internal role passes, and is shown only to holders of the valuation permission — or of
+        // a role the API's fallback grants it to, while a tenant's permission seed has not run.
+        title: 'Pay to value (HR)',
+        href: '/hr/pay-valuation',
+        icon: Banknote,
+        roles: PAY_VALUER_ROLES,
+        permissions: ['HR.Pay.Value'],
+        accessMode: 'any',
       },
       {
         title: 'General Ledger',

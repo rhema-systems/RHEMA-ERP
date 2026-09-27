@@ -703,12 +703,9 @@ export interface LeaveEncashment {
   amountPaid: number;
 
   /**
-   * How the amount was arrived at, in words — the monthly figure, the divisor, the resulting
-   * daily rate, and where that divisor came from.
-   *
-   * ⚠ **Recorded at payout time, not recomputed.** The divisor behind it is a setting, so a
-   * figure that cannot name its own basis stops reconciling the moment somebody edits it. This
-   * is what finding L-20 was missing: the row showed an amount and nothing to check it against.
+   * How the amount was arrived at, in words. ⚠ Since leave settings audit 2 it is Finance's, set
+   * when Finance marks the days paid; until then the amount is 0 and this is empty ("awaiting
+   * Finance"). Rows paid before carry HR's old sentence (monthly figure ÷ divisor).
    */
   rateBasis?: string | null;
 
@@ -729,14 +726,19 @@ export interface CreateLeaveEncashmentRequest {
   employeeId: string;
   leaveTypeId: string;
   year: number;
+  /** Days only (leave settings audit 2): Finance enters the amount when it pays. */
   daysEncashed: number;
-  amountPaid: number;
   notes?: string | null;
 }
 
-/** The processor is stamped server-side from the caller's employee id, never sent. */
+/**
+ * Finance marks cashed-in leave paid (`HR.Pay.Value`, leave settings audit 2): the amount it paid,
+ * how it worked it out (optional), and the payment reference. The processor is stamped server-side.
+ */
 export interface ProcessLeaveEncashmentRequest {
   paymentReference: string;
+  amount: number;
+  basis?: string | null;
 }
 
 // ── Year-end ────────────────────────────────────────────────────────────────────

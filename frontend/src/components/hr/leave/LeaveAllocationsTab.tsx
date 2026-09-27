@@ -12,7 +12,6 @@ import { DateField, FieldRow, NumberField, SelectField } from '@/components/hr/e
 const schema = z
   .object({
     staffLevelId: z.string().min(1, 'Staff level is required'),
-    leaveSubTypeId: z.string().optional().or(z.literal('')),
     allocationDays: z.coerce.number().int('Whole days only').min(0, 'Cannot be negative'),
     effectiveFrom: z.string().min(1, 'Effective date is required'),
     effectiveTo: z.string().optional().or(z.literal('')),
@@ -26,7 +25,6 @@ type FormValues = z.infer<typeof schema>;
 
 const empty: FormValues = {
   staffLevelId: '',
-  leaveSubTypeId: '',
   allocationDays: 0,
   effectiveFrom: new Date().toISOString().slice(0, 10),
   effectiveTo: '',
@@ -34,7 +32,6 @@ const empty: FormValues = {
 
 const toPayload = (leaveTypeId: string, v: FormValues) => ({
   leaveTypeId,
-  leaveSubTypeId: v.leaveSubTypeId || null,
   staffLevelId: v.staffLevelId,
   allocationDays: v.allocationDays,
   effectiveFrom: v.effectiveFrom,
@@ -81,7 +78,6 @@ export function LeaveAllocationsTab({ leaveTypeId }: { leaveTypeId: string }) {
       emptyForm={empty}
       toForm={(a) => ({
         staffLevelId: a.staffLevelId,
-        leaveSubTypeId: a.leaveSubTypeId ?? '',
         allocationDays: a.allocationDays,
         effectiveFrom: a.effectiveFrom?.slice(0, 10) ?? '',
         effectiveTo: a.effectiveTo?.slice(0, 10) ?? '',

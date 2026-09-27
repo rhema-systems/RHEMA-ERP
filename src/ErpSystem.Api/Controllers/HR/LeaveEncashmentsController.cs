@@ -15,8 +15,9 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 /// <remarks>
 /// W3 slice 5: an employee requests and views their OWN encashment (self-or-permission), the
-/// register and the payment step are the leave read/write tiers, and approve/reject stay with
-/// the workflow assignee, validated per request by the service.
+/// register is the leave read tier, and approve/reject stay with the workflow assignee, validated
+/// per request by the service. Since leave settings audit 2 the payment step is Finance's
+/// (<c>HR.Pay.Value</c>): a request carries days, and Finance enters the amount when it pays.
 /// </remarks>
 [ApiController]
 [Route("api/hr/leave-encashments")]
@@ -180,8 +181,10 @@ public class LeaveEncashmentsController : ControllerBase
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    // Leave settings audit 2 (P4): marking paid is Finance's — it enters the amount — so the gate is
+    // HR.Pay.Value, not the leave desk's Write. HR approves the days; it does not pay them.
     [HttpPatch("{id:guid}/process")]
-    [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
+    [Authorize(Policy = HrPermissions.PayValuePolicy)]
     [ProducesResponseType(typeof(LeaveEncashmentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

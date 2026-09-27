@@ -9801,7 +9801,9 @@ namespace ErpSystem.Web.Services
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
-                },
+                }
+                    // HR side: valuing the pay HR records in days (leave settings audit 2, P2).
+                    .Concat(HrPermissions.GrantsFor("Senior Accountant")).ToArray(),
                 ["Finance Manager"] = new[]
                 {
                     "Finance.Read",
@@ -9880,7 +9882,13 @@ namespace ErpSystem.Web.Services
                     // Chief Accountants own period-end review and controlled financial-report
                     // distribution. Export remains separately permission-gated at the API/UI.
                     "Finance.Reports.Export"
-                },
+                }
+                    // HR side: valuing the pay HR records in days (leave settings audit 2, P2).
+                    .Concat(HrPermissions.GrantsFor("Chief Accountant")).ToArray(),
+                // Finance Officer had no entry here: its only grant from this map is the HR
+                // valuation step (leave settings audit 2, P2). The map ADDS what is missing, so
+                // whatever else the role holds is untouched.
+                ["Finance Officer"] = HrPermissions.GrantsFor("Finance Officer"),
                 // ⚠ "Managing Director" and Constants.Roles.ManagingDirector are the SAME string,
                 // and this initializer's [key] = value syntax silently overwrites duplicates. The
                 // Finance and HR grants for the MD therefore live in ONE entry here — a second
