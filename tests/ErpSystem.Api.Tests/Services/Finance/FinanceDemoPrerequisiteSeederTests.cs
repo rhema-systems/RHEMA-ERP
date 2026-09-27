@@ -60,18 +60,20 @@ public sealed class FinanceDemoPrerequisiteSeederTests
 
         var usd = await context.ExchangeRates.SingleAsync(rate =>
             rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "USD");
-        usd.Rate.Should().Be(12.5m, "1 USD is seeded as 12.50 GHS under the ExchangeRate entity contract");
-        usd.InverseRate.Should().Be(0.08m);
+        // ExchangeRate.Rate follows the canonical source/base -> target convention:
+        // 1 GHS = Rate USD. InverseRate is therefore the GHS value of one USD.
+        usd.Rate.Should().Be(0.08m);
+        usd.InverseRate.Should().Be(12.5m);
 
         var eur = await context.ExchangeRates.SingleAsync(rate =>
             rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "EUR");
-        eur.Rate.Should().Be(13.1579m);
-        eur.InverseRate.Should().Be(0.076m);
+        eur.Rate.Should().Be(0.076m);
+        eur.InverseRate.Should().Be(13.157895m);
 
         var gbp = await context.ExchangeRates.SingleAsync(rate =>
             rate.TenantId == tenantId && rate.BaseCurrencyCode == "GHS" && rate.TargetCurrencyCode == "GBP");
-        gbp.Rate.Should().Be(15.873m);
-        gbp.InverseRate.Should().Be(0.063m);
+        gbp.Rate.Should().Be(0.063m);
+        gbp.InverseRate.Should().Be(15.873016m);
     }
 
     [Fact]
