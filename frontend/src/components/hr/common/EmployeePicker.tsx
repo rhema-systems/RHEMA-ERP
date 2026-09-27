@@ -6,7 +6,7 @@ import { Loader2, Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useDebounce } from '@/hooks/use-debounce';
-import { employeeService } from '@/services/hr/employee.service';
+import { staffDirectoryService } from '@/services/hr/staff-directory.service';
 
 interface EmployeePickerProps {
   value: string | null;
@@ -18,8 +18,12 @@ interface EmployeePickerProps {
 }
 
 /**
- * Lightweight searchable employee selector backed by POST /hr/Employees/paged.
+ * Lightweight searchable employee selector backed by GET /employee-portal/directory/lookup.
  * Used until a shared combobox primitive / full Employees UI exists.
+ *
+ * ⚠ Not `POST /hr/Employees/paged`: since master's global search (2026-09-27) that needs
+ * HR.Employee.Read, which the SHE, manager and other roles that fill HR forms do not hold. The
+ * lookup is the lean directory card — name, number, post — open to any internal user.
  */
 export function EmployeePicker({
   value,
@@ -51,8 +55,7 @@ export function EmployeePicker({
 
   const { data, isFetching } = useQuery({
     queryKey: ['hr', 'employee-lookup', debouncedQuery],
-    queryFn: () =>
-      employeeService.searchPaged({ searchTerm: debouncedQuery, isActive: true }, 1, 10),
+    queryFn: () => staffDirectoryService.lookup(debouncedQuery, 10),
     enabled: open && debouncedQuery.trim().length >= 2,
   });
 
@@ -111,7 +114,7 @@ export function EmployeePicker({
           ) : (
             <ul className="max-h-60 overflow-auto py-1">
               {results.map((emp) => {
-                const label = emp.displayName || emp.fullName || `${emp.firstName} ${emp.lastName}`;
+                const label = emp.displayName || emp.fullName;
                 return (
                   <li key={emp.id}>
                     <button

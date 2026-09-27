@@ -12,12 +12,18 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 /// <remarks>
 /// <para><b>Deliberately open to any linked internal user, with a lean projection.</b> W3 slice 11
-/// already settled that lean directory reads stay ungated — the shared <c>EmployeePicker</c> rides
-/// <c>POST api/hr/employees/paged</c>, which any internal caller may hit — so gating this would
-/// gate the front door while leaving the back one open. What this controller adds is the lean
-/// part: <see cref="StaffDirectoryEntryDto"/> projects name, role, unit, location and work email
-/// and nothing else, where the employee summary it could have reused carries gender, employment
-/// type, hire date, years of service and expatriate status.</para>
+/// settled that lean directory reads stay ungated, and the permission catalogue says so
+/// (<c>HrPermissions.ViewEmployees</c>: "the shared name picker, org lookups stay open to internal
+/// staff"). What this controller adds is the lean part: <see cref="StaffDirectoryEntryDto"/>
+/// projects name, role, unit, location and work email and nothing else, where the employee summary
+/// it could have reused carries gender, employment type, hire date, years of service and expatriate
+/// status.</para>
+///
+/// <para><b>The shared <c>EmployeePicker</c> searches through <c>directory/lookup</c>.</b> It used to
+/// ride <c>POST api/hr/employees/paged</c>, until master's global search (2026-09-27) put
+/// <c>EmployeeReadPolicy</c> on that endpoint — correctly for a full <c>EmployeeDto</c> read, but it
+/// refused every picker to the SHE, manager and other roles that hold no <c>HR.Employee.Read</c>.
+/// See <see cref="Lookup"/>.</para>
 ///
 /// <para><b>Nothing here is id-bearing in the dangerous sense.</b> The one route that takes an
 /// employee id returns the same public card for anybody, so there is no self-arm to get wrong;
@@ -78,6 +84,35 @@ public class StaffDirectoryController : ControllerBase
             return BadRequest("Invalid location id.");
 
         return Ok(await _service.SearchAsync(me, search, organizationUnitId, locationId, page, pageSize, ct));
+    }
+
+    /// <summary>
+    /// The shared name picker's search: the same lean card, a few at a time, for any internal user.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>No employee link required, unlike <c>directory</c>.</b> A picker is part of a form,
+    /// not the caller's own directory, and the accounts that fill forms include ones with no
+    /// employee record — <c>admin</c> runs the Admin-tier HR screens. The link only ever fed
+    /// <c>IsSelf</c>, which the service already answers as false for an unlinked caller.</para>
+    ///
+    /// <para><b>A search, never a browse.</b> Under two characters returns nothing, and
+    /// <paramref name="take"/> is capped, so this cannot page out the tenant's staff list — which
+    /// the directory already offers to any linked user anyway.</para>
+    /// </remarks>
+    [HttpGet("directory/lookup")]
+    [ProducesResponseType(typeof(PagedResult<StaffDirectoryEntryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Lookup(
+        [FromQuery] string? search = null,
+        [FromQuery] int take = 10,
+        CancellationToken ct = default)
+    {
+        var term = search?.Trim() ?? string.Empty;
+        var size = Math.Clamp(take, 1, 25);
+        if (term.Length < 2)
+            return Ok(new PagedResult<StaffDirectoryEntryDto> { Page = 1, PageSize = size });
+
+        return Ok(await _service.SearchAsync(
+            _currentUser.EmployeeId ?? Guid.Empty, term, null, null, 1, size, ct));
     }
 
     /// <summary>One colleague's card: their role, their unit path, their reporting line.</summary>

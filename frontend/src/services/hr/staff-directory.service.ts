@@ -9,10 +9,10 @@ import type { OrganogramNode } from '@/types/hr/organogram';
  * names — a type written from a route is fiction that type-checks.
  *
  * ⚠ **This is a LEAN projection on purpose.** The employee summary at
- * `POST api/hr/employees/paged` is also open to any internal caller and would have served here
- * without new code, but it carries gender, employment type, hire date, years of service and
- * expatriate status. The probe asserts none of those columns appear on a directory row; if one
- * ever does, the fix is on the server, not a `delete` in the client.
+ * `POST api/hr/employees/paged` carries gender, employment type, hire date, years of service and
+ * expatriate status — and since master's global search (2026-09-27) it needs `HR.Employee.Read`.
+ * The probe asserts none of those columns appear on a directory row; if one ever does, the fix is
+ * on the server, not a `delete` in the client.
  *
  * ⚠ Work contact only. `businessNumber` and `extension` are office numbers; the personal mobile
  * the employee maintains themselves (slice 12a) is deliberately not served. Measured on DEFAULT
@@ -109,6 +109,17 @@ class StaffDirectoryService {
     qs.set('page', String(query.page ?? 1));
     qs.set('pageSize', String(query.pageSize ?? DIRECTORY_PAGE_SIZE));
     return apiService.get<DirectoryPage>(`${this.baseUrl}/directory?${qs.toString()}`);
+  }
+
+  /**
+   * The shared `EmployeePicker`'s search: the same lean card, `take` at a time (server caps at 25).
+   *
+   * Unlike {@link search} it needs no employee link — `admin` fills HR forms too — and it is a
+   * search, never a browse: under two characters the server returns an empty page.
+   */
+  lookup(search: string, take = 10): Promise<DirectoryPage> {
+    const qs = new URLSearchParams({ search: search.trim(), take: String(take) });
+    return apiService.get<DirectoryPage>(`${this.baseUrl}/directory/lookup?${qs.toString()}`);
   }
 
   /** One colleague's card. 404 when they are not on strength — a miss, not a refusal. */
