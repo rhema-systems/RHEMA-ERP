@@ -7,14 +7,24 @@ import {
   mapDraftToEditableBid,
 } from './tender-bid-draft';
 
-const tender = {
+const tender: TenderDetailDto = {
   id: 'tender-1',
+  tenderNumber: 'TND-001', title: 'Equipment procurement', tenderType: 'ITB', status: 'Published',
+  bidCount: 1, invitationCount: 1, createdAt: '2026-09-01T10:00:00Z',
+  requiresPrequalification: false, allowPartialBids: true, priceWeightage: 40, qualityWeightage: 30,
+  deliveryWeightage: 20, experienceWeightage: 10, useQCBSEvaluation: false,
+  technicalWeight: 0, financialWeight: 0, minimumTechnicalScore: 0,
+  documents: [], invitations: [], bids: [], fees: [], evaluators: [], clarifications: [], revisions: [],
+  totalViews: 1, totalDownloads: 0, lotCount: 1,
   lots: [
     {
       id: 'lot-1',
+      tenderId: 'tender-1', lotNumber: 1, lotCode: 'LOT-01', title: 'Equipment', status: 'Published',
+      displayOrder: 1, itemCount: 1, bidCount: 1, isAwarded: false,
       items: [
         {
           id: 'item-1',
+          tenderId: 'tender-1', lotId: 'lot-1', lineNumber: 1, description: 'Laptop', unitOfMeasure: 'EA',
           quantity: 12,
         },
       ],
@@ -22,11 +32,14 @@ const tender = {
   ],
   // Some tender detail projections do not duplicate nested lot items here.
   items: [],
-} as TenderDetailDto;
+};
 
-const savedDraft = {
+const savedDraft: TenderBidDetailDto = {
   id: 'bid-1',
   tenderId: 'tender-1',
+  tenderNumber: 'TND-001', tenderTitle: 'Equipment procurement', businessPartnerId: 'supplier-1',
+  businessPartnerName: 'Equipment supplier', bidNumber: 'BID-001', submittedDate: '',
+  totalBidAmount: 4500, isCompliant: false, createdAt: '2026-09-02T10:00:00Z', updatedAt: '2026-09-02T11:00:00Z',
   status: 'Draft',
   selectedLotIds: ['lot-1'],
   bidLots: [
@@ -66,7 +79,7 @@ const savedDraft = {
       technicalDetails: 'Exact saved technical details',
     },
   ],
-} as TenderBidDetailDto;
+};
 
 describe('tender bid draft rehydration', () => {
   it('restores selected lots and every editable line value after reopen', () => {

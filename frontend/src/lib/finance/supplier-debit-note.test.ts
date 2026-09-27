@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CompoundBasis, TaxApplicability, TaxCategory } from '@/types/tax';
 
 import {
   calculateSupplierDebitNoteLine,
@@ -20,7 +21,7 @@ describe('supplier debit-note controls', () => {
         tenantId: 'tenant',
         code: 'GH',
         name: 'Ghana purchase tax',
-        applicability: 'Purchases',
+        applicability: TaxApplicability.Purchases,
         isDefault: false,
         isActive: true,
         createdAt: '2025-01-01',
@@ -31,9 +32,9 @@ describe('supplier debit-note controls', () => {
             taxCode: 'LEVY',
             taxName: 'Levy',
             taxRate: 2.5,
-            taxCategory: 'Levy',
+            taxCategory: TaxCategory.Levy,
             calculationOrder: 1,
-            compoundBasis: 'BaseOnly',
+            compoundBasis: CompoundBasis.BaseOnly,
           },
           {
             id: 'vat',
@@ -41,9 +42,9 @@ describe('supplier debit-note controls', () => {
             taxCode: 'VAT',
             taxName: 'VAT',
             taxRate: 15,
-            taxCategory: 'VAT',
+            taxCategory: TaxCategory.Standard,
             calculationOrder: 2,
-            compoundBasis: 'Cumulative',
+            compoundBasis: CompoundBasis.Cumulative,
           },
           {
             id: 'wht',
@@ -51,9 +52,9 @@ describe('supplier debit-note controls', () => {
             taxCode: 'WHT',
             taxName: 'WHT',
             taxRate: 3,
-            taxCategory: 'Withholding',
+            taxCategory: TaxCategory.Withholding,
             calculationOrder: 3,
-            compoundBasis: 'BaseOnly',
+            compoundBasis: CompoundBasis.BaseOnly,
           },
         ],
       }

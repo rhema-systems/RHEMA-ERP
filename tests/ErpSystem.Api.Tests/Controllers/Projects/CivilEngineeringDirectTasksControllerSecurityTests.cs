@@ -14,6 +14,8 @@ public sealed class CivilEngineeringDirectTasksControllerSecurityTests
     {
         var type = typeof(CivilEngineeringDirectTasksController);
         type.GetCustomAttribute<AuthorizeAttribute>().Should().NotBeNull();
+        type.GetMethod(nameof(CivilEngineeringDirectTasksController.Search))!.GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(CivilEngineeringAccessControlRegistry.WorkspaceRead);
+        type.GetMethod(nameof(CivilEngineeringDirectTasksController.Get))!.GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(CivilEngineeringAccessControlRegistry.WorkspaceRead);
         type.GetMethod(nameof(CivilEngineeringDirectTasksController.Lookups))!.GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(CivilEngineeringAccessControlRegistry.AssignmentsManage);
         type.GetMethod(nameof(CivilEngineeringDirectTasksController.List))!.GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(CivilEngineeringAccessControlRegistry.WorkspaceRead);
         type.GetMethod(nameof(CivilEngineeringDirectTasksController.Create))!.GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(CivilEngineeringAccessControlRegistry.AssignmentsManage);

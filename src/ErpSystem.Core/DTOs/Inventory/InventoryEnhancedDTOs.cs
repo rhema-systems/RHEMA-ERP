@@ -1642,6 +1642,9 @@ public sealed class InventoryIssueVoucherLineDto
     public Guid? LocationId { get; set; }
     public string? LocationCode { get; set; }
     public decimal Quantity { get; set; }
+    public decimal RequestedQuantity { get; set; }
+    public decimal ReceivedQuantity { get; set; }
+    public decimal OutstandingQuantity { get; set; }
     public decimal UnitCost { get; set; }
     public decimal TotalValue { get; set; }
     public string? UnitOfMeasure { get; set; }
@@ -1670,6 +1673,7 @@ public sealed class InventoryIssueVoucherDto
     public Guid InventoryRequisitionId { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public InventoryIssueVoucherStatus Status { get; set; }
+    public bool IsLegacyAcknowledgement { get; set; }
     public Guid WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
     public Guid? LocationId { get; set; }
@@ -1707,6 +1711,14 @@ public sealed class AcknowledgeInventoryIssueVoucherRequest
     [Required] public string RowVersion { get; set; } = string.Empty;
     [Required, MaxLength(1000)] public string Comment { get; set; } = string.Empty;
     [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [Required, MinLength(1)] public List<AcknowledgeInventoryIssueVoucherLineRequest> Lines { get; set; } = new();
+}
+
+public sealed class AcknowledgeInventoryIssueVoucherLineRequest
+{
+    public Guid IssueVoucherLineId { get; set; }
+    [Range(typeof(decimal), "0", "99999999999999.9999")]
+    public decimal ReceivedQuantity { get; set; }
 }
 
 public class ReturnRequisitionItemDto

@@ -521,6 +521,16 @@ export class EstateLandManagementService {
       : [];
   }
 
+  async getManagedAsset(id: string): Promise<EstateManagedAsset> {
+    const response = await apiService.get<{ success: boolean; data: EstateManagedAsset }>(
+      `/estate/managed-assets/${encodeURIComponent(id)}`
+    );
+    if (!response.success || !response.data) {
+      throw new Error('Managed asset not found.');
+    }
+    return normalizeManagedAsset(response.data);
+  }
+
   async getManagedAssets(
     query: EstateManagedAssetQuery = {}
   ): Promise<EstateManagedAsset[]> {

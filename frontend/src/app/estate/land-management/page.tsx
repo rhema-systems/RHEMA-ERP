@@ -3,6 +3,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
 import {
   ArrowRight,
   BadgeCheck,
@@ -35,6 +36,7 @@ import {
   estateLandManagementService,
   EstateManagedAssetSourceType,
   EstateManagedAssetStatus,
+  EstateManagedAssetType,
   type EstateLandDemarcation,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
@@ -378,6 +380,21 @@ export default function EstateLandManagementPage() {
 
   return (
     <div className="space-y-6">
+      {!isLoading && <GlobalSearchRecordOpener
+        load={async id => {
+          const asset = await estateLandManagementService.getManagedAsset(id);
+          if (asset.assetType !== EstateManagedAssetType.Land) {
+            throw new Error('The selected record is not a land asset.');
+          }
+          return asset;
+        }}
+        onOpen={asset => {
+          setAssets(current => [asset, ...current.filter(item => item.id !== asset.id)]);
+          setSearch('');
+          setRecordPage(1);
+          setSelectedKey(`asset:${asset.id}`);
+        }}
+      />}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-2">
           <Badge variant="outline" className="w-fit">

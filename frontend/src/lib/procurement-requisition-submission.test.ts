@@ -29,7 +29,6 @@ describe('getSubmissionControlPresentation', () => {
     expect(getSubmissionControlPresentation(readiness({
       isCompliant: true,
       canSubmit: true,
-      basis: 'BusinessRequirements'
     }))).toMatchObject({ tone: 'ready', basisLabel: 'Required details complete' });
   });
 
@@ -46,7 +45,6 @@ describe('getSubmissionControlPresentation', () => {
       status: 'Submitted',
       isCompliant: true,
       canSubmit: false,
-      basis: 'BusinessRequirements'
     }))).toMatchObject({ tone: 'blocked', title: 'Submission no longer available' });
   });
 

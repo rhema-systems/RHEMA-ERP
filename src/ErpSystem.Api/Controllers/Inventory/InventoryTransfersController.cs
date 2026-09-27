@@ -38,6 +38,11 @@ public class InventoryTransfersController : ControllerBase
         _logger = logger;
     }
 
+    [HttpGet("search")]
+    public async Task<ActionResult<IEnumerable<InventoryTransferDto>>> Search(
+        [FromQuery] string search, [FromQuery] int take = 8) =>
+        Ok(await _transferService.SearchAsync(search, take, HttpContext.RequestAborted));
+
     private Guid GetCurrentUserId()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

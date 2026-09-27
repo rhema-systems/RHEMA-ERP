@@ -40,7 +40,7 @@ async function openSelect(label: string) {
 }
 async function choose(label: string, option: string) {
   await openSelect(label);
-  await act(async () => { fireEvent.click(screen.getByRole('option', { name: option, exact: true })); });
+  await act(async () => { fireEvent.click(screen.getByRole('option', { name: option })); });
 }
 async function loaded() {
   await waitFor(() => expect(screen.queryByText('Loading templates...')).not.toBeInTheDocument());
@@ -110,7 +110,7 @@ it('selects an exact Works template without treating legacy Construction or Good
   expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual([
     'Select a matching template', 'works (works)',
   ]);
-  await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'works (works)', exact: true })); });
+  await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'works (works)' })); });
   await waitFor(() => expect(savedForm()).toMatchObject({ evaluationTemplateId: 'works', useQCBSEvaluation: false }));
 });
 

@@ -53,15 +53,17 @@ describe('inventoryManagementService controlled physical counts', () => {
       ...control, physicalCountItemId: 'line-1', itemRowVersion: 'BAUG', recountedQuantity: 7,
       investigationNotes: 'Independent recount reconciled the bin.',
     });
-    await inventoryManagementService.decidePhysicalCountStores('count-1', { ...control, approved: true });
-    await inventoryManagementService.decidePhysicalCountFinance('count-1', { ...control, approved: true });
-    await inventoryManagementService.attestPhysicalCountAudit('count-1', { ...control, approved: true });
+    const decision = { ...control, decisionCode: 'APPROVE', decisionRevision: 'decision-v1', approved: true };
+    await inventoryManagementService.decidePhysicalCountStores('count-1', decision);
+    await inventoryManagementService.decidePhysicalCountFinance('count-1', decision);
+    await inventoryManagementService.attestPhysicalCountAudit('count-1', decision);
 
     expect(mockedAxios.post.mock.calls.map(call => call[0])).toEqual([
       expect.stringMatching(/\/count-1\/recount$/), expect.stringMatching(/\/count-1\/stores-decision$/),
       expect.stringMatching(/\/count-1\/finance-decision$/), expect.stringMatching(/\/count-1\/audit-attestation$/),
     ]);
     expect(mockedAxios.post.mock.calls[0][1]).toEqual(expect.objectContaining({ rowVersion: 'AQID', itemRowVersion: 'BAUG', idempotencyKey: 'count-key' }));
+    for (const call of mockedAxios.post.mock.calls.slice(1)) expect(call[1]).toEqual(decision);
   });
 
   it('uses dedicated schedule and controlled Finance-post endpoints', async () => {

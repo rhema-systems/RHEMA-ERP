@@ -83,6 +83,26 @@ public sealed class EstateManagedAssetsController : ControllerBase
         });
     }
 
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetManagedAsset(Guid id)
+    {
+        if (!_currentUserService.TenantId.HasValue || _currentUserService.TenantId == Guid.Empty)
+        {
+            return Forbid();
+        }
+
+        // Use the register owner so tenant/deleted visibility and enrichment stay identical.
+        var assets = await _managedAssetService.GetManagedAssetsAsync(new EstateManagedAssetQuery
+        {
+            AssetId = id,
+            Take = 1
+        });
+        var asset = assets.SingleOrDefault();
+        return asset is null
+            ? NotFound(new { success = false, message = "Managed asset not found." })
+            : Ok(new { success = true, data = asset });
+    }
+
     [HttpPost("manual-land")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer")]
     public async Task<IActionResult> CreateManualLand([FromBody] CreateManualExistingLandDto request)

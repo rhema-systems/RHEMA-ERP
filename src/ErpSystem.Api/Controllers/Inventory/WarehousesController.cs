@@ -7,6 +7,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Services.Inventory;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -36,6 +37,22 @@ public class WarehousesController : ControllerBase
         _logger = logger;
         _masterDataChanges = masterDataChanges;
         _defaultLocations = defaultLocations ?? new WarehouseDefaultLocationService(unitOfWork, currentUserProvider);
+    }
+
+    [HttpGet("search")]
+    public async Task<ActionResult<IEnumerable<WarehouseDto>>> Search(
+        [FromQuery] string search, [FromQuery] int take = 8)
+    {
+        if (_currentUserProvider.TenantId == Guid.Empty) return Unauthorized();
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100)
+            return Ok(Array.Empty<WarehouseDto>());
+        var term = search.Trim();
+        var warehouses = await _warehouseRepository.GetQueryable(value =>
+                value.TenantId == _currentUserProvider.TenantId && !value.IsDeleted &&
+                (value.Code.Contains(term) || value.Name.Contains(term)))
+            .AsNoTracking().OrderBy(value => value.Code).ThenBy(value => value.Id)
+            .Take(Math.Clamp(take, 1, 50)).ToListAsync(HttpContext.RequestAborted);
+        return Ok(warehouses.Select(MapToDto).ToList());
     }
 
     /// <summary>

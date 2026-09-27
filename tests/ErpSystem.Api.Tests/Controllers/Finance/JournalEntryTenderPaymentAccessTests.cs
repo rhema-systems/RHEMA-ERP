@@ -17,6 +17,34 @@ namespace ErpSystem.Api.Tests.Controllers.Finance;
 public sealed class JournalEntryTenderPaymentAccessTests
 {
     [Fact]
+    public async Task Search_DeniesScopedTenderVerifierBeforeReadingTheJournalRegister()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        await using var db = CreateContext();
+        await SeedPermissionAsync(db, userId, ProcurementAccessControlRegistry.TenderPaymentVerifyPermission);
+        var service = new Mock<IJournalEntryService>(MockBehavior.Strict);
+        var controller = CreateController(db, service.Object, userId, tenantId);
+        (await controller.Search("JE", 5)).Result.Should().BeOfType<ForbidResult>();
+        service.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Search_UsesBoundedOwnerReadForFinanceReaders()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        await using var db = CreateContext();
+        await SeedPermissionAsync(db, userId, ErpSystem.Shared.FinancePermissions.ViewFinance);
+        var service = new Mock<IJournalEntryService>();
+        service.Setup(item => item.SearchAsync("JE", 5, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new FinanceRecordSearchDto { Id = Guid.NewGuid(), Number = "JE-001" } });
+        var controller = CreateController(db, service.Object, userId, tenantId);
+        (await controller.Search("JE", 5)).Result.Should().BeOfType<OkObjectResult>();
+        service.Verify(item => item.SearchAsync("JE", 5, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task GetJournalEntryById_AllowsTenderPaymentVerifierForExactLinkedJournal()
     {
         var tenantId = Guid.NewGuid();

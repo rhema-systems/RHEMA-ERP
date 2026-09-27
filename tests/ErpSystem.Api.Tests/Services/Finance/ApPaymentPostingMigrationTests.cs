@@ -32,6 +32,57 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed partial class ApPaymentPostingMigrationTests
 {
     [Theory]
+    [InlineData("missing-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("draft-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("expired-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("future-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("cross-tenant-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("wrong-role-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("inactive-role", "AP_ROLE_INACTIVE")]
+    [InlineData("wrong-role-type", "AP_ROLE_REQUIRED")]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    public async Task FirstPosting_RequiresTheCapturedApprovedApProfile_ForTheDocumentDate(string defect, string code)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var document = fixture.Payment;
+        var role = await db.Set<BusinessPartnerRole>().SingleAsync(x => x.Id == document.BusinessPartnerRoleId);
+        var profile = await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == document.BusinessPartnerApProfileVersionId);
+        // An unrelated approved replacement must not silently replace captured authority.
+        db.Set<BusinessPartnerApProfileVersion>().Add(new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            VersionNumber = 99, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020, 1, 1)
+        });
+        switch (defect)
+        {
+            case "missing-profile": document.BusinessPartnerApProfileVersionId = Guid.NewGuid(); break;
+            case "draft-profile": profile.Status = BusinessPartnerFinanceProfileStatus.Draft; break;
+            case "expired-profile": profile.EffectiveTo = document.PaymentDate.AddDays(-1); break;
+            case "future-profile": profile.EffectiveFrom = document.PaymentDate.AddDays(1); break;
+            case "cross-tenant-profile": profile.TenantId = Guid.NewGuid(); break;
+            case "wrong-role-profile": profile.BusinessPartnerRoleId = Guid.NewGuid(); break;
+            case "inactive-role": role.Status = BusinessPartnerRoleStatus.Inactive; break;
+            case "wrong-role-type": role.RoleType = BusinessPartnerRoleType.Customer; break;
+        }
+        await db.SaveChangesAsync();
+        var beforeJournals = await db.JournalEntries.CountAsync();
+        var beforeTransactions = await db.AccountTransactions.CountAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        Func<Task> post = () => service.PostAsync(document.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(code + ":*");
+
+        (await db.JournalEntries.CountAsync()).Should().Be(beforeJournals);
+        (await db.AccountTransactions.CountAsync()).Should().Be(beforeTransactions);
+        (await db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "VendorPayment" && x.SourceDocumentId == document.Id))
+            .Should().Be(0);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(5)]
     public async Task InvoiceChosenRate_ShouldSurvivePaymentCalculationAndPosting(decimal chosenRate)
@@ -859,6 +910,10 @@ public sealed partial class ApPaymentPostingMigrationTests
         var (service, _) = CreateService(db, tenantId);
 
         var first = await service.PostAsync(fixture.Payment.Id);
+        var capturedProfile = await db.Set<BusinessPartnerApProfileVersion>()
+            .SingleAsync(x => x.Id == fixture.Payment.BusinessPartnerApProfileVersionId);
+        capturedProfile.Status = BusinessPartnerFinanceProfileStatus.Superseded;
+        await db.SaveChangesAsync();
         var second = await service.PostAsync(fixture.Payment.Id);
 
         second.JournalEntryId.Should().Be(first.JournalEntryId);

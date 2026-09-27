@@ -14,7 +14,7 @@ const approved: ProcurementPurchaseOrderSourceLineDto = {
 };
 const ea: ItemUnitOfMeasureDto = {
   id: 'item-ea', unitOfMeasureId: 'ea-id', unitCode: 'EA', unitName: 'Each',
-  conversionFactor: 1, isBaseUnit: true, isPurchaseUnit: true, isSalesUnit: true,
+  conversionFactor: 1, isBaseUnit: true, isPurchaseUnit: true, isSalesUnit: true, isStockingUnit: true,
 };
 
 describe('approved purchase-order line mapping', () => {

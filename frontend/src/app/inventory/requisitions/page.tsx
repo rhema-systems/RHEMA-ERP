@@ -1,4 +1,5 @@
 'use client';
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -189,6 +190,7 @@ export default function InventoryRequisitionsPage() {
 
   return (
     <div className="space-y-6">
+      <GlobalSearchRecordOpener load={id => inventoryRequisitionService.getById(id)} onOpen={openViewDialog} />
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>

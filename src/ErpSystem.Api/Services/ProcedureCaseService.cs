@@ -98,6 +98,35 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return page.Items.ToList();
     }
 
+    public async Task<IReadOnlyList<ProcedureCaseSummaryDto>> SearchCasesAsync(
+        string module, string search, int take, CancellationToken cancellationToken = default)
+    {
+        var tenantId = RequireTenantId();
+        var term = search.Trim();
+        if (term.Length < 2 || term.Length > 100) return Array.Empty<ProcedureCaseSummaryDto>();
+        term = term.ToLowerInvariant();
+        var limit = Math.Clamp(take, 1, 10);
+        var query = BuildProcedureCaseListQuery(tenantId, NormalizeModule(module), null)
+            .Where(item => item.Title.ToLower().Contains(term)
+                || (item.ReferenceNumber != null && item.ReferenceNumber.ToLower().Contains(term)))
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt).ThenBy(item => item.Id);
+        var results = new List<ProcedureCaseSummaryDto>();
+        const int batchSize = 100;
+        for (var offset = 0; ; offset += batchSize)
+        {
+            var batch = await query.Skip(offset).Take(batchSize).ToListAsync(cancellationToken);
+            foreach (var item in batch)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // Apply the same record visibility as the register before limiting results.
+                if (!CanView(item)) continue;
+                results.Add(ToSummaryDto(item));
+                if (results.Count == limit) return results;
+            }
+            if (batch.Count < batchSize) return results;
+        }
+    }
+
     public async Task<CommonPagedResult> GetCasesPageAsync(
         string? module,
         string? entityType,

@@ -11,7 +11,8 @@ const authHeaders = () => {
 async function result<T>(response: Response): Promise<T> {
   if (response.ok) return response.json();
   const body = await response.json().catch(() => null);
-  throw new Error(body?.detail || body?.title || 'Finance profile request failed.');
+  const message = body?.detail || body?.title || 'Finance profile request failed.';
+  throw new Error(body?.code ? `${message} (${body.code})` : message);
 }
 
 export interface BusinessPartnerApWhtDefault {
@@ -83,6 +84,8 @@ export interface SaveApProfile {
   effectiveTo?: string | null;
   apReferenceNumber?: string | null;
   paymentTermId?: string | null;
+  defaultTaxGroupId?: string | null;
+  defaultExpenseAccountId?: string | null;
   subjectToWithholding: boolean;
   withholdingDefaults: Array<{
     categoryCode: string;

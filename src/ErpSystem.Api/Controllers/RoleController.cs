@@ -37,6 +37,36 @@ public class RoleController : ControllerBase
         _currentUserService = currentUserService;
     }
 
+    [HttpGet("search-summaries")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<IActionResult> SearchRoleSummaries([FromQuery] string? search = null, [FromQuery] int take = 5)
+    {
+        var term = search?.Trim() ?? string.Empty;
+        if (term.Length < 2 || term.Length > 100) return Ok(Array.Empty<object>());
+        // Roles are a global catalogue in the existing identity model, with the same read policy as GetRoles.
+        var roles = await _rolePermissionService.GetAllRolesWithPermissionsAsync();
+        return Ok(roles.Where(role => (role.Name?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (role.Description?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderBy(role => role.Name).ThenBy(role => role.Id)
+            .Take(Math.Clamp(take, 1, 20)).Select(SearchRoleSummary).ToArray());
+    }
+
+    [HttpGet("summaries/{id:guid}")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<IActionResult> GetRoleSummary(Guid id)
+    {
+        var role = await _rolePermissionService.GetRoleWithPermissionsByIdAsync(id);
+        return role is null ? NotFound() : Ok(SearchRoleSummary(role));
+    }
+
+    private static object SearchRoleSummary(ApplicationRole role) => new
+    {
+        role.Id,
+        Name = role.Name ?? string.Empty,
+        role.Description,
+        Status = role.IsSystemRole ? "System role" : "Custom role",
+    };
+
     /// <summary>
     /// Get all roles
     /// </summary>

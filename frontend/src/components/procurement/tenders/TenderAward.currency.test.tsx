@@ -117,7 +117,7 @@ describe('tender award currency presentation', () => {
     render(<TenderAward {...tenderProps} bids={[{ id: 'bid-1', currency }]} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Recommend' }));
     expect(screen.getByRole('spinbutton', { name: `Award Amount (${currency}) *` })).toHaveValue(52000);
-    fireEvent.click(screen.getByRole('button', { name: 'Submit Recommendation', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Recommendation' }));
     await waitFor(() => expect(mocks.createAward).toHaveBeenCalledWith(expect.objectContaining({
       tenderId: 'tender-1', tenderBidId: 'bid-1', awardedAmount: 52000, currency,
     })));
@@ -126,7 +126,7 @@ describe('tender award currency presentation', () => {
   it('submits the tender currency when the saved bid has no currency', async () => {
     render(<TenderAward {...tenderProps} bids={[{ id: 'bid-1' }]} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Recommend' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit Recommendation', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Recommendation' }));
     await waitFor(() => expect(mocks.createAward).toHaveBeenCalledWith(expect.objectContaining({
       awardedAmount: 52000, currency: 'GHS',
     })));
@@ -135,7 +135,7 @@ describe('tender award currency presentation', () => {
   it('keeps the separate create-award entry point and its verification in the saved bid currency', async () => {
     render(<CreateAwardPage />);
     expect(await screen.findAllByText('EUR 52,000.00')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Verify Bidder', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Bidder' }));
     expect(await within(screen.getByRole('dialog')).findByText('EUR 52,000.00')).toBeVisible();
     expect(mocks.createAward).not.toHaveBeenCalled();
   });

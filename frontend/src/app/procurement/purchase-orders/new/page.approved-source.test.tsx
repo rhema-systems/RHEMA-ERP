@@ -51,7 +51,7 @@ describe('contract-first purchase order page', () => {
     fireEvent.keyDown(within(row).getByRole('button', { name: /Actions for/ }), { key: 'ArrowDown' });
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit item' }));
     const editing = (await screen.findByRole('textbox', { name: 'Approved source unit' })).closest('tr')!;
-    const typeSelect = within(editing).getByRole('option', { name: 'Service', exact: true }).closest('select')!;
+    const typeSelect = within(editing).getByRole('option', { name: 'Service' }).closest('select')!;
     fireEvent.change(typeSelect, { target: { value: String(lineType) } });
     fireEvent.click(within(editing).getAllByRole('button')[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }));

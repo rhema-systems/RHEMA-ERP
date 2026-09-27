@@ -27,7 +27,7 @@ public partial class VendorInvoiceService
             if (order.BusinessPartnerId != partner.Id)
                 throw new InvalidOperationException("The purchase order defaults belong to a different Business Partner.");
         }
-        var term = await ResolvePaymentTermAsync(profile.PaymentTermId, "Business Partner AP profile", cancellationToken);
+        var term = await ResolvePaymentTermAsync(profile.PaymentTermId, canonical.Role.RoleType, cancellationToken);
         var defaults = new BusinessPartnerPostingDefaultsDto
         {
             DefaultExpenseAccountId = profile.DefaultExpenseAccountId,

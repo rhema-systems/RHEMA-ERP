@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -64,9 +64,21 @@ export default function CrmQuotesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedQuoteId, setSelectedQuoteId] = useState(requestedQuoteId);
   const [selectedQuote, setSelectedQuote] = useState<CrmQuoteDetailDto | null>(null);
+  const requestedIdRef = useRef(requestedQuoteId);
+  requestedIdRef.current = requestedQuoteId;
+  const detailRequest = useRef(0);
+
+  useEffect(() => {
+    if (requestedQuoteId) {
+      setSelectedQuoteId(requestedQuoteId);
+      setPage(1);
+    }
+  }, [requestedQuoteId]);
+
   const [convertingQuoteId, setConvertingQuoteId] = useState<string | null>(null);
 
   const loadQuotes = async (requestedPage: number = page) => {
+    const requestedIdAtLoad = requestedIdRef.current;
     try {
       setLoading(true);
       const data = await crmService.getQuotes({
@@ -79,6 +91,7 @@ export default function CrmQuotesPage() {
         leadId: scopedLeadId || undefined,
       });
 
+      if (requestedIdAtLoad !== requestedIdRef.current) return;
       setResult(data);
 
       if (requestedQuoteId && requestedPage === 1) {
@@ -99,19 +112,23 @@ export default function CrmQuotesPage() {
   };
 
   const loadQuoteDetail = async (quoteId: string) => {
+    const request = ++detailRequest.current;
+    setSelectedQuote(null);
     if (!quoteId) {
-      setSelectedQuote(null);
+      setDetailLoading(false);
       return;
     }
 
     try {
       setDetailLoading(true);
-      setSelectedQuote(await crmService.getQuote(quoteId));
+      const detail = await crmService.getQuote(quoteId);
+      if (request === detailRequest.current) setSelectedQuote(detail);
     } catch (error: unknown) {
+      if (request !== detailRequest.current) return;
       toast.error(getMessage(error, 'Failed to load CRM quote detail'));
       setSelectedQuote(null);
     } finally {
-      setDetailLoading(false);
+      if (request === detailRequest.current) setDetailLoading(false);
     }
   };
 
@@ -130,6 +147,7 @@ export default function CrmQuotesPage() {
 
   useEffect(() => {
     void loadQuoteDetail(selectedQuoteId);
+    return () => { detailRequest.current++; };
   }, [selectedQuoteId]);
 
   const metrics = useMemo(() => {

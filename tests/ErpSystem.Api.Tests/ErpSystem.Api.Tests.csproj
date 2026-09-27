@@ -66,6 +66,14 @@
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
+    <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
+    <Compile Include="Controllers\GlobalSearchEstateLegalTests.cs" />
+    <Compile Include="Controllers\GlobalSearchSafetyTests.cs" />
+    <Compile Include="Controllers\GlobalSearchAdministrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceRecordSearchTests.cs" />
+    <Compile Include="Services\Procurement\ProcurementRegisterSearchTranslationTests.cs" />
+    <Compile Include="Controllers\Estate\EstateManagedAssetReadTests.cs" />
     <Compile Include="Controllers\Finance\FinancePurchasingOptionalApprovalTests.cs" />
     <!-- Supplier-return ownership is shared with Procurement/Inventory, but Finance must keep
          its legacy mutation endpoints fail-closed until FIN-INT-012/013 producer contracts exist. -->
@@ -237,6 +245,7 @@
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.PartnerDefaults.cs" />
     <Compile Include="Services\Finance\CustomerPostingSettingsFixture.cs" />
     <Compile Include="Services\Finance\CanonicalVendorInvoiceBusinessPartnerTests.cs" />
+    <Compile Include="Services\Finance\CanonicalCustomerProfileReadTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentEvidenceOptionalApprovalTests.cs" />

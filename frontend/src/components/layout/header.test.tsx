@@ -162,8 +162,8 @@ describe('Header layout', () => {
     expect(headerRow).toHaveClass('w-full', 'min-w-0');
     expect(headerRow).not.toHaveClass('container');
 
-    const search = screen.getByPlaceholderText('Search modules and functions...');
-    expect(search.closest('.max-w-sm')).toBeInTheDocument();
+    const search = screen.getByRole('combobox', { name: 'Search across the app' });
+    expect(search.closest('.max-w-2xl')).toBeInTheDocument();
 
     const tenant = screen.getByText('Demo Organization');
     expect(tenant.closest('.ml-auto')).toHaveClass('shrink-0', 'items-center');

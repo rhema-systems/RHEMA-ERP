@@ -11,6 +11,9 @@ namespace ErpSystem.Api.Controllers.QuantitySurvey;
 [Route("api/quantity-survey/variations")]
 public sealed class QuantitySurveyVariationsController(IQuantitySurveyVariationService service) : ControllerBase
 {
+    [HttpGet("search"), Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<IActionResult> Search([FromQuery] string search, CancellationToken token, [FromQuery] int take = 8) =>
+        ExecuteAsync(async () => Ok(await service.SearchAsync(search, take, token)));
     [HttpGet, Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public Task<IActionResult> Workspace([FromQuery] Guid projectId, CancellationToken token) => ExecuteAsync(async () => Ok(await service.GetWorkspaceAsync(projectId, token)));
 

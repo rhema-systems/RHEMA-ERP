@@ -60,6 +60,10 @@ const endpoint = '/ehc/internal/property-enquiries';
 function PropertyEnquiries() {
   const params = useSearchParams();
   const [selectedId, setSelectedId] = useState(params.get('id') || '');
+  const requestedId = params.get('id');
+  useEffect(() => {
+    if (requestedId) setSelectedId(requestedId);
+  }, [requestedId]);
   const [page, setPage] = useState(1);
   const [reply, setReply] = useState('');
   const [handoffDraft, setHandoffDraft] = useState<EstateHandoffDraft>({

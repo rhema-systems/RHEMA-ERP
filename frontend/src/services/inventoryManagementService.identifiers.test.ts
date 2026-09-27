@@ -11,7 +11,7 @@ vi.mock('axios', () => ({
   },
 }));
 
-const mockedAxios = vi.mocked(axios);
+const mockedAxios = vi.mocked(axios, true);
 
 describe('inventory item identifier client', () => {
   beforeEach(() => {

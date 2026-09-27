@@ -5,6 +5,7 @@ namespace ErpSystem.Core.Interfaces.QuantitySurvey;
 
 public interface IQuantitySurveyPaymentCertificateService
 {
+    Task<IReadOnlyList<QuantitySurveyPaymentCertificateDto>> SearchAsync(string search, int take = 8, CancellationToken token = default);
     Task<QuantitySurveyPaymentCertificateLookupsDto> GetLookupsAsync(Guid projectId, CancellationToken token = default);
     Task<IReadOnlyList<QuantitySurveyPaymentCertificateDto>> ListAsync(Guid projectId, CancellationToken token = default);
     Task<QuantitySurveyPaymentCertificateDto> GetAsync(Guid id, CancellationToken token = default);

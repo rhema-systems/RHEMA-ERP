@@ -5572,6 +5572,30 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (!supplier.IsActive || supplier.IsBlacklisted)
                 throw new InvalidOperationException($"Business Partner '{supplier.PartnerName}' is not active for AP payment posting.");
 
+            // First posting must use the approved role/profile captured on this document.
+            // Do not silently substitute a newer profile; historical posted replay and
+            // settlement continue to use their frozen document and Finance evidence.
+            if (!payment.JournalEntryId.HasValue)
+            {
+                var role = await _unitOfWork.Repository<BusinessPartnerRole>()
+                    .GetQueryable(item => item.TenantId == TenantId &&
+                        item.Id == payment.BusinessPartnerRoleId &&
+                        item.BusinessPartnerId == payment.BusinessPartnerId && !item.IsDeleted)
+                    .SingleOrDefaultAsync(cancellationToken);
+                var profile = await _unitOfWork.Repository<BusinessPartnerApProfileVersion>()
+                    .GetQueryable(item => item.TenantId == TenantId &&
+                        item.Id == payment.BusinessPartnerApProfileVersionId &&
+                        item.BusinessPartnerRoleId == payment.BusinessPartnerRoleId && !item.IsDeleted)
+                    .Include(item => item.WithholdingDefaults)
+                    .SingleOrDefaultAsync(cancellationToken);
+                var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAp(
+                    supplier, role,
+                    profile is null ? Array.Empty<BusinessPartnerApProfileVersion>() : new[] { profile },
+                    payment.PaymentDate);
+                if (!readiness.IsReady)
+                    throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
+            }
+
             return supplier;
         }
 

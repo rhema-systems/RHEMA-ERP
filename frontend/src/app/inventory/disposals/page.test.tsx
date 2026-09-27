@@ -1,4 +1,6 @@
 import React from 'react';
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/inventory/disposals', useRouter: () => ({ replace: vi.fn() }) }));
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,7 +20,7 @@ vi.mock('@/services/inventoryDisposalService', () => ({ inventoryDisposalService
 } }));
 vi.mock('@/services/inventoryManagementService', () => ({ inventoryManagementService: {
   getWarehouses: async () => [{ id: 'warehouse', name: 'Project Demo Warehouse' }],
-  getInventoryByWarehouse: mocks.warehouseItems, getWarehouseLocations: mocks.locations,
+  getWarehouseInventoryItems: mocks.warehouseItems, getWarehouseLocations: mocks.locations,
 } }));
 vi.mock('@/services/document-management.service', () => ({ documentManagementService: {
   getRecords: mocks.records, getRecord: mocks.record,

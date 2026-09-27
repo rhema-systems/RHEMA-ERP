@@ -24,21 +24,21 @@ beforeEach(() => {
 afterEach(cleanup);
 async function open(posted = false) {
   const changed = vi.fn(); render(<LandedCostSupplierInvoices voucher={{ ...voucher, status: posted ? 'Posted' : 'Allocated' }} onCreated={changed} />);
-  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Prepare supplier invoices', exact: true })));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Prepare supplier invoices' })));
   return changed;
 }
 describe('landed-cost invoice preparation', () => {
   it('requires receiving permission and prior allocation', () => {
     api.allowed = false; const { unmount } = render(<LandedCostSupplierInvoices voucher={voucher} onCreated={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Prepare supplier invoices', exact: true })).toBeDisabled(); unmount(); api.allowed = true;
+    expect(screen.getByRole('button', { name: 'Prepare supplier invoices' })).toBeDisabled(); unmount(); api.allowed = true;
     render(<LandedCostSupplierInvoices voucher={{ ...voucher, status: 'Draft' }} onCreated={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Prepare supplier invoices', exact: true })).toBeDisabled(); expect(api.prepare).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Prepare supplier invoices' })).toBeDisabled(); expect(api.prepare).not.toHaveBeenCalled();
   });
   it('opens a draft preparation review with no tax fields and makes no mutation', async () => {
     await open(); expect(screen.getByText('Carrier · CARRIER-1 · GHS 360.00')).toBeInTheDocument();
     expect(screen.queryByLabelText('Invoice charge 1 tax treatment')).not.toBeInTheDocument();
     expect(api.prepare).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel', exact: true })); expect(api.prepare).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); expect(api.prepare).not.toHaveBeenCalled();
   });
   it('prepares drafts without posting or assigning tax', async () => {
     const changed = await open();

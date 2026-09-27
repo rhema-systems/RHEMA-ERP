@@ -119,6 +119,17 @@ public sealed class QuantitySurveyPaymentCertificateService(
         };
     }
 
+    public async Task<IReadOnlyList<QuantitySurveyPaymentCertificateDto>> SearchAsync(string search, int take = 8, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var query = Query().Where(value => (value.CertificateNumber != null && value.CertificateNumber.Contains(term)) || value.Title.Contains(term))
+            .OrderByDescending(value => value.IssueDate).ThenBy(value => value.Id);
+        var rows = await QuantitySurveyAuthorizedSearch.ReadAsync(query, value => value.ProjectId,
+            projectService.HasProjectAccessAsync, take, token);
+        return rows.Select(Map).ToList();
+    }
+
     public async Task<IReadOnlyList<QuantitySurveyPaymentCertificateDto>> ListAsync(Guid projectId, CancellationToken token = default)
     {
         await RequireProjectAsync(projectId);

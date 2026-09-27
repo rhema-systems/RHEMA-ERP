@@ -33,6 +33,122 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed partial class ApInvoicePostingMigrationTests
 {
+    [Theory]
+    [InlineData("profile")]
+    [InlineData("invoice")]
+    [InlineData("line")]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    public async Task ExpensePosting_UsesExplicitLineThenInvoiceThenCapturedProfile_NeverLegacySupplier(string precedence)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var profile = await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == fixture.Invoice.BusinessPartnerApProfileVersionId);
+        var profileExpense = SeedAccount(db, tenantId, "6101", AccountType.Expense);
+        var headerExpense = SeedAccount(db, tenantId, "6102", AccountType.Expense);
+        var legacyExpense = SeedAccount(db, tenantId, "6103", AccountType.Expense);
+        profile.DefaultExpenseAccountId = profileExpense.Id;
+        fixture.Supplier.DefaultExpenseAccountId = legacyExpense.Id;
+        fixture.Invoice.ExpenseAccountId = precedence == "profile" ? null : headerExpense.Id;
+        var line = fixture.Invoice.LineItems.Single();
+        line.GLAccountId = precedence == "line" ? fixture.ExpenseAccount.Id : null;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var posted = await service.PostAsync(fixture.Invoice.Id);
+
+        var actual = await db.AccountTransactions.SingleAsync(x => x.JournalEntryId == posted.JournalEntryId && x.TransactionTag == "AP-Expense");
+        actual.AccountId.Should().Be(precedence == "line" ? fixture.ExpenseAccount.Id : precedence == "invoice" ? headerExpense.Id : profileExpense.Id);
+        actual.AccountId.Should().NotBe(legacyExpense.Id);
+        if (precedence == "profile")
+        {
+            profile.DefaultExpenseAccountId = headerExpense.Id;
+            await db.SaveChangesAsync();
+            var changedDefaultReplay = await service.PostAsync(fixture.Invoice.Id);
+            changedDefaultReplay.JournalEntryId.Should().Be(posted.JournalEntryId);
+            profile.IsDeleted = true; // Historical source evidence still supports exact replay.
+            fixture.Supplier.DefaultExpenseAccountId = headerExpense.Id;
+            await db.SaveChangesAsync();
+            var replay = await service.PostAsync(fixture.Invoice.Id);
+            replay.JournalEntryId.Should().Be(posted.JournalEntryId);
+            (await db.JournalEntries.CountAsync(x => x.SourceDocumentType == "VendorInvoice")).Should().Be(1);
+        }
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    public async Task ExpensePosting_RejectsMissingCapturedProfileExpense_EvenWhenLegacyDefaultExists()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        (await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == fixture.Invoice.BusinessPartnerApProfileVersionId))
+            .DefaultExpenseAccountId = null;
+        fixture.Invoice.ExpenseAccountId = null;
+        fixture.Invoice.LineItems.Single().GLAccountId = null;
+        fixture.Supplier.DefaultExpenseAccountId.Should().NotBeNull();
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        Func<Task> post = () => service.PostAsync(fixture.Invoice.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("No expense account specified for AP line*");
+
+        (await db.FinancePostingEvents.CountAsync(x => x.SourceDocumentId == fixture.Invoice.Id)).Should().Be(0);
+        (await db.JournalEntries.CountAsync(x => x.SourceDocumentId == fixture.Invoice.Id)).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("missing-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("draft-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("expired-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("future-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("cross-tenant-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("wrong-role-profile", "AP_PROFILE_REQUIRED")]
+    [InlineData("inactive-role", "AP_ROLE_INACTIVE")]
+    [InlineData("wrong-role-type", "AP_ROLE_REQUIRED")]
+    [Trait("Batch", "FinanceGoLive-APInvoicePosting")]
+    public async Task FirstPosting_RequiresTheCapturedApprovedApProfile_ForTheDocumentDate(string defect, string code)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var document = fixture.Invoice;
+        var role = await db.Set<BusinessPartnerRole>().SingleAsync(x => x.Id == document.BusinessPartnerRoleId);
+        var profile = await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == document.BusinessPartnerApProfileVersionId);
+        // An unrelated approved replacement must not silently replace captured authority.
+        db.Set<BusinessPartnerApProfileVersion>().Add(new BusinessPartnerApProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = role.Id,
+            VersionNumber = 99, Status = BusinessPartnerFinanceProfileStatus.Approved,
+            EffectiveFrom = new DateTime(2020, 1, 1)
+        });
+        switch (defect)
+        {
+            case "missing-profile": document.BusinessPartnerApProfileVersionId = Guid.NewGuid(); break;
+            case "draft-profile": profile.Status = BusinessPartnerFinanceProfileStatus.Draft; break;
+            case "expired-profile": profile.EffectiveTo = document.InvoiceDate.AddDays(-1); break;
+            case "future-profile": profile.EffectiveFrom = document.InvoiceDate.AddDays(1); break;
+            case "cross-tenant-profile": profile.TenantId = Guid.NewGuid(); break;
+            case "wrong-role-profile": profile.BusinessPartnerRoleId = Guid.NewGuid(); break;
+            case "inactive-role": role.Status = BusinessPartnerRoleStatus.Inactive; break;
+            case "wrong-role-type": role.RoleType = BusinessPartnerRoleType.Customer; break;
+        }
+        await db.SaveChangesAsync();
+        var beforeJournals = await db.JournalEntries.CountAsync();
+        var beforeTransactions = await db.AccountTransactions.CountAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        Func<Task> post = () => service.PostAsync(document.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(code + ":*");
+
+        (await db.JournalEntries.CountAsync()).Should().Be(beforeJournals);
+        (await db.AccountTransactions.CountAsync()).Should().Be(beforeTransactions);
+        (await db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "VendorInvoice" && x.SourceDocumentId == document.Id))
+            .Should().Be(0);
+    }
+
     [Fact]
     public async Task DraftDistribution_ShouldUseThePostingTaxEngineAndConfiguredInputTaxAccount()
     {
@@ -970,6 +1086,10 @@ public sealed partial class ApInvoicePostingMigrationTests
         var (service, _) = CreateService(db, tenantId);
 
         var first = await service.PostAsync(fixture.Invoice.Id);
+        var capturedProfile = await db.Set<BusinessPartnerApProfileVersion>()
+            .SingleAsync(x => x.Id == fixture.Invoice.BusinessPartnerApProfileVersionId);
+        capturedProfile.Status = BusinessPartnerFinanceProfileStatus.Superseded;
+        await db.SaveChangesAsync();
         var second = await service.PostAsync(fixture.Invoice.Id);
 
         second.JournalEntryId.Should().Be(first.JournalEntryId);

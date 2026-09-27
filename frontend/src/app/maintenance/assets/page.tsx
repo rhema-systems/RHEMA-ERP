@@ -1,5 +1,8 @@
 'use client';
 
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
+import maintenanceApiService from '@/services/maintenanceApiService';
+
 import React, { useRef, useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1313,6 +1316,14 @@ function AssetsPageContent() {
 
   return (
     <div className="space-y-6">
+      <GlobalSearchRecordOpener<Asset>
+        load={async id => mapAssets([await maintenanceApiService.getAssetById(id)])[0]}
+        onOpen={asset => {
+          setSelectedAsset(asset);
+          setAssetViewTab('details');
+          setIsViewDialogOpen(true);
+        }}
+      />
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>

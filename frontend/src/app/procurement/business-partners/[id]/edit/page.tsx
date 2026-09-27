@@ -1,8 +1,7 @@
 'use client';
 
 import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
-import type { BusinessPartnerReceivablesDefaults } from '@/services/businessPartnerService';
-import { BusinessPartnerReceivablesFields } from '@/components/procurement/BusinessPartnerReceivablesFields';
+import { BusinessPartnerCurrentAccountsPanel } from '@/components/procurement/BusinessPartnerCurrentAccountsPanel';
 
 
 import { useEffect, useState } from 'react';
@@ -39,11 +38,7 @@ import {
   type PriceListDto,
 } from '@/services/priceListService';
 import {
-  emptyBusinessPartnerPostingDefaults,
-  PartnerAccountsFields,
   PartnerCatalogueNotice,
-  PartnerOptionsFields,
-  PartnerTaxDefaultsFields,
   useBusinessPartnerPostingCatalogues,
 } from '@/components/procurement/BusinessPartnerPostingFields';
 import { BusinessPartnerFinanceProfilesPanel } from '@/components/finance/BusinessPartnerFinanceProfilesPanel';
@@ -78,7 +73,7 @@ export default function EditBusinessPartnerPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState(
-    searchParams.get('tab') === 'finance-profiles' ? 'finance-profiles' : 'details'
+    ['finance-profiles', 'accounts-payable', 'accounts-receivable'].includes(searchParams.get('tab') ?? '') ? searchParams.get('tab')! : 'details'
   );
   const [partner, setPartner] = useState<BusinessPartnerDetailDto | null>(null);
   const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
@@ -87,10 +82,6 @@ export default function EditBusinessPartnerPage() {
   const [allPartners, setAllPartners] = useState<BusinessPartnerDto[]>([]);
   const [formData, setFormData] = useState<UpdateBusinessPartnerDto>(emptyForm);
   const [creditLimit, setCreditLimit] = useState('');
-  const [receivablesDefaults, setReceivablesDefaults] = useState<BusinessPartnerReceivablesDefaults>({ defaultArAccountId: null });
-  const [postingDefaults, setPostingDefaults] = useState(
-    emptyBusinessPartnerPostingDefaults
-  );
   const catalogues = useBusinessPartnerPostingCatalogues(partner?.partnerType);
 
   useEffect(() => {
@@ -132,14 +123,9 @@ export default function EditBusinessPartnerPage() {
           priceList: data.priceList || '',
           parentId: data.parentId || '',
         });
-        setReceivablesDefaults(data.receivablesDefaults ?? { defaultArAccountId: null });
         setCreditLimit(
           data.creditLimit == null ? '' : String(data.creditLimit)
         );
-        setPostingDefaults({
-          ...emptyBusinessPartnerPostingDefaults(),
-          ...data.postingDefaults,
-        });
       })
       .catch((error) => {
         if (current)
@@ -272,10 +258,12 @@ export default function EditBusinessPartnerPage() {
         <Card>
           <CardContent className="p-4">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="h-auto w-full flex-wrap justify-start">
                 <TabsTrigger value="details">Details</TabsTrigger>
                 <TabsTrigger value="contact">Contact</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
+                {hasPayables && <TabsTrigger value="accounts-payable">Accounts Payable</TabsTrigger>}
+                {hasCustomerRole(formData.partnerType) && <TabsTrigger value="accounts-receivable">Accounts Receivable</TabsTrigger>}
                 <TabsTrigger value="finance-profiles">Finance Profiles</TabsTrigger>
               </TabsList>
               <div className="h-[min(620px,calc(100vh-250px))] min-h-80 overflow-y-auto px-1">
@@ -468,6 +456,12 @@ export default function EditBusinessPartnerPage() {
                 <TabsContent value="finance-profiles" className="py-3">
                   <BusinessPartnerFinanceProfilesPanel businessPartnerId={id} paymentTerms={paymentTerms} withholdingTaxes={catalogues.withholdingTaxes} />
                 </TabsContent>
+                {hasPayables && <TabsContent value="accounts-payable" className="py-3">
+                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="payables" />
+                </TabsContent>}
+                {hasCustomerRole(formData.partnerType) && <TabsContent value="accounts-receivable" className="py-3">
+                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="receivables" />
+                </TabsContent>}
               </div>
             </Tabs>
           </CardContent>

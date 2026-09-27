@@ -1,6 +1,7 @@
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -67,6 +68,139 @@ public sealed class CanonicalVendorInvoiceBusinessPartnerTests
         var request = fixture.Request(partner.Id);
         request.BusinessPartnerRoleId = supplierRole.Id;
         (await fixture.Service.CreateAsync(request)).BusinessPartnerRoleId.Should().Be(supplierRole.Id);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Update_accounting_date_captures_effective_profile_and_preserves_explicit_choices(bool explicitTerms)
+    {
+        await using var fixture = new Fixture();
+        var (partner, role, oldProfile) = await fixture.AddReadyPartnerAsync();
+        var oldTerm = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "OLD30", Name = "Old 30 days",
+            DueDays = 30, ApplicableTo = "Supplier"
+        };
+        var newTerm = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "NEW60", Name = "New 60 days",
+            DueDays = 60, DiscountPercent = 2m, DiscountDays = 10, ApplicableTo = "Supplier"
+        };
+        oldProfile.EffectiveTo = new DateTime(2026, 9, 30);
+        oldProfile.PaymentTermId = oldTerm.Id;
+        var nextProfile = fixture.Profile(role.Id);
+        nextProfile.VersionNumber = 2;
+        nextProfile.EffectiveFrom = new DateTime(2026, 10, 1);
+        nextProfile.PaymentTermId = newTerm.Id;
+        fixture.Context.Set<PaymentTerm>().AddRange(oldTerm, newTerm);
+        fixture.Context.Set<BusinessPartnerApProfileVersion>().Add(nextProfile);
+        await fixture.Context.SaveChangesAsync();
+        var request = fixture.Request(partner.Id);
+        var explicitAccountId = Guid.NewGuid();
+        request.LineItems.Single().GLAccountId = explicitAccountId;
+        var created = await fixture.Service.CreateAsync(request);
+        created.BusinessPartnerApProfileVersionId.Should().Be(oldProfile.Id);
+        var newDate = new DateTime(2026, 10, 2);
+
+        var updated = await fixture.Service.UpdateAsync(new VendorInvoiceUpdateDto
+        {
+            Id = created.Id, InvoiceDate = newDate, CurrencyCode = "GHS",
+            PaymentTermId = explicitTerms ? oldTerm.Id : null,
+            ApplySupplierWithholdingDefaults = false,
+            LineItems =
+            [
+                new VendorInvoiceLineItemCreateDto
+                {
+                    Id = created.LineItems.Single().Id, Description = "Changed accounting date",
+                    Quantity = 1m, UnitPrice = 125m, GLAccountId = explicitAccountId,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            ]
+        });
+
+        var expectedTerm = explicitTerms ? oldTerm : newTerm;
+        updated.BusinessPartnerRoleId.Should().Be(role.Id);
+        updated.BusinessPartnerApProfileVersionId.Should().Be(nextProfile.Id);
+        updated.PaymentTermId.Should().Be(expectedTerm.Id);
+        updated.PaymentTermsDays.Should().Be(expectedTerm.DueDays);
+        updated.DueDate.Should().Be(newDate.AddDays(expectedTerm.DueDays));
+        updated.EarlyPaymentDiscountPercentage.Should().Be(expectedTerm.DiscountPercent);
+        updated.LineItems.Single().GLAccountId.Should().Be(explicitAccountId);
+        var persisted = await fixture.Context.VendorInvoices.AsNoTracking().SingleAsync(x => x.Id == created.Id);
+        persisted.BusinessPartnerApProfileVersionId.Should().Be(nextProfile.Id);
+    }
+
+    [Theory]
+    [InlineData(BusinessPartnerRoleType.Supplier, "Supplier", true)]
+    [InlineData(BusinessPartnerRoleType.Supplier, "Vendor", true)]
+    [InlineData(BusinessPartnerRoleType.Contractor, "Contractor", true)]
+    [InlineData(BusinessPartnerRoleType.Contractor, "All", true)]
+    [InlineData(BusinessPartnerRoleType.Supplier, "Supplier", false)]
+    [InlineData(BusinessPartnerRoleType.Supplier, "Vendor", false)]
+    [InlineData(BusinessPartnerRoleType.Contractor, "Contractor", false)]
+    public async Task Defaults_create_and_update_accept_terms_for_the_actual_ap_role(
+        BusinessPartnerRoleType roleType, string applicability, bool profileTerm)
+    {
+        await using var fixture = new Fixture();
+        var (partner, role, profile) = await fixture.AddReadyPartnerAsync();
+        role.RoleType = roleType;
+        var term = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "ROLE45", Name = "Role 45 days",
+            DueDays = 45, ApplicableTo = applicability, IsDefault = !profileTerm
+        };
+        profile.PaymentTermId = profileTerm ? term.Id : null;
+        fixture.Context.Set<PaymentTerm>().Add(term);
+        await fixture.Context.SaveChangesAsync();
+
+        var defaults = await fixture.Service.GetSupplierDefaultsAsync(partner.Id,
+            invoiceDate: new DateTime(2026, 9, 24), businessPartnerRoleId: role.Id);
+        var created = await fixture.Service.CreateAsync(fixture.Request(partner.Id));
+        var updated = await fixture.Service.UpdateAsync(new VendorInvoiceUpdateDto
+        {
+            Id = created.Id, InvoiceDate = new DateTime(2026, 9, 25), CurrencyCode = "GHS",
+            PaymentTermId = term.Id, ApplySupplierWithholdingDefaults = false,
+            LineItems =
+            [
+                new VendorInvoiceLineItemCreateDto
+                {
+                    Id = created.LineItems.Single().Id, Description = "Role applicable terms",
+                    Quantity = 1m, UnitPrice = 125m, TaxTreatment = TaxTreatment.OutOfScope
+                }
+            ]
+        });
+
+        defaults!.PaymentTermsDays.Should().Be(45);
+        created.PaymentTermId.Should().Be(term.Id);
+        created.PaymentTermsDays.Should().Be(45);
+        updated.PaymentTermId.Should().Be(term.Id);
+        updated.PaymentTermsDays.Should().Be(45);
+        updated.BusinessPartnerRoleId.Should().Be(role.Id);
+    }
+
+    [Theory]
+    [InlineData(BusinessPartnerRoleType.Supplier, "Customer")]
+    [InlineData(BusinessPartnerRoleType.Supplier, "Contractor")]
+    [InlineData(BusinessPartnerRoleType.Contractor, "Vendor")]
+    public async Task Create_rejects_payment_terms_for_a_different_role(BusinessPartnerRoleType roleType, string applicability)
+    {
+        await using var fixture = new Fixture();
+        var (partner, role, profile) = await fixture.AddReadyPartnerAsync();
+        role.RoleType = roleType;
+        var term = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Code = "WRONGROLE", Name = "Other role",
+            DueDays = 45, ApplicableTo = applicability
+        };
+        profile.PaymentTermId = term.Id;
+        fixture.Context.Set<PaymentTerm>().Add(term);
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.CreateAsync(fixture.Request(partner.Id));
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not applicable*");
+        fixture.Context.VendorInvoices.Should().BeEmpty();
     }
 
     private sealed class Fixture : IAsyncDisposable

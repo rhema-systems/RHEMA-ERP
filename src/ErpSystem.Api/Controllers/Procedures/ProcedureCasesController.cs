@@ -24,6 +24,15 @@ public sealed class ProcedureCasesController : ControllerBase
         return Ok(new { success = true, data = cases });
     }
 
+    [HttpGet("search")]
+    public async Task<IActionResult> SearchCases(
+        [FromQuery] string module, [FromQuery] string search, [FromQuery] int take = 5,
+        CancellationToken cancellationToken = default)
+    {
+        var cases = await _procedureCaseService.SearchCasesAsync(module, search, take, cancellationToken);
+        return Ok(new { success = true, data = cases });
+    }
+
     [HttpGet("paged")]
     public async Task<IActionResult> GetCasesPage(
         [FromQuery] string? module,

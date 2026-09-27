@@ -17,6 +17,8 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// </summary>
         Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default);
 
+        Task<IReadOnlyList<FinanceRecordSearchDto>> SearchAsync(string? search, int take = 5, CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Retrieves journal entries filtered at the database query.
         /// </summary>

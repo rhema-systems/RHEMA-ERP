@@ -357,7 +357,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var paymentTerm = await ResolvePaymentTermAsync(
                 dto.PaymentTermId ?? apPartner.Profile.PaymentTermId,
-                "Business Partner AP profile",
+                apPartner.Role.RoleType,
                 cancellationToken);
             var paymentTermsDays = capturedPartnerDefaults.PaymentTermsDays ?? paymentTerm?.DueDays ?? dto.PaymentTermsDays;
             var earlyPaymentDiscountPercentage = paymentTerm?.DiscountPercent ?? dto.EarlyPaymentDiscountPercentage;
@@ -596,7 +596,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var supplier = await ResolveExistingSupplierForInvoiceAsync(invoice.BusinessPartnerId, cancellationToken);
             var editPartner = await ResolveCanonicalApPartnerAsync(invoice.BusinessPartnerId, invoice.BusinessPartnerRoleId, dto.InvoiceDate, cancellationToken);
-            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? editPartner.Profile.PaymentTermId, "Business Partner AP profile", cancellationToken);
+            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? editPartner.Profile.PaymentTermId, editPartner.Role.RoleType, cancellationToken);
             var paymentTermsDays = paymentTerm?.DueDays ?? dto.PaymentTermsDays;
             var earlyPaymentDiscountPercentage = paymentTerm?.DiscountPercent ?? dto.EarlyPaymentDiscountPercentage;
             var earlyPaymentDiscountDueDate = paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0
@@ -630,6 +630,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.SupplierInvoiceNumber = dto.SupplierInvoiceNumber;
             invoice.PurchaseOrderId = dto.PurchaseOrderId;
             invoice.InvoiceDate = dto.InvoiceDate;
+            invoice.BusinessPartnerRoleId = editPartner.Role.Id;
+            invoice.BusinessPartnerApProfileVersionId = editPartner.Profile.Id;
             invoice.ReceivedDate = dto.ReceivedDate;
             invoice.DueDate = dto.DueDate ?? dto.InvoiceDate.AddDays(paymentTermsDays);
             invoice.CurrencyCode = governedExchangeRate?.TransactionCurrency ?? dto.CurrencyCode;
@@ -3424,6 +3426,30 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (!supplier.IsActive || supplier.IsBlacklisted)
                 throw new InvalidOperationException($"Business Partner '{supplier.PartnerName}' is not active for AP posting.");
 
+            // First posting must use the approved role/profile captured on this document.
+            // Do not silently substitute a newer profile; historical posted replay and
+            // settlement continue to use their frozen document and Finance evidence.
+            if (!invoice.JournalEntryId.HasValue)
+            {
+                var role = await _unitOfWork.Repository<BusinessPartnerRole>()
+                    .GetQueryable(item => item.TenantId == TenantId &&
+                        item.Id == invoice.BusinessPartnerRoleId &&
+                        item.BusinessPartnerId == invoice.BusinessPartnerId && !item.IsDeleted)
+                    .SingleOrDefaultAsync(cancellationToken);
+                var profile = await _unitOfWork.Repository<BusinessPartnerApProfileVersion>()
+                    .GetQueryable(item => item.TenantId == TenantId &&
+                        item.Id == invoice.BusinessPartnerApProfileVersionId &&
+                        item.BusinessPartnerRoleId == invoice.BusinessPartnerRoleId && !item.IsDeleted)
+                    .Include(item => item.WithholdingDefaults)
+                    .SingleOrDefaultAsync(cancellationToken);
+                var readiness = BusinessPartnerFinanceProfilePolicy.ResolveAp(
+                    supplier, role,
+                    profile is null ? Array.Empty<BusinessPartnerApProfileVersion>() : new[] { profile },
+                    invoice.InvoiceDate);
+                if (!readiness.IsReady)
+                    throw new InvalidOperationException($"{readiness.Code}: {readiness.Message}");
+            }
+
             return supplier;
         }
 
@@ -3543,7 +3569,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             var accountId = isInventoryLine
                 ? line.GLAccountId ?? itemInventoryAccount ?? settings.ControlAccountInventoryId
                     ?? throw new InvalidOperationException("Inventory or clearing account is not configured for AP invoice line posting.")
-                : line.GLAccountId ?? invoice.ExpenseAccountId ?? supplier.DefaultExpenseAccountId
+                : line.GLAccountId ?? invoice.ExpenseAccountId
+                    ?? await ResolveCapturedProfileExpenseAccountAsync(invoice, line, cancellationToken)
                     ?? throw new InvalidOperationException($"No expense account specified for AP line '{line.Description}'.");
 
             await ResolvePostingAccountAsync(
@@ -3555,6 +3582,55 @@ namespace ErpSystem.Api.Services.Finance.AP
                 cancellationToken);
 
             return accountId;
+        }
+
+        private async Task<Guid?> ResolveCapturedProfileExpenseAccountAsync(
+            VendorInvoice invoice, VendorInvoiceLineItem line, CancellationToken cancellationToken)
+        {
+            // The posted source is authoritative when no saved distribution needs its
+            // pre-split basis. A subsequently changed profile must not redirect a replay.
+            if (invoice.JournalEntryId.HasValue && string.IsNullOrWhiteSpace(invoice.DistributionDraftJson))
+                return await ResolveOriginalExpenseAccountAsync(invoice, line, cancellationToken);
+
+            var capturedDefault = await _unitOfWork.Repository<BusinessPartnerApProfileVersion>()
+                .GetQueryable(profile => profile.TenantId == TenantId && !profile.IsDeleted &&
+                    profile.Id == invoice.BusinessPartnerApProfileVersionId &&
+                    profile.BusinessPartnerRoleId == invoice.BusinessPartnerRoleId &&
+                    profile.BusinessPartnerRole.BusinessPartnerId == invoice.BusinessPartnerId &&
+                    profile.BusinessPartnerRole.TenantId == TenantId && !profile.BusinessPartnerRole.IsDeleted &&
+                    (invoice.JournalEntryId.HasValue ||
+                        (profile.Status == BusinessPartnerFinanceProfileStatus.Approved &&
+                         profile.EffectiveFrom.Date <= invoice.InvoiceDate.Date &&
+                         (!profile.EffectiveTo.HasValue || profile.EffectiveTo.Value.Date >= invoice.InvoiceDate.Date))))
+                .Select(profile => profile.DefaultExpenseAccountId)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (capturedDefault.HasValue || !invoice.JournalEntryId.HasValue)
+                return capturedDefault;
+
+            // GL split accounts cannot reconstruct the saved pre-distribution basis.
+            throw new InvalidOperationException("AP_INVOICE_DISTRIBUTION_HISTORY_REQUIRED: the original distribution basis is unavailable. Finance must review and repair its historical source evidence before retrying; do not reset a posted distribution.");
+        }
+
+        private async Task<Guid> ResolveOriginalExpenseAccountAsync(
+            VendorInvoice invoice, VendorInvoiceLineItem line, CancellationToken cancellationToken)
+        {
+            var journalExists = await _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(journal => journal.TenantId == TenantId && !journal.IsDeleted && !journal.IsReversed &&
+                    journal.Id == invoice.JournalEntryId && journal.SourceDocumentId == invoice.Id &&
+                    journal.SourceDocumentType == "VendorInvoice" && journal.PostingStatus == "Posted")
+                .AnyAsync(cancellationToken);
+            if (!journalExists)
+                throw new InvalidOperationException("AP_INVOICE_SOURCE_LINEAGE_UNAVAILABLE: the original posted expense journal is missing or reversed.");
+            var tag = ResolveLineTag(line);
+            var originalAccounts = await _unitOfWork.Repository<AccountTransaction>()
+                .GetQueryable(transaction => transaction.TenantId == TenantId && !transaction.IsDeleted &&
+                    transaction.JournalEntryId == invoice.JournalEntryId && transaction.SourceDocumentLineId == line.Id &&
+                    transaction.PostingStatus == "Posted" && transaction.TransactionTag == tag &&
+                    transaction.DebitAmount > 0m && transaction.CreditAmount == 0m)
+                .Select(transaction => transaction.AccountId).Distinct().ToListAsync(cancellationToken);
+            if (originalAccounts.Count != 1)
+                throw new InvalidOperationException("AP_INVOICE_SOURCE_LINEAGE_UNAVAILABLE: the original expense account is missing or ambiguous.");
+            return originalAccounts[0];
         }
 
         private async Task<Account> ResolvePostingAccountAsync(
@@ -4576,8 +4652,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             };
         }
 
-        private async Task<PaymentTerm?> ResolvePaymentTermAsync(Guid? paymentTermId, string applicableTo, CancellationToken cancellationToken)
+        private async Task<PaymentTerm?> ResolvePaymentTermAsync(Guid? paymentTermId, BusinessPartnerRoleType roleType, CancellationToken cancellationToken)
         {
+            var applicableTo = roleType.ToString();
+            var acceptsVendorAlias = roleType == BusinessPartnerRoleType.Supplier;
             if (!paymentTermId.HasValue || paymentTermId.Value == Guid.Empty)
             {
                 return await _unitOfWork.Repository<PaymentTerm>()
@@ -4586,7 +4664,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         !t.IsDeleted &&
                         t.IsActive &&
                         t.IsDefault &&
-                        (t.ApplicableTo == "All" || t.ApplicableTo == applicableTo || t.ApplicableTo == "Vendor"))
+                        (t.ApplicableTo == "All" || t.ApplicableTo == applicableTo || (acceptsVendorAlias && t.ApplicableTo == "Vendor")))
                     .OrderBy(t => t.ApplicableTo == applicableTo ? 0 : 1)
                     .ThenBy(t => t.DisplayOrder)
                     .FirstOrDefaultAsync(cancellationToken);
@@ -4605,7 +4683,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
 
             if (!string.Equals(paymentTerm.ApplicableTo, "All", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(paymentTerm.ApplicableTo, applicableTo, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(paymentTerm.ApplicableTo, applicableTo, StringComparison.OrdinalIgnoreCase) &&
+                !(acceptsVendorAlias && string.Equals(paymentTerm.ApplicableTo, "Vendor", StringComparison.OrdinalIgnoreCase)))
             {
                 throw new InvalidOperationException($"Payment term '{paymentTerm.Code}' is not applicable to {applicableTo} transactions.");
             }

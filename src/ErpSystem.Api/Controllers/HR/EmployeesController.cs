@@ -313,6 +313,7 @@ public class EmployeesController : ControllerBase
 
     // NEW ENDPOINT: paged employees for Blazor grids / server-side paging.
     [HttpPost("paged")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(PagedResult<EmployeeDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<PagedResult<EmployeeDto>>> GetPaged([FromBody] EmployeeSearchDto search, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)

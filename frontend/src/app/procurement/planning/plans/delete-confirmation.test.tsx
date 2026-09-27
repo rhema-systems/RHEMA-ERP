@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { commonService, marketAnalysisService, procurementBudgetService } from '@/services/procurementPlanningService';
 import { businessPartnerService } from '@/services/businessPartnerService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
 
 import ProcurementPlansPage from './page';
 import EditProcurementPlanPage from './[id]/edit/page';
@@ -30,6 +31,7 @@ vi.mock('@/services/procurementPlanningService', () => ({
 }));
 vi.mock('@/services/businessPartnerService', () => ({ businessPartnerService: { getAllPartnersForDropdown: vi.fn().mockResolvedValue([]) } }));
 vi.mock('@/services/inventoryManagementService', () => ({ inventoryManagementService: { getUnitsOfMeasure: vi.fn().mockResolvedValue([]) } }));
+vi.mock('@/services/hr/organization-unit.service', () => ({ organizationUnitService: { getSummary: vi.fn().mockResolvedValue([]) } }));
 vi.mock('../components/FiscalYearSelect', () => ({ FiscalYearSelect: () => <div>FY2026</div> }));
 
 const item = {
@@ -39,7 +41,7 @@ const item = {
 };
 const plan = {
   id: 'plan-1', planNumber: 'PP-2026-TEST', title: 'Test operations plan',
-  departmentId: 'ops', departmentName: 'Operations', fiscalYear: 2026,
+  organizationUnitId: 'ops', organizationUnitName: 'Operations', departmentName: 'Operations', fiscalYear: 2026,
   planningCycle: 'Annual', planStartDate: '2026-09-05', planEndDate: '2026-12-31',
   planDurationYears: 1, totalEstimatedBudget: 100, approvedBudget: 0,
   status: 'Draft', currency: 'GHS', createdAt: '2026-09-05', itemCount: 1, items: [item],
@@ -47,11 +49,17 @@ const plan = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(organizationUnitService.getSummary).mockResolvedValue([]);
   vi.mocked(commonService.getDepartments).mockResolvedValue([]);
   vi.mocked(commonService.getInventoryItems).mockResolvedValue([]);
   vi.mocked(procurementBudgetService.getAvailableBudgetsForLinking).mockResolvedValue([]);
-  vi.mocked(procurementBudgetService.getBudgetById).mockResolvedValue({ allocations: [] } as Awaited<ReturnType<typeof procurementBudgetService.getBudgetById>>);
-  vi.mocked(marketAnalysisService.getAnalyses).mockResolvedValue({ items: [] } as Awaited<ReturnType<typeof marketAnalysisService.getAnalyses>>);
+  vi.mocked(procurementBudgetService.getBudgetById).mockResolvedValue({
+    id: 'budget-1', budgetCode: 'BUD-2026-001', title: 'Operations budget', fiscalYear: 2026,
+    allocatedAmount: 100, utilizedAmount: 0, committedAmount: 0, remainingAmount: 100,
+    currency: 'GHS', status: 'Approved', controlLevel: 'Strict', warningThresholdPercent: 80,
+    utilizationPercent: 0, createdAt: '2026-09-01', allocations: [], revisions: [],
+  });
+  vi.mocked(marketAnalysisService.getAnalyses).mockResolvedValue({ items: [], totalCount: 0, page: 1, pageSize: 20, totalPages: 0 });
   vi.mocked(businessPartnerService.getAllPartnersForDropdown).mockResolvedValue([]);
   vi.mocked(inventoryManagementService.getUnitsOfMeasure).mockResolvedValue([]);
   service.getPlans.mockResolvedValue({ items: [plan], totalPages: 1 });
@@ -85,7 +93,7 @@ describe.each(surfaces)('$name application confirmation', (surface) => {
   it('requires explicit confirmation and cancel does not delete', async () => {
     const dialog = await openDelete(surface);
     expect(surface.api).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel', exact: true }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: surface.title })).not.toBeInTheDocument());
     expect(surface.api).not.toHaveBeenCalled();
   });
@@ -96,12 +104,12 @@ describe.each(surfaces)('$name application confirmation', (surface) => {
     surface.api.mockImplementationOnce(() => new Promise<void>((resolvePromise) => { finish = resolvePromise; }));
     service.getPlans.mockResolvedValue({ items: [], totalPages: 1 });
     service.getPlanById.mockResolvedValue({ ...plan, items: [] });
-    const confirm = within(dialog).getByRole('button', { name: surface.confirm, exact: true });
+    const confirm = within(dialog).getByRole('button', { name: surface.confirm });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
     expect(surface.api).toHaveBeenCalledExactlyOnceWith(...surface.args);
     expect(within(dialog).getByRole('button', { name: 'Please wait...' })).toBeDisabled();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close', exact: true }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
     expect(screen.getByRole('dialog', { name: surface.title })).toBeInTheDocument();
     await act(async () => finish());
     await waitFor(() => expect(screen.queryByRole('dialog', { name: surface.title })).not.toBeInTheDocument());
@@ -112,13 +120,13 @@ describe.each(surfaces)('$name application confirmation', (surface) => {
     const dialog = await openDelete(surface);
     const message = 'The plan is no longer a draft. (PLAN_NOT_DRAFT)';
     surface.api.mockRejectedValueOnce(new Error(message));
-    fireEvent.click(within(dialog).getByRole('button', { name: surface.confirm, exact: true }));
+    fireEvent.click(within(dialog).getByRole('button', { name: surface.confirm }));
     await waitFor(() => expect(within(dialog).getByRole('alert')).toHaveTextContent(message));
     expect(screen.getByRole('dialog', { name: surface.title })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: surface.confirm, exact: true })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: surface.confirm })).toBeEnabled();
     expect(surface.api).toHaveBeenCalledExactlyOnceWith(...surface.args);
     expect(toast.success).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole('button', { name: surface.confirm, exact: true }));
+    fireEvent.click(within(dialog).getByRole('button', { name: surface.confirm }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: surface.title })).not.toBeInTheDocument());
     expect(surface.api).toHaveBeenCalledTimes(2);
     expect(toast.success).toHaveBeenCalled();
@@ -132,7 +140,7 @@ it('does not open another item confirmation while a committed deletion is refres
   fireEvent.click(within(await screen.findByRole('row', { name: /Disposable test item/ })).getByRole('button', { name: 'Delete item' }));
   let finishRefresh!: (value: typeof plan) => void;
   service.getPlanById.mockImplementationOnce(() => new Promise((resolvePromise) => { finishRefresh = resolvePromise; }));
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete item', exact: true }));
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete item' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   fireEvent.click(within(screen.getByRole('row', { name: /Retained item/ })).getByRole('button', { name: 'Delete item' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -144,7 +152,7 @@ it('does not re-offer item deletion when only the post-delete refresh fails', as
   const surface = surfaces[1];
   const dialog = await openDelete(surface);
   service.getPlanById.mockRejectedValueOnce(new Error('Read unavailable'));
-  fireEvent.click(within(dialog).getByRole('button', { name: surface.confirm, exact: true }));
+  fireEvent.click(within(dialog).getByRole('button', { name: surface.confirm }));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: surface.title })).not.toBeInTheDocument());
   expect(service.removeItem).toHaveBeenCalledExactlyOnceWith('plan-1', 'item-1');
   expect(toast.error).toHaveBeenCalledWith('Item deleted, but the plan could not be refreshed. Reload the page before continuing.');

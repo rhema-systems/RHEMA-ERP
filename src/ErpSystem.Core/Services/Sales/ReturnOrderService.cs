@@ -1127,7 +1127,7 @@ public class ReturnOrderService : IReturnOrderService
                     e.SourceDocumentId == originalInvoice.Id &&
                     e.PostingAction == "Post" &&
                     e.PostingStatus == "Posted" &&
-                    e.JournalEntryId.HasValue &&
+                    e.JournalEntryId == originalInvoice.JournalEntryId &&
                     !e.IsDeleted)
                 .AnyAsync(cancellationToken);
 
@@ -1149,9 +1149,7 @@ public class ReturnOrderService : IReturnOrderService
         var exchangeRate = NormalizeExchangeRate(creditNote.ExchangeRate);
         var accountCache = new Dictionary<Guid, Account>();
 
-        var arAccountId = creditNote.BusinessPartner.DefaultArAccountId
-            ?? settings.ControlAccountArId
-            ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
+        var arAccountId = await ResolveCreditNoteArControlAccountAsync(creditNote, settings, cancellationToken);
         await ResolveCreditNotePostingAccountAsync(arAccountId, "AR control account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
         var salesReturnsAccountId = creditNote.BusinessPartner.CustomerSalesReturnsAccountId ?? settings.DiscountAllowedAccountId
@@ -1411,6 +1409,33 @@ public class ReturnOrderService : IReturnOrderService
             .FirstOrDefaultAsync(cancellationToken);
 
         return settings ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
+    }
+
+    private async Task<Guid> ResolveCreditNoteArControlAccountAsync(
+        CreditNote creditNote, FinanceSettings settings, CancellationToken cancellationToken)
+    {
+        if (!creditNote.OriginalInvoiceId.HasValue)
+            return settings.ControlAccountArId
+                ?? throw new InvalidOperationException("AR control account is not configured for this tenant.");
+
+        // A linked credit must clear the original receivable, even if Finance settings or
+        // obsolete partner defaults changed after invoicing. Missing lineage is not a fallback.
+        var invoice = creditNote.OriginalInvoice!;
+        var journalExists = await _unitOfWork.Repository<JournalEntry>().GetQueryable(j =>
+            j.TenantId == creditNote.TenantId && j.Id == invoice.JournalEntryId &&
+            j.SourceDocumentId == invoice.Id && j.SourceDocumentType == "CustomerInvoice" &&
+            j.PostingStatus == "Posted" && !j.IsReversed && !j.IsDeleted).AnyAsync(cancellationToken);
+        if (!journalExists)
+            throw new InvalidOperationException("AR_CREDIT_NOTE_SOURCE_LINEAGE_UNAVAILABLE: the original invoice posted journal is missing or reversed.");
+
+        var controls = await _unitOfWork.Repository<AccountTransaction>().GetQueryable(t =>
+            t.TenantId == creditNote.TenantId && t.JournalEntryId == invoice.JournalEntryId &&
+            !t.IsDeleted && t.PostingStatus == "Posted" && t.TransactionTag == "AR-Control" &&
+            t.DebitAmount > 0m && t.CreditAmount == 0m)
+            .Select(t => t.AccountId).ToListAsync(cancellationToken);
+        if (controls.Count != 1)
+            throw new InvalidOperationException("AR_CREDIT_NOTE_SOURCE_LINEAGE_UNAVAILABLE: the original invoice AR-control transaction is missing or ambiguous.");
+        return controls[0];
     }
 
     private async Task<Account> ResolveCreditNotePostingAccountAsync(

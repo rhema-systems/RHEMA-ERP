@@ -5,6 +5,7 @@ namespace ErpSystem.Core.Interfaces.QuantitySurvey;
 
 public interface IQuantitySurveyValuationWorksheetService
 {
+    Task<IReadOnlyList<QuantitySurveyValuationWorksheetDto>> SearchAsync(string search, int take = 8, CancellationToken token = default);
     Task<QuantitySurveyValuationLookupsDto> GetLookupsAsync(Guid projectId, CancellationToken token = default);
     Task<QuantitySurveyValuationWorksheetDto> GetAsync(Guid interimValuationId, Guid? projectBoqVersionId, CancellationToken token = default);
     Task<QuantitySurveyValuationWorksheetDto> SaveAsync(Guid interimValuationId, SaveQuantitySurveyValuationWorksheetRequest request, string correlationId, CancellationToken token = default);

@@ -64,6 +64,17 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
     private string ActorRoles => string.Join(",", currentUser.Roles.Where(value => !string.IsNullOrWhiteSpace(value))
         .Select(value => value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value));
 
+    public async Task<IReadOnlyList<QuantitySurveyValuationWorksheetDto>> SearchAsync(string search, int take = 8, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var query = Query().Where(value => (value.ProjectInterimValuation.ValuationNumber != null && value.ProjectInterimValuation.ValuationNumber.Contains(term)) || value.ProjectInterimValuation.Title.Contains(term))
+            .OrderByDescending(value => value.ProjectInterimValuation.ValuationDate).ThenBy(value => value.Id);
+        var rows = await QuantitySurveyAuthorizedSearch.ReadAsync(query, value => value.ProjectId,
+            projectService.HasProjectAccessAsync, take, token);
+        return rows.Select(Map).ToList();
+    }
+
     public async Task<QuantitySurveyValuationLookupsDto> GetLookupsAsync(Guid projectId, CancellationToken token = default)
     {
         if (projectId == Guid.Empty) throw Validation("Select a project.");

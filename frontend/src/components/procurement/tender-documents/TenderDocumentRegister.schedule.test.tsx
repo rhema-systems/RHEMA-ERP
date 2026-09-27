@@ -16,7 +16,11 @@ it('retains original and effective opening times and the governed opening-date h
       reason: 'Audited unpublished schedule correction', integrityHash: 'change-integrity-hash',
       recipients: [], allowedActions: [], blockedReasons: [], previousOpeningScheduledAtUtc: previousOpening, newOpeningScheduledAtUtc: nextOpening }],
   } as unknown as Register;
-  render(<TenderDocumentRegister readiness={{ sourceType: 'Tender', sourceReference: 'TND-001', ready: true, issuanceCount: 0, pendingAcknowledgementCount: 0, blockedReasons: [] } as ProcurementTenderDocumentReadiness} register={register} />);
+  const readiness: ProcurementTenderDocumentReadiness = {
+    sourceType: 'Tender', sourceId: 'tender-1', sourceReference: 'TND-001', hasRegister: true,
+    ready: true, issuanceCount: 0, pendingAcknowledgementCount: 0, pendingChangeCount: 0, blockedReasons: [], allowedActions: [],
+  };
+  render(<TenderDocumentRegister readiness={readiness} register={register} />);
   expect(screen.getByText(/^Original opening time:/).parentElement).toHaveTextContent(new Date(previousOpening).toLocaleString());
   expect(screen.getByText(/^Effective opening time:/).parentElement).toHaveTextContent(new Date(nextOpening).toLocaleString());
   expect(screen.getByText(/^Previous opening time:/).parentElement).toHaveTextContent(new Date(previousOpening).toLocaleString());

@@ -22,6 +22,12 @@ public sealed class InventoryDisposalsController : ControllerBase
         _logger = logger;
     }
 
+    [HttpGet("search")]
+    public Task<ActionResult<IReadOnlyList<InventoryDisposalDto>>> Search(
+        [FromQuery] string search, [FromQuery] int take = 8, CancellationToken cancellationToken = default) =>
+        ExecuteAsync<IReadOnlyList<InventoryDisposalDto>>(async () =>
+            Ok(await _service.SearchAsync(search, take, cancellationToken)));
+
     [HttpGet]
     public Task<ActionResult<IReadOnlyList<InventoryDisposalDto>>> Get(
         [FromQuery] InventoryDisposalStatus? status = null,

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PurchaseOrderPage from './purchase-orders/[id]/page';
 import ReceiptPage from './receipts/[id]/page';
-import { financePurchaseOrderService } from '@/services/financePurchaseOrderService';
+import { financePurchaseOrderService, type FinancePurchaseOrder, type FinancePurchaseOrderReceipt } from '@/services/financePurchaseOrderService';
 import { workflowApiService } from '@/services/workflow-api.service';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -15,18 +15,18 @@ vi.mock('@/services/financePurchaseOrderService', () => ({ financePurchaseOrderS
   submitReceiptForApproval: vi.fn(), approvePurchaseOrder: vi.fn(), rejectPurchaseOrder: vi.fn(), convertToVendorInvoice: vi.fn(),
 } }));
 
-const order = { id: 'record', orderNumber: 'FPO-TEST', vendorId: 'supplier', vendorName: 'Supplier',
+const order: FinancePurchaseOrder = { id: 'record', orderNumber: 'FPO-TEST', businessPartnerId: 'supplier', vendorName: 'Supplier',
   orderDate: '2026-09-12', status: 1, approvalRequired: true, currencyCode: 'GHS', exchangeRate: 1,
   totalAmount: 100, items: [] };
-const receipt = { id: 'record', financePurchaseOrderId: 'po', receiptNumber: 'FGRV-TEST',
+const receipt: FinancePurchaseOrderReceipt = { id: 'record', financePurchaseOrderId: 'po', receiptNumber: 'FGRV-TEST',
   receiptDate: '2026-09-12', status: 1, statusName: 'Draft', approvalRequired: true, items: [] };
 const pages = [
   { type: 'FinancePurchaseOrder', Page: PurchaseOrderPage, label: 'Finalize', submit: financePurchaseOrderService.submitPurchaseOrderForApproval,
-    get: financePurchaseOrderService.getPurchaseOrderById, record: order, completed: 2 },
+    completed: 2 },
   { type: 'FinancePurchaseOrderReceipt', Page: ReceiptPage, label: 'Complete', submit: financePurchaseOrderService.submitReceiptForApproval,
-    get: financePurchaseOrderService.getReceiptById, record: receipt, completed: 3 },
+    completed: 3 },
 ];
-describe.each(pages)('$type optional approval actions', ({ type, Page, label, submit, get, record, completed }) => {
+describe.each(pages)('$type optional approval actions', ({ type, Page, label, submit, completed }) => {
   beforeEach(() => {
     vi.stubGlobal('React', React);
     vi.clearAllMocks();
@@ -36,7 +36,8 @@ describe.each(pages)('$type optional approval actions', ({ type, Page, label, su
       entityType: type, entityId: 'record', approvalRequired: false, hasActiveInstance: false,
       canCurrentUserApprove: false, pendingApprovers: [],
     });
-    vi.mocked(submit).mockResolvedValue({ ...record, status: completed, approvalRequired: false } as never);
+    vi.mocked(financePurchaseOrderService.submitPurchaseOrderForApproval).mockResolvedValue({ ...order, status: 2, approvalRequired: false });
+    vi.mocked(financePurchaseOrderService.submitReceiptForApproval).mockResolvedValue({ ...receipt, status: 3, approvalRequired: false });
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
   const open = async () => {
@@ -69,7 +70,11 @@ describe.each(pages)('$type optional approval actions', ({ type, Page, label, su
     expect(submit).not.toHaveBeenCalled();
   });
   it('labels a saved direct completion without claiming that a person approved it', async () => {
-    vi.mocked(get).mockResolvedValue({ ...record, status: completed, statusName: 'Approved', approvalRequired: false } as never);
+    if (type === 'FinancePurchaseOrder') {
+      vi.mocked(financePurchaseOrderService.getPurchaseOrderById).mockResolvedValue({ ...order, status: completed, approvalRequired: false });
+    } else {
+      vi.mocked(financePurchaseOrderService.getReceiptById).mockResolvedValue({ ...receipt, status: completed, statusName: 'Approved', approvalRequired: false });
+    }
     await open();
     expect((await screen.findAllByText(type === 'FinancePurchaseOrder' ? 'Ready for receiving' : 'Ready for invoice')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Approved By')).not.toBeInTheDocument();
