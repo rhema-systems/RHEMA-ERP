@@ -186,7 +186,13 @@ public class TeamObjective : TenantEntity
     public string? Measure { get; set; }
 
     /// <summary>The number to reach, where the measure has one.</summary>
-    [Column(TypeName = "decimal(18,2)")]
+    /// <remarks>
+    /// decimal(18,4), because <c>ApplicationDbContext.ConfigureDecimalPrecision</c> runs after this
+    /// attribute and sets every decimal whose name is not money-like to 18,4. This attribute read
+    /// 18,2 until 2026-09-27 and was silently ignored, while the migration that created the table
+    /// trusted it — see <c>AlignTeamObjectiveTargetValuePrecision</c>.
+    /// </remarks>
+    [Column(TypeName = "decimal(18,4)")]
     public decimal? TargetValue { get; set; }
 
     /// <summary>What the target is counted in — "incidents", "%", "days".</summary>
