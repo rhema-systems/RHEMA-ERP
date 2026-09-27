@@ -31,7 +31,7 @@ try {
     }
     $result = @(Invoke-CanonicalMigrationPreflight)
     $coverage = @($result | Where-Object { $_ -like 'GUARD_COVERAGE|*' })
-    if ($script:probeCalls -ne 3 -or $coverage.Count -ne 20 -or @($coverage | Select-Object -Unique).Count -ne 20) {
+    if ($script:probeCalls -ne 4 -or $coverage.Count -ne 22 -or @($coverage | Select-Object -Unique).Count -ne 22) {
         throw 'Successful preflight did not execute all probes and report exact coverage.'
     }
     $script:probeCalls=0; $script:blockProbe=$true; $blocked=$false
@@ -39,7 +39,7 @@ try {
         if ($_.Exception.Message -notlike '*Test retained transaction=3*') { throw }
         $blocked=$true
     }
-    if (-not $blocked -or $script:probeCalls -ne 3) { throw 'Retained data did not fail closed after all probes.' }
+    if (-not $blocked -or $script:probeCalls -ne 4) { throw 'Retained data did not fail closed after all probes.' }
 
     # Verify a changed migration cannot inherit a previously reviewed coverage ID.
     $fixture = Join-Path $testRoot 'fixture'
@@ -50,6 +50,11 @@ try {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $probe.sqlFile) -Destination (Join-Path $fixture 'scripts\vps')
         foreach($migration in $probe.migrations) {
             Copy-Item -LiteralPath (Join-Path $repositoryRoot "src\ErpSystem.Data\Migrations\$($migration.id).cs") -Destination (Join-Path $fixture 'src\ErpSystem.Data\Migrations')
+            foreach($guard in @($migration.guardSources)) {
+                if($null -ne $guard) {
+                    Copy-Item -LiteralPath (Join-Path $repositoryRoot "src\ErpSystem.Data\Migrations\$($guard.file)") -Destination (Join-Path $fixture 'src\ErpSystem.Data\Migrations')
+                }
+            }
         }
     }
     $firstId = $manifest.probes[0].migrations[0].id
@@ -60,7 +65,16 @@ try {
         $blocked=$true
     }
     if (-not $blocked) { throw 'Changed migration was not rejected.' }
-    Write-Host 'PASS: packaged PowerShell helper, all 20 coverage IDs, retained-data rejection, and stale-review rejection.'
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot "src\ErpSystem.Data\Migrations\$firstId.cs") -Destination (Join-Path $fixture 'src\ErpSystem.Data\Migrations') -Force
+    $guardFile = 'InventoryIssueOptionalApprovalGuards.cs'
+    Add-Content -LiteralPath (Join-Path $fixture "src\ErpSystem.Data\Migrations\$guardFile") -Value '// Unreviewed guard change'
+    $blocked=$false
+    try { New-RhemaVpsPreflightHelper -RepositoryRoot $fixture -OutputPath $output | Out-Null } catch {
+        if ($_.Exception.Message -notlike '*guard InventoryIssueOptionalApprovalGuards.cs changed since its preflight review*') { throw }
+        $blocked=$true
+    }
+    if (-not $blocked) { throw 'Changed helper guard was not rejected.' }
+    Write-Host 'PASS: packaged PowerShell helper, all 22 coverage IDs, retained-data rejection, and migration/helper stale-review rejection.'
 
     if ($SqlServer) {
         if (-not $CanonicalDatabase -or -not $LegacyDatabase) { throw 'Both test database names are required.' }

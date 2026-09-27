@@ -771,7 +771,8 @@ function Compare-MigrationState {
     $migrationRoot = Join-Path $RepositoryRoot 'src\ErpSystem.Data\Migrations'
     foreach ($migrationId in $missing) {
         $source = Get-Content (Join-Path $migrationRoot "$migrationId.cs") -Raw
-        if ($source -match 'THROW\s+\d+' -and $migrationId -notin $guardCoverage) {
+        if (($source -match 'THROW\s+\d+' -or $source -match '\b\w+Guards?\.Install\s*\(') -and
+            $migrationId -notin $guardCoverage) {
             $uncoveredGuards += $migrationId
         }
     }

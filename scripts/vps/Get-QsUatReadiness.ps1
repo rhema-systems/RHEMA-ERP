@@ -1,12 +1,17 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][ValidatePattern('^RhemaERP_[A-Za-z0-9_]{1,119}$')][string]$ExpectedDatabase,
-    [string]$OutputDirectory=(Join-Path $PSScriptRoot '..\..\artifacts\qs-uat'),
+    [string]$OutputDirectory,
     [uri]$PublicBaseUrl='https://63.141.230.56'
 )
 # Run on the VPS. Reads only the existing API service configuration and database.
 # Does not create users, change passwords, modify business records or restart services.
 $ErrorActionPreference='Stop'
+# Windows PowerShell 5.1 does not populate PSScriptRoot while binding -File
+# parameter defaults. Resolve the default only after the script body starts.
+if([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory=Join-Path $PSScriptRoot '..\..\artifacts\qs-uat'
+}
 $connection=$null;$command=$null
 try {
     $serviceValues=@{}

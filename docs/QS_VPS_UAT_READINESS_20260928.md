@@ -44,6 +44,14 @@ Status: **VPS scenario inventory and live QS readiness verification pending.** N
 
 ## Read-only VPS evidence command
 
+For a release upgrade followed by this report, run
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-QsUatVps.ps1`
+from the updated VPS checkout. This wrapper runs the report only after the normal
+deployment succeeds. It uses the existing deployment preflight; normal `-DryRun`
+is a current-release parity check and is not a prerequisite for pending migrations.
+Windows PowerShell 5.1 `-File` report invocation and failure sequencing have dedicated
+regressions, including default output path resolution after parameter binding.
+
 After this follow-up is available in the release checkout, run this on the VPS. The explicit database below is the name from the user's successful fresh cutover; the script refuses to run if the current API service points elsewhere.
 
 ```powershell
