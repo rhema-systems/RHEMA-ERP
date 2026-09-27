@@ -38,10 +38,10 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import { LEAVE_STATUS_OPTIONS, type LeaveStatus } from '@/types/hr/leave-request';
 
 const ALL = '__all__';
-const currentYear = new Date().getFullYear();
 
 /** Saves a blob the browser already has, rather than navigating to a URL that carries no token. */
 function saveBlob(blob: Blob, filename: string) {
@@ -59,8 +59,14 @@ export default function LeaveRegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
 
-  const [from, setFrom] = useState(`${currentYear}-01-01`);
-  const [to, setTo] = useState(`${currentYear}-12-31`);
+  // ⚠ Leave settings audit 2, L-95: the current LEAVE year, which is the calendar year only while
+  // it starts in January. The user's dates are kept apart from the default, so a late answer still
+  // moves the default and never overrides a choice (see useLeaveYear).
+  const leaveYear = useLeaveYear();
+  const [chosenFrom, setFrom] = useState<string | null>(null);
+  const [chosenTo, setTo] = useState<string | null>(null);
+  const from = chosenFrom ?? leaveYear.startDate;
+  const to = chosenTo ?? leaveYear.endDate;
   const [status, setStatus] = useState(ALL);
   const [leaveTypeId, setLeaveTypeId] = useState(ALL);
   const [employeeId, setEmployeeId] = useState<string | null>(null);

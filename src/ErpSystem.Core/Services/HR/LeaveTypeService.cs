@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -31,7 +32,10 @@ public class LeaveTypeService : ILeaveTypeService
         IGenericRepository<Employee> employeeRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
-        ILogger<LeaveTypeService> logger)
+        ILogger<LeaveTypeService> logger,
+        ILeaveBalanceRecalculationService recalculation,
+        IHrAudienceResolver audience,
+        ILeaveYearContext leaveYear)
     {
         _leaveTypeRepository = leaveTypeRepository;
         _leaveSubTypeRepository = leaveSubTypeRepository;
@@ -42,7 +46,14 @@ public class LeaveTypeService : ILeaveTypeService
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _recalculation = recalculation;
+        _audience = audience;
+        _leaveYear = leaveYear;
     }
+
+    private readonly ILeaveBalanceRecalculationService _recalculation;
+    private readonly IHrAudienceResolver _audience;
+    private readonly ILeaveYearContext _leaveYear;
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
@@ -373,10 +384,42 @@ public class LeaveTypeService : ILeaveTypeService
         entity.TenantId = tenantId;
         await _allocationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return (await _allocationRepository.GetQueryable()
+        var updated = await ReResolveCurrentYearAsync(entity.LeaveTypeId, (entity.EffectiveFrom, entity.EffectiveTo));
+        var result = (await _allocationRepository.GetQueryable()
             .Include(a => a.LeaveType)
             .Include(a => a.StaffLevel)
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == entity.Id))!.ToDto();
+        result.BalancesUpdated = updated;
+        return result;
+    }
+
+    /// <summary>
+    /// Re-resolves the current leave year's balances of a leave type after one of its allocations
+    /// changed, when the allocation — as it was or as it is — is in force during that year.
+    /// Returns how many balances moved (null when the year was not reached).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Leave settings audit 2, L-89. A balance stores its entitlement, so an allocation saved or
+    /// edited reached nobody until an administrator ran <i>Repair entitlements</i> — the booking
+    /// check went on reading the old figure. Saving is the deliberate act on the rule, so it now does
+    /// what the repair would, for the CURRENT leave year only: a closed year's balances may already
+    /// have been carried from, and rewriting them automatically would change history — the repair,
+    /// with its preview, stays the way to do that.
+    /// </remarks>
+    private async Task<int?> ReResolveCurrentYearAsync(Guid leaveTypeId, params (DateOnly From, DateOnly? To)[] spans)
+    {
+        var startMonth = await _leaveYear.StartMonthAsync();
+        var year = await _leaveYear.CurrentYearAsync();
+        var yearStart = LeaveYear.StartOf(year, startMonth);
+        var yearEnd = LeaveYear.EndOf(year, startMonth);
+        if (!spans.Any(s => s.From <= yearEnd && (s.To is null || s.To >= yearStart)))
+            return null;
+
+        var repair = await _recalculation.RepairEntitlementsAsync(year, leaveTypeId);
+        _logger.LogInformation(
+            "Allocation change on leave type {LeaveTypeId}: {Changed} of {Examined} balance(s) for {Year} re-resolved",
+            leaveTypeId, repair.BalancesChanged, repair.BalancesExamined, year);
+        return repair.BalancesChanged;
     }
 
     public async Task<LeaveCategoryAllocationDto> UpdateAllocationAsync(Guid id, CreateLeaveCategoryAllocationDto dto)
@@ -384,6 +427,8 @@ public class LeaveTypeService : ILeaveTypeService
         var entity = await GetOwnedAllocationAsync(id);
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = entity.TenantId;
+        // What it covered before the edit counts too: narrowing it away from this year changes it.
+        var before = (entity.LeaveTypeId, entity.EffectiveFrom, entity.EffectiveTo);
 
         entity.LeaveTypeId = dto.LeaveTypeId;
         // Always the whole type (round 5, lane N2); there is no sub-type column any more (L-76).
@@ -394,18 +439,27 @@ public class LeaveTypeService : ILeaveTypeService
 
         await _allocationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
-        return (await _allocationRepository.GetQueryable()
+        var updated = await ReResolveCurrentYearAsync(entity.LeaveTypeId,
+            (entity.EffectiveFrom, entity.EffectiveTo), (before.EffectiveFrom, before.EffectiveTo));
+        if (before.LeaveTypeId != entity.LeaveTypeId)
+            await ReResolveCurrentYearAsync(before.LeaveTypeId, (before.EffectiveFrom, before.EffectiveTo));
+        var result = (await _allocationRepository.GetQueryable()
             .Include(a => a.LeaveType)
             .Include(a => a.StaffLevel)
             .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == id))!.ToDto();
+        result.BalancesUpdated = updated;
+        return result;
     }
 
     public async Task DeleteAllocationAsync(Guid id)
     {
         var entity = await GetOwnedAllocationAsync(id);
+        var span = (entity.EffectiveFrom, entity.EffectiveTo);
 
         await _allocationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+        // Removed, it no longer grants what it did (L-89): the year's balances follow.
+        await ReResolveCurrentYearAsync(entity.LeaveTypeId, span);
     }
 
     // ─── Eligibility Rules ───────────────────────────────────────────────────
@@ -429,6 +483,7 @@ public class LeaveTypeService : ILeaveTypeService
     {
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = GetTenantId();
+        await RequireValidRuleAsync(dto, tenantId);
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         await _eligibilityRepository.AddAsync(entity);
@@ -439,6 +494,59 @@ public class LeaveTypeService : ILeaveTypeService
             .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .FirstOrDefaultAsync(e => e.TenantId == tenantId && e.Id == entity.Id))!.ToDto();
+    }
+
+    /// <summary>
+    /// A rule names what it admits, and only that (leave settings audit 2, L-94).
+    /// </summary>
+    /// <remarks>
+    /// Nothing was validated on the server: a position rule with no position was saved and matched
+    /// nobody, so the type silently admitted no one through it; a gender rule carrying a unit ignored
+    /// the unit. A level, unit or position rule may add a gender (an AND within the rule).
+    /// </remarks>
+    private async Task RequireValidRuleAsync(CreateLeaveTypeEligibilityDto dto, Guid tenantId)
+    {
+        switch (dto.EligibilityType)
+        {
+            case LeaveEligibilityType.Gender:
+                if (dto.Gender is null)
+                    throw new InvalidOperationException("A gender rule must name the gender it admits.");
+                if (dto.OrganizationLevelId is not null || dto.OrganizationUnitId is not null || dto.PositionId is not null)
+                    throw new InvalidOperationException(
+                        "A gender rule names a gender only. To admit one gender within a level, a unit or a position, "
+                        + "make it that kind of rule and add the gender to it.");
+                return;
+            case LeaveEligibilityType.OrganizationLevel:
+                if (dto.OrganizationUnitId is not null || dto.PositionId is not null)
+                    throw new InvalidOperationException("An organisation level rule names a level (and may add a gender), nothing else.");
+                if (dto.OrganizationLevelId is not Guid levelId)
+                    throw new InvalidOperationException("An organisation level rule must name the level it admits.");
+                if (!await _unitOfWork.Repository<OrganizationLevel>().GetQueryable()
+                        .AnyAsync(l => l.Id == levelId && l.TenantId == tenantId && !l.IsDeleted))
+                    throw new InvalidOperationException("That organisation level is not one of this organisation's.");
+                return;
+            case LeaveEligibilityType.OrganizationUnit:
+                if (dto.OrganizationLevelId is not null || dto.PositionId is not null)
+                    throw new InvalidOperationException("A unit rule names a unit (and may add a gender), nothing else.");
+                if (dto.OrganizationUnitId is not Guid unitId)
+                    throw new InvalidOperationException("A unit rule must name the unit it admits.");
+                if (!await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                        .AnyAsync(u => u.Id == unitId && u.TenantId == tenantId && !u.IsDeleted))
+                    throw new InvalidOperationException("That unit is not one of this organisation's.");
+                return;
+            case LeaveEligibilityType.Position:
+                if (dto.OrganizationLevelId is not null || dto.OrganizationUnitId is not null)
+                    throw new InvalidOperationException("A position rule names a position (and may add a gender), nothing else.");
+                if (dto.PositionId is not Guid positionId)
+                    throw new InvalidOperationException("A position rule must name the position it admits.");
+                if (!await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+                        .AnyAsync(pos => pos.Id == positionId && pos.TenantId == tenantId && !pos.IsDeleted))
+                    throw new InvalidOperationException("That position is not one of this organisation's.");
+                return;
+            default:
+                throw new InvalidOperationException(
+                    "Choose what the rule admits: a gender, an organisation level, a unit or a position.");
+        }
     }
 
     public async Task DeleteEligibilityRuleAsync(Guid id)
@@ -633,10 +741,28 @@ public class LeaveTypeService : ILeaveTypeService
                 + "eligibility if the year's leave should be available at once.");
     }
 
+    /// <summary>
+    /// ⚠ <b>No accrual is no policy</b> (leave settings audit 2, L-92).
+    /// </summary>
+    /// <remarks>
+    /// A "None" policy was offered, shown in force, accrued nothing — and, being the type's one
+    /// active policy, blocked adding a real one. Leave granted in full needs no policy (the type then
+    /// grants its entitlement) or a full grant on eligibility. A row already carrying it stays
+    /// editable, so it can be moved to a real frequency; choosing it anew is refused.
+    /// </remarks>
+    private static void RefuseNoAccrual(AccrualFrequency frequency)
+    {
+        if (frequency == AccrualFrequency.None)
+            throw new InvalidOperationException(
+                "An accrual frequency of None accrues nothing, so it is not a policy. For leave available in full, "
+                + "remove the policy — the type then grants its entitlement — or choose a full grant on eligibility.");
+    }
+
     public async Task<LeaveAccrualPolicyDto> CreateAccrualPolicyAsync(CreateLeaveAccrualPolicyDto dto)
     {
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = GetTenantId();
+        RefuseNoAccrual(dto.Frequency);
         RefusePerPayPeriod(dto.Frequency);
         RefuseIncrementalAnnual(dto.Frequency, dto.Mode);
         // A policy saved switched off takes nobody's place (lane N1), so only an active one meets
@@ -666,6 +792,8 @@ public class LeaveTypeService : ILeaveTypeService
         // or retiring the option would strand the policies that have it — which is the opposite of
         // what "the enum value stays" is for.
         if (dto.Frequency != entity.Frequency) RefusePerPayPeriod(dto.Frequency);
+        // The same courtesy for None (L-92): refused only when the edit makes it so.
+        if (dto.Frequency != entity.Frequency) RefuseNoAccrual(dto.Frequency);
         // The same courtesy for incremental Annual: refused only when the edit makes it so.
         if (dto.Frequency != entity.Frequency || dto.Mode != entity.Mode)
             RefuseIncrementalAnnual(dto.Frequency, dto.Mode);
@@ -727,8 +855,16 @@ public class LeaveTypeService : ILeaveTypeService
         if (employee == null || employee.TenantId != tenantId)
             return false;
 
+        // ⚠ Leave settings audit 2, L-93: a unit rule admits the unit and every unit beneath it, as HR's
+        // own audience rule does — it matched the exact unit only, so a rule for a directorate admitted
+        // nobody in its departments. The employee's unit and every unit above it, read once.
+        var unitChain = employee.OrganizationUnitId is Guid unitId
+                        && rules.Any(r => r.EligibilityType == LeaveEligibilityType.OrganizationUnit)
+            ? (await _audience.UnitAncestryAsync(tenantId, unitId)).ToHashSet()
+            : new HashSet<Guid>();
+
         // Employee is eligible when they match at least one rule
-        return rules.Any(rule => MatchesRule(rule, employee));
+        return rules.Any(rule => MatchesRule(rule, employee, unitChain));
     }
 
     /// <summary>
@@ -739,7 +875,7 @@ public class LeaveTypeService : ILeaveTypeService
     /// scope, and — if a Gender qualifier is also set on the rule — the employee's gender
     /// must additionally match (AND logic within the rule).
     /// </summary>
-    private static bool MatchesRule(LeaveTypeEligibility rule, Employee employee)
+    private static bool MatchesRule(LeaveTypeEligibility rule, Employee employee, IReadOnlySet<Guid> unitChain)
     {
         bool scopeMatches = rule.EligibilityType switch
         {
@@ -752,8 +888,8 @@ public class LeaveTypeService : ILeaveTypeService
                 employee.OrganizationLevelId == rule.OrganizationLevelId,
 
             LeaveEligibilityType.OrganizationUnit =>
-                rule.OrganizationUnitId.HasValue &&
-                employee.OrganizationUnitId == rule.OrganizationUnitId,
+                rule.OrganizationUnitId is Guid ruleUnit &&
+                (employee.OrganizationUnitId == ruleUnit || unitChain.Contains(ruleUnit)),
 
             LeaveEligibilityType.Position =>
                 rule.PositionId.HasValue &&

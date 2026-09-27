@@ -21,6 +21,7 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
 import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import { RelieverChooser, clashLine, toRosterRelievers } from '@/components/hr/leave/LeavePlanRelievers';
 import {
   CancelPlanDialog,
@@ -128,9 +129,6 @@ function PlanRelieverFields({ form }: { form: any }) {
   );
 }
 
-const currentYear = new Date().getFullYear();
-const years = [currentYear + 1, currentYear, currentYear - 1];
-
 const schema = z
   .object({
     // Carried so an edit can exclude the plan itself from its own reliever check.
@@ -201,7 +199,12 @@ export default function LeavePlansPage() {
   const { canWrite } = useLeavePermissions();
   const currentEmployeeId = (user?.employeeId as string | undefined) ?? null;
 
-  const [year, setYear] = useState(String(currentYear));
+  // ⚠ Leave settings audit 2, L-95: the current leave year, not the calendar year; the choice is
+  // kept apart so a late answer moves the default and never overrides it (see useLeaveYear).
+  const { currentYear } = useLeaveYear();
+  const years = [currentYear + 1, currentYear, currentYear - 1];
+  const [chosenYear, setYear] = useState<string | null>(null);
+  const year = chosenYear ?? String(currentYear);
   const [openPlanId, setOpenPlanId] = useState<string | null>(searchParams.get('planId'));
   const [suggestFor, setSuggestFor] = useState<LeavePlan | null>(null);
   const [rejectFor, setRejectFor] = useState<LeavePlan | null>(null);

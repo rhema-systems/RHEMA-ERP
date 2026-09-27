@@ -1,9 +1,9 @@
 # Leave settings that do what they say — the second audit, and pay to Finance
 
-> **Status (2026-09-27): slices A and B BUILT — L-73 to L-86 closed; slice C next.** The user agreed
-> the whole of it on 2026-09-27 ("I agree. proceed."), and widened P3 during slice B (benefit payment
-> and other earning are pay lines). The live record is § 8 at the bottom: one entry per slice. ⚠ One
-> deviation in slice B is the user's to confirm (L-83, § 8).
+> **Status (2026-09-27): slices A, B and C BUILT — L-73 to L-96 all closed.** The user agreed the whole
+> of it on 2026-09-27 ("I agree. proceed."), and widened P3 during slice B (benefit payment and other
+> earning are pay lines). The live record is § 8 at the bottom: one entry per slice. ⚠ Still the
+> user's: the L-83 deviation (slice B), slice C's two refinements (L-90, L-89 — § 8), and the walk.
 
 ## Why this exists
 
@@ -339,3 +339,88 @@ off through the product's save, as the A2B types are by the suite.
 **Docs.** The leave guide: ch. 7/7b (the board is locked once submitted; approval re-checks), the
 recall row (never maternity), ch. 17's rules table (booking agrees with the expiry), § 23's L-77 to L-86
 closed.
+
+### C — Labels and small behaviours · BUILT 2026-09-27
+
+**Built** (no migration):
+
+- **L-87.** *Pro-rate on exit*'s hint says what the leaver's settlement does with it — on, only the days
+  built up by the last day; off, the whole year. It said the settlement did not read it.
+- **L-88.** Self-certification and the board threshold are labelled in **chargeable days**, and the hint
+  says how this type counts them (its two counting switches) — the server always compared `TotalDays`.
+- **L-89.** Saving, editing or removing an allocation re-works the type's balances for the **current**
+  leave year (`LeaveTypeService.ReResolveCurrentYearAsync` → `RepairEntitlementsAsync(year, type)`) when
+  the allocation — as it was or as it is — is in force during that year; the reply carries
+  `BalancesUpdated` (null when that year was not reached) and the save's message says it
+  (`ResourceCollectionTab` gained an optional `savedDescription`). The tab's dates say the year rule
+  (*its whole leave year*) and *from* defaults to the leave year's first day. The repair contract's
+  "never a side effect" now names this one exception.
+- **L-90.** Forfeiture of a year's **unused** days waits for the year end: the run and its preview hold
+  it while the year is open and say when to run again; carried days past their window still expire. The
+  year-end page's card and confirmation say so for an open year.
+- **L-91.** The job offer finds annual leave by the type's kind (one active Annual type, round 5 A1) and
+  proposes what the post's staff level gets — `ILeaveEntitlementService.GetSnapshotsAsync` for a holder
+  with the post's level and no hire date, in the leave year of the requisition's start (else the current
+  one) — and names the source. On UAT a Junior Staff offer now says **15**; it said the default **21**.
+- **L-92.** Accrual frequency *None* is refused on create and on an edit that makes it so; it is gone from
+  the picker (`ACCRUAL_FREQUENCY_NOT_OFFERED` keeps it, with *Per pay period*, for the row that has it),
+  and such a row reads *In force — accrues nothing*.
+- **L-93.** A unit rule admits the unit and every unit beneath it (`IHrAudienceResolver.UnitAncestryAsync`,
+  as HR's audience rule does).
+- **L-94.** `RequireValidRuleAsync`: a rule names what it admits, of this organisation, and only that — a
+  level, unit or position rule may add a gender. ⚠ **Found by the suite:** the eligibility endpoint caught
+  every exception as a 500 and a generic sentence, so the refusals never reached the screen; it now
+  answers 400 with the reason (404 for a missing record), as the accrual endpoints do.
+- **L-95.** The six desk screens (requests, register, adjustments, plans, cashing in, compliance) open on
+  the leave year (`useLeaveYear`, the choice kept apart); the register's dates default to its first and
+  last day. The guard compares against the default start month when the tenant has no settings row, and
+  counts plans.
+- **L-96.** The first comment went with slice A's column; the second with L-91. A third of the kind was
+  corrected — the entitlement snapshot said it was *"resolved from subtype/allocation/default"*.
+- **Also corrected:** the guide's chapter 4 still described the removed *Allowances included in the rate*
+  control (slice A missed those paragraphs).
+
+**Changed from the plan, and why — for the user to confirm.**
+
+1. ⚠ **L-90: only the forfeiture waits; the run is not refused.** The plan said "refused for a year that
+   has not ended (a preview still runs), as carry-over already is". But the run's first step — expiring
+   the carried days not taken within their window — belongs mid-year (for TDC the window closes in
+   March), and refusing the run would stop that too. So the run expires carried days as before and
+   forfeits no unused days until the year has ended, saying so and when to run again.
+2. ⚠ **L-89: the current leave year only.** The plan said "re-resolves that type's balances for the leave
+   year". A closed year's balances may already have been carried from, and rewriting them unasked would
+   change history; they stay with *Repair entitlements* and its preview. A future year has no balances
+   yet — they are created from the rule.
+
+**Suite.** `dev-harness/hr-leave/run-audit2-c.mjs` — **96 assertions, green twice.** Each rule in both
+positions, on five harness types of its own (A2C…), switched off at the end and their balances deleted;
+[0] reads the labels and comments from the source (a harness cannot see a label — the walk is where they
+are seen); [3] only reads — the offer defaults for existing applications, against TDC's own allocations,
+worked out independently; [7] soft-deletes the tenant's settings row for one refused save and restores it
+in a finally, deleting any row the save could have written. Its first run: 83 green and 11 red — ten
+were the eligibility 500 above, one its own source check matching the comment that corrects the claim.
+⚠ **And the pass after it found the suite's own litter:** leave.emp's last-year balance on A2CFOR (which
+allows carry-over) made round5-g's scoped carry-over examine two balances where it asserts one. The
+suite now deletes its types' balances and asserts it; round5-g re-run after it at 55.
+
+**Neighbours — the whole hr-leave pass, at baseline** (slice B's pass): slices 1–13 (slice 1's three
+known reds, the same three), round 5 A, C–N and the K boards, audit2-a **145** and audit2-b **98** —
+three of them changed, each named in the suite's own comments:
+
+| Suite | Count | Change |
+|---|---|---|
+| hr-leave slice 10 | **29** (was 27) | re-based for L-89: saving the allocation reaches the balance at once and says so (+2); the repair's preview and apply are now proved on a rule moved behind the product, 18 → 20 (they were 15 → 18 through the product's own edit) |
+| hr-leave round 5 G | **55** (=) | ⚠ 54 + 1 red in the pass — the new suite's leftover last-year balance (above); re-run after the fixed suite at 55 |
+| hr-leave round 5 I | **88** (=) | ⚠ 84 + 1 red in the pass, and again alone: [6a]'s preview died in 6 ms with `ECONNRESET`. The harness had reused a keep-alive connection the API had already closed — `SQL()` is synchronous, and [4b]–[5]'s database checks, with no HTTP between them, now outlast Kestrel's 130 s (the reminder tables grow every run), so Node never saw the close. Retried on a fresh connection the answer was right (88). **Fixed in `hr-leave/api.mjs`**: one turn of the event loop before every request; 88 without the retry |
+
+**Housekeeping.** The 24 leave types the pass's older slices minted (F1…, G1–G5…, W1…, W2…) switched off
+through the product's save; the new suite deletes its own balances.
+
+**Not run:** `hr-recruitment/run-round4-g.mjs` (the offer defaults) — its setup mints five employees
+and logins on a real post every run, and it asserts nothing about the leave days; [3] proves the
+defaults read-only.
+
+**Docs.** The leave guide (ch. 1's collections, 2.6c's labels, ch. 4's tabs, medical evidence,
+frequency picker and 4.4.1, ch. 4b's leave year and its guard, ch. 13's repair, ch. 17's forfeiture,
+ch. 20's job offer, § 23's L-87 to L-96 closed); the configuration register; round 5's *what changes*
+note.

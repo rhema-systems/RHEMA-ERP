@@ -540,7 +540,7 @@ working correctly".)*
 |---|---|---|
 | **Max carry-over days** | 5 days | At most 5 unused days move into the next leave year. |
 | **Carry-over expires after (months)** | 3 | Carried days must be used by the end of March, or they are lost. |
-| **Forfeit unused after (months)** | off for TDC | Leave from a finished year cannot be booked anyway; this setting only tidied what was left of it. With cashing-in allowed only on leaving, it is not needed. |
+| **Forfeit unused after (months)** | off for TDC | Leave from a finished year cannot be booked anyway; this setting only tidied what was left of it. With cashing-in allowed only on leaving, it is not needed. *(Since 27 September it removes nothing from a year still running: until the year ends, those days can still be booked.)* |
 
 **A worked example.** On 31 December 2026, Ama has 9 unused days.
 
@@ -744,6 +744,19 @@ does not need a lot of setup complexity".)*
 - **Labels tell the truth.** For example, the eligibility tab says *"With no rules, everyone may
   take this leave. With rules, anyone matching any one of them may."* — because adding a rule widens
   who qualifies, it does not narrow it.
+- **Ten more, on 27 September** (the second settings audit):
+  - changing how many days a staff level gets now reaches everyone's balance for this year at once,
+    and the save says how many it changed — before, nothing moved until an administrator ran a repair;
+  - the certificate and medical-board figures are counted in **chargeable** days — the days the leave
+    actually uses, not counting weekends or public holidays unless the leave type does — and say so;
+  - a rule that lets one department take a leave type now covers the units inside that department
+    too, and a rule that names nothing is refused;
+  - a build-up rule of *None* — which built up nothing — can no longer be chosen;
+  - unused days are not removed from a leave year that is still running;
+  - a job offer proposes the annual leave the post's staff level will really get (15 days for Junior
+    Staff at TDC, where it used to say 21 for everyone);
+  - six HR leave screens open on the current **leave** year rather than the calendar year, and the
+    leave year's start month cannot be moved once any leave, balance or plan exists.
 - **No more dodging.** Submitting re-checks the notice, the reliever, the sub-type limit and the
   balance, however the request was started. A medical board counts leave that is still waiting for a
   decision, and a request whose dates are moved and get longer needs the certificate the longer leave

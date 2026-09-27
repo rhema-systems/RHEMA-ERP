@@ -77,7 +77,6 @@ export const LEAVE_ELIGIBILITY_TYPE_OPTIONS: { value: LeaveEligibilityType; labe
  * owns — it is a cross-module contract, not an HR setting.
  */
 export const ACCRUAL_FREQUENCY_OPTIONS: { value: AccrualFrequency; label: string }[] = [
-  { value: 'None', label: 'None' },
   { value: 'Monthly', label: 'Monthly' },
   { value: 'Quarterly', label: 'Quarterly' },
   { value: 'SemiAnnual', label: 'Semi-annual' },
@@ -85,12 +84,22 @@ export const ACCRUAL_FREQUENCY_OPTIONS: { value: AccrualFrequency; label: string
 ];
 
 /**
- * For DISPLAY only — the picker's options plus the retired value, so a policy that still carries
- * `PerPayPeriod` reads as words in a table rather than as a raw enum name.
+ * Values the picker no longer offers, kept for a policy that already carries one: `PerPayPeriod`
+ * is retired (decision D-6), and `None` accrues nothing, so it is no policy and the server refuses
+ * it (leave settings audit 2, L-92).
+ */
+export const ACCRUAL_FREQUENCY_NOT_OFFERED: { value: AccrualFrequency; label: string }[] = [
+  { value: 'None', label: 'None (accrues nothing)' },
+  { value: 'PerPayPeriod', label: 'Per pay period (retired — accrues monthly)' },
+];
+
+/**
+ * For DISPLAY only — the picker's options plus the values it no longer offers, so a policy that
+ * still carries one reads as words in a table rather than as a raw enum name.
  */
 export const ACCRUAL_FREQUENCY_DISPLAY: { value: AccrualFrequency; label: string }[] = [
   ...ACCRUAL_FREQUENCY_OPTIONS,
-  { value: 'PerPayPeriod', label: 'Per pay period (retired — accrues monthly)' },
+  ...ACCRUAL_FREQUENCY_NOT_OFFERED,
 ];
 
 export const ACCRUAL_MODE_OPTIONS: { value: AccrualMode; label: string }[] = [
@@ -251,6 +260,12 @@ export interface LeaveCategoryAllocation {
   /** DateOnly */
   effectiveFrom: string;
   effectiveTo?: string | null;
+  /**
+   * On a save's reply only (leave settings audit 2, L-89): how many of this type's balances in the
+   * current leave year the save re-worked; null when the allocation, before or after, is not in
+   * force in that year, so none was looked at.
+   */
+  balancesUpdated?: number | null;
 }
 
 export interface LeaveCategoryAllocationRequest {

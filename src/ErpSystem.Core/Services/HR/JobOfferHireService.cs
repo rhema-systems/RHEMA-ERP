@@ -9,6 +9,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.HR.Recruitment;
 using Microsoft.EntityFrameworkCore;
@@ -41,6 +42,8 @@ public class JobOfferService : IJobOfferService
     private readonly HrCurrencyBridge _currencies;
     private readonly IOfferLetterService _offerLetters;
     private readonly IHtmlToPdfRenderer _pdfRenderer;
+    private readonly ILeaveEntitlementService _entitlements;
+    private readonly ILeaveYearContext _leaveYear;
 
     public JobOfferService(
         IJobOfferRepository offerRepository,
@@ -60,7 +63,9 @@ public class JobOfferService : IJobOfferService
         ICompanyHrPolicySettingsService policySettings,
         HrCurrencyBridge currencies,
         IOfferLetterService offerLetters,
-        IHtmlToPdfRenderer pdfRenderer)
+        IHtmlToPdfRenderer pdfRenderer,
+        ILeaveEntitlementService entitlements,
+        ILeaveYearContext leaveYear)
     {
         _offerRepository         = offerRepository;
         _benefitRepository       = benefitRepository;
@@ -79,6 +84,8 @@ public class JobOfferService : IJobOfferService
         _currencies              = currencies;
         _offerLetters            = offerLetters;
         _pdfRenderer             = pdfRenderer;
+        _entitlements            = entitlements;
+        _leaveYear               = leaveYear;
         // No localhost fallback: this URL goes into offer emails sent to real candidates. A missing
         // config value must fail at startup, not silently mail every candidate a link to localhost.
         _portalBaseUrl           = configuration["CandidatePortal:PortalUrl"]
@@ -328,6 +335,7 @@ public class JobOfferService : IJobOfferService
             .Include(a => a.JobCandidate)
             .Include(a => a.JobVacancy).ThenInclude(v => v.Position).ThenInclude(p => p!.SalaryGrade)
             .Include(a => a.JobVacancy).ThenInclude(v => v.Position).ThenInclude(p => p!.OrganizationUnit)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position).ThenInclude(p => p!.StaffLevel)
             .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r!.Location)
             .FirstOrDefaultAsync(a => a.Id == applicationId && a.TenantId == tenantId && !a.IsDeleted,
                 cancellationToken);
@@ -400,24 +408,52 @@ public class JobOfferService : IJobOfferService
         }
 
         // ── annual leave ─────────────────────────────────────────────────────────────────────
-        // ⚠ From the ANNUAL leave type's standard entitlement, not from a grade-specific rule:
-        // this system has no entitlement keyed on grade or employment type, and inventing one here
-        // would put a number on the offer letter that nothing downstream honours.
+        // ⚠ Leave settings audit 2, L-91 / L-96. The days the leave engine would give the post's
+        // holder: the annual leave type found by its KIND (at most one is Annual and active, round 5
+        // A1) — it was found by the word "Annual" in its name — then the allocation for the post's
+        // staff level, else the type's default, under the annual ceiling. This read the default
+        // alone, on the stated ground that "this system has no entitlement keyed on grade"; it has —
+        // staff-level allocations — so the letter could promise a figure the new hire's balance would
+        // never show. A full year's days: no hire date is passed, so no first-year scaling applies,
+        // and every arm is a whole number.
         var annualLeave = await _unitOfWork.Repository<LeaveType>().GetQueryable()
             .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive
-                     && t.DefaultDaysPerYear > 0
-                     && (t.Name.Contains("Annual") || t.Code == "AL"))
-            .OrderBy(t => t.Name)
+                     && t.Category == LeaveTypeCategory.Annual)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (annualLeave is not null)
         {
-            dto.AnnualLeaveDays = annualLeave.DefaultDaysPerYear;
-            Source("annualLeaveDays", $"The standard entitlement for {annualLeave.Name}");
+            // The leave year the proposed start falls in, so an allocation that takes effect by then
+            // is the one read; the current leave year when nothing proposes a start.
+            var startMonth = await _leaveYear.StartMonthAsync(cancellationToken);
+            var leaveYear = requisition is not null
+                ? LeaveYear.For(requisition.DesiredStartDate, startMonth)
+                : await _leaveYear.CurrentYearAsync(cancellationToken);
+            var holder = new LeaveAccrualSubject(Guid.Empty, HiredOn: null, LeftOn: null, position?.StaffLevelId);
+            var snapshots = await _entitlements.GetSnapshotsAsync(
+                new[] { holder }, annualLeave.Id, leaveYear, ct: cancellationToken);
+            var days = (int)snapshots[holder.EmployeeId].AnnualEntitledDays;
+
+            if (days > 0)
+            {
+                dto.AnnualLeaveDays = days;
+                Source("annualLeaveDays", position?.StaffLevelId is null
+                    ? $"The standard entitlement for {annualLeave.Name}"
+                      + (position is null ? "" : $" (the {position.Title} post names no staff level)")
+                    : $"What {annualLeave.Name} gives the {position.Title} post's staff level"
+                      + (position.StaffLevel is { } level ? $", {level.Name}," : "")
+                      + $" in the leave year from {LeaveYear.StartOf(leaveYear, startMonth):d MMM yyyy}");
+            }
+            else
+            {
+                dto.Unresolved.Add(position?.StaffLevelId is null
+                    ? $"Annual leave days — {annualLeave.Name} carries no standard entitlement."
+                    : $"Annual leave days — {annualLeave.Name} gives the {position.Title} post's staff level no days.");
+            }
         }
         else
         {
-            dto.Unresolved.Add("Annual leave days — no active annual leave type carries a standard entitlement.");
+            dto.Unresolved.Add("Annual leave days — no leave type is set up as annual leave.");
         }
 
         // ── conditional on pre-employment checks ─────────────────────────────────────────────

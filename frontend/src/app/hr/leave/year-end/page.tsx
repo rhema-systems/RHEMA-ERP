@@ -207,7 +207,7 @@ export default function LeaveYearEndPage() {
             <CardDescription>
               Expires the carried-over days not taken before their window closed — days taken in
               time are kept — and, for a leave type with a cut-off, forfeits what is still unused
-              after it.
+              after it, once the leave year has ended: until then those days can still be booked.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -262,9 +262,15 @@ export default function LeaveYearEndPage() {
             ? `Unused days from ${carryFromYear} will be carried into ${Number(carryFromYear) + 1}${
                 carryEmployeeId ? ' for the selected employee' : ' for every employee'
               }.`
-            : `Carried-over days not taken before their window closed, and unused days past a cut-off, will be removed from ${forfeitYear}${
-                forfeitEmployeeId ? ' for the selected employee' : ' for every employee'
-              }. This cannot be undone automatically.`
+            : // ⚠ Leave settings audit 2, L-90: a year still open keeps its unused days; the run
+              // expires carried days only, and the dialog must not promise more.
+              Number(forfeitYear) >= currentYear
+              ? `Carried-over days not taken before their window closed will be removed from ${forfeitYear}${
+                  forfeitEmployeeId ? ' for the selected employee' : ' for every employee'
+                }. Unused days are not forfeited: the ${forfeitYear} leave year has not ended. This cannot be undone automatically.`
+              : `Carried-over days not taken before their window closed, and unused days past a cut-off, will be removed from ${forfeitYear}${
+                  forfeitEmployeeId ? ' for the selected employee' : ' for every employee'
+                }. This cannot be undone automatically.`
         }
         confirmText={pending === 'carry' ? 'Run carry-over' : 'Run forfeiture'}
         variant={pending === 'forfeit' ? 'destructive' : 'default'}

@@ -277,8 +277,18 @@ public class LeaveYearEndService : ILeaveYearEndService
         // showed on a forfeiture preview.
         var result = new LeaveYearEndResult { IsDryRun = dryRun };
         var effectiveAsOf = asOf ?? _clock.TodayUtc;
-        var yearStart = LeaveYear.StartOf(year, await _leaveYear.StartMonthAsync());
+        var startMonth = await _leaveYear.StartMonthAsync();
+        var yearStart = LeaveYear.StartOf(year, startMonth);
         var usedInTime = new Dictionary<Guid, IReadOnlyDictionary<Guid, LeaveUsage>>();
+
+        // ⚠ Leave settings audit 2, L-90: a year's UNUSED days are not forfeited while the year is open
+        // — they can still be booked, and the field's own help says forfeiture removes what a year that
+        // has ended can no longer book. Carry-over refuses an open year outright; here only the
+        // forfeiture waits, because the run's first step — expiring carried days past their window —
+        // belongs mid-year and still runs. The preview skips it too, so it shows what the run would do.
+        var yearEnd = LeaveYear.EndOf(year, startMonth);
+        var yearOpen = _clock.TodayUtc <= yearEnd;
+        var forfeitureHeld = false;
 
         var balances = await LoadBalancesAsync(year, employeeId, ct);
 
@@ -318,9 +328,15 @@ public class LeaveYearEndService : ILeaveYearEndService
                     + $"{yearStart.AddMonths(leaveType.CarryOverExpiryMonths!.Value):d MMM yyyy}.");
             }
 
-            // 2) Forfeit unused accrual after the forfeiture cut-off.
+            // 2) Forfeit unused accrual after the forfeiture cut-off — once the year has ended (L-90).
             if (leaveType.ForfeitUnusedAfterMonths is int forfeitMonths
-                && effectiveAsOf >= yearStart.AddMonths(forfeitMonths))
+                && effectiveAsOf >= yearStart.AddMonths(forfeitMonths)
+                && yearOpen)
+            {
+                forfeitureHeld = true;
+            }
+            else if (leaveType.ForfeitUnusedAfterMonths is int forfeitMonths2
+                && effectiveAsOf >= yearStart.AddMonths(forfeitMonths2))
             {
                 var alreadyForfeited = await _adjustmentRepository
                     .GetQueryable()
@@ -381,6 +397,11 @@ public class LeaveYearEndService : ILeaveYearEndService
             + $"and forfeited {result.TotalDaysForfeited:0.##} day(s) across {result.BalancesAffected}, "
             + $"left {result.BalancesSkipped} alone."
             + (dryRun ? " NOTHING WAS WRITTEN - this was a dry run." : string.Empty));
+        if (forfeitureHeld)
+            result.Notes.Insert(1,
+                $"The {year} leave year runs to {yearEnd:d MMMM yyyy}, so its unused days were not forfeited: until then "
+                + "they can still be booked. Carried days past their window were expired as usual. Run it again from "
+                + $"{yearEnd.AddDays(1):d MMMM yyyy} to forfeit what is left.");
 
         _logger.LogInformation(
             "Leave forfeiture {Mode} for {Year} as of {AsOf}: {Affected} of {Examined} balances, {Expired} days expired, {Days} days forfeited",

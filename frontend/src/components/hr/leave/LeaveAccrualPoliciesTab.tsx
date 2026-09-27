@@ -7,6 +7,7 @@ import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import {
   ACCRUAL_FREQUENCY_OPTIONS,
+  ACCRUAL_FREQUENCY_NOT_OFFERED,
   ACCRUAL_FREQUENCY_DISPLAY,
   ACCRUAL_MODE_OPTIONS,
   type LeaveAccrualPolicy,
@@ -102,7 +103,14 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
         {
           header: 'Status',
           cell: (p) =>
-            p.isActive ? <Badge variant="secondary">Active</Badge> : <Badge variant="outline">Inactive</Badge>,
+            !p.isActive ? (
+              <Badge variant="outline">Inactive</Badge>
+            ) : p.frequency === 'None' ? (
+              // L-92: in force, it accrues nothing and holds the type's one in-force place.
+              <Badge variant="destructive">In force — accrues nothing</Badge>
+            ) : (
+              <Badge variant="secondary">Active</Badge>
+            ),
         },
       ]}
       schema={schema}
@@ -120,20 +128,20 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
         <>
           <FieldRow>
             {/*
-              ⚠ `PerPayPeriod` is retired (decision D-6) and is not offered — but a policy that
-              already carries it must stay editable, or retiring the option would strand it: the
-              select would render blank and every save would be refused. So the retired value is
-              added back for exactly the row that has it, and for no other.
+              ⚠ `PerPayPeriod` (retired, decision D-6) and `None` (refused, L-92) are not offered —
+              but a policy that already carries one must stay editable, or dropping the option
+              would strand it: the select would render blank and every save would be refused. So
+              the value is added back for exactly the row that has it, and for no other.
             */}
             <SelectField
               form={form}
               name="frequency"
               label="Frequency"
               required
-              options={(form.watch('frequency') === 'PerPayPeriod'
-                ? ACCRUAL_FREQUENCY_DISPLAY
-                : ACCRUAL_FREQUENCY_OPTIONS
-              ).filter(
+              options={[
+                ...ACCRUAL_FREQUENCY_OPTIONS,
+                ...ACCRUAL_FREQUENCY_NOT_OFFERED.filter((o) => o.value === form.watch('frequency')),
+              ].filter(
                 // Round 5, lane N2: incremental Annual credits the whole year on its last day, so
                 // it is not offered — kept only for the row already set to it, like PerPayPeriod.
                 (o) =>
@@ -166,7 +174,13 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
             ⚠ Entitlement plan B4. This is the single most useful thing on the tab and the digit 0
             says the opposite of it, so it is spelled out rather than left to be discovered.
           */}
-          {Number(form.watch('accrualRate')) > 0 ? (
+          {form.watch('frequency') === 'None' ? (
+            <p className="text-sm text-muted-foreground">
+              <strong>A frequency of None accrues nothing</strong>, and while this policy is in
+              force no other can be. Switch it off or remove it: a leave type with no policy grants
+              its entitlement in full. It can no longer be chosen.
+            </p>
+          ) : Number(form.watch('accrualRate')) > 0 ? (
             <p className="text-sm text-muted-foreground">
               Every employee on this leave type accrues{' '}
               <strong>{form.watch('accrualRate')}</strong> day(s) per period, whatever they are
@@ -195,7 +209,7 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
               form={form}
               name="proRateOnExit"
               label="Pro-rate on exit"
-              description="A leaver stops accruing on their last day. A leaver's settlement does not read this figure yet."
+              description="On: a leaver stops accruing on their last day, and for annual leave their final settlement counts only the days built up by then. Off: they accrue to the end of the leave year, and the settlement counts the whole year. Incremental accrual only — a full grant is not scaled down."
             />
           </FieldRow>
           {/* Round 5, lane N1: the switch existed on the policy with nothing to set it. */}

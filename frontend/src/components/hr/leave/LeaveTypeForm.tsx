@@ -176,6 +176,19 @@ export function LeaveTypeForm({
   const requiresCertificate = form.watch('requiresMedicalCertificate');
   const selfCertDays = form.watch('selfCertificationDays');
   const boardDays = form.watch('medicalBoardThresholdDays');
+  // ⚠ Leave settings audit 2, L-88: both medical figures are measured in the type's CHARGEABLE
+  // days — the days a request charges, counted as the two counting switches say — and the hints
+  // said plain days, which reads as calendar days.
+  const countWeekends = form.watch('countWeekendsAsLeave');
+  const countHolidays = form.watch('countHolidaysAsLeave');
+  const chargeableRule =
+    countWeekends && countHolidays
+      ? 'every calendar day counts'
+      : countWeekends
+        ? 'weekends count, public holidays do not'
+        : countHolidays
+          ? 'public holidays count, weekends do not'
+          : 'weekends and public holidays do not count';
 
   // A failed save whose error sits under Advanced opens it, so the reason is on screen.
   const onInvalid = (errors: Partial<Record<keyof LeaveTypeFormValues, unknown>>) => {
@@ -225,25 +238,30 @@ export function LeaveTypeForm({
       {requiresCertificate && (
         <>
           <FieldRow>
-            <NumberField form={form} name="selfCertificationDays" label="Self-certification days" />
+            <NumberField
+              form={form}
+              name="selfCertificationDays"
+              label="Self-certification (chargeable days)"
+            />
             <NumberField
               form={form}
               name="medicalBoardThresholdDays"
-              label="Medical board threshold (days per year)"
+              label="Medical board threshold (chargeable days per year)"
             />
           </FieldRow>
           <p className="text-sm text-muted-foreground">
-            An absence of <strong>{selfCertDays || 0}</strong> day(s) or fewer needs nothing but the
-            employee&apos;s own word.{' '}
+            An absence of <strong>{selfCertDays || 0}</strong> chargeable day(s) or fewer needs
+            nothing but the employee&apos;s own word.{' '}
             {boardDays ? (
               <>
-                Once this leave type reaches <strong>{boardDays}</strong> day(s) in one year &mdash;
-                counted across every request, not per request &mdash; a medical board&apos;s
-                recommendation must be attached as well.
+                Once this leave type reaches <strong>{boardDays}</strong> chargeable day(s) in one
+                year &mdash; counted across every request, not per request &mdash; a medical
+                board&apos;s recommendation must be attached as well.
               </>
             ) : (
               <>Leave the board threshold blank and no board is ever required.</>
-            )}
+            )}{' '}
+            Chargeable days are counted as this type counts them: {chargeableRule}.
           </p>
           <p className="text-sm text-muted-foreground">
             These are starting values, not rules from any authority. Set what this

@@ -27,6 +27,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import { leaveService } from '@/services/hr/leave.service';
 
 /** Saves a blob the browser already has, rather than navigating to a URL that carries no token. */
@@ -41,15 +42,17 @@ function saveBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-const currentYear = new Date().getFullYear();
-const years = [currentYear, currentYear - 1, currentYear - 2];
-
 /**
  * Annual-leave compliance: who still owes statutory leave days this year. Driven by the leave type
  * whose kind is Annual (round 5, A4; it was a `mandatoryAnnualLeave` flag).
  */
 export default function LeaveCompliancePage() {
-  const [year, setYear] = useState(String(currentYear));
+  // ⚠ Leave settings audit 2, L-95: the current leave year, not the calendar year; the choice is
+  // kept apart so a late answer moves the default and never overrides it (see useLeaveYear).
+  const { currentYear } = useLeaveYear();
+  const years = [currentYear, currentYear - 1, currentYear - 2];
+  const [chosenYear, setYear] = useState<string | null>(null);
+  const year = chosenYear ?? String(currentYear);
   const [exporting, setExporting] = useState(false);
   const [unit, setUnit] = useState('all');
   const [status, setStatus] = useState('all');

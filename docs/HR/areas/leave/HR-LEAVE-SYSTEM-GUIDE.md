@@ -324,7 +324,7 @@ Each one carries four child collections, all maintained on the tabs in chapter 4
 |---|---|---|
 | **Sub-types** | `LeaveSubTypes` | named variants of one type — on the demo, *Sick → Hospitalisation (30) · Out-patient treatment (7) · Quarantine / notifiable disease (14)* — each with its own optional annual cap, **inside** the type's days |
 | **Allocations** | `LeaveCategoryAllocations` | how many days a **staff level** gets, **effective-dated**, for the whole type |
-| **Eligibility rules** | `LeaveTypeEligibilities` | who may take it at all — by gender, organisation level, organisation unit or position |
+| **Eligibility rules** | `LeaveTypeEligibilities` | who may take it at all — by gender, organisation level, organisation unit (and every unit beneath it) or position |
 | **Accrual policies** | `LeaveAccrualPolicies` | whether the entitlement arrives all at once or builds up through the year |
 
 ### 1.2 Entitlement — how many days a person actually gets
@@ -969,8 +969,8 @@ five minutes and it is the only way to get an *In progress* record on a fresh da
 days). Only the board threshold needs lowering, so a demo can cross it. Two minutes, as `hr.head`:
 
 1. `/administration/hr/leave-types` → **Sick Leave** → **✏ Edit**.
-2. **Medical evidence** → leave **Requires excuse duty** on and **Self-certification days** at `3`.
-3. **Medical board threshold (days per year)**: `10` (from 90).
+2. **Medical evidence** → leave **Requires excuse duty** on and **Self-certification (chargeable days)** at `3`.
+3. **Medical board threshold (chargeable days per year)**: `10` (from 90).
    ⚠ Ten is chosen so a demo can actually cross it. The form's own defaults are 3 and 90, and they
    are stated on screen as starting values, which is the honest thing to say about them.
 4. **Save.** Read the sentence the form writes back to you before you leave — it explains the two
@@ -1248,9 +1248,9 @@ update endpoint for a rule, so a wrong one is removed and added again):
 | Tab | Rows are | The field that matters most |
 |---|---|---|
 | **Sub-types** | named variants | **Max days** — an *annual* cap, enforced per request, **inside** the type's days: a sub-type never has more than its type *(lane N; it used to replace the type's entitlement)*. A sub-type saved switched off stays off |
-| **Allocations** | days per staff level | **Effective from / to** — this is how a policy change is dated rather than overwritten. Always for the whole type *(lane N: the sub-type picker is gone — an allocation to one sub-type matched almost nothing)* |
-| **Eligibility** | who may take it | ⚠ **Any** rule that matches admits the employee — rules are OR'd, so each rule added *widens* eligibility, and the tab now says so. A unit, level or position rule may carry **And only this gender**, which narrows that rule alone *(lane N, § 23 L-43)* |
-| **Accrual** | how entitlement builds | **Frequency**, **Mode**, the two pro-rate switches, and **Rate** — where **0 means *derive it from each employee's entitlement***. ⚠ **One policy in force per leave type**, enforced — see below. An **In force** switch turns a policy off without deleting it, and the rule follows the switch *(lane N, § 23 L-40)*. *Once a year* is not offered with incremental accrual: it would credit the year on its last day |
+| **Allocations** | days per staff level | **Effective from / to** — this is how a policy change is dated rather than overwritten. Always for the whole type *(lane N: the sub-type picker is gone — an allocation to one sub-type matched almost nothing)*. ⚠ **The dates choose leave years, not days** *(leave settings audit 2, L-89)*: an allocation gives its full figure for every leave year its dates touch and is not split at the date; when two for one level touch a year, the later start wins. *From* defaults to the leave year's first day. **Saving, editing or removing one re-works the type's balances for the current leave year**, and the save says how many moved — it used to wait for *Repair entitlements*, which is still how a past year is put right (chapter 13) |
+| **Eligibility** | who may take it | ⚠ **Any** rule that matches admits the employee — rules are OR'd, so each rule added *widens* eligibility, and the tab now says so. A unit, level or position rule may carry **And only this gender**, which narrows that rule alone *(lane N, § 23 L-43)*. A **unit** rule admits the unit **and every unit beneath it**, as HR's own audience rule does *(leave settings audit 2, L-93 — it matched the exact unit only, so a directorate's rule admitted nobody in its departments)*. And a rule must name what it admits: the server refuses a position rule with no position, a gender rule carrying a unit, a unit that is not this organisation's *(L-94)* |
+| **Accrual** | how entitlement builds | **Frequency**, **Mode**, the two pro-rate switches, and **Rate** — where **0 means *derive it from each employee's entitlement***. ⚠ **One policy in force per leave type**, enforced — see below. An **In force** switch turns a policy off without deleting it, and the rule follows the switch *(lane N, § 23 L-40)*. *Once a year* is not offered with incremental accrual: it would credit the year on its last day. *None* is not offered at all *(L-92, below)*. *Pro-rate on exit*'s hint now says what the leaver's settlement does with it — it said the settlement did not read it *(L-87)* |
 
 ⚠ **Remove is `HR.Leave.Admin` on all four tabs and is hidden from `hr.head`.** Add and (where there is one) Edit are
 `HR.Leave.Write` and are available. So an HR officer can add and correct configuration but cannot
@@ -1263,14 +1263,20 @@ destroy it — which is the right split and is worth one sentence if the room as
 | Control | Default | What it does |
 |---|---|---|
 | **Requires excuse duty (a medical certificate)** | **off** | the master switch. Off, neither rule below exists |
-| **Self-certification days** | `3` | at or under this many days the employee's own word is enough. Longer, and a document of kind *Excuse duty* must be attached before it can be submitted |
-| **Medical board threshold (days per year)** | `90`, and **may be left blank** | once **cumulative** days of this leave type in the year pass it, a board's recommendation is required as well. Blank means no board is ever required |
+| **Self-certification (chargeable days)** | `3` | at or under this many **chargeable** days the employee's own word is enough. Longer, and a document of kind *Excuse duty* must be attached before it can be submitted |
+| **Medical board threshold (chargeable days per year)** | `90`, and **may be left blank** | once **cumulative** chargeable days of this leave type in the year pass it, a board's recommendation is required as well. Blank means no board is ever required |
+
+⚠ **Chargeable days, as this type counts them** *(leave settings audit 2, L-88 — the labels said days)*: the
+days a request charges, which leave out weekends and public holidays unless the type's two counting
+switches put them in. A week off Monday to Sunday is five chargeable days on a type that counts
+neither — under a self-certification of 5, no certificate.
 
 Underneath, the form writes the rule back to you in a sentence, live:
 
-> *An absence of **3** day(s) or fewer needs nothing but the employee's own word. Once this leave
-> type reaches **10** day(s) in one year — counted across every request, not per request — a medical
-> board's recommendation must be attached as well.*
+> *An absence of **3** chargeable day(s) or fewer needs nothing but the employee's own word. Once this
+> leave type reaches **10** chargeable day(s) in one year — counted across every request, not per
+> request — a medical board's recommendation must be attached as well. Chargeable days are counted as
+> this type counts them: weekends and public holidays do not count.*
 >
 > *These are starting values, not rules from any authority. Set what this organisation's policy
 > says.*
@@ -1279,20 +1285,10 @@ Underneath, the form writes the rule back to you in a sentence, live:
 handed them to us, and a form that presents its own defaults as policy is how a placeholder becomes
 a rule nobody remembers choosing.
 
-**Encashment → Allowances included in the rate** — a checkbox list of the tenant's allowance pay
-components, shown only when the rate basis is *Derived from emoluments*:
-
-> *Tick nothing and an encashed day is worth basic pay alone. **Removing one lowers what people are
-> paid** for leave they have already earned, so it is not a change to make casually.*
-
-⚠ **This is the control that did not exist.** The links were in the database and on the API from the
-start, and no screen could set them — so **every leave type paid on basic alone** unless somebody
-called the API by hand. The derived rate is *(monthly basic + the allowances ticked here) ÷ the
-working-days figure above it*, and chapter 15 shows that sentence printed on an actual payout.
-
-⚠ **And a hazard that came with it, closed in the same change.** A leave-type save that did not
-mention the allowances used to **delete every one of them silently** — see §4.4.5. It does not any
-more, and the form owns the value rather than asking each page to remember to echo it back.
+~~**Encashment → Allowances included in the rate**~~ — **gone since leave settings audit 2
+(2026-09-27, L-73)**, with the rest of HR's encashment rate: the form asks only whether the type may
+be cashed in, because Finance values leave cashed in (chapter 15). §4.4.4 keeps the record of the
+hazard that control once carried. *(These paragraphs outlived slice A; corrected in slice C.)*
 
 ⚠ **Retired sub-types no longer appear in the pickers.** The rulebook tab still shows them, with an
 *Inactive* badge, because that is what the Status column is for.
@@ -1337,6 +1333,13 @@ a more specific label — the engine credits one period a month whatever the pay
 a fortnightly payroll the label was a claim the product could not honour. Accruing on a real pay
 cycle needs the pay calendar, which **payroll owns**. A policy created before this still shows the
 value, marked *(retired — accrues monthly)*, and stays editable.
+
+⚠ **Nor does it offer *None*** *(leave settings audit 2, L-92)*. A policy of *None* accrued nothing
+and, being the type's one policy in force, blocked adding a real one — so the server refuses it:
+*"An accrual frequency of None accrues nothing, so it is not a policy."* Leave available in full
+needs **no** policy (the type then grants its entitlement) or a full grant on eligibility. A policy
+that already carries *None* shows **In force — accrues nothing**, stays editable, and can be switched
+off or moved to a real frequency.
 
 ### ▶ Walk it
 
@@ -1414,7 +1417,7 @@ of leave is worth in cash. §4.4.6 lists those, and chapter 4b is the screen the
 | **Sub-type → Max days** | enforced as an **annual cap per employee per sub-type**, checked when a request is raised and when its dates move. ⚠ It is *not* a separate balance — see §1.7. ✅ *(closed 2026-09-25, lane N — L-44)* a draft's edit checks it too, and it limits the sub-type **inside** the type's pot rather than replacing the type's entitlement |
 | **Sub-type → Active** | retired sub-types are filtered out of the request forms' picker **and refused by the service**, so the API door is shut too. ✅ *(closed 2026-09-25, lane N — L-44)* on every door: creating a sub-type honours it, and editing a draft validates the sub-type |
 | **Leave type → Active** | the **service** now refuses a retired type, not just the picker. Moving a draft onto a retired type is refused as well |
-| **Accrual → Pro-rate on exit** | a leaver stops accruing on their last day. ⚠ Incremental accrual only — see §1.3. ✅ *(closed 2026-09-26, lane L — L-46)* the leaver's settlement reads it: the line's build-up stops at the last day when it is on |
+| **Accrual → Pro-rate on exit** | a leaver stops accruing on their last day. ⚠ Incremental accrual only — see §1.3. ✅ *(closed 2026-09-26, lane L — L-46)* the leaver's settlement reads it: the line's build-up stops at the last day when it is on. Its hint said the settlement did not, until leave settings audit 2 (L-87) |
 | **Accrual → Pro-rate on join** *(2026-09-18)* | ⚠ **It was read on every accrual calculation and could not change the answer**, because its condition could never be true. ON is what always happened; **OFF is new** and accrues on the company's leave year instead. §1.3 |
 | **Leave type → Carry-over and forfeiture count** *(2026-09-18)* | both year-end runs read it. *Granted* is the behaviour that predates it; *Earned* substitutes accrued-to-date through the same definition the create check uses |
 | **Leave type → Pro-rate the first year** *(2026-09-18)* | scales a joiner's first-year entitlement, and is **refused** alongside incremental accrual rather than ignored |
@@ -1425,7 +1428,9 @@ of leave is worth in cash. §4.4.6 lists those, and chapter 4b is the screen the
 | **Which calendar a holiday belongs to** | only the tenant's **default, active** calendar counts |
 | ~~**Leave type → Allowance components**~~ *(removed 2026-09-27)* | fed HR's encashment rate; leave settings audit 2 removed the rate, and them with it (L-73) — Finance values leave cashed in |
 | **Leave type → Requires excuse duty / self-certification days** *(new)* | refused at submit, naming the document and the threshold |
-| **Leave type → Medical board threshold** *(new)* | refused at submit on **cumulative days in the year**, satisfied by a concluded board or its attached recommendation |
+| **Leave type → Medical board threshold** *(new)* | refused at submit on **cumulative days in the year**, satisfied by a concluded board or its attached recommendation. Both medical figures count **chargeable** days, and say so (L-88) |
+| **Allocation → saved, edited or removed** *(2026-09-27)* | re-works the type's balances for the **current** leave year and reports how many moved (L-89). A closed year is still *Repair entitlements'*, with its preview |
+| **Eligibility → unit rule** *(2026-09-27)* | admits the unit and every unit beneath it (L-93); every rule is validated when saved (L-94) |
 
 ### 4.4.2 Still not read by HR — and both belong to payroll
 
@@ -1579,11 +1584,16 @@ year 2027 — and entitlement, carry-over expiry and the forfeiture cut-off all 
 pro-rating counts the months of the **leave** year (an April-start joiner hired in February is
 present for two months, not eleven), and the untaken-leave reminder's month is the month **of the
 leave year** (§ 23, L-48, first half). A screen or a call that names no year now gets the leave year
-we are in, not the calendar year. None of it shows on a January leave year, which is TDC's.
+we are in, not the calendar year — and since leave settings audit 2 (L-95) so do the six desk
+screens that still opened on the calendar year: requests, the register (its dates default to the
+leave year's first and last day), adjustments, plans, cashing in and compliance. None of it shows
+on a January leave year, which is TDC's.
 
 > ⚠ **Set it during setup. It cannot be changed later**, and the screen says so in amber. Once the
 > company holds any leave, the save is refused and names what already exists — *"…already holds 42
-> leave request(s) and 97 leave balance(s)"*.
+> leave request(s), 97 leave balance(s) and 3 leave plan(s)"*. ⚠ *(Leave settings audit 2, L-95.)*
+> Plans are counted — each carries its leave year — and a company that has never saved this page is
+> held to the default the same way: its first save used to move the year freely.
 >
 > Not out of caution: moving the boundary changes which leave year some dates fall in while the
 > records already written keep their labels. Most figures re-derive; **a carry-over that has already
@@ -3434,6 +3444,12 @@ Only then is **Apply** offered, and it is disabled when nothing disagrees.
 > before it touches one. A confirmation that says *'this will correct some entitlements'* is asking
 > you to authorise a change you cannot see."
 
+⚠ **Since leave settings audit 2 (L-89), an allocation saved on the rulebook does this itself — for the
+current leave year.** Saving, editing or removing an allocation re-works that type's balances for the
+year we are in, and the save's message says how many moved. The repair is for everything else: a
+closed year (its balances may have been carried from), a change to the leave type itself — its
+default days, its maximum, first-year pro-rating — and any figure moved outside the product.
+
 ⚠ **Two things it deliberately does not do.** It never runs as a side effect of an ordinary
 recalculation — re-deriving on every write would restate history the moment somebody back-dated an
 allocation. And **it does not revisit a carry-over already run for the year**: those days were
@@ -3911,7 +3927,11 @@ knowing:
 
 > *Unused days from 2025 will be carried into 2026 for every employee.*
 > *Carried-over days not taken before their window closed, and unused days past a cut-off, will be
-> removed from 2026 for every employee. This cannot be undone automatically.*
+> removed from 2025 for every employee. This cannot be undone automatically.*
+
+For the leave year still open the second says what that run will really do *(leave settings audit 2,
+L-90)*: *"…will be removed from 2026 for every employee. Unused days are not forfeited: the 2026 leave
+year has not ended."*
 
 **After a run, a results panel:** badges for examined / changed / left alone, then the days —
 *carried over*, *carried days expired* *(new, round 5 lane G)*, *forfeited* — and a scrollable list of
@@ -3921,6 +3941,16 @@ notes, **the first of which is the run's summary in words**.
 year we are still in, it refuses and names the day it can run from; **Preview** still runs at any
 time, which is how a run is checked in December. And **the forfeiture preview now says it is one**
 — it never set the flag, so its panel never turned amber.
+
+⚠ *(Leave settings audit 2, L-90.)* **Forfeiture waits for the year end too — its second step.**
+Pressed for the year we are still in, the run expires the carried days past their window as usual —
+that belongs mid-year — and forfeits **no unused days**: until the year ends they can still be booked,
+which is the setting's own premise. The results say so, in the note after the summary: *"The 2026
+leave year runs to 31 December 2026, so its unused days were not forfeited: until then they can still
+be booked. Carried days past their window were expired as usual. Run it again from 1 January 2027 to
+forfeit what is left."* The preview does the same, so it still shows what the run would do. A year
+that has ended forfeits as before. *(The plan said to refuse the run outright, as carry-over is;
+holding only the forfeiture keeps the expiry, which is a mid-year job — the plan's § 8.)*
 
 ✅ **The badges say what happened** — *N examined*, *N changed*, *N left alone* *(checked
 2026-09-26)*. The first once read *N processed*, and *processed* meant **looked at**, not
@@ -4018,7 +4048,7 @@ The rules, as they now stand:
 |---|---|---|
 | **Maximum carry-over** | 5 | At most 5 unused days travel into the next leave year |
 | **Carry-over expires after (months)** | 3 | Carried days must be **taken** by the end of the third month of the new leave year — the end of March for TDC — or they lapse when the expiry runs |
-| **Forfeit unused after (months)** | **off** for TDC (decision B7) | After the cut-off, the year's unused days are removed with a named adjustment. A finished year cannot be booked anyway, so this only tidies the ledger; with cashing-in only on leaving, TDC does not need it |
+| **Forfeit unused after (months)** | **off** for TDC (decision B7) | After the cut-off **and once the year has ended** (L-90), the year's unused days are removed with a named adjustment. A finished year cannot be booked anyway, so this only tidies the ledger; with cashing-in only on leaving, TDC does not need it |
 
 **An approved deferral beyond the cap (B7)** — the public-service rule is that unused leave is lost
 unless deferred with written approval. HR records it as an **adjustment on the new year**, with the
@@ -4402,7 +4432,7 @@ Every call is the **same endpoint** the desk uses. The narrowing is `CanActForEm
 ---
 ## 20. Where leave shows up outside its own menu
 
-**Seven places now, and two of them are new enough to be the best things in the book.**
+**Eight places now, and two of them are new enough to be the best things in the book.**
 
 | Where | What it shows | Route |
 |---|---|---|
@@ -4413,6 +4443,7 @@ Every call is the **same endpoint** the desk uses. The narrowing is `CanActForEm
 | **A medical expense claim** | **Related sick leave** — the claim can name the leave it arose from | `/hr/medical/claims/[id]` |
 | **A medical board** *(new)* | the panel whose finding a long absence rests on. Leave **reads** it; it never writes one, and there is no foreign key in either direction | `/hr/medical/boards` |
 | **The workflow inbox** | leave requests, plans and encashments awaiting *you*, beside every other kind of approval | `/workflow/inbox` |
+| **A job offer** *(recruitment)* | the **annual leave days** proposed for the offer letter: what the post's staff level gets under the leave type set up as Annual — its allocation, else the type's default, under the maximum — with where the figure came from said beside it. ⚠ *(Leave settings audit 2, L-91.)* It found the type by the word *Annual* in its name and read the default alone, so a Junior Staff offer said 21 days where the balance would give 15 | `/hr/recruitment/offers` |
 
 ### ▶ The cross-module moment worth performing
 
@@ -4546,8 +4577,9 @@ below so that nobody promises a stakeholder a button.
 > endpoints.
 
 > **2026-09-27 — leave settings audit 2 opened twenty-four more, L-73 to L-96** (the block after
-> round 5 lane I): its slice A closed **L-73 to L-76** — pay is Finance's — and slice B closed **L-77 to L-86**, the
-> ten open doors; **L-87 to L-96 are open**, scheduled as slice C. With the four above, **fourteen are open.**
+> round 5 lane I): its slice A closed **L-73 to L-76** — pay is Finance's — slice B closed **L-77 to L-86**, the
+> ten open doors, and slice C closed **L-87 to L-96**, labels and small behaviours. All twenty-four are
+> closed; the four above are still the **four open**.
 
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
@@ -4753,7 +4785,7 @@ The user asked whether every leave setting is used and enforced — no dead or g
 reviewers traced about seventy settings, and every finding below was verified in the code first. The
 plan and its live log: [`HR-LEAVE-SETTINGS-AUDIT-2-PLAN.md`](../../programme/HR-LEAVE-SETTINGS-AUDIT-2-PLAN.md).
 Slice A is proved by `dev-harness/hr-leave/run-audit2-a.mjs` (145 assertions, green twice); slice B by
-`run-audit2-b.mjs` (98, green twice). Slice B also made **benefit payment and other earning pay lines**
+`run-audit2-b.mjs` (98, green twice); slice C by `run-audit2-c.mjs` (96, green twice). Slice B also made **benefit payment and other earning pay lines**
 (the user, 2026-09-27), and any HR figure on a pay line now waits for Finance's.
 
 | # | Where | Finding | State |
@@ -4772,16 +4804,16 @@ Slice A is proved by `dev-harness/hr-leave/run-audit2-a.mjs` (145 assertions, gr
 | **L-84** | ch. 7b | The board threshold was not re-checked when a request moved, unchanged in length, into another leave year | ✅ **Closed** by slice B: a move that changes the leave year runs the evidence gate again |
 | **L-85** | ch. 7 | Reliever availability was not re-checked when dates moved | ✅ **Closed** by slice B: every move checks the relievers again, naming the one who cannot cover |
 | **L-86** | ch. 12 | Plans validated neither eligibility nor the sub-type until the request was raised, after approval | ✅ **Closed** by slice B: a plan is checked when saved — a retired or non-annual type, eligibility, the sub-type (of this type, active when newly chosen); a retired type again at submit |
-| **L-87** | ch. 4 | *Pro-rate on exit* said a leaver's settlement does not read it — it has since round 5 lane L | Open — slice C |
-| **L-88** | ch. 4 | Self-certification and the board threshold count chargeable days; the hints said days | Open — slice C |
-| **L-89** | ch. 4 | An allocation's *effective from* covers its whole leave year, and an edited allocation did not reach balances until *Repair entitlements* ran | Open — slice C |
-| **L-90** | ch. 17 | Forfeiture could run for a leave year still open | Open — slice C |
-| **L-91** | ch. 20 | The job offer found annual leave by the word *Annual* in its name, ignoring staff-level allocations and the ceiling | Open — slice C |
-| **L-92** | ch. 4 | Accrual frequency *None* was offered and shown in force, accrued nothing, and blocked adding a real policy | Open — slice C |
-| **L-93** | ch. 4 | An organisation-unit eligibility rule matched the exact unit only; HR's own audience rule covers the units beneath | Open — slice C |
-| **L-94** | ch. 4 | Eligibility rules were not validated on the server (a Position rule with no position matched nobody) | Open — slice C |
-| **L-95** | ch. 4b, 13 | Six desk leave screens opened on the calendar year; the leave-year change guard skipped a tenant with no settings row and did not count plans | Open — slice C |
-| **L-96** | — | Two code comments said the opposite of the code (sub-type allocations take precedence; "no entitlement keyed on grade") | Open — slice C |
+| **L-87** | ch. 4 | *Pro-rate on exit* said a leaver's settlement does not read it — it has since round 5 lane L | ✅ **Closed** by slice C: the hint says what the settlement does — on, only the days built up by the last day; off, the whole year |
+| **L-88** | ch. 4 | Self-certification and the board threshold count chargeable days; the hints said days | ✅ **Closed** by slice C: both labelled in chargeable days, and the hint says how this type counts them |
+| **L-89** | ch. 4 | An allocation's *effective from* covers its whole leave year, and an edited allocation did not reach balances until *Repair entitlements* ran | ✅ **Closed** by slice C: saving, editing or removing an allocation re-works the type's balances for the **current** leave year and the save says how many moved; the label says the year rule; *from* defaults to the leave year's first day. A closed year stays *Repair entitlements'* |
+| **L-90** | ch. 17 | Forfeiture could run for a leave year still open | ✅ **Closed** by slice C: an open year's unused days are not forfeited — the preview neither — and the run says so; carried days past their window still expire mid-year. ⚠ The plan said refuse the run; holding only the forfeiture keeps the expiry (the plan's § 8) |
+| **L-91** | ch. 20 | The job offer found annual leave by the word *Annual* in its name, ignoring staff-level allocations and the ceiling | ✅ **Closed** by slice C: by the type's kind, and the days the post's staff level gets — a Junior Staff offer now says TDC's 15, not the default 21 |
+| **L-92** | ch. 4 | Accrual frequency *None* was offered and shown in force, accrued nothing, and blocked adding a real policy | ✅ **Closed** by slice C: refused anew and not offered; a policy that carries it reads *In force — accrues nothing* and stays editable |
+| **L-93** | ch. 4 | An organisation-unit eligibility rule matched the exact unit only; HR's own audience rule covers the units beneath | ✅ **Closed** by slice C: the unit and every unit beneath it |
+| **L-94** | ch. 4 | Eligibility rules were not validated on the server (a Position rule with no position matched nobody) | ✅ **Closed** by slice C: a rule names what it admits, and only that. ⚠ The save answered every refusal with a 500 and a generic sentence — it now says why (400) |
+| **L-95** | ch. 4b, 13 | Six desk leave screens opened on the calendar year; the leave-year change guard skipped a tenant with no settings row and did not count plans | ✅ **Closed** by slice C: the six open on the leave year; the guard holds against the default when there is no row, and counts plans |
+| **L-96** | — | Two code comments said the opposite of the code (sub-type allocations take precedence; "no entitlement keyed on grade") | ✅ **Closed**: the first by slice A, with the column; the second by slice C, with L-91 — and a third of the kind found and corrected (the entitlement snapshot's *"subtype/allocation/default"*) |
 
 **Found in passing by slice A, and fixed:** a settlement Internal Audit **returns** keeps its
 finalised date as history, and the statement read that date — so it said *"finalised and with

@@ -246,6 +246,11 @@ public class LeaveTypesController : ControllerBase
         {
             return StatusCode(201, await _service.CreateEligibilityRuleAsync(dto));
         }
+        // ⚠ Leave settings audit 2, L-94: the service now refuses a rule that does not name what it
+        // admits, with a sentence saying so. Without this arm it came back as a 500 and a generic
+        // string, as the accrual policy's refusal once did.
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating eligibility rule");

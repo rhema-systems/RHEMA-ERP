@@ -148,6 +148,12 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
   /** Sentence under the dialog title, e.g. "Add a sub-type to this leave type." */
   dialogHint?: string;
   /**
+   * The saved toast's description, from what the save returned — for a save that does more than
+   * store the row (leave settings audit 2, L-89: an allocation re-works the current leave year's
+   * balances and says how many moved). Returning nothing keeps the default "… added/updated."
+   */
+  savedDescription?: (saved: unknown, editing: boolean) => string | null | undefined;
+  /**
    * Whose record this collection belongs to, e.g. the employee's full name (round 3, lane P1 —
    * the demo asked for the employee's name in every sub-detail dialog). Shown in the dialog
    * description ("On Ama Mensah's profile") and in the remove confirmation. Optional: ~30 screens
@@ -197,6 +203,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   dialogClassName = 'sm:max-w-[560px]',
   emptyDescription,
   dialogHint,
+  savedDescription,
   subjectLabel,
   itemLabel,
   prefill,
@@ -244,9 +251,14 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   const saveMutation = useMutation({
     mutationFn: async (values: TForm) =>
       editing ? update(parentId, getId(editing), values) : create(parentId, values),
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       await invalidate();
-      toast({ title: 'Saved', description: `${cap(singular)} ${editing ? 'updated' : 'added'}.` });
+      toast({
+        title: 'Saved',
+        description:
+          savedDescription?.(saved, editing !== null) ||
+          `${cap(singular)} ${editing ? 'updated' : 'added'}.`,
+      });
       setDialogOpen(false);
       setEditing(null);
     },

@@ -7,7 +7,11 @@ namespace ErpSystem.Core.Interfaces.HR;
 /// </summary>
 public class LeaveEntitlementSnapshot
 {
-    /// <summary>Full annual entitlement (the yearly cap), resolved from subtype/allocation/default.</summary>
+    /// <summary>
+    /// Full annual entitlement (the yearly cap): the staff-level allocation, else the type's default,
+    /// under the annual ceiling. Never a sub-type's — it said "subtype/allocation/default" until leave
+    /// settings audit 2 (L-96); a sub-type draws on its type's days.
+    /// </summary>
     public decimal AnnualEntitledDays { get; set; }
 
     /// <summary>Days accrued by the as-of date, per the accrual policy. Capped at the annual entitlement.</summary>

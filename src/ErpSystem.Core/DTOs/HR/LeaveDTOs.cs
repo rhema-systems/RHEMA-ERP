@@ -188,6 +188,12 @@ public class LeaveCategoryAllocationDto
     public int AllocationDays { get; set; }
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
+
+    /// <summary>
+    /// On a save: how many of the current leave year's balances moved to match (leave settings audit
+    /// 2, L-89). Null when the allocation does not reach the current year, and on reads.
+    /// </summary>
+    public int? BalancesUpdated { get; set; }
 }
 
 public class CreateLeaveCategoryAllocationDto

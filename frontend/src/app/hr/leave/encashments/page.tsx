@@ -37,13 +37,12 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { HR_ADMIN_ROLES, PAY_VALUER_ROLES } from '@/components/hr/common/PermissionGate';
+import { useLeaveYear } from '@/components/hr/leave/use-leave-year';
 import { useAuth } from '@/hooks/use-auth';
 import { leaveEncashmentService } from '@/services/hr/leave.service';
 import type { LeaveEncashment } from '@/types/hr/leave-request';
 
 const ALL = '__all__';
-const currentYear = new Date().getFullYear();
-const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
 const statuses = ['Draft', 'Submitted', 'PendingApproval', 'Approved', 'Rejected', 'Processed', 'Cancelled'];
 
 type Pending =
@@ -59,7 +58,12 @@ type Pending =
 export default function LeaveEncashmentsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [year, setYear] = useState(String(currentYear));
+  // ⚠ Leave settings audit 2, L-95: the current leave year, not the calendar year; the choice is
+  // kept apart so a late answer moves the default and never overrides it (see useLeaveYear).
+  const { currentYear } = useLeaveYear();
+  const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
+  const [chosenYear, setYear] = useState<string | null>(null);
+  const year = chosenYear ?? String(currentYear);
   const [status, setStatus] = useState(ALL);
   const [pending, setPending] = useState<Pending | null>(null);
   const [rejectReason, setRejectReason] = useState('');
