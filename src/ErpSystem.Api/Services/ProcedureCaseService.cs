@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Api.Services.DocumentManagement;
+using ErpSystem.Api.Services.Estate;
 using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
@@ -17,6 +18,7 @@ using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Interfaces.Estate;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Legal;
@@ -58,6 +60,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private readonly ICentralDocumentPdfSigningService _pdfSigningService;
     private readonly ICentralDocumentRenditionService? _renditionService;
     private readonly IJobCardService _jobCardService;
+    private readonly FacilitiesComplaintHandoffService _facilitiesComplaintHandoff;
     private IReadOnlyCollection<string>? _currentUserRoleNames;
 
     public ProcedureCaseService(
@@ -74,6 +77,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         IInvoiceService invoiceService,
         ICentralDocumentPdfSigningService pdfSigningService,
         IJobCardService jobCardService,
+        IEhcTicketService ehcTicketService,
         ICentralDocumentRenditionService? renditionService = null)
     {
         _db = db;
@@ -90,6 +94,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _pdfSigningService = pdfSigningService;
         _renditionService = renditionService;
         _jobCardService = jobCardService;
+        _facilitiesComplaintHandoff = new FacilitiesComplaintHandoffService(db, ehcTicketService);
     }
 
     public async Task<IReadOnlyList<ProcedureCaseSummaryDto>> GetCasesAsync(string? module, string? entityType, bool mineOnly)
@@ -154,7 +159,14 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         string module,
         string entityType)
     {
-        var workspace = await BuildWorkspaceSeedAsync(NormalizeModule(module), entityType.Trim());
+        var normalizedModule = NormalizeModule(module);
+        var normalizedEntityType = entityType.Trim();
+        var workspace = await BuildWorkspaceSeedAsync(normalizedModule, normalizedEntityType);
+        EnsurePublishedWorkflowForProcedureCase(
+            normalizedModule,
+            normalizedEntityType,
+            workspace.WorkflowDefinitionId,
+            "collecting intake documents for");
         var firstStageName = workspace.Stages.OrderBy(stage => stage.Index).FirstOrDefault()?.Name;
         return workspace.Documents
             .Where(document => string.Equals(document.RequiredFrom, firstStageName, StringComparison.OrdinalIgnoreCase)
@@ -292,6 +304,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 throw new InvalidOperationException("Select an active customer for this Legal matter.");
         }
         var workspace = await BuildWorkspaceSeedAsync(module, entityType);
+        EnsurePublishedWorkflowForProcedureCase(module, entityType, workspace.WorkflowDefinitionId, "opening");
         var firstStage = workspace.Stages.FirstOrDefault() ?? new StageSeed(0, "Open", null, null, null, []);
         var organizationScope = await ResolveProcedureOrganizationScopeAsync(
             tenantId,
@@ -992,6 +1005,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
 
         EnsureCanEdit(procedureCase);
+        EnsureWorkflowRuntimeForProcedureCase(procedureCase, "advancing");
         await EnsureCurrentStageRequiredFieldsReadyAsync(procedureCase);
         EnsurePropertyListingPremiumChargeGateReady(procedureCase);
 
@@ -1033,6 +1047,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var now = DateTime.UtcNow;
 
         await EnsureFacilitiesMaintenanceCloseoutReadyAsync(procedureCase, tenantId);
+        await _facilitiesComplaintHandoff.EnsureCloseoutReadyAsync(procedureCase);
+        await _facilitiesComplaintHandoff.EnsureTicketForHandoffAsync(procedureCase, userId, now);
 
         var completedStageName = procedureCase.CurrentStageName;
 
@@ -1129,6 +1145,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
 
         EnsureCanEdit(procedureCase);
+        EnsureWorkflowRuntimeForProcedureCase(procedureCase, "reviewing");
         if (!string.Equals(
                 procedureCase.EntityType,
                 "EstatePropertyManagementListingApplication",
@@ -2228,9 +2245,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var serviceImpact = FirstNonBlank(FieldValue(procedureCase, "serviceImpact"), "Not recorded")!;
         var accessInstructions = FirstNonBlank(FieldValue(procedureCase, "accessInstructions"), "Not recorded")!;
         var targetDate = ParseProcedureDate(FieldValue(procedureCase, "targetDate"));
-        var customerBusinessPartnerId = Guid.TryParse(FieldValue(procedureCase, "sourceReference"), out var parsedCustomerId)
+        var customerBusinessPartnerId = Guid.TryParse(FieldValue(procedureCase, "customerReference"), out var parsedCustomerId)
             ? parsedCustomerId
             : (Guid?)null;
+
+        var providerSelection = await new FacilitiesProviderSelectionService(_db).ResolveAsync(
+            tenantId,
+            FieldValue(procedureCase, "serviceProviderBusinessPartnerId"),
+            FieldValue(procedureCase, "serviceProviderContractId"),
+            now);
 
         var createdJobCard = await _jobCardService.CreateJobCardAsync(new CreateJobCardDto
         {
@@ -2248,7 +2271,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             RequiresShutdown = maintenanceType.RequiresShutdown,
             RequiresSafetyPermit = maintenanceType.RequiresSafetyPermit,
             SafetyRequirements = FirstNonBlank(maintenanceType.SafetyRequirements, FieldValue(procedureCase, "safetyNotes")),
-            SpecialInstructions = $"Facilities routing approved from {completedStageName}. Continue execution in Maintenance Management and return job card/work order status to Facilities closeout.",
+            SpecialInstructions = $"Facilities routing approved from {completedStageName}. Continue execution in Maintenance Management and return job card/work order status to Facilities closeout."
+                + (providerSelection is null ? string.Empty
+                    : $" Procurement provider: {providerSelection.Provider.PartnerName}; contract: {providerSelection.Contract.ContractNumber}."),
             CustomFieldValues = new Dictionary<string, object>
             {
                 ["sourceModule"] = "Estate / Facilities",
@@ -2257,7 +2282,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 ["sourceEntityType"] = procedureCase.EntityType,
                 ["propertyUnit"] = propertyUnit ?? string.Empty,
                 ["issueType"] = issueType,
-                ["serviceImpact"] = serviceImpact
+                ["serviceImpact"] = serviceImpact,
+                ["serviceProviderBusinessPartnerId"] = providerSelection?.Provider.Id.ToString() ?? string.Empty,
+                ["serviceProviderContractId"] = providerSelection?.Contract.Id.ToString() ?? string.Empty,
+                ["serviceProviderContractNumber"] = providerSelection?.Contract.ContractNumber ?? string.Empty
             }
         });
 
@@ -2347,6 +2375,22 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         {
             throw new InvalidOperationException($"Maintenance closeout cannot be submitted because job card {jobCard.JobCardNumber} is still {jobCard.JobCardStatus}.");
         }
+
+        EnsureFacilitiesMaintenanceCloseoutFields(procedureCase);
+    }
+
+    internal static void EnsureFacilitiesMaintenanceCloseoutFields(ProcedureCase procedureCase)
+    {
+        var inspectionOutcome = FieldValue(procedureCase, "inspectionOutcome");
+        if (inspectionOutcome is not ("Passed" or "Not required"))
+            throw new InvalidOperationException("Record a passed inspection or an approved not-required outcome before Maintenance closeout.");
+        if (inspectionOutcome == "Passed" && string.IsNullOrWhiteSpace(FieldValue(procedureCase, "inspectionReference")))
+            throw new InvalidOperationException("Record the inspection reference before Maintenance closeout.");
+        var requesterFeedback = FieldValue(procedureCase, "requesterFeedbackStatus");
+        if (string.IsNullOrWhiteSpace(requesterFeedback) || requesterFeedback == "Pending")
+            throw new InvalidOperationException("Record the requester feedback outcome before Maintenance closeout.");
+        if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "closureNotes")))
+            throw new InvalidOperationException("Record closure notes before Maintenance closeout.");
     }
 
     private async Task<JobCardDto?> ResolveFacilitiesMaintenanceJobCardAsync(ProcedureCase procedureCase)
@@ -4508,6 +4552,66 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return new WorkspaceSeed(title, stages, fields, documents, workflowStage?.WorkflowDefinitionId, workflowStage?.WorkflowDefinitionName);
     }
 
+    private void EnsurePublishedWorkflowForProcedureCase(
+        string module,
+        string entityType,
+        Guid? workflowDefinitionId,
+        string action)
+    {
+        if (!RequiresPublishedWorkflowForProcedureCase(module, entityType) || workflowDefinitionId.HasValue)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(MissingPublishedWorkflowMessage(module, entityType, action));
+    }
+
+    private void EnsureWorkflowRuntimeForProcedureCase(ProcedureCase procedureCase, string action)
+    {
+        if (!RequiresPublishedWorkflowForProcedureCase(procedureCase.Module, procedureCase.EntityType)
+            || procedureCase.WorkflowInstanceId.HasValue)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"This {procedureCase.Module} / {procedureCase.EntityType} procedure case must be attached to workflow runtime before {action} this procedure case.");
+    }
+
+    private bool RequiresPublishedWorkflowForProcedureCase(string module, string entityType)
+    {
+        var workspaceType = ResolveProcedureWorkspaceType(module, entityType);
+        if (!string.IsNullOrWhiteSpace(workspaceType))
+        {
+            return !IsNonCaseWorkspaceType(workspaceType);
+        }
+
+        return module is "Legal" or "Estate" or "PropertyManagement" or "Facilities" or "Planning";
+    }
+
+    private string? ResolveProcedureWorkspaceType(string module, string entityType)
+        => module switch
+        {
+            "Estate" => _estateCatalog.GetProcedures()
+                .FirstOrDefault(item => string.Equals(item.EntityType, entityType, StringComparison.OrdinalIgnoreCase))
+                ?.WorkspaceType,
+            "PropertyManagement" => _propertyManagementCatalog.GetProcedures()
+                .FirstOrDefault(item => string.Equals(item.EntityType, entityType, StringComparison.OrdinalIgnoreCase))
+                ?.WorkspaceType,
+            "Facilities" => _facilitiesCatalog.GetProcedures()
+                .FirstOrDefault(item => string.Equals(item.EntityType, entityType, StringComparison.OrdinalIgnoreCase))
+                ?.WorkspaceType,
+            "Legal" or "Planning" => "Case Workflow",
+            _ => null
+        };
+
+    private static bool IsNonCaseWorkspaceType(string workspaceType)
+        => string.Equals(workspaceType, "Register", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(workspaceType, "Dashboard / Report", StringComparison.OrdinalIgnoreCase);
+
+    private static string MissingPublishedWorkflowMessage(string module, string entityType, string action)
+        => $"Publish a workflow for {module} / {entityType} before {action} this procedure case.";
+
     private async Task<List<StageSeed>> BuildStageSeedsAsync(string module, string entityType)
     {
         var tenantId = RequireTenantId();
@@ -4542,8 +4646,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .ToList();
         }
 
-        // A published workflow supplies engine routing when it is available. The procedure catalog
-        // remains the operational manual path when the workflow has not yet been configured.
+        // Catalog stages are retained only as a backend fallback for non-case workspaces and legacy reads.
+        // Case-style procedure routing is blocked unless a published workflow is available.
         return module switch
         {
             "Legal" => _legalCatalog.GetProcedureWorkspace(entityType)?.Stages
@@ -5893,6 +5997,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var documents = procedureCase.Documents.OrderBy(item => item.CreatedAt).ToList();
         var dmsDocuments = await LoadDmsDocumentSnapshotsAsync(procedureCase.TenantId, documents);
         await AddFacilitiesMaintenanceExecutionStatusFieldsAsync(procedureCase, fields);
+        await _facilitiesComplaintHandoff.AddTicketStatusFieldsAsync(procedureCase, fields);
         return new(
             procedureCase.Id,
             procedureCase.Module,

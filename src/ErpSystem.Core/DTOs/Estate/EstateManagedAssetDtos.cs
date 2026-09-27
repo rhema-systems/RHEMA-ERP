@@ -37,6 +37,9 @@ public class EstateManagedAssetDto
     public bool IsReadyForProjectManagement { get; set; }
     public string? BlockName { get; set; }
     public string? FloorLabel { get; set; }
+    public Guid? ResponsibleOfficerEmployeeId { get; set; }
+    public string? ResponsibleOfficerEmployeeNumber { get; set; }
+    public string? ResponsibleOfficerName { get; set; }
     public EstateManagedAssetType AssetType { get; set; }
     public EstateManagedAssetStatus Status { get; set; }
     public EstateManagedAssetSourceType SourceType { get; set; }
@@ -173,6 +176,7 @@ public class UpdateEstateManagedAssetOccupancyDto
     public EstateManagedAssetStatus Status { get; set; }
     public DateTime? ActualDate { get; set; }
     public bool? ReleaseOccupant { get; set; }
+    public Guid? TerminationCaseId { get; set; }
     public bool? IsAvailableForLease { get; set; }
     public bool? IsAvailableForSale { get; set; }
     public bool? IsPublishedToExternalPortal { get; set; }

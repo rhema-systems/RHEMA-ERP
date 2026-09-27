@@ -120,6 +120,32 @@ const crossModuleFlows = [
   },
 ];
 
+const closedStatuses = new Set(['completed', 'closed', 'cancelled', 'rejected']);
+
+const normalizeCaseText = (item: ProcedureCaseSummary) =>
+  [
+    item.module,
+    item.entityType,
+    item.title,
+    item.referenceNumber,
+    item.applicantName,
+    item.status,
+    item.currentStageName,
+    item.currentAssignedRole,
+    ...Object.values(item.fieldValues || {}),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+const matchesAny = (item: ProcedureCaseSummary, terms: string[]) => {
+  const text = normalizeCaseText(item);
+  return terms.some((term) => text.includes(term));
+};
+
+const isOpenCase = (item: ProcedureCaseSummary) =>
+  !closedStatuses.has(item.status.toLowerCase());
+
 export default function EstateOperationsPage() {
   const router = useRouter();
   const { hasAnyRole } = useAuth();
@@ -178,7 +204,7 @@ export default function EstateOperationsPage() {
       dmsRecords.filter(
         (record) =>
           record.sourceModule.toLowerCase().startsWith('estate') ||
-          record.sourceLabel.toLowerCase().includes('source: estate')
+          record.sourceLabel.toLowerCase().includes('estate')
       ),
     [dmsRecords]
   );
@@ -267,6 +293,110 @@ export default function EstateOperationsPage() {
       value: dmsMetadataPercent,
     },
   ];
+
+  const estateSopQueues = React.useMemo(() => {
+    const allOpenCases = [
+      ...estateCases,
+      ...propertyCases,
+      ...facilitiesCases,
+    ].filter(isOpenCase);
+
+    const queues = [
+      {
+        title: 'Registry & File Movement',
+        icon: ClipboardList,
+        terms: ['registry', 'secretarial', 'file', 'received', 'dispatch'],
+      },
+      {
+        title: 'Records Amendments',
+        icon: Database,
+        terms: ['records', 'address', 'certified', 'copy', 'joint', 'amendment'],
+      },
+      {
+        title: 'Applications & Allocation',
+        icon: Landmark,
+        terms: [
+          'application',
+          'allocation',
+          'serviced',
+          'partially',
+          'traditional',
+          'regularisation',
+          'regularization',
+          'housing',
+          'listing',
+        ],
+      },
+      {
+        title: 'Revenue, Arrears & Rates',
+        icon: BarChart3,
+        terms: [
+          'groundrent',
+          'ground rent',
+          'billing',
+          'servicecharge',
+          'service charge',
+          'invoice',
+          'payment',
+          'arrears',
+          'rate',
+          'reminder',
+        ],
+      },
+      {
+        title: 'Lease, Transfer & Legal Routing',
+        icon: FileSignature,
+        terms: ['lease', 'transfer', 'assignment', 'mortgage', 'legal'],
+      },
+      {
+        title: 'Inspection, Site & Facilities',
+        icon: MapPin,
+        terms: [
+          'inspection',
+          'site',
+          'maintenance',
+          'complaint',
+          'facility',
+          'facilities',
+          'provider',
+          'staff',
+          'cleaner',
+          'asset',
+        ],
+      },
+      {
+        title: 'Reports & Closeout',
+        icon: FileText,
+        terms: ['report', 'quarterly', 'closeout', 'completion', 'dms', 'document'],
+      },
+    ];
+
+    return queues.map((queue) => {
+      const items = allOpenCases.filter((item) => matchesAny(item, queue.terms));
+      return {
+        ...queue,
+        count: items.length,
+        items: items.slice(0, 5),
+      };
+    });
+  }, [estateCases, propertyCases, facilitiesCases]);
+
+  const openEstateCase = (item: ProcedureCaseSummary) => {
+    const entityType = encodeURIComponent(item.entityType);
+    const caseId = encodeURIComponent(item.id);
+
+    if (item.module === 'PropertyManagement') {
+      router.push(`/estate/property-management/${entityType}/cases/${caseId}`);
+      return;
+    }
+
+    if (item.module === 'Facilities') {
+      router.push(`/estate/facilities/${entityType}`);
+      return;
+    }
+
+    router.push(`/estate/${entityType}/cases/${caseId}`);
+  };
 
   return (
     <div className="space-y-6">
@@ -369,6 +499,93 @@ export default function EstateOperationsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-border bg-card text-card-foreground">
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-primary" />
+              <CardTitle>Estate SOP Control Registers</CardTitle>
+            </div>
+            <Badge variant="secondary">
+              {estateSopQueues.reduce((total, queue) => total + queue.count, 0)} open controls
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {estateSopQueues.map((queue) => {
+              const Icon = queue.icon;
+              return (
+                <div
+                  key={queue.title}
+                  className="rounded-md border border-border bg-background p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium">{queue.title}</div>
+                      <div className="mt-2 text-2xl font-semibold">
+                        {queue.count}
+                      </div>
+                    </div>
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted">
+                      <Icon className="h-4 w-4 text-primary" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            {estateSopQueues.map((queue) => (
+              <div
+                key={`${queue.title}-items`}
+                className="rounded-md border border-border bg-background p-4"
+              >
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="font-medium">{queue.title}</div>
+                  <Badge variant="outline">{queue.count}</Badge>
+                </div>
+                {queue.items.length > 0 ? (
+                  <div className="space-y-2">
+                    {queue.items.map((item) => (
+                      <button
+                        key={`${queue.title}-${item.id}`}
+                        type="button"
+                        className="w-full rounded-md border border-border bg-card p-3 text-left transition hover:bg-muted"
+                        onClick={() => openEstateCase(item)}
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="text-sm font-medium">
+                              {item.referenceNumber || item.title}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {item.title}
+                            </div>
+                          </div>
+                          <Badge variant="secondary" className="w-fit">
+                            {item.status}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                          <span>{item.module}</span>
+                          <span>{item.currentStageName}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+                    No open items
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="border-border bg-card text-card-foreground">

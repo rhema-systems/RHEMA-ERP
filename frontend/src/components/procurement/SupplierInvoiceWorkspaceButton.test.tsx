@@ -19,23 +19,15 @@ describe('supplier invoice workspace navigation', () => {
     { acceptedSupplyKind: 'WorksPaymentCertificate' },
     { isProcurementAutoInvoice: true },
     { lineItems: [{ landedCostItemId: 'charge' }] },
-  ])('opens source-owned invoices in Procurement: %j', async (source) => {
+    { lineItems: [] },
+    { isOpeningBalance: true, estateAcquisitionId: 'estate', lineItems: [] },
+  ])('opens supplier invoices in Procurement: %j', async (source) => {
     vi.mocked(accountsPayableService.getInvoice).mockResolvedValue({ id: 'persisted-invoice', lineItems: [], ...source } as never);
     render(<SupplierInvoiceWorkspaceButton invoiceId="invoice-reference" />);
     fireEvent.click(screen.getByRole('button', { name: 'Open supplier invoice' }));
     await waitFor(() => expect(push).toHaveBeenCalledWith('/procurement/supplier-invoices/persisted-invoice'));
     expect(accountsPayableService.getInvoice).toHaveBeenCalledWith('invoice-reference');
     expect(toast).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    { lineItems: [] },
-    { isOpeningBalance: true, estateAcquisitionId: 'estate', lineItems: [] },
-  ])('keeps legacy and opening invoices on Finance: %j', async (invoice) => {
-    vi.mocked(accountsPayableService.getInvoice).mockResolvedValue({ id: 'legacy-invoice', ...invoice } as never);
-    render(<SupplierInvoiceWorkspaceButton invoiceId="legacy-invoice" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open supplier invoice' }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith('/finance/ap/invoices/legacy-invoice'));
   });
 
   it('retains the page, reports server detail and code, and allows retry after a failed lookup', async () => {

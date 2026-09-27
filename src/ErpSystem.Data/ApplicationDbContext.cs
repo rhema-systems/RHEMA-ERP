@@ -1147,6 +1147,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EstateGroundRentCharge> EstateGroundRentCharges { get; set; }
     public DbSet<EstateGroundRentReview> EstateGroundRentReviews { get; set; }
     public DbSet<EstateFacilityDutyRoster> EstateFacilityDutyRosters { get; set; }
+    public DbSet<EstateFacilityDutyAttendance> EstateFacilityDutyAttendances { get; set; }
+    public DbSet<EstateFacilityProviderRate> EstateFacilityProviderRates { get; set; }
     public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
     public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
     public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
@@ -10526,6 +10528,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.AttendanceStatus, item.CompletionStatus });
             entity.HasIndex(item => new { item.TenantId, item.LinkedMaintenanceReference });
             entity.HasIndex(item => new { item.TenantId, item.LinkedComplaintReference });
+        });
+
+        builder.Entity<EstateFacilityDutyAttendance>(entity =>
+        {
+            entity.ToTable("EstateFacilityDutyAttendances");
+            entity.HasIndex(item => new { item.TenantId, item.DutyRosterId, item.DutyDate }).IsUnique();
+            entity.HasOne(item => item.DutyRoster).WithMany()
+                .HasForeignKey(item => item.DutyRosterId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EstateFacilityProviderRate>(entity =>
+        {
+            entity.ToTable("EstateFacilityProviderRates");
+            entity.Property(item => item.Rate).HasPrecision(18, 4);
+            entity.HasIndex(item => new { item.TenantId, item.BusinessPartnerId, item.IsActive });
+            entity.HasIndex(item => new { item.TenantId, item.ContractId });
         });
 
         builder.Entity<LandAcquisitionNote>(entity =>

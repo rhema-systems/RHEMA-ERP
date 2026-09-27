@@ -527,6 +527,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Api.Services.Estate.IEstateSalesListingApplicationHandoffService, ErpSystem.Api.Services.Estate.EstateSalesListingApplicationHandoffService>();
             services.AddScoped<ErpSystem.Api.Services.Estate.IGroundRentAdministrationService, ErpSystem.Api.Services.Estate.GroundRentAdministrationService>();
             services.AddScoped<ErpSystem.Api.Services.Estate.EstateRecurringBillingService>();
+            services.AddScoped<ErpSystem.Api.Services.Estate.FacilitiesLeaseReminderService>();
             services.AddHostedService<ErpSystem.Api.Services.Estate.EstateRecurringBillingBackgroundService>();
             services
                 .AddOptions<ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions>()

@@ -435,6 +435,8 @@ namespace ErpSystem.Web.Services
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring Planning procedure workflows are seeded...");
+            await EnsurePlanningProcedureWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring HR workflows are seeded...");
             await EnsureHrWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring HR leave workflows are seeded...");
@@ -810,6 +812,25 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed Legal procedure workflows");
+            }
+        }
+
+        private async Task EnsurePlanningProcedureWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in GetPlanningProcedureWorkflowSeedSpecs())
+                    {
+                        await EnsureEstateSopWorkflowDefinitionSeededAsync(tenant.Id, spec);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Planning procedure workflows");
             }
         }
 
@@ -1273,6 +1294,235 @@ namespace ErpSystem.Web.Services
                     entityName,
                     $"Estate SOP Example - {entityName}",
                     $"Example TDC Estate SOP workflow for {entityName}. It provides practical stages, checklist controls, and document requirements that can be cloned/refined in Workflow Setup.",
+                    steps);
+        }
+
+        private static IReadOnlyList<EstateSopWorkflowSeedSpec> GetPlanningProcedureWorkflowSeedSpecs()
+        {
+            const string TaskActionType = "planning-procedure";
+            const string DocumentType = "PlanningProcedureEvidence";
+
+            var intakeReviewSiteDecision = new[]
+            {
+                PlanningStep("HOD Intake", WorkflowStepType.Manual, "Head of Development",
+                    ["Application or file is received and routed to Planning", "Supporting documents are checked for completeness"],
+                    ["Application / file referral", "Supporting planning documents"]),
+                PlanningStep("STP Technical Review", WorkflowStepType.Manual, "Supervising Town Planner",
+                    ["Application is vetted against approved layout and master plan", "Technical officer assignment is recorded"],
+                    ["Technical review note", "Approved layout / master plan extract"]),
+                PlanningStep("Site Verification", WorkflowStepType.Manual, "Town Planner",
+                    ["Site visit is completed where required", "Situational observations are recorded"],
+                    ["Site visitation report", "Photo / field evidence"]),
+                PlanningStep("HOD Decision", WorkflowStepType.Approval, "Head of Development",
+                    ["Recommendation or rejection is reviewed with justification", "Final routing action is recorded"],
+                    ["STP recommendation note", "HOD decision / routing note"])
+            };
+
+            var siteReportSteps = new[]
+            {
+                PlanningStep("HOD Intake", WorkflowStepType.Manual, "Head of Development",
+                    ["Request letter or file is received and routed to STP", "Site-report purpose is confirmed"],
+                    ["Request letter / file referral", "Supporting documents"]),
+                PlanningStep("STP Assignment", WorkflowStepType.Manual, "Supervising Town Planner",
+                    ["Officer assigned for field visit", "Inspection scope and site details are confirmed"],
+                    ["Assignment note", "Site/location reference"]),
+                PlanningStep("Site Visit and Report", WorkflowStepType.Manual, "Town Planner",
+                    ["Site visit completed", "Ground situation and observations documented"],
+                    ["Site report", "Photo / field evidence"]),
+                PlanningStep("STP Submission", WorkflowStepType.Approval, "Supervising Town Planner",
+                    ["Report is reviewed for completeness", "Report is referred to HOD for further action"],
+                    ["STP reviewed site report", "HOD submission note"])
+            };
+
+            var sitePlanSteps = new[]
+            {
+                PlanningStep("HOD Intake", WorkflowStepType.Manual, "Head of Development",
+                    ["Application or file is received and routed to STP", "Supporting documents are checked"],
+                    ["Application / file referral", "Supporting documents"]),
+                PlanningStep("STP Vetting", WorkflowStepType.Manual, "Supervising Town Planner",
+                    ["Application is vetted", "DOS handoff is recorded"],
+                    ["Vetting note", "Layout / parcel reference"]),
+                PlanningStep("DOS Drafting Review", WorkflowStepType.Manual, "Drawing Office Supervisor",
+                    ["Plot dimensions, access, utility corridors, buffers, easements, and coordinates are reviewed", "Draughtsman assignment is recorded"],
+                    ["Drafting instruction", "Survey coordinate evidence"]),
+                PlanningStep("Site Plan Signoff", WorkflowStepType.Approval, "Supervising Town Planner",
+                    ["Prepared or amended site plan is reviewed", "Draughtsman, DOS, and STP signoff is confirmed"],
+                    ["Signed site plan", "Approval / amendment note"])
+            };
+
+            return
+            [
+                PlanningSpec(
+                    "PlanningLandAllocationVetting",
+                    "Land Allocation / Temporary License Vetting",
+                    intakeReviewSiteDecision),
+                PlanningSpec(
+                    "PlanningChangeOfUseReview",
+                    "Change of Use Review",
+                    [
+                        PlanningStep("HOD Intake", WorkflowStepType.Manual, "Head of Development",
+                            ["Application is received and routed to Planning", "Supporting documents are checked"],
+                            ["Change-of-use application", "Supporting documents"]),
+                        PlanningStep("Committee Vetting", WorkflowStepType.Manual, "Change of Use Committee",
+                            ["Proposed use is assessed for permissibility", "Stakeholder or neighbourhood consultation need is determined"],
+                            ["Committee vetting note", "Consultation evidence"]),
+                        PlanningStep("Site Report and STP Review", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Site report is completed where required", "STP recommendation or rejection is recorded"],
+                            ["Site report", "STP recommendation note"]),
+                        PlanningStep("Committee Chair Decision", WorkflowStepType.Approval, "Head of Development",
+                            ["Recommendation is reviewed with justification", "Decision is recorded for further action"],
+                            ["Decision note", "HOD / committee chair routing note"])
+                    ]),
+                PlanningSpec(
+                    "PlanningSchemeLayoutPreparation",
+                    "Planning Scheme / Layout Preparation",
+                    [
+                        PlanningStep("Base Map Intake", WorkflowStepType.Manual, "Head of Development",
+                            ["Base map or site parcel is referred to STP", "Planning purpose is confirmed"],
+                            ["Base map / site parcel referral", "Acquisition or project brief"]),
+                        PlanningStep("Layout Design", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Town Planner, Physical Planner, DOS, and technical officers are engaged", "Layout design work is coordinated"],
+                            ["Draft planning scheme / layout", "Technical design notes"]),
+                        PlanningStep("Reports Compilation", WorkflowStepType.Manual, "Town Planner",
+                            ["Accompanying reports are produced", "Layout package is checked for completeness"],
+                            ["Planning reports", "Final layout package"]),
+                        PlanningStep("HOD Approval", WorkflowStepType.Approval, "Head of Development",
+                            ["Final layout and reports are reviewed", "Approval or further action is recorded"],
+                            ["Approved layout", "HOD approval / action note"])
+                    ]),
+                PlanningSpec("PlanningSiteReport", "Site Report", siteReportSteps),
+                PlanningSpec("PlanningSitePlanPreparation", "Site Plan Preparation", sitePlanSteps),
+                PlanningSpec(
+                    "PlanningOfficialSearchData",
+                    "Official Search and Provision of Data",
+                    [
+                        PlanningStep("Search Intake", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Application or consent for search is received", "Attached site plan is captured"],
+                            ["Search application / consent", "Attached site plan"]),
+                        PlanningStep("Records Search", WorkflowStepType.Manual, "Town Planner",
+                            ["Prepared site plans, notebooks, and layouts are checked", "Site plan is superimposed on available layout where needed"],
+                            ["Records search note", "Superimposition evidence"]),
+                        PlanningStep("Estate and Revenue Cross-check", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Estate and Revenue record checks are recommended or recorded", "Land status information is compiled"],
+                            ["Estate / Revenue cross-check note", "Land status information pack"]),
+                        PlanningStep("HOD Submission", WorkflowStepType.Approval, "Head of Development",
+                            ["Planning information is reviewed", "Information package is referred to HOD"],
+                            ["Planning search response", "HOD submission note"])
+                    ]),
+                PlanningSpec(
+                    "PlanningDevelopmentPermitConformity",
+                    "Development Permit Conformity Review",
+                    [
+                        PlanningStep("Application Intake", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Development permit proposal and site plan are received", "Layout reference is captured"],
+                            ["Development permit proposal", "Site plan"]),
+                        PlanningStep("Layout and Land Use Check", WorkflowStepType.Manual, "Town Planner",
+                            ["Site plan is checked against layout", "Land use and height zoning controls are reviewed"],
+                            ["Layout conformity note", "Land use / height zoning check"]),
+                        PlanningStep("Revision Review", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Inconsistencies and requested revisions are recorded", "Endorsement readiness is confirmed"],
+                            ["Revision request / response", "Conformity recommendation"]),
+                        PlanningStep("Endorsement", WorkflowStepType.Approval, "Head of Development",
+                            ["Conformity recommendation is reviewed", "Approval, revision, or referral decision is recorded"],
+                            ["Endorsed conformity review", "Decision / referral note"])
+                    ]),
+                PlanningSpec(
+                    "PlanningRegularization",
+                    "Regularization",
+                    [
+                        PlanningStep("Regularization Intake", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Application or Regularization Office letter is received", "Parcel or plot is identified"],
+                            ["Regularization application / letter", "Parcel / plot reference"]),
+                        PlanningStep("Records and Layout Verification", WorkflowStepType.Manual, "Town Planner",
+                            ["Existing record is checked", "Layout and ground conditions are cross-referenced"],
+                            ["Records verification note", "Layout cross-reference evidence"]),
+                        PlanningStep("Site Verification and Committee Review", WorkflowStepType.Manual, "Regularization Committee",
+                            ["Site verification or area profiling is completed", "Committee / MD route is recorded where required"],
+                            ["Site report", "Committee / MD recommendation"]),
+                        PlanningStep("Site Plan and HOD Closeout", WorkflowStepType.Approval, "Head of Development",
+                            ["Approved regularization is routed for site plan preparation where applicable", "Final HOD referral is recorded"],
+                            ["Prepared site plan", "HOD closeout note"])
+                    ]),
+                PlanningSpec(
+                    "PlanningLayoutReviewCorrection",
+                    "Layout Review and Correction",
+                    [
+                        PlanningStep("Anomaly Intake", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Audit finding or recommendation is logged", "Affected layout is identified"],
+                            ["Audit finding / recommendation", "Affected layout extract"]),
+                        PlanningStep("Technical Review", WorkflowStepType.Manual, "Town Planner",
+                            ["Issues are reviewed against master plan and approved layout", "Estate file request need is determined"],
+                            ["Technical review note", "Estate file request"]),
+                        PlanningStep("DOS Correction", WorkflowStepType.Manual, "Drawing Office Supervisor",
+                            ["Anomaly is corrected or updated on layout", "Amended layout is prepared"],
+                            ["Corrected / amended layout", "DOS correction note"]),
+                        PlanningStep("STP Submission", WorkflowStepType.Approval, "Supervising Town Planner",
+                            ["Response and updated layout are vetted", "Submission to HOD is recorded"],
+                            ["STP response", "HOD submission package"])
+                    ]),
+                PlanningSpec("PlanningComplianceInspection", "Compliance Site Inspection and Reporting", siteReportSteps),
+                PlanningSpec(
+                    "PlanningDisputeComplaint",
+                    "Dispute Resolution and Client Complaint Management",
+                    [
+                        PlanningStep("Complaint Intake", WorkflowStepType.Manual, "Head of Development",
+                            ["Complaint, dispute, or file is received", "Supporting records are checked for completeness"],
+                            ["Complaint / dispute letter", "Supporting documents"]),
+                        PlanningStep("STP Assessment", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Matter is assigned for review", "Planning and boundary records are assessed"],
+                            ["Assessment note", "Boundary / planning records extract"]),
+                        PlanningStep("Internal Review", WorkflowStepType.Manual, "Town Planner",
+                            ["Issue is reviewed against available records", "Resolution options are documented"],
+                            ["Internal review note", "Resolution recommendation"]),
+                        PlanningStep("HOD Action", WorkflowStepType.Approval, "Head of Development",
+                            ["STP report is reviewed", "Further action or client response is approved"],
+                            ["STP report", "HOD action / response note"])
+                    ]),
+                PlanningSpec(
+                    "PlanningAssemblySpatialCommittee",
+                    "District Assembly Spatial Planning Committee Meetings",
+                    [
+                        PlanningStep("Invitation Intake", WorkflowStepType.Manual, "Supervising Town Planner",
+                            ["Invitation letter is received from HOD", "Meeting details and representation need are confirmed"],
+                            ["Invitation letter", "Meeting agenda / notice"]),
+                        PlanningStep("Representation", WorkflowStepType.Manual, "Town Planner",
+                            ["STP attends or assigns a representative", "TDC interest and issues are recorded"],
+                            ["Attendance evidence", "Meeting notes"]),
+                        PlanningStep("Meeting Report", WorkflowStepType.Manual, "Town Planner",
+                            ["Assigned officer prepares report", "Action items and decisions are captured"],
+                            ["Committee meeting report", "Action item register"]),
+                        PlanningStep("HOD Submission", WorkflowStepType.Approval, "Head of Development",
+                            ["Report is submitted through STP", "HOD follow-up action is recorded"],
+                            ["STP-reviewed report", "HOD action note"])
+                    ])
+            ];
+
+            static EstateSopWorkflowStepSeed PlanningStep(
+                string name,
+                WorkflowStepType type,
+                string role,
+                IReadOnlyList<string> checks,
+                IReadOnlyList<string> documents)
+                => new(
+                    name,
+                    type,
+                    role,
+                    string.Join(" ", checks),
+                    checks,
+                    documents,
+                    TaskActionType,
+                    DocumentType,
+                    $"Complete the {name} stage for this Planning procedure.");
+
+            static EstateSopWorkflowSeedSpec PlanningSpec(
+                string entityCode,
+                string entityName,
+                IReadOnlyList<EstateSopWorkflowStepSeed> steps)
+                => new(
+                    entityCode,
+                    entityName,
+                    $"Planning - {entityName}",
+                    $"Default Planning workflow for {entityName}. Stages, checklist controls, and document requirements are managed in Workflow Setup.",
                     steps);
         }
 

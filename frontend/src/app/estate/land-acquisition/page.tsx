@@ -437,7 +437,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('surveyNotes', 'Survey Notes', 'textarea', undefined, 2),
     field(
       'accountsPayableInvoiceNumber',
-      'AP Invoice',
+      'Payable Request',
       'text',
       undefined,
       1,
@@ -453,7 +453,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     ),
     field(
       'accountsPayablePaymentNumber',
-      'AP Payment',
+      'Payment Record',
       'text',
       undefined,
       1,
@@ -680,7 +680,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     ),
     field(
       'accountsPayableInvoiceNumber',
-      'AP Invoice',
+      'Payable Request',
       'text',
       undefined,
       1,
@@ -696,7 +696,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     ),
     field(
       'accountsPayablePaymentNumber',
-      'AP Payment',
+      'Payment Record',
       'text',
       undefined,
       1,
@@ -790,7 +790,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
   'stamp-duty-payment': [
     field(
       'accountsPayableInvoiceNumber',
-      'AP Invoice',
+      'Payable Request',
       'text',
       undefined,
       1,
@@ -806,7 +806,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     ),
     field(
       'accountsPayablePaymentNumber',
-      'AP Payment',
+      'Payment Record',
       'text',
       undefined,
       1,
@@ -1007,7 +1007,7 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'External surveyor payment',
       description:
-        'Track the Accounts Payable request and receipt when an external surveyor is used.',
+        'Track the Estate payable request and receipt when an external surveyor is used.',
       keys: [
         'accountsPayableInvoiceNumber',
         'accountsPayableInvoiceStatus',
@@ -1204,9 +1204,9 @@ const WORKSPACE_SECTIONS: Partial<
       ],
     },
     {
-      title: 'Accounts Payable status',
+      title: 'Estate payable status',
       description:
-        'Create the AP request and process the vendor payment before moving to instrument execution.',
+        'Create the Estate payable request and confirm the vendor payment before moving to instrument execution.',
       keys: [
         'accountsPayableInvoiceNumber',
         'accountsPayableInvoiceStatus',
@@ -1217,7 +1217,7 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Processed vendor payment',
       description:
-        'Payment evidence is synchronized from Accounts Payable after the vendor payment is completed.',
+        'Payment evidence is synchronized after the vendor payment is completed.',
       keys: [
         'receiptNumber',
         'paymentReference',
@@ -1308,9 +1308,9 @@ const WORKSPACE_SECTIONS: Partial<
   ],
   'stamp-duty-payment': [
     {
-      title: 'Accounts Payable status',
+      title: 'Estate payable status',
       description:
-        'Payment details are synchronized from the linked Accounts Payable invoice and payment.',
+        'Payment details are synchronized from the linked Estate payable request and payment.',
       keys: [
         'accountsPayableInvoiceNumber',
         'accountsPayableInvoiceStatus',
@@ -1321,7 +1321,7 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Processed payment',
       description:
-        'Receipt and transaction values become available after Accounts Payable processes the payment.',
+        'Receipt and transaction values become available after the payment is processed.',
       keys: [
         'receiptNumber',
         'paymentReference',
@@ -1479,18 +1479,18 @@ function missingWorkspaceInputs(
     if (!invoiceId)
       return [
         ...missing,
-        field('accountsPayableRequest', 'Surveyor AP Request'),
+        field('accountsPayableRequest', 'Surveyor Payable Request'),
       ];
     if (!paymentId)
       return [
         ...missing,
-        field('accountsPayablePayment', 'Surveyor AP Payment'),
+        field('accountsPayablePayment', 'Surveyor Payment'),
       ];
     return paid
       ? missing
       : [
           ...missing,
-          field('accountsPayablePaymentProcessing', 'Finance Processing'),
+          field('accountsPayablePaymentProcessing', 'Payment Processing'),
         ];
   }
 
@@ -1500,12 +1500,12 @@ function missingWorkspaceInputs(
     const paid =
       values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true';
     if (!invoiceId)
-      return [field('accountsPayableRequest', 'Accounts Payable Request')];
+      return [field('accountsPayableRequest', 'Estate Payable Request')];
     if (!paymentId)
-      return [field('accountsPayablePayment', 'Accounts Payable Payment')];
+      return [field('accountsPayablePayment', 'Estate Payment')];
     return paid
       ? []
-      : [field('accountsPayablePaymentProcessing', 'Finance Processing')];
+      : [field('accountsPayablePaymentProcessing', 'Payment Processing')];
   }
 
   const missing = WORKSPACE_FIELDS[kind].filter((config) => {
@@ -1745,11 +1745,11 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
   );
   labels.set('vendorId', 'Linked Vendor / Owner');
   labels.set('surveyorBusinessPartnerId', 'External Surveyor / Vendor');
-  labels.set('accountsPayableRequest', 'Accounts Payable Request');
-  labels.set('accountsPayablePayment', 'Accounts Payable Payment');
+  labels.set('accountsPayableRequest', 'Estate Payable Request');
+  labels.set('accountsPayablePayment', 'Estate Payment');
   labels.set('stageDocuments', 'Stage Documents');
   labels.set('witnessOath', 'Witness Oath');
-  labels.set('accountsPayablePaymentProcessing', 'Finance Processing');
+  labels.set('accountsPayablePaymentProcessing', 'Payment Processing');
   return keys.map((key) => labels.get(key) || key);
 }
 
@@ -2385,15 +2385,11 @@ export default function LandAcquisitionPage() {
         <div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Landmark className="h-4 w-4" />
-            Estate workflow
+            Estate operations
           </div>
           <h1 className="mt-1 text-2xl font-semibold text-foreground">
             Land Acquisition Procedure
           </h1>
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Manage land acquisition requests through the configured RHEMA
-            workflow stages, roles, and approvals.
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canManageWorkflows && (
@@ -2448,13 +2444,7 @@ export default function LandAcquisitionPage() {
       {stages.length === 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Workflow not configured</CardTitle>
-            <CardDescription>
-              Configure and publish the Land Acquisition workflow in
-              Administration &gt; Workflow Setup. The acquisition board will
-              show the stages, documents, checklist items, roles, and
-              assignments returned by that workflow.
-            </CardDescription>
+            <CardTitle>Setup required</CardTitle>
           </CardHeader>
           <CardContent>
             <Button
@@ -3535,7 +3525,7 @@ function AccountsPayableEvidenceDialog({
     amountDue == null ? null : Math.max(0, amountDue - amountPaid);
   const title =
     view === 'invoice'
-      ? 'Accounts Payable Invoice'
+      ? 'Estate Payable Request'
       : 'Payment Receipt';
 
   return (
@@ -4020,12 +4010,12 @@ function WorkspaceDialog({
       await onReload();
       toast.success(
         workspace.values.isPaid === true
-          ? 'Accounts Payable payment synchronized.'
-          : 'Accounts Payable status refreshed.'
+          ? 'Estate payment synchronized.'
+          : 'Estate payable status refreshed.'
       );
     } catch (error: any) {
       toast.error(
-        error?.message || 'Unable to refresh Accounts Payable status.'
+        error?.message || 'Unable to refresh Estate payable status.'
       );
     } finally {
       setSyncingPayable(false);
@@ -4046,10 +4036,10 @@ function WorkspaceDialog({
         await estateAcquisitionService.ensureAccountsPayableRequest(item.id);
       onChange(workspace.values);
       await onReload();
-      toast.success('Accounts Payable request created.');
+      toast.success('Estate payable request created.');
     } catch (error: any) {
       toast.error(
-        error?.message || 'Unable to create the Accounts Payable request.'
+        error?.message || 'Unable to create the Estate payable request.'
       );
     } finally {
       setSyncingPayable(false);
@@ -4098,11 +4088,11 @@ function WorkspaceDialog({
         );
       onChange(workspace.values);
       await onReload();
-      toast.success('Other acquisition costs AP request created.');
+      toast.success('Other acquisition costs payable request created.');
     } catch (error: any) {
       toast.error(
         error?.message ||
-          'Unable to create the other acquisition costs AP request.'
+          'Unable to create the other acquisition costs payable request.'
       );
     } finally {
       setSyncingPayable(false);
@@ -4313,40 +4303,19 @@ function WorkspaceDialog({
   };
 
   const openAccountsPayable = () => {
-    if (accountsPayablePaymentId) {
-      router.push(`/finance/ap/payments/${accountsPayablePaymentId}`);
-      return;
+    if (accountsPayableInvoiceId) {
+      router.push(
+        `/procurement/supplier-invoices/${encodeURIComponent(accountsPayableInvoiceId)}`
+      );
     }
-
-    if (!accountsPayableInvoiceId || !accountsPayableSupplierId) return;
-    const params = new URLSearchParams({
-      businessPartnerId: accountsPayableSupplierId,
-      invoiceId: accountsPayableInvoiceId,
-      amount: `${values.amountDue || ''}`,
-      referenceNumber: item.projectReference,
-      description: `${accountsPayableSubject} for ${item.projectReference}`,
-      source: 'land-acquisition',
-      locked: 'true',
-    });
-    router.push(`/finance/ap/payments/create?${params.toString()}`);
   };
 
   const openOtherAcquisitionCostsAccountsPayable = () => {
-    if (otherAccountsPayablePaymentId) {
-      router.push(`/finance/ap/payments/${otherAccountsPayablePaymentId}`);
-      return;
+    if (otherAccountsPayableInvoiceId) {
+      router.push(
+        `/procurement/supplier-invoices/${encodeURIComponent(otherAccountsPayableInvoiceId)}`
+      );
     }
-
-    if (!otherAccountsPayableInvoiceId) return;
-    const params = new URLSearchParams({
-      invoiceId: otherAccountsPayableInvoiceId,
-      amount: `${values.otherAmountDue || otherAcquisitionServicesTotal || ''}`,
-      referenceNumber: item.projectReference,
-      description: `other acquisition costs for ${item.projectReference}`,
-      source: 'land-acquisition',
-      locked: 'true',
-    });
-    router.push(`/finance/ap/payments/create?${params.toString()}`);
   };
 
   React.useEffect(() => {
@@ -4693,7 +4662,7 @@ function WorkspaceDialog({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-sm font-semibold text-foreground">
-                        Accounts Payable request
+                        Estate payable request
                       </h3>
                       <Badge
                         variant={accountsPayablePaid ? 'secondary' : 'outline'}
@@ -4750,9 +4719,7 @@ function WorkspaceDialog({
                         disabled={syncingPayable}
                       >
                         <ExternalLink className="mr-2 h-4 w-4" />
-                        {accountsPayablePaymentId
-                          ? 'View AP Payment'
-                          : 'Process in Accounts Payable'}
+                        Open Supplier Invoice
                       </Button>
                     ) : (
                       <Button
@@ -4769,7 +4736,7 @@ function WorkspaceDialog({
                         ) : (
                           <Plus className="mr-2 h-4 w-4" />
                         )}
-                        Create AP Request
+                        Create Payable Request
                       </Button>
                     )}
                     <Button
@@ -4977,9 +4944,7 @@ function WorkspaceDialog({
                         disabled={syncingPayable}
                       >
                         <ExternalLink className="mr-2 h-4 w-4" />
-                        {otherAccountsPayablePaymentId
-                          ? 'View Other Cost Payment'
-                          : 'Process Other Costs in AP'}
+                        Open Supplier Invoice
                       </Button>
                     ) : (
                       <Button
@@ -5006,7 +4971,7 @@ function WorkspaceDialog({
                         ) : (
                           <Plus className="mr-2 h-4 w-4" />
                         )}
-                        Create Other Cost AP
+                        Create Other Cost Payable
                       </Button>
                     )}
                     <Button
@@ -5022,7 +4987,7 @@ function WorkspaceDialog({
                       disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
                       title={
                         otherAccountsPayableInvoiceId
-                          ? 'Other cost AP request already exists.'
+                          ? 'Other cost payable request already exists.'
                           : !workspaceCanEdit
                             ? workspaceLockedMessage
                             : undefined
@@ -5159,7 +5124,7 @@ function WorkspaceDialog({
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">AP invoice</p>
+                    <p className="text-xs text-muted-foreground">Supplier invoice</p>
                     <p className="font-medium">
                       {values.otherAccountsPayableInvoiceNumber ||
                         otherAccountsPayableInvoiceId ||
@@ -5167,7 +5132,7 @@ function WorkspaceDialog({
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">AP payment</p>
+                    <p className="text-xs text-muted-foreground">Payment</p>
                     <p className="font-medium">
                       {values.otherAccountsPayablePaymentNumber ||
                         values.otherAccountsPayablePaymentStatus ||

@@ -18,6 +18,7 @@ using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Models;
 using ErpSystem.Core.Services.Estate;
 using ErpSystem.Api.Services.DocumentManagement;
+using ErpSystem.Api.Services.Estate;
 using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -555,18 +556,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         var invoices = await _db.Invoices
             .AsNoTracking()
-            .Where(invoice => invoice.TenantId == tenantId
-                && !invoice.IsDeleted
-                && customerIds.Contains(invoice.BusinessPartnerId)
-                && (invoice.Status == InvoiceStatus.Sent
-                    || invoice.Status == InvoiceStatus.PartiallyPaid
-                    || invoice.Status == InvoiceStatus.Paid
-                    || invoice.Status == InvoiceStatus.Overdue
-                    || invoice.Status == InvoiceStatus.Approved)
-                && ((invoice.Reference != null && invoice.Reference.StartsWith("RENT-"))
-                    || (invoice.Reference != null && invoice.Reference.StartsWith("LEGAL-TRANSFER-FEE-"))
-                    || (invoice.Notes != null
-                        && invoice.Notes.Contains("Estate / Property Management"))))
+            .ForCustomerProperties(tenantId, customerIds)
             .OrderByDescending(invoice => invoice.InvoiceDate)
             .Select(invoice => new
             {
@@ -966,23 +956,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
         }
 
-        var customerIds = PortalCustomers(tenantId, userId.Value).Select(customer => customer.Id);
+        var customerIds = await PortalCustomers(tenantId, userId.Value)
+            .Select(customer => customer.Id).ToListAsync(cancellationToken);
         var invoice = await _db.Invoices
             .AsNoTracking()
             .Include(item => item.Tenant)
             .Include(item => item.LineItems.Where(line => !line.IsDeleted))
-            .FirstOrDefaultAsync(item => item.Id == invoiceId
-                && item.TenantId == tenantId
-                && !item.IsDeleted
-                && customerIds.Contains(item.BusinessPartnerId)
-                && (item.Status == InvoiceStatus.Sent
-                    || item.Status == InvoiceStatus.PartiallyPaid
-                    || item.Status == InvoiceStatus.Paid
-                    || item.Status == InvoiceStatus.Overdue
-                    || item.Status == InvoiceStatus.Approved)
-                && ((item.Reference != null && item.Reference.StartsWith("RENT-"))
-                    || (item.Reference != null && item.Reference.StartsWith("LEGAL-TRANSFER-FEE-"))
-                    || (item.Notes != null && item.Notes.Contains("Estate / Property Management"))), cancellationToken);
+            .ForCustomerProperties(tenantId, customerIds)
+            .FirstOrDefaultAsync(item => item.Id == invoiceId, cancellationToken);
         if (invoice is null)
         {
             return NotFound(new { success = false, message = "Property invoice was not found." });

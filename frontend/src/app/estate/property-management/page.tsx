@@ -28,7 +28,6 @@ import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
@@ -151,9 +150,6 @@ export default function EstatePropertyManagementPage() {
             <CardTitle className="text-base leading-6">
               {procedure.title}
             </CardTitle>
-            <CardDescription className="mt-1">
-              {procedure.source}
-            </CardDescription>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">

@@ -50,8 +50,19 @@ public sealed class ProcedureCasesController : ControllerBase
         [FromQuery] string module,
         [FromQuery] string entityType)
     {
-        var requirements = await _procedureCaseService.GetSubmissionDocumentRequirementsAsync(module, entityType);
-        return Ok(new { success = true, data = requirements });
+        try
+        {
+            var requirements = await _procedureCaseService.GetSubmissionDocumentRequirementsAsync(module, entityType);
+            return Ok(new { success = true, data = requirements });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
     }
 
     [HttpGet("{id:guid}")]

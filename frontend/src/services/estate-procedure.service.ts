@@ -7,8 +7,6 @@ import {
 export interface EstateProcedure {
   title: string;
   entityType: string;
-  source: string;
-  summary: string;
   icon: string;
   stageCount: number;
   accent: string;
