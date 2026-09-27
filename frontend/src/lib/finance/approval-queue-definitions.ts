@@ -8,6 +8,7 @@ export const FINANCE_APPROVAL_QUEUE_IDS = {
     journalEntries: 'journal-entries',
     purchaseOrders: 'finance-purchase-orders',
     businessPartnerProfiles: 'business-partner-finance-profiles',
+    businessPartnerIdentities: 'business-partner-identities',
 } as const;
 
 interface FinanceWorkflowApprovalQueueItem {
@@ -136,9 +137,25 @@ const allFinanceWorkflowDefinition: ApprovalQueueDefinition = {
     accessDeniedMessage: 'You need a finance approver role to review finance workflow approvals.',
     icon: ClipboardCheck,
     accentClassName: 'border-sky-100 bg-sky-50/50',
-    load: () => loadFinanceWorkflowApprovals(),
+    load: () => loadFinanceWorkflowApprovals(item => normalizeEntityType(item.entityType) !== 'BUSINESSPARTNER'),
     approve: approveFinanceWorkflowApproval,
     reject: rejectFinanceWorkflowApproval,
+};
+
+const businessPartnerIdentityDefinition: ApprovalQueueDefinition = {
+    id: FINANCE_APPROVAL_QUEUE_IDS.businessPartnerIdentities,
+    title: 'Business Partner Approvals',
+    documentLabel: 'Partner Identities',
+    description: 'Canonical Business Partner identities awaiting your assigned independent approval step.',
+    emptyMessage: 'No Business Partner identities are awaiting your approval.',
+    accessDeniedMessage: 'Only users assigned to the Business Partner approval step can review these records.',
+    icon: ClipboardCheck,
+    accentClassName: 'border-violet-100 bg-violet-50/50',
+    load: () => loadFinanceWorkflowApprovals(item => normalizeEntityType(item.entityType) === 'BUSINESSPARTNER'),
+    // Identity decisions intentionally occur on the Business Partner detail page. That route
+    // invokes the Procurement status adapter which activates the canonical shared identity.
+    approve: async () => { throw new Error('Open the Business Partner record to approve it.'); },
+    reject: async () => { throw new Error('Open the Business Partner record to reject it.'); },
 };
 
 function profileAction(item: ApprovalQueueItem): { partnerId: string; ledger: 'ap' | 'ar'; profileId: string } {
@@ -182,6 +199,7 @@ const businessPartnerProfileDefinition: ApprovalQueueDefinition = {
 
 const definitions: ApprovalQueueDefinition[] = [
     allFinanceWorkflowDefinition,
+    businessPartnerIdentityDefinition,
     businessPartnerProfileDefinition,
     {
         id: FINANCE_APPROVAL_QUEUE_IDS.journalEntries,
@@ -213,7 +231,7 @@ const definitions: ApprovalQueueDefinition[] = [
 
 export function getFinanceApprovalQueueDefinitions(queueIds?: string[]): ApprovalQueueDefinition[] {
     if (!queueIds || queueIds.length === 0) {
-        return [allFinanceWorkflowDefinition, businessPartnerProfileDefinition];
+        return [allFinanceWorkflowDefinition, businessPartnerIdentityDefinition, businessPartnerProfileDefinition];
     }
 
     const selected = new Set(queueIds);

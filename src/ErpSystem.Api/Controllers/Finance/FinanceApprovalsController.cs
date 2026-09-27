@@ -398,6 +398,27 @@ public class FinanceApprovalsController : ControllerBase
                 continue;
             }
 
+            if (IsBusinessPartner(entityType))
+            {
+                // Business Partner identity approval is shared Procurement/Finance master-data
+                // governance. Surface assigned items in the Finance inbox, but keep the decision
+                // on the partner endpoint so its status adapter activates the canonical identity.
+                // The submitter is excluded even if a broad administrative role was assigned.
+                if (instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var partnerApproval = await MapApprovalAsync(
+                    approval,
+                    canApprove: false,
+                    canReject: false,
+                    approveDisabledReason: "Open the Business Partner record to approve it.",
+                    rejectDisabledReason: "Open the Business Partner record to reject it.",
+                    cancellationToken);
+                partnerApproval.DecisionOnDetailPage = true;
+                results.Add(partnerApproval);
+                continue;
+            }
+
             if (!IsFinanceEntity(entityType))
             {
                 continue;
@@ -2842,7 +2863,11 @@ public class FinanceApprovalsController : ControllerBase
 
     internal static bool IsFinanceQueueEntity(string? entityType)
         => IsFinanceEntity(entityType) || IsAccountingBookLifecycle(entityType) ||
-           IsAccountingBookPeriodLifecycle(entityType) || IsAccountingBookInitialization(entityType);
+           IsAccountingBookPeriodLifecycle(entityType) || IsAccountingBookInitialization(entityType) ||
+           IsBusinessPartner(entityType);
+
+    private static bool IsBusinessPartner(string? entityType)
+        => Normalize(entityType) == "BUSINESSPARTNER";
 
     private static bool IsAccountingBookLifecycle(string? entityType)
         => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
@@ -2860,9 +2885,12 @@ public class FinanceApprovalsController : ControllerBase
             return displayUrl;
         }
 
-        return Normalize(entityType) == "OPENINGBALANCEBATCH"
-            ? $"/finance/opening-balances?batchId={entityId:D}"
-            : "/finance/approvals";
+        return Normalize(entityType) switch
+        {
+            "OPENINGBALANCEBATCH" => $"/finance/opening-balances?batchId={entityId:D}",
+            "BUSINESSPARTNER" => $"/procurement/business-partners/{entityId:D}",
+            _ => "/finance/approvals"
+        };
     }
 
     private static bool RequiresSubmitterApproverSeparation(string? entityType)
@@ -2968,6 +2996,11 @@ public class FinanceApprovalsController : ControllerBase
             return "Foreign Exchange";
         }
 
+        if (key == "BUSINESSPARTNER")
+        {
+            return "Procurement / Finance Master Data";
+        }
+
         if (key.StartsWith("ASSET", StringComparison.OrdinalIgnoreCase) || key is "FIXEDASSET" or "FIXEDASSETDEPRECIATIONRUN" or "CAPITALPROJECT" or "LEASECONTRACT")
         {
             return "Fixed Assets";
@@ -3008,6 +3041,7 @@ public class FinanceApprovalsController : ControllerBase
             "ASSETVALUATION" => "Asset Valuation",
             "ASSETTRANSFER" => "Asset Transfer",
             "ASSETDISPOSAL" => "Asset Disposal",
+            "BUSINESSPARTNER" => "Business Partner",
             "ASSETVERIFICATIONSESSION" => "Asset Verification",
             "CAPITALPROJECT" => "Capital Project",
             "LEASECONTRACT" => "Lease Contract",

@@ -33,7 +33,9 @@ import {
   TrendingUp,
   BarChart3,
   Activity,
-  Plus
+  Plus,
+  Send,
+  XCircle
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -47,6 +49,7 @@ import { PerformanceTrendsChart } from '@/components/procurement/PerformanceTren
 import { SupplierBankAccountsPanel, SupplierContactsPanel } from '@/components/procurement/SupplierContactBankDetails';
 import { bankAccountsFromRegistrationData, contactsFromRegistrationData } from '@/lib/supplier-registration-details';
 import { BusinessPartnerAccessSetup } from '@/components/procurement/BusinessPartnerAccessSetup';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -75,6 +78,13 @@ export default function BusinessPartnerDetailPage() {
   const [activateDialogOpen, setActivateDialogOpen] = useState(false);
   const [blacklistDialogOpen, setBlacklistDialogOpen] = useState(false);
   const [removeBlacklistDialogOpen, setRemoveBlacklistDialogOpen] = useState(false);
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+
+  // Business Partner identity approval is distinct from its effective-dated AP/AR
+  // Finance profiles. The workflow summary is authoritative for both routing and
+  // maker-checker visibility; never infer approval rights from the user's UI role.
+  const partnerWorkflow = useWorkflowSummary({ entityType: 'BusinessPartner', entityId: id });
 
   // Blacklist form state
   const [blacklistReason, setBlacklistReason] = useState('');
@@ -257,6 +267,59 @@ export default function BusinessPartnerDetailPage() {
     }
   };
 
+  const refreshPartnerWorkflow = async () => {
+    await Promise.all([loadPartner(), partnerWorkflow.refresh()]);
+  };
+
+  const handleSubmitForApproval = async () => {
+    try {
+      setActionLoading(true);
+      await businessPartnerService.submitPartnerForApproval(id);
+      toast.success('Business partner submitted for independent approval');
+      await refreshPartnerWorkflow();
+    } catch (error: any) {
+      console.error('Error submitting business partner:', error);
+      toast.error(error?.message || 'Unable to submit the business partner for approval');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApprovePartner = async () => {
+    try {
+      setActionLoading(true);
+      await businessPartnerService.approvePartner(id);
+      toast.success('Business partner approved and activated for new transactions');
+      await refreshPartnerWorkflow();
+    } catch (error: any) {
+      console.error('Error approving business partner:', error);
+      toast.error(error?.message || 'Unable to approve the business partner');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRejectPartner = async () => {
+    if (!rejectionReason.trim()) {
+      toast.error('Enter a reason so the maker knows what must be corrected');
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+      await businessPartnerService.rejectPartner(id, rejectionReason.trim());
+      toast.success('Business partner rejected and returned to the maker');
+      setRejectDialogOpen(false);
+      setRejectionReason('');
+      await refreshPartnerWorkflow();
+    } catch (error: any) {
+      console.error('Error rejecting business partner:', error);
+      toast.error(error?.message || 'Unable to reject the business partner');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
       Active: { label: 'Active', variant: 'default' },
@@ -298,6 +361,16 @@ export default function BusinessPartnerDetailPage() {
   const canActivate = partner.status === 'Suspended' || partner.status === 'Inactive';
   const canBlacklist = !partner.isBlacklisted;
   const canRemoveFromBlacklist = partner.isBlacklisted;
+  const hasActivePartnerWorkflow = partnerWorkflow.summary?.hasActiveInstance === true;
+  const canSubmitForApproval =
+    partner.approvalStatus !== 'Approved' &&
+    partner.approvalStatus !== 'Rejected' &&
+    partnerWorkflow.visibility.known &&
+    !hasActivePartnerWorkflow;
+  const canDecidePartner =
+    partnerWorkflow.visibility.showApprovalControls &&
+    hasActivePartnerWorkflow &&
+    partnerWorkflow.summary?.canCurrentUserApprove === true;
   const partnerContacts = contactsFromRegistrationData(partner as unknown as Record<string, unknown>);
   const partnerBankAccounts = bankAccountsFromRegistrationData(partner as unknown as Record<string, unknown>);
 
@@ -325,6 +398,24 @@ export default function BusinessPartnerDetailPage() {
         </div>
 
         <div className="flex gap-2">
+          {canSubmitForApproval && (
+            <Button onClick={handleSubmitForApproval} disabled={actionLoading}>
+              <Send className="w-4 h-4 mr-2" />
+              {actionLoading ? 'Submitting...' : 'Submit for approval'}
+            </Button>
+          )}
+          {canDecidePartner && (
+            <>
+              <Button onClick={() => setRejectDialogOpen(true)} disabled={actionLoading} variant="outline">
+                <XCircle className="w-4 h-4 mr-2" />
+                Reject
+              </Button>
+              <Button onClick={handleApprovePartner} disabled={actionLoading} className="bg-green-600 hover:bg-green-700">
+                <CheckCircle className="w-4 h-4 mr-2" />
+                {actionLoading ? 'Approving...' : 'Approve'}
+              </Button>
+            </>
+          )}
           <BusinessPartnerAccessSetup partnerId={id} onSaved={loadPartner} />
           <Button onClick={() => router.push(`/procurement/business-partners/${id}/edit`)}>
             <Edit className="w-4 h-4 mr-2" />
@@ -356,6 +447,22 @@ export default function BusinessPartnerDetailPage() {
           )}
         </div>
       </div>
+
+      {hasActivePartnerWorkflow && !canDecidePartner && (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="pt-4 text-sm text-blue-900">
+            This Business Partner is awaiting an independent approval. It appears in the Finance Approval Workbench only for users assigned to the current approval step.
+          </CardContent>
+        </Card>
+      )}
+      {partnerWorkflow.error && (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardContent className="flex items-center justify-between gap-4 pt-4 text-sm text-amber-900">
+            <span>Approval status could not be loaded. Submission and decision actions are disabled to protect maker-checker controls.</span>
+            <Button variant="outline" size="sm" onClick={() => void partnerWorkflow.refresh()}>Retry</Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Blacklist Warning Banner */}
       {partner.isBlacklisted && (
@@ -1244,6 +1351,28 @@ export default function BusinessPartnerDetailPage() {
       </Tabs>
 
       {/* Suspend Dialog */}
+      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Business Partner</DialogTitle>
+            <DialogDescription>
+              Explain what the maker must correct before this partner can be submitted again.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={rejectionReason}
+            onChange={(event) => setRejectionReason(event.target.value)}
+            placeholder="Required rejection reason"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleRejectPartner} disabled={actionLoading || !rejectionReason.trim()}>
+              {actionLoading ? 'Rejecting...' : 'Reject and return'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={suspendDialogOpen} onOpenChange={setSuspendDialogOpen}>
         <DialogContent>
           <DialogHeader>
