@@ -23,7 +23,7 @@ No row is complete until its service, API, UI, SQL and acceptance gates pass whe
 
 | Req | Current gap and implementation | Principal existing owner | Status |
 | --- | --- | --- | --- |
-| 1 | Add explicit per-line actual receipts, cumulative/outstanding quantities, repeated partial acknowledgements, receiver security and replay protection. Preserve issued lines and historical acknowledgements. | InventoryRequisitionService; IssueRequisitionDialog; InventoryIssueVoucher entities/configuration | In progress: implementation and migration present; 17 service tests, model parity, 21 SQL guard checks and isolated full-schema upgrade pass; fresh installation, two-session concurrency and live acceptance pending |
+| 1 | Add explicit per-line actual receipts, cumulative/outstanding quantities, repeated partial acknowledgements, receiver security and replay protection. Preserve issued lines and historical acknowledgements. | InventoryRequisitionService; IssueRequisitionDialog; InventoryIssueVoucher entities/configuration | In progress: implementation and migration present; 17 service tests, model parity, 21 SQL guard checks and isolated full-schema upgrade pass; 9 SQL concurrency checks and full 0-to-60 fresh installation also pass; HTTP/UI lifecycle acceptance pending |
 | 2 | Remove request/approval bin requirement; capture validated source picks at issue and destination bin at receipt. Preserve partial dispatch. | InventoryTransferService, valuation Transfers, Transfer/Ship/ReceiveTransferDialog, SQL lifecycle guards | Analysis complete |
 | 3 | Canonical supplier BusinessPartner carrier selector/FK plus historical name snapshot in both shipping paths. | Transfer shipping DTO/service and ShipTransferDialog | Analysis complete |
 | 4 | Activate system-managed transit location with balanced physical/carrying-value legs, shipment/container lineage and ledger-backed report; reconcile historical open transfers explicitly. | InventoryTransferService and InventoryValuationService | Analysis complete |
@@ -89,3 +89,25 @@ Supplier helpdesk normalization belongs in the supplier entry point before SLA, 
 Complete and validate each workstream before unrelated implementation: (1) requisition acknowledgement; (2) transfer request/issue bins; (3) carrier; (4) transit; (5) counters; (6) selective recount/addenda; (7) defective quantities; (8) PPV/revaluation; (9) supplier returns; (10) warehouse assignment/403; (11) disposal/Sales/accounts; (12) external helpdesk.
 
 For each workstream record exact focused test results, migration/SQL evidence, permission and tenant denial, replay/concurrent-write handling, and visible browser lifecycle evidence. Include workflow-present/absent behavior where relevant. Use existing records before generating new verification documents. SQL Server tests are required for database triggers and locking; InMemory tests cannot stand in for them. Run full backend analyzer build, frontend production build and relevant broader regression suites before final delivery. All original acceptance scenarios remain pending until evidenced; build success alone does not mark business acceptance complete.
+
+## Requirement 1: SQL receipt concurrency evidence (2026-09-27)
+
+Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/Test-InventoryReceiptConcurrency.ps1` from the repository root. The harness creates a uniquely named isolated database, reads API user secrets in memory, installs the exact archived voucher lifecycle triggers and current receipt guards on minimal fixture tables, and retains the database plus SQL/JSON evidence. It neither opens nor changes the original database or the app verification clone.
+
+The completed run used `RhemaERP_ReceiptConcurrent_20260927_082101_37703711`. Evidence is in `tmp/receipt-concurrency-20260927_082101_37703711.json` and the matching `.sql`. All nine checks passed: three trigger compilations, three overlapping two-session cases and three committed-state invariants. Each case required `sys.dm_exec_requests` evidence that session B was blocked by session A before A could commit; an elapsed delay alone does not pass the test.
+
+| Concurrent case | Observed contention | Outcome after first receipt of 60/100 commits |
+| --- | --- | --- |
+| Second receipt of 60 | Sessions 61/62, `LCK_M_S` | SQL error 51632; one receipt remains, total 60, outstanding 40 |
+| Same replay key | Sessions 62/61, `LCK_M_X` | SQL error 2601; one receipt/action remains, total 60 |
+| Remaining receipt of 40 | Sessions 61/62, `LCK_M_S` | Both commit; two receipt actions, total 100, voucher acknowledged |
+
+Each invariant also verifies the original issued quantity remains 100 and no Finance binding is introduced. Connections and transactions are disposed; the isolated database is retained for inspection. These tests certify the database receipt guards under real SQL Server contention, including defense below the service's per-voucher application lock. They do not execute HTTP or EF service requests and do not replace visible lifecycle acceptance. The separate full fresh installation subsequently passed all 60 migrations with an explicit 8 GiB subprocess heap limit; see `INVENTORY_RECEIPT_FRESH_INSTALL_ACCEPTANCE.md`. Requirement 1 remains in progress until HTTP/UI lifecycle acceptance passes.
+
+## Live receipt acceptance prerequisites (2026-09-27)
+
+Read-only inspection of the isolated running verification database found no Inventory items, warehouses, stock movements, warehouse quantities, requisitions or issue vouchers. Its eleven dedicated operational UAT accounts are also absent. This is not a populated receipt lifecycle fixture.
+
+Reuse the existing `seed-operational-uat` command after configuring `UatBootstrap:SharedPassword` locally. The create-only reconciler provisions accounts, roles, responsibility scopes and Inventory masters without resetting existing passwords; it preserves existing workflow definitions and governed Finance mappings. The bootstrap secret must not be pasted into chat or included in logs. Its configuration is currently pending from the user.
+
+Master-data seeding does not establish stock or certify acknowledgement. Prepare stock through its normal governed owner, then exercise issue, partial receipt, reload, final receipt, replay and over-receipt rejection through the visible UI/API. Verify resulting receipt evidence and unchanged issue/Finance postings. Do not fabricate posted vouchers with direct SQL or disable approvals to satisfy this gate.

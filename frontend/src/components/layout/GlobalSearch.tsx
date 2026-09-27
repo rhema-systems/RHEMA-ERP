@@ -95,7 +95,7 @@ function SearchInput({ enabled, hasAnyRole, hasAnyPermission }: {
       aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
       placeholder="Search records, modules and pages…" maxLength={100} value={query}
       className="bg-slate-50/70 pl-10 pr-16 dark:bg-neutral-800/80"
-      onFocus={() => setOpen(true)} onChange={event => { setQuery(event.target.value); setRecords([]); setActiveId(null); setOpen(true); }}
+      onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={event => { setQuery(event.target.value); setRecords([]); setActiveId(null); setOpen(true); }}
       onKeyDown={event => {
         if (event.key === 'Escape') { setOpen(false); setActiveId(null); }
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

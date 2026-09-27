@@ -70,6 +70,7 @@
     <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
     <Compile Include="Controllers\GlobalSearchEstateLegalTests.cs" />
     <Compile Include="Controllers\GlobalSearchSafetyTests.cs" />
+    <Compile Include="Controllers\SalesDeliveryDependencyTests.cs" />
     <Compile Include="Controllers\GlobalSearchAdministrationTests.cs" />
     <Compile Include="Services\Finance\FinanceRecordSearchTests.cs" />
     <Compile Include="Services\Procurement\ProcurementRegisterSearchTranslationTests.cs" />

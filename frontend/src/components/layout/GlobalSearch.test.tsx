@@ -156,6 +156,37 @@ describe('global header search', () => {
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
   });
 
+  it('reopens on a click after Escape without requiring the focused input to blur', async () => {
+    const pending = deferred<{ items: { id: string; number: string }[] }>();
+    mocks.request.mockReturnValueOnce(pending.promise)
+      .mockResolvedValue({ items: [{ id: 'current', number: 'Current invoice' }] });
+    render(<GlobalSearch />);
+    act(() => input().focus());
+    type('invoice');
+    await advance();
+    const closedSignal: AbortSignal = mocks.request.mock.calls[0][1].signal;
+
+    fireEvent.keyDown(input(), { key: 'Escape' });
+    expect(input()).toHaveFocus();
+    expect(input()).toHaveAttribute('aria-expanded', 'false');
+    expect(closedSignal.aborted).toBe(true);
+
+    fireEvent.click(input());
+    expect(input()).toHaveFocus();
+    expect(input()).toHaveValue('invoice');
+    expect(input()).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    await advance(349);
+    expect(mocks.request).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Current invoice')).toBeInTheDocument();
+
+    await act(async () => pending.resolve({ items: [{ id: 'old', number: 'Stale invoice' }] }));
+    expect(screen.queryByText('Stale invoice')).not.toBeInTheDocument();
+    expect(screen.getByText('Current invoice')).toBeInTheDocument();
+  });
+
   it('never requests providers for hidden routes or missing provider permissions', async () => {
     mocks.navigation.push(page('Items', '/inventory/items', 'Inventory'));
     render(<GlobalSearch />);
