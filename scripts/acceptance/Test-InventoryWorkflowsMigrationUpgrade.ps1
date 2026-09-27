@@ -1,19 +1,22 @@
 # Local SQL Server acceptance only. Prepare makes a unique COPY_ONLY restore of
 # the explicitly approved populated verification database. Apply accepts only
-# the exact prepared target and one generated 60-to-61 migration script.
+# the exact prepared target and one generated Inventory migration script.
 # The app database, secrets, and runtime configuration are never changed.
 param(
     [ValidateSet('Prepare','Apply')][string]$Mode='Prepare',
     [string]$PreparedEvidence,
     [string]$MigrationSql,
-    [ValidatePattern('^20\d{12}_InventoryControlledWorkflowsAndAccounting$')][string]$ExpectedMigration,
+    [ValidatePattern('^20\d{12}_Inventory(ControlledWorkflowsAndAccounting|IssueOptionalWorkflowApproval)$')][string]$ExpectedMigration,
+    [ValidateSet('20260927021852_InventoryIssueActualReceipts','20260927141036_InventoryControlledWorkflowsAndAccounting')]
+    [string]$PreviousMigration='20260927021852_InventoryIssueActualReceipts',
     [string]$Workspace=(Join-Path $PSScriptRoot '..\..')
 )
 $ErrorActionPreference='Stop'
 $Workspace=[IO.Path]::GetFullPath($Workspace)
 $source='RhemaERP_ReceiptUpgrade_20260927_023608_918225d0'
 $server='RHEMA-MICHAEL\SQL2017'
-$previous='20260927021852_InventoryIssueActualReceipts'
+$previous=$PreviousMigration
+$previousCount=if($previous -eq '20260927021852_InventoryIssueActualReceipts'){60}else{61}
 $next=$ExpectedMigration
 $prefix='RhemaERP_InventoryWorkflowsUpgrade_'
 $connection=$null; $stage='configuration'; $created=$false
@@ -41,7 +44,8 @@ function Snapshot {
     foreach($table in @('BusinessPartnerApProfileVersions','BusinessPartnerArProfileVersions','BusinessPartnerApWhtDefaults',
         'StockAdjustments','StockAdjustmentItems','StockAdjustmentActions','InventoryRequisitions','InventoryRequisitionItems',
         'InventoryMovements','InventoryBalances','InventoryItems','InventoryLocations','StockMovements','WarehouseQuantities',
-        'JournalEntries','AccountTransactions')) {
+        'JournalEntries','AccountTransactions','InventoryIssueVouchers','InventoryIssueVoucherLines',
+        'InventoryIssueVoucherActions','InventoryIssueVoucherReceiptLines')) {
         if(!$script:preservationColumns.Contains($table)) {
             $columns=Sql 'SELECT name FROM sys.columns WHERE object_id=OBJECT_ID(@table) ORDER BY column_id' @{table='dbo.'+$table} -Rows
             if($columns.Rows.Count -eq 0){throw 'Expected preservation table is missing.'}
@@ -87,7 +91,7 @@ try {
     $connection=[Data.SqlClient.SqlConnection]::new($builder.ConnectionString);$connection.Open();Switch-Db 'master'
     if([int](Sql 'SELECT COUNT(*) FROM sys.databases WHERE name=@name AND state_desc=''ONLINE''' @{name=$source} -Scalar) -ne 1){throw 'Exact approved source clone is unavailable.'}
     Switch-Db $source; $sourceBefore=Snapshot; $result.SourceBefore=$sourceBefore;$result.PreservationColumns=$script:preservationColumns
-    if($sourceBefore.LatestMigration -cne $previous -or $sourceBefore.MigrationCount -ne 60){throw 'Approved source is not at the expected migration predecessor.'}
+    if($sourceBefore.LatestMigration -cne $previous -or $sourceBefore.MigrationCount -ne $previousCount){throw 'Approved source is not at the expected migration predecessor.'}
     if($Mode -eq 'Prepare') {
         Sql @'
 IF NOT EXISTS(SELECT 1 FROM dbo.StockAdjustments WHERE Id='486da09b-8e8c-4a6d-9797-11ee9396187e')
@@ -158,6 +162,9 @@ IF NOT EXISTS(SELECT 1 FROM dbo.StockAdjustments WHERE Id='486da09b-8e8c-4a6d-97
         if($cloneAfter.LatestMigration -cne $next -or $cloneAfter.MigrationCount -ne ($cloneBefore.MigrationCount+1)){throw 'Target migration history is incorrect.'}
         Same-Snapshot $cloneBefore $cloneAfter -AccountingOnly
         Sql ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'InventoryWorkflowsSchemaAssertions.sql')))
+        if($next -like '*_InventoryIssueOptionalWorkflowApproval') {
+            Sql ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'InventoryIssueOptionalApprovalSchemaAssertions.sql')))
+        }
         $result.CloneAfter=$cloneAfter;$result.MigrationApplied=$true;$result.SchemaAndGuardsVerified=$true
         Switch-Db $source;$sourceAfter=Snapshot;Same-Snapshot $sourceBefore $sourceAfter;Same-Snapshot $prepared.SourceBefore $sourceAfter
         $result.SourceAfter=$sourceAfter;$result.SourceUnchanged=$true;$result.Passed=$true

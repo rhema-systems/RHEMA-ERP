@@ -1745,7 +1745,7 @@ public sealed class InventoryIssueVoucherDto
     public string? ProjectCode { get; set; }
     public Guid RequestedById { get; set; }
     public string RequestedByName { get; set; } = string.Empty;
-    public Guid ApprovedById { get; set; }
+    public Guid? ApprovedById { get; set; }
     public string ApprovedByName { get; set; } = string.Empty;
     public Guid IssuedById { get; set; }
     public string IssuedByName { get; set; } = string.Empty;

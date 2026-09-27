@@ -244,7 +244,7 @@ export interface InventoryIssueVoucherDto {
   projectCode?: string;
   requestedById: string;
   requestedByName: string;
-  approvedById: string;
+  approvedById?: string | null;
   approvedByName: string;
   issuedById: string;
   issuedByName: string;

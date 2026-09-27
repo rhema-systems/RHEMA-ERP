@@ -200,9 +200,13 @@ IF (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN(N'CK_InventoryIssue
  THROW 51015,'Receipt check constraints missing or untrusted.',1;
 '@
     $report.SchemaAndGuardsVerified=$true
-    if ($ExpectedLastMigration -match '_InventoryControlledWorkflowsAndAccounting$') {
+    if ($ExpectedMigrationCount -ge 61) {
         Query ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'InventoryWorkflowsSchemaAssertions.sql')))
         $report.InventoryWorkflowSchemaAndGuardsVerified=$true
+    }
+    if ($ExpectedLastMigration -match '_InventoryIssueOptionalWorkflowApproval$') {
+        Query ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'InventoryIssueOptionalApprovalSchemaAssertions.sql')))
+        $report.OptionalIssueApprovalSchemaAndGuardsVerified=$true
     }
     Query "DBCC CHECKDB ([$target]) WITH PHYSICAL_ONLY,NO_INFOMSGS;"
     $report.PhysicalCheckPassed=$true

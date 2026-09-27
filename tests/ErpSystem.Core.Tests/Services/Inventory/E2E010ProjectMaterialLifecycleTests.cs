@@ -42,6 +42,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
     private readonly Guid _projectManagerId = Guid.NewGuid();
     private readonly Guid _departmentId = Guid.NewGuid();
     private readonly Guid _organizationUnitId = Guid.NewGuid();
+    private readonly Mock<IWorkflowIntegrationService> _issueWorkflow = new();
     private readonly Guid _projectId = Guid.NewGuid();
     private readonly Guid _warehouseId = Guid.NewGuid();
     private readonly Guid _locationId = Guid.NewGuid();
@@ -218,7 +219,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         consignment.Setup(service => service.TryCreateFromStockMovementAsync(It.IsAny<StockMovement>()))
             .Returns(Task.CompletedTask);
 
-        var workflow = new Mock<IWorkflowIntegrationService>();
+        var workflow = _issueWorkflow;
         workflow.Setup(service => service.SubmitAsync("InventoryReturnVoucher", It.IsAny<Guid>()))
             .ReturnsAsync(new WorkflowIntegrationResult(
                 new WorkflowExecutionResult
@@ -680,9 +681,18 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         await AssertProjectCostAsync(expectedIssue: 50m, expectedReturn: -20m, expectedActual: 30m);
     }
 
-    [Fact]
-    public async Task Issue_uses_actual_fifo_cost_preserves_approval_and_replay_does_not_consume_twice()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Issue_uses_actual_fifo_cost_preserves_approval_and_replay_does_not_consume_twice(bool approvedByWorkflow)
     {
+        if (!approvedByWorkflow)
+        {
+            var directSource = await _context.Set<InventoryRequisition>().SingleAsync(value => value.Id == _requisitionId);
+            directSource.ApprovedById = null;
+            directSource.ApprovedBy = null;
+            directSource.ApprovalDate = null;
+        }
         var item = await _context.Set<InventoryItem>().SingleAsync(value => value.Id == _itemId);
         item.ValuationMethod = ValuationMethod.FIFO;
         item.StandardCost = 2000m;
@@ -710,6 +720,8 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         await _requisitions.IssueAsync(_requisitionId, request);
         _context.ChangeTracker.Clear();
         var voucher = await _context.Set<InventoryIssueVoucher>().SingleAsync();
+        voucher.ApprovedById.Should().Be(approvedByWorkflow ? _approverId : null);
+        voucher.SourceSnapshotJson.Should().Contain(approvedByWorkflow ? "\"ApprovalRequired\":true" : "\"ApprovalRequired\":false");
         var line = await _context.Set<InventoryIssueVoucherLine>().SingleAsync();
         line.UnitCost.Should().Be(1900m);
         line.TotalValue.Should().Be(3800m);
@@ -762,6 +774,44 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         (await WarehouseStock()).CurrentStock.Should().Be(19);
         _issueFinanceAssets.Verify(value => value.PostReturnAsync(returned.Id, It.IsAny<CancellationToken>()), Times.Once);
         await AssertProjectCostAsync(3800, -1900, 1900);
+    }
+
+    [Theory]
+    [InlineData("workflow")]
+    [InlineData("instance")]
+    [InlineData("issuer-requester")]
+    [InlineData("issuer-receiver")]
+    public async Task Direct_issue_cannot_bypass_configured_approval_or_independent_handover(string scenario)
+    {
+        var source = await _context.Set<InventoryRequisition>().SingleAsync(value => value.Id == _requisitionId);
+        source.ApprovedById = null;
+        source.ApprovedBy = null;
+        source.ApprovalDate = null;
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        _issueWorkflow.Setup(value => value.HasActiveApprovalWorkflowAsync("InventoryRequisition"))
+            .ReturnsAsync(scenario == "workflow");
+        _issueWorkflow.Setup(value => value.HasActiveApprovalInstanceAsync("InventoryRequisition", _requisitionId))
+            .ReturnsAsync(scenario == "instance");
+        if (scenario == "issuer-requester") _currentUser.Switch(_requesterId, "requester");
+        if (scenario == "issuer-receiver") _currentUser.Switch(_receiverId, "receiver");
+        var before = (await WarehouseStock()).CurrentStock;
+        var request = new IssueRequisitionDto
+        {
+            IdempotencyKey = "optional-guard", CorrelationId = "optional-guard",
+            RowVersion = Convert.ToBase64String(_requisitionRowVersion), ReceiverUserId = _receiverId,
+            MovementReasonCode = InventoryIssueMovementReasons.ProjectConsumption,
+            Items = [new() { ItemId = _requisitionLineId, IssuedQuantity = 2m, LocationId = _locationId }]
+        };
+        Func<Task> issue = () => _requisitions.IssueAsync(_requisitionId, request);
+        if (scenario is "workflow" or "instance")
+            (await issue.Should().ThrowAsync<InventoryIssueControlException>()).Which.Code
+                .Should().Be("INV_ISSUE_APPROVAL_LINEAGE_REQUIRED");
+        else
+            await issue.Should().ThrowAsync<InventoryIssueAuthorizationException>();
+        (await _context.Set<InventoryIssueVoucher>().CountAsync()).Should().Be(0);
+        (await WarehouseStock()).CurrentStock.Should().Be(before);
+        _issueFinanceAssets.Verify(value => value.PostIssueAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     public Task DisposeAsync()
