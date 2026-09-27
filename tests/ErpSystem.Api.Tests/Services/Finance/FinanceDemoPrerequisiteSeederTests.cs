@@ -13,6 +13,38 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FinanceDemoPrerequisiteSeederTests
 {
     [Fact]
+    public async Task Tax_seed_separates_purchase_vat_from_supplier_withholding()
+    {
+        await using var context = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var seeder = new FinanceDataSeeder(context, NullLogger<FinanceDataSeeder>.Instance);
+        var seedMethod = typeof(FinanceDataSeeder).GetMethod(
+            "SeedTaxConfigurationAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        seedMethod.Should().NotBeNull();
+        await (Task)seedMethod!.Invoke(seeder, new object[] { tenantId, DateTime.UtcNow })!;
+
+        var purchaseGroup = await context.TaxGroups.SingleAsync(group =>
+            group.TenantId == tenantId && group.Code == "VAT-STD-PURCHASES");
+        purchaseGroup.Applicability.Should().Be(TaxApplicability.Purchases);
+        purchaseGroup.IsDefault.Should().BeTrue();
+        var componentTaxIds = await context.TaxGroupComponents
+            .Where(component => component.TenantId == tenantId && component.TaxGroupId == purchaseGroup.Id && !component.IsDeleted)
+            .Select(component => component.TaxId)
+            .ToListAsync();
+        var componentTaxes = await context.Taxes.Where(tax => componentTaxIds.Contains(tax.Id)).ToListAsync();
+        componentTaxes.Should().HaveCount(3);
+        componentTaxes.Should().OnlyContain(tax =>
+            tax.Applicability == TaxApplicability.Purchases && tax.Category == TaxCategory.Standard);
+        componentTaxes.Should().OnlyContain(tax => tax.TaxReceivableAccountId.HasValue);
+
+        var withholdingGroup = await context.TaxGroups.SingleAsync(group =>
+            group.TenantId == tenantId && group.Code == "WHT-SERVICES");
+        withholdingGroup.IsDefault.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ExchangeRateSeed_ShouldStoreFunctionalCurrencyPerTargetCurrencyUnit()
     {
         await using var context = CreateContext();

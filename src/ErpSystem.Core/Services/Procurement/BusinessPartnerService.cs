@@ -61,8 +61,16 @@ public class BusinessPartnerService : IBusinessPartnerService
             bank.TenantId == tenantId && !bank.IsDeleted && bank.IsActive)).OrderBy(bank => bank.AccountName);
         var applicability = string.Equals(partnerType, "Customer", StringComparison.OrdinalIgnoreCase)
             ? TaxApplicability.Sales : TaxApplicability.Purchases;
+        var nonWithholdingTaxIds = (await _unitOfWork.Repository<Tax>().FindAsync(tax =>
+            tax.TenantId == tenantId && !tax.IsDeleted && tax.IsActive &&
+            tax.Category != TaxCategory.Withholding && tax.Category != TaxCategory.VatWithholding))
+            .Select(tax => tax.Id).ToHashSet();
+        var invoiceTaxGroupIds = (await _unitOfWork.Repository<TaxGroupComponent>().FindAsync(component =>
+            component.TenantId == tenantId && !component.IsDeleted && nonWithholdingTaxIds.Contains(component.TaxId)))
+            .Select(component => component.TaxGroupId).ToHashSet();
         var taxes = (await _unitOfWork.Repository<TaxGroup>().FindAsync(tax =>
             tax.TenantId == tenantId && !tax.IsDeleted && tax.IsActive &&
+            invoiceTaxGroupIds.Contains(tax.Id) &&
             (tax.Applicability == TaxApplicability.Both || tax.Applicability == applicability)))
             .OrderBy(tax => tax.Name);
         var withholdingTaxes = (await _unitOfWork.Repository<Tax>().FindAsync(tax =>

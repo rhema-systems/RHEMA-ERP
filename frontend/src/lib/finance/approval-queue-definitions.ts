@@ -1,11 +1,13 @@
 import { ClipboardCheck, FileText, ShoppingCart } from 'lucide-react';
 import type { ApprovalQueueDefinition, ApprovalQueueItem } from '@/components/approvals/approval-workbench';
 import apiService from '@/services/api.service';
+import { businessPartnerFinanceProfileService } from '@/services/businessPartnerFinanceProfileService';
 
 export const FINANCE_APPROVAL_QUEUE_IDS = {
     financeWorkflows: 'finance-workflows',
     journalEntries: 'journal-entries',
     purchaseOrders: 'finance-purchase-orders',
+    businessPartnerProfiles: 'business-partner-finance-profiles',
 } as const;
 
 interface FinanceWorkflowApprovalQueueItem {
@@ -139,8 +141,48 @@ const allFinanceWorkflowDefinition: ApprovalQueueDefinition = {
     reject: rejectFinanceWorkflowApproval,
 };
 
+function profileAction(item: ApprovalQueueItem): { partnerId: string; ledger: 'ap' | 'ar'; profileId: string } {
+    const [ledger, partnerId, profileId] = item.id.split(':');
+    if ((ledger !== 'ap' && ledger !== 'ar') || !partnerId || !profileId) throw new Error('Invalid Business Partner profile approval reference.');
+    return { partnerId, ledger, profileId };
+}
+
+const businessPartnerProfileDefinition: ApprovalQueueDefinition = {
+    id: FINANCE_APPROVAL_QUEUE_IDS.businessPartnerProfiles,
+    title: 'Business Partner Finance Profiles',
+    documentLabel: 'AP/AR Profiles',
+    description: 'Submitted effective-dated AP and AR defaults awaiting an independent Finance decision.',
+    emptyMessage: 'No Business Partner Finance profiles are awaiting your approval.',
+    accessDeniedMessage: 'You need Approve Business Partner Finance Profiles permission to review these profiles.',
+    icon: ClipboardCheck,
+    accentClassName: 'border-indigo-100 bg-indigo-50/50',
+    load: async () => (await businessPartnerFinanceProfileService.getPendingApprovals()).map(row => ({
+        id: `${row.ledger}:${row.businessPartnerId}:${row.profileId}`,
+        reference: `${row.partnerCode}/${row.ledger.toUpperCase()}/V${row.versionNumber}`,
+        title: `${row.partnerName} — ${row.ledger.toUpperCase()} profile`,
+        detailHref: `/procurement/business-partners/${row.businessPartnerId}/edit`,
+        documentType: 'Business Partner Finance Profile', module: 'Finance Settings',
+        statusLabel: 'Submitted', date: row.submittedAtUtc, submittedBy: row.submittedBy,
+        canApprove: true, canReject: true,
+        metadata: [
+            { label: 'Ledger', value: row.ledger.toUpperCase() },
+            { label: 'Effective from', value: row.effectiveFrom.slice(0, 10) },
+            { label: 'Effective through', value: row.effectiveTo?.slice(0, 10) || 'Open-ended' },
+        ],
+    })),
+    approve: async (item, comments) => {
+        const action = profileAction(item);
+        await businessPartnerFinanceProfileService.decide(action.partnerId, action.ledger, action.profileId, 'approve', comments);
+    },
+    reject: async (item, reason) => {
+        const action = profileAction(item);
+        await businessPartnerFinanceProfileService.decide(action.partnerId, action.ledger, action.profileId, 'reject', reason);
+    },
+};
+
 const definitions: ApprovalQueueDefinition[] = [
     allFinanceWorkflowDefinition,
+    businessPartnerProfileDefinition,
     {
         id: FINANCE_APPROVAL_QUEUE_IDS.journalEntries,
         title: 'Journal Entry Approvals',
@@ -171,7 +213,7 @@ const definitions: ApprovalQueueDefinition[] = [
 
 export function getFinanceApprovalQueueDefinitions(queueIds?: string[]): ApprovalQueueDefinition[] {
     if (!queueIds || queueIds.length === 0) {
-        return [allFinanceWorkflowDefinition];
+        return [allFinanceWorkflowDefinition, businessPartnerProfileDefinition];
     }
 
     const selected = new Set(queueIds);
