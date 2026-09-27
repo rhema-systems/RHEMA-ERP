@@ -1325,10 +1325,14 @@ declared finished without pretending these are closed.
       bare `[Authorize]` behind the external-user allowlist, with procurement exposed *today*;
       **#9** Projects' maintenance follow-through throws for every tenant; **#10** maintenance
       numbers collide within one second behind unique indexes.
-- [ ] **The EF migration chain cannot build the database from scratch** — no migration ever CREATEs
+- [x] **The EF migration chain cannot build the database from scratch** — no migration ever CREATEs
       `Employees`, so a fresh environment cannot be deployed with `dotnet ef database update`.
       `rebuild-db` works around it. A squashed baseline generated from the current model is separate
       platform work, and it is not HR-caused.
+      ⚠ **RESOLVED by master (verified at merge #11, 2026-09-27):** the disposable baseline
+      `20260916132000` builds from empty, and the whole chain now applies to an empty database
+      (89 of 89). The workaround became the hazard: `rebuild-db` omits 500 guard triggers the chain
+      creates, so UAT is now built through the chain. Defects doc § 31.
 - [ ] **A full-project `tsc --noEmit` crashes** (TypeScript 5.9.2, "Debug Failure. No error for last
       overload signature") on a clean tree, so **every frontend type error in every module is
       invisible**. Slices are checked against scoped tsconfigs meanwhile. Nobody has found the

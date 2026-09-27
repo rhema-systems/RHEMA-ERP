@@ -1781,6 +1781,130 @@ because, until they were moved, the flag changed nothing a user saw:
 
 None of these needs an HR change.
 
+## 30. Global search — gating `POST api/hr/employees/paged` refused every name picker outside the HR desk (2026-09-27)
+
+**Owner:** global search (master `b29cf068f`, "Add global search and restore partner account and
+receipt controls"), plus **Payroll** for (b). **Severity:** (a) fixed on HR's side; (b) open.
+**Found:** hrdev ← master merge #11.
+
+### What is broken
+
+Global search's employee record source reads `POST api/hr/employees/paged`, and the same commit put
+`[Authorize(Policy = HrPermissions.EmployeeReadPolicy)]` on that endpoint. For a full `EmployeeDto`
+read that is correct. But the endpoint was also the back end of every lean employee search, and the
+permission catalogue promised that search stays open: `HrPermissions.ViewEmployees` reads *"the lean
+directory reads (the shared name picker, org lookups) stay open to internal staff and do not need
+this."*
+
+- (a) HR's shared `EmployeePicker` (imported by 83 files) searched through it. Only the HR desk bundle
+  (`HrStaffGrants`) holds `HR.Employee.Read`; `SafetyOfficerGrants`, `SheManagerGrants` and every
+  line-manager login do not, so their pickers were refused.
+- (b) `payrollService.searchEmployees` (`frontend/src/services/payrollService.ts`) still posts to the
+  same endpoint, so a payroll user without `HR.Employee.Read` gets 403 from payroll's employee search.
+
+### What was proven
+
+Master's gate is the only change to `EmployeesController` in the range; the endpoint was ungated
+at the merge base (`21ff99f3`), and all 10 `hr/safety` picker screens predate the gate.
+
+### What it blocks
+
+(b): payroll's employee search, for any payroll role without HR's employee-read permission.
+
+### What a fix needs
+
+- (a) **Done in HR.** The picker now searches `GET api/employee-portal/directory/lookup`: the
+  directory's lean card (name, number, post, unit), any internal user, no employee link required, at
+  least two characters, at most 25 rows. Master's gate on `/paged` is untouched.
+- (b) Payroll: move `searchEmployees` to `directory/lookup`, or grant payroll roles
+  `HR.Employee.Read` if payroll genuinely needs the full record. No HR change needed either way.
+
+## 31. Platform — a `rebuild-db` database now lacks 500 guard triggers, and cannot migrate past master's QS guards (2026-09-27)
+
+**Owner:** Finance (the disposable baseline) and the module owners whose guards live only in
+migration SQL — Quantity Survey, Procurement, Inventory, Finance. **Severity:** a model-built database
+silently runs without the platform's business-rule guards, and cannot be brought forward.
+**Supersedes the scale, not the substance, of § 21.**
+
+### What is broken
+
+§ 21 found a few check constraints and triggers that exist only in migration SQL. Since master's
+disposable baseline (`20260916132000`) the migration chain builds a complete database from empty,
+and the guards have multiplied. Two scratch databases built from the same assembly at merge #11 —
+one by `apply-migrations` on an empty database, one by `rebuild-db` — match exactly in tables (1,703),
+columns, primary, unique and check constraints (848) and foreign keys (6,252), but:
+
+| Object | Chain-built | `rebuild-db` |
+| --- | --- | --- |
+| Triggers | **500** | **0** |
+| SQL scalar functions | 7 | 0 |
+| Views | 1 | 0 |
+| Default constraints | 185 | 120 |
+
+### What was proven
+
+`ErpSystemDB_UAT` (built by `rebuild-db` on 2026-09-20) applied 6 of master's 48 new migrations and
+stopped at `20260920121000_AllowInternalQuantitySurveyValuations`:
+
+```
+The existing QS valuation guard is required before internal valuation alignment.
+```
+
+That migration, `20260920124000`, `20260920154000` and `20260925190000` read an existing trigger's
+text and patch it (`REPLACE(@guard, N'CREATE TRIGGER', N'ALTER TRIGGER')` plus clause edits), so the
+guard must exist at exactly the version the patch expects. Installing today's final-state trigger
+would not satisfy them either.
+
+### What it blocks
+
+Every developer database built with `rebuild-db`, which until this merge was the documented reset in
+HR's docs and `scripts/New-UatDatabase.ps1`. On such a database the API's startup `MigrateAsync`
+throws, and even before that, the database enforced none of the 500 guards.
+
+### What a fix needs
+
+- Treat `rebuild-db` as scratch-only, or make it build through the chain (drop, create empty,
+  `MigrateAsync`, seed) now that the chain can.
+- **HR's side is done:** `New-UatDatabase.ps1` now drops, creates empty, runs `apply-migrations`
+  then `seed-db`. Verified: the whole chain applies from empty in about 1.8 min (89 of 89).
+
+## 32. Finance / Procurement / Inventory — nine migration-created unique indexes carry filters the model does not declare (2026-09-27)
+
+**Owner:** Finance (Business Partner roles and profiles, primary-book designations, vendor-invoice
+receipt allocations), Procurement / Inventory (landed costs, issue-voucher receipt lines).
+**Severity:** low — a schema drift between chain-built and model-built databases; no correctness
+change. **Found:** hrdev ← master merge #11, schema comparison of the two scratch databases in § 31.
+
+### What is broken
+
+These unique indexes are created by raw SQL with a filter, while the EF model declares them
+unfiltered, so a chain-built database and a model-built one differ:
+
+- `IX_AccountingBookPrimaryDesignations_TenantId_EffectiveFrom`
+  (`20260920030047_AddGovernedPrimaryBookReplacementAuthority`)
+- `IX_BusinessPartnerRoles_TenantId_BusinessPartnerId_RoleType`, the AP/AR profile-version and AP
+  WHT-default indexes (`20260924032011_CanonicalBusinessPartnerFinanceProfiles`)
+- `IX_LandedCostReceiptWeights_…`, `IX_LandedCostSupplierDocuments_…`
+  (`20260924210000`, `20260924220000`)
+- `IX_VendorInvoiceReceiptAllocations_TenantId_VendorInvoiceLineItemId`
+  (`20260924230000_ProcurementAutoInvoiceReceipts`)
+- `IX_InventoryIssueVoucherReceiptLines_…` (`20260927021852_InventoryIssueActualReceipts`)
+
+Every filter reads `[col] IS NOT NULL AND …`, over key columns that are **all NOT NULL** (24 of 24),
+so the filter excludes nothing.
+
+### What it blocks
+
+Nothing functionally. A filtered index cannot serve a parameterised lookup whose predicate the
+optimiser cannot prove matches the filter, so these unique indexes may be skipped for exactly the
+lookups they were built for.
+
+### What a fix needs
+
+Drop the redundant filters in a follow-up migration, or declare `HasFilter` on the model if they are
+intentional. `has-pending-model-changes` will not surface this: the snapshot follows the model,
+not the SQL.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:
