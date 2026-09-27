@@ -48,6 +48,24 @@ public class SheEnvironmentalComplianceController : SheApiControllerBase
         [FromQuery] int? expiringInDays)
         => Ok(await _permits.GetAllAsync(status, type, search, expiringInDays));
 
+    [HttpGet("permits/search")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
+    public async Task<IActionResult> SearchPermits([FromQuery] string? search = null, [FromQuery] int take = 5)
+    {
+        var term = search?.Trim() ?? string.Empty;
+        if (term.Length < 2 || term.Length > 100)
+            return Ok(Array.Empty<object>());
+
+        var permits = await _permits.GetAllAsync(search: term);
+        return Ok(permits.Take(Math.Clamp(take, 1, 20)).Select(permit => new
+        {
+            permit.Id,
+            permit.RegisterNumber,
+            permit.PermitName,
+            Status = permit.StatusName,
+        }).ToArray());
+    }
+
     [HttpGet("permits/{id:guid}")]
     [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<SheEnvironmentalPermitDto>> GetPermit(Guid id)

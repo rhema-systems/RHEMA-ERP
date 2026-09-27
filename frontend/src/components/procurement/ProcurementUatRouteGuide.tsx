@@ -575,14 +575,16 @@ export function ProcurementUatRouteGuide() {
     ...(tender ? tenderStageStates(tender, readiness, committee, control) : {}),
     ...upstreamStageStates(requisition, submission, plan),
   };
+  const documentPublicationStage = stageStates['tender-documents-publication'];
   if (
     pathname?.endsWith('/document-controls') &&
     tender?.status === 'Approved' &&
     readiness?.ready &&
-    readiness.isSourcePublished === false
+    readiness.isSourcePublished === false &&
+    documentPublicationStage
   ) {
     stageStates['tender-documents-publication'] = {
-      ...stageStates['tender-documents-publication'],
+      ...documentPublicationStage,
       href: `/procurement/tenders/${tenderId}`,
       actionLabel: 'Return to tender publication',
     };

@@ -41,7 +41,7 @@ vi.mock('@/services/finance/finance-data.service', () => ({
     getReportingDimensions: vi.fn(),
     getFinanceDimensions: vi.fn(),
     getTrialBalance: vi.fn(),
-    getDeltaBookCombinedReport: vi.fn(),
+    getMultiDeltaBookCombinedReport: vi.fn(),
   },
 }));
 
@@ -60,9 +60,11 @@ describe('TrialBalancePage report date', () => {
     vi.mocked(financeDataService.getReportingDimensions).mockResolvedValue([]);
     vi.mocked(financeDataService.getFinanceDimensions).mockResolvedValue([]);
     vi.mocked(financeDataService.getTrialBalance).mockImplementation(
-      async (request) => ({
+      async (request) => {
+        if (!request.asAtDate) throw new Error('Expected an explicit report date.');
+        return {
         asAtDate: request.asAtDate,
-        bookClassification: request.bookClassification,
+        bookClassification: request.bookClassification ?? 'BASE',
         currencyCode: 'GHS',
         lines: [],
         totalDebits: 0,
@@ -70,11 +72,14 @@ describe('TrialBalancePage report date', () => {
         difference: 0,
         isBalanced: true,
         companyName: 'Rhema ERP',
-      })
+        };
+      }
     );
-    vi.mocked(financeDataService.getDeltaBookCombinedReport).mockResolvedValue({
+    vi.mocked(financeDataService.getMultiDeltaBookCombinedReport).mockResolvedValue({
       deltaAccountingBookId: 'delta-1',
       deltaAccountingBookCode: 'IFRS_CONSOL_ADJ',
+      deltaAccountingBookIds: ['delta-1'],
+      deltaAccountingBookCodes: ['IFRS_CONSOL_ADJ'],
       baseAccountingBookId: 'ifrs-1',
       baseAccountingBookCode: 'IFRS',
       functionalCurrencyCode: 'GHS',
@@ -136,8 +141,8 @@ describe('TrialBalancePage report date', () => {
     fireEvent.click(await screen.findByText('Base + Delta'));
     fireEvent.click(screen.getByRole('button', { name: 'Run Report' }));
 
-    await waitFor(() => expect(financeDataService.getDeltaBookCombinedReport).toHaveBeenCalledWith(
-      'delta-1',
+    await waitFor(() => expect(financeDataService.getMultiDeltaBookCombinedReport).toHaveBeenCalledWith(
+      ['delta-1'],
       expect.any(String),
     ));
     expect(await screen.findByText('IFRS + IFRS_CONSOL_ADJ')).toBeInTheDocument();
@@ -147,7 +152,7 @@ describe('TrialBalancePage report date', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Print' }));
     await waitFor(() => expect(documentOutputService.printReportDocument).toHaveBeenCalledWith(
       'Finance.BaseDeltaReport',
-      expect.objectContaining({ deltaAccountingBookId: 'delta-1' }),
+      expect.objectContaining({ deltaAccountingBookIds: 'delta-1' }),
     ));
   });
 });

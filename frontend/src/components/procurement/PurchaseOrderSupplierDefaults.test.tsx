@@ -2,7 +2,9 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PurchaseOrderSupplierDefaults } from './PurchaseOrderSupplierDefaults';
-import { businessPartnerService, type BusinessPartnerPostingOptions } from '@/services/businessPartnerService';
+import { businessPartnerService } from '@/services/businessPartnerService';
+import { BankAccountType } from '@/types/cash-management';
+import { TaxApplicability } from '@/types/tax';
 import type { PurchaseOrderSupplierDefaultsDto } from '@/services/purchasingService';
 
 Object.assign(globalThis, { React });
@@ -13,7 +15,11 @@ const snapshot: PurchaseOrderSupplierDefaultsDto = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(businessPartnerService.getPostingOptions).mockResolvedValue({ accounts: [], bankAccounts: [{ id: 'bank', accountNumber: 'GCB-01', accountName: 'GCB Cedi' }], taxGroups: [{ id: 'tax', code: 'STD', name: 'Standard Purchase Tax' }] } as BusinessPartnerPostingOptions);
+  vi.mocked(businessPartnerService.getPostingOptions).mockResolvedValue({
+    accounts: [],
+    bankAccounts: [{ id: 'bank', accountNumber: 'GCB-01', accountName: 'GCB Cedi', bankName: 'GCB', currency: 'GHS', accountType: BankAccountType.Checking, currentBalance: 0, availableBalance: 0, isActive: true, createdAt: '2026-01-01' }],
+    taxGroups: [{ id: 'tax', tenantId: 'tenant', code: 'STD', name: 'Standard Purchase Tax', applicability: TaxApplicability.Purchases, isDefault: false, isActive: true, components: [], createdAt: '2026-01-01' }],
+  });
 });
 
 describe('saved purchase order supplier defaults', () => {

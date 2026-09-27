@@ -72,6 +72,7 @@ export interface ItemUnitOfMeasureDto {
   isBaseUnit: boolean;
   isPurchaseUnit: boolean;
   isSalesUnit: boolean;
+  isStockingUnit: boolean;
   barcode?: string;
 }
 

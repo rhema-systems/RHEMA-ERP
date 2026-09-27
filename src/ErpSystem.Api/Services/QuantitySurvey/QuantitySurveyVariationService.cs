@@ -41,6 +41,17 @@ public sealed class QuantitySurveyVariationService(
     private string UserName => string.IsNullOrWhiteSpace(currentUser.UserName) ? UserId.ToString() : currentUser.UserName.Trim();
     private string ActorRoles => string.Join(',', currentUser.Roles.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value));
 
+    public async Task<IReadOnlyList<QuantitySurveyVariationDto>> SearchAsync(string search, int take = 8, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var query = Query().Where(value => (value.ReferenceNumber != null && value.ReferenceNumber.Contains(term)) || value.Title.Contains(term))
+            .OrderByDescending(value => value.RequestedDate).ThenBy(value => value.Id);
+        var rows = await QuantitySurveyAuthorizedSearch.ReadAsync(query, value => value.ProjectId,
+            projectService.HasProjectAccessAsync, take, token);
+        return rows.Select(Map).ToList();
+    }
+
     public async Task<QuantitySurveyVariationWorkspaceDto> GetWorkspaceAsync(Guid projectId, CancellationToken token = default)
     {
         await RequireProjectAsync(projectId);

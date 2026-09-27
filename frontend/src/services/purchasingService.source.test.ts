@@ -90,8 +90,8 @@ describe('purchase-order approved source client', () => {
 
     await expect(
       purchasingService.createPurchaseOrder({
-        sourceType: 'PurchaseRequisition',
-        sourceId: 'pr-1',
+        sourceType: 'ApprovedException',
+        sourceId: 'exception-1',
         supplierId: 'supplier-1',
         requestedById: 'user-1',
         items: []

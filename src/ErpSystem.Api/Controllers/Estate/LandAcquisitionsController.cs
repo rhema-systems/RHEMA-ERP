@@ -101,6 +101,36 @@ public class LandAcquisitionsController : ControllerBase
         _logger = logger;
     }
 
+    [HttpGet("search")]
+    public async Task<IActionResult> SearchAcquisitions([FromQuery] string? search, [FromQuery] int take = 5,
+        CancellationToken cancellationToken = default)
+    {
+        var term = search?.Trim() ?? string.Empty;
+        if (term.Length < 2 || term.Length > 100) return Ok(new { data = Array.Empty<object>() });
+        term = term.ToLowerInvariant();
+        var query = ScopedQuery(GetTenantId()).AsNoTracking()
+            .Where(item => item.ProjectReference.ToLower().Contains(term) || item.Location.ToLower().Contains(term))
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt).ThenBy(item => item.Id);
+        var limit = Math.Clamp(take, 1, 10);
+        var results = new List<object>();
+        var userId = GetUserId();
+        var isAdministrator = IsWorkflowAdministrator();
+        const int batchSize = 100;
+        for (var offset = 0; ; offset += batchSize)
+        {
+            var batch = await query.Skip(offset).Take(batchSize).ToListAsync(cancellationToken);
+            foreach (var acquisition in batch)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!await CanViewStageAsync(acquisition, acquisition.StageOrder, userId, isAdministrator)) continue;
+                results.Add(new { acquisition.Id, acquisition.ProjectReference, acquisition.Location,
+                    Status = acquisition.Status.ToString() });
+                if (results.Count == limit) return Ok(new { data = results });
+            }
+            if (batch.Count < batchSize) return Ok(new { data = results });
+        }
+    }
+
     [HttpGet("workflow-board")]
     public async Task<ActionResult<LandAcquisitionBoardDto>> GetWorkflowBoard(CancellationToken cancellationToken)
     {
@@ -1120,8 +1150,11 @@ public class LandAcquisitionsController : ControllerBase
         });
     }
 
+    private IQueryable<LandAcquisition> ScopedQuery(Guid tenantId)
+        => _context.LandAcquisitions.Where(item => item.TenantId == tenantId && !item.IsDeleted);
+
     private IQueryable<LandAcquisition> BaseQuery(Guid tenantId)
-        => _context.LandAcquisitions
+        => ScopedQuery(tenantId)
             // The acquisition board needs many child collections; split queries prevent SQL Server timeouts from a single huge join.
             .AsSplitQuery()
             .Include(item => item.Documents)
@@ -1137,8 +1170,7 @@ public class LandAcquisitionsController : ControllerBase
             .Include(item => item.LandInstrument)
             .Include(item => item.StatutoryConsent)
             .Include(item => item.StampDutyAssessment)
-            .Include(item => item.StampDutyPayment)
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted);
+            .Include(item => item.StampDutyPayment);
 
     private void ApplyWorkspace(LandAcquisition acquisition, LandAcquisitionWorkspaceRequest request)
     {

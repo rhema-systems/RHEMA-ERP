@@ -1,7 +1,7 @@
  
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -100,10 +100,19 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
   const [movementReasonCode, setMovementReasonCode] = useState('');
   const [accountingOptions, setAccountingOptions] = useState<InventoryIssueAccountingOptionsDto | null>(null);
   const [vouchers, setVouchers] = useState<InventoryIssueVoucherDto[]>([]);
-  const [acknowledgementComment, setAcknowledgementComment] = useState('');
+  const [acknowledgementComments, setAcknowledgementComments] = useState<Record<string, string>>({});
+  const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({});
+  const [receiptErrors, setReceiptErrors] = useState<Record<string, string>>({});
+  const receiptRetries = useRef(new Map<string, { payload: string; key: string }>());
   const [voucherActionId, setVoucherActionId] = useState<string | null>(null);
   const [voucherPreview, setVoucherPreview] = useState<CentralDocumentViewerFile | null>(null);
-  useEffect(() => { setVoucherPreview(null); }, [open, requisitionId]);
+  useEffect(() => {
+    setVoucherPreview(null);
+    setReceiptQuantities({});
+    setAcknowledgementComments({});
+    setReceiptErrors({});
+    receiptRetries.current.clear();
+  }, [open, requisitionId]);
   const canIssue = canIssueRequisition(requisition, user?.id, hasIssuePermission);
   const trackingExceptions = useAvailableInventoryTrackingExceptions(open && canIssue);
 
@@ -272,18 +281,50 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
   };
 
   const handleAcknowledge = async (voucher: InventoryIssueVoucherDto) => {
-    if (!acknowledgementComment.trim()) {
-      toast({ title: 'Comment required', description: 'Enter the receiver handover comment before acknowledging.', variant: 'destructive' });
+    const comment = (acknowledgementComments[voucher.id] ?? '').trim();
+    const outstanding = voucher.lines.filter(line => line.outstandingQuantity > 0);
+    const lines = outstanding.map(line => ({ issueVoucherLineId: line.id, receivedQuantity: Number(receiptQuantities[line.id]) }));
+    let validation = '';
+    if (voucher.lines.some(line => !Number.isFinite(line.outstandingQuantity) || !Number.isFinite(line.receivedQuantity))) {
+      validation = 'Receipt balances are unavailable. Reload this requisition before acknowledging.';
+    } else if (!outstanding.length) {
+      validation = 'This voucher has no outstanding quantity to receive.';
+    } else {
+      for (const line of outstanding) {
+        const raw = receiptQuantities[line.id]?.trim() ?? '';
+        const quantity = Number(raw);
+        if (!raw || !/^\d+(?:\.\d{1,4})?$/.test(raw) || !Number.isFinite(quantity) || quantity > line.outstandingQuantity || (line.serialNumber && !Number.isInteger(quantity))) {
+          validation = `${line.itemCode}: enter an actual received quantity from 0 to ${line.outstandingQuantity}${line.serialNumber ? ' in whole units' : ' with at most four decimal places'}. Enter 0 if none was received.`;
+          break;
+        }
+      }
+    }
+    if (!validation && !lines.some(line => line.receivedQuantity > 0)) validation = 'Enter a positive received quantity for at least one line.';
+    if (!validation && !comment) validation = 'Enter the receiver handover comment before acknowledging.';
+    if (validation) {
+      setReceiptErrors(previous => ({ ...previous, [voucher.id]: validation }));
       return;
+    }
+    const payload = JSON.stringify({ rowVersion: voucher.rowVersion, comment, lines });
+    let retry = receiptRetries.current.get(voucher.id);
+    if (retry?.payload !== payload) {
+      retry = { payload, key: crypto.randomUUID() };
+      receiptRetries.current.set(voucher.id, retry);
     }
     try {
       setVoucherActionId(voucher.id);
-      await inventoryRequisitionService.acknowledgeIssueVoucher(voucher.id, voucher.rowVersion, acknowledgementComment.trim());
-      toast({ title: 'Handover acknowledged', description: `${voucher.voucherNumber} now has receiver evidence.` });
-      setAcknowledgementComment('');
+      setReceiptErrors(previous => ({ ...previous, [voucher.id]: '' }));
+      const updated = await inventoryRequisitionService.acknowledgeIssueVoucher(voucher.id, voucher.rowVersion, comment, lines, retry.key);
+      setVouchers(previous => previous.map(value => value.id === voucher.id ? updated : value));
+      toast({ title: 'Receipt recorded', description: `${voucher.voucherNumber}: actual received quantities saved. Any remaining quantity stays outstanding.` });
+      setAcknowledgementComments(previous => ({ ...previous, [voucher.id]: '' }));
+      setReceiptQuantities(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !voucher.lines.some(line => line.id === id))));
+      receiptRetries.current.delete(voucher.id);
       await loadRequisition();
+      onSuccess();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to acknowledge the Store Issue Voucher';
+      const message = getProcurementProblemMessage(err, 'Failed to acknowledge the Store Issue Voucher');
+      setReceiptErrors(previous => ({ ...previous, [voucher.id]: message }));
       toast({ title: 'Acknowledgement failed', description: message, variant: 'destructive' });
     } finally {
       setVoucherActionId(null);
@@ -585,7 +626,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge className={voucher.status === 2 || String(voucher.status) === 'Acknowledged' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}>
-                          {voucher.status === 2 || String(voucher.status) === 'Acknowledged' ? 'Acknowledged' : 'Awaiting receiver'}
+                          {voucher.status === 2 || String(voucher.status) === 'Acknowledged' ? 'Acknowledged' : voucher.lines.some(line => line.receivedQuantity > 0) ? 'Partially received' : 'Awaiting receiver'}
                         </Badge>
                         <Button variant="outline" size="sm" onClick={() => handleDownload(voucher)} disabled={voucherActionId === voucher.id}>
                           <Download className="mr-1 h-3.5 w-3.5" /> PDF
@@ -595,17 +636,44 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                     <div className="text-xs text-muted-foreground">
                       {voucher.lines.length} line(s) · {accountingOptions?.movementReasons[voucher.movementReasonCode] ?? voucher.movementReasonCode} · Finance {voucher.financeJournalEntryId ? 'posted' : 'pending'}
                     </div>
+                    <p className="text-xs text-muted-foreground">Issuing store: {voucher.warehouseName} · Requisition: {voucher.requisitionNumber}</p>
+                    {voucher.isLegacyAcknowledgement && <p className="text-sm text-muted-foreground">Historical acknowledgement: actual quantities were not captured per line.</p>}
+                    <Table aria-label={`Receipt lines ${voucher.voucherNumber}`}>
+                      <TableHeader><TableRow>
+                        <TableHead>Item code</TableHead><TableHead>Description</TableHead><TableHead>UOM</TableHead>
+                        <TableHead className="text-right">Requested</TableHead><TableHead className="text-right">Issued</TableHead>
+                        <TableHead className="text-right">Previously received</TableHead><TableHead className="text-right">Outstanding</TableHead>
+                        <TableHead className="text-right">Actual quantity received</TableHead>
+                      </TableRow></TableHeader>
+                      <TableBody>{voucher.lines.map(line => <TableRow key={line.id}>
+                        <TableCell>{line.itemCode}</TableCell><TableCell>{line.itemName}{line.serialNumber && <div className="text-xs text-muted-foreground">Serial: {line.serialNumber}</div>}</TableCell>
+                        <TableCell>{line.unitOfMeasure ?? '—'}</TableCell><TableCell className="text-right">{line.requestedQuantity ?? '—'}</TableCell>
+                        <TableCell className="text-right">{line.quantity}</TableCell><TableCell className="text-right">{voucher.isLegacyAcknowledgement ? 'Not recorded' : line.receivedQuantity ?? '—'}</TableCell>
+                        <TableCell className="text-right">{voucher.isLegacyAcknowledgement ? '—' : line.outstandingQuantity ?? '—'}</TableCell>
+                        <TableCell className="text-right">{(voucher.status === 1 || String(voucher.status) === 'Issued') && user?.id === voucher.receiverUserId && line.outstandingQuantity > 0
+                          ? <Input aria-label={`Actual quantity received ${voucher.voucherNumber} ${line.itemCode}`} className="ml-auto w-28 text-right" type="number" min="0" max={line.outstandingQuantity} step={line.serialNumber ? '1' : '0.0001'}
+                            placeholder="Enter quantity" value={receiptQuantities[line.id] ?? ''} disabled={voucherActionId !== null}
+                            onChange={event => setReceiptQuantities(previous => ({ ...previous, [line.id]: event.target.value }))} />
+                          : '—'}</TableCell>
+                      </TableRow>)}</TableBody>
+                    </Table>
+                    {receiptErrors[voucher.id] && <p role="alert" className="text-sm text-destructive">{receiptErrors[voucher.id]}</p>}
                     {(voucher.status === 1 || String(voucher.status) === 'Issued') && user?.id === voucher.receiverUserId ? (
-                      <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">Enter the quantity physically received for every outstanding line, including 0 for items not received.</p>
+                        <div className="flex flex-col gap-2 sm:flex-row">
                         <Input
-                          value={acknowledgementComment}
-                          onChange={event => setAcknowledgementComment(event.target.value)}
+                          aria-label={`Receiver handover comment ${voucher.voucherNumber}`}
+                          value={acknowledgementComments[voucher.id] ?? ''}
+                          onChange={event => setAcknowledgementComments(previous => ({ ...previous, [voucher.id]: event.target.value }))}
                           placeholder="Receiver handover comment"
                           maxLength={1000}
+                          disabled={voucherActionId !== null}
                         />
-                        <Button size="sm" onClick={() => handleAcknowledge(voucher)} disabled={voucherActionId === voucher.id}>
+                        <Button size="sm" onClick={() => handleAcknowledge(voucher)} disabled={voucherActionId !== null || !voucher.lines.some(line => line.outstandingQuantity > 0)}>
                           <ClipboardCheck className="mr-1 h-4 w-4" /> Acknowledge receipt
                         </Button>
+                        </div>
                       </div>
                     ) : (voucher.status === 2 || String(voucher.status) === 'Acknowledged') ? (
                       <p className="text-xs text-green-700">Acknowledged {voucher.acknowledgedAtUtc ? format(new Date(voucher.acknowledgedAtUtc), 'dd MMM yyyy HH:mm') : ''}: {voucher.receiverComment}</p>

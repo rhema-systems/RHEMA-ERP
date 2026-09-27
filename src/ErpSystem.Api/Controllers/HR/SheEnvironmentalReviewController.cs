@@ -41,8 +41,12 @@ public class SheEnvironmentalReviewController : SheApiControllerBase
     [Authorize(Policy = HrPermissions.SheReadPolicy)]
     public async Task<ActionResult<IEnumerable<SheEnvironmentalReviewSummaryDto>>> GetReviews(
         [FromQuery] SheEnvironmentalReviewStatus? status,
-        [FromQuery] string? search)
-        => Ok(await _reviews.GetAllAsync(status, search));
+        [FromQuery] string? search,
+        [FromQuery] int? take = null)
+    {
+        var records = await _reviews.GetAllAsync(status, search);
+        return Ok(take.HasValue ? records.Take(Math.Clamp(take.Value, 1, 20)) : records);
+    }
 
     [HttpGet("reviews/{id:guid}")]
     [Authorize(Policy = HrPermissions.SheReadPolicy)]

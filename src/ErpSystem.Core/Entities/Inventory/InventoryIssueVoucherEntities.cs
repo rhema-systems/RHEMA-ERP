@@ -12,7 +12,8 @@ public enum InventoryIssueVoucherStatus
 public enum InventoryIssueVoucherActionType
 {
     Issued = 1,
-    Acknowledged = 2
+    Acknowledged = 2,
+    PartiallyAcknowledged = 3
 }
 
 [Table("InventoryIssueVouchers")]
@@ -21,6 +22,7 @@ public sealed class InventoryIssueVoucher : TenantEntity
     [Required, MaxLength(50)] public string VoucherNumber { get; set; } = string.Empty;
     public Guid InventoryRequisitionId { get; set; }
     public InventoryIssueVoucherStatus Status { get; set; }
+    public int ReceiptSequence { get; set; }
     public Guid WarehouseId { get; set; }
     public Guid? LocationId { get; set; }
     public Guid? DepartmentId { get; set; }
@@ -101,6 +103,19 @@ public sealed class InventoryIssueVoucherAction : TenantEntity
     [Required, Column(TypeName = "nvarchar(max)")] public string PayloadJson { get; set; } = "{}";
     [Required, MaxLength(100)] public string CorrelationId { get; set; } = string.Empty;
     [Required, MaxLength(64)] public string IntegrityHash { get; set; } = string.Empty;
+    [MaxLength(100)] public string? ReceiptIdempotencyKey { get; set; }
+    [MaxLength(64)] public string? ReceiptPayloadHash { get; set; }
 
     public InventoryIssueVoucher InventoryIssueVoucher { get; set; } = null!;
+    public ICollection<InventoryIssueVoucherReceiptLine> ReceiptLines { get; set; } = new List<InventoryIssueVoucherReceiptLine>();
+}
+
+[Table("InventoryIssueVoucherReceiptLines")]
+public sealed class InventoryIssueVoucherReceiptLine : TenantEntity
+{
+    public Guid InventoryIssueVoucherActionId { get; set; }
+    public Guid InventoryIssueVoucherLineId { get; set; }
+    [Column(TypeName = "decimal(18,4)")] public decimal ReceivedQuantity { get; set; }
+    public InventoryIssueVoucherAction InventoryIssueVoucherAction { get; set; } = null!;
+    public InventoryIssueVoucherLine InventoryIssueVoucherLine { get; set; } = null!;
 }

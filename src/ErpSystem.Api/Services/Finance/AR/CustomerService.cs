@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Services.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -40,7 +41,7 @@ public class CustomerService : ICustomerService
         var partner = await CustomerPartners()
             .FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
 
-        return partner == null ? null : MapToDto(partner);
+        return partner == null ? null : (await MapCustomersAsync(new[] { partner }, cancellationToken)).Single();
     }
 
     public async Task<CustomerDto?> GetByCodeAsync(string customerCode, CancellationToken cancellationToken = default)
@@ -53,7 +54,7 @@ public class CustomerService : ICustomerService
                 p.CustomerAccountNumber == normalizedCode,
                 cancellationToken);
 
-        return partner == null ? null : MapToDto(partner);
+        return partner == null ? null : (await MapCustomersAsync(new[] { partner }, cancellationToken)).Single();
     }
 
     public async Task<PagedResult<CustomerDto>> GetAllAsync(CustomerQueryDto query, CancellationToken cancellationToken = default)
@@ -107,7 +108,7 @@ public class CustomerService : ICustomerService
 
         return new PagedResult<CustomerDto>
         {
-            Items = items.Select(MapToDto).ToList(),
+            Items = await MapCustomersAsync(items, cancellationToken),
             TotalCount = totalCount,
             PageNumber = query.PageNumber,
             PageSize = query.PageSize
@@ -145,7 +146,8 @@ public class CustomerService : ICustomerService
             .ToList();
 
         var outstandingBalance = settlementBalances.Sum(b => b.OutstandingAmount);
-        var creditLimit = partner.CreditLimit ?? 0m;
+        var readiness = (await ResolveCustomerProfilesAsync(new[] { partner }, asOfDate, cancellationToken))[partner.Id];
+        var creditLimit = readiness.ArProfile?.CreditLimit ?? 0m;
 
         var balance = new CustomerBalanceDto
         {
@@ -168,6 +170,8 @@ public class CustomerService : ICustomerService
     {
         var balance = await GetBalanceAsync(customerId, cancellationToken);
         var availableCredit = balance.AvailableCredit;
+        var partner = await EnsureCustomerExistsAsync(customerId, cancellationToken);
+        var readiness = (await ResolveCustomerProfilesAsync(new[] { partner }, DateTime.UtcNow, cancellationToken))[partner.Id];
 
         return new CreditCheckResultDto
         {
@@ -175,8 +179,8 @@ public class CustomerService : ICustomerService
             CurrentOutstanding = balance.TotalOutstanding,
             RequestedAmount = amount,
             AvailableCredit = availableCredit,
-            IsApproved = amount <= availableCredit,
-            Message = amount > availableCredit
+            IsApproved = readiness.IsReady && amount <= availableCredit,
+            Message = !readiness.IsReady ? $"{readiness.Code}: {readiness.Message}" : amount > availableCredit
                 ? $"Requested amount exceeds available credit by {amount - availableCredit:C}."
                 : null
         };
@@ -262,9 +266,54 @@ public class CustomerService : ICustomerService
                 p.BusinessPartnerId == customerId);
     }
 
-    private static CustomerDto MapToDto(BusinessPartner partner)
+    private async Task<Dictionary<Guid, BusinessPartnerFinanceProfileReadiness>> ResolveCustomerProfilesAsync(
+        IReadOnlyCollection<BusinessPartner> partners, DateTime asOfDate, CancellationToken cancellationToken)
     {
-        var paymentTermsDays = TryParsePaymentTermsDays(partner.PaymentTerms) ?? 30;
+        var partnerIds = partners.Select(partner => partner.Id).ToArray();
+        var roles = await _unitOfWork.Repository<BusinessPartnerRole>().GetQueryable(role =>
+                role.TenantId == TenantId && partnerIds.Contains(role.BusinessPartnerId) && !role.IsDeleted &&
+                role.RoleType == BusinessPartnerRoleType.Customer)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        var roleIds = roles.Select(role => role.Id).ToArray();
+        var profiles = await _unitOfWork.Repository<BusinessPartnerArProfileVersion>().GetQueryable(profile =>
+                profile.TenantId == TenantId && roleIds.Contains(profile.BusinessPartnerRoleId) && !profile.IsDeleted)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        return partners.ToDictionary(partner => partner.Id, partner =>
+        {
+            var customerRoles = roles.Where(role => role.BusinessPartnerId == partner.Id).ToArray();
+            return BusinessPartnerFinanceProfilePolicy.ResolveAr(partner,
+                customerRoles.Length == 1 ? customerRoles[0] : null, profiles, asOfDate);
+        });
+    }
+
+    private async Task<List<CustomerDto>> MapCustomersAsync(
+        IReadOnlyCollection<BusinessPartner> partners, CancellationToken cancellationToken)
+    {
+        if (partners.Count == 0) return new List<CustomerDto>();
+        var readiness = await ResolveCustomerProfilesAsync(partners, DateTime.UtcNow, cancellationToken);
+        var termIds = readiness.Values.Where(value => value.ArProfile?.PaymentTermId.HasValue == true)
+            .Select(value => value.ArProfile!.PaymentTermId!.Value).ToArray();
+        var terms = await _unitOfWork.Repository<PaymentTerm>().GetQueryable(term =>
+                term.TenantId == TenantId && !term.IsDeleted && term.IsActive &&
+                (term.IsDefault || termIds.Contains(term.Id)) &&
+                (term.ApplicableTo == "All" || term.ApplicableTo == "Customer" || term.ApplicableTo == "Client"))
+            .AsNoTracking().ToListAsync(cancellationToken);
+        var defaultTerm = terms.Where(term => term.IsDefault)
+            .OrderBy(term => term.ApplicableTo == "Customer" ? 0 : 1).ThenBy(term => term.DisplayOrder).FirstOrDefault();
+        return partners.Select(partner =>
+        {
+            var state = readiness[partner.Id];
+            var term = state.IsReady
+                ? state.ArProfile!.PaymentTermId.HasValue
+                    ? terms.SingleOrDefault(value => value.Id == state.ArProfile.PaymentTermId.Value)
+                    : defaultTerm
+                : null;
+            return MapToDto(partner, state, term);
+        }).ToList();
+    }
+
+    private static CustomerDto MapToDto(BusinessPartner partner, BusinessPartnerFinanceProfileReadiness readiness, PaymentTerm? paymentTerm)
+    {
 
         return new CustomerDto
         {
@@ -281,15 +330,13 @@ public class CustomerService : ICustomerService
             PostalCode = partner.PhysicalPostalCode ?? partner.MailingPostalCode,
             Country = partner.PhysicalCountry ?? partner.MailingCountry,
             TaxId = partner.TaxIdentificationNumber,
-            CreditLimit = partner.CreditLimit ?? 0m,
+            CreditLimit = readiness.ArProfile?.CreditLimit ?? 0m,
             OutstandingBalance = partner.OutstandingBalance ?? 0m,
-            PaymentTermsDays = paymentTermsDays,
-            PaymentTermId = partner.PaymentTermId,
+            PaymentTermsDays = paymentTerm?.DueDays ?? 30,
+            PaymentTermId = paymentTerm?.Id,
             PriceGroup = partner.PriceList,
             CurrencyCode = string.IsNullOrWhiteSpace(partner.Currency) ? "GHS" : partner.Currency,
-            IsActive = partner.IsActive &&
-                       !partner.IsBlacklisted &&
-                       !string.Equals(partner.RegistrationStatus, "Blacklisted", StringComparison.OrdinalIgnoreCase),
+            IsActive = readiness.IsReady,
             Notes = partner.Notes,
             CreatedAt = partner.CreatedAt
         };
@@ -471,19 +518,4 @@ public class CustomerService : ICustomerService
         };
     }
 
-    private static int? TryParsePaymentTermsDays(string? paymentTerms)
-    {
-        if (string.IsNullOrWhiteSpace(paymentTerms))
-        {
-            return null;
-        }
-
-        if (paymentTerms.Equals("COD", StringComparison.OrdinalIgnoreCase))
-        {
-            return 0;
-        }
-
-        var digits = new string(paymentTerms.Where(char.IsDigit).ToArray());
-        return int.TryParse(digits, out var days) ? days : null;
-    }
 }

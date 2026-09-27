@@ -5,6 +5,7 @@ namespace ErpSystem.Core.Interfaces.Inventory;
 
 public interface IInventoryDisposalService
 {
+    Task<IReadOnlyList<InventoryDisposalDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<InventoryDisposalDto>> GetAsync(InventoryDisposalStatus? status, Guid? warehouseId, int take, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> CreateAsync(CreateInventoryDisposalRequest request, CancellationToken cancellationToken = default);

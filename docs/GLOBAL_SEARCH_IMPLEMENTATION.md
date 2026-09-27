@@ -1,0 +1,47 @@
+# Global search
+
+User request (2026-09-27): header search across modules, master data and transactions, with suggestions as the user types and direct navigation to a selected record.
+
+## Behaviour
+
+- The header replaces its inactive search placeholder with an accessible combobox and results panel. Two characters start record searches after a 350 ms pause. Page matching is immediate.
+- Results show a reference/name, record type, context and status where supplied by the source. Users can filter by module, use Up/Down and Enter, dismiss with Escape, or focus search using Ctrl/Cmd K.
+- Four source requests may run at once. Each source uses a bounded server-side search; a failed source does not discard successful results. Changing the query cancels old requests; stale responses are ignored. Each request has a ten-second timeout.
+- Results are not cached across sessions. Changing user, tenant, roles or permissions resets the component and cancels pending work.
+- Navigation results use the sidebar's existing access filtering. Record sources additionally retain query constraints from accessible register links (for example customers-only views). The existing module API remains authoritative for tenant, permission and record-level access.
+- Record summaries explicitly select reviewed display fields. They do not display balances, salary, medical information, bank details or authentication data.
+
+## Architecture and coverage
+
+`frontend/src/lib/global-search.ts` owns provider contracts, scoped provider selection, federated requests and result extraction. Source catalogues contain reviewed API contracts; `global-search-navigation.ts` shares the canonical sidebar access filter. No search index, schema migration or alternate raw-database access path is introduced. Result links disable speculative prefetching.
+
+All accessible navigation leaves are searchable. There are 64 distinct record providers in 18 module groups. Record sources cover Finance GL accounts, journals, fixed assets, AP/AR invoices and payments; Procurement business partners, plans, budgets, contracts, requisitions, purchase orders, receipts, tenders, RFQs and supplier invoices; Inventory items, warehouses, transfers, counts, requisitions, issue vouchers and disposals; CRM accounts/leads/opportunities/quotations; Sales documents; Projects; HR employees and leave request references; Estate land assets and acquisitions; Legal cases and procedures; property enquiries; Civil tasks and configuration profiles; QS measurements, valuations, variations, certificates, catalogues, rate libraries, price-index imports, escalation formulas and configuration profiles; Maintenance assets/work orders/job cards; Helpdesk tickets; internal/external enquiries; Fleet vehicles/trips; SHE controlled documents, environmental reviews and permits; DMS documents; and Administration current-tenant users and role summaries. Exact registered sources are authoritative in the catalogues.
+
+Land acquisition searches use a new read-only scoped endpoint rather than the workflow board refresh, which also synchronizes payment/workflow state. Store issue voucher searches preserve designated-receiver and requisition-evidence access. Journal search does not grant general access to actors with only tender-payment-specific journal verification rights. Supplier invoice search uses the actual `procurementOnly=true` API contract. PO/requisition register predicates now use SQL-translatable case-insensitive matching.
+
+The new Inventory search actions search before limiting, include historical dates and reuse existing warehouse/location or actor scope. Request cancellation propagates through the new service methods. Inventory and other dialog-based screens accept an explicit record selection link and load that ID through their existing authorized API rather than assuming it is on the current register page.
+
+The HR employee paged endpoint now applies the established EmployeeReadPolicy, matching its neighbouring read actions. The search provider also checks the corresponding read/write/admin grants before requesting that endpoint.
+
+Administration search retains the identity owners' TenantAdmin/SuperAdmin restrictions. Users come from active current-tenant mappings, with revoked, deleted and expired relationships excluded; exact user summaries recheck that relationship. Roles remain the existing global identity catalogue. Search/detail project only minimal display metadata and do not expose contacts, credentials, permissions or assignments.
+
+## Remaining coverage
+
+Record coverage is explicit rather than inferred from database tables. This does not yet mean every record type is indexed. Specialist QS commercial registers and specialist Civil controls still need owner adapters and read-only destinations. Subordinate lines (for example historical rates within a chosen QS rate library) are not independently indexed. The exported `GLOBAL_SEARCH_RECORD_GAPS` tracks reviewed unsupported contracts; unregistered subordinate entities are not implicitly indexed. Module/page results must not be mistaken for transaction coverage. All responses are bounded, but some existing owners (notably CRM, Maintenance work orders, SHE, identity and the QS catalogue) materialize their scoped records before filtering/limiting; those retain their existing performance characteristics. Escalation formula discovery retains its owner's 5,000-project cap. See `GLOBAL_SEARCH_CIVIL_QS_COVERAGE.md` for precise specialist contracts. A prepared QS four-owner extension under `tmp/qs-search-extension` has not been applied or accepted.
+
+## Verification
+
+- Final consolidated frontend run: 126/126 passed across 19 suites (`tmp/global-search-final-frontend.log`), covering the header/font control, engine, navigation, component, catalogues, exact record destinations, readonly identity/SHE pages, stale results and keyboard selection identity. Earlier smaller runs overlap this count.
+- Core Inventory receipt/search run: 19/19 passed (`tmp/global-search-core-final-tests.log`). Expanded API run: 102/102 passed (`tmp/global-search-api-final-tests-confirmed.log`), including tenant/row scope, access policies, SQL query translation, late authorized pages and SHE permit projection. Identity's 10 additional API cases passed against the final API assembly (`tmp/global-search-api-identity-tests.log`): 112 focused API cases in total.
+- Full expanded analyzer build, including Core, Data and API, passed: 0 errors, 663 warnings (`tmp/global-search-expanded-build.log`, 26m07s). Final API build including identity/SHE adapters passed: 0 errors, 40 warnings (`tmp/global-search-api-final-build.log`, 5m48s).
+- Live browser verified automatic Finance search, module filtering, and selecting `1100` opening the exact Accounts Receivable detail page. The final API is running on port 5003 and the frontend on port 3000; final-assembly database/ClamAV/startup readiness passed HTTP 200. The browser remains at login, so refreshed endpoint and exact-link UI acceptance still needs the user's requested sign-in. Do not treat the earlier Finance check as acceptance of every provider.
+- Final TypeScript run includes the last identity files and has exactly the same 53 baseline diagnostic locations/codes, with no search diagnostic (`tmp/global-search-typecheck-complete.log`, 7m33s). One new voucher test overload error was corrected before the final run. The existing errors still prevent a clean whole-application TypeScript gate. Other Inventory implementation acceptance gates remain separate. No deployment or merge is included in this change.
+- Preview diagnosis resolved: SQL and EF model/connect probes pass against the isolated migrated clone. The deeply nested preview path caused SqlClient's native loader to fail with Windows error 0x800700CE (filename too long). A short `tmp/gs-*` runtime path restored HTTP 200 readiness for database, ClamAV and startup. No original database data or connection secrets were changed.
+
+## Pre-merge review
+
+- Fixed CRM lead/opportunity/quote selection when a second global result changes only the query string. The actual pages now reject stale register/detail responses and clear denied detail selections. All 9 new navigation regression cases passed (`tmp/global-search-crm-navigation-tests.log`).
+- The new issue-voucher destination now labels historical acknowledgements and displays uncaptured receipt quantities as "Not recorded". Voucher detail suite: 3/3 passed.
+- Completing a requisition with outstanding actual receipts now returns the established actionable 409 control envelope instead of a generic 500. Controller suite: 2/2 passed (`tmp/search-pr-review-api-tests.log`).
+- Targeted TypeScript validation for these final review changes passed (`tmp/search-pr-targeted-types.log`). Normal API analyzer rebuild passed with 0 errors and 40 warnings (`tmp/search-pr-api-review-build.log`, 3m02s).
+- The authenticated final browser gate remains open. This checkpoint does not claim the larger Inventory programme or every specialist record type is complete.

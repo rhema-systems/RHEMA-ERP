@@ -63,6 +63,31 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
+
+    public async Task<IReadOnlyList<FinanceRecordSearchDto>> SearchAsync(
+        string? search, int take = 5, CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var term = search?.Trim();
+        if (string.IsNullOrEmpty(term) || term.Length < 2 || term.Length > 100)
+            return Array.Empty<FinanceRecordSearchDto>();
+
+        term = term.ToUpperInvariant();
+        return await _context.FixedAssets.AsNoTracking()
+            .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted
+                && (asset.AssetCode.ToUpper().Contains(term) || asset.Name.ToUpper().Contains(term)))
+            .OrderBy(asset => asset.AssetCode)
+            .ThenBy(asset => asset.Id)
+            .Take(Math.Clamp(take, 1, 25))
+            .Select(asset => new FinanceRecordSearchDto
+            {
+                Id = asset.Id,
+                Number = asset.AssetCode,
+                Title = asset.Name,
+                Status = asset.Status.ToString()
+            })
+            .ToListAsync(cancellationToken);
+    }
     private string UserName => _currentUser.UserName ?? "system";
     private Guid CurrentUserGuid => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 

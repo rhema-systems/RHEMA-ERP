@@ -1,8 +1,7 @@
 'use client';
 
 import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
-import { BusinessPartnerReceivablesFields } from '@/components/procurement/BusinessPartnerReceivablesFields';
-import { PartnerAccountsFields, emptyBusinessPartnerPostingDefaults, useBusinessPartnerPostingCatalogues } from '@/components/procurement/BusinessPartnerPostingFields';
+import { BusinessPartnerCurrentAccountsPanel } from '@/components/procurement/BusinessPartnerCurrentAccountsPanel';
 
 
 import { useState, useEffect } from 'react';
@@ -56,7 +55,6 @@ export default function BusinessPartnerDetailPage() {
   const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
-  const postingCatalogues = useBusinessPartnerPostingCatalogues();
   const [partner, setPartner] = useState<BusinessPartnerDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -460,6 +458,8 @@ export default function BusinessPartnerDetailPage() {
             )}
           </TabsTrigger>
           <TabsTrigger value="financial">Financial Info</TabsTrigger>
+          {(hasSupplierRole(partner.partnerType) || hasContractorRole(partner.partnerType)) && <TabsTrigger value="accounts-payable">Accounts Payable</TabsTrigger>}
+          {hasCustomerRole(partner.partnerType) && <TabsTrigger value="accounts-receivable">Accounts Receivable</TabsTrigger>}
           {hasSupplierRole(partner.partnerType) && (
             <TabsTrigger value="purchase-orders">
               Purchase Orders ({purchaseOrders.length})
@@ -477,6 +477,12 @@ export default function BusinessPartnerDetailPage() {
         </TabsList>
 
         {/* Company Details Tab */}
+        {(hasSupplierRole(partner.partnerType) || hasContractorRole(partner.partnerType)) && <TabsContent value="accounts-payable">
+          <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={partner.partnerType} ledger="payables" />
+        </TabsContent>}
+        {hasCustomerRole(partner.partnerType) && <TabsContent value="accounts-receivable">
+          <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={partner.partnerType} ledger="receivables" />
+        </TabsContent>}
         <TabsContent value="details" className="space-y-4">
           <Card>
             <CardHeader>

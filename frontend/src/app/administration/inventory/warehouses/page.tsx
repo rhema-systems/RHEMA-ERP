@@ -1,4 +1,5 @@
 'use client';
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
 
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
@@ -248,6 +249,7 @@ export default function WarehousesPage() {
 
   return (
     <div className="space-y-6">
+      <GlobalSearchRecordOpener load={id => inventoryManagementService.getWarehouseById(id)} onOpen={handleEdit} />
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>

@@ -153,6 +153,140 @@ public sealed partial class ArInvoicePostingMigrationTests
     }
 
     [Theory]
+    [InlineData(false, true, true, 45)]
+    [InlineData(true, true, true, 7)]
+    [InlineData(false, false, true, 21)]
+    [InlineData(false, false, false, 30)]
+    public async Task CreateInvoice_ShouldUseApprovedProfileTermsOrCanonicalDefault(
+        bool explicitTerms, bool profileHasTerms, bool configuredDefault, int expectedDays)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var profile = await db.Set<BusinessPartnerArProfileVersion>().SingleAsync();
+        var approvedTerm = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "APPROVED45", Name = "Approved 45 days",
+            DueDays = 45, DiscountPercent = 2m, DiscountDays = 10, ApplicableTo = "Customer"
+        };
+        var explicitTerm = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "EXPLICIT7", Name = "Explicit 7 days",
+            DueDays = 7, DiscountPercent = 1m, DiscountDays = 3, ApplicableTo = "Customer"
+        };
+        var defaultTerm = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "DEFAULT21", Name = "Default 21 days",
+            DueDays = 21, ApplicableTo = "Customer", IsDefault = configuredDefault
+        };
+        var legacyTerm = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "LEGACY90", Name = "Obsolete 90 days",
+            DueDays = 90, ApplicableTo = "Customer"
+        };
+        db.Set<PaymentTerm>().AddRange(approvedTerm, explicitTerm, defaultTerm, legacyTerm);
+        profile.PaymentTermId = profileHasTerms ? approvedTerm.Id : null;
+        fixture.Customer.PaymentTermId = legacyTerm.Id;
+        fixture.Customer.PaymentTerms = "Net 90";
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+        var invoiceDate = new DateTime(2026, 7, 6);
+
+        var created = await service.CreateAsync(new InvoiceCreateDto
+        {
+            BusinessPartnerId = fixture.Customer.Id,
+            InvoiceDate = invoiceDate,
+            CurrencyCode = "GHS",
+            PaymentTermId = explicitTerms ? explicitTerm.Id : null,
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    LineItemType = "GLAccount", GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Profile terms regression", Quantity = 1m, UnitPrice = 100m,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        });
+
+        var expectedTerm = explicitTerms ? explicitTerm : profileHasTerms ? approvedTerm : configuredDefault ? defaultTerm : null;
+        created.BusinessPartnerArProfileVersionId.Should().Be(profile.Id);
+        created.PaymentTermId.Should().Be(expectedTerm?.Id);
+        created.PaymentTermsDays.Should().Be(expectedDays);
+        created.DueDate.Should().Be(invoiceDate.AddDays(expectedDays));
+        created.EarlyPaymentDiscountPercentage.Should().Be(expectedTerm?.DiscountPercent ?? 0m);
+        created.EarlyPaymentDiscountDueDate.Should().Be(expectedTerm?.DiscountPercent > 0m
+            ? invoiceDate.AddDays(expectedTerm.DiscountDays) : null);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateInvoiceDate_ShouldCaptureEffectiveProfileAndPreserveAcceptedTerms(bool savedTerm)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        var oldProfile = await db.Set<BusinessPartnerArProfileVersion>().SingleAsync();
+        oldProfile.EffectiveTo = new DateTime(2026, 7, 31);
+        var nextTerm = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "NEW60", Name = "New 60 days",
+            DueDays = 60, DiscountPercent = 2m, DiscountDays = 10, ApplicableTo = "Customer"
+        };
+        var acceptedTerm = new PaymentTerm
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "ACCEPTED7", Name = "Accepted 7 days",
+            DueDays = 7, DiscountPercent = 1m, DiscountDays = 3, ApplicableTo = "Customer"
+        };
+        var nextProfile = new BusinessPartnerArProfileVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerRoleId = oldProfile.BusinessPartnerRoleId,
+            Status = BusinessPartnerFinanceProfileStatus.Approved, VersionNumber = 2,
+            EffectiveFrom = new DateTime(2026, 8, 1), PaymentTermId = nextTerm.Id
+        };
+        db.Set<PaymentTerm>().AddRange(nextTerm, acceptedTerm);
+        db.Set<BusinessPartnerArProfileVersion>().Add(nextProfile);
+        if (savedTerm)
+        {
+            fixture.Invoice.PaymentTermId = acceptedTerm.Id;
+            fixture.Invoice.PaymentTermsDays = acceptedTerm.DueDays;
+            fixture.Invoice.EarlyPaymentDiscountPercentage = acceptedTerm.DiscountPercent;
+            fixture.Invoice.EarlyPaymentDiscountDueDate = fixture.Invoice.InvoiceDate.AddDays(acceptedTerm.DiscountDays);
+        }
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+        var invoiceDate = new DateTime(2026, 8, 2);
+        DateTime? explicitDueDate = savedTerm ? invoiceDate.AddDays(12) : null;
+
+        var updated = await service.UpdateAsync(new InvoiceUpdateDto
+        {
+            Id = fixture.Invoice.Id, InvoiceDate = invoiceDate, DueDate = explicitDueDate, CurrencyCode = "GHS",
+            LineItems = new List<InvoiceLineItemUpdateDto>
+            {
+                new()
+                {
+                    Id = fixture.Invoice.LineItems.Single().Id, LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id, Description = "Edited invoice date",
+                    Quantity = 1m, UnitPrice = 100m, TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        });
+
+        var expectedTerm = savedTerm ? acceptedTerm : nextTerm;
+        updated.BusinessPartnerArProfileVersionId.Should().Be(nextProfile.Id);
+        updated.BusinessPartnerRoleId.Should().Be(oldProfile.BusinessPartnerRoleId);
+        updated.PaymentTermId.Should().Be(expectedTerm.Id);
+        updated.PaymentTermsDays.Should().Be(expectedTerm.DueDays);
+        updated.DueDate.Should().Be(explicitDueDate ?? invoiceDate.AddDays(expectedTerm.DueDays));
+        updated.EarlyPaymentDiscountPercentage.Should().Be(expectedTerm.DiscountPercent);
+        updated.EarlyPaymentDiscountDueDate.Should().Be(invoiceDate.AddDays(expectedTerm.DiscountDays));
+        updated.LineItems.Single().GLAccountId.Should().Be(fixture.RevenueAccount.Id);
+        (await db.Invoices.AsNoTracking().SingleAsync(item => item.Id == fixture.Invoice.Id))
+            .BusinessPartnerArProfileVersionId.Should().Be(nextProfile.Id);
+    }
+
+    [Theory]
     [InlineData(101, 0)]
     [InlineData(0, 101)]
     public async Task CreateInvoice_ShouldRejectInvalidTradeDiscounts(decimal linePercentage, decimal documentDiscount)

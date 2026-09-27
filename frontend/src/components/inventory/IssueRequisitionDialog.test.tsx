@@ -42,7 +42,12 @@ beforeAll(() => {
 const voucher = (status: number | string) => ({
   id: 'voucher-1', voucherNumber: 'SIV-TEST', receiverUserId: 'receiver', receiverName: 'Jane Employee',
   issuerName: 'John Manager', status, rowVersion: 'AQID', issuedAtUtc: '2026-09-06T22:22:08Z',
-  movementReasonCode: 'DEPARTMENT_CONSUMPTION', financeJournalEntryId: 'journal-1', lines: [],
+  warehouseName: 'Main Stores', requisitionNumber: 'REQ-TEST',
+  movementReasonCode: 'DEPARTMENT_CONSUMPTION', financeJournalEntryId: 'journal-1', lines: [{
+    id: 'voucher-line-1', itemCode: 'SKU-001', itemName: 'PVC Pipe', unitOfMeasure: 'EACH',
+    quantity: 100, requestedQuantity: 100, receivedQuantity: status === 2 || status === 'Acknowledged' ? 100 : 0,
+    outstandingQuantity: status === 2 || status === 'Acknowledged' ? 0 : 100,
+  }],
 });
 
 beforeEach(() => {
@@ -358,6 +363,88 @@ describe('requester is the suggested receiver', () => {
 });
 
 describe('issued voucher handover', () => {
+  it.each(['', '-1', '101', '1.12345', '0'])('rejects missing or invalid actual receipts (%s) without assuming issued quantity', async quantity => {
+    vi.mocked(service.getIssueVouchers).mockResolvedValue([voucher(1)] as never);
+    open();
+    const input = await screen.findByRole('spinbutton', { name: 'Actual quantity received SIV-TEST SKU-001' });
+    expect(input).toHaveValue(null);
+    fireEvent.change(input, { target: { value: quantity } });
+    fireEvent.change(screen.getByPlaceholderText('Receiver handover comment'), { target: { value: 'Delivery checked' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge receipt' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(quantity === '0' ? 'positive received quantity' : 'enter an actual received quantity');
+    expect(service.acknowledgeIssueVoucher).not.toHaveBeenCalled();
+  });
+
+  it('records 92 then the remaining 8 using refreshed balances and version', async () => {
+    const partial = { ...voucher(1), rowVersion: 'BAUG', lines: [{ ...voucher(1).lines[0], receivedQuantity: 92, outstandingQuantity: 8 }] };
+    vi.mocked(service.getIssueVouchers).mockResolvedValueOnce([voucher(1)] as never).mockResolvedValueOnce([partial] as never).mockResolvedValueOnce([voucher(2)] as never);
+    vi.mocked(service.acknowledgeIssueVoucher).mockResolvedValueOnce(partial as never).mockResolvedValueOnce(voucher(2) as never);
+    open();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Actual quantity received SIV-TEST SKU-001' }), { target: { value: '92' } });
+    fireEvent.change(screen.getByPlaceholderText('Receiver handover comment'), { target: { value: 'Eight still missing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge receipt' }));
+    const remaining = await screen.findByRole('spinbutton', { name: 'Actual quantity received SIV-TEST SKU-001' });
+    await waitFor(() => expect(remaining).toHaveAttribute('max', '8'));
+    expect(remaining).toHaveValue(null);
+    expect(screen.getByText('Partially received')).toBeInTheDocument();
+    expect(service.acknowledgeIssueVoucher).toHaveBeenNthCalledWith(1, 'voucher-1', 'AQID', 'Eight still missing', [{ issueVoucherLineId: 'voucher-line-1', receivedQuantity: 92 }], expect.any(String));
+    fireEvent.change(remaining, { target: { value: '8' } });
+    fireEvent.change(screen.getByPlaceholderText('Receiver handover comment'), { target: { value: 'Remaining eight arrived' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge receipt' }));
+    await screen.findByText('Acknowledged');
+    expect(service.acknowledgeIssueVoucher).toHaveBeenNthCalledWith(2, 'voucher-1', 'BAUG', 'Remaining eight arrived', [{ issueVoucherLineId: 'voucher-line-1', receivedQuantity: 8 }], expect.any(String));
+    expect(screen.queryByRole('button', { name: 'Acknowledge receipt' })).not.toBeInTheDocument();
+  });
+
+  it('requires an entry for each outstanding line and permits explicit zero alongside a receipt', async () => {
+    const pending = { ...voucher(1), lines: [voucher(1).lines[0], { ...voucher(1).lines[0], id: 'voucher-line-2', itemCode: 'SKU-002' }] };
+    vi.mocked(service.getIssueVouchers).mockResolvedValue([pending] as never);
+    vi.mocked(service.acknowledgeIssueVoucher).mockResolvedValue(pending as never);
+    open();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Actual quantity received SIV-TEST SKU-001' }), { target: { value: '92' } });
+    fireEvent.change(screen.getByPlaceholderText('Receiver handover comment'), { target: { value: 'Second item missing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge receipt' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('SKU-002: enter');
+    expect(service.acknowledgeIssueVoucher).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Actual quantity received SIV-TEST SKU-002' }), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge receipt' }));
+    await waitFor(() => expect(service.acknowledgeIssueVoucher).toHaveBeenCalledWith('voucher-1', 'AQID', 'Second item missing', [
+      { issueVoucherLineId: 'voucher-line-1', receivedQuantity: 92 }, { issueVoucherLineId: 'voucher-line-2', receivedQuantity: 0 },
+    ], expect.any(String)));
+  });
+
+  it('retains actual quantities and the same retry key after an API failure', async () => {
+    vi.mocked(service.getIssueVouchers).mockResolvedValue([voucher(1)] as never);
+    vi.mocked(service.acknowledgeIssueVoucher).mockRejectedValue({ response: { data: { detail: 'Receipt changed. Refresh before retrying.', code: 'INV_RECEIPT_CONFLICT' } } });
+    open();
+    const input = await screen.findByRole('spinbutton', { name: 'Actual quantity received SIV-TEST SKU-001' });
+    fireEvent.change(input, { target: { value: '92' } });
+    fireEvent.change(screen.getByPlaceholderText('Receiver handover comment'), { target: { value: 'Eight missing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge receipt' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Receipt changed. Refresh before retrying. (INV_RECEIPT_CONFLICT)');
+    expect(input).toHaveValue(92);
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge receipt' }));
+    await waitFor(() => expect(service.acknowledgeIssueVoucher).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(service.acknowledgeIssueVoucher).mock.calls[1]).toEqual(vi.mocked(service.acknowledgeIssueVoucher).mock.calls[0]);
+  });
+
+  it('rejects fractional quantities for serial-numbered stock', async () => {
+    vi.mocked(service.getIssueVouchers).mockResolvedValue([{ ...voucher(1), lines: [{ ...voucher(1).lines[0], serialNumber: 'SN-001' }] }] as never);
+    open();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Actual quantity received SIV-TEST SKU-001' }), { target: { value: '0.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge receipt' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('in whole units');
+    expect(service.acknowledgeIssueVoucher).not.toHaveBeenCalled();
+  });
+
+  it('identifies historical acknowledgements without inventing actual received quantities', async () => {
+    vi.mocked(service.getIssueVouchers).mockResolvedValue([{ ...voucher(2), isLegacyAcknowledgement: true }] as never);
+    open();
+    expect(await screen.findByText('Historical acknowledgement: actual quantities were not captured per line.')).toBeInTheDocument();
+    expect(screen.getByText('Not recorded')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Acknowledge receipt' })).not.toBeInTheDocument();
+  });
+
   it.each([5, 'PartiallyIssued'])('allows receiver handover on a partially issued requisition (%s) without fetching issue setup', async status => {
     vi.mocked(service.getById).mockResolvedValue({
       id: 'req-1', requisitionNumber: 'REQ-TEST', status, requestedById: 'receiver',
@@ -419,11 +506,13 @@ describe('issued voucher handover', () => {
   it('sends the exact voucher, row version and receiver comment then reloads evidence', async () => {
     vi.mocked(service.getIssueVouchers).mockResolvedValueOnce([voucher('Issued')] as never)
       .mockResolvedValueOnce([{ ...voucher('Acknowledged'), receiverComment: 'LOCAL UAT received' }] as never);
+    vi.mocked(service.acknowledgeIssueVoucher).mockResolvedValue(voucher('Acknowledged') as never);
     open();
     const button = await screen.findByRole('button', { name: 'Acknowledge receipt' });
     fireEvent.change(screen.getByPlaceholderText('Receiver handover comment'), { target: { value: 'LOCAL UAT received' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Actual quantity received SIV-TEST SKU-001' }), { target: { value: '100' } });
     fireEvent.click(button);
-    await waitFor(() => expect(service.acknowledgeIssueVoucher).toHaveBeenCalledWith('voucher-1', 'AQID', 'LOCAL UAT received'));
+    await waitFor(() => expect(service.acknowledgeIssueVoucher).toHaveBeenCalledWith('voucher-1', 'AQID', 'LOCAL UAT received', [{ issueVoucherLineId: 'voucher-line-1', receivedQuantity: 100 }], expect.any(String)));
     await screen.findByText('Acknowledged');
   });
 });

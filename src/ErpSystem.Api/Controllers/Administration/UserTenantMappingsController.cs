@@ -56,6 +56,50 @@ public sealed class UserTenantMappingsController : ControllerBase
         return Ok(mappings);
     }
 
+    [HttpGet("current/users/search")]
+    public async Task<IActionResult> SearchCurrentUsers([FromQuery] string? search = null, [FromQuery] int take = 5)
+    {
+        var tenantId = await CurrentSearchTenantAsync();
+        if (!tenantId.HasValue) return Forbid();
+        var term = search?.Trim() ?? string.Empty;
+        if (term.Length < 2 || term.Length > 100) return Ok(Array.Empty<object>());
+        var users = await _userTenantService.GetActiveTenantUsersAsync(tenantId.Value);
+        return Ok(users.Where(user =>
+                (user.UserName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                user.FullName.Contains(term, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(user => user.UserName).ThenBy(user => user.Id)
+            .Take(Math.Clamp(take, 1, 20)).Select(SearchUserSummary).ToArray());
+    }
+
+    [HttpGet("current/users/{userId:guid}")]
+    public async Task<IActionResult> GetCurrentUserSummary(Guid userId)
+    {
+        var tenantId = await CurrentSearchTenantAsync();
+        if (!tenantId.HasValue) return Forbid();
+        var relationship = await _userTenantService.GetUserTenantRelationshipAsync(userId, tenantId.Value);
+        if (relationship is null || relationship.TenantId != tenantId.Value || relationship.UserId != userId ||
+            relationship.IsDeleted || relationship.Status != UserTenantStatus.Active ||
+            relationship.ExpiresAt <= DateTime.UtcNow || relationship.User is null)
+            return NotFound();
+        return Ok(SearchUserSummary(relationship.User));
+    }
+
+    private async Task<Guid?> CurrentSearchTenantAsync()
+    {
+        var tenantId = _currentUser.TenantId;
+        if (!tenantId.HasValue || tenantId.Value == Guid.Empty || !CanManageTenant(tenantId.Value)) return null;
+        var tenant = await _tenantService.GetTenantByIdAsync(tenantId.Value);
+        return tenant?.Status == TenantStatus.Active ? tenantId : null;
+    }
+
+    private static object SearchUserSummary(ApplicationUser user) => new
+    {
+        user.Id,
+        Username = user.UserName ?? string.Empty,
+        Name = user.FullName.Trim(),
+        Status = user.IsActive ? "Active" : "Inactive",
+    };
+
     [HttpPost]
     public async Task<IActionResult> Grant(
         [FromBody] SaveTenantUserMappingRequest request,

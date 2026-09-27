@@ -1,4 +1,5 @@
 'use client';
+import { GlobalSearchRecordOpener } from '@/components/global-search/GlobalSearchRecordOpener';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronsUpDown, Eye, Maximize2, Minimize2, Pencil, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
@@ -122,7 +123,7 @@ export default function InventoryDisposalsPage() {
   useEffect(() => {
     if (!mode || !warehouseId) { setItems([]); setLocations([]); return; }
     let live = true; setLookupBusy(true);
-    Promise.all([inventoryManagementService.getInventoryByWarehouse(warehouseId), inventoryManagementService.getWarehouseLocations(warehouseId)])
+    Promise.all([inventoryManagementService.getWarehouseInventoryItems(warehouseId), inventoryManagementService.getWarehouseLocations(warehouseId)])
       .then(([itemRows, locationRows]) => {
         if (!live) return;
         setItems(itemRows.filter(item => item.itemType === 1)); const active = locationRows.filter(location => location.isActive);
@@ -242,6 +243,10 @@ export default function InventoryDisposalsPage() {
   const tabs = ['details', 'items', 'documents', ...(selected?.approvalRequired && !editable ? ['workflow'] : []), ...(!editable ? ['history'] : [])];
 
   return <div className="space-y-4">
+    <GlobalSearchRecordOpener load={id => inventoryDisposalService.getById(id)} onOpen={value => {
+      applyRecord(value); setDocumentId(''); setAccountId(''); setMode('view'); setTab('details');
+      setFullscreen(false); setLineSearch(''); setLinePage(1);
+    }} />
     <div className="flex items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold">Inventory Disposals</h1>
       <p className="text-sm text-muted-foreground">Write off, donate or sell stock.</p></div><div className="flex gap-2">
       <Button variant="outline" aria-label="Refresh disposals" title="Refresh" disabled={loading || busy} onClick={() => void load()}><RefreshCw className="h-4 w-4" /></Button>

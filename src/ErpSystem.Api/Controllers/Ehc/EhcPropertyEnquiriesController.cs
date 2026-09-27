@@ -41,6 +41,22 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
         return Ok(new { success = true, data = items, totalCount = total, page, pageSize = 25 });
     }
 
+    [HttpGet("search")]
+    public async Task<IActionResult> Search([FromQuery] string? search, [FromQuery] int take = 5,
+        CancellationToken cancellationToken = default)
+    {
+        var term = search?.Trim() ?? string.Empty;
+        if (term.Length < 2 || term.Length > 100) return Ok(new { success = true, data = Array.Empty<object>() });
+        term = term.ToLowerInvariant();
+        var items = await Query()
+            .Where(item => item.TicketNumber.ToLower().Contains(term) || item.Subject.ToLower().Contains(term))
+            .OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id)
+            .Take(Math.Clamp(take, 1, 10))
+            .Select(item => new { item.Id, item.TicketNumber, item.Subject, Status = item.Status.ToString() })
+            .ToArrayAsync(cancellationToken);
+        return Ok(new { success = true, data = items });
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
     {

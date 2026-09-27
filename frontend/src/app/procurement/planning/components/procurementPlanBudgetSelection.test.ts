@@ -7,7 +7,7 @@ import { applyProcurementPlanBudgetSelection } from './procurementPlanBudgetSele
 
 const plan: CreateProcurementPlanDto = {
   title: 'Annual plan',
-  departmentId: 'department-one',
+  organizationUnitId: 'department-one',
   fiscalYear: 2026,
   planStartDate: '2026-01-01',
   planEndDate: '2026-12-31',

@@ -309,7 +309,7 @@ export default function ProcurementPlanningDashboardPage() {
                   </TableHeader>
                   <TableBody>
                     {dashboard.departmentSummaries.map((row) => (
-                      <TableRow key={row.departmentId}>
+                      <TableRow key={row.organizationUnitId}>
                         <TableCell className="font-medium">{row.departmentName}</TableCell>
                         <TableCell>{row.planCount}</TableCell>
                         <TableCell>{row.itemCount}</TableCell>

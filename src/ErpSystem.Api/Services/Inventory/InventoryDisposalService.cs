@@ -72,6 +72,12 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         _controlEvents = controlEvents;
     }
 
+    public Task<IReadOnlyList<InventoryDisposalDto>> SearchAsync(
+        string search, int take = 8, CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100
+            ? Task.FromResult<IReadOnlyList<InventoryDisposalDto>>([])
+            : GetSourceAsync(null, null, Math.Clamp(take, 1, 50), cancellationToken, search.Trim());
+
     public Task<IReadOnlyList<InventoryDisposalDto>> GetAsync(
         InventoryDisposalStatus? status,
         Guid? warehouseId,
@@ -89,12 +95,16 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         InventoryDisposalStatus? status,
         Guid? warehouseId,
         int? take,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? search = null)
     {
         EnsureActor();
         var query = FullQuery().AsNoTracking().Where(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted);
         if (status.HasValue) query = query.Where(value => value.Status == status.Value);
         if (warehouseId.HasValue) query = query.Where(value => value.WarehouseId == warehouseId.Value);
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(value => value.DisposalNumber.Contains(search) || value.Reason.Contains(search) ||
+                value.IdentificationDetails.Contains(search) || value.Warehouse.Name.Contains(search));
         var allowed = new List<InventoryDisposalDto>();
         var offset = 0;
         var pageSize = Math.Max(take ?? 500, 50);

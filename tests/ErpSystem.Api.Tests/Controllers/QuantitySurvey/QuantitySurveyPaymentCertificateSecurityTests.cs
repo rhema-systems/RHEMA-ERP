@@ -62,6 +62,7 @@ public sealed class QuantitySurveyPaymentCertificateSecurityTests
 
     [Theory]
     [InlineData(nameof(QuantitySurveyPaymentCertificatesController.Lookups), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    [InlineData(nameof(QuantitySurveyPaymentCertificatesController.Search), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     [InlineData(nameof(QuantitySurveyPaymentCertificatesController.List), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     [InlineData(nameof(QuantitySurveyPaymentCertificatesController.Get), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     [InlineData(nameof(QuantitySurveyPaymentCertificatesController.Generate), QuantitySurveyAccessControlRegistry.CertificatesManage)]

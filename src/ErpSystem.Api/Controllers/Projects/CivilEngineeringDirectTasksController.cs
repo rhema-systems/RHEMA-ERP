@@ -12,6 +12,13 @@ namespace ErpSystem.Api.Controllers.Projects;
 [Route("api/projects/{projectId:guid}/civil-engineering/direct-tasks")]
 public sealed class CivilEngineeringDirectTasksController(ICivilEngineeringDirectTaskService service) : ControllerBase
 {
+    [HttpGet("~/api/civil-engineering/direct-tasks/search"), Authorize(Policy = CivilEngineeringAccessControlRegistry.WorkspaceRead)]
+    public Task<IActionResult> Search([FromQuery] string search, CancellationToken token, [FromQuery] int take = 8) =>
+        ExecuteAsync(async () => Ok(await service.SearchAsync(search, take, token)));
+
+    [HttpGet("~/api/civil-engineering/direct-tasks/{id:guid}"), Authorize(Policy = CivilEngineeringAccessControlRegistry.WorkspaceRead)]
+    public Task<IActionResult> Get(Guid id, CancellationToken token) => ExecuteAsync(async () => Ok(await service.GetAsync(id, token)));
+
     [HttpGet("lookups"), Authorize(Policy = CivilEngineeringAccessControlRegistry.AssignmentsManage)]
     public Task<IActionResult> Lookups(Guid projectId, CancellationToken token) => ExecuteAsync(async () => Ok(await service.GetLookupsAsync(projectId, token)));
 

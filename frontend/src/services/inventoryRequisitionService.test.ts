@@ -77,13 +77,20 @@ describe('inventoryRequisitionService controlled issue lifecycle', () => {
   it('uses voucher row version and a fresh replay key for receiver acknowledgement', async () => {
     mockedAxios.post.mockResolvedValueOnce({ data: { id: 'voucher-1', status: 2 } });
 
-    await inventoryRequisitionService.acknowledgeIssueVoucher('voucher-1', 'BAUG', 'Received intact.');
+    await inventoryRequisitionService.acknowledgeIssueVoucher('voucher-1', 'BAUG', 'Received intact.', [{ issueVoucherLineId: 'line-1', receivedQuantity: 92 }]);
 
     expect(mockedAxios.post).toHaveBeenCalledWith(
       expect.stringMatching(/\/issue-vouchers\/voucher-1\/acknowledge$/),
-      { rowVersion: 'BAUG', comment: 'Received intact.', idempotencyKey: '60600000-0000-4000-8000-000000000001' },
+      { rowVersion: 'BAUG', comment: 'Received intact.', lines: [{ issueVoucherLineId: 'line-1', receivedQuantity: 92 }], idempotencyKey: '60600000-0000-4000-8000-000000000001' },
       expect.anything(),
     );
+  });
+
+  it('preserves the supplied receipt retry key and explicit zero quantities', async () => {
+    mockedAxios.post.mockResolvedValueOnce({ data: { id: 'voucher-1', status: 1 } });
+    const lines = [{ issueVoucherLineId: 'line-1', receivedQuantity: 0 }, { issueVoucherLineId: 'line-2', receivedQuantity: 3.1234 }];
+    await inventoryRequisitionService.acknowledgeIssueVoucher('voucher-1', 'BAUG', 'Partial delivery', lines, 'same-retry');
+    expect(mockedAxios.post).toHaveBeenCalledWith(expect.any(String), { rowVersion: 'BAUG', comment: 'Partial delivery', lines, idempotencyKey: 'same-retry' }, expect.anything());
   });
 
   it('downloads immutable SIV evidence as a blob from the protected API', async () => {

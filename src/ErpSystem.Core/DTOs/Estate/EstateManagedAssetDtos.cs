@@ -308,6 +308,7 @@ public class UpdateEstateLandDemarcationCostingDto
 
 public class EstateManagedAssetQuery
 {
+    public Guid? AssetId { get; set; }
     public EstateManagedAssetType? AssetType { get; set; }
     public EstateManagedAssetStatus? Status { get; set; }
     public List<EstateManagedAssetStatus> Statuses { get; set; } = new();

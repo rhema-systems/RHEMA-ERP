@@ -202,6 +202,9 @@ export interface InventoryIssueVoucherLineDto {
   locationId?: string;
   locationCode?: string;
   quantity: number;
+  requestedQuantity: number;
+  receivedQuantity: number;
+  outstandingQuantity: number;
   unitCost: number;
   totalValue: number;
   unitOfMeasure?: string;
@@ -251,6 +254,7 @@ export interface InventoryIssueVoucherDto {
   acknowledgedAtUtc?: string;
   notes?: string;
   receiverComment?: string;
+  isLegacyAcknowledgement?: boolean;
   rowVersion: string;
   lines: InventoryIssueVoucherLineDto[];
   actions: InventoryIssueVoucherActionDto[];
@@ -485,6 +489,11 @@ export const inventoryRequisitionService = {
     return response.data;
   },
 
+  getIssueVoucher: async (voucherId: string): Promise<InventoryIssueVoucherDto> => {
+    const response = await axios.get(`${API_URL}/inventory/requisitions/issue-vouchers/${encodeURIComponent(voucherId)}`, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
   getIssueAccountingOptions: async (requisitionId?: string): Promise<InventoryIssueAccountingOptionsDto> => {
     const response = await axios.get(`${API_URL}/inventory/issue-accounting/options`, {
       headers: getAuthHeaders(),
@@ -522,11 +531,13 @@ export const inventoryRequisitionService = {
     return response.data;
   },
 
-  acknowledgeIssueVoucher: async (voucherId: string, rowVersion: string, comment: string): Promise<InventoryIssueVoucherDto> => {
+  acknowledgeIssueVoucher: async (voucherId: string, rowVersion: string, comment: string,
+    lines: { issueVoucherLineId: string; receivedQuantity: number }[], idempotencyKey: string = crypto.randomUUID()): Promise<InventoryIssueVoucherDto> => {
     const response = await axios.post(`${API_URL}/inventory/requisitions/issue-vouchers/${voucherId}/acknowledge`, {
       rowVersion,
       comment,
-      idempotencyKey: crypto.randomUUID(),
+      lines,
+      idempotencyKey,
     }, { headers: getAuthHeaders() });
     return response.data;
   },

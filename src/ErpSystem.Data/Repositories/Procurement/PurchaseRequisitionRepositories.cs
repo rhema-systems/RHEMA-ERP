@@ -237,9 +237,9 @@ public class PurchaseRequisitionRepository : GenericRepository<PurchaseRequisiti
         // Apply filters
         if (!string.IsNullOrWhiteSpace(search))
         {
-            search = search.ToLower();
-            query = query.Where(pr => pr.RequisitionNumber.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
-                                    (pr.RequestedBy != null && (pr.RequestedBy.FirstName.Contains(search, StringComparison.CurrentCultureIgnoreCase) || pr.RequestedBy.LastName.Contains(search, StringComparison.CurrentCultureIgnoreCase))));
+            search = search.ToUpperInvariant();
+            query = query.Where(pr => pr.RequisitionNumber.ToUpper().Contains(search) ||
+                                    (pr.RequestedBy != null && (pr.RequestedBy.FirstName.ToUpper().Contains(search) || pr.RequestedBy.LastName.ToUpper().Contains(search))));
         }
 
         if (!string.IsNullOrWhiteSpace(status))

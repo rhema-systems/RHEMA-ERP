@@ -103,7 +103,7 @@ describe('business partner governed finance setup', () => {
     vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({ ...saved, status });
     render(<EditBusinessPartnerPage />);
     await screen.findByLabelText('Company Name *');
-    expect(screen.queryByRole('tab', { name: 'Accounts Payable' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Accounts Payable' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Accounts Receivable' })).not.toBeInTheDocument();
     await openTab('Finance Profiles');
     expect(screen.getByText('Governed profiles')).toBeInTheDocument();

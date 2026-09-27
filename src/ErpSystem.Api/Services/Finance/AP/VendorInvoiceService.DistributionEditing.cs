@@ -202,7 +202,11 @@ public partial class VendorInvoiceService
         try { draft = JsonSerializer.Deserialize<InvoiceDistributionDraft>(invoice.DistributionDraftJson) ?? throw new JsonException(); }
         catch (JsonException) { throw new InvalidOperationException("Saved distribution is unreadable. Reset and review it before posting."); }
         if (draft.SchemaVersion != 1 || draft.BasisVersion != DistributionBasis(invoice, request))
+        {
+            if (invoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException("AP_INVOICE_DISTRIBUTION_HISTORY_REQUIRED: the original posted distribution basis cannot be reconstructed. Finance must review and repair its historical source evidence before retrying; do not reset a posted distribution.");
             throw new InvalidOperationException("The invoice or posting defaults changed after distribution was saved. Review and save Distribution again before posting.");
+        }
         await ValidateDistributionLinesAsync(invoice, draft.Lines, request, ct);
         request.Lines = ComposeDistributionLines(draft.Lines, request, consolidate);
     }

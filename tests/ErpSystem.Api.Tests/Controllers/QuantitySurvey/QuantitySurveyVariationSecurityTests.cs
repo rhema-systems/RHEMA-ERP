@@ -11,6 +11,7 @@ namespace ErpSystem.Api.Tests.Controllers.QuantitySurvey;
 public sealed class QuantitySurveyVariationSecurityTests
 {
     [Theory]
+    [InlineData(nameof(QuantitySurveyVariationsController.Search), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     [InlineData(nameof(QuantitySurveyVariationsController.Workspace), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     [InlineData(nameof(QuantitySurveyVariationsController.Get), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     [InlineData(nameof(QuantitySurveyVariationsController.Save), QuantitySurveyAccessControlRegistry.VariationsManage)]

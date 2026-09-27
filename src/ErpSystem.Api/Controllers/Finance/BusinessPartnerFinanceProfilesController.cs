@@ -44,6 +44,10 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
         Guid businessPartnerId,
         [FromBody] SaveBusinessPartnerApProfileRequest request,
         CancellationToken cancellationToken)
+        => await ExecuteApWriteAsync(() => CreateApDraftCore(businessPartnerId, request, cancellationToken), cancellationToken);
+
+    private async Task<ActionResult<BusinessPartnerApProfileDto>> CreateApDraftCore(
+        Guid businessPartnerId, SaveBusinessPartnerApProfileRequest request, CancellationToken cancellationToken)
     {
         var validation = await ValidateApRequestAsync(businessPartnerId, request, cancellationToken);
         if (validation is not null) return validation;
@@ -80,6 +84,10 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
         Guid profileId,
         [FromBody] SaveBusinessPartnerApProfileRequest request,
         CancellationToken cancellationToken)
+        => await ExecuteApWriteAsync(() => UpdateApDraftCore(businessPartnerId, profileId, request, cancellationToken), cancellationToken);
+
+    private async Task<ActionResult<BusinessPartnerApProfileDto>> UpdateApDraftCore(
+        Guid businessPartnerId, Guid profileId, SaveBusinessPartnerApProfileRequest request, CancellationToken cancellationToken)
     {
         var profile = await _db.BusinessPartnerApProfileVersions
             .Include(item => item.BusinessPartnerRole)
@@ -119,6 +127,8 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
             return ConflictProblem("PROFILE_NOT_DRAFT", "Only a draft AP profile can be submitted.");
         var readiness = ValidateApApproval(profile);
         if (readiness is not null) return readiness;
+        var configuration = await ValidateStoredApAsync(businessPartnerId, profile, cancellationToken);
+        if (configuration is not null) return configuration;
         profile.Status = BusinessPartnerFinanceProfileStatus.Submitted;
         profile.SubmittedById = UserId;
         profile.SubmittedAtUtc = DateTime.UtcNow;
@@ -142,6 +152,8 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
             return ConflictProblem("MAKER_CHECKER_REQUIRED", "The user who submitted this AP profile cannot approve it.");
         var readiness = ValidateApApproval(profile);
         if (readiness is not null) return readiness;
+        var configuration = await ValidateStoredApAsync(businessPartnerId, profile, cancellationToken);
+        if (configuration is not null) return configuration;
         var candidates = await _db.BusinessPartnerApProfileVersions.AsNoTracking()
             .Where(item => item.TenantId == TenantId && item.BusinessPartnerRoleId == profile.BusinessPartnerRoleId)
             .ToListAsync(cancellationToken);
@@ -236,6 +248,8 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
         if (profile is null) return NotFound();
         if (profile.Status != BusinessPartnerFinanceProfileStatus.Draft)
             return ConflictProblem("PROFILE_NOT_DRAFT", "Only a draft AR profile can be submitted.");
+        var termsValidation = await ValidatePaymentTermAsync(profile.PaymentTermId, BusinessPartnerRoleType.Customer, cancellationToken);
+        if (termsValidation is not null) return termsValidation;
         profile.Status = BusinessPartnerFinanceProfileStatus.Submitted;
         profile.SubmittedById = UserId;
         profile.SubmittedAtUtc = DateTime.UtcNow;
@@ -257,6 +271,8 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
             return ConflictProblem("PROFILE_NOT_SUBMITTED", "Only a submitted AR profile can be approved.");
         if (profile.SubmittedById == UserId)
             return ConflictProblem("MAKER_CHECKER_REQUIRED", "The user who submitted this AR profile cannot approve it.");
+        var termsValidation = await ValidatePaymentTermAsync(profile.PaymentTermId, BusinessPartnerRoleType.Customer, cancellationToken);
+        if (termsValidation is not null) return termsValidation;
         var candidates = await _db.BusinessPartnerArProfileVersions.AsNoTracking()
             .Where(item => item.TenantId == TenantId && item.BusinessPartnerRoleId == profile.BusinessPartnerRoleId)
             .ToListAsync(cancellationToken);
@@ -311,6 +327,11 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
             return BadRequestProblem("AP_ROLE_INACTIVE", "The selected AP role is inactive.");
         if (request.EffectiveTo.HasValue && request.EffectiveTo.Value.Date < request.EffectiveFrom.Date)
             return BadRequestProblem("EFFECTIVE_PERIOD_INVALID", "Effective through cannot be earlier than effective from.");
+        var defaultsValidation = await ValidateApDefaultsAsync(request.PaymentTermId, request.DefaultExpenseAccountId,
+            request.DefaultTaxGroupId, role.RoleType, request.EffectiveFrom.Date, cancellationToken);
+        if (defaultsValidation is not null) return defaultsValidation;
+        if (request.WithholdingDefaults is null || request.WithholdingDefaults.Any(item => item is null || string.IsNullOrWhiteSpace(item.CategoryCode)))
+            return BadRequestProblem("WHT_CATEGORY_REQUIRED", "Every WHT default requires a category code.");
         if (request.WithholdingDefaults.GroupBy(item => item.CategoryCode.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
             return BadRequestProblem("WHT_CATEGORY_DUPLICATE", "Each WHT category may appear only once in an AP profile.");
         if (request.WithholdingDefaults.Count(item => item.IsActive && item.IsDefaultForAp) > 1)
@@ -344,7 +365,79 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
             return BadRequestProblem("EFFECTIVE_PERIOD_INVALID", "Effective through cannot be earlier than effective from.");
         if (request.CreditLimit < 0)
             return BadRequestProblem("CREDIT_LIMIT_INVALID", "Credit limit must be zero or greater.");
+        return await ValidatePaymentTermAsync(request.PaymentTermId, BusinessPartnerRoleType.Customer, cancellationToken);
+    }
+
+    private async Task<ActionResult?> ValidateApDefaultsAsync(Guid? paymentTermId, Guid? expenseAccountId,
+        Guid? taxGroupId, BusinessPartnerRoleType roleType, DateTime effectiveFrom, CancellationToken cancellationToken)
+    {
+        var termsValidation = await ValidatePaymentTermAsync(paymentTermId, roleType, cancellationToken);
+        if (termsValidation is not null) return termsValidation;
+        if (expenseAccountId.HasValue && !await _db.Accounts.AsNoTracking().AnyAsync(account =>
+                account.Id == expenseAccountId.Value && account.TenantId == TenantId && !account.IsDeleted &&
+                account.Status == AccountStatus.Active && account.AllowDirectPosting && !account.IsControlAccount &&
+                (account.AccountType == AccountType.Expense || account.AccountType == AccountType.Asset) &&
+                (!account.EffectiveDate.HasValue || account.EffectiveDate <= effectiveFrom) &&
+                (!account.ExpirationDate.HasValue || account.ExpirationDate > effectiveFrom), cancellationToken))
+            return BadRequestProblem("AP_EXPENSE_ACCOUNT_INVALID", "Select an active, directly postable expense or asset account from the current tenant.");
+        if (taxGroupId.HasValue && !await _db.TaxGroups.AsNoTracking().AnyAsync(group =>
+                group.Id == taxGroupId.Value && group.TenantId == TenantId && !group.IsDeleted && group.IsActive &&
+                (group.Applicability == TaxApplicability.Purchases || group.Applicability == TaxApplicability.Both),
+                cancellationToken))
+            return BadRequestProblem("AP_TAX_GROUP_INVALID", "Select an active purchase tax group from the current tenant.");
         return null;
+    }
+
+    private async Task<ActionResult?> ValidatePaymentTermAsync(Guid? paymentTermId,
+        BusinessPartnerRoleType roleType, CancellationToken cancellationToken)
+    {
+        if (!paymentTermId.HasValue) return null;
+        var term = await _db.PaymentTerms.AsNoTracking().SingleOrDefaultAsync(item => item.Id == paymentTermId.Value &&
+            item.TenantId == TenantId && !item.IsDeleted && item.IsActive, cancellationToken);
+        if (term is null || !(string.Equals(term.ApplicableTo, "All", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(term.ApplicableTo, roleType.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                              (roleType == BusinessPartnerRoleType.Supplier && string.Equals(term.ApplicableTo, "Vendor", StringComparison.OrdinalIgnoreCase)) ||
+                              (roleType == BusinessPartnerRoleType.Customer && string.Equals(term.ApplicableTo, "Client", StringComparison.OrdinalIgnoreCase))))
+            return BadRequestProblem("PROFILE_PAYMENT_TERM_INVALID", "Select an active payment term applicable to this partner role from the current tenant.");
+        return null;
+    }
+
+    private Task<ActionResult?> ValidateStoredApAsync(Guid partnerId, BusinessPartnerApProfileVersion profile,
+        CancellationToken cancellationToken) => ValidateApRequestAsync(partnerId, new SaveBusinessPartnerApProfileRequest
+        {
+            BusinessPartnerRoleId = profile.BusinessPartnerRoleId,
+            EffectiveFrom = profile.EffectiveFrom, EffectiveTo = profile.EffectiveTo,
+            PaymentTermId = profile.PaymentTermId, DefaultExpenseAccountId = profile.DefaultExpenseAccountId,
+            DefaultTaxGroupId = profile.DefaultTaxGroupId, SubjectToWithholding = profile.SubjectToWithholding,
+            WithholdingDefaults = profile.WithholdingDefaults.Where(line => !line.IsDeleted).Select(line =>
+                new SaveBusinessPartnerApWhtDefaultRequest
+                {
+                    CategoryCode = line.CategoryCode, CategoryName = line.CategoryName,
+                    WithholdingTaxId = line.WithholdingTaxId, IsDefaultForAp = line.IsDefaultForAp, IsActive = line.IsActive
+                }).ToList()
+        }, cancellationToken);
+
+    private async Task<ActionResult<BusinessPartnerApProfileDto>> ExecuteApWriteAsync(
+        Func<Task<ActionResult<BusinessPartnerApProfileDto>>> operation, CancellationToken cancellationToken)
+    {
+        if (!_db.Database.IsRelational() || _db.Database.CurrentTransaction is not null)
+            return await operation();
+        return await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var result = await operation();
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _db.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     private ActionResult? ValidateApApproval(BusinessPartnerApProfileVersion profile)
@@ -416,10 +509,10 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
         var roleIds = roles.Select(item => item.Id).ToList();
         var ap = await _db.BusinessPartnerApProfileVersions.AsNoTracking()
             .Include(item => item.WithholdingDefaults).ThenInclude(line => line.WithholdingTax)
-            .Where(item => roleIds.Contains(item.BusinessPartnerRoleId) && !item.IsDeleted)
+            .Where(item => item.TenantId == TenantId && roleIds.Contains(item.BusinessPartnerRoleId) && !item.IsDeleted)
             .OrderByDescending(item => item.VersionNumber).ToListAsync(cancellationToken);
         var ar = await _db.BusinessPartnerArProfileVersions.AsNoTracking()
-            .Where(item => roleIds.Contains(item.BusinessPartnerRoleId) && !item.IsDeleted)
+            .Where(item => item.TenantId == TenantId && roleIds.Contains(item.BusinessPartnerRoleId) && !item.IsDeleted)
             .OrderByDescending(item => item.VersionNumber).ToListAsync(cancellationToken);
         return new BusinessPartnerFinanceProfileSetDto
         {
@@ -438,7 +531,7 @@ public sealed class BusinessPartnerFinanceProfilesController : ControllerBase
     {
         var profile = await _db.BusinessPartnerApProfileVersions.AsNoTracking()
             .Include(item => item.WithholdingDefaults).ThenInclude(line => line.WithholdingTax)
-            .SingleAsync(item => item.Id == profileId, cancellationToken);
+            .SingleAsync(item => item.Id == profileId && item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
         return MapAp(profile);
     }
 

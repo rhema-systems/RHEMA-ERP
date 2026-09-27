@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TENDER_PAYMENT_VERIFY_PERMISSION,
   TenderPaymentVerificationPanel,
-} from './page';
+} from '@/components/procurement/tenders/TenderPaymentVerificationPanel';
 import type { TenderPaymentDto } from '@/services/tenderBidService';
 
 const mocks = vi.hoisted(() => ({

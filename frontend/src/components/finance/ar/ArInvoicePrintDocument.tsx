@@ -208,7 +208,7 @@ export function ArInvoicePrintDocument({
           <dl className={styles.compactList}>
             <div>
               <dt>Canonical customer ID</dt>
-              <dd className={styles.auditValue}>{invoice.customerId}</dd>
+              <dd className={styles.auditValue}>{invoice.businessPartnerId}</dd>
             </div>
           </dl>
         </div>

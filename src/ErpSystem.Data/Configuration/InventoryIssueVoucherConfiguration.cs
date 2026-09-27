@@ -13,6 +13,7 @@ public sealed class InventoryIssueVoucherConfiguration : IEntityTypeConfiguratio
         {
             table.HasTrigger("TR_InventoryIssueVouchers_ControlledLifecycle");
             table.HasCheckConstraint("CK_InventoryIssueVouchers_Status", "[Status] IN (1,2)");
+            table.HasCheckConstraint("CK_InventoryIssueVouchers_ReceiptSequence", "[ReceiptSequence] >= 0");
             table.HasCheckConstraint("CK_InventoryIssueVouchers_Hashes", "LEN([PayloadHash]) = 64 AND LEN([IntegrityHash]) = 64");
             table.HasCheckConstraint("CK_InventoryIssueVouchers_Sod", "[RequestedById] <> [ApprovedById] AND [RequestedById] <> [IssuedById] AND [ApprovedById] <> [IssuedById] AND [IssuedById] <> [ReceiverUserId]");
             table.HasCheckConstraint("CK_InventoryIssueVouchers_Acknowledgement", "([Status] = 1 AND [AcknowledgedById] IS NULL AND [AcknowledgedAtUtc] IS NULL) OR ([Status] = 2 AND [AcknowledgedById] = [ReceiverUserId] AND [AcknowledgedAtUtc] IS NOT NULL)");
@@ -81,12 +82,32 @@ public sealed class InventoryIssueVoucherActionConfiguration : IEntityTypeConfig
         {
             table.HasTrigger("TR_InventoryIssueVoucherActions_AppendOnly");
             table.HasCheckConstraint("CK_InventoryIssueVoucherActions_Sequence", "[Sequence] > 0");
-            table.HasCheckConstraint("CK_InventoryIssueVoucherActions_ActionType", "[ActionType] IN (1,2)");
+            table.HasCheckConstraint("CK_InventoryIssueVoucherActions_ActionType", "[ActionType] IN (1,2,3)");
             table.HasCheckConstraint("CK_InventoryIssueVoucherActions_StatusAfter", "[StatusAfter] IN (1,2)");
             table.HasCheckConstraint("CK_InventoryIssueVoucherActions_IntegrityHash", "LEN([IntegrityHash]) = 64");
         });
         builder.HasIndex(item => new { item.TenantId, item.InventoryIssueVoucherId, item.Sequence }).IsUnique();
+        builder.HasIndex(item => new { item.TenantId, item.InventoryIssueVoucherId, item.ReceiptIdempotencyKey })
+            .IsUnique().HasFilter("[ReceiptIdempotencyKey] IS NOT NULL");
         builder.HasIndex(item => new { item.TenantId, item.OccurredAtUtc });
         builder.HasOne(item => item.InventoryIssueVoucher).WithMany(item => item.Actions).HasForeignKey(item => item.InventoryIssueVoucherId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public sealed class InventoryIssueVoucherReceiptLineConfiguration : IEntityTypeConfiguration<InventoryIssueVoucherReceiptLine>
+{
+    public void Configure(EntityTypeBuilder<InventoryIssueVoucherReceiptLine> builder)
+    {
+        builder.ToTable("InventoryIssueVoucherReceiptLines", table =>
+        {
+            table.HasTrigger("TR_InventoryIssueVoucherReceiptLines_AppendOnly");
+            table.HasCheckConstraint("CK_InventoryIssueVoucherReceiptLines_Quantity", "[ReceivedQuantity] > 0");
+        });
+        builder.HasIndex(line => new { line.TenantId, line.InventoryIssueVoucherActionId, line.InventoryIssueVoucherLineId }).IsUnique();
+        builder.HasIndex(line => new { line.TenantId, line.InventoryIssueVoucherLineId });
+        builder.HasOne(line => line.InventoryIssueVoucherAction).WithMany(action => action.ReceiptLines)
+            .HasForeignKey(line => line.InventoryIssueVoucherActionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(line => line.InventoryIssueVoucherLine).WithMany()
+            .HasForeignKey(line => line.InventoryIssueVoucherLineId).OnDelete(DeleteBehavior.Restrict);
     }
 }

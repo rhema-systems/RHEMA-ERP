@@ -70,6 +70,18 @@ public sealed class QuantitySurveyMeasurementService(
         return new() { ApprovedBoqLines = lines, ApprovedDrawings = drawings };
     }
 
+    public async Task<IReadOnlyList<QuantitySurveyMeasurementDto>> SearchAsync(string search, int take = 8, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var query = Query().Where(value => value.SheetReference.Contains(term) || value.Title.Contains(term) ||
+                (value.SiteLocation != null && value.SiteLocation.Contains(term)))
+            .OrderByDescending(value => value.MeasurementDate).ThenBy(value => value.Id);
+        var rows = await QuantitySurveyAuthorizedSearch.ReadAsync(query, value => value.ProjectId,
+            projectService.HasProjectAccessAsync, take, token);
+        return rows.Select(Map).ToList();
+    }
+
     public async Task<QuantitySurveyMeasurementPageDto> ListAsync(QuantitySurveyMeasurementListRequest request, CancellationToken token = default)
     {
         if (!string.IsNullOrWhiteSpace(request.Status) && request.Status is not ("Draft" or "Recorded"))

@@ -4,19 +4,20 @@ import { buildSplitAwardLines, getAwardableRfqQuotes } from './rfq-award';
 import type { RfqItemDto, RfqQuoteDto } from '@/services/rfqService';
 
 const item: RfqItemDto = {
-  id: 'item-1', rfqId: 'rfq-1', lineNumber: 1, description: 'Laptop', quantity: 2, unitOfMeasure: 'EA',
+  id: 'item-1', lineNumber: 1, description: 'Laptop', quantity: 2, unitOfMeasure: 'EA',
 };
 
 const quote = (id: string, status: string): RfqQuoteDto => ({
   id,
-  rfqId: 'rfq-1',
   businessPartnerId: `supplier-${id}`,
   partnerCode: id,
   partnerName: id,
   status,
-  currency: 'GHS',
+  revisionNumber: 1,
   totalAmount: 100,
-  items: [{ id: `line-${id}`, rfqItemId: item.id, unitPrice: 50, lineTotal: 100 }],
+  items: [{ rfqItemId: item.id, lineNumber: item.lineNumber, description: item.description,
+    quantity: item.quantity, unitOfMeasure: item.unitOfMeasure, unitPrice: 50, lineTotal: 100 }],
+  history: [],
 });
 
 describe('RFQ split award selection', () => {

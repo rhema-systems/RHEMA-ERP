@@ -45,6 +45,7 @@ public sealed class StoreIssueVoucherDocumentBuilder : IDocumentBuilder
             .Include(value => value.ReceiverUser)
             .Include(value => value.Lines).ThenInclude(value => value.InventoryItem)
             .Include(value => value.Lines).ThenInclude(value => value.Location)
+            .Include(value => value.Actions).ThenInclude(value => value.ReceiptLines)
             .SingleOrDefaultAsync(value => value.TenantId == tenantId && value.Id == request.EntityId && !value.IsDeleted,
                 cancellationToken)
             ?? throw new KeyNotFoundException("The Store Issue Voucher was not found in the current tenant.");
@@ -138,6 +139,30 @@ public sealed class StoreIssueVoucherDocumentBuilder : IDocumentBuilder
                     ack.Item().PaddingTop(4).Text(voucher.AcknowledgedAtUtc.HasValue
                         ? $"Acknowledged by {Name(voucher.ReceiverUser)} on {voucher.AcknowledgedAtUtc:dd MMM yyyy HH:mm} UTC."
                         : $"Awaiting acknowledgement from {Name(voucher.ReceiverUser)}.");
+                    var legacyAcknowledgement = voucher.Status == InventoryIssueVoucherStatus.Acknowledged && voucher.ReceiptSequence == 0;
+                    if (legacyAcknowledgement)
+                        ack.Item().PaddingTop(3).Text("Historical full acknowledgement; individual receipt quantities were not recorded.");
+                    ack.Item().PaddingTop(5).Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.RelativeColumn(3); columns.RelativeColumn(); columns.RelativeColumn();
+                        });
+                        foreach (var heading in new[] { "Item", "Received", "Outstanding" })
+                            table.Cell().Element(HeaderCell).Text(heading);
+                        foreach (var line in voucher.Lines.OrderBy(value => value.InventoryItem.ItemCode))
+                        {
+                            var received = legacyAcknowledgement ? line.Quantity : voucher.Actions
+                                .Where(action => !action.IsDeleted).SelectMany(action => action.ReceiptLines)
+                                .Where(receipt => !receipt.IsDeleted && receipt.InventoryIssueVoucherLineId == line.Id)
+                                .Sum(receipt => receipt.ReceivedQuantity);
+                            table.Cell().Element(BodyCell).Text(line.InventoryItem.ItemCode);
+                            table.Cell().Element(BodyCell).AlignRight().Text(received.ToString("N4"));
+                            table.Cell().Element(BodyCell).AlignRight().Text((line.Quantity - received).ToString("N4"));
+                        }
+                    });
+                    foreach (var action in voucher.Actions.Where(action => action.ReceiptIdempotencyKey != null).OrderBy(action => action.Sequence))
+                        ack.Item().PaddingTop(3).Text($"Receipt {action.Sequence - 1}: {action.OccurredAtUtc:dd MMM yyyy HH:mm} UTC — {action.ActorName}: {action.Comment}");
                     if (!string.IsNullOrWhiteSpace(voucher.ReceiverComment)) ack.Item().PaddingTop(3).Text(voucher.ReceiverComment);
                 });
             });

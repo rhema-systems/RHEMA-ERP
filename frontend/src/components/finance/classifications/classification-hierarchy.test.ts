@@ -6,7 +6,7 @@ const item = (id: string, code: string, parentClassificationId: string | null, d
     id, code, parentClassificationId, displayOrder, accountingBookId: 'book', accountingBookCode: 'IFRS',
     name: code, coreAccountType: 'Asset', defaultRevaluationTreatment: 'Exclude', isPostingClassification: id !== 'root',
     status: 'Active', rowVersion: '', childCount: id === 'root' ? 2 : 0, nonRetiredChildCount: id === 'root' ? 2 : 0, totalAccountCount: 0,
-    enabledAccountCount: 0, isLeaf: id !== 'root', canRetire: id !== 'root',
+    enabledAccountCount: 0, isLeaf: id !== 'root', canRetire: id !== 'root', hasDraftLayoutReference: false,
 });
 
 describe('classification hierarchy', () => {

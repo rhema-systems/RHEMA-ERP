@@ -40,7 +40,7 @@ describe('current count sheet upload', () => {
     await screen.findByText(/2 quantities to save/);
     expect(screen.getAllByRole('columnheader')).toHaveLength(4);
     expect(screen.queryByRole('columnheader', { name: 'Location' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Close', exact: true })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]);
     expect(service.importPhysicalCountSheet).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
   });

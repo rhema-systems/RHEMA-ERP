@@ -15,7 +15,7 @@ const item: CreateProcurementPlanItemDto = {
 describe.each(['add', 'update'] as const)('plan item %s request', action => {
   const save = (data: CreateProcurementPlanItemDto) => action === 'add'
     ? procurementPlanService.addItem('plan-1', data)
-    : procurementPlanService.updateItem('item-1', data);
+    : procurementPlanService.updateItem('item-1', { ...data, id: 'item-1' });
 
   it.each([undefined, '', '   ', '2026-09-15'])('serializes optional date %j safely', async requiredDate => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));

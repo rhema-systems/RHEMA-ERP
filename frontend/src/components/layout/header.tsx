@@ -3,13 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
-  Search, 
   Settings, 
   ChevronDown,
 } from 'lucide-react';
 
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
+import { GlobalSearch } from './GlobalSearch';
 import { cn, getInitials } from '../../lib/utils';
 import { useAuth } from '../../hooks/use-auth';
 import { useTenant } from '../../contexts/TenantContext';
@@ -28,8 +27,6 @@ interface HeaderProps {
 export function Header({ className, accountSidebarContainer }: HeaderProps) {
   const accountButtonRef = useRef<HTMLButtonElement>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [mounted, setMounted] = useState(false);
   const { user, logout, isLoggingOut, hasAnyRole, hasAnyPermission } = useAuth();
   const { currentTenant, currentTenantCode, setCurrentTenantCode } = useTenant();
@@ -76,81 +73,7 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
       <div className="flex min-h-16 w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:flex-nowrap sm:px-6">
         {/* Enhanced Search */}
         <div className="order-last flex min-w-0 basis-full items-center space-x-4 sm:order-none sm:basis-auto sm:flex-1">
-          <div className="relative w-full max-w-sm">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-slate-400" />
-            <Input
-              placeholder="Search modules and functions..."
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setIsSearchOpen(e.target.value.length > 0);
-              }}
-              onFocus={() => setIsSearchOpen(searchQuery.length > 0)}
-              className="border-slate-200/50 bg-slate-50/50 pl-10 focus:bg-white dark:border-neutral-700 dark:bg-neutral-800/80 dark:focus:bg-neutral-800"
-            />
-            
-            {/* Search Suggestions - HIDDEN */}
-            {/* {isSearchOpen && searchQuery && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-lg z-50 max-h-80 overflow-y-auto">
-                {/* Quick Actions */}
-                {/* <div className="p-2 border-b border-slate-100 dark:border-slate-800">
-                  <div className="text-xs font-medium text-slate-500 dark:text-slate-400 px-3 py-1">Quick Actions</div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start h-9 px-3 text-sm rounded-lg"
-                    onClick={() => {
-                      setIsSearchOpen(false);
-                      setSearchQuery('');
-                      window.location.href = '/reports';
-                    }}
-                  >
-                    <BarChart3 className="h-4 w-4 mr-3 text-slate-500" />
-                    Browse All Reports
-                  </Button>
-                  
-                  {user?.roles?.some(role => ['admin', 'SuperAdmin', 'TenantAdmin'].includes(role)) && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start h-9 px-3 text-sm rounded-lg"
-                      onClick={() => {
-                        setIsSearchOpen(false);
-                        setSearchQuery('');
-                        window.location.href = '/administration/reports';
-                      }}
-                    >
-                      <Plus className="h-4 w-4 mr-3 text-slate-500" />
-                      Create New Report
-                    </Button>
-                  )}
-                </div>
-                
-                {/* Report Modules */}
-                {/* <div className="p-2">
-                  <div className="text-xs font-medium text-slate-500 dark:text-slate-400 px-3 py-1">Report Modules</div>
-                  {['Financial', 'Sales', 'HR', 'Inventory', 'Operations'].filter(module => 
-                    module.toLowerCase().includes(searchQuery.toLowerCase())
-                  ).map((module) => (
-                    <Button
-                      key={module}
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start h-9 px-3 text-sm rounded-lg"
-                      onClick={() => {
-                        setIsSearchOpen(false);
-                        setSearchQuery('');
-                        window.location.href = `/reports?module=${module.toLowerCase()}`;
-                      }}
-                    >
-                      <FileText className="h-4 w-4 mr-3 text-slate-500" />
-                      {module} Reports
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )} */}
-          </div>
+          <GlobalSearch />
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -256,15 +179,6 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
         </div>
       </div>
 
-      {/* Click outside to close menus */}
-      {isSearchOpen && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => {
-            setIsSearchOpen(false);
-          }}
-        />
-      )}
     </header>
     <AccountSidebar
       open={isUserMenuOpen}

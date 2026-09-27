@@ -47,6 +47,11 @@ public partial class PhysicalCountsController : ControllerBase
         _logger = logger;
     }
 
+    [HttpGet("search")]
+    public async Task<ActionResult<IEnumerable<PhysicalCountDto>>> Search(
+        [FromQuery] string search, [FromQuery] int take = 8) =>
+        Ok(await _countService.SearchAsync(search, take, HttpContext.RequestAborted));
+
     private Guid GetCurrentUserId()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

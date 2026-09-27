@@ -19,7 +19,10 @@ vi.mock('./ArInvoicePrintDocument.module.css', () => ({
 const openingInvoice: Invoice = {
   id: 'invoice-id',
   invoiceNumber: 'INV-2026-00001',
-  customerId: 'canonical-customer-id',
+  businessPartnerId: 'canonical-customer-id',
+  businessPartnerRoleId: 'customer-role-id',
+  businessPartnerArProfileVersionId: 'ar-profile-id',
+  businessPartnerCode: 'CUS-001',
   customerName: 'Akua Payables',
   customerAddress: '14 Independence Avenue\nAccra',
   invoiceDate: '2025-01-01T00:00:00Z',
@@ -75,6 +78,7 @@ describe('ArInvoicePrintDocument', () => {
     expect(markup).toContain('Finance Demonstration &amp; Mastery');
     expect(markup).toContain('FINANCE-DEMO');
     expect(markup).toContain('Akua Payables');
+    expect(markup).toContain('canonical-customer-id');
     expect(markup).toContain('FINDEMO-AR-OB-001');
     expect(markup).toContain('1990 · Migration Clearing');
     expect(markup).toContain('Opening customer balance at cutover');

@@ -92,6 +92,29 @@ public partial class InventoryTransferService : IInventoryTransferService
         _valuation = valuation;
     }
 
+    public async Task<IEnumerable<InventoryTransferDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(search) || search.Trim().Length is < 2 or > 100) return [];
+        var term = search.Trim();
+        var limit = Math.Clamp(take, 1, 50);
+        var query = _transferRepository.GetQueryable(value => !value.IsDeleted &&
+            value.TenantId == _currentUserProvider.TenantId &&
+            (value.TransferNumber.Contains(term) || value.SourceWarehouse.Name.Contains(term) ||
+             value.DestinationWarehouse.Name.Contains(term) || (value.Notes != null && value.Notes.Contains(term))))
+            .AsNoTracking().Include(value => value.SourceWarehouse).Include(value => value.DestinationWarehouse)
+            .Include(value => value.Items).OrderByDescending(value => value.RequestDate).ThenBy(value => value.Id);
+        var allowed = new List<InventoryTransferDto>();
+        // Search all dates and continue past denied rows; a limit must never hide later authorized matches.
+        for (var offset = 0; allowed.Count < limit; offset += 50)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidates = await query.Skip(offset).Take(50).ToListAsync(cancellationToken);
+            allowed.AddRange((await FilterReadableAsync(candidates)).Select(MapToDto).Take(limit - allowed.Count));
+            if (candidates.Count < 50) break;
+        }
+        return allowed;
+    }
+
     public async Task<IEnumerable<InventoryTransferDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null)
     {
         var transfers = await _transferRepository.GetByDateRangeAsync(

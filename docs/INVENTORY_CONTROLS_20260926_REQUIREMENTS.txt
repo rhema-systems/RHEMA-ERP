@@ -1,0 +1,1884 @@
+You are working on an existing enterprise ERP system containing Inventory, Warehouse Management, Inventory Requisition, Inter-Store Transfer, Stock Count, Procurement, GRN, Supplier Invoice, Supplier Returns, Inventory Disposal, Sales, Finance, General Ledger, Business Partners, Employees, Notifications, Reporting, and an External Supplier/Helpdesk Portal.
+
+Your task is to thoroughly analyze the existing codebase and implement the requirements below while preserving the existing architecture, accounting integrity, inventory integrity, approval workflows, permissions, audit trail, reporting, and existing functionality.
+
+Do NOT treat these requirements as isolated frontend changes.
+
+Several of these changes affect the end-to-end movement of inventory and accounting transactions across:
+
+- Inventory
+- Warehousing
+- Stock Transfers
+- Stock Counts
+- Procurement
+- Accounts Payable
+- General Ledger
+- Sales
+- Finance
+- Inventory Disposal
+- Helpdesk
+- External Supplier Portal
+
+Before making significant changes, inspect the current implementation and understand:
+
+- Inventory Requisition
+- Inventory Requisition Issue
+- Inventory Requisition Receipt/Acknowledgement
+- Inter-Store Transfer Request
+- Inter-Store Transfer Approval
+- Inter-Store Transfer Issue
+- Inter-Store Transfer Shipping
+- Inter-Store Transfer Receipt
+- Warehouse/Store
+- Location
+- Bin
+- Inventory Movement
+- Inventory Ledger
+- Stock Count
+- Stock Count Draft
+- Count Sheet
+- Stock Count Approval Workflow
+- Stock Adjustment
+- Employee/User relationships
+- Notification/email infrastructure
+- Business Partner/Supplier
+- GRN
+- Supplier Invoice
+- Supplier Return
+- Inventory valuation
+- Item Cost
+- Purchase Price Variance
+- Procurement Settings
+- Item GL Accounts
+- Inventory Disposal
+- Disposal Methods
+- Sales Invoice
+- Finance Invoice / Non-Supplier Invoice
+- Cashbook
+- General Ledger posting
+- Distribution/Accounting Distribution screens
+- Helpdesk Ticketing
+- External Supplier Portal
+- Helpdesk Categories
+- Helpdesk Types
+- Helpdesk Priority
+- Helpdesk Channel
+- Authorization and permissions
+- Existing audit infrastructure
+
+Use existing architecture, conventions, services, posting engines, notification systems, and reusable components wherever possible.
+
+Do not create duplicate inventory, invoice, notification, workflow, or accounting engines where existing functionality can be reused.
+
+All inventory movements and financial postings must be:
+
+- Transactional
+- Auditable
+- Traceable
+- Idempotent where applicable
+- Protected against duplicate processing
+- Properly linked to their source documents
+
+==================================================
+WORKSTREAM 1 — INVENTORY REQUISITION RECEIPT
+==================================================
+
+REQUIREMENT 1 — ACTUAL QUANTITY RECEIVED DURING ACKNOWLEDGEMENT
+
+Currently, when the requester acknowledges receipt of items issued through an Inventory Requisition, the system does not provide a proper receiving grid where the requester can confirm the actual quantities physically received.
+
+Modify the acknowledgement process.
+
+Before the requester clicks the final "Acknowledge" button, display an item grid similar to the existing Inter-Store Transfer receipt screen.
+
+The grid should show relevant information including:
+
+- Item Code
+- Item Description
+- Quantity Requested
+- Quantity Issued
+- Quantity Previously Received, if applicable
+- Outstanding Quantity, if applicable
+- Actual Quantity Received
+- Unit of Measure
+- Issuing Store/Warehouse
+- Relevant reference/document number
+
+The requester must be able to enter or confirm the Actual Quantity Received for every line before acknowledgement.
+
+Do NOT assume that Quantity Issued automatically equals Quantity Received.
+
+Example:
+
+Quantity Requested = 100
+Quantity Issued = 100
+Actual Quantity Received = 92
+
+The system must record 92 as received, not 100.
+
+If partial acknowledgement is supported:
+
+Received = 92
+Outstanding = 8
+
+The remaining quantity must remain outstanding.
+
+Investigate and correctly handle:
+
+- Partial receipts
+- Multiple acknowledgements
+- Short receipts
+- Previously acknowledged quantities
+- Outstanding quantities
+- Over-receipt validation
+- Cancelled/reversed issues where supported
+
+Reuse the existing Inter-Store Transfer receipt implementation where practical so the two receiving experiences remain consistent.
+
+Ensure the Inventory Movement/Ledger reflects the actual acknowledged quantity rather than an assumed quantity where the acknowledgement affects inventory records.
+
+==================================================
+WORKSTREAM 2 — INTER-STORE TRANSFER
+==================================================
+
+REQUIREMENT 2 — BIN MUST NOT BE REQUIRED DURING TRANSFER REQUEST, BUT MUST BE REQUIRED DURING STOCK ISSUE
+
+The current Inter-Store Transfer process requires the requester to select a Bin for transfer items too early in the process.
+
+This behaviour must be changed.
+
+The key business rule is:
+
+THE REQUESTER SHOULD NOT SELECT THE SOURCE BIN WHEN CREATING THE INTER-STORE TRANSFER REQUEST.
+
+The requester normally knows:
+
+- Which item is required
+- What quantity is required
+- Which Store/Warehouse should supply it
+- Which Store/Warehouse should receive it
+
+However, the requester may NOT know the exact Bin in the source Store where the physical stock is located.
+
+Bin selection belongs to the Store/Warehouse officer who is actually issuing the stock.
+
+--------------------------------------------------
+TRANSFER REQUEST STAGE
+--------------------------------------------------
+
+When creating an Inter-Store Transfer Request:
+
+The requester should select:
+
+- Source Store/Warehouse
+- Destination Store/Warehouse
+- Item
+- Requested Quantity
+- Unit of Measure
+- Other existing required request information
+
+The requester must NOT be required to select:
+
+- Source Bin
+
+Do not make Source Bin mandatory in either frontend or backend validation during the REQUEST stage.
+
+If the current data model requires a Bin ID on every transfer line, refactor the workflow/data model appropriately rather than forcing the requester to enter a meaningless placeholder bin.
+
+A transfer request must be valid without knowing the physical source bin.
+
+Conceptually:
+
+Requester:
+
+"I need 20 units of Item ABC from Main Warehouse."
+
+NOT:
+
+"I need 20 units of Item ABC specifically from Bin A-03-02."
+
+The physical stock location is the responsibility of the warehouse/store issuing officer.
+
+--------------------------------------------------
+TRANSFER APPROVAL STAGE
+--------------------------------------------------
+
+If the Inter-Store Transfer requires approval, the absence of a Source Bin must NOT prevent the transfer request from moving through approval.
+
+The requested item and quantity should be approved independently of the physical picking/bin decision.
+
+The Bin should still remain unresolved until the actual Issue/Picking stage.
+
+--------------------------------------------------
+TRANSFER ISSUE / PICKING STAGE
+--------------------------------------------------
+
+When the approved transfer reaches the actual Stock Issue/Picking stage:
+
+The Store/Warehouse officer MUST select the Source Bin from which the stock is physically being issued.
+
+At this point Bin selection is required because inventory is actually about to leave a physical stock location.
+
+The system should show the warehouse officer only valid bins for:
+
+- The selected Source Store/Warehouse
+- The selected Item
+- Available stock
+- Relevant Unit of Measure
+- Any other existing inventory restrictions
+
+The warehouse officer should be able to see useful information such as:
+
+- Bin
+- Quantity Available
+- Quantity Reserved, where applicable
+- Quantity Available to Issue
+- Lot/Batch where applicable
+- Serial information where applicable
+
+The selected Source Bin must have sufficient available inventory for the quantity being issued unless the ERP explicitly supports splitting across bins.
+
+--------------------------------------------------
+MULTIPLE SOURCE BINS
+--------------------------------------------------
+
+If the requested quantity is available across multiple bins, support the existing ERP's normal inventory picking behaviour.
+
+For example:
+
+Transfer Request Quantity = 100
+
+Available stock:
+
+Bin A = 60
+Bin B = 40
+
+The warehouse officer should be able to issue:
+
+Bin A = 60
+Bin B = 40
+
+Total Issued = 100
+
+Do not force the requester to predict this bin allocation when creating the request.
+
+If the ERP already has picking/allocation functionality, reuse it.
+
+--------------------------------------------------
+PARTIAL ISSUE
+--------------------------------------------------
+
+Support partial issue where the existing business process permits it.
+
+Example:
+
+Requested Quantity = 100
+Currently Available = 80
+
+Issued = 80
+Outstanding = 20
+
+The system must maintain the outstanding transfer quantity correctly.
+
+The remaining 20 should not disappear merely because part of the transfer has been issued.
+
+--------------------------------------------------
+DESTINATION BIN
+--------------------------------------------------
+
+Do not confuse Source Bin selection with Destination Bin selection.
+
+The Source Bin is selected during Issue/Picking by the issuing Store/Warehouse officer.
+
+For Destination Bin handling during receipt:
+
+Inspect the existing warehouse/bin configuration and retain the appropriate receiving behaviour.
+
+If the destination warehouse requires Bin-level receiving, the receiving officer may select the Destination Bin at the actual Receipt stage.
+
+Do not require the original requester to know either the Source Bin or Destination Bin when submitting the transfer request unless there is an explicit configured business reason.
+
+--------------------------------------------------
+VALIDATION RULE
+--------------------------------------------------
+
+The validation must therefore be stage-aware:
+
+TRANSFER REQUEST:
+
+Source Bin = NOT REQUIRED
+
+TRANSFER APPROVAL:
+
+Source Bin = NOT REQUIRED
+
+TRANSFER ISSUE / PICKING:
+
+Source Bin = REQUIRED
+
+TRANSFER RECEIPT:
+
+Destination Bin = based on the existing destination warehouse/bin configuration and receiving workflow.
+
+Update:
+
+- Frontend validation
+- Backend validation
+- DTOs
+- Commands
+- Domain validation
+- Database assumptions
+- APIs
+- Approval workflow
+- Issue workflow
+
+accordingly.
+
+Do not solve this by making Bin nullable everywhere without enforcing it at the Issue stage.
+
+The objective is to require the Bin at the correct point in the business process.
+
+==================================================
+
+REQUIREMENT 3 — REPLACE CARRIER NAME WITH SUPPLIER SELECTOR
+
+During Inter-Store Transfer shipping, the current Carrier Name field is a free-text field.
+
+Replace it with a Supplier/Business Partner selector.
+
+The user should select the Carrier from existing Supplier/Creditor Business Partners.
+
+Requirements:
+
+- Reuse the existing Supplier/Business Partner selector/search component where possible
+- Store the Supplier/Business Partner ID
+- Display the Supplier name
+- Support searching for Suppliers
+- Display Supplier Account Number where useful
+- Preserve appropriate historical information on completed transfers
+
+Do NOT use only the Supplier name as a free-text relationship.
+
+Existing historical Inter-Store Transfer records containing free-text Carrier Names must continue to display correctly.
+
+If required for historical integrity, retain the previous Carrier Name snapshot while adding the new relational Business Partner ID for future transactions.
+
+==================================================
+
+REQUIREMENT 4 — SYSTEM-MANAGED IN-TRANSIT LOCATION
+
+Create a system-managed virtual In-Transit inventory location.
+
+The objective is to properly represent stock that has left the Source Store but has not yet been received by the Destination Store.
+
+The required transfer flow is:
+
+Transfer Request
+→ Approval, where applicable
+→ Source Bin Selection / Issue
+→ In-Transit Location
+→ Destination Receipt
+→ Destination Store/Bin
+
+When an Inter-Store Transfer is actually issued:
+
+1. Stock leaves the selected Source Bin/Source Store.
+2. The same quantity automatically enters the In-Transit Location.
+3. That stock remains in transit until the receiving Store confirms receipt.
+4. When received, stock leaves In-Transit and enters the Destination Store.
+5. Any quantity not yet received must remain in In-Transit.
+
+IMPORTANT:
+
+Creating or approving a Transfer Request must NOT move inventory.
+
+Inventory enters In-Transit only when stock has actually been issued/shipped.
+
+Example:
+
+Requested Quantity = 100
+
+At request stage:
+
+Source Store inventory = unchanged
+In-Transit = unchanged
+Destination Store = unchanged
+
+After warehouse officer issues 100:
+
+Source Store = -100
+In-Transit = +100
+
+Destination receives 80:
+
+In-Transit = -80
+Destination Store = +80
+
+Remaining In-Transit = 20
+
+The outstanding 20 must continue to show in reports until eventually received, returned, cancelled, lost, or otherwise resolved through an authorized business process.
+
+--------------------------------------------------
+IN-TRANSIT LOCATION RULES
+--------------------------------------------------
+
+The In-Transit Location should:
+
+- Be system-managed
+- Hold all and only stock currently in transit
+- Appear in Inventory Ledger and relevant inventory reports
+- Not normally be available for ordinary stock issues
+- Not normally be manually selected as an operational Store
+- Not be manually manipulated by ordinary users
+- Automatically receive quantities from actual Transfer Issue/Shipment
+- Automatically release quantities during Transfer Receipt
+- Support partial receipts
+- Support partial issues
+- Support multiple open transfers simultaneously
+- Maintain traceability to the originating Transfer
+
+The system must not lose traceability simply because multiple transfers use one virtual In-Transit Location.
+
+Each In-Transit quantity must remain associated with its originating transfer.
+
+--------------------------------------------------
+VEHICLE / TRUCK / COURIER AS TEMPORARY TRANSIT CONTAINER
+--------------------------------------------------
+
+The physical Carrier/Vehicle/Truck/Courier used to transport stock should conceptually function like a temporary transit container/bin within the In-Transit process.
+
+The business objective is to know not only:
+
+"100 units are in transit"
+
+but, where transportation information exists:
+
+"100 units are in transit under Transfer X using Carrier/Vehicle Y."
+
+Do not force this into the existing Warehouse Bin table if doing so conflicts with the domain architecture.
+
+Inspect how:
+
+- Vehicles
+- Carriers
+- Suppliers
+- Bins
+- Locations
+- Stores
+- Transfers
+
+are currently modeled.
+
+Choose the cleanest architecture-compatible implementation.
+
+A conceptual structure may be:
+
+In-Transit Location
+    ↓
+Transfer
+    ↓
+Carrier / Vehicle / Courier
+    ↓
+Items / Quantities In Transit
+
+The Carrier/Vehicle information is primarily for traceability.
+
+The authoritative inventory balance must remain represented correctly in the In-Transit location.
+
+--------------------------------------------------
+REPORTING
+--------------------------------------------------
+
+In-Transit quantities must appear in appropriate reports.
+
+At minimum users should be able to determine:
+
+- Item
+- Transfer Number
+- Source Store
+- Destination Store
+- Source Bin(s)
+- Quantity Requested
+- Quantity Issued
+- Quantity Received
+- Quantity Still In Transit
+- Shipment Date
+- Carrier
+- Vehicle/reference where available
+- Number of days in transit where practical
+
+Do not calculate In-Transit stock using only Transfer Status if proper inventory movement records exist.
+
+Use the Inventory Movement/Ledger as the authoritative quantity source where appropriate.
+
+==================================================
+WORKSTREAM 3 — STOCK COUNT COMMITTEE / COUNTERS
+==================================================
+
+REQUIREMENT 5 — SELECT COUNTERS WHEN CREATING STOCK COUNT DRAFT
+
+When creating a Stock Count Draft, allow the user to assign employees who will perform the count.
+
+This should function as a Stock Counting Committee.
+
+The creator should be able to select one or more Counters from the existing Employee table.
+
+Do not use free-text employee names.
+
+Create a proper relationship between:
+
+Stock Count
+↔
+Assigned Counters/Employees
+
+The UI should support:
+
+- Search employees
+- Select multiple employees
+- View selected counters
+- Remove counters before the count begins, subject to permissions/status
+- View assigned Counters on the Stock Count details page
+
+Once the Stock Count is ready/assigned, notify the selected Counters by email.
+
+Use the existing notification/email framework.
+
+The notification should include appropriate information such as:
+
+- Stock Count Number
+- Store/Warehouse
+- Scheduled/created date where applicable
+- Instructions/link to access the count
+- Who assigned the count
+
+Create in-app notifications as well if the ERP already supports them.
+
+Only authorized assigned Counters should be able to perform the count where the existing security architecture supports this restriction.
+
+Audit:
+
+- Who assigned each Counter
+- When assigned
+- Any later assignment changes
+
+==================================================
+WORKSTREAM 4 — STOCK COUNT INVESTIGATION AND RECOUNT
+==================================================
+
+REQUIREMENT 6 — MARK COUNT ITEMS FOR INVESTIGATION / RECOUNT
+
+Add a checkbox/action per Stock Count item similar to:
+
+"Require Investigation / Recount"
+
+The flag applies to an individual Count Sheet line.
+
+A Stock Count may therefore contain:
+
+- Passed items
+- Items requiring investigation/recount
+
+Some lines requiring recount must NOT block all passed items from continuing through the normal Stock Count approval workflow.
+
+--------------------------------------------------
+EXPECTED WORKFLOW
+--------------------------------------------------
+
+Example:
+
+Item A — Passed
+Item B — Passed
+Item C — Recount Required
+Item D — Passed
+Item E — Recount Required
+
+The original Stock Count can continue through its configured approval workflow.
+
+Passed entries:
+
+A
+B
+D
+
+continue through approval and eventually become eligible for Stock Adjustment.
+
+Recount entries:
+
+C
+E
+
+must be excluded from the passed-item adjustment processing for that count cycle.
+
+They must be returned to the assigned Counters for investigation/recount.
+
+--------------------------------------------------
+GRID BEHAVIOUR
+--------------------------------------------------
+
+For users processing the original count:
+
+Recount-required lines should be hidden by default from the normal passed-item grid.
+
+Provide a button/toggle such as:
+
+"Show Recount / Investigation Items"
+
+Authorized users should be able to display the excluded lines when required.
+
+Do not delete or detach these records.
+
+They remain linked to the original Count Sheet.
+
+--------------------------------------------------
+RECOUNT NOTIFICATION
+--------------------------------------------------
+
+When items are marked for recount, notify the assigned Counters.
+
+The notification should indicate:
+
+- Stock Count
+- Count Sheet
+- Items requiring recount
+- Store/Warehouse
+- Reason/comment where provided
+
+The Counters should return to the same overall Stock Count context.
+
+However, only the lines requiring recount should be available for recount data entry.
+
+Previously passed lines should not appear as editable recount lines.
+
+--------------------------------------------------
+ADDENDUM COUNT SHEET
+--------------------------------------------------
+
+When Counters complete the recount and submit:
+
+Create a NEW Count Sheet Addendum containing only the recounted items.
+
+The Addendum must:
+
+- Link to the original Stock Count
+- Link to the original Count Sheet
+- Identify itself as a Recount/Addendum
+- Contain only the items requiring recount
+- Maintain recount attempt/version information
+- Preserve original count values
+- Store new recount values
+- Begin the same configured approval workflow again
+
+Do NOT overwrite the original submitted Count Sheet.
+
+Conceptually:
+
+Stock Count
+   │
+   ├── Original Count Sheet
+   │       ├── Passed lines → approval → adjustment
+   │       └── Recount lines
+   │
+   └── Recount Addendum #1
+           ├── Recounted lines
+           ├── approval workflow
+           └── adjustment after approval
+
+If an Addendum itself contains lines requiring another recount, support another recount cycle.
+
+Example:
+
+Original Count Sheet
+→ Recount Addendum 1
+→ Recount Addendum 2
+
+Maintain the complete history.
+
+--------------------------------------------------
+STOCK ADJUSTMENT
+--------------------------------------------------
+
+Passed original items may proceed to Stock Adjustment once properly approved.
+
+Recount items must NOT be adjusted using the rejected/original value.
+
+They should only be adjusted using the finally approved recount/addendum result.
+
+Prevent the same difference from being adjusted twice.
+
+==================================================
+WORKSTREAM 5 — DEFECTIVE QUANTITY DURING STOCK COUNT
+==================================================
+
+REQUIREMENT 7 — DEFECTIVE COUNT COLUMN
+
+Add a column to:
+
+- Count Sheet item grid
+- Uploaded Count Sheet / Items grid
+
+called:
+
+"Defective Quantity"
+
+or equivalent existing terminology.
+
+Also allow a comment/remark against the defective quantity.
+
+Example:
+
+System Quantity = 100
+Physical Count = 100
+Defective Quantity = 5
+
+The Physical Count remains 100.
+
+The fact that 5 units are defective is supplementary information.
+
+CRITICAL RULE:
+
+Defective Quantity MUST NOT affect Stock Count variance calculations.
+
+It must NOT automatically reduce:
+
+- Physical Count
+- Counted Quantity
+- Variance
+- Stock Adjustment Quantity
+
+Example:
+
+System Qty = 100
+Physical Count = 100
+Defective Qty = 5
+
+Variance = 0
+
+NOT:
+
+Variance = -5
+
+The Defective Quantity exists so those units can be dealt with separately later.
+
+A later authorized process may transfer defective stock to:
+
+- Defective Location
+- Defective Bin
+- Quarantine Location
+- Another configured location/process
+
+That later movement is separate from the Stock Count adjustment.
+
+--------------------------------------------------
+VALIDATION
+--------------------------------------------------
+
+At minimum:
+
+Defective Quantity >= 0
+
+and normally:
+
+Defective Quantity <= Physical Count
+
+unless the existing inventory model requires another valid rule.
+
+Allow a comment explaining the defect.
+
+Maintain audit history.
+
+==================================================
+WORKSTREAM 6 — PURCHASE PRICE VARIANCE / ITEM REVALUATION
+==================================================
+
+REQUIREMENT 8 — SUPPLIER INVOICE COST DIFFERENT FROM ORIGINAL GRN COST
+
+When processing a Supplier Invoice, the Supplier Invoice item cost may differ from the cost recorded on the original GRN when goods were received.
+
+The ERP must support two company-policy approaches:
+
+1. Revalue Inventory
+2. Post the difference to Purchase Price Variance
+
+Configure this company policy under Procurement Settings.
+
+The setting should conceptually provide:
+
+Purchase Price Difference Handling:
+
+- Revalue Inventory
+- Post to Purchase Price Variance
+
+Reuse an existing equivalent setting if one exists.
+
+--------------------------------------------------
+EXAMPLE
+--------------------------------------------------
+
+Original GRN:
+
+Quantity = 100
+GRN Unit Cost = GHS 10
+Original Value = GHS 1,000
+
+Supplier Invoice:
+
+Quantity = 100
+Invoice Unit Cost = GHS 11
+Invoice Value = GHS 1,100
+
+Difference = GHS 100
+
+Handling depends on Procurement Settings.
+
+--------------------------------------------------
+OPTION A — REVALUE INVENTORY
+--------------------------------------------------
+
+If company policy is:
+
+Revalue Inventory
+
+follow the existing inventory costing/revaluation architecture.
+
+Do NOT alter the historical original GRN cost.
+
+The original GRN remains an accurate historical receipt document.
+
+Create the appropriate cost-adjustment/revaluation transaction.
+
+Consider stock already:
+
+- Issued
+- Consumed
+- Transferred
+- Sold
+- Otherwise removed from inventory
+
+Do not blindly revalue quantities no longer on hand.
+
+Use the ERP's configured costing method and existing cost-adjustment rules.
+
+--------------------------------------------------
+OPTION B — PURCHASE PRICE VARIANCE
+--------------------------------------------------
+
+If company policy is:
+
+Post to Purchase Price Variance
+
+post the difference to the Item's configured Purchase Price Variance GL Account rather than revaluing inventory.
+
+Use the Purchase Price Variance account configured against the Item.
+
+If the Item does not currently support this account, determine whether it belongs in the Item Accounts tab and add it according to the ERP's existing GL account architecture.
+
+Do not hard-code a GL account.
+
+--------------------------------------------------
+GENERAL RULES
+--------------------------------------------------
+
+Determine variance at the appropriate line level.
+
+Handle:
+
+- Positive variance
+- Negative variance
+- Partial invoice
+- Multiple invoices against a GRN
+- Partial quantities
+- Taxes separately according to existing tax rules
+- Currency/exchange-rate handling using existing architecture
+
+Maintain traceability:
+
+Supplier Invoice
+→ Invoice Line
+→ GRN Line
+→ Cost Difference
+→ Revaluation or PPV Journal Entry
+
+Prevent duplicate variance processing when posting is retried.
+
+==================================================
+WORKSTREAM 7 — SUPPLIER RETURNS ACCOUNTING
+==================================================
+
+REQUIREMENT 9 — SUPPLIER RETURN ACCOUNTING DEPENDS ON WHETHER GRN HAS BEEN INVOICED
+
+Supplier Return accounting must depend on the accounting stage of the original GRN.
+
+The Supplier Return process should allow the user to select/load the relevant GRN.
+
+When the GRN is selected, the system must determine whether that GRN—or the applicable GRN line/quantity—has already been invoiced.
+
+Do not rely only on a document-level Boolean if partial invoicing exists.
+
+Determine invoice status at the line/quantity level.
+
+--------------------------------------------------
+SCENARIO A — GRN RECEIVED BUT NOT INVOICED
+--------------------------------------------------
+
+If the returned quantity has reached GRN stage but has NOT been invoiced:
+
+The return should reverse the receipt/accrual.
+
+Conceptually:
+
+Debit: Accrued Purchases / GRNI / Receipt Accrual
+Credit: Inventory
+
+Use the actual account configuration and naming in the ERP.
+
+Do not hard-code accounts.
+
+--------------------------------------------------
+SCENARIO B — GRN ALREADY INVOICED
+--------------------------------------------------
+
+If the relevant returned quantity has already been included in a Supplier Invoice:
+
+The accounting must affect the Supplier/AP balance rather than the receipt accrual.
+
+Conceptually:
+
+Debit: Supplier / Accounts Payable balance
+Credit: Inventory
+
+Use the ERP's correct Supplier Return/AP Debit Note architecture if one exists.
+
+Do not bypass the Accounts Payable subledger.
+
+--------------------------------------------------
+PARTIAL INVOICE EXAMPLE
+--------------------------------------------------
+
+GRN Quantity = 100
+Already Invoiced = 60
+Not Yet Invoiced = 40
+
+Supplier Return Quantity = 50
+
+Do not incorrectly treat all 50 as entirely invoiced or entirely uninvoiced.
+
+Determine the proper allocation based on the actual remaining GRN/invoice relationships.
+
+Where appropriate this may result in:
+
+40 reversing the Accrued Purchases account
+10 reversing Accounts Payable
+
+subject to the existing ERP's allocation rules.
+
+The accounting must reflect the real status of the returned quantities.
+
+--------------------------------------------------
+GRN SELECTOR
+--------------------------------------------------
+
+Provide/use a Supplier Return GRN selector.
+
+When a GRN is selected, load appropriate information including:
+
+- Supplier
+- GRN Number
+- Purchase Order
+- Receipt
+- Items
+- Quantities
+- Accepted quantities where applicable
+- Previously returned quantities
+- Remaining returnable quantity
+- Invoice status
+- Invoice references
+- Cost information
+
+Only eligible quantities should be returnable.
+
+Prevent returns exceeding the remaining returnable quantity.
+
+Maintain relationships:
+
+Supplier Return
+→ GRN
+→ GRN Line
+→ Supplier Invoice where applicable
+→ Accounting transaction
+
+==================================================
+WORKSTREAM 8 — ASSIGN ITEMS TO WAREHOUSE
+==================================================
+
+REQUIREMENT 10 — SELECT ALL ITEMS
+
+On the "Assign Items to Warehouse" page, add a Select All function.
+
+The user should be able to:
+
+- Select all eligible items
+- Deselect all
+- Manually select/deselect individual items
+
+If the grid uses pagination or server-side filtering, implement clear behaviour.
+
+Where useful distinguish:
+
+- Select Current Page
+- Select All Filtered Items
+
+Do not accidentally select or assign records the user is not authorized to manage.
+
+==================================================
+
+REQUIREMENT 11 — INVESTIGATE AND FIX 403 WHEN ASSIGNING ITEMS TO WAREHOUSES
+
+There is an intermittent/frequent HTTP 403 Forbidden error when assigning items to warehouses.
+
+Do NOT work around this by disabling authorization.
+
+Trace the complete request:
+
+Frontend
+→ API endpoint
+→ Authentication
+→ Authorization policy
+→ Permission/role claim
+→ Tenant/company context
+→ Warehouse access
+→ CSRF/anti-forgery if applicable
+→ Backend handler/service
+
+Determine the actual cause.
+
+Inspect possibilities such as:
+
+- Incorrect authorization policy
+- Missing permission registration
+- Incorrect frontend endpoint
+- Wrong HTTP verb
+- Missing role/claim
+- Warehouse-specific authorization issue
+- Company/tenant mismatch
+- Permission cache
+- Route authorization
+- CSRF/anti-forgery
+- User-to-store access rules
+
+Fix the root cause.
+
+Authorized users must be able to assign items.
+
+Unauthorized users must continue to receive the appropriate authorization failure.
+
+Add a regression test where supported.
+
+==================================================
+WORKSTREAM 9 — INVENTORY DISPOSAL
+==================================================
+
+REQUIREMENT 12 — WAYBILL AND AUCTION INVOICE
+
+For Inventory Disposal Methods that are NOT Sales:
+
+Add a button named:
+
+"Waybill"
+
+The Waybill should generate a document to accompany items physically leaving the organization for disposal.
+
+Reuse the ERP's existing document/report infrastructure where possible.
+
+Include appropriate fields such as:
+
+- Disposal Number
+- Disposal Method
+- Date
+- Store/Warehouse
+- Recipient/Destination where available
+- Items
+- Quantities
+- Unit of Measure
+- Reference
+- Vehicle/Carrier where available
+- Prepared By
+- Approval information where applicable
+
+Only allow Waybill generation at an appropriate workflow stage.
+
+--------------------------------------------------
+AUCTION
+--------------------------------------------------
+
+If:
+
+Disposal Method = Auction
+
+show an additional button such as:
+
+"Create Invoice"
+
+or the application's equivalent.
+
+The Auction must use the Finance module's NON-SUPPLIER invoice functionality for collection/payment.
+
+Do NOT use the Procurement Supplier Invoice/AP Invoice implementation.
+
+Conceptually:
+
+Inventory Disposal
+→ Auction
+→ Finance Non-Supplier Invoice
+→ Payment
+→ GL
+
+Maintain a relationship from the Finance Invoice back to the Inventory Disposal.
+
+Prevent duplicate invoice generation.
+
+Reuse the correct existing Finance invoice implementation rather than creating another invoice system.
+
+==================================================
+
+REQUIREMENT 13 — SALES MUST NOT BE AN INVENTORY DISPOSAL METHOD
+
+If inventory is being sold, the transaction must be handled through the Sales module.
+
+Therefore:
+
+Hide/remove "Sales" from the Inventory Disposal Method options for NEW disposal transactions.
+
+Do not delete or invalidate historical Disposal records that used Sales.
+
+Historical Sales disposal records must remain viewable.
+
+New inventory sales should follow:
+
+Sales Module
+→ Sales Invoice
+→ Payment/Cashbook
+→ GL
+
+The Sales process must reduce inventory through the existing Sales inventory-posting process.
+
+Inventory Disposal should remain for non-standard disposal methods such as:
+
+- Auction
+- Destruction
+- Donation
+- Write-off
+- Other configured non-sales methods
+
+according to the actual ERP configuration.
+
+--------------------------------------------------
+SALES ACCOUNTING DISTRIBUTION
+--------------------------------------------------
+
+For inventory sold through the Sales module, show the GL distribution before posting where this aligns with the existing architecture.
+
+The Distribution window should provide a similar level of visibility to the existing Purchase Distribution window.
+
+Use the selected Cashbook/Bank/Cash Account where applicable.
+
+Do not duplicate the Sales posting engine.
+
+==================================================
+
+REQUIREMENT 14 — INVENTORY DISPOSAL ACCOUNT ON ITEM ACCOUNTS
+
+Add an Inventory Disposal Account to the Item Accounts tab/setup.
+
+Use the existing Chart of Accounts selector.
+
+Do not store the account as free text.
+
+For the specified disposal/sale accounting requirement, the conceptual entries are:
+
+1. Credit Inventory Account with the original inventory value.
+2. Debit Inventory Disposal Account with the original inventory value.
+3. Credit Inventory Disposal Account with the proceeds.
+4. Debit Cash/Bank Account with the proceeds.
+
+Example:
+
+Original Inventory Cost = GHS 1,000
+Proceeds = GHS 1,300
+
+Journal:
+
+Dr Inventory Disposal Account     1,000
+    Cr Inventory Account                    1,000
+
+Dr Cash/Bank Account              1,300
+    Cr Inventory Disposal Account           1,300
+
+Net Inventory Disposal Account balance:
+
+Credit GHS 300
+
+representing the gain.
+
+If proceeds are below carrying value, the net debit represents the loss.
+
+Before implementing, inspect whether the ERP already uses:
+
+- Separate disposal gain/loss accounts
+- Disposal clearing account
+- Inventory write-off account
+- Sales revenue account
+- Another equivalent accounting architecture
+
+If existing accounting architecture provides an equivalent mechanism, integrate with it rather than creating conflicting journal logic.
+
+However, preserve the required business outcome and expose the distributions correctly before posting.
+
+Account sources:
+
+Inventory Account
+→ existing Item account configuration
+
+Inventory Disposal Account
+→ new Item Inventory Disposal Account
+
+Cash/Bank Account
+→ selected Cashbook/payment account
+
+Maintain traceability:
+
+Item
+→ Disposal
+→ Inventory Cost
+→ Proceeds
+→ GL Distribution
+→ Journal
+
+==================================================
+WORKSTREAM 10 — HELPDESK EXTERNAL SUPPLIER PORTAL
+==================================================
+
+REQUIREMENT 15 — CATEGORY FIRST, SYSTEM DETERMINES TYPE
+
+On the External Supplier Portal Helpdesk ticket creation screen:
+
+Category must be selected first.
+
+The Supplier must NOT manually choose Helpdesk Type.
+
+Required flow:
+
+1. Supplier selects Category.
+2. System determines Type from Category using existing Helpdesk configuration.
+3. Type is automatically assigned.
+
+If Category → Type mapping does not currently exist, inspect the Helpdesk configuration and introduce the least disruptive configurable relationship.
+
+Do not hard-code category names in frontend logic where configuration can be used.
+
+The backend must also determine or validate the correct Type.
+
+A Supplier must not be able to manipulate the API and submit an unauthorized/different Type.
+
+==================================================
+
+REQUIREMENT 16 — HIDE PRIORITY FROM EXTERNAL SUPPLIER
+
+Hide the Priority dropdown from the External Supplier Portal ticket form.
+
+Suppliers must not select their own Priority.
+
+Determine Priority using the existing Helpdesk implementation.
+
+Prefer:
+
+1. Existing Category/Type priority configuration
+2. Existing default Priority
+3. Existing Helpdesk business rules
+
+Do not invent an unnecessary priority algorithm.
+
+Internal Helpdesk staff may continue to change Priority according to their existing permissions and workflow.
+
+The backend must not trust a Supplier-supplied Priority value.
+
+==================================================
+
+REQUIREMENT 17 — DEFAULT CHANNEL TO WEBSITE AND DISABLE IT
+
+For Helpdesk tickets created from the External Supplier Portal:
+
+Channel = Website
+
+The Supplier must not be able to change it.
+
+The UI may:
+
+- Display Website as read-only/disabled
+
+or:
+
+- Hide the field while automatically setting Website
+
+depending on the existing UX pattern.
+
+Server-side logic must enforce:
+
+Channel = Website
+
+for tickets originating from the External Supplier Portal.
+
+Do not trust a client-supplied Channel.
+
+Internal Helpdesk ticket creation must remain unaffected.
+
+==================================================
+CROSS-MODULE ACCOUNTING REQUIREMENTS
+==================================================
+
+For every accounting-related modification:
+
+1. Reuse the existing GL posting engine.
+2. Reuse the existing Chart of Accounts.
+3. Do not hard-code GL account IDs.
+4. Maintain balanced double-entry journals.
+5. Preserve source-document relationships.
+6. Prevent duplicate posting.
+7. Use database transactions.
+8. Maintain AP/subledger integrity where Supplier balances are involved.
+9. Do not mark a source document Posted if journal posting fails.
+10. Record Journal/Document references.
+11. Handle transaction/base currency according to existing architecture.
+12. Use existing financial precision and rounding.
+13. Ensure reversals use the correct original accounting context.
+14. Maintain audit history.
+
+==================================================
+INVENTORY INTEGRITY REQUIREMENTS
+==================================================
+
+For every inventory movement:
+
+- Use the existing Inventory Movement/Ledger engine
+- Do not directly manipulate Stock On Hand if a movement service exists
+- Preserve source-document references
+- Prevent duplicate movements
+- Maintain Store/Warehouse balances
+- Maintain Bin balances where applicable
+- Respect Unit of Measure
+- Handle partial quantities safely
+- Use database transactions
+- Maintain chronological movement history
+- Use reversing movements rather than deleting posted history
+
+For Inter-Store Transfer specifically:
+
+REQUEST DOES NOT MOVE STOCK.
+
+APPROVAL DOES NOT MOVE STOCK.
+
+ISSUE MOVES STOCK:
+
+Source Bin
+→ In-Transit
+
+RECEIPT MOVES STOCK:
+
+In-Transit
+→ Destination Store/Bin
+
+==================================================
+APPROVAL WORKFLOW REQUIREMENTS
+==================================================
+
+Where configurable approval workflows already exist:
+
+- Preserve them
+- Do not bypass approvals
+- Support workflows where no approval setup exists
+- Make Recount Addendums use the appropriate existing workflow
+- Maintain independent approval history for original Count Sheets and Addenda
+
+==================================================
+NOTIFICATION REQUIREMENTS
+==================================================
+
+Reuse the existing notification system.
+
+Notifications should include:
+
+- Counter assignment
+- Recount request
+- Recount submission where appropriate
+- Other existing workflow events
+
+Prevent duplicate email notifications during retries.
+
+Prefer existing queued/background email infrastructure where present.
+
+==================================================
+AUDIT REQUIREMENTS
+==================================================
+
+Audit significant actions including:
+
+- Inventory Requisition acknowledgement
+- Actual received quantities
+- Inter-Store Transfer request
+- Transfer approval
+- Source Bin selected during Issue
+- Inter-Store Issue
+- In-Transit movement
+- Transfer Receipt
+- Carrier selection/change
+- Counter assignment
+- Recount flag
+- Recount comments
+- Recount Addendum creation
+- Defective Quantity changes
+- PPV/Revaluation policy changes
+- Purchase Price Variance posting
+- Inventory Revaluation
+- Supplier Return
+- Supplier Return accounting
+- Warehouse item assignment
+- Inventory Disposal
+- Waybill generation
+- Auction Invoice creation
+- Helpdesk external ticket source/category/type
+- Relevant configuration changes
+
+Use the existing audit framework.
+
+==================================================
+SECURITY REQUIREMENTS
+==================================================
+
+Review server-side permissions for:
+
+- Inventory Requisition acknowledgement
+- Inter-Store Transfer Request
+- Transfer approval
+- Stock Issue
+- Bin allocation
+- Shipping
+- Receiving
+- Carrier selection
+- Stock Count creation
+- Counter assignment
+- Recount entry
+- Stock Count approval
+- Stock Adjustment
+- Procurement Settings
+- Supplier Returns
+- Warehouse item assignment
+- Inventory Disposal
+- Waybill
+- Auction Invoice
+- Item Account configuration
+- External Helpdesk ticket creation
+
+Do not rely on hidden frontend controls for authorization.
+
+Fix the warehouse-assignment 403 without weakening authorization.
+
+External Portal users must only access permitted records and data.
+
+==================================================
+BACKWARD COMPATIBILITY
+==================================================
+
+Existing data must continue to function.
+
+Pay particular attention to:
+
+- Historical Inventory Requisitions
+- Existing acknowledged requisitions
+- Existing Inter-Store Transfer Requests
+- Existing approved Transfers
+- Transfers currently awaiting issue
+- Transfers already issued and awaiting receipt
+- Existing Transfer records with Bin already assigned at request stage
+- Existing free-text Carrier Names
+- Existing bin-based warehouse records
+- Existing Stock Counts
+- Existing Count Sheets
+- Existing Stock Adjustments
+- Existing Supplier GRNs
+- Existing Supplier Invoices
+- Partially invoiced GRNs
+- Existing Supplier Returns
+- Existing Inventory Disposal records
+- Historical Sales-type Disposal records
+- Existing Item Account configuration
+- Existing Helpdesk tickets
+
+Do not retroactively alter posted accounting transactions.
+
+Do not move historical transfer stock into In-Transit without a safe reconciliation strategy.
+
+If currently open transfers need migration into the new In-Transit model, identify and implement a safe reconciliation/migration approach.
+
+==================================================
+DATABASE REQUIREMENTS
+==================================================
+
+Review schema changes before creating migrations.
+
+Potential concepts may include:
+
+- Nullable SourceBinId at Transfer Request stage
+- Issue/Picking allocation records
+- CarrierBusinessPartnerId
+- In-Transit system location marker
+- Transfer transit allocation records
+- Stock Count Counter assignments
+- RecountRequired
+- RecountReason/Comment
+- ParentCountSheetId / OriginalCountSheetId
+- Addendum/Recount sequence
+- DefectiveQuantity
+- DefectiveComment
+- Purchase Price Difference Policy
+- Purchase Price Variance Account
+- Inventory Disposal Account
+- Disposal Invoice linkage
+- Helpdesk Category-Type mapping
+
+These names are conceptual only.
+
+Do NOT create these exact fields/tables if equivalent structures already exist.
+
+Use:
+
+- Proper foreign keys
+- Appropriate indexes
+- Unique constraints where required
+- Correct decimal precision
+- Safe historical defaults
+- Nullable migration strategies where appropriate
+- Existing naming conventions
+
+Do not use free-text relationships where proper relational links are appropriate.
+
+==================================================
+TESTING REQUIREMENTS
+==================================================
+
+Add/update tests covering at minimum:
+
+1. Inventory Requisition full acknowledgement
+2. Inventory Requisition partial acknowledgement
+3. Actual received quantity less than issued quantity
+4. Prevent acknowledgement beyond available quantity
+
+5. Inter-Store Transfer Request can be created WITHOUT Source Bin
+6. Transfer Request approval succeeds WITHOUT Source Bin
+7. Source Bin IS required during actual Transfer Issue
+8. Issuing officer can select Source Bin
+9. Requested quantity can be split across multiple Source Bins where supported
+10. Partial Transfer Issue maintains outstanding quantity
+11. Destination Bin behaviour follows warehouse receiving configuration
+
+12. Carrier Supplier selection
+13. Historical free-text Carrier compatibility
+
+14. Transfer Request does NOT create stock movement
+15. Transfer Approval does NOT create stock movement
+16. Actual Transfer Issue moves stock from Source Bin to In-Transit
+17. Full Transfer Receipt removes stock from In-Transit
+18. Partial Transfer Receipt leaves outstanding quantity In-Transit
+19. Multiple simultaneous transfers maintain correct In-Transit balances
+20. In-Transit reporting
+
+21. Stock Count Counter assignment
+22. Counter notification
+23. Multiple Counters
+
+24. Count line marked for Recount
+25. Passed lines continue through workflow
+26. Recount lines excluded from original adjustment
+27. Recount notification
+28. Recount Addendum creation
+29. Second recount/addendum where required
+30. Prevent duplicate adjustment across original/recount sheets
+
+31. Defective Quantity capture
+32. Defective Quantity does not affect variance
+33. Defective comment
+
+34. Invoice cost equals GRN cost
+35. Positive Purchase Price Variance
+36. Negative Purchase Price Variance
+37. Policy = Purchase Price Variance
+38. Policy = Revaluation
+39. Partial Supplier Invoice variance
+
+40. Uninvoiced GRN Supplier Return
+41. Fully invoiced GRN Supplier Return
+42. Partially invoiced GRN Supplier Return
+43. Prevent Supplier over-return
+
+44. Select All warehouse items
+45. Authorized warehouse assignment does not return 403
+46. Unauthorized warehouse assignment still returns 403
+
+47. Disposal Waybill generation
+48. Auction Finance Invoice creation
+49. Duplicate Auction Invoice prevention
+50. Sales Disposal method unavailable for new Disposal
+51. Historical Sales Disposal remains viewable
+52. Inventory Disposal GL Account configuration
+53. Disposal accounting at gain
+54. Disposal accounting at loss
+
+55. Helpdesk Category determines Type
+56. Supplier cannot override Helpdesk Type
+57. Priority hidden/defaulted correctly
+58. External ticket Channel defaults to Website
+59. Supplier cannot override Channel
+60. Existing internal Helpdesk workflows remain functional
+
+Run the existing test suite after implementation.
+
+Do not modify valid tests merely to hide regressions.
+
+Fix the underlying implementation.
+
+==================================================
+IMPLEMENTATION APPROACH
+==================================================
+
+PHASE 1 — REPOSITORY ANALYSIS
+
+Before broad implementation:
+
+1. Inspect the repository.
+2. Identify affected projects/modules.
+3. Trace Inventory Requisition flow.
+4. Trace Inter-Store Transfer Request → Approval → Issue → Shipment → Receipt.
+5. Determine exactly where Bin is currently made mandatory.
+6. Trace inventory movement generation.
+7. Trace Stock Count workflow.
+8. Trace inventory valuation and GL posting.
+9. Trace GRN → Supplier Invoice relationships.
+10. Trace Supplier Return logic.
+11. Trace Inventory Disposal and Sales.
+12. Trace Helpdesk configuration and External Portal.
+13. Identify database changes.
+14. Identify reusable services/components.
+15. Identify architectural conflicts.
+16. Identify backward compatibility risks.
+17. Produce an implementation plan.
+
+For every requirement identify:
+
+- Existing implementation
+- Relevant files/classes
+- Entities/tables
+- APIs
+- Frontend components
+- Domain/business rules
+- Inventory impact
+- Accounting impact
+- Security impact
+- Dependencies
+- Tests
+
+Do not begin broad implementation until this analysis is complete.
+
+==================================================
+PHASE 2 — IMPLEMENTATION ORDER
+==================================================
+
+Implement in this order:
+
+1. Inventory Requisition acknowledgement
+2. Inter-Store Transfer request/bin/issue workflow
+3. Carrier Supplier selection
+4. In-Transit inventory architecture
+5. Stock Count Counter assignments
+6. Stock Count Recount/Addendum workflow
+7. Defective Quantity
+8. Purchase Price Variance / Revaluation
+9. Supplier Return accounting
+10. Warehouse assignment/select-all/403
+11. Inventory Disposal
+12. Helpdesk External Portal
+
+Complete and validate each logical workstream before making unrelated changes.
+
+==================================================
+PHASE 3 — DATABASE MIGRATIONS
+==================================================
+
+Review migrations for:
+
+- Data loss
+- Incorrect defaults
+- Existing transfers with Bin values
+- Existing open transfers
+- Existing Stock Counts
+- Historical accounting records
+- Foreign-key conflicts
+- Long-running schema changes
+
+Do not create destructive migrations without explicitly identifying the risk.
+
+==================================================
+PHASE 4 — BUILD AND TEST
+==================================================
+
+Run:
+
+- Backend build
+- Frontend build
+- Unit tests
+- Integration tests where available
+- Migration checks
+- Static/compiler checks
+- Authorization tests
+
+Resolve introduced regressions.
+
+==================================================
+PHASE 5 — FINAL REVIEW
+==================================================
+
+Before declaring completion, specifically verify:
+
+- Requester is no longer asked for Source Bin
+- Transfer approval does not require Source Bin
+- Issuing Store officer cannot issue stock without selecting the correct Source Bin
+- Source Bin inventory is reduced only at Issue
+- Transfer Request/Approval does not prematurely reduce inventory
+- In-Transit inventory is created only after Issue
+- Partial receipts leave accurate In-Transit quantities
+- Inventory does not disappear between Stores
+- Inventory is not duplicated during transfer
+- Stock Count differences are not adjusted twice
+- Recount history is preserved
+- Defective Quantity does not affect variance
+- PPV/Revaluation is not processed twice
+- Supplier Returns use the correct accounting stage
+- AP subledger remains balanced
+- Warehouse 403 fix does not weaken authorization
+- Auction invoices are not duplicated
+- Disposal GL distributions are balanced
+- External Suppliers cannot manipulate Helpdesk Type/Priority/Channel
+- Historical records remain valid
+
+==================================================
+IMPORTANT WORKING RULES
+==================================================
+
+1. Do not guess where repository analysis can answer the question.
+
+2. Search existing code before introducing new architecture.
+
+3. Reuse the existing inventory movement engine.
+
+4. Reuse the existing GL posting engine.
+
+5. Reuse existing invoice implementations.
+
+6. Do not directly alter stock balances when a movement engine exists.
+
+7. Do not directly alter GL balances.
+
+8. Do not bypass approval workflows.
+
+9. Do not bypass server-side authorization.
+
+10. Do not overwrite submitted Stock Count history.
+
+11. Do not adjust the same Stock Count variance twice.
+
+12. Defective Quantity must never affect Stock Count variance.
+
+13. Do not hard-code GL accounts.
+
+14. Do not hard-code configurable Helpdesk mappings unnecessarily.
+
+15. Do not fix the warehouse 403 by removing authorization.
+
+16. Preserve historical records and posted transactions.
+
+17. Most importantly for Inter-Store Transfer:
+
+   - Requester selects WHAT is needed and FROM/TO which Store.
+   - Requester does NOT select the Source Bin.
+   - Approver approves the business request without requiring a Bin.
+   - Warehouse/Store issuing officer selects WHERE the stock physically comes from.
+   - Bin becomes mandatory at the actual Issue/Picking stage.
+   - Stock enters In-Transit only when physically issued.
+   - Receiving officer completes receipt into the Destination Store/Bin according to warehouse configuration.
+
+18. Follow existing application conventions for:
+
+   - Naming
+   - Architecture
+   - Dependency Injection
+   - Repository/service patterns
+   - Validation
+   - Error handling
+   - Logging
+   - Audit
+   - Notification
+   - Authorization
+   - API responses
+   - Frontend components
+
+==================================================
+EXPECTED INITIAL OUTPUT
+==================================================
+
+Before broad coding provide:
+
+1. Current architecture discovered
+2. Affected modules/projects
+3. Current Inventory Requisition flow
+4. Current Inter-Store Transfer Request → Approval → Issue → Receipt flow
+5. Exact location where Bin is currently being required
+6. Proposed corrected stage-based Bin workflow
+7. Required database changes
+8. Inventory movement changes
+9. Accounting changes
+10. Workflow/approval changes
+11. Notification changes
+12. Security changes
+13. Dependencies
+14. Major risks
+15. Planned implementation order
+
+Then proceed with implementation.
+
+Maintain a checklist against all 17 requirements.
+
+==================================================
+EXPECTED FINAL OUTPUT
+==================================================
+
+At completion provide:
+
+1. Requirements completed
+2. Implementation summary
+3. Significant files/projects modified
+4. Database migrations created
+5. New/modified entities and relationships
+6. API changes
+7. Frontend changes
+8. Inter-Store Transfer Request/Issue changes
+9. Inventory movement changes
+10. Stock Count workflow changes
+11. Accounting/GL changes
+12. Notification changes
+13. Authorization changes
+14. Root cause and resolution of warehouse assignment 403
+15. Tests added/updated
+16. Build/test results
+17. Backward compatibility handling
+18. Manual verification steps
+19. Migration/deployment notes
+20. Remaining assumptions or technical risks
+
+Do not declare the work complete unless every requirement has either been implemented and validated or explicitly identified as blocked with the exact technical reason.

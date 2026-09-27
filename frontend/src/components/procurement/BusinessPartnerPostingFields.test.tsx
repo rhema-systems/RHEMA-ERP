@@ -52,7 +52,7 @@ describe('business partner posting fields', () => {
     expect(screen.queryByLabelText('WHT Rate (%)')).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'WHT Configuration' })).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('combobox', { name: 'Tax', exact: true }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Tax' }));
     fireEvent.click(screen.getByRole('option', { name: 'SALES - Sales tax' }));
     expect(onChange).toHaveBeenCalledWith({ ...value, defaultTaxGroupId: 'sales-tax' });
     rerender(<PartnerTaxDefaultsFields partnerType="Both" value={value} onChange={onChange} taxGroups={[]} />);

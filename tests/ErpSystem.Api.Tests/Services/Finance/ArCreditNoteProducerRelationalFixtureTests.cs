@@ -144,8 +144,8 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         var finance = await fixture.Db.FinancePostingEvents.SingleAsync(x => x.SourceDocumentId == fixture.CreditNote.Id);
         finance.JournalEntryId.Should().Be(posted.JournalEntryId);
         finance.RequestFingerprint.Should().NotBeNullOrWhiteSpace("the C10 compatibility leaf retains its own canonical posting fingerprint");
-        (await fixture.Db.JournalEntries.CountAsync()).Should().Be(1);
-        (await fixture.Db.AccountTransactions.CountAsync()).Should().Be(2);
+        (await fixture.Db.JournalEntries.CountAsync()).Should().Be(2, "the original invoice journal remains alongside the credit note");
+        (await fixture.Db.AccountTransactions.CountAsync()).Should().Be(4);
         (await fixture.Db.AccountBalances.CountAsync()).Should().BeGreaterThan(0);
         (await fixture.Db.AuditLogs.CountAsync()).Should().BeGreaterThan(0, "success uses the real durable audit service");
 
@@ -181,7 +181,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         fixture.Db.ChangeTracker.Clear();
         (await fixture.Db.CreditNotes.SingleAsync()).JournalEntryId.Should().BeNull();
         (await fixture.Db.FinancePostingEvents.CountAsync()).Should().Be(1, "only the seeded invoice authority is durable after rollback");
-        (await fixture.Db.JournalEntries.CountAsync()).Should().Be(0);
+        (await fixture.Db.JournalEntries.CountAsync()).Should().Be(1, "the seeded original invoice journal survives rollback");
         var failed = await fixture.Db.AccountingEvents.Include(x => x.Attempts).SingleAsync();
         failed.Status.Should().Be(AccountingEventStatuses.Failed);
         failed.Attempts.Should().ContainSingle(x => x.Status == AccountingEventStatuses.Failed);
@@ -360,6 +360,19 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             var partner = new BusinessPartner { Id = Guid.NewGuid(), TenantId = tenant, PartnerCode = "C1", PartnerName = "Relational customer", PartnerType = "Customer", IsActive = true, DefaultArAccountId = ar.Id };
             var invoiceJournalId = Guid.NewGuid();
             var invoice = new Invoice { Id = Guid.NewGuid(), TenantId = tenant, BusinessPartnerId = partner.Id, InvoiceNumber = "SI-R1", CustomerName = partner.PartnerName, InvoiceDate = new DateTime(2026, 9, 1), CurrencyCode = "GHS", ExchangeRate = 1, TotalAmount = 100m, BaseCurrencyAmount = 100m, JournalEntryId = invoiceJournalId, Status = InvoiceStatus.Approved };
+            var revenue = Account(tenant, "4000", AccountType.Revenue, false, true);
+            var invoiceJournal = new JournalEntry { Id = invoiceJournalId, TenantId = tenant,
+                JournalEntryNumber = "JE-SI-R1", JournalType = "AR Invoice", EntryDate = invoice.InvoiceDate,
+                SourceModule = "AR", SourceDocumentType = "CustomerInvoice", SourceDocumentId = invoice.Id,
+                AccountingBookId = book.Id, FiscalPeriodId = fiscalPeriod.Id, PostingStatus = "Posted",
+                ApprovalStatus = "Approved", TotalDebitAmount = 100m, TotalCreditAmount = 100m, IsBalanced = true };
+            db.AddRange(revenue, invoiceJournal,
+                new AccountTransaction { Id = Guid.NewGuid(), TenantId = tenant, JournalEntryId = invoiceJournalId,
+                    AccountId = ar.Id, AccountingBookId = book.Id, FiscalPeriodId = fiscalPeriod.Id,
+                    TransactionDate = invoice.InvoiceDate, PostingStatus = "Posted", TransactionTag = "AR-Control", DebitAmount = 100m },
+                new AccountTransaction { Id = Guid.NewGuid(), TenantId = tenant, JournalEntryId = invoiceJournalId,
+                    AccountId = revenue.Id, AccountingBookId = book.Id, FiscalPeriodId = fiscalPeriod.Id,
+                    TransactionDate = invoice.InvoiceDate, PostingStatus = "Posted", TransactionTag = "AR-Revenue", CreditAmount = 100m });
             var invoicePosting = new FinancePostingEvent { Id = Guid.NewGuid(), TenantId = tenant, SourceModule = "AR", OriginModuleCode = "SALES", SourceDocumentType = "CustomerInvoice", SourceDocumentId = invoice.Id, PostingAction = "Post", PostingStatus = "Posted", PostingDate = invoice.InvoiceDate, PostedAt = DateTime.UtcNow, JournalEntryId = invoiceJournalId, AccountingBookId = book.Id, BookClassification = book.Code, FunctionalCurrencyCode = "GHS" };
             var credit = new CreditNote { Id = Guid.NewGuid(), TenantId = tenant, BusinessPartnerId = partner.Id, OriginalInvoiceId = invoice.Id, DocumentNumber = "SCN-R1", DocumentDate = new DateTime(2026, 9, 1), Currency = "GHS", ExchangeRate = 1, CreditNoteStatus = CreditNoteStatus.Approved, TotalAmount = creditAmount, CreatedAt = DateTime.UtcNow, CreatedBy = "seed" };
             credit.Lines.Add(new CreditNoteLine { Id = Guid.NewGuid(), TenantId = tenant, CreditNoteId = credit.Id, Description = "Return", Quantity = 1, UnitPrice = creditAmount, CreatedAt = DateTime.UtcNow, CreatedBy = "seed" });

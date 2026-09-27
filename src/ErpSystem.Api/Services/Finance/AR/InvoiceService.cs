@@ -212,8 +212,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 cancellationToken);
             var customer = counterparty.Partner;
 
-            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? customer.PaymentTermId, cancellationToken);
-            var paymentTermsDays = paymentTerm?.DueDays ?? TryParsePaymentTermsDays(customer.PaymentTerms) ?? 30;
+            var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? counterparty.Profile.PaymentTermId, cancellationToken);
+            var paymentTermsDays = paymentTerm?.DueDays ?? 30;
             var earlyPaymentDiscountPercentage = paymentTerm?.DiscountPercent ?? 0m;
             DateTime? earlyPaymentDiscountDueDate = null;
             if (paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0)
@@ -274,7 +274,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 ExchangeRate = openingExchangeRate?.Rate ?? dto.ExchangeRate,
                 ExchangeRateId = openingExchangeRate?.ExchangeRateId,
                 PaymentTermsDays = paymentTermsDays,
-                PaymentTermId = paymentTerm?.Id ?? customer.PaymentTermId,
+                PaymentTermId = paymentTerm?.Id,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
                 EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate,
                 TaxGroupId = dto.IsOpeningBalance ? null : dto.TaxGroupId,
@@ -387,10 +387,10 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Check credit limit before saving (using Base Currency)
             // Note: Customer.OutstandingBalance is now assumed to be in Base Currency
             var newOutstanding = customer.OutstandingBalance + invoice.BaseCurrencyAmount;
-            if (newOutstanding > customer.CreditLimit)
+            if (newOutstanding > counterparty.Profile.CreditLimit)
             {
                 _logger.LogWarning("Credit limit exceeded for customer {CustomerId}. Limit: {Limit} {BaseCurrency}, New Outstanding: {Outstanding} {BaseCurrency}",
-                    customer.Id, customer.CreditLimit, tenant.BaseCurrency, newOutstanding, tenant.BaseCurrency);
+                    customer.Id, counterparty.Profile.CreditLimit, tenant.BaseCurrency, newOutstanding, tenant.BaseCurrency);
                 // Allow creation but might flag for approval in a real system
             }
 
@@ -537,6 +537,22 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.Rejected)
                 throw new InvalidOperationException("Only draft or rejected invoices can be updated.");
+
+            var accountingDateChanged = invoice.InvoiceDate.Date != dto.InvoiceDate.Date;
+            CustomerCounterparty? updatedCounterparty = null;
+            PaymentTerm? updatedDefaultTerm = null;
+            var discountDays = invoice.EarlyPaymentDiscountDueDate.HasValue
+                ? (invoice.EarlyPaymentDiscountDueDate.Value.Date - invoice.InvoiceDate.Date).Days
+                : (int?)null;
+            if (accountingDateChanged)
+            {
+                updatedCounterparty = await ResolveCustomerCounterpartyAsync(
+                    invoice.BusinessPartnerId, invoice.BusinessPartnerRoleId, dto.InvoiceDate, cancellationToken);
+                // The update contract has no payment-term selector and does not record whether
+                // the saved term was explicit. Preserve accepted terms; fill only an absent term.
+                if (!invoice.PaymentTermId.HasValue)
+                    updatedDefaultTerm = await ResolvePaymentTermAsync(updatedCounterparty.Profile.PaymentTermId, cancellationToken);
+            }
             
             // Fetch Tenant for Base Currency (needed for recalculation)
             var tenant = await _unitOfWork.Repository<Tenant>()
@@ -553,8 +569,24 @@ namespace ErpSystem.Api.Services.Finance.AR
                 cancellationToken);
 
             var now = DateTime.UtcNow;
+            if (updatedCounterparty is not null)
+            {
+                invoice.BusinessPartnerRoleId = updatedCounterparty.Role.Id;
+                invoice.BusinessPartnerArProfileVersionId = updatedCounterparty.Profile.Id;
+                if (!invoice.PaymentTermId.HasValue)
+                {
+                    invoice.PaymentTermId = updatedDefaultTerm?.Id;
+                    invoice.PaymentTermsDays = updatedDefaultTerm?.DueDays ?? 30;
+                    invoice.EarlyPaymentDiscountPercentage = updatedDefaultTerm?.DiscountPercent ?? 0m;
+                    discountDays = updatedDefaultTerm is { DiscountPercent: > 0m, DiscountDays: > 0 }
+                        ? updatedDefaultTerm.DiscountDays : null;
+                }
+                invoice.EarlyPaymentDiscountDueDate = discountDays.HasValue
+                    ? dto.InvoiceDate.AddDays(discountDays.Value) : null;
+            }
             invoice.InvoiceDate = dto.InvoiceDate;
-            invoice.DueDate = dto.DueDate;
+            invoice.DueDate = dto.DueDate ?? (accountingDateChanged
+                ? dto.InvoiceDate.AddDays(invoice.PaymentTermsDays) : (DateTime?)null);
             invoice.Reference = dto.Reference;
             invoice.Notes = dto.Notes;
             invoice.IsOpeningBalance = dto.IsOpeningBalance;
@@ -2374,22 +2406,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                     p.TenantId == TenantId &&
                     p.Id == businessPartnerId &&
                     !p.IsDeleted);
-        }
-
-        private static int? TryParsePaymentTermsDays(string? paymentTerms)
-        {
-            if (string.IsNullOrWhiteSpace(paymentTerms))
-            {
-                return null;
-            }
-
-            if (paymentTerms.Equals("COD", StringComparison.OrdinalIgnoreCase))
-            {
-                return 0;
-            }
-
-            var digits = new string(paymentTerms.Where(char.IsDigit).ToArray());
-            return int.TryParse(digits, out var days) ? days : null;
         }
 
         private static bool IsCustomerPaymentTerm(string applicableTo)

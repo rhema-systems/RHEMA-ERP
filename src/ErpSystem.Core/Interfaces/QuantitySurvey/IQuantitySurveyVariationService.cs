@@ -4,6 +4,7 @@ namespace ErpSystem.Core.Interfaces.QuantitySurvey;
 
 public interface IQuantitySurveyVariationService
 {
+    Task<IReadOnlyList<QuantitySurveyVariationDto>> SearchAsync(string search, int take = 8, CancellationToken token = default);
     Task<QuantitySurveyVariationWorkspaceDto> GetWorkspaceAsync(Guid projectId, CancellationToken token = default);
     Task<QuantitySurveyVariationDto> GetAsync(Guid id, CancellationToken token = default);
     Task<QuantitySurveyVariationDto> SaveAsync(Guid projectId, SaveQuantitySurveyVariationRequest request, string correlationId, CancellationToken token = default);

@@ -36,8 +36,12 @@ public class SheControlledDocumentController : SheApiControllerBase
         [FromQuery] SheControlledDocumentCategory? category,
         [FromQuery] SheControlledDocumentStatus? status,
         [FromQuery] string? search,
-        [FromQuery] int? dueForReviewInDays)
-        => Ok(await _service.GetAllAsync(category, status, search, dueForReviewInDays));
+        [FromQuery] int? dueForReviewInDays,
+        [FromQuery] int? take = null)
+    {
+        var records = await _service.GetAllAsync(category, status, search, dueForReviewInDays);
+        return Ok(take.HasValue ? records.Take(Math.Clamp(take.Value, 1, 20)) : records);
+    }
 
     [HttpGet("{id:guid}")]
     [Authorize(Policy = HrPermissions.SheReadPolicy)]

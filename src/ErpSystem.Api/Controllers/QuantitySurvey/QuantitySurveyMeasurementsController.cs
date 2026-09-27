@@ -13,6 +13,9 @@ namespace ErpSystem.Api.Controllers.QuantitySurvey;
 [Route("api/quantity-survey/measurements")]
 public sealed class QuantitySurveyMeasurementsController(IQuantitySurveyMeasurementService service) : ControllerBase
 {
+    [HttpGet("search"), Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<IActionResult> Search([FromQuery] string search, CancellationToken token, [FromQuery] int take = 8) =>
+        ExecuteAsync(async () => Ok(await service.SearchAsync(search, take, token)));
     [HttpGet("lookups"), Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public Task<IActionResult> Lookups([FromQuery] Guid projectId, CancellationToken token) =>
         ExecuteAsync(async () => Ok(await service.GetLookupsAsync(projectId, token)));

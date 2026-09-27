@@ -33,6 +33,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .GetQueryable(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted
+                && (!query.AssetId.HasValue || item.Id == query.AssetId.Value)
                 && (!query.AssetType.HasValue || item.AssetType == query.AssetType.Value)
                 && (!query.Status.HasValue || item.Status == query.Status.Value)
                 && (statuses.Count == 0 || statuses.Contains(item.Status))

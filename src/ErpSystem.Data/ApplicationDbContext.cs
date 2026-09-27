@@ -1318,6 +1318,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryIssueVoucherConfiguration());
         builder.ApplyConfiguration(new InventoryIssueVoucherLineConfiguration());
         builder.ApplyConfiguration(new InventoryIssueVoucherActionConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueVoucherReceiptLineConfiguration());
         builder.ApplyConfiguration(new InventoryIssueAccountingRuleConfiguration());
         builder.ApplyConfiguration(new InventoryIssueFinanceLineageConfiguration());
         builder.ApplyConfiguration(new InventoryIssueReturnAllocationConfiguration());
@@ -1374,6 +1375,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         if (Database.IsSqlServer())
         {
             ArchivedCheckConstraintBaselineModel.Apply(builder);
+            builder.Entity<InventoryIssueVoucherAction>().ToTable(table => table.HasCheckConstraint(
+                "CK_InventoryIssueVoucherActions_ActionType", "[ActionType] IN (1,2,3)"));
             // Current QS architecture permits internal valuations; retain the historical archive verbatim.
             builder.Entity<ErpSystem.Core.Entities.QuantitySurvey.QuantitySurveyValuationWorksheet>().ToTable(table => table.HasCheckConstraint(
                 "CK_QsValuationWorksheets_Policy",

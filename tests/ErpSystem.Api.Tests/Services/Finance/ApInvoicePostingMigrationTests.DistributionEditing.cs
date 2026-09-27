@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,41 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed partial class ApInvoicePostingMigrationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DistributionEdit_PostedProfileBasedSplits_RequireHistoricalBasisWhenProfileChanges(bool missingProfile)
+    {
+        var tenant = Guid.NewGuid(); await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenant, ProcurementDistributionDraft);
+        fixture.Invoice.LineItems.Single().GLAccountId = null;
+        fixture.Invoice.ExpenseAccountId = null;
+        var alternate = SeedAccount(db, tenant, "6201", AccountType.Expense);
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenant);
+        var input = DistributionInput(await service.GetDistributionAsync(fixture.Invoice.Id));
+        var debit = input.Lines.Single(x => x.Debit > 0); debit.Debit = 60m;
+        input.Lines.Add(new() { LineId = Guid.NewGuid(), GroupId = debit.GroupId, AccountId = alternate.Id, Debit = 40m });
+        await service.SaveDistributionAsync(fixture.Invoice.Id, input);
+        var invoice = await db.VendorInvoices.SingleAsync(x => x.Id == fixture.Invoice.Id);
+        invoice.Status = VendorInvoiceStatus.Approved; invoice.ApprovalStatus = "Approved";
+        invoice.ApprovedById = Guid.NewGuid(); invoice.ApprovedDate = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        var posted = await service.PostAsync(invoice.Id);
+        var profile = await db.Set<BusinessPartnerApProfileVersion>().SingleAsync(x => x.Id == invoice.BusinessPartnerApProfileVersionId);
+        if (missingProfile) profile.IsDeleted = true;
+        else profile.DefaultExpenseAccountId = alternate.Id;
+        await db.SaveChangesAsync();
+
+        Func<Task> post = () => service.PostAsync(invoice.Id);
+        await post.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AP_INVOICE_DISTRIBUTION_HISTORY_REQUIRED:*");
+
+        (await db.JournalEntries.CountAsync(x => x.SourceDocumentId == invoice.Id)).Should().Be(1);
+        (await db.AccountTransactions.CountAsync(x => x.JournalEntryId == posted.JournalEntryId)).Should().Be(3);
+        (await db.FinancePostingEvents.CountAsync(x => x.SourceDocumentId == invoice.Id)).Should().Be(1);
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(0.5)]

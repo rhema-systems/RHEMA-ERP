@@ -91,6 +91,8 @@ public interface ICivilEngineeringPermittingHodDecisionService
 /// <summary>Governed Civil overlay over the authoritative Projects work-item owner.</summary>
 public interface ICivilEngineeringDirectTaskService
 {
+    Task<IReadOnlyList<CivilEngineeringDirectTaskDto>> SearchAsync(string search, int take = 8, CancellationToken token = default);
+    Task<CivilEngineeringDirectTaskDto> GetAsync(Guid id, CancellationToken token = default);
     Task<CivilEngineeringDirectTaskLookupsDto> GetLookupsAsync(Guid projectId, CancellationToken token = default);
     Task<IReadOnlyList<CivilEngineeringDirectTaskDto>> ListAsync(Guid projectId, CancellationToken token = default);
     Task<CivilEngineeringDirectTaskDto> CreateAsync(Guid projectId, CreateCivilEngineeringDirectTaskRequest request, string correlationId, CancellationToken token = default);

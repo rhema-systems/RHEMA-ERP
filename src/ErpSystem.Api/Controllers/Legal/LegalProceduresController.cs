@@ -126,6 +126,18 @@ public sealed class LegalProceduresController : ControllerBase
         });
     }
 
+    [HttpGet("search")]
+    public IActionResult SearchProcedures([FromQuery] string? search, [FromQuery] int take = 5)
+    {
+        var term = search?.Trim() ?? string.Empty;
+        var procedures = _procedureCatalog.GetProcedures()
+            .Where(item => term.Length >= 2 && term.Length <= 100
+                && (item.Title.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || item.EntityType.Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Take(Math.Clamp(take, 1, 10));
+        return Ok(new { success = true, data = procedures });
+    }
+
     [HttpGet("{entityType}")]
     public IActionResult GetProcedureWorkspace(string entityType)
     {

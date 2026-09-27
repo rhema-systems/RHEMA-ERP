@@ -197,6 +197,7 @@ export const MOCK_FISCAL_YEARS: FiscalYear[] = [
 export const MOCK_FISCAL_PERIODS: FiscalPeriod[] = [
     {
         id: 'fp-2024-01',
+        allowFutureDating: false,
         tenantId: 'tenant-1',
         fiscalYearId: 'fy-2024',
         periodNumber: 1,
@@ -213,6 +214,7 @@ export const MOCK_FISCAL_PERIODS: FiscalPeriod[] = [
     },
     {
         id: 'fp-2024-11',
+        allowFutureDating: false,
         tenantId: 'tenant-1',
         fiscalYearId: 'fy-2024',
         periodNumber: 11,
@@ -229,6 +231,7 @@ export const MOCK_FISCAL_PERIODS: FiscalPeriod[] = [
     },
     {
         id: 'fp-2024-12',
+        allowFutureDating: false,
         tenantId: 'tenant-1',
         fiscalYearId: 'fy-2024',
         periodNumber: 12,

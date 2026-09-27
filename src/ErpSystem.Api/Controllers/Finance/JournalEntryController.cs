@@ -302,8 +302,20 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Retrieves journal entries awaiting approval for the current finance approver.
+        /// Searches bounded journal summaries for Finance readers.
         /// </summary>
+        [HttpGet("search")]
+        public async Task<ActionResult<IReadOnlyList<FinanceRecordSearchDto>>> Search(
+            [FromQuery] string? search = null, [FromQuery] int take = 5, CancellationToken cancellationToken = default)
+        {
+            // A tender-payment verifier can view only its linked journal, not search the GL register.
+            if (!await HasAnyPermissionAsync(FinancePermissions.ViewFinance))
+                return Forbid();
+
+            return Ok(await _journalEntryService.SearchAsync(search, take, cancellationToken));
+        }
+
+        /// <summary>Retrieves journal entries awaiting approval for the current finance approver.</summary>
         [HttpGet("pending-approvals")]
         public async Task<ActionResult<List<JournalEntryDto>>> GetPendingApprovals()
         {

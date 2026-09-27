@@ -18,7 +18,7 @@ describe('ReceiptSourceEvidenceControl disclosure', () => {
     });
     render(<ReceiptSourceEvidenceControl receiptId="receipt-1" />);
     expect(await screen.findByText('Waybill required')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Attach', exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Attach' })).toBeVisible();
     expect(document.querySelector('input[type="file"]')).toBeVisible();
     expect(screen.getByText('Invoice copies do not create Finance postings.')).not.toBeVisible();
     fireEvent.click(screen.getByText('About invoice copies'));

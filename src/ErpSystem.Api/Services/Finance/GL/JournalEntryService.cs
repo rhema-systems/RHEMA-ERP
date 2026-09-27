@@ -66,6 +66,33 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
+        public async Task<IReadOnlyList<FinanceRecordSearchDto>> SearchAsync(
+            string? search, int take = 5, CancellationToken cancellationToken = default)
+        {
+            var tenantId = TenantId;
+            var term = search?.Trim();
+            if (string.IsNullOrEmpty(term) || term.Length < 2 || term.Length > 100)
+                return Array.Empty<FinanceRecordSearchDto>();
+
+            term = term.ToUpperInvariant();
+            return await _context.JournalEntries.AsNoTracking()
+                .Where(entry => entry.TenantId == tenantId && !entry.IsDeleted
+                    && (entry.JournalEntryNumber.ToUpper().Contains(term)
+                        || entry.Description.ToUpper().Contains(term)
+                        || (entry.ReferenceNumber != null && entry.ReferenceNumber.ToUpper().Contains(term))))
+                .OrderByDescending(entry => entry.EntryDate)
+                .ThenByDescending(entry => entry.JournalEntryNumber)
+                .Take(Math.Clamp(take, 1, 25))
+                .Select(entry => new FinanceRecordSearchDto
+                {
+                    Id = entry.Id,
+                    Number = entry.JournalEntryNumber,
+                    Title = entry.JournalType,
+                    Status = entry.PostingStatus
+                })
+                .ToListAsync(cancellationToken);
+        }
+
         public Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(
             CancellationToken cancellationToken = default) =>
             GetJournalEntriesAsync(null, null, null, null, null, cancellationToken);
