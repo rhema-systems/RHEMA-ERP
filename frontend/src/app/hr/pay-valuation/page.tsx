@@ -196,7 +196,7 @@ function SettlementValuation({ separationId, onClose }: { separationId: string; 
               </div>
               <div className="flex items-center gap-3">
                 {line.days != null && <span className="text-sm text-muted-foreground">{line.days} day(s)</span>}
-                {line.computation === 'CannotCompute' ? (
+                {line.computation === 'CannotCompute' || (line.awaitingFinance && line.amount == null) ? (
                   <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">
                     {line.isPayLine ? 'Awaiting Finance' : 'Not computed'}
                   </Badge>
@@ -205,6 +205,12 @@ function SettlementValuation({ separationId, onClose }: { separationId: string; 
                     {line.isDeduction ? '−' : ''}
                     {money(line.amount, settlement.currencyCode)}
                   </span>
+                )}
+                {/* HR's figure from before pay was Finance's: shown for reference, not as Finance's. */}
+                {line.awaitingFinance && line.amount != null && (
+                  <Badge variant="outline" className="border-amber-400 text-xs text-amber-700 dark:text-amber-300">
+                    HR&apos;s figure — to value
+                  </Badge>
                 )}
                 {line.computation === 'ValuedByFinance' && (
                   <Badge variant="outline" className="text-xs">
@@ -221,7 +227,7 @@ function SettlementValuation({ separationId, onClose }: { separationId: string; 
                       setSource(line.sourceReference ?? '');
                     }}
                   >
-                    {line.computation === 'CannotCompute' ? 'Enter the figure' : 'Revalue'}
+                    {line.awaitingFinance ? 'Enter the figure' : 'Revalue'}
                   </Button>
                 )}
               </div>

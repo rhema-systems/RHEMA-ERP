@@ -553,7 +553,10 @@ export default function MyLeaveRequestDetailPage({
                     >
                       <Download className="h-4 w-4" />
                     </Button>
-                    {canAttach && (
+                    {/* Submitted medical evidence is locked (leave settings audit 2, L-77). */}
+                    {canAttach
+                      && !(request.status !== 'Draft'
+                        && (a.evidenceKind === 'ExcuseDuty' || a.evidenceKind === 'MedicalBoardRecommendation')) && (
                       <Button
                         variant="ghost"
                         size="sm"

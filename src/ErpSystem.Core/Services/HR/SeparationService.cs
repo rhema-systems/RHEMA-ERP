@@ -2051,14 +2051,41 @@ public class SeparationService : ISeparationService
     /// Finance's books when Internal Audit released the statement; "Finance confirms the amount" was
     /// a label, not a step. Recoveries (loans, advances, property, other deductions) are balances of
     /// documents Finance already holds, and stay as HR carries them.
+    /// <para>⚠ Benefit payment and other earning were added on 2026-09-27 (the user, after slice A):
+    /// every line that pays the leaver is Finance's to value.</para>
     /// </remarks>
     internal static bool IsPayLine(SettlementLineCategory category) => category is
         SettlementLineCategory.UnpaidSalary
         or SettlementLineCategory.NoticePay
         or SettlementLineCategory.LeaveEncashment
         or SettlementLineCategory.GratuityOrEndOfService
+        or SettlementLineCategory.BenefitPayment
         or SettlementLineCategory.PensionRelated
+        or SettlementLineCategory.OtherEarning
         or SettlementLineCategory.TaxDeduction;
+
+    /// <summary>
+    /// A pay line still waiting for Finance's figure: not valued by Finance, and not a stated zero.
+    /// </summary>
+    /// <remarks>
+    /// The one rule the queue, the blocked reason and the finalise gate share (leave settings audit 2,
+    /// slice B). A pay line is settled only by Finance's figure — so a figure HR put on one, from before
+    /// pay moved to Finance or on a category since added to <see cref="IsPayLine"/>, still waits for
+    /// Finance rather than passing as priced; widening the categories needs no data step. A stated zero
+    /// (no days owed, summary dismissal) is a fact, not a valuation.
+    /// </remarks>
+    internal static bool AwaitsFinance(SeparationSettlementLine line) =>
+        IsPayLine(line.Category)
+        && line.Computation != SettlementLineComputation.ValuedByFinance
+        && !(line.Computation == SettlementLineComputation.Computed && line.Amount == 0m);
+
+    /// <summary>
+    /// A line still waiting for a figure — a pay line until Finance values it, any other line while
+    /// nobody could value it. What holds a statement open.
+    /// </summary>
+    private static bool StillToValue(SeparationSettlementLine line) =>
+        AwaitsFinance(line)
+        || (!IsPayLine(line.Category) && line.Computation == SettlementLineComputation.CannotCompute);
 
     /// <summary>
     /// The currency a settlement is stated in: HR's configured default, validated against Finance,
@@ -2499,7 +2526,9 @@ public class SeparationService : ISeparationService
             .ThenBy(l => l.Description)
             .ToListAsync(cancellationToken);
 
-        var uncomputed = lines.Count(l => l.Computation == SettlementLineComputation.CannotCompute);
+        // Lines still waiting for a figure: a pay line until Finance values it (AwaitsFinance), any
+        // other line while nobody could value it.
+        var uncomputed = lines.Count(StillToValue);
         var earnings = lines.Where(l => !l.IsDeduction).Sum(l => l.Amount ?? 0m);
         var deductions = lines.Where(l => l.IsDeduction).Sum(l => l.Amount ?? 0m);
 
@@ -2563,8 +2592,7 @@ public class SeparationService : ISeparationService
         if (uncomputed > 0)
         {
             // Leave settings audit 2 (P2/P3): a pay line waits on Finance, not on HR.
-            var awaitingFinance = lines.Count(l => l.Computation == SettlementLineComputation.CannotCompute
-                                                   && IsPayLine(l.Category));
+            var awaitingFinance = lines.Count(AwaitsFinance);
             var other = uncomputed - awaitingFinance;
             var parts = new List<string>();
             if (awaitingFinance > 0)
@@ -2748,8 +2776,8 @@ public class SeparationService : ISeparationService
 
         if (!IsPayLine(line.Category))
             throw new InvalidOperationException(
-                "Only pay is valued by Finance — unpaid salary, notice pay, annual leave owed, gratuity, pension and "
-                + "tax. This line is a recovery HR carries as recorded.");
+                "Only pay is valued by Finance — unpaid salary, notice pay, annual leave owed, gratuity, benefits, "
+                + "pension, other earnings and tax. This line is a recovery HR carries as recorded.");
 
         var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
             .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
@@ -2792,9 +2820,11 @@ public class SeparationService : ISeparationService
 
         var rows = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
             .AsNoTracking()
+            // AwaitsFinance, as SQL: a pay line not valued by Finance and not a stated zero.
             .Where(l => l.TenantId == tenantId && !l.IsDeleted
-                        && l.Computation == SettlementLineComputation.CannotCompute
                         && payCategories.Contains(l.Category)
+                        && l.Computation != SettlementLineComputation.ValuedByFinance
+                        && !(l.Computation == SettlementLineComputation.Computed && l.Amount == 0m)
                         && !l.Settlement.IsDeleted
                         && l.Settlement.Separation.Status == SeparationStatus.SettlementPending)
             .Select(l => new
@@ -2895,17 +2925,18 @@ public class SeparationService : ISeparationService
         // The rule this whole slice turns on. A statement finalised with an unvalued line would go
         // to Internal Audit, and then to payment, carrying a silent zero where a real amount was
         // owed. Zero is a claim; the block is what keeps it from being made by accident.
-        var uncomputed = lines.Where(l => l.Computation == SettlementLineComputation.CannotCompute).ToList();
+        var uncomputed = lines.Where(StillToValue).ToList();
         if (uncomputed.Count > 0)
         {
             // Leave settings audit 2: a pay line waits on Finance's figure, not on HR's — so the
-            // refusal says which lines are whose, as the statement's blocked reason does.
+            // refusal says which lines are whose, as the statement's blocked reason does. A pay line
+            // carrying HR's figure waits too (AwaitsFinance): only Finance's figure settles it.
             static string Names(List<SeparationSettlementLine> of) =>
                 string.Join(", ", of.Take(4).Select(l => l.Description))
                 + (of.Count > 4 ? $" and {of.Count - 4} more" : string.Empty);
 
-            var awaitingFinance = uncomputed.Where(l => IsPayLine(l.Category)).ToList();
-            var other = uncomputed.Where(l => !IsPayLine(l.Category)).ToList();
+            var awaitingFinance = uncomputed.Where(AwaitsFinance).ToList();
+            var other = uncomputed.Where(l => !AwaitsFinance(l)).ToList();
             var parts = new List<string>();
             if (awaitingFinance.Count > 0)
                 parts.Add($"{awaitingFinance.Count} pay line(s) await Finance's valuation in Pay to value — "
@@ -3129,6 +3160,7 @@ public class SeparationService : ISeparationService
         SortOrder = l.SortOrder,
         Days = l.Days,
         IsPayLine = IsPayLine(l.Category),
+        AwaitingFinance = AwaitsFinance(l),
         // Needs ValuedByEmployee loaded; the statement read includes it.
         ValuedByName = l.ValuedByEmployee == null ? null : FullName(l.ValuedByEmployee),
         ValuedOn = l.ValuedOn,

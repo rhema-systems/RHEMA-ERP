@@ -251,6 +251,12 @@ public interface ILeaveService
     Task<IEnumerable<LeaveRequestAttachmentDto>> GetAttachmentsAsync(Guid leaveRequestId);
     Task<LeaveRequestAttachmentDto?> GetAttachmentByIdAsync(Guid attachmentId);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId);
+
+    /// <summary>
+    /// Refuses removing medical evidence from a request that has been submitted (leave settings audit
+    /// 2, L-77). Asked BEFORE the stored file is removed, so a refused delete destroys nothing.
+    /// </summary>
+    Task EnsureAttachmentRemovableAsync(Guid attachmentId);
 }
 
 /// <summary>

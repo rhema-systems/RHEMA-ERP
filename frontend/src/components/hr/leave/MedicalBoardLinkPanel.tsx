@@ -91,11 +91,17 @@ function whyNotSatisfying(board: MedicalBoard, c: MedicalBoardCase | undefined, 
 export function MedicalBoardLinkPanel({
   request,
   canEdit,
+  boardLocked = false,
   onChanged,
 }: {
   request: LeaveRequest;
   /** The desk tier. The API is self-or-desk; this only hides what would 403. */
   canEdit: boolean;
+  /**
+   * Submitted (leave settings audit 2, L-77): a linked board is evidence the request stands on, so it
+   * is neither changed nor unlinked — the API refuses both. One can still be linked where none is.
+   */
+  boardLocked?: boolean;
   onChanged: () => void | Promise<void>;
 }) {
   const { toast } = useToast();
@@ -179,7 +185,7 @@ export function MedicalBoardLinkPanel({
         <CardTitle className="flex items-center gap-2 text-base">
           <Stethoscope className="h-4 w-4" /> Medical board
         </CardTitle>
-        {canEdit && (
+        {canEdit && !(boardLocked && linkedId) && (
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setPicking(true)}>
               {linkedId ? 'Change' : 'Link a board'}

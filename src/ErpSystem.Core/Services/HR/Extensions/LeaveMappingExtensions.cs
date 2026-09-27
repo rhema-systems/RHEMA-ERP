@@ -100,8 +100,8 @@ namespace ErpSystem.Application.Extensions
             Description = dto.Description,
             MaxDaysAllowed = dto.MaxDaysAllowed,
             // Round 5, lane N (guide L-44): it was not mapped, so a sub-type created switched off
-            // came out active and was offered to every request.
-            IsActive = dto.IsActive
+            // came out active and was offered to every request. Left out, it is active.
+            IsActive = dto.IsActive ?? true
         };
 
         public static List<LeaveSubTypeDto> ToDtoList(this IEnumerable<LeaveSubType> entities)

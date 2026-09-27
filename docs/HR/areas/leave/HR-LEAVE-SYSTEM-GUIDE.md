@@ -1960,7 +1960,7 @@ approved request, and records that leave is still going ahead.
 | **🗓 Move dates** | **Approved**, not closed | reschedule — **new** |
 | **✅ Still going ahead** | **Approved**, not yet confirmed | records the answer — **new** |
 | **Recall** *(workflow)* | there is a live instance and you raised it | withdraws it to Draft |
-| **📞 Recall** *(from leave — new)* | **Approved** or **In progress**, not closed, and you hold `HR.Leave.Write` **or are the employee's line manager** *(round 5)*: their supervisor, or the head of their unit or of any unit above it | calls the employee back and gives the remaining days back |
+| **📞 Recall** *(from leave — new)* | **Approved** or **In progress**, not closed, and you hold `HR.Leave.Write` **or are the employee's line manager** *(round 5)*: their supervisor, or the head of their unit or of any unit above it. ⚠ **Never maternity leave** (leave settings audit 2, L-80: the Act gives at least twelve weeks, s.57) — the button is not offered | calls the employee back and gives the remaining days back |
 | **✓✓ Confirm return** *(was Close, round 5)* | **Approved** or **In progress**, the return reported or the leave ended, and you are HR or the line manager | closes the leave on the day the employee was back: early cuts it short and returns the days, late records the working days overstayed |
 | **⊘ Cancel** *(red)* | Draft, Pending or Changes suggested (the employee or HR); **Approved or In progress up to and including the first day, HR only, with a reason** *(round 5)* | withdraws it, releases the days, and takes a pending request out of its approver's queue |
 
@@ -1988,8 +1988,9 @@ then the Medical board panel:**
   *The approval stands — this leave was granted and then interrupted.*
 - **Split absence** *(round 5, lane H)* — on a request split at approval: how many days went to
   annual leave, and to which request; on that second request, the request it continues.
-- **Medical board** — only on a leave type that names a board or has a board threshold: link,
-  change or unlink the board this absence rests on (chapter 7b).
+- **Medical board** — only on a leave type that names a board or has a board threshold: link the
+  board this absence rests on; change or unlink it only while the request is a **draft** — once
+  submitted it is evidence the request stands on (chapter 7b; leave settings audit 2, L-77).
 
 ⚠ **Without that panel a recall is invisible**: the end date simply looks earlier, and the record
 reads as though the leave was always that short. Everything else on this screen is a fact about what
@@ -2252,7 +2253,7 @@ any screen** — chapter 21 item 13.
 | Move dates | `PUT /api/Leaves/{id}/reschedule` | self-or-`HR.Leave.Write` |
 | Still going | `PUT /api/Leaves/{id}/confirm-observance` | self-or-`HR.Leave.Write` |
 | **Recall** | `PUT /api/Leaves/{id}/recall` | **`HR.Leave.Write` or the employee's line authority** *(round 5, lane D)* — their supervisor, or the head of their unit or of any unit above it. Never self: the subject is refused inside the service |
-| **Link a medical board** | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write`. **The Medical board panel on the request overview** — link, change, unlink. See chapter 7b |
+| **Link a medical board** | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write`. **The Medical board panel on the request overview** — link; change or unlink only while a draft (L-77). See chapter 7b |
 | Attachments | `POST /api/Leaves/{id}/attachments?evidenceKind=` | self-or-`HR.Leave.Write` |
 | **Confirm return** *(was Close)* · Cancel | `PUT /api/Leaves/{id}/close` · `/cancel` | `HR.Leave.Write` **or line authority**, never the subject / self-or-write — after approval, HR only, up to the first day |
 
@@ -2628,7 +2629,11 @@ It goes through.
 
 **That second route got its screen on 2026-09-18** (closure plan G5c). The request's **Overview**
 tab carries a **Medical board** panel: it lists the boards with **a case about that employee** — only
-theirs, because the server refuses a board with no case on them — and links, changes or unlinks one.
+theirs, because the server refuses a board with no case on them — and links one. ⚠ **Since leave
+settings audit 2 (L-77) it is changed or unlinked only while the request is a draft**: once submitted,
+the board and the certificate attached are the evidence the request stands on, so neither can be
+withdrawn — and approval checks the evidence again at every stage, so a rule tightened after
+submission (a certificate newly required, a threshold lowered) is met before it is approved.
 The panel hides itself on leave types that neither name a board nor set a threshold, so you will not
 see it on annual leave.
 
@@ -3999,6 +4004,7 @@ The rules, as they now stand:
 | | |
 |---|---|
 | **Expiry keeps what was taken in time** | Carried days are used first. When the window closes, the carried days covered by annual leave taken on or before the last usable day **stay**; only the rest expire. It used to zero them all, charging the days somebody had taken a second time (§ 23, L-42). Leave **booked** for after the deadline does not save them — carried days must be taken in time |
+| **Booking agrees with the run** *(leave settings audit 2, L-81)* | From the lapse, leave cannot draw on carried days that were not taken in time — **whether or not the expiry has run**. A request starting after it is measured without them, and the refusal says which days lapsed and when. The rule is the expiry's own, so running the expiry changes nothing a booking sees |
 | **The warning agrees with the run** | Reminder sweep 5 warns about exactly the carried days the expiry will remove. It used to compare the whole year's used days, so leave booked for June hid the warning while the March deadline passed anyway. The run, the reminder and the *leave owed* report (§ 13b) all read one definition of "used in time" |
 | **Lapsed days never travel again** | Carry-over counts the closing year's own carried days only as far as they were still usable — whether or not anybody ran the expiry that year (§ 23, L-67) |
 | **One pot per leave type** | A stray second balance for the same type and year is examined and named, not carried over the first; the new year's balance is the type's, never a sub-type's |
@@ -4540,8 +4546,8 @@ below so that nobody promises a stakeholder a button.
 > endpoints.
 
 > **2026-09-27 — leave settings audit 2 opened twenty-four more, L-73 to L-96** (the block after
-> round 5 lane I): its slice A closed **L-73 to L-76** — pay is Finance's — and **L-77 to L-96 are
-> open**, scheduled as the audit's slices B and C. With the four above, **twenty-four are open.**
+> round 5 lane I): its slice A closed **L-73 to L-76** — pay is Finance's — and slice B closed **L-77 to L-86**, the
+> ten open doors; **L-87 to L-96 are open**, scheduled as slice C. With the four above, **fourteen are open.**
 
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
@@ -4741,12 +4747,14 @@ the round 5 plan's § 8.
 | **L-71** | ch. 16 | **The compliance register lists only people with a balance record** — 97 of 2,377 on the demo — while the September chase covers everybody serving. HR's summary therefore opens the balances page, whose annual view (chapter 13) lists everybody | Open |
 | **L-72** | ch. 7 | **When HR raises leave on somebody's behalf, the employee is not told it was approved.** The engine's *Approval completed* notice goes to whoever submitted the request, which is HR | Open — a notice, not a reminder; noted by lane I |
 
-### Leave settings audit 2 — 2026-09-27 — twenty-four found; slice A closed four
+### Leave settings audit 2 — 2026-09-27 — twenty-four found; slices A and B closed fourteen
 
 The user asked whether every leave setting is used and enforced — no dead or ghost settings. Four
 reviewers traced about seventy settings, and every finding below was verified in the code first. The
 plan and its live log: [`HR-LEAVE-SETTINGS-AUDIT-2-PLAN.md`](../../programme/HR-LEAVE-SETTINGS-AUDIT-2-PLAN.md).
-Slice A is proved by `dev-harness/hr-leave/run-audit2-a.mjs` (145 assertions, green twice).
+Slice A is proved by `dev-harness/hr-leave/run-audit2-a.mjs` (145 assertions, green twice); slice B by
+`run-audit2-b.mjs` (98, green twice). Slice B also made **benefit payment and other earning pay lines**
+(the user, 2026-09-27), and any HR figure on a pay line now waits for Finance's.
 
 | # | Where | Finding | State |
 |---|---|---|---|
@@ -4754,16 +4762,16 @@ Slice A is proved by `dev-harness/hr-leave/run-audit2-a.mjs` (145 assertions, gr
 | **L-74** | ch. 4b, 15 | **A leaver's leave line and notice pay in lieu were HR's calculation** (monthly × 12 ÷ 365), posted to Finance's books on Internal Audit's release; *"Finance confirms the amount"* was a label, not a step | ✅ **Closed** by slice A: days only; Finance values every pay line in *Pay to value* (`HR.Pay.Value`); Internal Audit cannot release a statement that still carries HR's figures |
 | **L-75** | ch. 4b | The company's encashment working days per month: no screen set it, and it was read only when a type's own figure was 0 | ✅ **Closed** by slice A: dropped |
 | **L-76** | ch. 4 | `LeaveCategoryAllocations.LeaveSubTypeId`: retired in lane N, still a column (0 rows used it) | ✅ **Closed** by slice A: dropped |
-| **L-77** | ch. 7b | Medical evidence could be withdrawn after it passed: attachments deletable at any status, a board unlinkable at any status, and approval never re-checked | Open — slice B |
-| **L-78** | ch. 6, 7 | The service-length gate and eligibility were checked only when a request was made; a draft saved before a rule changed could be submitted, and moving dates earlier got past the service gate | Open — slice B |
-| **L-79** | ch. 4 | A retired leave type was still reachable (a pre-retirement draft, plans, in-service encashment), and an API save that left out `isActive` revived one | Open — slice B |
-| **L-80** | ch. 7 | Maternity leave could be recalled, although its dates never move and the Labour Act gives at least 12 weeks (s.57) | Open — slice B |
-| **L-81** | ch. 13, 17 | Carried-over days stayed bookable after their expiry date until somebody ran the expiry job | Open — slice B |
-| **L-82** | ch. 7 | *Requires approval: off* was ignored when dates were moved: the moved request went back to an approver | Open — slice B |
-| **L-83** | ch. 15 | The in-service switch was checked only at request time; an encashment could be approved and paid after it was switched off | Open — slice B |
-| **L-84** | ch. 7b | The board threshold was not re-checked when a request moved, unchanged in length, into another leave year | Open — slice B |
-| **L-85** | ch. 7 | Reliever availability was not re-checked when dates moved | Open — slice B |
-| **L-86** | ch. 12 | Plans validated neither eligibility nor the sub-type until the request was raised, after approval | Open — slice B |
+| **L-77** | ch. 7b | Medical evidence could be withdrawn after it passed: attachments deletable at any status, a board unlinkable at any status, and approval never re-checked | ✅ **Closed** by slice B: evidence attachments and a linked board are locked once submitted (a draft's can change); approval runs the evidence gate again at every stage. ⚠ The delete removed the stored FILE before the service could refuse — now asked first |
+| **L-78** | ch. 6, 7 | The service-length gate and eligibility were checked only when a request was made; a draft saved before a rule changed could be submitted, and moving dates earlier got past the service gate | ✅ **Closed** by slice B: submit re-runs eligibility and the service gate; a move and a draft's new dates face the service gate at the new start |
+| **L-79** | ch. 4 | A retired leave type was still reachable (a pre-retirement draft, plans, in-service encashment), and an API save that left out `isActive` revived one | ✅ **Closed** by slice B: submit, plans and cashing in refuse a retired type (and submit a retired sub-type); a save that leaves `isActive` out changes nothing, on the type and the sub-type |
+| **L-80** | ch. 7 | Maternity leave could be recalled, although its dates never move and the Labour Act gives at least 12 weeks (s.57) | ✅ **Closed** by slice B: recall refuses maternity leave, and the screen does not offer it |
+| **L-81** | ch. 13, 17 | Carried-over days stayed bookable after their expiry date until somebody ran the expiry job | ✅ **Closed** by slice B: the booking check counts carried days only as the expiry would — from the lapse, those taken in time — and says which lapsed |
+| **L-82** | ch. 7 | *Requires approval: off* was ignored when dates were moved: the moved request went back to an approver | ✅ **Closed** by slice B: a moved request of such a type is approved again directly, as submit does (reschedule and answering a suggestion) |
+| **L-83** | ch. 15 | The in-service switch was checked only at request time; an encashment could be approved and paid after it was switched off | ✅ **Closed** by slice B: approving is refused while the switch is off. ⚠ **Paying one already approved is not** — it holds the employee's days and cannot be cancelled (the plan's § 8, for the user to confirm) |
+| **L-84** | ch. 7b | The board threshold was not re-checked when a request moved, unchanged in length, into another leave year | ✅ **Closed** by slice B: a move that changes the leave year runs the evidence gate again |
+| **L-85** | ch. 7 | Reliever availability was not re-checked when dates moved | ✅ **Closed** by slice B: every move checks the relievers again, naming the one who cannot cover |
+| **L-86** | ch. 12 | Plans validated neither eligibility nor the sub-type until the request was raised, after approval | ✅ **Closed** by slice B: a plan is checked when saved — a retired or non-annual type, eligibility, the sub-type (of this type, active when newly chosen); a retired type again at submit |
 | **L-87** | ch. 4 | *Pro-rate on exit* said a leaver's settlement does not read it — it has since round 5 lane L | Open — slice C |
 | **L-88** | ch. 4 | Self-certification and the board threshold count chargeable days; the hints said days | Open — slice C |
 | **L-89** | ch. 4 | An allocation's *effective from* covers its whole leave year, and an edited allocation did not reach balances until *Repair entitlements* ran | Open — slice C |

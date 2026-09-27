@@ -374,11 +374,12 @@ public class LeaveService : ILeaveService
                   lb.LeaveTypeId == dto.LeaveTypeId &&
                   lb.Year == currentYear);
 
-        var accruedAvailable = await GetAccruedAvailableDaysAsync(
-            dto.EmployeeId, dto.LeaveTypeId, dto.LeaveSubTypeId, currentYear, balance);
+        var bookable = await GetBookableAsync(
+            dto.EmployeeId, dto.LeaveTypeId, dto.LeaveSubTypeId, currentYear, balance, dto.StartDate);
+        var accruedAvailable = bookable.Days;
         await EnsureDaysCoveredAsync(
             dto.EmployeeId, leaveType, dto.StartDate, dto.EndDate, totalDays, accruedAvailable, dto.ChargeExcessToAnnual,
-            $"Insufficient accrued leave balance. Available: {accruedAvailable} days, Requested: {totalDays} days");
+            $"Insufficient accrued leave balance. Available: {accruedAvailable} days, Requested: {totalDays} days{bookable.LapseNote}");
 
         // The sub-type's own annual cap, which nothing enforced before wave D (L-28 / decision D-2).
         if (dto.LeaveSubTypeId is Guid capSubTypeId)
@@ -484,6 +485,13 @@ public class LeaveService : ILeaveService
         else
         {
             leaveType = await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
+
+            // ⚠ Leave settings audit 2, L-78: new dates face the service gate at their start, as a
+            // new request does — moving a draft earlier used to get past it. (Submit asks again.)
+            if (datesChanged
+                && !await _entitlementService.IsAccessibleAsync(request.EmployeeId, request.LeaveTypeId, dto.StartDate))
+                throw new InvalidOperationException(
+                    "This employee has not yet completed the minimum service period required to take this leave type.");
         }
 
         // The sub-type faces the create path's checks too (round 5, lane N3): it must belong to the
@@ -527,15 +535,16 @@ public class LeaveService : ILeaveService
                       lb.LeaveTypeId == dto.LeaveTypeId &&
                       lb.Year == currentYear);
 
-            var accruedAvailable = await GetAccruedAvailableDaysAsync(
-                request.EmployeeId, dto.LeaveTypeId, dto.LeaveSubTypeId, currentYear, balance);
+            var bookable = await GetBookableAsync(
+                request.EmployeeId, dto.LeaveTypeId, dto.LeaveSubTypeId, currentYear, balance, dto.StartDate);
+            var accruedAvailable = bookable.Days;
             // ⚠ Nothing is given back (round 5, lane N3). This used to add the draft's own days as
             // "already reserved by this draft", but a draft reserves nothing — only Pending counts as
             // pending — so a 10-day draft with 5 days left could be edited to 15.
             await EnsureDaysCoveredAsync(
                 request.EmployeeId, leaveType, dto.StartDate, dto.EndDate, totalDays, accruedAvailable,
                 dto.ChargeExcessToAnnual,
-                $"Insufficient accrued leave balance. Available: {accruedAvailable} days, Requested: {totalDays} days");
+                $"Insufficient accrued leave balance. Available: {accruedAvailable} days, Requested: {totalDays} days{bookable.LapseNote}");
         }
 
         // The sub-type's annual cap, checked whatever changed: moving onto a capped sub-type
@@ -613,7 +622,7 @@ public class LeaveService : ILeaveService
                   lb.EmployeeId == employeeId &&
                   lb.LeaveTypeId == leaveTypeId &&
                   lb.Year == year);
-        var available = await GetAccruedAvailableDaysAsync(employeeId, leaveTypeId, leaveSubTypeId, year, balance);
+        var available = await GetAccruedAvailableDaysAsync(employeeId, leaveTypeId, leaveSubTypeId, year, balance, startDate);
 
         var preview = new LeaveExcessPreviewDto
         {
@@ -663,10 +672,7 @@ public class LeaveService : ILeaveService
         // normal approval). Used for low-risk types (e.g. short casual leave).
         if (!leaveType.RequiresApproval)
         {
-            request.Status = LeaveStatus.Approved;
-            request.ApprovedById = userId == Guid.Empty ? null : userId;
-            request.ApprovedDate = _clock.UtcNow;
-            request.RejectionReason = null;
+            ApproveWithoutApprover(request);
 
             await _unitOfWork.ExecuteInTransactionAsync(async ct =>
             {
@@ -719,6 +725,21 @@ public class LeaveService : ILeaveService
     }
 
     /// <summary>
+    /// Approves a request of a leave type that needs no approval (<c>RequiresApproval</c> off) — the
+    /// configured opt-out, not the engine falling through. Submit uses it, and so does every move of
+    /// such a request (leave settings audit 2, L-82): a move used to send it to an approver the type
+    /// does not have.
+    /// </summary>
+    private void ApproveWithoutApprover(LeaveRequest request)
+    {
+        var userId = GetCurrentUserId();
+        request.Status = LeaveStatus.Approved;
+        request.ApprovedById = userId == Guid.Empty ? null : userId;
+        request.ApprovedDate = _clock.UtcNow;
+        request.RejectionReason = null;
+    }
+
+    /// <summary>
     /// The create checks, run again at submit (round 5, lane N3): minimum notice, the reliever
     /// requirement, the balance and the sub-type cap.
     /// </summary>
@@ -732,12 +753,34 @@ public class LeaveService : ILeaveService
     /// never asked (lane A3).</para>
     ///
     /// <para>What the employee's OTHER pending requests hold is already out of the available
-    /// figure. A Pending request's own days are in it too and come back to it; a draft's never left.
-    /// Eligibility and the service gate are facts about the employee, settled at creation, and are
-    /// not re-run — the same judgement as <see cref="EnsureMovedDatesAreValidAsync"/>.</para>
+    /// figure. A Pending request's own days are in it too and come back to it; a draft's never left.</para>
+    ///
+    /// <para>⚠ <b>Leave settings audit 2 (L-78, L-79): eligibility, the service gate and a retired type
+    /// are asked again too.</b> They were judged facts settled at creation and not re-run — but a draft
+    /// can sit while a rule changes, the type or sub-type is retired, or its dates are moved earlier
+    /// than the service gate allows, and each got through. Submitting is when a draft becomes a
+    /// request, so it faces what a new request faces.</para>
     /// </remarks>
     private async Task EnsureStillSubmittableAsync(LeaveRequest request, LeaveType leaveType)
     {
+        if (!leaveType.IsActive)
+            throw new InvalidOperationException(
+                $"'{leaveType.Name}' has been retired and cannot be requested. This draft was saved before it was; "
+                + "raise it as another kind of leave.");
+
+        if (request.LeaveSubTypeId is Guid savedSubTypeId
+            && await _leaveSubTypeRepository.GetByIdAsync(savedSubTypeId) is { IsActive: false } retiredSubType)
+            throw new InvalidOperationException(
+                $"'{retiredSubType.SubTypeName}' has been retired and cannot be requested. Choose another on the draft.");
+
+        if (!await _leaveTypeService.IsEmployeeEligibleAsync(request.LeaveTypeId, request.EmployeeId))
+            throw new InvalidOperationException(
+                "This employee does not meet the eligibility criteria for the selected leave type.");
+
+        if (!await _entitlementService.IsAccessibleAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate))
+            throw new InvalidOperationException(
+                "This employee has not yet completed the minimum service period required to take this leave type.");
+
         if (request.Status == LeaveStatus.Draft && leaveType.Category != LeaveTypeCategory.Maternity
             && leaveType.MinDaysNotice is int minNotice && minNotice > 0)
         {
@@ -752,11 +795,12 @@ public class LeaveService : ILeaveService
                 "This leave type requires a reliever. Name one on the request before submitting it.");
 
         var year = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
-        var headroom = await AvailableToRequestAsync(request);
+        var toRequest = await AvailableToRequestAsync(request);
+        var headroom = toRequest.Days;
         await EnsureDaysCoveredAsync(
             request.EmployeeId, leaveType, request.StartDate, request.EndDate, request.TotalDays, headroom,
             request.ChargeExcessToAnnual,
-            $"Insufficient accrued leave balance. Available: {headroom} days, Requested: {request.TotalDays} days");
+            $"Insufficient accrued leave balance. Available: {headroom} days, Requested: {request.TotalDays} days{toRequest.LapseNote}");
 
         if (request.LeaveSubTypeId is Guid subTypeId)
             await EnsureSubTypeCapAsync(request.EmployeeId, subTypeId, year, request.TotalDays, request.Id);
@@ -1011,12 +1055,18 @@ public class LeaveService : ILeaveService
         // the request not (the L-1 shape). ⚠ The approver is checked first: that refusal names what
         // the employee's annual leave can take, which is for the people deciding the request. The
         // suite found it telling a manager who no longer decided it.
+        await EnsureMayDecideAsync(id, userId, "approve a leave request");
+
+        // ⚠ Leave settings audit 2, L-77: the medical evidence gate again, at every stage and before
+        // the engine is asked, for the reason above. Evidence can no longer be withdrawn once
+        // submitted, but what it must satisfy can move under it — a certificate newly required, a
+        // board threshold lowered, the linked board's case withdrawn — and approval never re-checked.
+        await EnsureMedicalEvidenceAsync(
+            request, request.LeaveType ?? await GetOwnedLeaveTypeAsync(request.LeaveTypeId), act: "approved");
+
         ExcessSplit? split = null;
         if (request.ChargeExcessToAnnual)
-        {
-            await EnsureMayDecideAsync(id, userId, "approve a leave request");
             split = await PlanApprovalSplitAsync(request);
-        }
 
         var comments = dto.Comments ?? dto.ApprovalNotes;
 
@@ -1184,14 +1234,22 @@ public class LeaveService : ILeaveService
         request.ManagerSuggestionNotes = null;
 
         // Back through the front door, with the same guard the first submit has: without it a
-        // request sent back for changes would approve itself on its way in.
-        var (workflowResult, submitOutcome) =
-            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
+        // request sent back for changes would approve itself on its way in. ⚠ Unless the type needs
+        // no approval (leave settings audit 2, L-82) — then it is approved directly, as submit does.
+        if (!leaveType.RequiresApproval)
+        {
+            ApproveWithoutApprover(request);
+        }
+        else
+        {
+            var (workflowResult, submitOutcome) =
+                await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
-        var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(request, submitOutcome, GetCurrentUserId());
+            var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+            adapter.ApplySubmitOutcome(request, submitOutcome, GetCurrentUserId());
+        }
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
@@ -1199,6 +1257,10 @@ public class LeaveService : ILeaveService
             await _unitOfWork.SaveChangesAsync(ct);
             await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
         });
+
+        // Approved directly, it reaches the attendance register now, as a submit's does.
+        if (request.Status == LeaveStatus.Approved)
+            await ReconcileAttendanceAsync(request.Id);
 
         _logger.LogInformation("Leave request {number} re-submitted after a suggestion ({mode})",
             request.RequestNumber, dto.Accept ? "accepted" : "countered");
@@ -1267,13 +1329,22 @@ public class LeaveService : ILeaveService
         request.ApprovedDate = null;
         request.WorkflowInstanceId = null;
 
-        var (workflowResult, submitOutcome) =
-            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to restart the approval workflow.");
+        // ⚠ Leave settings audit 2, L-82: a type that needs no approval is approved again directly, as
+        // submit approves it — the move used to send it to an approver the type does not have.
+        if (!leaveType.RequiresApproval)
+        {
+            ApproveWithoutApprover(request);
+        }
+        else
+        {
+            var (workflowResult, submitOutcome) =
+                await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to restart the approval workflow.");
 
-        var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(request, submitOutcome, GetCurrentUserId());
+            var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+            adapter.ApplySubmitOutcome(request, submitOutcome, GetCurrentUserId());
+        }
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
@@ -1288,7 +1359,8 @@ public class LeaveService : ILeaveService
 
         // The dates it was approved for are no longer the dates, so those attendance days come off
         // now. The reconciler posts nothing in their place, because the move re-opened the approval
-        // — attendance is written when leave is approved, not when it is asked for.
+        // — attendance is written when leave is approved, not when it is asked for. (A type that
+        // needs no approval was approved again above, so its new dates are posted instead.)
         await ReconcileAttendanceAsync(request.Id);
 
         _logger.LogInformation("Leave request {number} rescheduled to {start}..{end} (move {count})",
@@ -1340,6 +1412,17 @@ public class LeaveService : ILeaveService
         if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == request.EmployeeId)
             throw new InvalidOperationException(
                 "You cannot recall yourself from leave. A recall is the employer's act and has to be recorded by someone else.");
+
+        // ⚠ Leave settings audit 2, L-80: maternity leave is not recalled. Its dates follow the birth and
+        // are never moved (lane A3), and the Labour Act gives at least twelve weeks (Act 651 s.57) — a
+        // recall would cut short leave the law guarantees.
+        if (await _leaveTypeRepository.GetQueryable()
+                .Where(t => t.Id == request.LeaveTypeId)
+                .Select(t => t.Category)
+                .FirstOrDefaultAsync() == LeaveTypeCategory.Maternity)
+            throw new InvalidOperationException(
+                "Maternity leave cannot be recalled: the Labour Act gives at least twelve weeks (s.57), and its dates "
+                + "follow the birth. If they are wrong, HR corrects them with an adjustment.");
 
         // Round 5, lane H: an absence split at approval is recalled as one, whichever part it is made on.
         if (await FindLiveSplitAsync(request) is { } split)
@@ -1507,6 +1590,18 @@ public class LeaveService : ILeaveService
         var request = await GetOwnedLeaveRequestAsync(id);
         var tenantId = GetTenantId();
 
+        // ⚠ Leave settings audit 2, L-77: once submitted, a linked board is evidence the request
+        // stands on, and it could be unlinked or swapped at any status. It is unlinked or changed only
+        // while the request is a draft; a board can still be linked where none is (a request waiting
+        // on its board), and approval checks it again.
+        if (request.Status != LeaveStatus.Draft
+            && request.MedicalBoardId is Guid linked && linked != medicalBoardId)
+            throw new InvalidOperationException(medicalBoardId is null
+                ? "The medical board linked to this request is evidence it was submitted on, so it cannot be unlinked. "
+                  + "HR can reject the request if it no longer stands."
+                : "This request is already linked to a medical board, the evidence it was submitted on, so the board "
+                  + "cannot be changed. HR can reject the request if it no longer stands.");
+
         if (medicalBoardId is Guid boardId)
         {
             // ⚠ The board must have a case about THIS employee. Without that check a request could be
@@ -1602,12 +1697,21 @@ public class LeaveService : ILeaveService
         if (newEnd < newStart)
             throw new InvalidOperationException("The end date cannot be before the start date.");
 
+        // ⚠ Leave settings audit 2, L-78: the service gate at the NEW start. It was asked only when the
+        // request was made, so moving leave earlier could put its first day before the employee had
+        // served long enough to take it.
+        if (!await _entitlementService.IsAccessibleAsync(request.EmployeeId, request.LeaveTypeId, newStart))
+            throw new InvalidOperationException(
+                "This employee will not yet have completed the minimum service period required to take this leave "
+                + $"type by {newStart:d MMM yyyy}. Choose dates after they have.");
+
         var hasConflict = await HasConflictingLeaveAsync(request.EmployeeId, newStart, newEnd, request.Id);
         if (hasConflict)
             throw new InvalidOperationException("The employee already has leave booked over those dates.");
 
         var newDays = await CalculateLeaveDaysAsync(newStart, newEnd, leaveType);
-        var year = LeaveYear.For(newStart, await _leaveYear.StartMonthAsync());
+        var startMonth = await _leaveYear.StartMonthAsync();
+        var year = LeaveYear.For(newStart, startMonth);
         var tenantId = GetTenantId();
 
         var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
@@ -1616,8 +1720,9 @@ public class LeaveService : ILeaveService
                   lb.LeaveTypeId == request.LeaveTypeId &&
                   lb.Year == year);
 
-        var available = await GetAccruedAvailableDaysAsync(
-            request.EmployeeId, request.LeaveTypeId, request.LeaveSubTypeId, year, balance);
+        var bookable = await GetBookableAsync(
+            request.EmployeeId, request.LeaveTypeId, request.LeaveSubTypeId, year, balance, newStart);
+        var available = bookable.Days;
 
         // The days this request already holds in that year are its own and come back to it; without
         // adding them a request could fail to move onto dates it is itself the only claimant of.
@@ -1626,13 +1731,13 @@ public class LeaveService : ILeaveService
         // suggestion used to be measured against days it did not have.
         var holdsDays = request.Status is LeaveStatus.Pending or LeaveStatus.Approved or LeaveStatus.InProgress;
         var headroom = available
-            + (holdsDays && LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()) == year
+            + (holdsDays && LeaveYear.For(request.StartDate, startMonth) == year
                 ? request.TotalDays
                 : 0m);
 
         await EnsureDaysCoveredAsync(
             request.EmployeeId, leaveType, newStart, newEnd, newDays, headroom, request.ChargeExcessToAnnual,
-            $"Insufficient leave balance for the new dates. Available: {headroom} days, needed: {newDays} days.");
+            $"Insufficient leave balance for the new dates. Available: {headroom} days, needed: {newDays} days{bookable.LapseNote}.");
 
         // A move can change the number of chargeable days, and can cross into a different year — so
         // the sub-type's annual cap is re-checked against the year the request is moving INTO. The
@@ -1642,9 +1747,31 @@ public class LeaveService : ILeaveService
 
         // ⚠ A LONGER request faces the evidence gate again (round 5, lane N3): a two-day absence on
         // the employee's word could otherwise be moved, suggested or countered into ten without a
-        // certificate. A shorter or equal one cannot need more evidence than it already passed.
-        if (newDays > request.TotalDays)
+        // certificate. A shorter or equal one cannot need more evidence than it already passed —
+        // ⚠ unless it moves into ANOTHER leave year (leave settings audit 2, L-84): the board
+        // threshold counts the year's days, and the new year's may already be near it.
+        var movesYear = LeaveYear.For(request.StartDate, startMonth) != year;
+        if (newDays > request.TotalDays || movesYear)
             await EnsureMedicalEvidenceAsync(request, leaveType, newDays, newStart, "moved to those dates");
+
+        // ⚠ Leave settings audit 2, L-85: the relievers named on the request must be free over the new
+        // dates too — they were checked only for the dates first asked. A move carries no reliever of
+        // its own, so the refusal says what can be done instead.
+        foreach (var relieverId in new[] { request.RelieverEmployeeId, request.SecondRelieverEmployeeId }.OfType<Guid>())
+        {
+            var reliever = await GetOwnedEmployeeAsync(relieverId);
+            var name = $"{reliever.FirstName} {reliever.LastName}".Trim();
+
+            if (!CanCover(reliever.IsActive, reliever.StaffStatus))
+                throw new InvalidOperationException(
+                    $"{name}, the reliever on this request, cannot cover it: {NotAtWorkMessage(reliever.StaffStatus)} "
+                    + "Cancel the leave and raise it again with another reliever.");
+
+            if (await RelieverHasConflictAsync(relieverId, newStart, newEnd))
+                throw new InvalidOperationException(
+                    $"{name}, the reliever on this request, is not available over the new dates. Choose dates they "
+                    + "can cover, or cancel the leave and raise it again with another reliever.");
+        }
     }
 
     public async Task<LeaveRequestDto> RejectLeaveAsync(Guid id, RejectLeaveDto dto)
@@ -1825,7 +1952,7 @@ public class LeaveService : ILeaveService
             return;
 
         var leaveType = request.LeaveType ?? await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
-        var available = await AvailableToRequestAsync(request);
+        var available = (await AvailableToRequestAsync(request)).Days;
         if (request.TotalDays <= available) return;
 
         if (!leaveType.AllowOffsetAgainstAnnual)
@@ -3491,7 +3618,9 @@ public class LeaveService : ILeaveService
                 ? isSubject || actingAsDesk
                 : granted && actingAsDesk && !isSubject && request.StartDate >= today,
             CancelNeedsReason = granted,
-            CanRecall = granted && open && !isSubject && (actingAsDesk || line),
+            // Never maternity leave (leave settings audit 2, L-80): the API refuses it.
+            CanRecall = granted && open && !isSubject && (actingAsDesk || line)
+                        && request.LeaveTypeCategory != LeaveTypeCategory.Maternity,
             // Reporting a return needs a day back after the first day of leave.
             CanReportResumption = granted && open && isSubject && absenceStart < today && !continuesAsAnnual,
             CanConfirmResumption = granted && open && !isSubject && (actingAsDesk || line) && !continuesAsAnnual
@@ -3898,18 +4027,67 @@ public class LeaveService : ILeaveService
     /// respects a manual <c>EntitledDays</c> override on an existing balance.
     /// </summary>
     private async Task<decimal> GetAccruedAvailableDaysAsync(
-        Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, int year, LeaveBalance? balance)
+        Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, int year, LeaveBalance? balance, DateOnly start)
+        => (await GetBookableAsync(employeeId, leaveTypeId, leaveSubTypeId, year, balance, start)).Days;
+
+    /// <summary>What a booking can draw on, and — where carried days have lapsed for it — why it is less.</summary>
+    private sealed record Bookable(decimal Days, string LapseNote);
+
+    /// <summary>
+    /// The days a request starting on <paramref name="start"/> can draw on: the enforced available
+    /// figure, with carried-over days counted only as the carry-over allows at that date.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Leave settings audit 2, L-81. Carried days count in full until they lapse; for leave starting
+    /// from the lapse only those used in time count — the rule the expiry run applies
+    /// (<c>LeaveYearEndService.CarriedStillUsableAsync</c>) and the leave owed report reads, so a
+    /// booking cannot spend days the expiry is about to remove. Before, they stayed bookable until
+    /// somebody ran the expiry job. The rule is idempotent — after the run the carried figure already
+    /// is what was used in time — so it holds whether the job has run or not. By the request's first
+    /// day: a request that straddles the lapse is judged as starting before it.
+    /// </remarks>
+    private async Task<Bookable> GetBookableAsync(
+        Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, int year, LeaveBalance? balance, DateOnly start)
     {
         var snapshot = await _entitlementService.GetSnapshotAsync(employeeId, leaveTypeId, leaveSubTypeId, year);
 
-        return EnforcedAvailableDays(
+        var carried = balance?.CarriedOverDays ?? 0m;
+        var usableCarried = carried;
+        var note = string.Empty;
+        if (carried > 0m)
+        {
+            var expiryMonths = await _leaveTypeRepository.GetQueryable()
+                .Where(t => t.Id == leaveTypeId)
+                .Select(t => t.CarryOverExpiryMonths)
+                .FirstOrDefaultAsync();
+            if (expiryMonths is int months)
+            {
+                var startMonth = await _leaveYear.StartMonthAsync();
+                var yearStart = LeaveYear.StartOf(year, startMonth);
+                var lapse = yearStart.AddMonths(months);
+                if (start >= lapse)
+                {
+                    var usage = await _usage.ReadAsync(
+                        GetTenantId(), leaveTypeId, yearStart, LeaveYear.EndOf(year, startMonth), lapse.AddDays(-1),
+                        new[] { employeeId });
+                    var usedInTime = usage.TryGetValue(employeeId, out var u) ? u.TakenThrough : 0m;
+                    usableCarried = Math.Min(carried, usedInTime);
+                    if (usableCarried < carried)
+                        note = $". {carried - usableCarried:0.##} carried-over day(s) had to be taken by "
+                               + $"{lapse.AddDays(-1):d MMM yyyy}, so they cannot be used for leave starting after it";
+                }
+            }
+        }
+
+        var days = EnforcedAvailableDays(
             snapshot,
             balance?.EntitledDays    ?? snapshot.AnnualEntitledDays,
-            balance?.CarriedOverDays ?? 0m,
+            usableCarried,
             balance?.AdjustmentDays  ?? 0m,
             balance?.UsedDays        ?? 0m,
             balance?.PendingDays     ?? 0m,
             balance?.EncashedDays    ?? 0m);
+        return new Bookable(days, note);
     }
 
     /// <summary>
@@ -3917,7 +4095,7 @@ public class LeaveService : ILeaveService
     /// request's own days counted back in while it is Pending and holds them. A draft, or a request
     /// sent back with other dates, holds none.
     /// </summary>
-    private async Task<decimal> AvailableToRequestAsync(LeaveRequest request)
+    private async Task<Bookable> AvailableToRequestAsync(LeaveRequest request)
     {
         var year = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
         var tenantId = GetTenantId();
@@ -3927,9 +4105,9 @@ public class LeaveService : ILeaveService
                   lb.LeaveTypeId == request.LeaveTypeId &&
                   lb.Year == year);
 
-        var available = await GetAccruedAvailableDaysAsync(
-            request.EmployeeId, request.LeaveTypeId, request.LeaveSubTypeId, year, balance);
-        return available + (request.Status == LeaveStatus.Pending ? request.TotalDays : 0m);
+        var bookable = await GetBookableAsync(
+            request.EmployeeId, request.LeaveTypeId, request.LeaveSubTypeId, year, balance, request.StartDate);
+        return bookable with { Days = bookable.Days + (request.Status == LeaveStatus.Pending ? request.TotalDays : 0m) };
     }
 
     // ─── Beyond the limit, charged to annual leave (round 5, lane H, decision A5) ────────────────
@@ -4053,7 +4231,7 @@ public class LeaveService : ILeaveService
                   lb.EmployeeId == employeeId &&
                   lb.LeaveTypeId == annual.Id &&
                   lb.Year == annualYear);
-        var annualLeft = await GetAccruedAvailableDaysAsync(employeeId, annual.Id, null, annualYear, annualBalance);
+        var annualLeft = await GetAccruedAvailableDaysAsync(employeeId, annual.Id, null, annualYear, annualBalance, annualStart);
 
         if (annualLeft < annualDays)
             return Refuse(
@@ -4076,7 +4254,7 @@ public class LeaveService : ILeaveService
         if (!request.ChargeExcessToAnnual) return null;
 
         var leaveType = request.LeaveType ?? await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
-        var available = await AvailableToRequestAsync(request);
+        var available = (await AvailableToRequestAsync(request)).Days;
         if (request.TotalDays <= available) return null;
 
         const string next = " Reject the request, or suggest dates within the limit.";
@@ -4694,6 +4872,43 @@ public class LeaveService : ILeaveService
         return attachment?.ToDto();
     }
 
+    /// <inheritdoc />
+    public async Task EnsureAttachmentRemovableAsync(Guid attachmentId)
+    {
+        var tenantId = GetTenantId();
+        var attachment = await _attachmentRepository
+            .GetQueryable()
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.TenantId == tenantId);
+        if (attachment != null)
+            await EnsureRemovableAsync(attachment);
+    }
+
+    /// <summary>
+    /// Refuses removing medical evidence from a request that has been submitted (leave settings audit
+    /// 2, L-77).
+    /// </summary>
+    /// <remarks>
+    /// Evidence is what the gate passed the request on, and it could be deleted at any status — so a
+    /// certificate could come off an approved sick leave. A draft's evidence can still be replaced;
+    /// attachments of no evidence kind stay removable. ⚠ The controller asks this BEFORE it removes the
+    /// stored file, or a refused delete would still destroy the document.
+    /// </remarks>
+    private async Task EnsureRemovableAsync(LeaveRequestAttachment attachment)
+    {
+        if (attachment.EvidenceKind is not (LeaveEvidenceKind.ExcuseDuty or LeaveEvidenceKind.MedicalBoardRecommendation))
+            return;
+
+        var tenantId = GetTenantId();
+        var status = await _leaveRepository.GetQueryable()
+            .Where(r => r.Id == attachment.LeaveRequestId && r.TenantId == tenantId)
+            .Select(r => (LeaveStatus?)r.Status)
+            .FirstOrDefaultAsync();
+        if (status is not null and not LeaveStatus.Draft)
+            throw new InvalidOperationException(
+                "This is medical evidence the request was submitted on, so it cannot be removed. If it is the wrong "
+                + "document, attach the right one as well; HR can reject the request if it no longer stands.");
+    }
+
     public async Task<bool> DeleteAttachmentAsync(Guid attachmentId)
     {
         var tenantId = GetTenantId();
@@ -4701,6 +4916,8 @@ public class LeaveService : ILeaveService
             .GetQueryable()
             .FirstOrDefaultAsync(a => a.Id == attachmentId && a.TenantId == tenantId);
         if (attachment == null) return false;
+
+        await EnsureRemovableAsync(attachment);
 
         await _attachmentRepository.DeleteAsync(attachment);
         await _unitOfWork.SaveChangesAsync();

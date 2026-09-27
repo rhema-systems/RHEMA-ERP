@@ -1,9 +1,9 @@
 # Leave settings that do what they say — the second audit, and pay to Finance
 
-> **Status (2026-09-27): slice A BUILT — pay is Finance's (L-73 to L-76 closed); slices B and C
-> next.** The user agreed the whole of it on 2026-09-27 ("I agree. proceed."). The live record is
-> § 8 at the bottom: one entry per slice. ⚠ Two decisions the build raised are the user's (§ 8,
-> slice A, *For the user*), and one UAT data step is theirs to run.
+> **Status (2026-09-27): slices A and B BUILT — L-73 to L-86 closed; slice C next.** The user agreed
+> the whole of it on 2026-09-27 ("I agree. proceed."), and widened P3 during slice B (benefit payment
+> and other earning are pay lines). The live record is § 8 at the bottom: one entry per slice. ⚠ One
+> deviation in slice B is the user's to confirm (L-83, § 8).
 
 ## Why this exists
 
@@ -42,7 +42,9 @@ open, and ten labels or small behaviours that said something the code did not do
   gratuity or end-of-service, pension-related, tax: HR records the days and facts, Finance enters the
   amount and its source; HR cannot price them. Recoveries of documents Finance already holds
   (loans, salary and travel advances, asset and property recoveries, other deductions) stay as HR
-  carries them. **HR keeps no pay-rate settings.**
+  carries them. **HR keeps no pay-rate settings.** ⚠ **Widened 2026-09-27 by the user** (after slice
+  A): **benefit payment** and **other earning** are pay lines too — every line that pays the leaver
+  is Finance's to value. Built in slice B.
 - **P4 — Cashing in while employed** (off for TDC; other organisations may use it): HR approves the
   days; Finance marks it paid, entering the amount with the payment reference; the posting to
   Finance's books uses Finance's amount.
@@ -208,8 +210,8 @@ its count, the neighbours re-run, and anything found in passing.
    now Finance's.
 4. **The data step 2 did not run on UAT.** It was added after UAT had applied the migration, and my
    UPDATE was refused by the permission classifier (shared database). The rendered batch is
-   `dev-harness/hr-leave/audit2a-uat-days-step.sql` — **the user's to run** (three lines; idempotent).
-   Until then those three lines show no days in Finance's queue; their descriptions carry them.
+   `dev-harness/hr-leave/audit2a-uat-days-step.sql` — **run by the user on 2026-09-27**, and checked in
+   SQL: SEP-2026-00013's notice 16 and leave 12.25 days, SEP-2026-00014's leave 14.
 5. **The screens accept Finance's roles beside the permission.** Login lists only *seeded* permissions,
    and the seeder does not run in Staging, so on UAT a Finance Officer's token carries no
    `HR.Pay.Value` while the API grants it by role. `PAY_VALUER_ROLES` (PermissionGate, mirroring
@@ -261,3 +263,79 @@ L-73 to L-96, Appendix B's `HR.Pay.Value`); the configuration register; `HR-OPEN
 
 **Housekeeping.** The four leave types today's runs created (G2C/G2O/G2Y694007, G5L716689) switched
 off through the product's save.
+
+### B — Every door · BUILT 2026-09-27
+
+**Built** (no migration):
+
+- **L-77 — evidence, locked.** An attachment of an evidence kind (excuse duty, board recommendation)
+  cannot be removed once the request is submitted; a draft's can, and other attachments can. A linked
+  board is changed or unlinked only while the request is a draft (one can still be linked where none
+  is). **Approval runs the evidence gate again, at every stage, before the engine records the step** —
+  after the approver check, which now always comes first (it did only for a split). ⚠ **Found on the
+  way:** the delete endpoint removed the stored FILE before the service was asked, so a refused delete
+  would have destroyed the document of a record that stays. `EnsureAttachmentRemovableAsync` is asked
+  first, and the refusal is a 400, not the old catch-all 500.
+- **L-78.** Submit re-runs eligibility and the service gate (the remarks said they were settled at
+  creation and deliberately not re-run — reversed); a move (reschedule, a suggestion answered) faces
+  the service gate at the new start, saying by when; a draft's new dates face it too.
+- **L-79.** Submit refuses a draft on a type or sub-type retired since it was saved; plans refuse a
+  retired type at save and at submit; cashing in refuses one. `UpdateLeaveTypeDto.IsActive` and the
+  sub-type's are `bool?` — null leaves them as they are (they defaulted to true, so a save that left
+  them out revived a retired type).
+- **L-80.** Recall refuses maternity leave, citing s.57; the viewer actions no longer offer it.
+- **L-81.** The booking check (`GetBookableAsync`, behind create, draft edit, submit, moves and the
+  excess preview) counts carried days as the expiry does: from the lapse, only those taken in time. The
+  rule is idempotent, so it holds whether the expiry has run or not, and the refusal names the lapsed
+  days and the last day they could be taken. A request is judged by its first day.
+- **L-82.** A request of a type that needs no approval is approved again directly when it moves, as
+  submit approves it (`ApproveWithoutApprover`, shared by submit, reschedule and a suggestion answered).
+- **L-83.** Approving an encashment is refused while in-service encashment is off. See *Changed from
+  the plan*.
+- **L-84.** A move that changes the leave year runs the evidence gate (the board counts the new year).
+- **L-85.** Every move checks the relievers again, naming the one who cannot cover and what to do
+  instead (a move carries no reliever of its own).
+- **L-86.** A plan is checked when saved: an active, annual type the employee is eligible for, and a
+  sub-type of that type, active when newly chosen (`RequirePlannableAsync`). A sub-type of another type
+  is a 404 ("not a sub-type of"), as on the request path.
+- **P3 widened (the user, 2026-09-27): benefit payment and other earning are pay lines.** And one rule
+  replaces "CannotCompute and a pay line": **`AwaitsFinance`** — a pay line waits for Finance until
+  Finance values it (or it is a stated zero). An HR figure on a pay line — from before pay moved, or on a
+  category since added — therefore waits too, and widening needed **no data step** (UAT had one such
+  line, SEP-2026-00081's "Medical benefit owed", a harness fixture). The statement's count, the blocked
+  reason, the finalise gate, Finance's queue and a new `AwaitingFinance` on the line all read it; both
+  screens show an HR figure as *HR's figure — awaiting Finance*.
+- **Screens.** The request page's attachment panel and board panel hide what the API now refuses once
+  submitted (the portal's own list too).
+
+**Changed from the plan, and why.**
+
+1. ⚠ **L-83: approving is refused while the switch is off — paying one already approved is not.** The
+   plan said "approve and pay refuse". But an approved encashment **holds the employee's days** (round
+   5, lane L3) and nothing can cancel an approved one: refusing payment would leave the employee without
+   the days *and* without the money. So Finance can still pay one approved while the route was open.
+   **The user's to confirm**; the alternative is refusing payment too, with a way to cancel an approved
+   encashment, which would be built.
+2. The plan's items stayed rules; the one addition is the file-deletion order in the attachment delete
+   (above) — a defect the lock exposed.
+
+**Suite.** `dev-harness/hr-leave/run-audit2-b.mjs` — **98 assertions, green twice.** Each rule in both
+positions, on nine harness types of its own (A2B…), switched off at the end; evidence and some requests
+planted in SQL as lane N plants them; [10] makes one harness type Annual for seconds (one active Annual
+type is the API's rule) and asserts TDC's is the only one after. Its first run failed seven times on its
+own mistakes, each fixed and named in the file: requests created Pending have no workflow instance until
+submitted (a 401 at stage one); two date clashes the overlap check answered first; the foreign sub-type's
+404; and sqlcmd printing an empty date as the word NULL, which killed the cleanup (the fixture's hire date
+was put back by hand).
+
+**Neighbours — the whole hr-leave pass, at baseline:** slices 1–13 (slice 1's three known reds, the same
+three), round 5 A, C–N and the K boards, and audit2-a **145**; separation slices 5 (**85**), 6 (**39**),
+run-audit (**134 + the same stale red**, re-based: a benefit is a pay line, added as a fact and valued by
+Finance); finance slices 3 (**23**) and 4 (**86**).
+
+**Housekeeping.** The 24 leave types the pass's older slices minted (F1…, G1–G5…, W1…, W2…) switched
+off through the product's save, as the A2B types are by the suite.
+
+**Docs.** The leave guide: ch. 7/7b (the board is locked once submitted; approval re-checks), the
+recall row (never maternity), ch. 17's rules table (booking agrees with the expiry), § 23's L-77 to L-86
+closed.

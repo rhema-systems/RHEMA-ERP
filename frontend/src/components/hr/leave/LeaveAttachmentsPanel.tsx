@@ -42,12 +42,18 @@ const sizeLabel = (bytes?: number | null) => {
  * DMS registration) and downloads stream from the authorized endpoint — the stored
  * `filePath` is never used as a link.
  */
+/** The kinds the evidence gate reads — locked once the request is submitted (leave settings audit 2, L-77). */
+const isEvidence = (kind: string) => kind === 'ExcuseDuty' || kind === 'MedicalBoardRecommendation';
+
 export function LeaveAttachmentsPanel({
   leaveRequestId,
   canUpload = true,
+  evidenceLocked = false,
 }: {
   leaveRequestId: string;
   canUpload?: boolean;
+  /** Submitted: medical evidence is what the request stands on, and the API refuses its removal. */
+  evidenceLocked?: boolean;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -181,7 +187,7 @@ export function LeaveAttachmentsPanel({
                             <Download className="h-4 w-4" />
                             <span className="sr-only">Download</span>
                           </Button>
-                          {canUpload && (
+                          {canUpload && !(evidenceLocked && isEvidence(a.evidenceKind)) && (
                             <Button
                               variant="ghost"
                               size="icon"

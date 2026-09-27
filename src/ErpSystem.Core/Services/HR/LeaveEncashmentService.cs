@@ -133,6 +133,12 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         // before the type's own flag, so the refusal names the real reason: sick or casual days are
         // not a reserve of money whatever a flag on their type says.
         var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+
+        // ⚠ Leave settings audit 2, L-79: a retired type is not cashed in, as it is not requested.
+        if (!leaveType.IsActive)
+            throw new InvalidOperationException(
+                $"'{leaveType.Name}' has been retired and cannot be cashed in.");
+
         if (leaveType.Category != LeaveTypeCategory.Annual)
             throw new InvalidOperationException(
                 $"Only annual leave can be cashed in, and '{leaveType.Name}' is not annual leave.");
@@ -259,6 +265,22 @@ public class LeaveEncashmentService : ILeaveEncashmentService
             throw new UnauthorizedAccessException("User not authenticated.");
 
         RefuseSelfApproval(entity.EmployeeId, "leave encashment");
+
+        // ⚠ Leave settings audit 2, L-83: the switch was asked only when the encashment was requested,
+        // so one could be approved after the organisation had switched the route off. Asked again
+        // here, before the engine records anything. While it awaits a decision it holds no days, so
+        // rejecting it costs the employee nothing.
+        //
+        // ⚠ Deliberately NOT asked when Finance pays one already approved: an approved encashment holds
+        // its days (round 5, lane L3) and cannot be cancelled, so refusing payment would leave the
+        // employee without the days and without the money. The plan said "approve and pay"; this is the
+        // deviation, recorded in its § 8 for the user.
+        var policy = await _policyProvider.GetAsync();
+        if (!policy.AllowInServiceEncashment)
+            throw new InvalidOperationException(
+                "Leave is no longer cashed in while employed — in-service encashment has been switched off in HR "
+                + "policy settings — so this encashment cannot be approved. Reject it: while it awaits a decision "
+                + "it holds none of the employee's days.");
 
         var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
             _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,

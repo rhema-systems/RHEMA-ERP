@@ -610,9 +610,7 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
               */}
               {settlement.uncomputedLines > 0 && (() => {
                 // Leave settings audit 2 (P2/P3): pay lines wait on Finance, not on HR.
-                const awaitingFinance = settlement.lines.filter(
-                  (l) => l.isPayLine && l.computation === 'CannotCompute',
-                ).length;
+                const awaitingFinance = settlement.lines.filter((l) => l.awaitingFinance).length;
                 const other = settlement.uncomputedLines - awaitingFinance;
                 return (
                   <Alert variant="destructive">
@@ -658,19 +656,23 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                         {line.days != null && (
                           <span className="text-sm text-muted-foreground tabular-nums">{line.days} day(s)</span>
                         )}
-                        {line.computation === 'CannotCompute' ? (
-                          line.isPayLine ? (
-                            // Leave settings audit 2: HR records the days; Finance puts the money on them.
-                            <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">
-                              Awaiting Finance
-                            </Badge>
-                          ) : (
-                            <Badge variant="destructive">Not computed</Badge>
-                          )
+                        {line.computation === 'CannotCompute' && !line.isPayLine ? (
+                          <Badge variant="destructive">Not computed</Badge>
+                        ) : line.awaitingFinance && line.amount == null ? (
+                          // Leave settings audit 2: HR records the days; Finance puts the money on them.
+                          <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">
+                            Awaiting Finance
+                          </Badge>
                         ) : (
                           <span className={`tabular-nums ${line.isDeduction ? 'text-rose-600 dark:text-rose-400' : ''}`}>
                             {line.isDeduction ? '−' : ''}{money(line.amount, settlement.currencyCode)}
                           </span>
+                        )}
+                        {/* A figure HR put on a pay line before it was Finance's: shown, but not settled. */}
+                        {line.awaitingFinance && line.amount != null && (
+                          <Badge variant="outline" className="border-amber-400 text-xs text-amber-700 dark:text-amber-300">
+                            HR&apos;s figure — awaiting Finance
+                          </Badge>
                         )}
                         {line.computation === 'ManuallyEntered' && (
                           <Badge variant="outline" className="text-xs">Entered by hand</Badge>

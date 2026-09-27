@@ -231,7 +231,10 @@ public class LeaveTypeService : ILeaveTypeService
         // Null leaves it as it is, for the same reason (round 5, lane H).
         if (dto.AllowOffsetAgainstAnnual is bool offset)
             entity.AllowOffsetAgainstAnnual = offset;
-        entity.IsActive = dto.IsActive;
+        // Null leaves it as it is (leave settings audit 2, L-79): a save that left it out used to revive a
+        // retired type, because the DTO defaulted it to true.
+        if (dto.IsActive is bool active)
+            entity.IsActive = active;
 
         // Both doors: making a type Annual, and re-activating an Annual one.
         if (entity.Category == LeaveTypeCategory.Annual && entity.IsActive)
@@ -324,7 +327,9 @@ public class LeaveTypeService : ILeaveTypeService
         entity.SubTypeName = dto.SubTypeName;
         entity.Description = dto.Description;
         entity.MaxDaysAllowed = dto.MaxDaysAllowed;
-        entity.IsActive = dto.IsActive;
+        // Null leaves it as it is (L-79, as on the leave type).
+        if (dto.IsActive is bool active)
+            entity.IsActive = active;
 
         await _leaveSubTypeRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();

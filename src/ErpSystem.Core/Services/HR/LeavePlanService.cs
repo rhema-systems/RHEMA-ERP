@@ -24,6 +24,7 @@ public class LeavePlanService : ILeavePlanService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILeaveRepository _leaveRequestRepository;
+    private readonly ILeaveTypeService _leaveTypeService;
 
     public LeavePlanService(
         ILeavePlanRepository leavePlanRepository,
@@ -33,7 +34,8 @@ public class LeavePlanService : ILeavePlanService
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserService currentUserService,
-        ILeaveRepository leaveRequestRepository)
+        ILeaveRepository leaveRequestRepository,
+        ILeaveTypeService leaveTypeService)
     {
         _leavePlanRepository = leavePlanRepository;
         _unitOfWork = unitOfWork;
@@ -43,6 +45,7 @@ public class LeavePlanService : ILeavePlanService
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserService = currentUserService;
         _leaveRequestRepository = leaveRequestRepository;
+        _leaveTypeService = leaveTypeService;
     }
 
     /// <summary>
@@ -161,7 +164,7 @@ public class LeavePlanService : ILeavePlanService
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
 
-        await RequireAnnualTypeAsync(dto.LeaveTypeId);
+        await RequirePlannableAsync(dto.EmployeeId, dto.LeaveTypeId, dto.LeaveSubTypeId, keptSubTypeId: null);
         await ValidateRelieversAsync(dto.EmployeeId, dto.RelieverId, dto.SecondRelieverId);
 
         var entity = dto.ToEntity();
@@ -190,7 +193,7 @@ public class LeavePlanService : ILeavePlanService
         if (hasConflict)
             throw new InvalidOperationException("Employee already has a leave plan for this period.");
 
-        await RequireAnnualTypeAsync(dto.LeaveTypeId);
+        await RequirePlannableAsync(dto.EmployeeId, dto.LeaveTypeId, dto.LeaveSubTypeId, keptSubTypeId: entity.LeaveSubTypeId);
         await ValidateRelieversAsync(dto.EmployeeId, dto.RelieverId, dto.SecondRelieverId);
 
         entity.EmployeeId = dto.EmployeeId;
@@ -218,6 +221,16 @@ public class LeavePlanService : ILeavePlanService
         var entity = await GetOwnedLeavePlanAsync(id);
         if (entity.Status != LeavePlanStatus.Draft)
             throw new InvalidOperationException("Only draft leave plans can be submitted.");
+
+        // ⚠ Leave settings audit 2, L-79: a plan on a type retired since it was saved is not sent for
+        // approval — it could only become a request the create path refuses.
+        var retired = await _unitOfWork.Repository<LeaveType>().GetQueryable()
+            .Where(t => t.Id == entity.LeaveTypeId && !t.IsActive)
+            .Select(t => t.Name)
+            .FirstOrDefaultAsync();
+        if (retired is not null)
+            throw new InvalidOperationException(
+                $"'{retired}' has been retired and cannot be planned. This plan was saved before it was.");
 
         // Submitting must never approve — see HrWorkflowFallbackAuthority. Defence in depth; a
         // LEAVE_PLAN definition is seeded, so this bites only on an unseeded tenant.
@@ -546,20 +559,49 @@ public class LeavePlanService : ILeavePlanService
     /// follows the birth. Plans of another kind made before this are left alone; new plans and edits
     /// are refused.
     /// </remarks>
-    private async Task RequireAnnualTypeAsync(Guid leaveTypeId)
+    /// <summary>
+    /// What a plan must be to be saved: an active, annual leave type the employee is eligible for, and
+    /// — if it names one — a sub-type of that type, active when newly chosen.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Leave settings audit 2, L-86 (and L-79's plan door). A plan checked only that its type was
+    /// Annual; eligibility and the sub-type were first asked when the approved plan was raised as a
+    /// request, after the approval — so a plan could be approved that could never be taken. A sub-type
+    /// already on the plan and retired since is kept, as a draft request keeps one.
+    /// </remarks>
+    private async Task RequirePlannableAsync(Guid employeeId, Guid leaveTypeId, Guid? subTypeId, Guid? keptSubTypeId)
     {
         var tenantId = GetTenantId();
         var type = await _unitOfWork.Repository<LeaveType>().GetQueryable()
             .Where(t => t.TenantId == tenantId && t.Id == leaveTypeId)
-            .Select(t => new { t.Name, t.Category })
+            .Select(t => new { t.Name, t.Category, t.IsActive })
             .FirstOrDefaultAsync();
 
         if (type == null)
             throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
+        if (!type.IsActive)
+            throw new InvalidOperationException($"'{type.Name}' has been retired and cannot be planned.");
         if (type.Category != LeaveTypeCategory.Annual)
             throw new InvalidOperationException(
                 $"Leave plans are for annual leave, and '{type.Name}' is not. Other kinds of leave are "
                 + "requested when they are needed.");
+
+        if (!await _leaveTypeService.IsEmployeeEligibleAsync(leaveTypeId, employeeId))
+            throw new InvalidOperationException(
+                $"This employee does not meet the eligibility criteria for {type.Name}, so it cannot be planned for them.");
+
+        if (subTypeId is Guid chosen)
+        {
+            var subType = await _unitOfWork.Repository<LeaveSubType>().GetQueryable()
+                .Where(st => st.TenantId == tenantId && st.Id == chosen)
+                .Select(st => new { st.SubTypeName, st.LeaveTypeId, st.IsActive })
+                .FirstOrDefaultAsync();
+            if (subType == null || subType.LeaveTypeId != leaveTypeId)
+                throw new ArgumentException($"Leave sub-type '{chosen}' is not a sub-type of {type.Name}.");
+            if (!subType.IsActive && chosen != keptSubTypeId)
+                throw new InvalidOperationException(
+                    $"'{subType.SubTypeName}' has been retired and cannot be planned.");
+        }
     }
 
     /// <summary>

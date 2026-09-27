@@ -134,7 +134,11 @@ public class CreateLeaveTypeDto
 /// </remarks>
 public class UpdateLeaveTypeDto : CreateLeaveTypeDto
 {
-    public bool IsActive { get; set; } = true;
+    /// <summary>
+    /// Retires or restores the type. ⚠ <c>null</c> leaves it as it is (leave settings audit 2, L-79): it
+    /// defaulted to <c>true</c>, so a save that left it out brought a retired type back.
+    /// </summary>
+    public bool? IsActive { get; set; }
 }
 
 public class LeaveTypeDetailDto : LeaveTypeDto
@@ -164,7 +168,12 @@ public class CreateLeaveSubTypeDto
     public string SubTypeName { get; set; } = string.Empty;
     public string? Description { get; set; }
     public int? MaxDaysAllowed { get; set; }
-    public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Active on create when left out; on update <c>null</c> leaves it as it is (leave settings audit 2,
+    /// L-79 — the same trap as the leave type's: an update that left it out revived a retired sub-type).
+    /// </summary>
+    public bool? IsActive { get; set; }
 }
 
 // ─── Leave Category Allocation ────────────────────────────────────────────────

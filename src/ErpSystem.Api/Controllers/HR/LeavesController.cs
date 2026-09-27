@@ -1818,6 +1818,11 @@ namespace ErpSystem.Api.Controllers.HR
                 if (!await CanActOnRequestAsync(attachment.LeaveRequestId, HrPermissions.LeaveWritePolicy))
                     return Forbid();
 
+                // ⚠ Leave settings audit 2, L-77: submitted medical evidence is locked. Asked BEFORE the
+                // stored file is touched — the service refuses too, but only after this removal, which
+                // would have destroyed the document of a record that stays.
+                await _leaveService.EnsureAttachmentRemovableAsync(attachmentId);
+
                 // Controlled uploads and their DMS records are removed through the shared
                 // boundary, which soft-deletes and schedules the physical delete. Only
                 // pre-migration rows still carry a raw storage path to remove directly.
@@ -1852,6 +1857,7 @@ namespace ErpSystem.Api.Controllers.HR
                 await _leaveService.DeleteAttachmentAsync(attachmentId);
                 return Ok(new { message = "Attachment deleted" });
             }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deleting attachment {AttachmentId}", attachmentId);

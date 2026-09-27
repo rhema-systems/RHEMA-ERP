@@ -608,6 +608,12 @@ public class SeparationSettlementLineDto
     /// <summary>True when this is PAY: HR records its facts and Finance values it (audit 2, P3).</summary>
     public bool IsPayLine { get; set; }
 
+    /// <summary>
+    /// A pay line still waiting for Finance's figure — not valued by Finance and not a stated zero.
+    /// True also where HR put a figure on it before pay moved to Finance: only Finance's settles it.
+    /// </summary>
+    public bool AwaitingFinance { get; set; }
+
     /// <summary>Who in Finance valued the line, and when. Null until it has been.</summary>
     public string? ValuedByName { get; set; }
     public DateTime? ValuedOn { get; set; }

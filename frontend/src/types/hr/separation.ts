@@ -390,13 +390,16 @@ export type SettlementLineComputation = 'Computed' | 'ManuallyEntered' | 'Cannot
 /**
  * The PAY lines (leave settings audit 2, P3): HR records their days and facts, and Finance values
  * them in Pay to value — HR cannot enter their amounts. Mirrors `SeparationService.IsPayLine`.
+ * Benefit payment and other earning joined on 2026-09-27: every line that pays the leaver.
  */
 export const PAY_LINE_CATEGORIES: SettlementLineCategory[] = [
   'UnpaidSalary',
   'NoticePay',
   'LeaveEncashment',
   'GratuityOrEndOfService',
+  'BenefitPayment',
   'PensionRelated',
+  'OtherEarning',
   'TaxDeduction',
 ];
 
@@ -423,6 +426,11 @@ export interface SettlementLine {
   days?: number | null;
   /** PAY — valued by Finance, never priced by HR (leave settings audit 2). */
   isPayLine: boolean;
+  /**
+   * A pay line still waiting for Finance's figure — true also where HR put a figure on it before pay
+   * moved to Finance: only Finance's settles it. `SeparationService.AwaitsFinance`.
+   */
+  awaitingFinance: boolean;
   /** Who in Finance valued the line, and when. */
   valuedByName?: string | null;
   valuedOn?: string | null;

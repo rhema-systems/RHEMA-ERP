@@ -345,7 +345,7 @@ export default function LeaveRequestDetailPage() {
             It hides itself on leave types that neither name a board nor have a threshold, so it
             costs annual leave nothing.
           */}
-          <MedicalBoardLinkPanel request={r} canEdit={canWrite} onChanged={refresh} />
+          <MedicalBoardLinkPanel request={r} canEdit={canWrite} boardLocked={!isDraft} onChanged={refresh} />
 
           <InfoCard title="Leave">
             <InfoRow label="Leave type" value={r.leaveTypeName} />
@@ -453,7 +453,7 @@ export default function LeaveRequestDetailPage() {
         </TabsContent>
 
         <TabsContent value="attachments" className="pt-4">
-          <LeaveAttachmentsPanel leaveRequestId={id} canUpload={isDraft || r.status === 'Pending'} />
+          <LeaveAttachmentsPanel leaveRequestId={id} canUpload={isDraft || r.status === 'Pending'} evidenceLocked={!isDraft} />
         </TabsContent>
 
         <WorkflowTabContent
