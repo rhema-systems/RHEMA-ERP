@@ -152,3 +152,13 @@ ABORTED; partial results only. Failed!  - Failed:   218, Passed:  2180, Skipped:
 | tests/ErpSystem.Api.Tests/Services/Finance/JournalVoucherDocumentBuilderTests.cs | bbc7b8fe4edff17804697ff4b1f38a0ad1965f28 | True |
 | tests/ErpSystem.Api.Tests/Services/Finance/VendorInvoiceMatchExceptionServiceTests.cs | deff9622b7c08f74818e107f855e7b7795282636 | True |
 | tests/ErpSystem.Api.Tests/Services/UnitOfWorkTransactionLockTests.cs | 52fc28453a530826c5f62b1981203968d31c93f9 | True |
+
+## Current unfiltered rerun (8 GiB test-host cap)
+
+The full current API test project compiled with zero errors and 34 warnings. Its product DLL hashes matched the latest normal API/Core/Data build (`tmp/inventory-api-full-current-artifacts.json`). The unfiltered run subsequently **aborted with an out-of-memory test-host crash**, recording **3,615 passed, 421 failed and 67 skipped (4,103 results)**. Sixteen retained failures explicitly contain `OutOfMemoryException`. Evidence: `tmp/inventory-workflows-final-tests/api-full-current.trx` and `tmp/inventory-api-full-current-tests.log`. This is an incomplete run, not a completed 4,103-test suite. The earlier 2,433-result attempt was also incomplete, so the raw failure totals do not measure a like-for-like regression.
+
+Newly reached failures include canonical Finance fixture/model mismatches, CRM/Projects application-startup fixtures, Estate expectations and migration/source assertions. No direct receipt-cost, supplier-return-allocation, physical-count, C9 adjustment or Sales adapter failure was found among retained failed test identities; that observation does not prove unexecuted tests passed.
+
+The wider run also reproduced a real error-response defect: `InvalidOperationException` messages were sent to the caller without the redaction already used for persisted diagnostics. The existing middleware test demonstrates disclosure using a synthetic token. A narrow follow-up applies the existing redactor to that response branch and adds a benign-message preservation check; its separate build and focused results must be recorded before claiming the defect fixed. Status/code and accounting validation rules are unchanged.
+
+That follow-up normal API build passed with **zero errors and 40 warnings** (`tmp/inventory-error-redaction-api-build.log`). The focused middleware/C9 suite passed **16/16** (`tmp/inventory-workflows-final-tests/redaction-c9-final.trx`), including the formerly failing synthetic-token case, preserved ordinary validation text, and actual positive/negative adjustment posting with the unused contra mapping absent. This closes those specific cases; it does not replace the aborted full-suite result.

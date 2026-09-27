@@ -21,6 +21,35 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class StockAdjustmentValuationIntentBuilderC9Tests
 {
     [Theory]
+    [InlineData(1)]
+    [InlineData(-1)]
+    public async Task Ordinary_adjustment_requires_only_the_account_used_by_its_sign(int sign)
+    {
+        var tenant = Guid.NewGuid();
+        var inventory = Guid.NewGuid();
+        var offset = Guid.NewGuid();
+        await using var db = Context();
+        await SeedSettingsAsync(db, tenant, inventory,
+            expense: sign < 0 ? offset : null,
+            recovery: sign > 0 ? offset : null);
+        db.ChangeTracker.Clear();
+        var adjustment = Adjustment(tenant);
+        adjustment.Items = [Item(tenant, sign * 2m, sign * 50m,
+            adjustment.AdjustmentDate, "Single-sign adjustment")];
+
+        var preview = await new StockAdjustmentValuationIntentBuilder(db).BuildAsync(adjustment);
+
+        preview.PostingRequest.Lines.Should().HaveCount(2);
+        var stockLine = preview.PostingRequest.Lines.Single(line => line.AccountId == inventory);
+        var offsetLine = preview.PostingRequest.Lines.Single(line => line.AccountId == offset);
+        stockLine.DebitAmount.Should().Be(sign > 0 ? 50m : 0m);
+        stockLine.CreditAmount.Should().Be(sign < 0 ? 50m : 0m);
+        offsetLine.DebitAmount.Should().Be(sign < 0 ? 50m : 0m);
+        offsetLine.CreditAmount.Should().Be(sign > 0 ? 50m : 0m);
+        db.ChangeTracker.HasChanges().Should().BeFalse();
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(1)]
     public async Task Disposal_uses_item_account_for_new_cases_and_preserves_legacy_expense(int accountingVersion)

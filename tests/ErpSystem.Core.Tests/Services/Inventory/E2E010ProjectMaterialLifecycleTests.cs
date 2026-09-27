@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
@@ -40,6 +41,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
     private readonly Guid _returnApproverId = Guid.NewGuid();
     private readonly Guid _projectManagerId = Guid.NewGuid();
     private readonly Guid _departmentId = Guid.NewGuid();
+    private readonly Guid _organizationUnitId = Guid.NewGuid();
     private readonly Guid _projectId = Guid.NewGuid();
     private readonly Guid _warehouseId = Guid.NewGuid();
     private readonly Guid _locationId = Guid.NewGuid();
@@ -393,7 +395,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             Id = _requisitionId,
             TenantId = _tenantId,
             RequisitionNumber = "REQ-E2E-010",
-            DepartmentId = _departmentId,
+            OrganizationUnitId = _organizationUnitId,
             DepartmentName = "Projects",
             WarehouseId = _warehouseId,
             LocationId = _locationId,
@@ -431,6 +433,20 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         await _context.AddRangeAsync(users.Cast<object>().Concat(new object[]
         {
             category,
+            new OrganizationUnit
+            {
+                Id = _organizationUnitId, TenantId = _tenantId,
+                Name = "Projects", Code = "PROJECTS", AccountCode = "PROJECTS",
+                IsActive = true,
+                OrganizationLevel = new OrganizationLevel
+                {
+                    TenantId = _tenantId, Name = "Department", Code = "DEPT", LevelNumber = 1,
+                    OrganizationStructure = new OrganizationStructure
+                    {
+                        TenantId = _tenantId, Name = "E2E organization", Code = "E2E-010"
+                    }
+                }
+            },
             warehouse,
             location,
             item,
@@ -548,6 +564,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         });
 
         reservation.Status.Should().Be(InventoryProjectReservationStatus.Reserved);
+        reservation.OrganizationUnitId.Should().Be(_organizationUnitId);
         reservation.ReservedQuantity.Should().Be(8m);
         reservation.RemainingQuantity.Should().Be(8m);
         (await WarehouseStock()).AllocatedStock.Should().Be(8m);
