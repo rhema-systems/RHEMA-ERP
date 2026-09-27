@@ -415,8 +415,14 @@ public class SimpleWorkflowService : IWorkflowService
         if (canApprove && isApprovalStep)
         {
             var approvalConfig = GetApprovalConfig(stepInstance);
-            var enforceSeparation = _sodPolicy is null || await _sodPolicy.IsRequiredForSourceAsync(
-                instance.TenantId, entityType, entityId);
+            // A workflow that explicitly requires an independent checker remains strict even when
+            // a tenant relaxes the broader Procurement SOD policy. In particular, a Business
+            // Partner maker must never gain approval eligibility merely by also holding an
+            // approver role (for example, System Administrator).
+            var configuredSeparation = approvalConfig is
+                { PreventInitiatorApproval: true } or { RequireDistinctApprovers: true };
+            var enforceSeparation = configuredSeparation || _sodPolicy is null ||
+                await _sodPolicy.IsRequiredForSourceAsync(instance.TenantId, entityType, entityId);
             var guardErrors = WorkflowApprovalGuardValidator.Validate(
                 approvalConfig,
                 instance.InitiatedById,

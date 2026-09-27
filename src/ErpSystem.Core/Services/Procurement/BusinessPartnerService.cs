@@ -225,6 +225,10 @@ public class BusinessPartnerService : IBusinessPartnerService
         var partner = await _partnerRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Business partner with ID {id} not found");
         if (partner.TenantId != _currentUserProvider.TenantId)
             throw new UnauthorizedAccessException("Business partner belongs to another tenant.");
+        if (!string.IsNullOrWhiteSpace(dto.Status) &&
+            !string.Equals(dto.Status, partner.RegistrationStatus, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "Business Partner lifecycle status cannot be changed through ordinary editing. Use submit, approval, suspension, or reactivation instead.");
         var requestedType = dto.PartnerType ?? partner.PartnerType;
         if (requestedType != partner.PartnerType || dto.ReceivablesDefaults != null || dto.PostingDefaults != null)
             await EnsureAccountingConfigurationAccessAsync();
@@ -274,11 +278,6 @@ public class BusinessPartnerService : IBusinessPartnerService
             partner.PaymentTerms = null;
         }
         
-        if (!string.IsNullOrEmpty(dto.Status)) 
-        {
-            partner.RegistrationStatus = dto.Status;
-        }
-
         // Update customer-specific fields if partner type is Customer
         if (BusinessPartnerRoles.HasCustomer(partner.PartnerType))
         {

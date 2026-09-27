@@ -1882,7 +1882,8 @@ namespace ErpSystem.Web.Services
                         entityClassName: typeof(BusinessPartner).FullName,
                         definitionName: "Business Partner Approval",
                         description: "Business partner onboarding workflow: Draft/PendingApproval -> PendingApproval -> Approved/Active.",
-                        approvalRoleNames: new[] { "Finance Manager", "Financial Controller", Constants.Roles.Manager, Constants.Roles.SuperAdmin });
+                        approvalRoleNames: new[] { "Finance Manager", "Financial Controller", Constants.Roles.Manager, Constants.Roles.SuperAdmin },
+                        preventInitiatorApproval: true);
                 }
             }
             catch (Exception ex)
@@ -5483,10 +5484,18 @@ namespace ErpSystem.Web.Services
             string? entityClassName,
             string definitionName,
             string description,
-            IReadOnlyCollection<string> approvalRoleNames)
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval = false)
         {
             if (await HasExistingWorkflowConfigurationAsync(tenantId, entityCode, entityName, definitionName))
+            {
+                if (preventInitiatorApproval)
+                {
+                    await EnsureWorkflowInitiatorSeparationAsync(
+                        tenantId, definitionName, approvalRoleNames);
+                }
                 return;
+            }
             var entityTypeCandidates = await _context.WorkflowEntityTypes
                 .Where(et => !et.IsDeleted && et.TenantId == tenantId)
                 .ToListAsync();
@@ -5570,7 +5579,7 @@ namespace ErpSystem.Web.Services
                     changed = true;
                 }
 
-                if (EnsureApprovalStepConfigurations(existingDefinition.Steps, approvalRoleNames))
+                if (EnsureApprovalStepConfigurations(existingDefinition.Steps, approvalRoleNames, preventInitiatorApproval))
                 {
                     changed = true;
                 }
@@ -5609,7 +5618,7 @@ namespace ErpSystem.Web.Services
                 StepType = WorkflowStepType.Approval,
                 Order = 2,
                 IsRequired = true,
-                Configuration = BuildApprovalConfigurationJson(approvalRoleNames),
+                Configuration = BuildApprovalConfigurationJson(approvalRoleNames, preventInitiatorApproval),
                 CreatedAt = now,
                 CreatedBy = "System"
             };
@@ -5673,6 +5682,54 @@ namespace ErpSystem.Web.Services
                 });
 
             await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Maker-checker is an identity-governance invariant for selected master-data workflows,
+        /// not a demo default. Preserve tenant-authored approver rules while repairing older
+        /// definitions that pre-date the explicit initiator-separation flags.
+        /// </summary>
+        private async Task EnsureWorkflowInitiatorSeparationAsync(
+            Guid tenantId,
+            string definitionName,
+            IReadOnlyCollection<string> fallbackApprovalRoleNames)
+        {
+            var definition = await _context.WorkflowDefinitions
+                .Include(item => item.Steps)
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && item.Name == definitionName)
+                .OrderByDescending(item => item.IsActive)
+                .ThenByDescending(item => item.Version)
+                .FirstOrDefaultAsync();
+            if (definition == null)
+                return;
+
+            var changed = false;
+            var now = DateTime.UtcNow;
+            foreach (var step in definition.Steps.Where(item =>
+                         !item.IsDeleted && item.StepType == WorkflowStepType.Approval))
+            {
+                var configuration = DeserializeWorkflowStepConfiguration(step.Configuration)
+                    ?? new WorkflowStepConfigurationDto();
+                configuration.ApprovalConfig ??= BuildApprovalConfig(fallbackApprovalRoleNames);
+                if (configuration.ApprovalConfig.PreventInitiatorApproval
+                    && configuration.ApprovalConfig.RequireDistinctApprovers)
+                    continue;
+
+                configuration.ApprovalConfig.PreventInitiatorApproval = true;
+                configuration.ApprovalConfig.RequireDistinctApprovers = true;
+                step.Configuration = JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
+                step.UpdatedAt = now;
+                step.UpdatedBy = "System (maker-checker repair)";
+                changed = true;
+            }
+
+            if (changed)
+            {
+                definition.UpdatedAt = now;
+                definition.UpdatedBy = "System (maker-checker repair)";
+                await _context.SaveChangesAsync();
+            }
         }
 
         private async Task EnsureSequentialWorkflowDefinitionSeededAsync(
@@ -6080,15 +6137,17 @@ namespace ErpSystem.Web.Services
 
         private static bool EnsureApprovalStepConfigurations(
             IEnumerable<WorkflowStep> steps,
-            IReadOnlyCollection<string> approvalRoleNames)
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval = false)
         {
-            return EnsureApprovalStepConfigurations(steps, approvalRoleNames, DateTime.UtcNow);
+            return EnsureApprovalStepConfigurations(steps, approvalRoleNames, DateTime.UtcNow, preventInitiatorApproval);
         }
 
         private static bool EnsureApprovalStepConfigurations(
             IEnumerable<WorkflowStep> steps,
             IReadOnlyCollection<string> approvalRoleNames,
-            DateTime now)
+            DateTime now,
+            bool preventInitiatorApproval = false)
         {
             var approvalSteps = steps
                 .Where(s => s.StepType == WorkflowStepType.Approval && !s.IsDeleted)
@@ -6107,7 +6166,7 @@ namespace ErpSystem.Web.Services
             var changed = false;
             foreach (var step in targetSteps)
             {
-                if (EnsureApprovalStepConfiguration(step, approvalRoleNames, now))
+                if (EnsureApprovalStepConfiguration(step, approvalRoleNames, now, preventInitiatorApproval))
                 {
                     changed = true;
                 }
@@ -6119,15 +6178,16 @@ namespace ErpSystem.Web.Services
         private static bool EnsureApprovalStepConfiguration(
             WorkflowStep step,
             IReadOnlyCollection<string> approvalRoleNames,
-            DateTime now)
+            DateTime now,
+            bool preventInitiatorApproval = false)
         {
-            if (ApprovalRolesMatch(step.Configuration, approvalRoleNames))
+            if (ApprovalConfigurationMatches(step.Configuration, approvalRoleNames, preventInitiatorApproval))
             {
                 return false;
             }
 
             var configuration = DeserializeWorkflowStepConfiguration(step.Configuration) ?? new WorkflowStepConfigurationDto();
-            configuration.ApprovalConfig = BuildApprovalConfig(approvalRoleNames);
+            configuration.ApprovalConfig = BuildApprovalConfig(approvalRoleNames, preventInitiatorApproval);
 
             step.Configuration = JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
             step.UpdatedAt = now;
@@ -6159,17 +6219,25 @@ namespace ErpSystem.Web.Services
             return true;
         }
 
-        private static bool ApprovalRolesMatch(string? configurationJson, IReadOnlyCollection<string> approvalRoleNames)
+        private static bool ApprovalConfigurationMatches(
+            string? configurationJson,
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval)
         {
             var expectedRoles = approvalRoleNames
                 .Where(role => !string.IsNullOrWhiteSpace(role))
                 .Select(role => role.Trim())
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var actualRoles = GetApprovalRolesFromConfiguration(configurationJson)
+            var configuration = DeserializeWorkflowStepConfiguration(configurationJson)?.ApprovalConfig;
+            var actualRoles = (configuration?.ApproverRules ?? [])
+                .Where(rule => rule.AssignmentType == WorkflowAssignmentType.Role && !string.IsNullOrWhiteSpace(rule.Role))
+                .Select(rule => rule.Role!.Trim())
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            return expectedRoles.SetEquals(actualRoles);
+            return expectedRoles.SetEquals(actualRoles)
+                && (!preventInitiatorApproval || configuration is
+                    { PreventInitiatorApproval: true, RequireDistinctApprovers: true });
         }
 
         private static IReadOnlyList<string> GetApprovalRolesFromConfiguration(string? configurationJson)
@@ -6213,23 +6281,29 @@ namespace ErpSystem.Web.Services
                 .Select(char.ToUpperInvariant)
                 .ToArray());
 
-        private static string BuildApprovalConfigurationJson(IReadOnlyCollection<string> approvalRoleNames)
+        private static string BuildApprovalConfigurationJson(
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval = false)
         {
             var configuration = new WorkflowStepConfigurationDto
             {
-                ApprovalConfig = BuildApprovalConfig(approvalRoleNames)
+                ApprovalConfig = BuildApprovalConfig(approvalRoleNames, preventInitiatorApproval)
             };
 
             return JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
         }
 
-        private static WorkflowApprovalConfigDto BuildApprovalConfig(IReadOnlyCollection<string> approvalRoleNames)
+        private static WorkflowApprovalConfigDto BuildApprovalConfig(
+            IReadOnlyCollection<string> approvalRoleNames,
+            bool preventInitiatorApproval = false)
         {
             return new WorkflowApprovalConfigDto
             {
                 ApprovalType = WorkflowApprovalType.Single,
                 MinApprovalsRequired = 1,
                 RejectionHandling = WorkflowRejectionHandling.StopWorkflow,
+                PreventInitiatorApproval = preventInitiatorApproval,
+                RequireDistinctApprovers = preventInitiatorApproval,
                 ApproverRules = approvalRoleNames
                     .Where(role => !string.IsNullOrWhiteSpace(role))
                     .Select(role => role.Trim())
