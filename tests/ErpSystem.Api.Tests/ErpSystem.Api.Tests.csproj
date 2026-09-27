@@ -69,6 +69,7 @@
     <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
+    <Compile Include="Services\Finance\BusinessPartnerFinanceProfilePolicyTests.cs" />
     <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
     <Compile Include="Controllers\GlobalSearchEstateLegalTests.cs" />
     <Compile Include="Controllers\GlobalSearchSafetyTests.cs" />
