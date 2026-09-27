@@ -14,10 +14,10 @@ vi.mock('@/components/finance/PostingAccountPicker', () => ({ PostingAccountPick
   </select> }));
 
 describe('inventory item accounts', () => {
-  it('renders all 16 mappings and filters account purpose without losing other mappings', async () => {
+  it('renders all 17 mappings and filters account purpose without losing other mappings', async () => {
     const onChange = vi.fn();
     render(<InventoryItemAccountsTab value={{ inventoryAccountId: 'stock', salesAccountId: 'sales' }} onChange={onChange} />);
-    expect(inventoryPostingAccountFields).toHaveLength(16);
+    expect(inventoryPostingAccountFields).toHaveLength(17);
     const inventory = screen.getByLabelText('Inventory');
     await waitFor(() => expect(inventory).not.toBeDisabled());
     expect(inventory).toHaveTextContent('Inventory');

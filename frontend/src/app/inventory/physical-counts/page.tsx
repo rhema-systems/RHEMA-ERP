@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import {
   inventoryManagementService,
-  PhysicalCountDto, PhysicalCountDetailDto, CreatePhysicalCountDto,
+  PhysicalCountDto, PhysicalCountDetailDto, CreatePhysicalCountDto, PhysicalCountCounterOptionDto,
   PhysicalCountItemDto, WarehouseDto, WarehouseLocationDto, InventoryItemDto, RecordCountItemDto,
   PhysicalCountFilterDto, VarianceReportDto, AddCountItemDto
 } from '@/services/inventoryManagementService';
@@ -32,10 +32,13 @@ import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { PhysicalCountReviewActions } from '@/components/inventory/PhysicalCountReviewActions';
+import { PhysicalCountRecountPanel } from '@/components/inventory/PhysicalCountRecountPanel';
 import { PhysicalCountItemsGrid } from '@/components/inventory/PhysicalCountItemsGrid';
 import { PhysicalCountControlPanel } from '@/components/inventory/PhysicalCountControlPanel';
 import { PhysicalCountDraftItemDialog } from '@/components/inventory/PhysicalCountDraftItemDialog';
 import { PhysicalCountSheetUploadDialog } from '@/components/inventory/PhysicalCountSheetUploadDialog';
+import { PhysicalCountCounterSelector } from '@/components/inventory/PhysicalCountCounterSelector';
+import { PhysicalCountCountersPanel } from '@/components/inventory/PhysicalCountCountersPanel';
 import { createCountSheet } from '@/lib/physical-count-sheet';
 import { procurementCurrencyService } from '@/services/financeCommonService';
 import { formatInventoryMoney, normalizeInventoryCurrency } from '@/lib/inventory-currency';
@@ -154,6 +157,7 @@ export default function PhysicalCountsPage() {
     notes: ''
   });
   const [countScope, setCountScope] = useState<'warehouse' | 'location'>('warehouse');
+  const [createCounters, setCreateCounters] = useState<PhysicalCountCounterOptionDto[]>([]);
   const [countLocations, setCountLocations] = useState<WarehouseLocationDto[]>([]);
   const [locationsLoading, setLocationsLoading] = useState(false);
   const [locationsError, setLocationsError] = useState<string | null>(null);
@@ -179,11 +183,12 @@ export default function PhysicalCountsPage() {
     return () => { cancelled = true; };
   }, [createDialogOpen, countScope, formData.warehouseId, locationsReload]);
 
-  const canCreateCount = !!formData.warehouseId && !actionLoading && (countScope === 'warehouse' ||
+  const canCreateCount = !!formData.warehouseId && createCounters.length > 0 && !actionLoading && (countScope === 'warehouse' ||
     (!locationsLoading && !locationsError && countLocations.some(location => location.id === formData.locationId)));
 
   // Count items for recording
   const [editingItems, setEditingItems] = useState<Map<string, number>>(new Map());
+  const [defectEdits, setDefectEdits] = useState<Map<string, { quantity: number; notes: string }>>(new Map());
 
 
   useEffect(() => {
@@ -248,10 +253,12 @@ export default function PhysicalCountsPage() {
     try {
       setActionLoading(true);
       const { locationId, ...warehouseData } = formData;
-      const newCount = await inventoryManagementService.createPhysicalCount(countScope === 'location' ? { ...warehouseData, locationId } : warehouseData);
+      const data = { ...warehouseData, counterEmployeeIds: createCounters.map(employee => employee.employeeId) };
+      const newCount = await inventoryManagementService.createPhysicalCount(countScope === 'location' ? { ...data, locationId } : data);
       setCounts(prev => [...prev, newCount]);
       setCreateDialogOpen(false);
       setFormData({ warehouseId: '', countType: 'CycleCount', freezeInventory: true, blindCount: true, abcClass: 'C', notes: '' });
+      setCreateCounters([]);
       setCountScope('warehouse');
     } catch (err) {
       console.error('Error creating count:', err);
@@ -267,7 +274,7 @@ export default function PhysicalCountsPage() {
       setSelectedCount(details);
       setCountItemsFullPage(false);
       setDraftNotes(details.notes || '');
-      setEditingItems(new Map());
+      setEditingItems(new Map()); setDefectEdits(new Map());
 
       setAddItemDialogOpen(false);
       setRemoveTarget(null);
@@ -352,7 +359,7 @@ export default function PhysicalCountsPage() {
   };
 
   const handleRecordItems = async () => {
-    if (!selectedCount || editingItems.size === 0) return;
+    if (!selectedCount || editingItems.size === 0 && defectEdits.size === 0) return;
     if ([...editingItems.values()].some(qty => !Number.isFinite(qty) || qty < 0)) {
       toast.error('Counted quantities must be zero or positive numbers.');
       return;
@@ -360,14 +367,20 @@ export default function PhysicalCountsPage() {
     try {
       setActionLoading(true);
       const items: RecordCountItemDto[] = [];
-      editingItems.forEach((qty, itemId) => {
+      for (const itemId of new Set([...editingItems.keys(), ...defectEdits.keys()])) {
         const line = selectedCount.items.find(item => item.id === itemId);
-        if (line) items.push({ physicalCountItemId: itemId, countedQuantity: qty, rowVersion: line.rowVersion, lotNumber: line.lotNumber, serialNumber: line.serialNumber, notes: line.notes, idempotencyKey: crypto.randomUUID() });
-      });
+        if (!line) continue;
+        const qty = editingItems.get(itemId) ?? (line.isCounted ? line.countedQuantity : undefined);
+        const defect = defectEdits.get(itemId) ?? { quantity: line.defectiveQuantity ?? 0, notes: line.defectiveNotes ?? '' };
+        if (qty === undefined || !Number.isFinite(qty) || !Number.isFinite(defect.quantity) || defect.quantity < 0 || defect.quantity > qty)
+          throw new Error(`Enter Counted Qty and a Defective Qty between zero and Counted Qty for ${line.itemCode}.`);
+        items.push({ physicalCountItemId: itemId, countedQuantity: qty, defectiveQuantity: defect.quantity, defectiveNotes: defect.notes,
+          rowVersion: line.rowVersion, lotNumber: line.lotNumber, serialNumber: line.serialNumber, notes: line.notes, idempotencyKey: crypto.randomUUID() });
+      }
       for (const item of items) await inventoryManagementService.recordCountItem(selectedCount.id, item);
       const updatedDetails = await loadPhysicalCountDetail(selectedCount.id);
       setSelectedCount(updatedDetails);
-      setEditingItems(new Map());
+      setEditingItems(new Map()); setDefectEdits(new Map());
       toast.success('Count quantities saved.');
     } catch (err) {
       console.error('Error recording items:', err);
@@ -482,7 +495,7 @@ export default function PhysicalCountsPage() {
     <div className="space-y-6">
       <GlobalSearchRecordOpener load={loadPhysicalCountDetail} onOpen={details => {
         setSelectedCount(details); setCountItemsFullPage(false); setDraftNotes(details.notes || '');
-        setEditingItems(new Map()); setAddItemDialogOpen(false); setRemoveTarget(null); setDetailDialogOpen(true);
+        setEditingItems(new Map()); setDefectEdits(new Map()); setAddItemDialogOpen(false); setRemoveTarget(null); setDetailDialogOpen(true);
       }} />
       {/* Page Header */}
       <div className="flex items-center justify-between">
@@ -608,6 +621,7 @@ export default function PhysicalCountsPage() {
                         <div>
                           <div className="flex items-center space-x-2">
                             <h3 className="font-semibold">{count.countNumber}</h3>
+                            {!!count.recountAttempt && <Badge variant="outline">Recount #{count.recountAttempt}</Badge>}
                             {getStatusBadge(count.status)}
                             <Badge variant="secondary">{CountTypes.find(t => t.value === count.countType)?.label || count.countType}</Badge>
                           </div>
@@ -620,7 +634,7 @@ export default function PhysicalCountsPage() {
                         <Button size="sm" variant="outline" aria-label={count.status === 'Draft' ? 'Edit draft' : 'View'} title={count.status === 'Draft' ? 'Edit draft' : 'View count'} onClick={() => handleViewDetails(count)}>
                           {count.status === 'Draft' ? <><Pencil className="h-4 w-4 mr-1" />Edit draft</> : <Eye className="h-4 w-4" />}
                         </Button>
-                        {count.status === 'Draft' && (
+                        {count.status === 'Draft' && !count.rootPhysicalCountId && (
                           <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700" aria-label={`Cancel draft count ${count.countNumber}`} title="Cancel draft count" disabled={actionLoading} onClick={() => { setCancellationReason(''); setCancelTarget(count); }}>
                             <XCircle className="h-4 w-4" />
                           </Button>
@@ -675,7 +689,7 @@ export default function PhysicalCountsPage() {
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2">
             <div className="space-y-2">
               <Label htmlFor="count-warehouse">Warehouse *</Label>
-              <Select value={formData.warehouseId} disabled={actionLoading} onValueChange={(v) => { setCountLocations([]); setFormData(previous => ({...previous, warehouseId: v, locationId: undefined})); }}>
+              <Select value={formData.warehouseId} disabled={actionLoading} onValueChange={(v) => { setCreateCounters([]); setCountLocations([]); setFormData(previous => ({...previous, warehouseId: v, locationId: undefined})); }}>
                 <SelectTrigger id="count-warehouse"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
                 <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
               </Select>
@@ -683,14 +697,14 @@ export default function PhysicalCountsPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="count-scope">Count scope</Label>
-                <Select value={countScope} disabled={actionLoading} onValueChange={value => { setCountScope(value === 'location' ? 'location' : 'warehouse'); setCountLocations([]); setFormData(previous => ({ ...previous, locationId: undefined })); }}>
+                <Select value={countScope} disabled={actionLoading} onValueChange={value => { setCreateCounters([]); setCountScope(value === 'location' ? 'location' : 'warehouse'); setCountLocations([]); setFormData(previous => ({ ...previous, locationId: undefined })); }}>
                   <SelectTrigger id="count-scope"><SelectValue /></SelectTrigger>
                   <SelectContent><SelectItem value="warehouse">Warehouse-wide</SelectItem><SelectItem value="location">Selected location</SelectItem></SelectContent>
                 </Select>
               </div>
               {countScope === 'location' && <div className="space-y-2">
                 <Label htmlFor="count-location">Location *</Label>
-                <Select value={formData.locationId || ''} onValueChange={value => setFormData(previous => ({ ...previous, locationId: value }))} disabled={actionLoading || !formData.warehouseId || locationsLoading || !!locationsError || countLocations.length === 0}>
+                <Select value={formData.locationId || ''} onValueChange={value => { setCreateCounters([]); setFormData(previous => ({ ...previous, locationId: value })); }} disabled={actionLoading || !formData.warehouseId || locationsLoading || !!locationsError || countLocations.length === 0}>
                   <SelectTrigger id="count-location"><SelectValue placeholder={locationsLoading ? 'Loading locations...' : 'Select location'} /></SelectTrigger>
                   <SelectContent>{countLocations.map(location => <SelectItem key={location.id} value={location.id}>{location.locationCode}{location.name ? ` - ${location.name}` : ''}</SelectItem>)}</SelectContent>
                 </Select>
@@ -699,6 +713,10 @@ export default function PhysicalCountsPage() {
             <p className="text-xs text-muted-foreground">{countScope === 'warehouse' ? 'Count items across this warehouse, separated by stock location.' : 'Only stock in the selected location is included.'} The same scope is used for the draft, count sheet and variances.</p>
             {countScope === 'location' && locationsError && <div role="alert" className="flex items-center justify-between gap-2 text-sm text-red-600"><span>{locationsError}</span><Button size="sm" variant="outline" onClick={() => setLocationsReload(value => value + 1)}>Retry</Button></div>}
             {countScope === 'location' && formData.warehouseId && !locationsLoading && !locationsError && countLocations.length === 0 && <p role="status" className="text-sm text-amber-700">No active locations are available for this warehouse.</p>}
+            <PhysicalCountCounterSelector warehouseId={formData.warehouseId}
+              locationId={countScope === 'location' ? formData.locationId : undefined}
+              selected={createCounters} onChange={setCreateCounters}
+              disabled={actionLoading || (countScope === 'location' && !formData.locationId)} />
             <div className="space-y-2">
               <Label>Count Type</Label>
               <Select value={formData.countType} onValueChange={(v) => setFormData({...formData, countType: v})}>
@@ -775,11 +793,12 @@ export default function PhysicalCountsPage() {
                 </div>
                 <p className="text-sm"><span className="text-muted-foreground">Count scope: </span>{selectedCount.locationId ? `Selected location — ${selectedCount.locationName || 'Location name unavailable'}` : 'Warehouse-wide (all locations)'}</p>
                 {selectedCount.items.some(item => !item.locationId) && !['Posted', 'Cancelled'].includes(selectedCount.status) && <p role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Items without a saved bin will use this warehouse’s default location when the count starts or is submitted. Stock already spread across other bins requires a new scoped count.</p>}
+                <PhysicalCountCountersPanel key={`${selectedCount.id}:${selectedCount.rowVersion}`} count={selectedCount} disabled={actionLoading} onSaved={refreshSelected} />
                 {selectedCount.status === 'Draft' ? <div className="space-y-2"><Label htmlFor="draft-count-notes">Notes (optional)</Label><Textarea id="draft-count-notes" value={draftNotes} onChange={event => setDraftNotes(event.target.value)} disabled={actionLoading} /><Button variant="outline" disabled={actionLoading || draftNotes === (selectedCount.notes || '')} onClick={() => void updateDraft(() => inventoryManagementService.updatePhysicalCount(selectedCount.id, { notes: draftNotes }), 'Draft notes saved.')}><Save className="mr-2 h-4 w-4" />Save draft notes</Button></div> : selectedCount.notes && <div><Label className="text-muted-foreground">Notes</Label><div>{selectedCount.notes}</div></div>}
                 <div className="space-y-3 rounded-md border p-4">
                   <div><Label>Count sheet (optional)</Label><p className="text-sm text-muted-foreground">Edit quantities in Items and select Save Counts, or import an Excel sheet. Saved quantities are used for review.</p></div>
                   {selectedCount.evidence?.some(item => item.isCurrentCountSheet) ? selectedCount.evidence.filter(item => item.isCurrentCountSheet).map(item => <div key={item.centralDocumentVersionId} className="flex items-center justify-between gap-3 rounded-md bg-green-50 p-3 text-sm text-green-900"><div><div className="font-medium">{item.fileName || item.title}</div><div>{new Date(item.uploadedAtUtc).toLocaleString()} · {selectedCount.countedItems}/{selectedCount.totalItems} counted</div></div><Badge variant="outline">Current</Badge></div>) : <p className="text-sm text-muted-foreground">{selectedCount.status === 'Draft' ? 'No file needed to prepare this draft. Upload after starting the count.' : selectedCount.evidence?.some(item => item.isImportedCountSheet) ? 'Quantities were edited in Items. Earlier Excel files remain in history; no re-upload is needed.' : 'Excel import is optional. Enter quantities directly in Items.'}</p>}
-                  {(['InProgress', 'UnderReview'].includes(selectedCount.status) && !!selectedCount.canReview) && <Button disabled={actionLoading || editingItems.size > 0} onClick={() => setImportDialogOpen(true)}><FileUp className="mr-2 h-4 w-4" />{selectedCount.evidence?.some(item => item.isImportedCountSheet) ? 'Replace' : 'Upload'}</Button>}
+                  {(!selectedCount.observationSubmittedAtUtc && ['InProgress', 'UnderReview'].includes(selectedCount.status) && !!selectedCount.canReview) && <Button disabled={actionLoading || (editingItems.size > 0 || defectEdits.size > 0)} onClick={() => setImportDialogOpen(true)}><FileUp className="mr-2 h-4 w-4" />{selectedCount.evidence?.some(item => item.isImportedCountSheet) ? 'Replace' : 'Upload'}</Button>}
                   <details className="rounded-md border p-3"><summary className="cursor-pointer text-sm font-medium">Supporting files and upload history ({(selectedCount.evidence ?? []).filter(item => !item.isCurrentCountSheet).length})</summary>
                     <p className="my-3 text-sm text-muted-foreground">These files are kept for review. They do not supply or change count quantities.</p>
                     <div className="space-y-2">{(selectedCount.evidence ?? []).filter(item => !item.isCurrentCountSheet).map(item => <div key={item.centralDocumentVersionId} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted p-3 text-sm"><div><div className="font-medium">{item.fileName || item.title}</div><div className="text-xs text-muted-foreground">{new Date(item.uploadedAtUtc).toLocaleString()} · {item.scanStatus}</div></div><Badge variant="outline">{item.isImportedCountSheet ? 'Previous count sheet' : 'Attachment only'}</Badge></div>)}</div>
@@ -788,8 +807,10 @@ export default function PhysicalCountsPage() {
                 </div>
               </TabsContent>
               <TabsContent value="items" className="min-h-0 flex-1 flex-col overflow-hidden data-[state=active]:flex">
+                <PhysicalCountRecountPanel key={`recount-${selectedCount.id}`} count={selectedCount} unsaved={editingItems.size > 0 || defectEdits.size > 0} onOpen={handleViewDetails} errorMessage={problemMessage} />
                 <PhysicalCountItemsGrid key={selectedCount.id} count={selectedCount} edits={editingItems} busy={actionLoading}
-                  currencyCode={currencyCode}
+                  currencyCode={currencyCode} defectEdits={defectEdits}
+                  onDefect={(id, quantity, notes) => setDefectEdits(previous => new Map(previous).set(id, { quantity, notes }))}
                   fullPage={countItemsFullPage} onToggleFullPage={() => setCountItemsFullPage(value => !value)}
                   onQuantity={(id, value) => {
                     if (value === undefined) setEditingItems(previous => { const next = new Map(previous); next.delete(id); return next; });
@@ -805,7 +826,7 @@ export default function PhysicalCountsPage() {
           )}
           <DialogFooter className="flex shrink-0 flex-row items-start gap-2 sm:justify-between sm:space-x-0" data-testid="count-action-footer">
             <div className="max-h-[32vh] min-w-0 flex-1 space-y-2 overflow-y-auto">
-              {selectedCount && <PhysicalCountReviewActions count={selectedCount} unsaved={editingItems.size > 0}
+              {selectedCount && <PhysicalCountReviewActions count={selectedCount} unsaved={(editingItems.size > 0 || defectEdits.size > 0)}
                 saving={actionLoading} onSaveCounts={() => void handleRecordItems()}
                 onUploadSheet={() => setImportDialogOpen(true)} onChanged={refreshSelected} />}
               {selectedCount?.status === 'ReadyToPost' && selectedCount.canPost === true && <Button onClick={handleControlledPost} disabled={actionLoading}><CheckCircle className="mr-2 h-4 w-4" />Post</Button>}

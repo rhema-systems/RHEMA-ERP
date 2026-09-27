@@ -3,6 +3,9 @@ param(
     [string]$ApiDirectory,
     [ValidateRange(2,16)][int]$HeapLimitGiB = 4,
     [string]$DiagnosticResumeEvidence,
+    [ValidateRange(60,1000)][int]$ExpectedMigrationCount = 60,
+    [ValidatePattern('^20\d{12}_[A-Za-z][A-Za-z0-9_]+$')]
+    [string]$ExpectedLastMigration = '20260927021852_InventoryIssueActualReceipts',
     [switch]$Execute
 )
 
@@ -20,8 +23,8 @@ foreach ($file in @($apiDll,$dataDll,(Join-Path $apiRoot 'ErpSystem.Api.runtimec
 }
 $expected = @(Get-ChildItem (Join-Path $repo 'src\ErpSystem.Data\Migrations') -Filter '*.cs' -File |
     Where-Object { $_.BaseName -cmatch '^20\d{12}_[A-Za-z][A-Za-z0-9_]+$' } | ForEach-Object BaseName | Sort-Object)
-if ($expected.Count -ne 60 -or $expected[-1] -cne '20260927021852_InventoryIssueActualReceipts') {
-    throw 'This acceptance script is pinned to the 60-migration actual receipt baseline.'
+if ($expected.Count -ne $ExpectedMigrationCount -or $expected[-1] -cne $ExpectedLastMigration) {
+    throw 'The source migration chain differs from the explicitly expected acceptance baseline.'
 }
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMdd_HHmmss') + '_' + [Guid]::NewGuid().ToString('N').Substring(0,8)
 $target = 'RhemaERP_ReceiptFresh_' + $stamp
@@ -197,6 +200,10 @@ IF (SELECT COUNT(*) FROM sys.check_constraints WHERE name IN(N'CK_InventoryIssue
  THROW 51015,'Receipt check constraints missing or untrusted.',1;
 '@
     $report.SchemaAndGuardsVerified=$true
+    if ($ExpectedLastMigration -match '_InventoryControlledWorkflowsAndAccounting$') {
+        Query ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'InventoryWorkflowsSchemaAssertions.sql')))
+        $report.InventoryWorkflowSchemaAndGuardsVerified=$true
+    }
     Query "DBCC CHECKDB ([$target]) WITH PHYSICAL_ONLY,NO_INFOMSGS;"
     $report.PhysicalCheckPassed=$true
     if ($resume) {

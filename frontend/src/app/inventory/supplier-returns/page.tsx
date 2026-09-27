@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { CheckCircle2, Eye, PackageX, Pencil, Plus, Send, Truck, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -51,12 +52,18 @@ export default function SupplierReturnsPage() {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [detail, setDetail] = useState<SupplierReturn | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingQuantities, setEditingQuantities] = useState<Record<string, number>>({});
   const [resolvedCredits, setResolvedCredits] = useState<Record<string, boolean>>({});
   const creditResolved = useCallback((id: string, resolved: boolean) => setResolvedCredits(current =>
     current[id] === resolved ? current : { ...current, [id]: resolved }), []);
   const isCreditResolved = (row: SupplierReturn) => resolvedCredits[row.id] ?? row.financeResolutionCompleted === true;
 
   const selectedSource = useMemo(() => sources.find(item => item.id === sourceId), [sources, sourceId]);
+  const sourceContext = (id: string) => selectedSource?.returnSource?.lines.find(line => line.goodsReceiptNoteItemId === id);
+  const returnCapacity = (id: string, accepted: number) => {
+    const context = sourceContext(id);
+    return context ? context.remainingReturnableQuantity + (editingQuantities[id] || 0) : accepted;
+  };
   const load = async () => {
     setLoading(true);
     try {
@@ -68,10 +75,17 @@ export default function SupplierReturnsPage() {
   };
   useEffect(() => { void load(); }, []);
 
-  const resetCreate = () => { setEditingId(null); setSourceId(''); setReason('Quality'); setNotes(''); setSelected({}); };
+  const resetCreate = () => { setEditingId(null); setEditingQuantities({}); setSourceId(''); setReason('Quality'); setNotes(''); setSelected({}); };
   const create = async () => {
     if (!selectedSource?.supplierId) {
       toast({ title: 'Select a received GRN', description: 'Choose a stock-updated GRN with a supplier before creating the return.', variant: 'destructive' });
+      return;
+    }
+    if (Object.entries(selected).some(([id, quantity]) => {
+      const line = selectedSource.items.find(item => item.id === id);
+      return !line || !Number.isFinite(Number(quantity)) || Number(quantity) < 0 || Number(quantity) > returnCapacity(id, line.acceptedQuantity);
+    })) {
+      toast({ title: 'Check return quantities', description: 'A return quantity exceeds the remaining accepted quantity available for return.', variant: 'destructive' });
       return;
     }
     const items = Object.entries(selected).filter(([, quantity]) => Number(quantity) > 0).map(([id, quantity]) => {
@@ -147,6 +161,7 @@ export default function SupplierReturnsPage() {
       setEditingId(id); setSourceId(value.goodsReceiptNoteId || '');
       setReason(value.returnReason as SupplierReturnReason); setNotes(value.notes || '');
       setSelected(Object.fromEntries((value.items || []).filter(line => line.grnItemId).map(line => [line.grnItemId!, String(line.returnQuantity)])));
+      setEditingQuantities(Object.fromEntries((value.items || []).filter(line => line.grnItemId).map(line => [line.grnItemId!, line.returnQuantity])));
       setCreateOpen(true);
     } catch (error) { toast({ title: 'Unable to edit return', description: errorMessage(error, 'Please retry.'), variant: 'destructive' }); }
   };
@@ -179,7 +194,12 @@ export default function SupplierReturnsPage() {
       <div className="grid gap-4"><div><Label>Accepted, stock-updated GRN</Label><Select disabled={!!editingId} value={sourceId} onValueChange={value => { setSourceId(value); setSelected({}); }}><SelectTrigger><SelectValue placeholder="Select a GRN" /></SelectTrigger><SelectContent>{sources.map(source => <SelectItem key={source.id} value={source.id}>{source.grnNumber} — {source.supplierName || 'Supplier'} — {source.warehouseName || 'Warehouse'}</SelectItem>)}</SelectContent></Select></div>
         {selectedSource && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-3 rounded border p-3 text-sm"><div><span className="text-muted-foreground">Supplier</span><p className="font-medium">{selectedSource.supplierName}</p></div><div><span className="text-muted-foreground">Warehouse</span><p className="font-medium">{selectedSource.warehouseName}</p></div><div><span className="text-muted-foreground">Source</span><p className="font-medium">{selectedSource.grnNumber}</p></div></div>
           <div><Label>Return reason</Label><Select value={reason} onValueChange={value => setReason(value as SupplierReturnReason)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{supplierReturnReasons.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></div>
-          <div className="overflow-x-auto border rounded"><table className="w-full text-sm"><thead className="border-b text-left"><tr><th className="p-2">Item</th><th className="p-2">Accepted</th><th className="p-2">GRN unit cost</th><th className="p-2 w-40">Return quantity</th></tr></thead><tbody>{selectedSource.items.filter(item => item.acceptedQuantity > 0).map(item => <tr key={item.id} className="border-b last:border-0"><td className="p-2"><div className="font-medium">{item.itemCode}</div><div className="text-muted-foreground">{item.itemName}</div></td><td className="p-2">{item.acceptedQuantity} {item.unitOfMeasure}</td><td className="p-2">{item.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td className="p-2"><Input type="number" min="0" max={item.acceptedQuantity} step="0.0001" value={selected[item.id] || ''} onChange={event => setSelected(current => ({ ...current, [item.id]: event.target.value }))} /></td></tr>)}</tbody></table></div>
+          {(selectedSource.purchaseOrderNumber || selectedSource.returnSource?.receiptNumber) && <p className="text-sm text-muted-foreground">PO: {selectedSource.purchaseOrderNumber || '—'} · Receipt: {selectedSource.returnSource?.receiptNumber || '—'}</p>}
+          <div className="overflow-x-auto border rounded"><table className="w-full text-sm"><thead className="border-b text-left"><tr><th className="p-2">Item</th><th className="p-2">Accepted</th><th className="p-2">Returned / reserved</th><th className="p-2">Remaining</th><th className="p-2">Invoices</th><th className="p-2">GRN unit cost</th><th className="p-2 w-40">Return quantity</th></tr></thead><tbody>{selectedSource.items.filter(item => item.acceptedQuantity > 0).map(item => {
+            const context = sourceContext(item.id);
+            const capacity = returnCapacity(item.id, item.acceptedQuantity);
+            return <tr key={item.id} className="border-b last:border-0"><td className="p-2"><div className="font-medium">{item.itemCode}</div><div className="text-muted-foreground">{item.itemName}</div></td><td className="p-2">{item.acceptedQuantity} {item.unitOfMeasure}</td><td className="p-2">{context ? `${context.previouslyReturnedQuantity} / ${context.reservedReturnQuantity + (context.reservedInvoiceQuantity || 0)}` : '—'}</td><td className="p-2">{capacity}</td><td className="p-2">{context?.invoices.length ? <div className="space-y-1">{context.invoices.map((invoice, index) => <div key={`${invoice.invoiceId}-${index}`}><Link className="text-primary hover:underline" href={`/procurement/supplier-invoices/${encodeURIComponent(invoice.invoiceId)}`}>{invoice.invoiceNumber}</Link><span className="text-muted-foreground"> · {invoice.baseQuantity} {invoice.posted ? 'posted' : 'not posted'}</span></div>)}</div> : context ? 'Uninvoiced' : '—'}</td><td className="p-2">{item.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td className="p-2"><Input type="number" aria-label={`Return quantity for ${item.itemCode || item.itemName}`} min="0" max={capacity} disabled={capacity <= 0} step="0.0001" value={selected[item.id] || ''} onChange={event => setSelected(current => ({ ...current, [item.id]: event.target.value }))} /></td></tr>;
+          })}</tbody></table></div>
           <div><Label>Notes</Label><Textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Optional dispatch or quality context" /></div></>}
       </div><DialogFooter><Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button><Button disabled={busy === 'create' || !selectedSource} onClick={create}><PackageX className="mr-2 h-4 w-4"/>{editingId ? 'Save' : 'Create draft'}</Button></DialogFooter>
     </DialogContent></Dialog>
@@ -194,7 +214,7 @@ export default function SupplierReturnsPage() {
           {detail.creditNoteAmount != null && <div><dt className="text-muted-foreground">Recorded credit amount</dt><dd>{detail.creditNoteAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</dd></div>}
         </dl>}
         {!isCreditResolved(detail) && <p className="mt-1 text-muted-foreground">{detail.creditNoteNumber ? 'A recorded supplier reference alone does not settle the original invoice.' : 'Dispatch does not create a supplier credit automatically.'}</p>}
-        <SupplierReturnCreditPanel key={detail.id} returnId={detail.id} returnNumber={detail.returnNumber} reason={detail.returnReason} alreadyResolved={isCreditResolved(detail)} onResolved={creditResolved} />
+        <SupplierReturnCreditPanel key={detail.id} returnId={detail.id} returnNumber={detail.returnNumber} reason={detail.returnReason} accountingGroups={detail.accountingGroups} alreadyResolved={isCreditResolved(detail)} onResolved={creditResolved} />
       </section>}
       <div className="overflow-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="p-2">Item</th><th className="p-2">Source bin</th><th className="p-2">Quantity</th><th className="p-2">GRN value</th></tr></thead><tbody>{detail?.items?.map(line => <tr key={line.id} className="border-b"><td className="p-2">{line.itemCode} — {line.itemName}</td><td className="p-2">{line.locationName || (line.locationId ? 'Bin name unavailable' : 'Missing — dispatch blocked')}</td><td className="p-2">{line.returnQuantity} {line.unitOfMeasure}</td><td className="p-2">{line.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td></tr>)}</tbody></table></div>
       <p className="text-xs text-muted-foreground">GRN value is the original receipt estimate. Stock movement history shows the actual carrying value used at dispatch. No supplier debit note or credit is generated by this action.</p><DialogFooter><Button variant="outline" onClick={() => setDetail(null)}>Close</Button></DialogFooter>

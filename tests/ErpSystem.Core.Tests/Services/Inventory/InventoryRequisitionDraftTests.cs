@@ -26,7 +26,7 @@ public sealed class InventoryRequisitionDraftTests : IDisposable
     private readonly Guid _actor = Guid.NewGuid();
     private readonly Guid _location = Guid.NewGuid();
     private readonly Warehouse _warehouse = new() { Code = "DRAFT-WH", Name = "Draft test warehouse" };
-    private readonly Department _department = new() { Name = "Operations", Code = "OPS", AccountCode = "CC-OPS" };
+    private readonly OrganizationUnit _organizationUnit = new() { Name = "Operations", Code = "OPS", AccountCode = "CC-OPS", IsActive = true };
     private readonly InventoryItem _item = new()
     {
         ItemCode = "DRAFT-PVC", Name = "Draft PVC", UnitOfMeasure = "EACH",
@@ -120,7 +120,7 @@ public sealed class InventoryRequisitionDraftTests : IDisposable
 
     private CreateInventoryRequisitionDto Request(decimal quantity) => new()
     {
-        DepartmentId = _department.Id, DepartmentName = "Operations", WarehouseId = _warehouse.Id,
+        OrganizationUnitId = _organizationUnit.Id, DepartmentName = "Operations", WarehouseId = _warehouse.Id,
         LocationId = _location, CostCenter = "Operations", Purpose = "Automated test only",
         Items = quantity == 0 ? [] : [new() { InventoryItemId = _item.Id, RequestedQuantity = quantity, LocationId = _location }]
     };
@@ -205,11 +205,11 @@ public sealed class InventoryRequisitionDraftTests : IDisposable
     private async Task<InventoryRequisitionService> Setup(ValuationMethod method)
     {
         _warehouse.TenantId = _tenant;
-        _department.TenantId = _tenant;
+        _organizationUnit.TenantId = _tenant;
         _item.TenantId = _tenant;
         _item.ValuationMethod = method;
         var user = new ApplicationUser { Id = _actor, TenantId = _tenant, UserName = "requester", FirstName = "Test", LastName = "Requester" };
-        _db.AddRange(user, _warehouse, _item, _department,
+        _db.AddRange(user, _warehouse, _item, _organizationUnit,
             Layer(_tenant, _location, 1900, -2), Layer(_tenant, _location, 2100, -1),
             Layer(Guid.NewGuid(), _location, 1, -10), Layer(_tenant, Guid.NewGuid(), 1, -10),
             new InventoryBalance { TenantId = _tenant, InventoryItemId = _item.Id, WarehouseId = _warehouse.Id,
@@ -335,11 +335,11 @@ public sealed class InventoryRequisitionDraftTests : IDisposable
     [Theory]
     [InlineData(" CC-OPS ", "OPS", "CC-OPS")]
     [InlineData("", " OPS ", "OPS")]
-    public async Task Create_derives_cost_centre_from_department_not_client_text(string account, string code, string expected)
+    public async Task Create_derives_cost_centre_from_organization_unit_not_client_text(string account, string code, string expected)
     {
         var service = await Setup(ValuationMethod.FIFO);
-        _department.AccountCode = account;
-        _department.Code = code;
+        _organizationUnit.AccountCode = account;
+        _organizationUnit.Code = code;
         await _db.SaveChangesAsync();
         var request = Request(0);
         request.CostCenter = "CLIENT-OVERRIDE";
@@ -347,6 +347,7 @@ public sealed class InventoryRequisitionDraftTests : IDisposable
         var created = await service.CreateAsync(request);
         created.CostCenter.Should().Be(expected);
         created.DepartmentName.Should().Be("Operations");
+        created.OrganizationUnitId.Should().Be(_organizationUnit.Id);
     }
 
     [Theory]
@@ -354,14 +355,14 @@ public sealed class InventoryRequisitionDraftTests : IDisposable
     [InlineData("inactive")]
     [InlineData("other-tenant")]
     [InlineData("unconfigured")]
-    public async Task Create_rejects_invalid_department_before_saving(string problem)
+    public async Task Create_rejects_invalid_organization_unit_before_saving(string problem)
     {
         var service = await Setup(ValuationMethod.FIFO);
         var request = Request(0);
-        if (problem == "missing") request.DepartmentId = Guid.NewGuid();
-        if (problem == "inactive") _department.IsActive = false;
-        if (problem == "other-tenant") _department.TenantId = Guid.NewGuid();
-        if (problem == "unconfigured") { _department.Code = " "; _department.AccountCode = " "; }
+        if (problem == "missing") request.OrganizationUnitId = Guid.NewGuid();
+        if (problem == "inactive") _organizationUnit.IsActive = false;
+        if (problem == "other-tenant") _organizationUnit.TenantId = Guid.NewGuid();
+        if (problem == "unconfigured") { _organizationUnit.Code = " "; _organizationUnit.AccountCode = " "; }
         await _db.SaveChangesAsync();
         var action = () => service.CreateAsync(request);
         await action.Should().ThrowAsync<ArgumentException>();
@@ -369,20 +370,21 @@ public sealed class InventoryRequisitionDraftTests : IDisposable
     }
 
     [Fact]
-    public async Task Draft_edit_preserves_saved_cost_centre_but_department_change_rederives_it()
+    public async Task Draft_edit_preserves_saved_cost_centre_but_organization_unit_change_rederives_it()
     {
         var service = await Setup(ValuationMethod.FIFO);
         var created = await service.CreateAsync(Request(0));
         var saved = await _db.Set<InventoryRequisition>().SingleAsync();
         saved.CostCenter = "HISTORIC";
-        var other = new Department { TenantId = _tenant, Name = "Engineering", Code = "ENG", AccountCode = "CC-ENG" };
+        var other = new OrganizationUnit { TenantId = _tenant, Name = "Engineering", Code = "ENG", AccountCode = "CC-ENG", IsActive = true };
         _db.Add(other);
         await _db.SaveChangesAsync();
         (await service.UpdateAsync(created.Id, new() { Purpose = "Updated", CostCenter = "CLIENT" }))
             .CostCenter.Should().Be("HISTORIC");
-        var updated = await service.UpdateAsync(created.Id, new() { DepartmentId = other.Id, CostCenter = "CLIENT" });
+        var updated = await service.UpdateAsync(created.Id, new() { OrganizationUnitId = other.Id, CostCenter = "CLIENT" });
         updated.CostCenter.Should().Be("CC-ENG");
         updated.DepartmentName.Should().Be("Engineering");
+        updated.OrganizationUnitId.Should().Be(other.Id);
     }
 
     [Fact]

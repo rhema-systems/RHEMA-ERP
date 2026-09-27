@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,6 +25,8 @@ public sealed partial class PurchaseReturnService
             {
                 Id = grn.Id, GRNNumber = grn.GRNNumber, SupplierId = grn.SupplierId, SupplierName = grn.SupplierName,
                 WarehouseId = grn.WarehouseId, WarehouseName = candidate.Warehouse?.Name ?? string.Empty,
+                PurchaseOrderId = grn.PurchaseOrderId, PurchaseOrderNumber = grn.PurchaseOrderNumber,
+                ReturnSource = await ReadReturnSourceContextAsync(grn),
                 Status = GRNStatus.StockUpdated, ReceiptDate = grn.ReceiptDate,
                 Items = grn.Items.Where(line => !line.IsDeleted && line.AcceptedQuantity > 0).Select(line => new GoodsReceiptNoteItemDto
                 {
@@ -36,6 +39,53 @@ public sealed partial class PurchaseReturnService
             });
         }
         return results;
+    }
+
+    private async Task<SupplierReturnSourceContextDto> ReadReturnSourceContextAsync(GoodsReceiptNote grn)
+    {
+        var context = new SupplierReturnSourceContextDto { PurchaseOrderReceiptId = grn.PurchaseOrderReceiptId };
+        if (grn.PurchaseOrderReceiptId.HasValue)
+            context.ReceiptNumber = await _unitOfWork.Repository<PurchaseOrderReceipt>().GetQueryable(value =>
+                value.Id == grn.PurchaseOrderReceiptId && value.TenantId == grn.TenantId && !value.IsDeleted)
+                .Select(value => value.ReceiptNumber).SingleOrDefaultAsync();
+        var returns = await _unitOfWork.Repository<PurchaseReturnItem>().GetQueryable(value =>
+            value.TenantId == grn.TenantId && !value.IsDeleted && value.GoodsReceiptNoteItemId.HasValue &&
+            value.PurchaseReturn.GoodsReceiptNoteId == grn.Id && !value.PurchaseReturn.IsDeleted &&
+            value.PurchaseReturn.Status != "Cancelled" && value.PurchaseReturn.Status != "Rejected")
+            .AsNoTracking().ToListAsync();
+        var lineIds = grn.Items.Select(value => value.Id).ToArray();
+        var invoiceAllocations = await _unitOfWork.Repository<VendorInvoiceReceiptAllocation>().GetQueryable(value =>
+            value.TenantId == grn.TenantId && !value.IsDeleted && lineIds.Contains(value.GoodsReceiptNoteItemId) &&
+            !value.VendorInvoice.IsDeleted && value.VendorInvoice.TenantId == grn.TenantId && value.VendorInvoice.Status != VendorInvoiceStatus.Voided)
+            .Include(value => value.VendorInvoice).Include(value => value.PurchaseOrderReceiptItem).AsNoTracking().ToListAsync();
+        var invoiceJournalIds = invoiceAllocations.Where(value => value.VendorInvoice.JournalEntryId.HasValue)
+            .Select(value => value.VendorInvoice.JournalEntryId!.Value).Distinct().ToArray();
+        var journals = await _unitOfWork.Repository<JournalEntry>().GetQueryable(value => value.TenantId == grn.TenantId &&
+            !value.IsDeleted && !value.IsReversed && value.PostingStatus == "Posted" && value.SourceDocumentType == "VendorInvoice" &&
+            invoiceJournalIds.Contains(value.Id)).AsNoTracking().ToListAsync();
+        foreach (var line in grn.Items.Where(value => !value.IsDeleted))
+        {
+            var prior = returns.Where(value => value.GoodsReceiptNoteItemId == line.Id).ToArray();
+            var detail = new SupplierReturnSourceLineContextDto { GoodsReceiptNoteItemId = line.Id,
+                PreviouslyReturnedQuantity = prior.Where(value => value.StockReversed).Sum(value => value.ReturnQuantity),
+                ReservedReturnQuantity = prior.Where(value => !value.StockReversed).Sum(value => value.ReturnQuantity),
+                RemainingReturnableQuantity = Math.Max(0m, line.AcceptedQuantity - prior.Sum(value => value.ReturnQuantity)) };
+            foreach (var allocation in invoiceAllocations.Where(value => value.GoodsReceiptNoteItemId == line.Id))
+            {
+                var receiptLine = allocation.PurchaseOrderReceiptItem;
+                if (receiptLine is null || receiptLine.TenantId != grn.TenantId || receiptLine.IsDeleted || receiptLine.AcceptedQuantity <= 0m)
+                    throw new InvalidOperationException("RTV_RECEIPT_ALLOCATION_SOURCE_INVALID: an invoice allocation has no accepted receipt conversion.");
+                var quantity = allocation.Quantity * line.AcceptedQuantity / receiptLine.AcceptedQuantity;
+                var posted = journals.Any(value => value.Id == allocation.VendorInvoice.JournalEntryId && value.SourceDocumentId == allocation.VendorInvoiceId);
+                detail.Invoices.Add(new SupplierReturnSourceInvoiceDto { InvoiceId = allocation.VendorInvoiceId,
+                    InvoiceNumber = allocation.VendorInvoice.InvoiceNumber, BaseQuantity = quantity, Posted = posted });
+                if (posted) detail.InvoicedQuantity += quantity;
+                else detail.ReservedInvoiceQuantity += quantity;
+            }
+            detail.RemainingReturnableQuantity = Math.Max(0m, detail.RemainingReturnableQuantity - detail.ReservedInvoiceQuantity);
+            context.Lines.Add(detail);
+        }
+        return context;
     }
 
     private async Task<GoodsReceiptNote?> LoadAcceptedSourceAsync(Guid id)
@@ -74,8 +124,14 @@ public sealed partial class PurchaseReturnService
                 line.PurchaseOrderItem.TenantId != grn.TenantId || line.PurchaseOrderItem.PurchaseOrderId != receipt.PurchaseOrderId) return null;
             if (line.PurchaseOrderItem.LineType != ItemType.StockItem) continue;
             if (line.PurchaseOrderItem.InventoryItemId is not Guid itemId || !line.LocationId.HasValue || line.AcceptedQuantity < 0) return null;
-            var conversion = 1m;
-            if (line.ItemUnitOfMeasureId.HasValue)
+            var basis = await _unitOfWork.Repository<ProcurementReceiptCostBasis>().GetQueryable(value =>
+                value.TenantId == grn.TenantId && !value.IsDeleted && value.PurchaseOrderReceiptItemId == line.Id)
+                .AsNoTracking().SingleOrDefaultAsync();
+            var conversion = basis?.ConversionToBase ?? 1m;
+            if (basis is not null && (basis.InventoryItemId != itemId || basis.PurchaseOrderReceiptId != receipt.Id ||
+                basis.PurchaseQuantity != line.AcceptedQuantity || basis.ConversionToBase <= 0m ||
+                basis.BaseQuantity != basis.PurchaseQuantity * basis.ConversionToBase)) return null;
+            if (basis is null && line.ItemUnitOfMeasureId.HasValue)
             {
                 conversion = await _unitOfWork.Repository<ItemUnitOfMeasure>().GetQueryable(value =>
                     value.Id == line.ItemUnitOfMeasureId && value.TenantId == grn.TenantId && !value.IsDeleted && value.InventoryItemId == itemId)
@@ -108,7 +164,7 @@ public sealed partial class PurchaseReturnService
         var projected = new GoodsReceiptNote
         {
             Id = grn.Id, TenantId = grn.TenantId, GRNNumber = grn.GRNNumber, ReceiptDate = grn.ReceiptDate,
-            PurchaseOrderReceiptId = receipt.Id, PurchaseOrderId = grn.PurchaseOrderId, PurchaseOrderNumber = grn.PurchaseOrderNumber,
+            PurchaseOrderReceiptId = receipt.Id, PurchaseOrderId = grn.PurchaseOrderId, PurchaseOrderNumber = receipt.PurchaseOrder.OrderNumber,
             SupplierId = grn.SupplierId, SupplierName = grn.SupplierName, WarehouseId = grn.WarehouseId,
             Status = GRNStatus.StockUpdated, StockUpdated = true
         };

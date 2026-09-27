@@ -236,8 +236,29 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
         var invoiceRouteId = producer.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt
             ? FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice
             : FinanceDimensionRouteId.FinanceArCustomerInvoice;
+        var auctionIds = invoiceRouteId == FinanceDimensionRouteId.FinanceArCustomerInvoice
+            ? await _db.Set<ErpSystem.Core.Entities.Inventory.InventoryDisposalAuctionInvoice>().AsNoTracking()
+                .Where(value => value.TenantId == TenantId && invoiceIds.Contains(value.InvoiceId))
+                .Select(value => value.InvoiceId).ToArrayAsync(cancellationToken)
+            : Array.Empty<Guid>();
+        var salesIds = invoiceRouteId == FinanceDimensionRouteId.FinanceArCustomerInvoice
+            ? await _db.SalesOrders.AsNoTracking().Where(value => value.TenantId == TenantId && value.InvoiceId.HasValue &&
+                invoiceIds.Contains(value.InvoiceId.Value)).Select(value => value.InvoiceId!.Value).ToArrayAsync(cancellationToken)
+            : Array.Empty<Guid>();
+        if (salesIds.Intersect(auctionIds).Any())
+            throw new InvalidOperationException("An invoice cannot belong to both Sales and Inventory auction producers.");
         var assignments = await LoadSourceAssignmentsAsync(
-            invoiceRouteId, invoiceIds, cancellationToken);
+            invoiceRouteId, invoiceIds.Except(auctionIds).Except(salesIds).ToArray(), cancellationToken);
+        if (salesIds.Length != 0)
+        {
+            var salesAssignments = await LoadSourceAssignmentsAsync(FinanceDimensionRouteId.SalesOrderCustomerInvoice, salesIds, cancellationToken);
+            foreach (var pair in salesAssignments) assignments.Add(pair.Key, pair.Value);
+        }
+        if (auctionIds.Length != 0)
+        {
+            var auctionAssignments = await LoadSourceAssignmentsAsync(FinanceDimensionRouteId.InventoryDisposalAuctionInvoice, auctionIds, cancellationToken);
+            foreach (var pair in auctionAssignments) assignments.Add(pair.Key, pair.Value);
+        }
         return allocations.Select(allocation =>
         {
             var invoice = allocation.Invoice;

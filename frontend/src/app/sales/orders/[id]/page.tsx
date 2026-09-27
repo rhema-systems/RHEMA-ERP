@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import { salesOrderService, type SalesOrderDetailDto } from '@/services/salesOrderService';
 import { format } from 'date-fns';
+import { SalesOrderInvoicePanel } from '@/components/sales/SalesOrderInvoicePanel';
 
 const STATUS_CONFIG: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; className: string }> = {
   Draft: { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
@@ -254,6 +255,8 @@ export default function SalesOrderDetailPage() {
           )}
         </div>
       </div>
+
+      <SalesOrderInvoicePanel order={order} onChanged={loadOrder} />
 
       {order.projectUnitContext && (
         <Card className="border-emerald-200 bg-emerald-50/40">

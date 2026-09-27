@@ -44,6 +44,15 @@ public partial class ApplicationDbContext
         foreach (var line in lines)
         {
             var lineMovements = tagged.Where(value => value.ReferenceId == line.Id).ToList();
+            if (byId.Values.Any(value => value.ReferenceId == line.Id && value.TransferDispatchAllocationId.HasValue))
+            {
+                // Allocated transfers retain transit in a real location balance. Adding the
+                // old off-ledger supplement here would count the same asset twice. Never
+                // reinterpret existing implicit-transit history as migrated physical stock.
+                if (lineMovements.Count > 0)
+                    throw new InvalidOperationException("Mixed legacy and allocated transfer carrying-value history requires reviewed reconciliation.");
+                continue;
+            }
             foreach (var movement in lineMovements)
             {
                 var action = actions.SingleOrDefault(value => value.Id == actionIds[movement.Id] && value.InventoryTransferId == line.InventoryTransferId);

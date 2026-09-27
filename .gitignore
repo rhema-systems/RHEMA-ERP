@@ -267,8 +267,9 @@ __pycache__/
 *.pyc
 
 # Cake
-tools/
+tools/*
 !tools/packages.config
+!tools/ErpSystem.MigrationModelCompiler/
 
 # Paket dependency manager
 .paket/paket.exe

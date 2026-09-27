@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -220,6 +221,128 @@ public sealed class InventoryIssueValuationTests : IDisposable
         _db.Add(line);
         await _db.SaveChangesAsync();
         return line;
+    }
+
+    [Theory]
+    [InlineData(ValuationMethod.FIFO)]
+    [InlineData(ValuationMethod.WeightedAverage)]
+    [InlineData(ValuationMethod.StandardCost)]
+    public async Task Preview_matches_sequential_real_issues_without_mutation(ValuationMethod method)
+    {
+        var service = await Setup(method);
+        await AddPreviewScope();
+        var balance = await _db.Set<InventoryBalance>().SingleAsync();
+        balance.QuantityOnHand = 3; balance.TotalValue = 10; _item.StandardCost = 3.33m;
+        if (method == ValuationMethod.FIFO)
+        {
+            var layer = await _db.Set<InventoryLayer>().SingleAsync();
+            layer.RemainingQuantity = 3; layer.RemainingValue = 10; layer.UnitCost = 3.33m;
+        }
+        await _db.SaveChangesAsync();
+        var lines = new[] { PreviewLine(1), PreviewLine(1), PreviewLine(1) };
+        var values = await service.PreviewIssueCostsAsync(lines);
+        balance.QuantityOnHand.Should().Be(3); balance.TotalValue.Should().Be(10);
+        _db.ChangeTracker.HasChanges().Should().BeFalse();
+        foreach (var line in lines) (await Issue(service, line.Quantity)).Should().Be(values[line.LineId]);
+        values.Values.Sum().Should().Be(method == ValuationMethod.StandardCost ? 9.99m : 10m);
+    }
+
+    [Fact]
+    public async Task Preview_rejects_combined_shortage_and_duplicate_lines_without_mutation()
+    {
+        var service = await Setup(ValuationMethod.FIFO); await AddPreviewScope();
+        Func<Task> shortage = () => service.PreviewIssueCostsAsync([PreviewLine(15), PreviewLine(6)]);
+        await shortage.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Insufficient*");
+        var same = PreviewLine(1);
+        Func<Task> duplicate = () => service.PreviewIssueCostsAsync([same, same]);
+        await duplicate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*unique*");
+        _db.ChangeTracker.HasChanges().Should().BeFalse();
+        (await _db.Set<InventoryLayer>().SingleAsync()).RemainingQuantity.Should().Be(20);
+    }
+
+    [Theory]
+    [InlineData("foreign")]
+    [InlineData("transit")]
+    [InlineData("wrong-bin")]
+    public async Task Preview_rejects_foreign_transit_and_mismatched_location(string scenario)
+    {
+        var service = await Setup(ValuationMethod.WeightedAverage); await AddPreviewScope();
+        var warehouse = await _db.Set<Warehouse>().SingleAsync();
+        var location = await _db.Set<WarehouseLocation>().SingleAsync();
+        if (scenario == "foreign") warehouse.TenantId = Guid.NewGuid();
+        if (scenario == "transit") location.IsInTransitLocation = true;
+        if (scenario == "wrong-bin") location.WarehouseId = Guid.NewGuid();
+        await _db.SaveChangesAsync();
+        Func<Task> action = () => service.PreviewIssueCostsAsync([PreviewLine(1)]);
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        _db.ChangeTracker.HasChanges().Should().BeFalse();
+    }
+
+    private InventoryIssueCostPreviewLineDto PreviewLine(decimal quantity) => new()
+    {
+        LineId = Guid.NewGuid(), InventoryItemId = _item.Id, WarehouseId = _warehouse,
+        LocationId = _location, Quantity = quantity
+    };
+
+    [Fact]
+    public async Task Sales_fifo_preview_and_issue_use_selected_lot_and_fail_closed_when_it_is_short()
+    {
+        var service = await Setup(ValuationMethod.FIFO); await AddPreviewScope();
+        var old = await _db.Set<InventoryLayer>().SingleAsync(); old.LotNumber = "OLDER";
+        var selected = Layer(_tenant, _location); selected.LotNumber = "SELECTED";
+        selected.LayerDate = DateTime.UtcNow; selected.RemainingQuantity = 3; selected.UnitCost = 3.33m; selected.RemainingValue = 10;
+        _db.Add(selected); var balance = await _db.Set<InventoryBalance>().SingleAsync();
+        balance.QuantityOnHand += 3; balance.TotalValue += 10; balance.QuantityAllocated = 3;
+        await _db.SaveChangesAsync();
+        var first = PreviewLine(1); first.LotNumber = "selected";
+        var last = PreviewLine(2); last.LotNumber = "SELECTED";
+        var preview = await service.PreviewIssueCostsAsync([first, last]);
+        preview[first.LineId].Should().Be(3.33m); preview[last.LineId].Should().Be(6.67m);
+        foreach (var line in new[] { first, last })
+            (await service.ProcessIssueAsync(_item.Id, _warehouse, _location, line.Quantity,
+                InventoryMovementType.SalesIssue, ReferenceType.SalesInvoice, "SALE", Guid.NewGuid(), line.LotNumber)).Should().Be(preview[line.LineId]);
+        old.RemainingQuantity.Should().Be(20); selected.RemainingQuantity.Should().Be(0);
+        await _db.SaveChangesAsync();
+        Func<Task> unavailable = () => service.PreviewIssueCostsAsync([first]);
+        await unavailable.Should().ThrowAsync<InvalidOperationException>().WithMessage("*layers*");
+        Func<Task> actual = () => service.ProcessIssueAsync(_item.Id, _warehouse, _location, 1,
+            InventoryMovementType.SalesIssue, ReferenceType.SalesInvoice, "SALE", Guid.NewGuid(), "SELECTED");
+        await actual.Should().ThrowAsync<InvalidOperationException>().WithMessage("*layers*");
+        old.RemainingQuantity.Should().Be(20);
+    }
+    private async Task AddPreviewScope()
+    {
+        _db.AddRange(new Warehouse { Id = _warehouse, TenantId = _tenant, Code = "PREVIEW", Name = "Preview" },
+            new WarehouseLocation { Id = _location, TenantId = _tenant, WarehouseId = _warehouse, LocationCode = "BIN" });
+        await _db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Wac_recalculation_preserves_signed_invoice_adjustments_and_exact_posted_issue_values()
+    {
+        var service = await Setup(ValuationMethod.WeightedAverage);
+        InventoryMovement Movement(InventoryMovementType type, MovementDirection direction, decimal quantity, decimal value) => new()
+        {
+            TenantId = _tenant, InventoryItemId = _item.Id, WarehouseId = _warehouse, LocationId = _location,
+            MovementNumber = Guid.NewGuid().ToString("N"), MovementType = type, Direction = direction,
+            Quantity = quantity, TotalValue = value, IsPosted = true, MovementDate = DateTime.UtcNow
+        };
+        _db.AddRange(Movement(InventoryMovementType.PurchaseReceipt, MovementDirection.In, 20, 38000),
+            Movement(InventoryMovementType.InvoiceCostAdjustment, MovementDirection.In, 0, 200),
+            Movement(InventoryMovementType.SalesIssue, MovementDirection.Out, 2, 3820),
+            Movement(InventoryMovementType.InvoiceCostAdjustment, MovementDirection.Out, 0, -100));
+        var foreign = Movement(InventoryMovementType.PurchaseReceipt, MovementDirection.In, 100, 99999);
+        foreign.TenantId = Guid.NewGuid(); _db.Add(foreign);
+        var foreignBalance = new InventoryBalance { TenantId = foreign.TenantId, InventoryItemId = _item.Id,
+            WarehouseId = _warehouse, LocationId = _location, QuantityOnHand = 100, TotalValue = 99999 };
+        _db.Add(foreignBalance);
+        await _db.SaveChangesAsync();
+        await service.RecalculateCostLayersAsync(_item.Id);
+        var balance = await _db.Set<InventoryBalance>().SingleAsync(x => x.TenantId == _tenant);
+        balance.QuantityOnHand.Should().Be(18);
+        balance.QuantityAvailable.Should().Be(18);
+        balance.TotalValue.Should().Be(34280);
+        foreignBalance.TotalValue.Should().Be(99999);
     }
 
     private Task<decimal> Issue(InventoryValuationService service, decimal quantity) => service.ProcessIssueAsync(

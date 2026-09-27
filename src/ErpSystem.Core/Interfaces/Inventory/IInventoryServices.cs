@@ -142,6 +142,8 @@ public interface IGoodsReceiptNoteService
 /// </summary>
 public interface IInventoryTransferService
 {
+    Task<IReadOnlyList<InventoryTransferPickingOptionDto>> GetPickingOptionsAsync(Guid transferId, CancellationToken cancellationToken = default);
+    Task<InventoryTransitStockReportDto> GetTransitStockAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<InventoryTransferDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default);
     Task<IEnumerable<InventoryTransferDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null);
     Task<IEnumerable<InventoryTransferDto>> GetByWarehouseAsync(Guid warehouseId, bool isSource = true);
@@ -198,6 +200,9 @@ public interface IInventoryTransferService
 /// </summary>
 public interface IPhysicalCountService
 {
+    Task<PhysicalCountDto> CreateRecountAsync(Guid countId, Guid userId, CreatePhysicalCountRecountRequest request);
+    Task<IReadOnlyList<PhysicalCountCounterOptionDto>> GetCounterOptionsAsync(Guid warehouseId, Guid? locationId, string? search, CancellationToken cancellationToken = default);
+    Task<bool> AssignCountersAsync(Guid countId, Guid userId, AssignPhysicalCountCountersRequest request);
     Task<IEnumerable<PhysicalCountDto>> SearchAsync(string search, int take = 8, CancellationToken cancellationToken = default);
     Task<bool> ReviewCountAsync(Guid countId, Guid userId, PhysicalCountMutationRequest request);
     Task<bool> SubmitReviewedCountAsync(Guid countId, Guid userId, PhysicalCountMutationRequest request);
@@ -250,6 +255,10 @@ public interface IPhysicalCountService
 /// </summary>
 public interface IInventoryValuationService
 {
+    /// <summary>Simulates ordered exact-bin issues without changing the inventory ledger.</summary>
+    Task<IReadOnlyDictionary<Guid, decimal>> PreviewIssueCostsAsync(
+        IReadOnlyList<InventoryIssueCostPreviewLineDto> lines, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Clears request-scoped valuation state before an execution-strategy attempt.
     /// A retry must never reuse entities that were detached by a rolled-back attempt.
@@ -261,6 +270,8 @@ public interface IInventoryValuationService
 
     /// <summary>Moves a governed transfer line into its retained in-transit carrying-value ledger.</summary>
     Task<decimal> ProcessTransferDispatchAsync(Guid transferItemId, Guid actionId, Guid warehouseId, Guid locationId, decimal quantity);
+    Task<decimal> ProcessTransferAllocationDispatchAsync(Guid dispatchAllocationId);
+    Task<decimal> ProcessTransferAllocationReceiptAsync(Guid receiptAllocationId);
 
     /// <summary>Receives a governed transfer line at its retained outbound value, not a new purchase cost.</summary>
     Task<decimal> ProcessTransferReceiptAsync(Guid transferItemId, Guid actionId, Guid warehouseId, Guid locationId, decimal quantity, bool returnToSource = false);

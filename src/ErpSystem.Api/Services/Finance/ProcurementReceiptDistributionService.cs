@@ -113,6 +113,8 @@ public sealed partial class ProcurementReceiptDistributionService(ApplicationDbC
         {
             if (requireMovements) throw new InvalidOperationException("The accepted receipt has no posted inventory valuation movements.");
             basis = "Saved receipt quantities; final distribution uses accepted quantities and valuation at posting. Landed costs post separately.";
+            var receiptRate = await ProcurementReceiptExchangeRatePolicy.ResolveAsync(db.ExchangeRates.AsNoTracking(), settings,
+                receipt.PurchaseOrder.Currency, receipt.ReceiptDate, ct);
             var receiptLines = await db.PurchaseOrderReceiptItems.AsNoTracking()
                 .Include(value => value.PurchaseOrderItem).ThenInclude(value => value.InventoryItem)
                 .Where(value => value.TenantId == receipt.TenantId && value.ReceiptId == receipt.Id && !value.IsDeleted).ToListAsync(ct);
@@ -128,7 +130,7 @@ public sealed partial class ProcurementReceiptDistributionService(ApplicationDbC
                 if (quantity <= 0) continue;
                 var conversion = line.ItemUnitOfMeasureId.HasValue ? conversions.GetValueOrDefault(line.ItemUnitOfMeasureId.Value, 1m) : 1m;
                 if (conversion <= 0) conversion = 1m;
-                var purchaseValue = quantity * poLine.UnitPrice;
+                var purchaseValue = quantity * poLine.UnitPrice * (receiptRate?.InverseRate ?? 1m);
                 var inventoryValue = item.ValuationMethod == ValuationMethod.StandardCost ? quantity * conversion * item.StandardCost : purchaseValue;
                 values.Add(new ReceiptValue(item.Id, inventoryValue, purchaseValue - inventoryValue));
             }

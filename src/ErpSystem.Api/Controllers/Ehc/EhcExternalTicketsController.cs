@@ -57,6 +57,10 @@ public sealed class EhcExternalTicketsController : ControllerBase
         {
             return BadRequest(new { success = false, message = ex.Message });
         }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating external EHC ticket");

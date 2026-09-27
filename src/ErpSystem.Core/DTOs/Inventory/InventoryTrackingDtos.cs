@@ -22,6 +22,9 @@ public sealed class InventoryTrackingRequirementsDto
 
 public sealed class InventoryTrackingMutationRequest
 {
+    // Internal typed authority; callers cannot opt into transit writes through JSON.
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? TransferDispatchAllocationId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? TransferReceiptAllocationId { get; set; }
     public Guid InventoryItemId { get; set; }
     public Guid WarehouseId { get; set; }
     public Guid? LocationId { get; set; }

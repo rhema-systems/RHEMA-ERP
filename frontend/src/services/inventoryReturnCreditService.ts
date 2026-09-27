@@ -10,6 +10,8 @@ export interface InventoryReturnCreditCandidate {
 }
 
 export interface InventoryReturnCreditSource {
+  accountingGroupId?: string | null;
+  returnBaseQuantity?: number;
   invoiceId: string;
   invoiceNumber: string;
   supplierInvoiceNumber?: string;
@@ -18,6 +20,7 @@ export interface InventoryReturnCreditSource {
 }
 
 export interface InventoryReturnCreditNote {
+  inventorySupplierReturnAccountingGroupId?: string | null;
   id: string;
   debitNoteNumber: string;
   inventoryPurchaseReturnId: string;

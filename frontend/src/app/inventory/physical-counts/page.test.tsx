@@ -19,7 +19,7 @@ vi.mock('@/services/inventoryManagementService', () => ({ inventoryManagementSer
   getWarehouseItems: vi.fn(), getWarehouseLocations: vi.fn(), getBinStock: vi.fn(),
   addCountItem: vi.fn(), removeCountItem: vi.fn(), updatePhysicalCount: vi.fn(), recordCountItem: vi.fn(),
   startPhysicalCount: vi.fn(), completePhysicalCount: vi.fn(), uploadPhysicalCountEvidence: vi.fn(), submitReviewedPhysicalCount: vi.fn(),
-  cancelPhysicalCount: vi.fn(), createPhysicalCount: vi.fn(),
+  cancelPhysicalCount: vi.fn(), createPhysicalCount: vi.fn(), getPhysicalCountCounterOptions: vi.fn(), updatePhysicalCountCounters: vi.fn(),
 } }));
 
 let count: PhysicalCountDetailDto;
@@ -61,6 +61,7 @@ beforeEach(() => {
   vi.mocked(service.removeCountItem).mockResolvedValue();
   vi.mocked(service.updatePhysicalCount).mockImplementation(async (_id, data) => { count = { ...count, ...data }; return count; });
   vi.mocked(service.createPhysicalCount).mockResolvedValue({ ...count, id: 'created-count' });
+  vi.mocked(service.getPhysicalCountCounterOptions).mockResolvedValue([{ employeeId: 'employee-1', employeeNumber: 'EMP-001', employeeName: 'Ama Counter', userId: 'user-1', hasEmail: true, canAssign: true }]);
 });
 
 async function open() {
@@ -82,7 +83,12 @@ async function openCreate() {
   await screen.findByRole('button', { name: 'Edit draft' });
   fireEvent.click(screen.getByRole('button', { name: 'New Count' }));
   await choose('Warehouse *', 'Demo Warehouse');
+  await selectCounter();
   return screen.getByRole('dialog', { name: 'Create Physical Count' });
+}
+
+async function selectCounter() {
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Select Ama Counter (EMP-001)' }));
 }
 
 describe('physical count posting eligibility', () => {
@@ -131,8 +137,24 @@ describe('physical count creation scope', () => {
     await waitFor(() => expect(service.createPhysicalCount).toHaveBeenCalledOnce());
     const request = vi.mocked(service.createPhysicalCount).mock.calls[0][0];
     expect(request.warehouseId).toBe('warehouse-1');
+    expect(request.counterEmployeeIds).toEqual(['employee-1']);
     expect(request).not.toHaveProperty('locationId');
     expect(service.getWarehouseLocations).not.toHaveBeenCalled();
+  });
+
+  it('requires a committee and clears its selection when count scope changes', async () => {
+    await openCreate();
+    expect(screen.getByRole('button', { name: 'Create Count' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Ama Counter' }));
+    expect(screen.getByRole('button', { name: 'Create Count' })).toBeDisabled();
+    await selectCounter();
+    await choose('Count scope', 'Selected location');
+    expect(screen.queryByRole('button', { name: 'Remove Ama Counter' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Location *' })).toBeEnabled());
+    await choose('Location *', 'LOC-001 - Main');
+    await selectCounter();
+    expect(service.getPhysicalCountCounterOptions).toHaveBeenLastCalledWith('warehouse-1', '', 'bin-1');
+    expect(screen.getByRole('button', { name: 'Create Count' })).toBeEnabled();
   });
 
   it('requires an active location belonging to the warehouse for a location count', async () => {
@@ -150,6 +172,7 @@ describe('physical count creation scope', () => {
     expect(screen.queryByRole('option', { name: 'CLOSED' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'OTHER' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('option', { name: 'LOC-001 - Main' }));
+    await selectCounter();
     fireEvent.click(screen.getByRole('button', { name: 'Create Count' }));
     await waitFor(() => expect(service.createPhysicalCount).toHaveBeenCalledWith(expect.objectContaining({ warehouseId: 'warehouse-1', locationId: 'bin-1' })));
   });
@@ -182,6 +205,7 @@ describe('physical count creation scope', () => {
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Location *' })).toBeEnabled());
     await act(async () => { resolveFirst([{ id: 'bin-1', warehouseId: 'warehouse-1', locationCode: 'LOC-001', name: 'Main', isActive: true }] as never); });
     await choose('Location *', 'LOC-002 - Second');
+    await selectCounter();
     fireEvent.click(screen.getByRole('button', { name: 'Create Count' }));
     await waitFor(() => expect(service.createPhysicalCount).toHaveBeenCalledWith(expect.objectContaining({ warehouseId: 'warehouse-2', locationId: 'bin-2' })));
   });
@@ -203,6 +227,7 @@ describe('physical count creation scope', () => {
     await choose('Count scope', 'Selected location');
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Location *' })).toBeEnabled());
     await choose('Location *', 'LOC-001 - Main');
+    await selectCounter();
     fireEvent.click(screen.getByRole('button', { name: 'Create Count' }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('The selected location is no longer active. (LOCATION_INACTIVE)'));
     expect(screen.getByRole('dialog', { name: 'Create Physical Count' })).toBeInTheDocument();

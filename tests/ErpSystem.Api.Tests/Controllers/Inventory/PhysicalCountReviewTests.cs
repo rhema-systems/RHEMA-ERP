@@ -59,4 +59,42 @@ public class PhysicalCountReviewTests
         if (allowed) action.Should().NotThrow(); else action.Should().Throw<InvalidOperationException>();
         ((Action)(() => PhysicalCountService.EnsureCounterCanEdit(count, Guid.NewGuid()))).Should().Throw<InvalidOperationException>();
     }
+
+    [Fact]
+    public void Committee_members_can_record_but_legacy_starter_cannot_bypass_assignment()
+    {
+        var tenant = Guid.NewGuid(); var starter = Guid.NewGuid(); var member = Guid.NewGuid();
+        var count = new PhysicalCount { TenantId = tenant, CountedById = starter, Status = "InProgress" };
+        count.Counters.Add(new PhysicalCountCounter { TenantId = tenant, UserId = member, IsActive = true });
+        ((Action)(() => PhysicalCountService.EnsureCounterCanEdit(count, member))).Should().NotThrow();
+        ((Action)(() => PhysicalCountService.EnsureCounterCanEdit(count, starter))).Should().Throw<InvalidOperationException>();
+        count.Status = "UnderReview";
+        ((Action)(() => PhysicalCountService.EnsureCounterCanEdit(count, member))).Should().NotThrow();
+        count.Status = "PendingStoresApproval";
+        ((Action)(() => PhysicalCountService.EnsureCounterCanEdit(count, member))).Should().Throw<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void Removed_or_cross_tenant_committee_members_cannot_record(bool active, bool wrongTenant)
+    {
+        var tenant = Guid.NewGuid(); var member = Guid.NewGuid();
+        var count = new PhysicalCount { TenantId = tenant, CountedById = member, Status = "InProgress" };
+        count.Counters.Add(new PhysicalCountCounter { TenantId = wrongTenant ? Guid.NewGuid() : tenant, UserId = member, IsActive = active });
+        ((Action)(() => PhysicalCountService.EnsureCounterCanEdit(count, member))).Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Every_committee_actor_remains_excluded_from_independent_approval()
+    {
+        var tenant = Guid.NewGuid(); var member = Guid.NewGuid();
+        var count = new PhysicalCount { TenantId = tenant, Status = "PendingStoresApproval" };
+        count.Counters.Add(new PhysicalCountCounter { TenantId = tenant, UserId = member, IsActive = false });
+        var method = typeof(PhysicalCountService).GetMethod("EnsureIndependentActor", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var blocked = () => method.Invoke(null, new object[] { count, member, true, true });
+        blocked.Should().Throw<System.Reflection.TargetInvocationException>().WithInnerException<InvalidOperationException>();
+        var allowed = () => method.Invoke(null, new object[] { count, Guid.NewGuid(), true, true });
+        allowed.Should().NotThrow();
+    }
 }

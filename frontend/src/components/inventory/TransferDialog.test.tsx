@@ -6,6 +6,7 @@ import { TransferDialog } from './TransferDialog';
 const mocks = vi.hoisted(() => ({
   warehouseItems: vi.fn(), locations: vi.fn(), detail: vi.fn(), permission: vi.fn(), submit: vi.fn(),
   close: vi.fn(), toast: vi.fn(), requirements: vi.fn(), visibility: { showTab: true },
+  addItem: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
@@ -28,6 +29,7 @@ vi.mock('@/services/inventoryManagementService', () => ({ inventoryManagementSer
   getWarehouseInventoryItems: mocks.warehouseItems, getWarehouseLocations: mocks.locations,
   getInventoryTransferById: mocks.detail, getTransferDiscrepancyResolutions: vi.fn(async () => ({})),
   submitTransferForApproval: mocks.submit, closeTransfer: mocks.close,
+  addTransferItem: mocks.addItem,
 } }));
 vi.mock('@/components/ui/select', () => ({
   Select: ({ children, onValueChange, value, disabled }: any) => <select value={value} disabled={disabled} onChange={event => onValueChange(event.target.value)}>{children}</select>,
@@ -54,6 +56,25 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('transfer dialog', () => {
+  it('adds a same-warehouse request without choosing dispatch or receipt bins', async () => {
+    mocks.detail.mockResolvedValue({ ...saved, status: 'Draft' });
+    mocks.requirements.mockResolvedValue({ inventoryItemId: 'pvc', requiresSerial: false, requiresLot: false, requiresBatch: false, requiresManufactureDate: false, requiresExpiryDate: false });
+    mocks.addItem.mockResolvedValue({});
+    render(<TransferDialog open mode="edit" initialTab="items" transfer={saved} warehouses={warehouses} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Item' }));
+    const picker = screen.getAllByRole('combobox').find(element => element.querySelector('option[value="pvc"]'));
+    fireEvent.change(picker!, { target: { value: 'pvc' } });
+    await waitFor(() => expect(mocks.requirements).toHaveBeenCalledWith('pvc'));
+    expect(screen.queryByText('Source Bin')).not.toBeInTheDocument();
+    expect(screen.queryByText('Destination Bin')).not.toBeInTheDocument();
+    const add = screen.getAllByRole('button', { name: 'Add Item' }).find(button => !(button as HTMLButtonElement).disabled)!;
+    fireEvent.click(add);
+    await waitFor(() => expect(mocks.addItem).toHaveBeenCalledWith('transfer', expect.objectContaining({ inventoryItemId: 'pvc' })));
+    expect(mocks.addItem.mock.calls[0][1]).not.toHaveProperty('sourceLocationId');
+    expect(mocks.addItem.mock.calls[0][1]).not.toHaveProperty('destinationLocationId');
+    expect(mocks.locations).not.toHaveBeenCalled();
+  });
+
   it.each(['view', 'edit'] as const)('maximizes and restores Items without reloading or losing input (%s)', async (mode) => {
     mocks.detail.mockResolvedValue({ ...saved, status: 'Draft' });
     render(<TransferDialog open mode={mode} initialTab="items" transfer={saved} warehouses={warehouses} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);

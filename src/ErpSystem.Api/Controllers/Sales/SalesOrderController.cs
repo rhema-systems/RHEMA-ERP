@@ -174,14 +174,14 @@ public class SalesOrderController : ControllerBase
     /// Generates an Invoice from a confirmed Sales Order.
     /// </summary>
     [HttpPost("{id}/generate-invoice")]
-    public async Task<ActionResult<Guid>> GenerateInvoice(Guid id)
+    public async Task<ActionResult<Guid>> GenerateInvoice(Guid id, [FromBody] GenerateSalesOrderInvoiceRequest request)
     {
         try
         {
-            var invoiceId = await _salesOrderService.GenerateInvoiceAsync(id);
+            var invoiceId = await _salesOrderService.GenerateInvoiceAsync(id, request);
             return Ok(new { invoiceId });
         }
-        catch (NotImplementedException ex) { return StatusCode(501, new { error = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Problem(statusCode: 403, detail: ex.Message); }
         catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
     }
 

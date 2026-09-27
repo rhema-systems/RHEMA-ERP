@@ -58,4 +58,14 @@ describe('inventoryManagementService controlled transfers', () => {
     expect(mockedAxios.post.mock.calls[1][1]).toEqual(expect.objectContaining({ rowVersion: 'AQID', idempotencyKey: 'close-key' }));
     expect(mockedAxios.post.mock.calls[1][2]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer tenant-token' }) }));
   });
+
+  it('uses the owner picking endpoint and carries bin allocation and carrier identities unchanged', async () => {
+    mockedAxios.get.mockResolvedValue({ data: [{ itemId: 'line-1', sourceLocationId: 'bin-a', quantityAvailable: 4 }] });
+    expect(await inventoryManagementService.getTransferPickingOptions('transfer-1')).toEqual([{ itemId: 'line-1', sourceLocationId: 'bin-a', quantityAvailable: 4 }]);
+    expect(mockedAxios.get).toHaveBeenCalledWith(expect.stringMatching(/\/inventory\/transfers\/transfer-1\/picking-options$/), expect.any(Object));
+    await inventoryManagementService.shipTransfer('transfer-1', control, undefined, [{ itemId: 'line-1', shippedQuantity: 4, picks: [{ sourceLocationId: 'bin-a', quantity: 4 }] }], { carrierBusinessPartnerId: 'supplier-1', vehicleNumber: 'GT-42' });
+    expect(mockedAxios.post.mock.calls[0][1]).toEqual(expect.objectContaining({ carrierBusinessPartnerId: 'supplier-1', vehicleNumber: 'GT-42', items: [{ itemId: 'line-1', shippedQuantity: 4, picks: [{ sourceLocationId: 'bin-a', quantity: 4 }] }] }));
+    await inventoryManagementService.receiveTransfer('transfer-1', control, [{ id: 'line-1', receivedQuantity: 2, allocations: [{ dispatchAllocationId: 'dispatch-1', receivedQuantity: 2, destinationLocationId: 'dest-a' }] }]);
+    expect(mockedAxios.post.mock.calls[1][1]).toEqual(expect.objectContaining({ receivedItems: [{ id: 'line-1', receivedQuantity: 2, allocations: [{ dispatchAllocationId: 'dispatch-1', receivedQuantity: 2, destinationLocationId: 'dest-a' }] }] }));
+  });
 });

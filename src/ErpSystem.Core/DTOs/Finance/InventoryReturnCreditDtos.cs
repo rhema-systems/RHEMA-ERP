@@ -23,6 +23,8 @@ public sealed class CreateInventoryReturnCreditDto
 
 public sealed class InventoryReturnCreditSourceDto
 {
+    public Guid? AccountingGroupId { get; set; }
+    public decimal ReturnBaseQuantity { get; set; }
     public Guid InvoiceId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public string? SupplierInvoiceNumber { get; set; }

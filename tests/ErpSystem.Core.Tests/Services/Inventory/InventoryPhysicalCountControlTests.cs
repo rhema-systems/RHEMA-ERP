@@ -36,6 +36,36 @@ public sealed class InventoryPhysicalCountControlTests : IDisposable
     }
 
     [Fact]
+    public void Recount_sheets_preserve_parent_and_root_lineage_and_claim_each_original_line_once()
+    {
+        var model = _context.GetService<IDesignTimeModel>().Model;
+        var count = model.FindEntityType(typeof(PhysicalCount))!;
+        count.GetForeignKeys().Should().Contain(fk => fk.Properties.Single().Name == nameof(PhysicalCount.RootPhysicalCountId));
+        count.GetForeignKeys().Should().Contain(fk => fk.Properties.Single().Name == nameof(PhysicalCount.ParentPhysicalCountId));
+        count.GetIndexes().Should().Contain(index => index.IsUnique && index.Properties.Select(p => p.Name).SequenceEqual(
+            new[] { "TenantId", "ParentPhysicalCountId", "RecountRequestKey" }));
+        var line = model.FindEntityType(typeof(PhysicalCountItem))!;
+        line.GetForeignKeys().Should().Contain(fk => fk.Properties.Single().Name == nameof(PhysicalCountItem.RootPhysicalCountItemId));
+        line.GetForeignKeys().Should().Contain(fk => fk.Properties.Single().Name == nameof(PhysicalCountItem.PredecessorPhysicalCountItemId));
+        var claim = model.FindEntityType(typeof(PhysicalCountAdjustmentClaim))!;
+        claim.GetIndexes().Should().Contain(index => index.IsUnique && index.Properties.Select(p => p.Name).SequenceEqual(
+            new[] { "TenantId", "RootPhysicalCountItemId" }));
+        claim.GetForeignKeys().Should().Contain(fk => fk.Properties.Single().Name == nameof(PhysicalCountAdjustmentClaim.StockAdjustmentItemId));
+    }
+
+    [Fact]
+    public void Counter_committee_has_typed_employee_user_notification_relationships_and_active_uniqueness()
+    {
+        var entity = _context.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(PhysicalCountCounter))!;
+        entity.Should().NotBeNull();
+        entity.GetIndexes().Should().Contain(index => index.IsUnique && index.Properties.Select(x => x.Name)
+            .SequenceEqual(new[] { "TenantId", "PhysicalCountId", "EmployeeId" }));
+        entity.GetForeignKeys().SelectMany(key => key.Properties).Select(x => x.Name)
+            .Should().Contain(new[] { "PhysicalCountId", "EmployeeId", "UserId", "AssignedById", "RemovedById", "InAppNotificationId", "EmailNotificationId" });
+        _context.Model.FindEntityType(typeof(PhysicalCount))!.FindNavigation(nameof(PhysicalCount.Counters))!.IsEagerLoaded.Should().BeTrue();
+    }
+
+    [Fact]
     public void Count_and_recount_requests_require_lineage_concurrency_and_replay_fields()
     {
         var first = new RecordCountItemDto();

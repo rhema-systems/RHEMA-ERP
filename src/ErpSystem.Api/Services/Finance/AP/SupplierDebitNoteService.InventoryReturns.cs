@@ -24,7 +24,10 @@ public sealed partial class SupplierDebitNoteService
             source.TenantId == tenant && !source.IsDeleted &&
             (source.Status == "Shipped" || source.Status == "Acknowledged") && source.ShippedDate.HasValue &&
             source.PurchaseOrderId.HasValue && source.GoodsReceiptNoteId.HasValue &&
-            !_db.SupplierDebitNotes.Any(note => note.TenantId == tenant && !note.IsDeleted && note.InventoryPurchaseReturnId == source.Id));
+            (!_db.SupplierDebitNotes.Any(note => note.TenantId == tenant && !note.IsDeleted && note.InventoryPurchaseReturnId == source.Id) ||
+             _db.Set<InventorySupplierReturnAccountingGroup>().Any(group => group.TenantId == tenant && !group.IsDeleted &&
+                group.InventoryPurchaseReturnId == source.Id && group.OriginalVendorInvoiceId.HasValue &&
+                !_db.SupplierDebitNotes.Any(note => note.TenantId == tenant && !note.IsDeleted && note.InventorySupplierReturnAccountingGroupId == group.Id))));
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();
@@ -66,6 +69,8 @@ public sealed partial class SupplierDebitNoteService
         Guid returnId, CancellationToken cancellationToken = default)
     {
         var source = await RequireDispatchedReturnAsync(returnId, cancellationToken);
+        var allocatedSources = await ReadAllocatedReturnCreditSourcesAsync(source, cancellationToken);
+        if (allocatedSources != null) return allocatedSources;
         var invoices = await _db.Set<VendorInvoice>().AsNoTracking().Include(x => x.LineItems)
             .Where(x => x.TenantId == TenantId && !x.IsDeleted && x.BusinessPartnerId == source.SupplierId &&
                 x.PurchaseOrderId == source.PurchaseOrderId && x.JournalEntryId.HasValue && x.Status != VendorInvoiceStatus.Voided &&
@@ -97,6 +102,13 @@ public sealed partial class SupplierDebitNoteService
             {
                 await _unitOfWork.AcquireTransactionLockAsync($"supplier-return:{TenantId:N}:{returnId:N}", cancellationToken);
                 await _unitOfWork.AcquireTransactionLockAsync(ApSettlementLockKeys.Invoice(TenantId, dto.OriginalVendorInvoiceId), cancellationToken);
+                if (await _db.Set<InventorySupplierReturnAccountingGroup>().AnyAsync(x => x.TenantId == TenantId && !x.IsDeleted &&
+                    x.InventoryPurchaseReturnId == returnId, cancellationToken))
+                {
+                    var allocated = await CreateAllocatedReturnCreditAsync(returnId, dto, producer, cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return allocated;
+                }
                 var existing = await _db.SupplierDebitNotes.Where(x => x.TenantId == TenantId && !x.IsDeleted &&
                     x.InventoryPurchaseReturnId == returnId).SingleOrDefaultAsync(cancellationToken);
                 if (existing != null)
@@ -199,6 +211,21 @@ public sealed partial class SupplierDebitNoteService
     {
         if (!_unitOfWork.HasActiveTransaction)
             throw new InvalidOperationException("RTV_DISPATCH_TRANSACTION_REQUIRED: Finance handoff must share the Inventory dispatch transaction.");
+        if (_acceptedSupply != null && !await _db.Set<InventorySupplierReturnPosting>().AnyAsync(x =>
+            x.TenantId == TenantId && !x.IsDeleted && x.InventoryPurchaseReturnId == inventoryReturnId, cancellationToken))
+        {
+            var allocatedSource = await RequireDispatchedReturnAsync(inventoryReturnId, cancellationToken);
+            var existingGroups = await _db.Set<InventorySupplierReturnAccountingGroup>().AsNoTracking().Where(x =>
+                x.TenantId == TenantId && !x.IsDeleted && x.InventoryPurchaseReturnId == inventoryReturnId).ToListAsync(cancellationToken);
+            if (existingGroups.Count != 0)
+            {
+                await ValidateAllocatedDispatchAsync(allocatedSource, existingGroups, cancellationToken);
+                return true;
+            }
+            await PostAllocatedReturnDispatchAsync(allocatedSource,
+                await CaptureReturnAccountingAsync(allocatedSource, cancellationToken), cancellationToken);
+            return true;
+        }
         var settings = await _db.FinanceSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
         if (settings?.ReturnToVendorClearingAccountId == null) return false;
         var candidates = await GetInventoryReturnCreditSourcesAsync(inventoryReturnId, cancellationToken);
@@ -465,6 +492,11 @@ public sealed partial class SupplierDebitNoteService
 
     private async Task PrepareInventoryReturnPostingAsync(SupplierDebitNote note, FinancePostingRequestV2Dto request, CancellationToken cancellationToken)
     {
+        if (note.InventorySupplierReturnAccountingGroupId.HasValue)
+        {
+            await PrepareAllocatedReturnCreditPostingAsync(note, request, cancellationToken);
+            return;
+        }
         var source = await RequireDispatchedReturnAsync(note.InventoryPurchaseReturnId!.Value, cancellationToken);
         var invoice = note.OriginalVendorInvoice ?? throw new InvalidOperationException("RTV_ORIGINAL_INVOICE_REQUIRED");
         await RequirePostedOriginalInvoiceAsync(invoice, cancellationToken);

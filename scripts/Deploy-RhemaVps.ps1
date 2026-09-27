@@ -514,7 +514,7 @@ function New-ReleaseArtifacts {
             $resolvedSourceCommit -match '^[0-9a-f]{40}$') `
             "The reusable API source commit is invalid: $ReuseApiOutputFromCommit"
 
-        $apiInputPaths = @('src')
+        $apiInputPaths = @('src', 'tools/ErpSystem.MigrationModelCompiler')
         foreach ($candidate in @(
                 'global.json', 'NuGet.config', 'Directory.Build.props',
                 'Directory.Build.targets', 'Directory.Packages.props')) {

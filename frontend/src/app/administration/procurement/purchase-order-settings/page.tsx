@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -54,6 +54,7 @@ export default function PurchaseOrderSettingsPage() {
         defaultItemCategoryId: data.defaultItemCategoryId,
         defaultUnitOfMeasureId: data.defaultUnitOfMeasureId,
         defaultValuationMethod: data.defaultValuationMethod || 'FIFO',
+        purchasePriceDifferenceHandling: data.purchasePriceDifferenceHandling,
         purchaseRequisitionNumberFormat: data.purchaseRequisitionNumberFormat || 'PR-{YYYY}-{####}',
         purchaseOrderNumberFormat: data.purchaseOrderNumberFormat || 'PO-{YYYY}-{####}',
         purchaseOrderReceiptNumberFormat: data.purchaseOrderReceiptNumberFormat || 'REC{YY}{####}',
@@ -245,6 +246,24 @@ export default function PurchaseOrderSettingsPage() {
               }
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Supplier invoice cost differences</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="purchasePriceDifferenceHandling">Purchase price difference handling</Label>
+          <Select value={formData.purchasePriceDifferenceHandling ?? ''} disabled={saving}
+            onValueChange={value => setFormData({ ...formData, purchasePriceDifferenceHandling: value as UpdateProcurementSettingsDto['purchasePriceDifferenceHandling'] })}>
+            <SelectTrigger id="purchasePriceDifferenceHandling" className="max-w-md"><SelectValue placeholder="Select company policy" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="RevalueInventory">Revalue Inventory</SelectItem>
+              <SelectItem value="PurchasePriceVariance">Post to Purchase Price Variance</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-sm text-muted-foreground">Applies when supplier invoice prices differ from accepted receipt costs. Original receipt costs remain unchanged.</p>
         </CardContent>
       </Card>
 

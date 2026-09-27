@@ -14,6 +14,36 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementSettingsControlTests
 {
+    [Theory]
+    [InlineData("RevalueInventory")]
+    [InlineData("PurchasePriceVariance")]
+    public async Task InvoicePricePolicyIsValidatedRetainedAndAudited(string policy)
+    {
+        var fixture = new Fixture();
+        var result = await fixture.Service.UpdateSettingsAsync(new UpdateProcurementSettingsDto
+            { AllowNonInventoryItems = true, PurchasePriceDifferenceHandling = policy });
+        result.PurchasePriceDifferenceHandling.Should().Be(policy);
+        var audit = fixture.Audits.Should().ContainSingle().Subject;
+        JsonDocument.Parse(audit.NewValues!).RootElement.GetProperty("PurchasePriceDifferenceHandling").GetString().Should().Be(policy);
+        await fixture.Service.UpdateSettingsAsync(new UpdateProcurementSettingsDto { AllowNonInventoryItems = true });
+        fixture.Settings.PurchasePriceDifferenceHandling.Should().Be(policy);
+        fixture.Audits.Should().HaveCount(1);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Ignore")]
+    [InlineData("purchasepricevariance")]
+    public async Task UnknownInvoicePricePolicyCannotBeSaved(string policy)
+    {
+        var fixture = new Fixture();
+        var action = () => fixture.Service.UpdateSettingsAsync(new UpdateProcurementSettingsDto
+            { AllowNonInventoryItems = true, PurchasePriceDifferenceHandling = policy });
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        fixture.Settings.PurchasePriceDifferenceHandling.Should().BeNull();
+        fixture.Unit.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task OlderClientOmittingFlagsPreservesConfiguredControls()
     {

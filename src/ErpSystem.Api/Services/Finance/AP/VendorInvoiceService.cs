@@ -1219,9 +1219,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
                 try
                 {
-                    await _unitOfWork.AcquireTransactionLockAsync(scope.PurchaseOrderId.HasValue
-                        ? $"tdc-ap-match:{TenantId:N}:{scope.PurchaseOrderId.Value:N}"
-                        : $"finance-ap-budget:{TenantId:N}:{id:N}", cancellationToken);
+                    _inventoryValuationService?.ResetProcessingAttempt();
+                    await _unitOfWork.AcquireTransactionLockAsync($"ap-invoice-post:{TenantId:N}:{id:N}", cancellationToken);
                     var result = await PostInCurrentTransactionAsync(id, producer, cancellationToken);
                     await _unitOfWork.CommitAsync(cancellationToken);
                     return result;
@@ -1288,14 +1287,18 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice,
                     producer,
                     cancellationToken);
-                var postingRequest = await BuildApInvoicePostingRequestAsync(
+                var receiptCostPlans = await ResolveReceiptCostsAsync(invoice, cancellationToken);
+                var postingRequest = await BuildApInvoicePostingRequestWithReceiptCostsAsync(
                     invoice,
                     budgetReservationIds,
                     producer,
-                    cancellationToken);
+                    cancellationToken, receiptCostPlans);
                 var postingResult = producer is null
                     ? await _financePostingEngine.PostAsync(postingRequest, cancellationToken)
                     : await _financePostingEngine.PostAsync(postingRequest, producer, cancellationToken);
+                if (!postingResult.WasDuplicate && receiptCostPlans.Count > 0)
+                    await PersistReceiptCostsAsync(invoice, receiptCostPlans, postingResult.PostingEventId,
+                        postingResult.JournalEntryId, cancellationToken);
 
                 if (invoice.JournalEntryId.HasValue && invoice.JournalEntryId.Value != postingResult.JournalEntryId)
                 {
@@ -1592,12 +1595,18 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 await _unitOfWork.AcquireTransactionLockAsync(
                     $"tdc0508-invoice:{TenantId:N}:{id:N}", cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync($"ap-invoice-post:{TenantId:N}:{id:N}", cancellationToken);
 
                 invoice = await _unitOfWork.Repository<VendorInvoice>()
                     .GetQueryable(i => i.TenantId == TenantId && i.Id == id && !i.IsDeleted)
                     .Include(i => i.PaymentAllocations.Where(a => !a.IsDeleted))
+                    .Include(i => i.LineItems)
                     .FirstOrDefaultAsync(cancellationToken)
                     ?? throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
+                await AcquireReceiptInvoiceLocksAsync(invoice, cancellationToken);
+                if (await _unitOfWork.Repository<InventorySupplierReturnAllocation>().GetQueryable(x => x.TenantId == TenantId &&
+                    x.OriginalVendorInvoiceId == invoice.Id && !x.IsDeleted).AnyAsync(cancellationToken))
+                    throw new InvalidOperationException("This invoice retains a dispatched supplier return. Complete its governed return credit lifecycle; voiding the original invoice cannot release its receipt claims.");
 
                 // A posted supplier debit note is the controlled correction of this exact AP
                 // recognition. Do not void its source invoice underneath that evidence; reverse
@@ -1694,6 +1703,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                             cancellationToken);
                     }
                 }
+
+                if (reversal != null)
+                    await ReverseReceiptCostsAsync(invoice, reversal, cancellationToken);
 
                 if (reversal != null && _fixedAssetService != null)
                 {
@@ -2972,11 +2984,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             return producer;
         }
 
-        private async Task<FinancePostingRequestV2Dto> BuildApInvoicePostingRequestAsync(
+        private Task<FinancePostingRequestV2Dto> BuildApInvoicePostingRequestAsync(VendorInvoice invoice,
+            IReadOnlyList<Guid> budgetReservationIds, FinancePostingProducerContext? producer, CancellationToken cancellationToken)
+            => BuildApInvoicePostingRequestWithReceiptCostsAsync(invoice, budgetReservationIds, producer, cancellationToken, null);
+
+        private async Task<FinancePostingRequestV2Dto> BuildApInvoicePostingRequestWithReceiptCostsAsync(
             VendorInvoice invoice,
             IReadOnlyList<Guid> budgetReservationIds,
             FinancePostingProducerContext? producer,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IReadOnlyList<ReceiptCostPlan>? receiptCostPlans = null)
         {
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
@@ -2986,7 +3003,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             EnsureInvoicePostingApproved(invoice);
 
-            var request = await BuildApInvoiceDistributionRequestAsync(invoice, budgetReservationIds, producer, cancellationToken);
+            var request = await BuildApInvoiceDistributionRequestWithReceiptCostsAsync(invoice, budgetReservationIds, producer, cancellationToken, receiptCostPlans);
             await ApplySavedDistributionAsync(invoice, request, cancellationToken, consolidate: true);
             return request;
         }
@@ -3012,11 +3029,16 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         // Pure line resolution shared by posting and the invoice Distribution read model.
         // Only the guarded posting method above may submit this request to Finance.
-        private async Task<FinancePostingRequestV2Dto> BuildApInvoiceDistributionRequestAsync(
+        private Task<FinancePostingRequestV2Dto> BuildApInvoiceDistributionRequestAsync(VendorInvoice invoice,
+            IReadOnlyList<Guid> budgetReservationIds, FinancePostingProducerContext? producer, CancellationToken cancellationToken)
+            => BuildApInvoiceDistributionRequestWithReceiptCostsAsync(invoice, budgetReservationIds, producer, cancellationToken, null);
+
+        private async Task<FinancePostingRequestV2Dto> BuildApInvoiceDistributionRequestWithReceiptCostsAsync(
             VendorInvoice invoice,
             IReadOnlyList<Guid> budgetReservationIds,
             FinancePostingProducerContext? producer,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IReadOnlyList<ReceiptCostPlan>? receiptCostPlans = null)
         {
             var tenantId = TenantId;
             if (invoice.TenantId != tenantId)
@@ -3068,7 +3090,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.VendorInvoiceId == invoice.Id && !r.IsDeleted);
             var clearsFinanceGrv = linkedFinanceReceipt != null;
             var clearsProcurementGrv = IsProcurementGrvClearingInvoice(invoice);
-            var procurementAccrualAccounts = clearsProcurementGrv
+            receiptCostPlans ??= clearsProcurementGrv ? await ResolveReceiptCostsAsync(invoice, cancellationToken) : [];
+            var procurementAccrualAccounts = clearsProcurementGrv && receiptCostPlans.Count == 0
                 ? await ResolveProcurementAccrualAccountsAsync(invoice, cancellationToken) : null;
             var landedCostAccounts = IsLandedCostInvoice(invoice)
                 ? await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken)
@@ -3088,6 +3111,27 @@ namespace ErpSystem.Api.Services.Finance.AP
             foreach (var line in activeLines)
             {
                 var grossAmount = RoundMoney(line.Quantity * line.UnitPrice);
+                var lineCosts = receiptCostPlans.Where(x => x.Cost.VendorInvoiceLineItemId == line.Id).ToArray();
+                if (lineCosts.Length > 0)
+                {
+                    foreach (var costPlan in lineCosts)
+                    foreach (var costLine in costPlan.Lines)
+                    {
+                        var protectedControl = costLine.Purpose is "Accrual" or "Inventory";
+                        await ResolvePostingAccountAsync(costLine.AccountId, $"receipt {costLine.Purpose} account", accountCache,
+                            allowControlAccount: protectedControl, requireDirectPosting: !protectedControl, cancellationToken);
+                        var tag = costLine.Purpose switch { "Accrual" => "AP-GRV", "Inventory" => "AP-INVENTORY-COST",
+                            "Ppv" => "AP-PRICE-VARIANCE", "Fx" => "AP-RECEIPT-FX", _ => throw new InvalidOperationException("Unsupported receipt cost posting purpose.") };
+                        var costPosting = BuildPostingLine(costLine.AccountId,
+                            $"{DistributionType(tag)} - {invoice.InvoiceNumber} - {line.Description}",
+                            Math.Max(0, costLine.FunctionalAmount), Math.Max(0, -costLine.FunctionalAmount),
+                            functionalCurrency, functionalCurrency, 1m, invoice.InvoiceDate, invoice.InvoiceNumber, lineNumber++, tag);
+                        costPosting.Notes = $"Receipt cost {costPlan.Cost.SourceFingerprint}; policy {costPlan.Cost.Policy}";
+                        ApplySourceDimensions(costPosting, line, sourceLineDimensions);
+                        postingLines.Add(costPosting);
+                    }
+                    continue;
+                }
                 if (landedCostAccounts != null)
                 {
                     var account = landedCostAccounts[line.Id];
@@ -3251,7 +3295,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (apFunctionalAmount != expectedFunctionalTotal)
             {
                 if (clearsProcurementGrv && !string.Equals(invoiceCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase) &&
-                    procurementAccrualAccounts!.Values.Any(value => value.Count > 1))
+                    procurementAccrualAccounts?.Values.Any(value => value.Count > 1) == true)
                     throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture,
                         "Multi-account receipt clearing has an FX rounding difference of {0:0.00} {1}. A reviewed FX rounding policy is required before posting; receipt accounts and amounts have not been changed.",
                         apFunctionalAmount - expectedFunctionalTotal, functionalCurrency));

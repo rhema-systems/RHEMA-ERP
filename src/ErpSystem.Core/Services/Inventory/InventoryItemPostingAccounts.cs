@@ -13,6 +13,7 @@ public static class InventoryItemPostingAccounts
     public static InventoryItemPostingAccountsDto Read(InventoryItem item) => new()
     {
         InventoryAccountId = item.InventoryAccountId,
+        InventoryDisposalAccountId = item.InventoryDisposalAccountId,
         InventoryOffsetAccountId = item.InventoryOffsetAccountId,
         CostOfGoodsSoldAccountId = item.CostOfGoodsSoldAccountId,
         SalesAccountId = item.SalesAccountId,
@@ -33,6 +34,7 @@ public static class InventoryItemPostingAccounts
     public static void Apply(InventoryItemPostingAccountsDto? values, InventoryItem item)
     {
         if (values is null) return;
+        if (values.ProvidedFields.Contains(nameof(values.InventoryDisposalAccountId))) item.InventoryDisposalAccountId = values.InventoryDisposalAccountId;
         if (values.ProvidedFields.Contains(nameof(values.InventoryAccountId))) item.InventoryAccountId = values.InventoryAccountId;
         if (values.ProvidedFields.Contains(nameof(values.InventoryOffsetAccountId))) item.InventoryOffsetAccountId = values.InventoryOffsetAccountId;
         if (values.ProvidedFields.Contains(nameof(values.CostOfGoodsSoldAccountId))) item.CostOfGoodsSoldAccountId = values.CostOfGoodsSoldAccountId;
@@ -53,6 +55,7 @@ public static class InventoryItemPostingAccounts
 
     public static IEnumerable<(string Purpose, Guid? AccountId, AccountType[] Types)> GetMappings(InventoryItem item)
     {
+        yield return (nameof(item.InventoryDisposalAccountId), item.InventoryDisposalAccountId, new[] { AccountType.Expense, AccountType.Revenue });
         yield return (nameof(item.InventoryAccountId), item.InventoryAccountId, new[] { AccountType.Asset });
         yield return (nameof(item.InventoryOffsetAccountId), item.InventoryOffsetAccountId, new[] { AccountType.Asset, AccountType.Liability });
         yield return (nameof(item.CostOfGoodsSoldAccountId), item.CostOfGoodsSoldAccountId, new[] { AccountType.Expense });
@@ -83,6 +86,7 @@ public static class InventoryItemPostingAccounts
         {
             if (!accounts.TryGetValue(mapping.AccountId!.Value, out var account) ||
                 account.Status != AccountStatus.Active || (!account.AllowDirectPosting && !account.IsControlAccount) ||
+                (mapping.Purpose == nameof(item.InventoryDisposalAccountId) && (!account.AllowDirectPosting || account.IsControlAccount)) ||
                 !mapping.Types.Contains(account.AccountType))
                 throw new InventoryItemProfileValidationException("ITEM_POSTING_ACCOUNT_INVALID",
                     $"{mapping.Purpose.Replace("AccountId", "")}: select an active posting account of the correct type in the current tenant, or use the default.");

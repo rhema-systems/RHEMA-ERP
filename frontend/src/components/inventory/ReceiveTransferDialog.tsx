@@ -13,7 +13,7 @@ import { Download, FileText, Loader2, AlertTriangle, Columns3, Maximize2, Minimi
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel } from '@/components/ui/dropdown-menu';
 import {
   inventoryManagementService,
-  InventoryTransferDetailDto, ReceiveTransferItemDto
+  InventoryTransferDetailDto, ReceiveTransferItemDto, WarehouseLocationDto
 } from '@/services/inventoryManagementService';
 import { useToast } from '@/hooks/use-toast';
 import { getInventoryTransferProblemMessage } from '@/lib/inventory-transfer-controls';
@@ -26,15 +26,22 @@ interface ReceiveTransferDialogProps {
 }
 
 interface ReceiveQuantity {
+  rowKey: string;
   itemId: string;
+  dispatchAllocationId?: string;
+  destinationLocationId?: string;
+  carrierName?: string;
+  vehicleNumber?: string;
   shippedQuantity: number;
   alreadyReceived: number;
   legacyReservedQuantity: number;
+  outstandingQuantity?: number;
   toReceive: number;
   itemCode?: string;
   itemName?: string;
   unitOfMeasure?: string;
   sourceLocationName?: string;
+  sourceLocationId?: string;
   destinationLocationName?: string;
 }
 
@@ -46,6 +53,8 @@ export function ReceiveTransferDialog({ open, onOpenChange, transferId, onSucces
   const [fullPage, setFullPage] = useState(false);
   const [transfer, setTransfer] = useState<InventoryTransferDetailDto | null>(null);
   const [receiveQuantities, setReceiveQuantities] = useState<ReceiveQuantity[]>([]);
+  const [destinationLocations, setDestinationLocations] = useState<WarehouseLocationDto[]>([]);
+  const loadSequence = useRef(0);
   const [binColumns, setBinColumns] = useState({ source: false, destination: false });
   const [notes, setNotes] = useState('');
   const mutationKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -61,17 +70,38 @@ export function ReceiveTransferDialog({ open, onOpenChange, transferId, onSucces
       setNotes('');
       mutationKeyRef.current = null;
     }
+    return () => { loadSequence.current++; };
   }, [open, transferId]);
 
   const loadTransferDetails = async () => {
     if (!transferId) return;
+    const sequence = ++loadSequence.current;
     try {
       setLoading(true);
+      setTransfer(null);
       const detail = await inventoryManagementService.getInventoryTransferById(transferId);
+      const locations = detail.items.some(item => item.dispatchAllocations?.length)
+        ? await inventoryManagementService.getWarehouseLocations(detail.destinationWarehouseId) : [];
+      if (sequence !== loadSequence.current) return;
+      const receivingLocations = locations.filter(location => location.isActive && location.isReceivingLocation &&
+        !location.isInTransitLocation && !location.isQuarantineLocation && !location.isInspectionLocation && !location.isDamageLocation &&
+        !['InTransit', 'Quarantine'].includes(location.locationType));
+      setDestinationLocations(receivingLocations);
       setTransfer(detail);
       
       // Initialize receive quantities from items
-      const quantities: ReceiveQuantity[] = detail.items.map(item => ({
+      const quantities: ReceiveQuantity[] = detail.items.flatMap<ReceiveQuantity>(item => item.dispatchAllocations?.length
+        ? item.dispatchAllocations.filter(allocation => allocation.outstandingQuantity > 0).map(allocation => ({
+          rowKey: allocation.id, itemId: item.id, dispatchAllocationId: allocation.id,
+          destinationLocationId: receivingLocations.some(location => location.id === item.destinationLocationId && location.id !== allocation.sourceLocationId) ? item.destinationLocationId : '',
+          sourceLocationId: allocation.sourceLocationId,
+          shippedQuantity: allocation.quantity, alreadyReceived: allocation.receivedQuantity,
+          legacyReservedQuantity: 0, outstandingQuantity: allocation.outstandingQuantity,
+          toReceive: allocation.outstandingQuantity, itemCode: item.itemCode, itemName: item.itemName,
+          unitOfMeasure: item.unitOfMeasure, sourceLocationName: allocation.sourceLocationName,
+          carrierName: allocation.carrierName, vehicleNumber: allocation.vehicleNumber,
+        })) : [{
+        rowKey: item.id,
         itemId: item.id,
         shippedQuantity: item.shippedQuantity,
         alreadyReceived: item.receivedQuantity,
@@ -82,34 +112,50 @@ export function ReceiveTransferDialog({ open, onOpenChange, transferId, onSucces
         unitOfMeasure: item.unitOfMeasure,
         sourceLocationName: item.sourceLocationName,
         destinationLocationName: item.destinationLocationName
-      }));
+      }]);
       setReceiveQuantities(quantities);
     } catch (err) {
+      if (sequence !== loadSequence.current) return;
       console.error('Error loading transfer:', err);
-      toast({ title: 'Error', description: 'Failed to load transfer details', variant: 'destructive' });
+      toast({ title: 'Error', description: getInventoryTransferProblemMessage(err, 'Failed to load transfer receipt bins'), variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   };
 
-  const updateReceiveQuantity = (itemId: string, qty: number) => {
+  const updateReceiveQuantity = (rowKey: string, qty: number) => {
     setReceiveQuantities((values) => values.map((item) => {
-      if (item.itemId !== itemId) return item;
-      const availableToReceive = Math.max(0, item.shippedQuantity - item.alreadyReceived - item.legacyReservedQuantity);
+      if (item.rowKey !== rowKey) return item;
+      const availableToReceive = item.outstandingQuantity ?? Math.max(0, item.shippedQuantity - item.alreadyReceived - item.legacyReservedQuantity);
       return { ...item, toReceive: Math.max(0, Math.min(Number.isFinite(qty) ? qty : 0, availableToReceive)) };
     }));
   };
 
   const handleReceive = async () => {
     if (!transferId || !transfer) return;
+    if (transfer.requiresTransitReconciliation) return;
     
     // Filter items with quantity to receive
-    const itemsToReceive: ReceiveTransferItemDto[] = receiveQuantities
-      .filter(q => q.toReceive > 0)
-      .map(q => ({
-        id: q.itemId,
-        receivedQuantity: q.toReceive,
-      }));
+    const grouped = new Map<string, ReceiveTransferItemDto>();
+    for (const item of receiveQuantities.filter(row => row.toReceive > 0)) {
+      if (item.dispatchAllocationId && !destinationLocations.some(location => location.id === item.destinationLocationId && location.id !== item.sourceLocationId)) {
+        toast({ title: 'Validation', description: `Select a destination bin for ${item.itemCode || item.itemName}.`, variant: 'destructive' });
+        return;
+      }
+      if (Math.abs(item.toReceive - Number(item.toReceive.toFixed(4))) > 1e-8) {
+        toast({ title: 'Validation', description: 'Enter receiving quantities with at most four decimal places.', variant: 'destructive' });
+        return;
+      }
+      const aggregate = grouped.get(item.itemId) || { id: item.itemId, receivedQuantity: 0 };
+      aggregate.receivedQuantity = Number((aggregate.receivedQuantity + item.toReceive).toFixed(4));
+      if (item.dispatchAllocationId) {
+        aggregate.allocations = [...(aggregate.allocations || []), {
+          dispatchAllocationId: item.dispatchAllocationId, receivedQuantity: Number(item.toReceive.toFixed(4)), destinationLocationId: item.destinationLocationId!,
+        }];
+      }
+      grouped.set(item.itemId, aggregate);
+    }
+    const itemsToReceive = [...grouped.values()];
 
     if (itemsToReceive.length === 0) {
       toast({ title: 'Warning', description: 'Please enter quantities to receive', variant: 'destructive' });
@@ -165,10 +211,18 @@ export function ReceiveTransferDialog({ open, onOpenChange, transferId, onSucces
   };
 
   const totalToReceive = receiveQuantities.reduce((sum, q) => sum + q.toReceive, 0);
+  const hasAllocations = receiveQuantities.some(item => item.dispatchAllocationId);
   const sourceBins = new Map((transfer?.items || []).map(item => [item.sourceLocationId || item.sourceLocationName || '', item.sourceLocationName]));
   const destinationBins = new Map((transfer?.items || []).map(item => [item.destinationLocationId || item.destinationLocationName || '', item.destinationLocationName]));
-  const commonSourceBin = sourceBins.size === 1 ? ([...sourceBins.values()][0] || 'Not specified') : 'Multiple bins — use Columns';
-  const commonDestinationBin = destinationBins.size === 1 ? ([...destinationBins.values()][0] || 'Not specified') : 'Multiple bins — use Columns';
+  const dispatchSourceNames = [...new Set(receiveQuantities.map(item => item.sourceLocationName).filter(Boolean))];
+  const selectedDestinationNames = [...new Set(receiveQuantities.map(item => destinationLocations.find(location => location.id === item.destinationLocationId)?.locationCode).filter(Boolean))];
+  const commonSourceBin = hasAllocations
+    ? (dispatchSourceNames.length === 1 ? dispatchSourceNames[0] : 'Multiple source bins')
+    : sourceBins.size === 1 ? ([...sourceBins.values()][0] || 'Not specified') : 'Multiple bins — use Columns';
+  const commonDestinationBin = hasAllocations
+    ? (receiveQuantities.some(item => item.toReceive > 0 && !item.destinationLocationId) ? 'Select below'
+      : selectedDestinationNames.length === 1 ? selectedDestinationNames[0] : 'Multiple destination bins')
+    : destinationBins.size === 1 ? ([...destinationBins.values()][0] || 'Not specified') : 'Multiple bins — use Columns';
   const totalLegacyReserved = receiveQuantities.reduce((sum, q) => sum + q.legacyReservedQuantity, 0);
   const totalShipped = receiveQuantities.reduce((sum, q) => sum + q.shippedQuantity, 0);
 
@@ -198,6 +252,7 @@ export function ReceiveTransferDialog({ open, onOpenChange, transferId, onSucces
           </div>
         ) : transfer ? (
           <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-auto pr-1">
+            {transfer.requiresTransitReconciliation && <p role="alert" className="rounded border border-amber-300 p-2 text-sm">This historical transfer needs transit reconciliation before dispatch or receipt.</p>}
             {/* Transfer Info */}
             <div className="grid grid-cols-3 gap-4 p-4 bg-muted rounded-lg">
               <div>
@@ -241,6 +296,7 @@ export function ReceiveTransferDialog({ open, onOpenChange, transferId, onSucces
                   <TableRow>
                     <TableHead>Item Code</TableHead>
                     <TableHead>Description</TableHead>
+                    {hasAllocations && <TableHead>Dispatch / destination bin</TableHead>}
                     {binColumns.source && <TableHead>From Bin</TableHead>}
                     {binColumns.destination && <TableHead>To Bin</TableHead>}
                     <TableHead>UoM</TableHead>
@@ -252,19 +308,27 @@ export function ReceiveTransferDialog({ open, onOpenChange, transferId, onSucces
                 </TableHeader>
                 <TableBody>
                   {receiveQuantities.map((item) => {
-                    const remaining = Math.max(0, item.shippedQuantity - item.alreadyReceived);
+                    const remaining = item.outstandingQuantity ?? Math.max(0, item.shippedQuantity - item.alreadyReceived);
                     const availableToReceive = Math.max(0, remaining - item.legacyReservedQuantity);
                     return (
-                        <TableRow key={item.itemId}>
+                        <TableRow key={item.rowKey}>
                           <TableCell className="font-mono text-sm">{item.itemCode}</TableCell>
                           <TableCell>{item.itemName}</TableCell>
+                          {hasAllocations && <TableCell className="min-w-52 space-y-1 py-2">
+                            <div className="text-xs text-muted-foreground">{item.sourceLocationName} {item.carrierName ? `· ${item.carrierName}` : ''} {item.vehicleNumber ? `· ${item.vehicleNumber}` : ''}</div>
+                            <select aria-label={`Destination bin ${item.itemCode} ${item.dispatchAllocationId}`} value={item.destinationLocationId || ''}
+                              className="h-8 w-full rounded border bg-background px-1 text-sm" onChange={event => setReceiveQuantities(previous => previous.map(row => row.rowKey === item.rowKey ? { ...row, destinationLocationId: event.target.value } : row))}>
+                              <option value="">Select destination bin</option>
+                              {destinationLocations.filter(location => location.id !== item.sourceLocationId).map(location => <option key={location.id} value={location.id}>{location.locationCode}{location.name ? ` · ${location.name}` : ''}</option>)}
+                            </select>
+                          </TableCell>}
                           {binColumns.source && <TableCell className="text-sm">{item.sourceLocationName || <span className="text-muted-foreground">-</span>}</TableCell>}
                           {binColumns.destination && <TableCell className="text-sm">{item.destinationLocationName || <span className="text-muted-foreground">-</span>}</TableCell>}
                           <TableCell>{item.unitOfMeasure}</TableCell>
                           <TableCell className="text-right">{item.shippedQuantity.toFixed(2)}</TableCell>
                           <TableCell className="text-right"><Badge variant="secondary">{item.alreadyReceived.toFixed(2)}</Badge></TableCell>
                           <TableCell className="text-right">{remaining.toFixed(2)}</TableCell>
-                          <TableCell><Input aria-label={`Qty to receive ${item.itemCode}`} type="number" min="0" max={availableToReceive} step="0.01" value={item.toReceive} onChange={(event) => updateReceiveQuantity(item.itemId, Number(event.target.value || 0))} className="w-24 text-right" disabled={availableToReceive <= 0} /></TableCell>
+                          <TableCell><Input aria-label={`Qty to receive ${item.itemCode}${item.dispatchAllocationId ? ` ${item.dispatchAllocationId}` : ''}`} type="number" min="0" max={availableToReceive} step="0.01" value={item.toReceive} onChange={(event) => updateReceiveQuantity(item.rowKey, Number(event.target.value || 0))} className="w-24 text-right" disabled={availableToReceive <= 0} /></TableCell>
                         </TableRow>
                     );
                   })}
@@ -321,7 +385,7 @@ export function ReceiveTransferDialog({ open, onOpenChange, transferId, onSucces
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={handleReceive} disabled={saving || totalToReceive <= 0}>
+            <Button onClick={handleReceive} disabled={loading || !transfer || transfer.requiresTransitReconciliation || saving || totalToReceive <= 0}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               <Download className="h-4 w-4 mr-2" />
               Receive Items

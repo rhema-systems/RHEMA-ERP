@@ -685,6 +685,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 SupplierAdvanceAccountId = settings.SupplierAdvanceAccountId,
                 CustomerAdvanceAccountId = settings.CustomerAdvanceAccountId,
                 ControlAccountInventoryId = settings.ControlAccountInventoryId,
+                ControlAccountCOGSId = settings.ControlAccountCOGSId,
                 ReturnToVendorClearingAccountId = settings.ReturnToVendorClearingAccountId,
                 PurchaseReturnVarianceAccountId = settings.PurchaseReturnVarianceAccountId,
                 ControlAccountPayrollId = settings.ControlAccountPayrollId,

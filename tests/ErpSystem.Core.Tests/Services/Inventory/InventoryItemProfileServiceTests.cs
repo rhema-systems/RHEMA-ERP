@@ -222,7 +222,8 @@ public sealed class InventoryItemProfileServiceTests : IAsyncLifetime
         item.SalesAccountId.Should().Be(originalSales);
         InventoryItemPostingAccounts.Apply(null, item);
         item.SalesAccountId.Should().Be(originalSales);
-        InventoryItemPostingAccounts.GetMappings(item).Should().HaveCount(16);
+        InventoryItemPostingAccounts.GetMappings(item).Should().HaveCount(17)
+            .And.ContainSingle(mapping => mapping.Purpose == nameof(InventoryItem.InventoryDisposalAccountId));
     }
 
     private InventoryItem ValidItem() => new()

@@ -725,6 +725,10 @@ public class WarehouseDto
 /// </summary>
 public class WarehouseLocationDto
 {
+    public bool IsInTransitLocation { get; set; }
+    public bool IsQuarantineLocation { get; set; }
+    public bool IsInspectionLocation { get; set; }
+    public bool IsDamageLocation { get; set; }
     public Guid Id { get; set; }
     public Guid WarehouseId { get; set; }
     public string LocationCode { get; set; } = string.Empty;

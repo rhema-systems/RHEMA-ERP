@@ -9,27 +9,30 @@ import { Input } from '@/components/ui/input';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Switch } from '@/components/ui/switch';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { getInventoryTransferProblemMessage } from '@/lib/inventory-transfer-controls';
 import { 
   DollarSign, TrendingUp, TrendingDown, Package, BarChart3, 
   PieChart, Calculator, RefreshCw, Download
 } from 'lucide-react';
 import {
   inventoryManagementService, 
-  InventoryItemDto, WarehouseDto, WarehouseItemDto
+  InventoryItemDto, WarehouseDto, WarehouseItemDto, InventoryTransferTransitStockReportDto
 } from '@/services/inventoryManagementService';
 import { INVENTORY_VALUATION_REPORT_PATH } from '@/lib/inventory-report-navigation';
+import { currencyService } from '@/services/financeCommonService';
+import { formatInventoryMoney, normalizeInventoryCurrency } from '@/lib/inventory-currency';
 
 export default function InventoryValuationPage() {
   const [items, setItems] = useState<InventoryItemDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
-  const [inTransitByItemId, setInTransitByItemId] = useState<Record<string, number>>({});
-  const [inTransitByWarehouseItem, setInTransitByWarehouseItem] = useState<Record<string, Record<string, number>>>({});
+  const [transit, setTransit] = useState<InventoryTransferTransitStockReportDto>({ items: [], legacyReconciliationRequiredCount: 0 });
+  const [error, setError] = useState<string | null>(null);
   const [selectedWarehouseItemsByItemId, setSelectedWarehouseItemsByItemId] = useState<Record<string, WarehouseItemDto>>({});
   const [loading, setLoading] = useState(true);
   const [selectedWarehouse, setSelectedWarehouse] = useState('all');
+  const [currencyCode, setCurrencyCode] = useState(normalizeInventoryCurrency());
   const [valuationMethod, setValuationMethod] = useState('average');
-  const [includeInTransit, setIncludeInTransit] = useState(true);
 
   const valuationMethodOptions = [
     { value: 'average', label: 'Weighted Average (AVCO)' },
@@ -50,69 +53,34 @@ export default function InventoryValuationPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const [itemDataRaw, warehouseDataRaw, inTransitRaw] = await Promise.all([
         inventoryManagementService.getInventoryItems(),
         inventoryManagementService.getWarehouses(),
-        inventoryManagementService.getInTransitTransfers()
+        inventoryManagementService.getTransferTransitStock()
       ]);
 
       const itemData = normalizeApiData<InventoryItemDto[]>(itemDataRaw) || [];
       const warehouseData = normalizeApiData<WarehouseDto[]>(warehouseDataRaw) || [];
-      const inTransitTransfers = normalizeApiData<any[]>(inTransitRaw) || [];
-
-      const inTransitQuantities: Record<string, number> = {};
-      const inTransitQuantitiesByWarehouse: Record<string, Record<string, number>> = {};
-      for (const transfer of inTransitTransfers) {
-        const transferId = transfer?.id || transfer?.transferId;
-        if (!transferId) continue;
-
-        try {
-          const detailRaw = await inventoryManagementService.getInventoryTransferById(transferId);
-          const detail = normalizeApiData<any>(detailRaw);
-          const transferItems = detail?.items || [];
-          const sourceWarehouseId = transfer?.sourceWarehouseId || detail?.sourceWarehouseId;
-          const destinationWarehouseId = transfer?.destinationWarehouseId || detail?.destinationWarehouseId;
-          const relatedWarehouseIds = Array.from(
-            new Set([sourceWarehouseId, destinationWarehouseId].filter((id): id is string => !!id))
-          );
-
-          for (const transferItem of transferItems) {
-            const itemId = transferItem?.inventoryItemId;
-            if (!itemId) continue;
-
-            const shipped = Number(transferItem?.shippedQuantity || 0);
-            const received = Number(transferItem?.receivedQuantity || 0);
-            const inTransitQty = Math.max(0, shipped - received);
-
-            if (inTransitQty > 0) {
-              inTransitQuantities[itemId] = (inTransitQuantities[itemId] || 0) + inTransitQty;
-
-              for (const warehouseId of relatedWarehouseIds) {
-                if (!inTransitQuantitiesByWarehouse[warehouseId]) {
-                  inTransitQuantitiesByWarehouse[warehouseId] = {};
-                }
-                inTransitQuantitiesByWarehouse[warehouseId][itemId] =
-                  (inTransitQuantitiesByWarehouse[warehouseId][itemId] || 0) + inTransitQty;
-              }
-            }
-          }
-        } catch (transferDetailError) {
-          console.warn('Unable to load transfer detail for valuation in-transit calculation:', transferDetailError);
-        }
-      }
-
       setItems(itemData);
       setWarehouses(warehouseData);
-      setInTransitByItemId(inTransitQuantities);
-      setInTransitByWarehouseItem(inTransitQuantitiesByWarehouse);
+      setTransit(inTransitRaw);
     } catch (err) {
-      console.error('Error fetching data:', err);
+      setError(getInventoryTransferProblemMessage(err, 'Unable to load inventory valuation and transit balances.'));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    currencyService.getBaseCurrency()
+      .then(currency => { if (!cancelled) setCurrencyCode(normalizeInventoryCurrency(currency?.code)); })
+      .catch(() => { if (!cancelled) setCurrencyCode(normalizeInventoryCurrency()); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const fetchWarehouseScopedItems = async () => {
@@ -162,19 +130,16 @@ export default function InventoryValuationPage() {
       });
   }, [items, selectedWarehouse, selectedWarehouseItemsByItemId]);
 
-  const activeInTransitByItemId = useMemo(() => {
-    if (selectedWarehouse === 'all') {
-      return inTransitByItemId;
-    }
-    return inTransitByWarehouseItem[selectedWarehouse] || {};
-  }, [selectedWarehouse, inTransitByItemId, inTransitByWarehouseItem]);
+  const transitRows = useMemo(() => transit.items.filter(row => selectedWarehouse === 'all' ||
+    row.sourceWarehouseId === selectedWarehouse || row.destinationWarehouseId === selectedWarehouse ||
+    row.inTransitWarehouseId === selectedWarehouse), [transit, selectedWarehouse]);
+  const activeInTransitByItemId = useMemo(() => transitRows.reduce((quantities, row) => {
+    quantities[row.itemId] = (quantities[row.itemId] || 0) + row.inTransitQuantity;
+    return quantities;
+  }, {} as Record<string, number>), [transitRows]);
 
-  // Calculate valuation metrics
-  const getEffectiveQuantity = (item: InventoryItemDto) => {
-    const onHandQty = Number(item.currentStock || 0);
-    const inTransitQty = Number(activeInTransitByItemId[item.id] || 0);
-    return includeInTransit ? onHandQty + inTransitQty : onHandQty;
-  };
+  // Physical transit is already part of canonical stock; never add it again.
+  const getEffectiveQuantity = (item: InventoryItemDto) => Number(item.currentStock || 0);
 
   const getUnitValueByMethod = (item: InventoryItemDto) => {
     switch (valuationMethod) {
@@ -196,11 +161,8 @@ export default function InventoryValuationPage() {
 
   const totalValue = valuationItems.reduce((sum, item) => sum + calculateValuation(item), 0);
   const totalItems = valuationItems.reduce((sum, item) => sum + getEffectiveQuantity(item), 0);
-  const totalInTransitUnits = valuationItems.reduce((sum, item) => sum + Number(activeInTransitByItemId[item.id] || 0), 0);
-  const totalInTransitValue = valuationItems.reduce(
-    (sum, item) => sum + (Number(activeInTransitByItemId[item.id] || 0) * getUnitValueByMethod(item)),
-    0
-  );
+  const totalInTransitUnits = transitRows.reduce((sum, row) => sum + row.inTransitQuantity, 0);
+  const totalInTransitValue = transitRows.reduce((sum, row) => sum + row.inTransitValue, 0);
   const avgCostPerUnit = totalItems > 0 ? totalValue / totalItems : 0;
   const lowStockValue = valuationItems
     .filter(i => i.availableStock <= i.reorderLevel)
@@ -222,6 +184,12 @@ export default function InventoryValuationPage() {
     .sort((a, b) => calculateValuation(b) - calculateValuation(a))
     .slice(0, 10);
 
+  if (error) return <div className="space-y-4">
+    <h1 className="text-3xl font-bold">Inventory Valuation</h1>
+    <p role="alert" className="text-sm text-destructive">{error}</p>
+    <Button variant="outline" onClick={fetchData}>Retry</Button>
+  </div>;
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -234,7 +202,7 @@ export default function InventoryValuationPage() {
             {selectedWarehouse === 'all'
               ? 'All Warehouses'
               : warehouses.find((warehouse) => warehouse.id === selectedWarehouse)?.name || 'Selected Warehouse'}
-            {' '}+ In-Transit {includeInTransit ? 'Included' : 'Excluded'}
+            {' '}· Transit is included once in company stock
           </p>
         </div>
         <div className="flex items-center space-x-2">
@@ -264,7 +232,7 @@ export default function InventoryValuationPage() {
           <CardTitle className="flex items-center"><Calculator className="h-4 w-4 mr-2" />Valuation Settings</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Valuation Method</label>
                 <Select value={valuationMethod} onValueChange={setValuationMethod}>
@@ -289,15 +257,6 @@ export default function InventoryValuationPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Include In-Transit Quantity</label>
-              <div className="h-10 px-3 border rounded-md flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">
-                  {includeInTransit ? 'Enabled' : 'Disabled'}
-                </span>
-                <Switch checked={includeInTransit} onCheckedChange={setIncludeInTransit} />
-              </div>
-            </div>
-            <div className="space-y-2">
               <label className="text-sm font-medium">In-Transit Units</label>
               <div className="h-10 px-3 border rounded-md flex items-center justify-between bg-muted/30">
                 <span className="text-sm text-muted-foreground">Current in-transit quantity</span>
@@ -305,7 +264,7 @@ export default function InventoryValuationPage() {
               </div>
               <p className="text-xs text-muted-foreground">
                 {selectedWarehouse === 'all'
-                  ? 'Across all warehouses'
+                  ? 'Subset of company stock'
                   : 'For transfers involving the selected warehouse'}
               </p>
             </div>
@@ -313,13 +272,14 @@ export default function InventoryValuationPage() {
         </CardContent>
       </Card>
 
+      {transit.legacyReconciliationRequiredCount > 0 && <p role="alert" className="rounded border border-amber-300 p-3 text-sm">{transit.legacyReconciliationRequiredCount} historical transfer(s) require transit reconciliation. Their unverified balances are excluded from the transit breakdown.</p>}
       {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold">${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-2xl font-bold">{formatInventoryMoney(totalValue, currencyCode)}</p>
                 <p className="text-sm text-muted-foreground">Total Inventory Value</p>
               </div>
               <DollarSign className="h-8 w-8 text-green-500" />
@@ -341,7 +301,7 @@ export default function InventoryValuationPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold">${avgCostPerUnit.toFixed(2)}</p>
+                <p className="text-2xl font-bold">{formatInventoryMoney(avgCostPerUnit, currencyCode)}</p>
                 <p className="text-sm text-muted-foreground">Avg Cost/Unit</p>
               </div>
               <BarChart3 className="h-8 w-8 text-purple-500" />
@@ -352,7 +312,7 @@ export default function InventoryValuationPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold text-orange-600">${lowStockValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-2xl font-bold text-orange-600">{formatInventoryMoney(lowStockValue, currencyCode)}</p>
                 <p className="text-sm text-muted-foreground">Low Stock Value</p>
               </div>
               <TrendingDown className="h-8 w-8 text-orange-500" />
@@ -363,7 +323,7 @@ export default function InventoryValuationPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold text-indigo-600">${totalInTransitValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-2xl font-bold text-indigo-600">{formatInventoryMoney(totalInTransitValue, currencyCode)}</p>
                 <p className="text-sm text-muted-foreground">In-Transit Value</p>
               </div>
               <TrendingUp className="h-8 w-8 text-indigo-500" />
@@ -376,6 +336,7 @@ export default function InventoryValuationPage() {
         <TabsList>
           <TabsTrigger value="items">Top Valued Items</TabsTrigger>
           <TabsTrigger value="categories">By Category</TabsTrigger>
+          <TabsTrigger value="transit">Stock in transit</TabsTrigger>
         </TabsList>
 
         <TabsContent value="items">
@@ -407,13 +368,13 @@ export default function InventoryValuationPage() {
                               <p className="text-sm text-muted-foreground">
                                 {item.categoryName || 'Uncategorized'} • Stock: {item.currentStock} units
                                 {Number(activeInTransitByItemId[item.id] || 0) > 0 && (
-                                  <> • In-Transit: {Number(activeInTransitByItemId[item.id] || 0)} units</>
+                                  <> • Related transit: {Number(activeInTransitByItemId[item.id] || 0)} units</>
                                 )}
                               </p>
                             </div>
                           </div>
                           <div className="text-right">
-                            <div className="text-lg font-bold">${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div className="text-lg font-bold">{formatInventoryMoney(value, currencyCode)}</div>
                             <div className="text-sm text-muted-foreground">{percentage.toFixed(1)}% of total</div>
                           </div>
                         </div>
@@ -451,7 +412,7 @@ export default function InventoryValuationPage() {
                             <span className="font-medium">{category}</span>
                           </div>
                           <div className="text-right">
-                            <span className="font-bold">${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            <span className="font-bold">{formatInventoryMoney(value, currencyCode)}</span>
                             <span className="text-muted-foreground ml-2">({percentage.toFixed(1)}%)</span>
                           </div>
                         </div>
@@ -471,6 +432,27 @@ export default function InventoryValuationPage() {
             </CardContent>
           </Card>
         </TabsContent>
+        <TabsContent value="transit">
+          <Card><CardHeader><CardTitle>Stock in transit</CardTitle><CardDescription>Physical transit balances by dispatch. Related site transfers are shown for context and are not added to that site's on-hand stock.</CardDescription></CardHeader>
+            <CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>
+              <TableHead>Transfer / item</TableHead><TableHead>Route</TableHead><TableHead>Carrier / vehicle</TableHead>
+              <TableHead className="text-right">Requested</TableHead><TableHead className="text-right">Dispatched</TableHead><TableHead className="text-right">Received</TableHead><TableHead className="text-right">Returned</TableHead><TableHead className="text-right">In transit</TableHead><TableHead className="text-right">Carrying value</TableHead>
+            </TableRow></TableHeader><TableBody>
+              {transitRows.map(row => <TableRow key={row.dispatchAllocationId}>
+                <TableCell><Link href={`/inventory/transfers?recordId=${encodeURIComponent(row.transferId)}`} className="text-primary underline">{row.transferNumber}</Link><div className="text-xs">{row.itemCode} · {row.itemName}</div></TableCell>
+                <TableCell><div>{row.sourceWarehouseName} / {row.sourceLocationName}</div><div className="text-xs text-muted-foreground">{row.inTransitLocationName} → {row.destinationWarehouseName}</div></TableCell>
+                <TableCell>{row.carrierName || 'Own transport'}<div className="text-xs">{row.vehicleNumber || '—'}</div></TableCell>
+                <TableCell className="text-right">{row.requestedQuantity.toLocaleString()}</TableCell>
+                <TableCell className="text-right">{row.dispatchedQuantity.toLocaleString()}</TableCell>
+                <TableCell className="text-right">{row.receivedQuantity.toLocaleString()}</TableCell>
+                <TableCell className="text-right">{row.returnedQuantity.toLocaleString()}</TableCell>
+                <TableCell className="text-right">{row.inTransitQuantity.toLocaleString()}</TableCell>
+                <TableCell className="text-right">{formatInventoryMoney(row.inTransitValue, currencyCode)}</TableCell>
+              </TableRow>)}
+              {!transitRows.length && <TableRow><TableCell colSpan={9}>No stock in transit in this scope.</TableCell></TableRow>}
+            </TableBody></Table></CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Cost Comparison */}
@@ -484,19 +466,19 @@ export default function InventoryValuationPage() {
             <div className="border rounded-lg p-4 text-center">
               <p className="text-sm text-muted-foreground mb-2">Standard Cost Valuation</p>
               <p className="text-2xl font-bold">
-                ${valuationItems.reduce((sum, i) => sum + i.currentStock * i.standardCost, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatInventoryMoney(valuationItems.reduce((sum, i) => sum + i.currentStock * i.standardCost, 0), currencyCode)}
               </p>
             </div>
             <div className="border rounded-lg p-4 text-center">
               <p className="text-sm text-muted-foreground mb-2">Average Cost Valuation</p>
               <p className="text-2xl font-bold">
-                ${valuationItems.reduce((sum, i) => sum + i.currentStock * i.averageCost, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatInventoryMoney(valuationItems.reduce((sum, i) => sum + i.currentStock * i.averageCost, 0), currencyCode)}
               </p>
             </div>
             <div className="border rounded-lg p-4 text-center">
               <p className="text-sm text-muted-foreground mb-2">Last Purchase Cost Valuation</p>
               <p className="text-2xl font-bold">
-                ${valuationItems.reduce((sum, i) => sum + i.currentStock * i.lastPurchaseCost, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatInventoryMoney(valuationItems.reduce((sum, i) => sum + i.currentStock * i.lastPurchaseCost, 0), currencyCode)}
               </p>
             </div>
           </div>

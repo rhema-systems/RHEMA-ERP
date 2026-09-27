@@ -1,6 +1,9 @@
 using ErpSystem.Api.Services.Inventory;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -23,6 +26,114 @@ namespace ErpSystem.Api.Tests.Services.Inventory;
 
 public sealed class InventoryDisposalServiceTests
 {
+    [Fact, Trait("Batch", "InventoryControls20260927")]
+    public async Task New_sales_use_sales_module_without_creating_disposal_stock_or_journals()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var request = fixture.Request("sale-route-guard");
+        request.Method = InventoryDisposalMethod.Sale;
+        var action = async () => await fixture.Service.CreateAsync(request);
+        (await action.Should().ThrowAsync<InventoryDisposalException>()).Which.Code
+            .Should().Be("INV_DISPOSAL_SALES_ROUTE_REQUIRED");
+        (await fixture.Db.InventoryDisposalCases.CountAsync()).Should().Be(0);
+        (await fixture.Db.StockAdjustments.CountAsync()).Should().Be(0);
+    }
+
+    [Fact, Trait("Batch", "InventoryControls20260927")]
+    public async Task Auction_requires_linked_AR_before_stock_staging_and_creates_one_invoice_on_retry()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var create = fixture.Request("auction-source");
+        create.Method = InventoryDisposalMethod.Auction;
+        var draft = await fixture.Service.CreateAsync(create);
+        var ready = await fixture.Service.SubmitAsync(draft.Id, new SubmitInventoryDisposalRequest
+            { RowVersion = draft.RowVersion, IdempotencyKey = "auction-submit" });
+        ready.CanCreateAuctionInvoice.Should().BeTrue();
+        ready.CanStageExecution.Should().BeFalse();
+        var stage = () => fixture.Service.StageExecutionAsync(ready.Id, new StageInventoryDisposalExecutionRequest
+            { RowVersion = ready.RowVersion, IdempotencyKey = "no-invoice", ExecutionReference = "AUCTION-01" });
+        (await stage.Should().ThrowAsync<InventoryDisposalException>()).Which.Code.Should().Be("INV_DISPOSAL_AUCTION_INVOICE_REQUIRED");
+        var account = new Account { Id = Guid.NewGuid(), TenantId = fixture.Current.TenantId,
+            AccountCode = "TEST-DISPOSAL", AccountName = "Test disposal", AccountType = AccountType.Expense,
+            Status = AccountStatus.Active, AllowDirectPosting = true };
+        fixture.Db.Accounts.Add(account);
+        var item = await fixture.Db.InventoryItems.SingleAsync(value => value.Id == fixture.Item.Id);
+        item.InventoryDisposalAccountId = account.Id;
+        fixture.Db.FinanceSettings.Add(new FinanceSettings { Id = Guid.NewGuid(), TenantId = fixture.Current.TenantId, BaseCurrency = "GHS" });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Invoices.Setup(value => value.CreateAsync(It.IsAny<InvoiceCreateDto>(),
+                It.Is<FinancePostingProducerContext>(producer => producer.RouteId == FinanceDimensionRouteId.InventoryDisposalAuctionInvoice),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InvoiceCreateDto dto, FinancePostingProducerContext _, CancellationToken _) =>
+            {
+                dto.LineItems.Should().OnlyContain(line => line.LineItemType == "GLAccount" && line.GLAccountId == account.Id && line.ProductId == null);
+                dto.FinanceDimensions.Should().NotBeNull();
+                dto.FinanceDimensions!.DefaultDimensions.Should().ContainSingle(value => value.DimensionCode == "DEPARTMENT" && value.ValueCode == "ESTATE");
+                var invoice = new Invoice { Id = Guid.NewGuid(), TenantId = fixture.Current.TenantId,
+                    InvoiceNumber = "AUCTION-AR-001", BusinessPartnerId = dto.BusinessPartnerId,
+                    InvoiceDate = dto.InvoiceDate, DueDate = dto.DueDate, Reference = dto.Reference,
+                    CurrencyCode = "GHS", ExchangeRate = 1, Status = InvoiceStatus.Draft, CustomerName = "Auction buyer",
+                    SubTotal = dto.LineItems.Sum(line => line.Quantity * line.UnitPrice),
+                    TotalAmount = dto.LineItems.Sum(line => line.Quantity * line.UnitPrice),
+                    LineItems = dto.LineItems.Select(line => new InvoiceLineItem { Id = line.Id!.Value,
+                        TenantId = fixture.Current.TenantId, LineItemType = LineItemType.GLAccount,
+                        GLAccountId = line.GLAccountId, Description = line.Description, Quantity = line.Quantity,
+                        UnitPrice = line.UnitPrice, TaxTreatment = line.TaxTreatment }).ToArray() };
+                foreach (var line in invoice.LineItems) line.InvoiceId = invoice.Id;
+                fixture.Db.Invoices.Add(invoice);
+                fixture.Db.SaveChanges();
+                return new InvoiceDto { Id = invoice.Id, InvoiceNumber = invoice.InvoiceNumber, TotalAmount = invoice.TotalAmount };
+            });
+        var request = new CreateInventoryDisposalAuctionInvoiceRequest { RowVersion = ready.RowVersion,
+            IdempotencyKey = "auction-invoice", BusinessPartnerId = Guid.NewGuid(), InvoiceDate = new DateTime(2026, 9, 27),
+            FinanceDimensions = new() { ApplyDefaultToEligibleLines = true,
+                DefaultDimensions = [new() { DimensionCode = "DEPARTMENT", ValueCode = "ESTATE" }] },
+            Lines = ready.Lines.Select(line => new InventoryDisposalAuctionInvoiceLineRequest {
+                DisposalLineId = line.Id, UnitPrice = 15.25m, TaxTreatment = TaxTreatment.Exempt }).ToList() };
+        var created = await fixture.Service.CreateAuctionInvoiceAsync(ready.Id, request);
+        created.AuctionInvoiceId.Should().NotBeNull();
+        created.CanCreateAuctionInvoice.Should().BeFalse();
+        created.CanStageExecution.Should().BeTrue();
+        var replay = await fixture.Service.CreateAuctionInvoiceAsync(ready.Id, request);
+        replay.AuctionInvoiceId.Should().Be(created.AuctionInvoiceId);
+        (await fixture.Db.Set<InventoryDisposalAuctionInvoice>().CountAsync()).Should().Be(1);
+        (await fixture.Db.StockAdjustments.CountAsync()).Should().Be(0);
+        request.Lines[0].UnitPrice = 16m;
+        var changed = () => fixture.Service.CreateAuctionInvoiceAsync(ready.Id, request);
+        await changed.Should().ThrowAsync<InventoryDisposalException>();
+        request.Lines[0].UnitPrice = 15.25m;
+        request.FinanceDimensions.DefaultDimensions = [new() { DimensionCode = "DEPARTMENT", ValueCode = "SALES" }];
+        await changed.Should().ThrowAsync<InventoryDisposalException>();
+        fixture.Invoices.Verify(value => value.CreateAsync(It.IsAny<InvoiceCreateDto>(),
+            It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        var staged = await fixture.Service.StageExecutionAsync(created.Id, new StageInventoryDisposalExecutionRequest
+            { RowVersion = created.RowVersion, IdempotencyKey = "auction-stage", ExecutionReference = "AUCTION-01" });
+        staged.Status.Should().Be(InventoryDisposalStatus.AdjustmentPending);
+        staged.ProceedsAmount.Should().Be(61m, "sale value comes from the linked invoice, not a duplicate cash posting");
+        staged.ProceedsJournalEntryId.Should().BeNull();
+        staged.StockAdjustmentId.Should().BeNull();
+        fixture.ProducerIntents.Verify(value => value.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact, Trait("Batch", "InventoryControls20260927")]
+    public void Auction_economic_snapshot_ignores_decimal_scale_and_payment_status_but_detects_account_quantity_and_price_changes()
+    {
+        var invoice = new Invoice { Id = Guid.NewGuid(), TenantId = Guid.NewGuid(), CurrencyCode = "GHS", ExchangeRate = 1,
+            InvoiceDate = new DateTime(2026, 9, 27), SubTotal = 50, TotalAmount = 50,
+            LineItems = [new InvoiceLineItem { Id = Guid.NewGuid(), GLAccountId = Guid.NewGuid(), Quantity = 2, UnitPrice = 25 }] };
+        var original = InventoryDisposalAuctionInvoiceGuard.Snapshot(invoice);
+        invoice.ExchangeRate = 1.000000m;
+        invoice.LineItems.Single().Quantity = 2.0000m;
+        invoice.Status = InvoiceStatus.Paid;
+        InventoryDisposalAuctionInvoiceGuard.Snapshot(invoice).Should().Be(original);
+        invoice.LineItems.Single().UnitPrice = 26;
+        InventoryDisposalAuctionInvoiceGuard.Snapshot(invoice).Should().NotBe(original);
+        invoice.LineItems.Single().UnitPrice = 25;
+        invoice.LineItems.Single().GLAccountId = Guid.NewGuid();
+        InventoryDisposalAuctionInvoiceGuard.Snapshot(invoice).Should().NotBe(original);
+    }
+
     [Fact, Trait("Batch", "TDC-0615")]
     public void SqlServer_disposal_completion_lock_captures_and_rejects_negative_application_lock_results()
     {
@@ -318,6 +429,9 @@ public sealed class InventoryDisposalServiceTests
         var staged = await fixture.Service.StageExecutionAsync(ready.Id, stageRequest);
         staged.Status.Should().Be(InventoryDisposalStatus.AdjustmentPending);
         staged.ApprovedById.Should().BeNull();
+        staged.StockAdjustmentId.Should().BeNull("preparation does not manufacture a persisted stock adjustment");
+        staged.FinanceProducerApprovalId.Should().NotBeNull();
+        (await fixture.Db.InventoryDisposalCases.SingleAsync(value => value.Id == staged.Id)).PreparedStockAdjustmentId.Should().NotBeNull();
         (await fixture.Service.StageExecutionAsync(staged.Id, stageRequest)).Should().BeEquivalentTo(staged);
         fixture.ProducerIntents.Verify(value => value.PrepareAsync(
             It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -365,6 +479,7 @@ public sealed class InventoryDisposalServiceTests
         public IReadOnlyList<Guid> CommitteeMemberIds { get; }
         public Mock<IWorkflowIntegrationService> Workflow { get; }
         public Mock<IStockAdjustmentService> Adjustments { get; init; } = new();
+        public Mock<IInvoiceService> Invoices { get; init; } = new();
         public Mock<IFinanceProducerIntentService> ProducerIntents { get; init; } = new();
 
         public CreateInventoryDisposalRequest Request(string key) => new()
@@ -528,14 +643,15 @@ public sealed class InventoryDisposalServiceTests
                     It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((ProducerAccountingIntentDto intent, CancellationToken _) =>
                     new AccountingEventDto { Id = intent.AccountingEventId!.Value, Status = "Prepared" });
+            var invoices = new Mock<IInvoiceService>();
             var service = new InventoryDisposalService(db, current, access.Object,
                 Mock.Of<IProcurementSodGuardService>(), workflow.Object,
                 disposalParticipant.Object, valuation.Object,
                 producerIntents.Object, Mock.Of<IFinanceProducerIntentGroupService>(),
                 Mock.Of<IFinanceProducerApprovedExecution>(), Mock.Of<IFinanceProducerIntentGroupApprovedExecution>(),
-                trackingControls.Object, events.Object);
+                trackingControls.Object, events.Object, invoices.Object);
             return new Fixture(db, service, current, events, trackingControls, warehouse, location, item, version, upload,
-                auditorId, memberIds, workflow) { Adjustments = adjustments, ProducerIntents = producerIntents };
+                auditorId, memberIds, workflow) { Adjustments = adjustments, ProducerIntents = producerIntents, Invoices = invoices };
         }
 
         private static ApplicationUser User(Guid id, Guid tenantId, Tenant tenant, string first, string last) => new()

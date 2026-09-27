@@ -7,6 +7,13 @@ import { workflowApiService } from '@/services/workflow-api.service';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock('@/components/hr/common/OrganizationUnitPicker', () => ({
+  OrganizationUnitPicker: ({ value, onChange }: { value: string; onChange: (id: string, unit: { name: string }) => void }) => (
+    <select aria-label="Organisation unit" value={value} onChange={event => onChange(event.target.value, { name: 'Finance unit' })}>
+      <option value="">Select unit</option><option value="unit-1">Finance unit</option>
+    </select>
+  ),
+}));
 vi.mock('@/services/workflow-api.service', () => ({
   workflowApiService: { getWorkflowEntitySummary: vi.fn() },
 }));
@@ -145,10 +152,25 @@ describe('requisition dialog tab layout', () => {
 
   it('uses the same bounded height for the two-tab new requisition dialog', async () => {
     open('create');
-    await waitFor(() => expect(service.getDepartments).toHaveBeenCalled());
+    expect(screen.getByRole('combobox', { name: 'Organisation unit' })).toBeInTheDocument();
+    expect(service.getDepartments).not.toHaveBeenCalled();
     expect(screen.queryByRole('tab', { name: 'Workflow' })).not.toBeInTheDocument();
     expectFixedFrame();
     selectTab('Items (0)');
     expectFixedFrame();
+  });
+
+  it('saves the HR organisation unit instead of the legacy department identity', async () => {
+    vi.mocked(service.getById).mockResolvedValue({
+      id: 'req-1', status: 1, requisitionType: 1, priority: 'Normal', items: [],
+      departmentId: 'legacy-department', departmentName: 'Legacy department',
+      organizationUnitId: 'unit-1', organizationUnitName: 'Finance unit', warehouseId: 'warehouse-1',
+    } as never);
+    open();
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Organisation unit' })).toHaveValue('unit-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(service.update).toHaveBeenCalledWith('req-1', expect.objectContaining({ organizationUnitId: 'unit-1' })));
+    expect(vi.mocked(service.update).mock.calls[0][1]).not.toHaveProperty('departmentId');
+    expect(service.getDepartments).not.toHaveBeenCalled();
   });
 });

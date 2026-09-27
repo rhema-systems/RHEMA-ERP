@@ -201,6 +201,8 @@ public class InventoryManagementService : IInventoryManagementService
                 request.NegativeStockOverrideId.HasValue)
                 ?? throw new InvalidOperationException("No suitable location found for allocation");
             var warehouseId = bestLocation.Location.InventoryWarehouseId;
+            await InventoryTransitProtection.EnsureOrdinaryStockScopeAsync(
+                _unitOfWork, _currentUserProvider.TenantId, warehouseId, bestLocation.LocationId);
             var allocationId = Guid.NewGuid();
             var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
             {
@@ -325,6 +327,8 @@ public class InventoryManagementService : IInventoryManagementService
             }
             if (warehouseId == Guid.Empty)
                 throw new InvalidOperationException("The allocation has no authoritative warehouse stock scope.");
+            await InventoryTransitProtection.EnsureOrdinaryStockScopeAsync(
+                _unitOfWork, _currentUserProvider.TenantId, warehouseId, allocation.LocationId);
             await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
             {
                 InventoryItemId = allocation.InventoryItemId,
@@ -544,7 +548,7 @@ public class InventoryManagementService : IInventoryManagementService
         // An emergency request must still select an exact picking bin so the shared
         // negative-stock boundary can validate the override against that location.
         return locations
-            .Where(loc => loc.Location.IsPickingLocation &&
+            .Where(loc => loc.Location.IsPickingLocation && !InventoryTransitProtection.IsProtected(loc.Location) &&
                 (allowInsufficientQuantity || loc.AvailableQuantity >= requiredQuantity))
             .OrderByDescending(loc => loc.AvailableQuantity) // Prefer locations with more stock
             .FirstOrDefault();

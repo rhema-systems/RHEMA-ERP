@@ -117,6 +117,8 @@ public class SupplierDebitNote : TenantEntity
 {
     /// <summary>Exact Inventory return, distinct from the legacy Finance SupplierReturn FK.</summary>
     public Guid? InventoryPurchaseReturnId { get; set; }
+    /// <summary>Exact invoice-stage group for a mixed or multi-invoice Inventory return; null retains the historical whole-return contract.</summary>
+    public Guid? InventorySupplierReturnAccountingGroupId { get; set; }
     public Guid? ReturnDispatchPostingEventId { get; set; }
     public Guid? ReturnDispatchJournalEntryId { get; set; }
     /// <summary>Audited whole-note credit-only settlement of OriginalVendorInvoiceId; never a fabricated payment.</summary>

@@ -83,6 +83,13 @@ export default function EditBusinessPartnerPage() {
   const [formData, setFormData] = useState<UpdateBusinessPartnerDto>(emptyForm);
   const [creditLimit, setCreditLimit] = useState('');
   const catalogues = useBusinessPartnerPostingCatalogues(partner?.partnerType);
+  const requestedTab = searchParams.get('tab');
+
+  useEffect(() => {
+    if (requestedTab && ['finance-profiles', 'accounts-payable', 'accounts-receivable'].includes(requestedTab)) {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
 
   useEffect(() => {
     let current = true;
@@ -457,10 +464,10 @@ export default function EditBusinessPartnerPage() {
                   <BusinessPartnerFinanceProfilesPanel businessPartnerId={id} paymentTerms={paymentTerms} withholdingTaxes={catalogues.withholdingTaxes} />
                 </TabsContent>
                 {hasPayables && <TabsContent value="accounts-payable" className="py-3">
-                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="payables" />
+                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="payables" onOpenFinanceProfiles={() => setActiveTab('finance-profiles')} />
                 </TabsContent>}
                 {hasCustomerRole(formData.partnerType) && <TabsContent value="accounts-receivable" className="py-3">
-                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="receivables" />
+                  <BusinessPartnerCurrentAccountsPanel businessPartnerId={id} partnerType={formData.partnerType ?? partner.partnerType} ledger="receivables" onOpenFinanceProfiles={() => setActiveTab('finance-profiles')} />
                 </TabsContent>}
               </div>
             </Tabs>

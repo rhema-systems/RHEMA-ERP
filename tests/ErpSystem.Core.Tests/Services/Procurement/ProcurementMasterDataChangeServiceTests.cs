@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -20,6 +21,48 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementMasterDataChangeServiceTests
 {
+    [Theory]
+    [InlineData("Main", "Transit")]
+    [InlineData("Transit", "Main")]
+    public async Task Staged_warehouse_changes_cannot_create_or_remove_managed_transit_identity(string currentType, string proposedType)
+    {
+        await using var f = new Fixture();
+        await f.AddActivePolicyAsync(ProcurementMasterDataResourceType.Warehouse);
+        f.Switch(f.MakerUserId, "TDC_PROCUREMENT_OFFICER");
+        var warehouse = new Warehouse { TenantId=f.TenantId, Code="TRANSIT-TEST", Name="Warehouse", WarehouseType=currentType, IsActive=true };
+        f.Context.Add(warehouse); await f.Context.SaveChangesAsync();
+        var request = ChangeRequest(warehouse.Id);
+        request.ResourceType = ProcurementMasterDataResourceType.Warehouse;
+        request.ProposedChangesJson = System.Text.Json.JsonSerializer.Serialize(new { WarehouseType=proposedType });
+
+        Func<Task> act = () => f.Service.SaveDraftAsync(null, request, "transit-warehouse");
+        (await act.Should().ThrowAsync<ProcurementMasterDataChangeValidationException>()).Which.Code.Should().Be("INV_TRANSIT_SYSTEM_MANAGED");
+        (await f.Context.ProcurementMasterDataChangeRequests.CountAsync()).Should().Be(0);
+        (await f.Context.Set<Warehouse>().AsNoTracking().SingleAsync()).WarehouseType.Should().Be(currentType);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Staged_location_changes_cannot_create_or_remove_managed_transit_identity(bool currentTransit, bool proposedTransit)
+    {
+        await using var f = new Fixture();
+        await f.AddActivePolicyAsync(ProcurementMasterDataResourceType.WarehouseLocation);
+        f.Switch(f.MakerUserId, "TDC_PROCUREMENT_OFFICER");
+        var warehouse = new Warehouse { TenantId=f.TenantId, Code="STORE", Name="Warehouse", WarehouseType="Main", IsActive=true };
+        var location = new WarehouseLocation { TenantId=f.TenantId, WarehouseId=warehouse.Id, LocationCode="LOCATION",
+            Name="Location", IsActive=true, IsInTransitLocation=currentTransit };
+        f.Context.AddRange(warehouse, location); await f.Context.SaveChangesAsync();
+        var request = ChangeRequest(location.Id);
+        request.ResourceType = ProcurementMasterDataResourceType.WarehouseLocation;
+        request.ProposedChangesJson = System.Text.Json.JsonSerializer.Serialize(new { IsInTransitLocation=proposedTransit });
+
+        Func<Task> act = () => f.Service.SaveDraftAsync(null, request, "transit-location");
+        (await act.Should().ThrowAsync<ProcurementMasterDataChangeValidationException>()).Which.Code.Should().Be("INV_TRANSIT_SYSTEM_MANAGED");
+        (await f.Context.ProcurementMasterDataChangeRequests.CountAsync()).Should().Be(0);
+        (await f.Context.Set<WarehouseLocation>().AsNoTracking().SingleAsync()).IsInTransitLocation.Should().Be(currentTransit);
+    }
+
     [Fact]
     public async Task RegistryCoversTwelveProtectedFamiliesAndExcludesInventoryTransactionFields()
     {

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Inventory;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Finance;
@@ -19,6 +20,69 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class StockAdjustmentValuationIntentBuilderC9Tests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task Disposal_uses_item_account_for_new_cases_and_preserves_legacy_expense(int accountingVersion)
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = Context();
+        var inventory = Guid.NewGuid(); var legacyExpense = Guid.NewGuid();
+        var disposalAccount = new Account { TenantId = tenant, AccountType = AccountType.Expense,
+            Status = AccountStatus.Active, AllowDirectPosting = true, AccountCode = "DISPOSAL", AccountName = "Disposal gain loss" };
+        var item = new InventoryItem { TenantId = tenant, ItemCode = "DISP-ITEM", Name = "Disposal item", InventoryDisposalAccountId = disposalAccount.Id };
+        var disposal = new InventoryDisposalCase { TenantId = tenant, AccountingVersion = accountingVersion, Method = InventoryDisposalMethod.WriteOff };
+        db.Accounts.Add(disposalAccount); db.InventoryItems.Add(item); db.InventoryDisposalCases.Add(disposal);
+        await SeedSettingsAsync(db, tenant, inventory, legacyExpense, null);
+        var adjustment = Adjustment(tenant);
+        var line = Item(tenant, -2, -50, adjustment.AdjustmentDate, null); line.InventoryItemId = item.Id;
+        adjustment.Items = [line];
+        var owner = new ProducerOwnerEffectIdentityDto { ParticipantCode = "INVENTORY.DISPOSAL.V1",
+            OwnerEntityType = "INVENTORY_DISPOSAL", OwnerEntityId = disposal.Id, OwnerAction = "COMPLETE_DISPOSAL", EffectFingerprint = new string('A', 64) };
+        var preview = await new StockAdjustmentValuationIntentBuilder(db).BuildAsync(adjustment, owner);
+        preview.PostingRequest.Lines.Should().HaveCount(2);
+        preview.PostingRequest.Lines[0].AccountId.Should().Be(accountingVersion == 1 ? disposalAccount.Id : legacyExpense);
+        preview.PostingRequest.Lines[0].DebitAmount.Should().Be(50);
+        preview.PostingRequest.Lines[1].AccountId.Should().Be(inventory);
+        preview.PostingRequest.Lines[1].CreditAmount.Should().Be(50);
+        if (accountingVersion == 1)
+        {
+            item.InventoryDisposalAccountId = null; await db.SaveChangesAsync();
+            var missing = () => new StockAdjustmentValuationIntentBuilder(db).BuildAsync(adjustment, owner);
+            await missing.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Inventory Disposal Account*");
+        }
+    }
+
+    [Fact]
+    public async Task Auction_stock_preview_retains_the_invoice_disposal_account_after_the_item_profile_changes()
+    {
+        var tenant = Guid.NewGuid(); await using var db = Context();
+        var retained = new Account { TenantId = tenant, AccountType = AccountType.Expense,
+            Status = AccountStatus.Active, AllowDirectPosting = true, AccountCode = "AUCTION", AccountName = "Auction gain loss" };
+        var item = new InventoryItem { TenantId = tenant, Name = "Auction item", InventoryDisposalAccountId = Guid.NewGuid() };
+        var disposal = new InventoryDisposalCase { TenantId = tenant, AccountingVersion = 1, Method = InventoryDisposalMethod.Auction };
+        var source = new InventoryDisposalLine { TenantId = tenant, InventoryDisposalCaseId = disposal.Id, InventoryItemId = item.Id, Quantity = 2 };
+        var invoice = new Invoice { TenantId = tenant, Status = InvoiceStatus.Draft, InvoiceDate = new DateTime(2026, 9, 27),
+            LineItems = [new InvoiceLineItem { Id = InventoryDisposalService.AuctionInvoiceLineId(tenant, disposal.Id, source.Id),
+                TenantId = tenant, Quantity = 2, UnitPrice = 35, GLAccountId = retained.Id, LineItemType = LineItemType.GLAccount }] };
+        foreach (var invoiceLine in invoice.LineItems) invoiceLine.InvoiceId = invoice.Id;
+        db.Accounts.Add(retained); db.InventoryItems.Add(item); db.InventoryDisposalCases.Add(disposal);
+        db.InventoryDisposalLines.Add(source); db.Invoices.Add(invoice);
+        db.Set<InventoryDisposalAuctionInvoice>().Add(new InventoryDisposalAuctionInvoice { TenantId = tenant,
+            InventoryDisposalCaseId = disposal.Id, InvoiceId = invoice.Id, InvoiceEconomicsJson = InventoryDisposalAuctionInvoiceGuard.Snapshot(invoice) });
+        var inventory = Guid.NewGuid(); await SeedSettingsAsync(db, tenant, inventory, Guid.NewGuid(), null);
+        var adjustment = Adjustment(tenant); var stockLine = Item(tenant, -2, -50, adjustment.AdjustmentDate, null);
+        stockLine.InventoryItemId = item.Id; adjustment.Items = [stockLine];
+        var owner = new ProducerOwnerEffectIdentityDto { ParticipantCode = "INVENTORY.DISPOSAL.V1", OwnerEntityType = "INVENTORY_DISPOSAL",
+            OwnerEntityId = disposal.Id, OwnerAction = "COMPLETE_DISPOSAL", EffectFingerprint = new string('B', 64) };
+        var result = await new StockAdjustmentValuationIntentBuilder(db).BuildAsync(adjustment, owner);
+        result.PostingRequest.Lines.Should().HaveCount(2, "AR proceeds and payment must not be duplicated in the stock journal");
+        result.PostingRequest.Lines[0].AccountId.Should().Be(retained.Id);
+        result.PostingRequest.Lines[0].DebitAmount.Should().Be(50);
+        result.PostingRequest.Lines[1].AccountId.Should().Be(inventory);
+        result.PostingRequest.Lines[1].CreditAmount.Should().Be(50);
+    }
+
     [Fact]
     public async Task Preview_IsPureDeterministicAndExpandsEveryOrdinaryValuationAndDimensionCase()
     {
