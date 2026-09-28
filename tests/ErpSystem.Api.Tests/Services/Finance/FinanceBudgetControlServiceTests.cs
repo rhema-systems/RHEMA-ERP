@@ -535,4 +535,9 @@ public sealed class FinanceBudgetControlServiceTests
     private sealed record JournalFixture(FiscalYear FiscalYear, FiscalPeriod Period, Account Expense, JournalEntry Journal);
     private sealed record BudgetFixture(BudgetScenario Scenario, BudgetReturn Return, BudgetEntry Entry);
 
+    private sealed class TestableBudgetControlMigration : AddFinanceBudgetControlFoundation
+    {
+        public void ApplyUp(MigrationBuilder builder) => Up(builder);
+        public void ApplyDown(MigrationBuilder builder) => Down(builder);
+    }
 }
