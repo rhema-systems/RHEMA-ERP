@@ -158,7 +158,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             // Check if any unit accounts are using this type
             var hasAccounts = await _unitOfWork.Repository<UnitAccount>()
-                .GetQueryable(ua => ua.UnitTypeId == id && !ua.IsDeleted)
+                .GetQueryable(ua => ua.TenantId == TenantId && ua.UnitTypeId == id && !ua.IsDeleted)
                 .AnyAsync(cancellationToken);
 
             if (hasAccounts)
@@ -184,7 +184,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             // Check if any unit accounts are using this type
             var hasAccounts = await _unitOfWork.Repository<UnitAccount>()
-                .GetQueryable(ua => ua.UnitTypeId == id && !ua.IsDeleted)
+                .GetQueryable(ua => ua.TenantId == TenantId && ua.UnitTypeId == id && !ua.IsDeleted)
                 .AnyAsync(cancellationToken);
 
             if (hasAccounts)
@@ -204,7 +204,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         private UnitTypeDto MapToDto(UnitType unitType)
         {
             var accountCount = _unitOfWork.Repository<UnitAccount>()
-                .GetQueryable(ua => ua.UnitTypeId == unitType.Id && !ua.IsDeleted)
+                .GetQueryable(ua => ua.TenantId == TenantId && ua.UnitTypeId == unitType.Id && !ua.IsDeleted)
                 .Count();
 
             return new UnitTypeDto
