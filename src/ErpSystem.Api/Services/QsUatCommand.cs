@@ -54,6 +54,8 @@ public static class QsUatCommand
             ErpSystem.Core.Services.HR.LocationService>();
         builder.Services.AddScoped<ErpSystem.Core.Services.Reference.IGeographyService,
             ErpSystem.Core.Services.Reference.GeographyService>();
+        builder.Services.AddScoped<ErpSystem.Core.Interfaces.HR.IGeofenceZoneRepository,
+            ErpSystem.Data.Repositories.HR.GeofenceZoneRepository>();
         await using var app = builder.Build();
         using var scope = app.Services.CreateScope();
         var services = scope.ServiceProvider;
