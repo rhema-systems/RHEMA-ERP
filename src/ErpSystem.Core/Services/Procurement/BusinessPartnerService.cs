@@ -61,8 +61,16 @@ public class BusinessPartnerService : IBusinessPartnerService
             bank.TenantId == tenantId && !bank.IsDeleted && bank.IsActive)).OrderBy(bank => bank.AccountName);
         var applicability = string.Equals(partnerType, "Customer", StringComparison.OrdinalIgnoreCase)
             ? TaxApplicability.Sales : TaxApplicability.Purchases;
+        var nonWithholdingTaxIds = (await _unitOfWork.Repository<Tax>().FindAsync(tax =>
+            tax.TenantId == tenantId && !tax.IsDeleted && tax.IsActive &&
+            tax.Category != TaxCategory.Withholding && tax.Category != TaxCategory.VatWithholding))
+            .Select(tax => tax.Id).ToHashSet();
+        var invoiceTaxGroupIds = (await _unitOfWork.Repository<TaxGroupComponent>().FindAsync(component =>
+            component.TenantId == tenantId && !component.IsDeleted && nonWithholdingTaxIds.Contains(component.TaxId)))
+            .Select(component => component.TaxGroupId).ToHashSet();
         var taxes = (await _unitOfWork.Repository<TaxGroup>().FindAsync(tax =>
             tax.TenantId == tenantId && !tax.IsDeleted && tax.IsActive &&
+            invoiceTaxGroupIds.Contains(tax.Id) &&
             (tax.Applicability == TaxApplicability.Both || tax.Applicability == applicability)))
             .OrderBy(tax => tax.Name);
         var withholdingTaxes = (await _unitOfWork.Repository<Tax>().FindAsync(tax =>
@@ -217,6 +225,10 @@ public class BusinessPartnerService : IBusinessPartnerService
         var partner = await _partnerRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Business partner with ID {id} not found");
         if (partner.TenantId != _currentUserProvider.TenantId)
             throw new UnauthorizedAccessException("Business partner belongs to another tenant.");
+        if (!string.IsNullOrWhiteSpace(dto.Status) &&
+            !string.Equals(dto.Status, partner.RegistrationStatus, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "Business Partner lifecycle status cannot be changed through ordinary editing. Use submit, approval, suspension, or reactivation instead.");
         var requestedType = dto.PartnerType ?? partner.PartnerType;
         if (requestedType != partner.PartnerType || dto.ReceivablesDefaults != null || dto.PostingDefaults != null)
             await EnsureAccountingConfigurationAccessAsync();
@@ -266,11 +278,6 @@ public class BusinessPartnerService : IBusinessPartnerService
             partner.PaymentTerms = null;
         }
         
-        if (!string.IsNullOrEmpty(dto.Status)) 
-        {
-            partner.RegistrationStatus = dto.Status;
-        }
-
         // Update customer-specific fields if partner type is Customer
         if (BusinessPartnerRoles.HasCustomer(partner.PartnerType))
         {

@@ -1139,6 +1139,30 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-1140-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1140",
+                AccountNumber = "1140",
+                AccountName = "Input VAT Receivable",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Current Assets",
+                AccountSubCategory = "Tax Receivables",
+                Description = "Control account for deductible purchase VAT and statutory levies recoverable from the tax authority.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-1200-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "1200",
@@ -2687,8 +2711,17 @@ public class FinanceDataSeeder
         var whtReceivable = await GetOrCreateTaxAsync(tenantId, "WHT-REC-SERV", "WHT Receivable (Services)", 7.5m, TaxApplicability.Sales, TaxCategory.Withholding, false, baseDate, systemUserId);
         var vatWithholdingReceivable = await GetOrCreateTaxAsync(tenantId, "VAT-WHT-REC", "VAT Withholding Receivable", 7.0m, TaxApplicability.Sales, TaxCategory.VatWithholding, false, baseDate, systemUserId);
 
+        // Purchase VAT is deliberately modelled separately from WHT. Reusing the WHT tax group
+        // as an AP profile's default tax schedule would calculate a supplier deduction as an
+        // invoice-line tax. These purchase components instead post deductible input tax to the
+        // dedicated receivable control account while WHT remains governed by the AP WHT defaults.
+        var purchaseNhil = await GetOrCreateTaxAsync(tenantId, "NHIL-PUR", "NHIL on Purchases", 2.5m, TaxApplicability.Purchases, TaxCategory.Standard, false, baseDate, systemUserId);
+        var purchaseGetfund = await GetOrCreateTaxAsync(tenantId, "GETFUND-PUR", "GETFund Levy on Purchases", 2.5m, TaxApplicability.Purchases, TaxCategory.Standard, false, baseDate, systemUserId);
+        var purchaseVat = await GetOrCreateTaxAsync(tenantId, "VAT-STD-PUR", "Input VAT (Standard)", 15.0m, TaxApplicability.Purchases, TaxCategory.Standard, true, baseDate, systemUserId);
+
         var taxPayableAccountId = Guid.Parse("00000005-2200-0000-0000-000000000001");
         var taxReceivableAccountId = Guid.Parse("00000005-1130-0000-0000-000000000001");
+        var inputVatReceivableAccountId = Guid.Parse("00000005-1140-0000-0000-000000000001");
         foreach (var purchaseWht in new[] { whtServices, whtGoods, whtWorks })
         {
             // Preserve tenant overrides. These are baseline defaults only for installations that
@@ -2697,6 +2730,10 @@ public class FinanceDataSeeder
         }
         whtReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
         vatWithholdingReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
+        foreach (var purchaseTax in new[] { purchaseNhil, purchaseGetfund, purchaseVat })
+        {
+            purchaseTax.TaxReceivableAccountId ??= inputVatReceivableAccountId;
+        }
 
         await _context.SaveChangesAsync();
 
@@ -2754,23 +2791,61 @@ public class FinanceDataSeeder
             component.UpdatedBy = "System";
         }
 
-        // 2.2 WHT Services (Purchases)
-        if (!await _context.TaxGroups.AnyAsync(g => g.Code == "WHT-SERVICES" && g.TenantId == tenantId))
+        // AP invoice tax defaults must be purchase VAT schedules, not WHT schedules. This group
+        // mirrors the configured standard scheme with purchase-applicable component masters and
+        // a receivable posting direction suitable for deductible input tax.
+        var purchaseVatGroup = await _context.TaxGroups
+            .FirstOrDefaultAsync(g => g.Code == "VAT-STD-PURCHASES" && g.TenantId == tenantId);
+        if (purchaseVatGroup == null)
         {
-             var whtGroup = new TaxGroup
+            purchaseVatGroup = new TaxGroup
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, Code = "VAT-STD-PURCHASES",
+                Name = "Purchase VAT Standard Scheme (15% + Levies)",
+                Description = "Deductible input VAT schedule for standard-rated purchases, separate from supplier withholding.",
+                Applicability = TaxApplicability.Purchases, IsDefault = true, IsActive = true,
+                CreatedAt = baseDate, CreatedBy = "System"
+            };
+            await _context.TaxGroups.AddAsync(purchaseVatGroup);
+        }
+        else
+        {
+            purchaseVatGroup.Name = "Purchase VAT Standard Scheme (15% + Levies)";
+            purchaseVatGroup.Description = "Deductible input VAT schedule for standard-rated purchases, separate from supplier withholding.";
+            purchaseVatGroup.Applicability = TaxApplicability.Purchases;
+            purchaseVatGroup.IsDefault = true;
+            purchaseVatGroup.IsActive = true;
+            purchaseVatGroup.UpdatedAt = DateTime.UtcNow;
+            purchaseVatGroup.UpdatedBy = "System";
+        }
+        await EnsureTaxGroupComponentAsync(tenantId, purchaseVatGroup, purchaseNhil, 1, CompoundBasis.BaseOnly);
+        await EnsureTaxGroupComponentAsync(tenantId, purchaseVatGroup, purchaseGetfund, 2, CompoundBasis.BaseOnly);
+        await EnsureTaxGroupComponentAsync(tenantId, purchaseVatGroup, purchaseVat, 3, CompoundBasis.BaseOnly);
+
+        // 2.2 WHT Services (Purchases)
+        var whtGroup = await _context.TaxGroups.FirstOrDefaultAsync(g => g.Code == "WHT-SERVICES" && g.TenantId == tenantId);
+        if (whtGroup == null)
+        {
+             whtGroup = new TaxGroup
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 Code = "WHT-SERVICES",
                 Name = "Withholding Tax - Services (7.5%)",
                 Applicability = TaxApplicability.Purchases,
-                IsDefault = true,
+                IsDefault = false,
                 IsActive = true,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             };
             await _context.TaxGroups.AddAsync(whtGroup);
             await _context.TaxGroupComponents.AddAsync(new TaxGroupComponent { Id = Guid.NewGuid(), TenantId = tenantId, TaxId = whtServices.Id, TaxGroupId = whtGroup.Id, CalculationOrder = 1, CompoundBasis = CompoundBasis.BaseOnly });
+        }
+        else
+        {
+            // WHT remains available to legacy consumers, but it is never the default invoice-line
+            // purchase tax schedule; governed WHT categories select the Tax master directly.
+            whtGroup.IsDefault = false;
         }
 
         await _context.SaveChangesAsync();

@@ -72,6 +72,7 @@
     <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
+    <Compile Include="Services\Finance\BusinessPartnerFinanceProfilePolicyTests.cs" />
     <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
     <Compile Include="Controllers\GlobalSearchEstateLegalTests.cs" />
     <Compile Include="Controllers\GlobalSearchSafetyTests.cs" />
@@ -189,6 +190,7 @@
     <Compile Include="Services\Finance\BudgetServiceHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceBudgetControlServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceBudgetCommitmentServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceBudgetSqlServerReleaseGateTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />

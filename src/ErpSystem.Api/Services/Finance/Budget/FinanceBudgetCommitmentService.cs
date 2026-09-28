@@ -406,6 +406,106 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
             postingEventId));
     }
 
+    public async Task RecordActualReversalAsync(
+        Guid tenantId,
+        string sourceDocumentType,
+        Guid sourceDocumentId,
+        Guid originalJournalEntryId,
+        Guid originalPostingEventId,
+        Guid reversalJournalEntryId,
+        Guid reversalPostingEventId,
+        CancellationToken cancellationToken = default)
+    {
+        if (tenantId != TenantId)
+            throw new UnauthorizedAccessException("Finance budget reservations belong to another tenant.");
+        if (sourceDocumentId == Guid.Empty
+            || originalJournalEntryId == Guid.Empty
+            || originalPostingEventId == Guid.Empty
+            || reversalJournalEntryId == Guid.Empty
+            || reversalPostingEventId == Guid.Empty)
+            throw Validation("BUDGET_REVERSAL_EVIDENCE_REQUIRED",
+                "Source, original posting and reversal posting identities are required.");
+        if (!string.Equals(
+                _db.Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.InMemory",
+                StringComparison.Ordinal)
+            && _db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException(
+                "Finance budget reversal evidence can be recorded only inside the central reversal transaction.");
+
+        var normalizedSourceType = Normalize(sourceDocumentType, 50, "source document type");
+        var reservations = await _db.FinanceBudgetReservations
+            .Where(row => row.TenantId == tenantId
+                && !row.IsDeleted
+                && row.SourceDocumentType == normalizedSourceType
+                && row.SourceDocumentId == sourceDocumentId)
+            .ToListAsync(cancellationToken);
+        if (reservations.Count == 0)
+            return;
+        if (reservations.Any(row => row.Status != ConsumedStatus
+                || row.JournalEntryId != originalJournalEntryId
+                || row.PostingEventId != originalPostingEventId))
+            throw Conflict("BUDGET_REVERSAL_LINEAGE_MISMATCH",
+                "Consumed Finance budget evidence does not match the posting being reversed.");
+
+        var originalEventIsValid = await _db.FinancePostingEvents.AsNoTracking().AnyAsync(item =>
+            item.TenantId == tenantId
+            && item.Id == originalPostingEventId
+            && item.JournalEntryId == originalJournalEntryId
+            && !item.IsDeleted,
+            cancellationToken);
+        var reversalEventIsValid = await _db.FinancePostingEvents.AsNoTracking().AnyAsync(item =>
+            item.TenantId == tenantId
+            && item.Id == reversalPostingEventId
+            && item.JournalEntryId == reversalJournalEntryId
+            && !item.IsDeleted,
+            cancellationToken);
+        var reversalJournalIsValid = await _db.JournalEntries.AsNoTracking().AnyAsync(item =>
+            item.TenantId == tenantId
+            && item.Id == reversalJournalEntryId
+            && item.OriginalJournalEntryId == originalJournalEntryId
+            && !item.IsDeleted,
+            cancellationToken);
+        if (!originalEventIsValid || !reversalEventIsValid || !reversalJournalIsValid)
+            throw Conflict("BUDGET_REVERSAL_POSTING_MISMATCH",
+                "The Finance reversal journal or posting-event lineage is incomplete.");
+
+        var reservationIds = reservations.Select(row => row.Id).OrderBy(id => id).ToArray();
+        var operationKey = $"REV:{reversalPostingEventId:N}:BudgetActual";
+        var operationHash = Hash(string.Join('|', new[]
+        {
+            normalizedSourceType,
+            sourceDocumentId.ToString("N"),
+            string.Join(',', reservationIds.Select(id => id.ToString("N"))),
+            originalJournalEntryId.ToString("N"),
+            originalPostingEventId.ToString("N"),
+            reversalJournalEntryId.ToString("N"),
+            reversalPostingEventId.ToString("N")
+        }));
+        var replay = await FindReplayAsync(tenantId, operationKey, operationHash, cancellationToken);
+        if (replay is not null)
+            return;
+
+        var now = DateTime.UtcNow;
+        _db.FinanceBudgetReservationOperations.Add(NewOperation(
+            tenantId,
+            null,
+            reservationIds,
+            "RecordActualReversal",
+            operationKey,
+            operationHash,
+            ConsumedStatus,
+            ConsumedStatus,
+            0m,
+            0m,
+            $"REV:{normalizedSourceType}:{sourceDocumentId:N}",
+            UserId,
+            now,
+            reversalJournalEntryId,
+            reversalPostingEventId));
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
     private async Task<FinanceBudgetReservationDto> MutateReservationAsync(
         Guid reservationId,
         string operationType,
@@ -616,8 +716,11 @@ public sealed class FinanceBudgetCommitmentService : IFinanceBudgetCommitmentSer
         CancellationToken cancellationToken)
     {
         var tenantId = entry.TenantId;
+        var primaryBook = await BudgetPrimaryBookResolver.ResolveAsync(
+            _db, tenantId, cancellationToken);
         var actualQuery = _db.AccountTransactions.AsNoTracking()
             .Where(x => x.TenantId == tenantId && !x.IsDeleted
+                && x.AccountingBookId == primaryBook.Id
                 && x.AccountId == entry.AccountId && x.FiscalPeriodId == entry.FiscalPeriodId
                 && x.JournalEntry.PostingStatus == "Posted" && !x.JournalEntry.IsDeleted);
         if (entry.FinanceDimensionSet is not null)

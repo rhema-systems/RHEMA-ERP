@@ -13,7 +13,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { BudgetRevisionLineInput, BudgetRevisionType, BudgetScenario } from '@/types/budget';
+import type {
+    BudgetDimensionAssignment,
+    BudgetRevisionLineInput,
+    BudgetRevisionType,
+    BudgetScenario,
+} from '@/types/budget';
 import type { Account, FiscalPeriod, SegmentLookupValue } from '@/types/finance';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -24,6 +29,14 @@ const emptyLine = (): BudgetRevisionLineInput => ({
     notes: '',
 });
 
+interface GovernedCombinationOption {
+    key: string;
+    segmentValueId?: string;
+    financeDimensionSetId: string;
+    label: string;
+    assignments: BudgetDimensionAssignment[];
+}
+
 export default function NewBudgetRevisionPage() {
     const router = useRouter();
     const { toast } = useToast();
@@ -31,6 +44,7 @@ export default function NewBudgetRevisionPage() {
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
     const [segments, setSegments] = useState<SegmentLookupValue[]>([]);
+    const [governedCombinations, setGovernedCombinations] = useState<GovernedCombinationOption[]>([]);
     const [saving, setSaving] = useState(false);
     const [sourceScenarioId, setSourceScenarioId] = useState('');
     const [revisionType, setRevisionType] = useState<BudgetRevisionType>('Virement');
@@ -72,15 +86,50 @@ export default function NewBudgetRevisionPage() {
     useEffect(() => {
         if (!sourceScenarioId) {
             setPeriods([]);
+            setGovernedCombinations([]);
             return;
         }
         const scenario = scenarios.find(item => item.id === sourceScenarioId);
         if (!scenario) return;
-        void financeDataService.getFiscalPeriods(scenario.fiscalYearId)
-            .then(setPeriods)
+        void Promise.all([
+            financeDataService.getFiscalPeriods(scenario.fiscalYearId),
+            budgetDataService.getReturns(scenario.id),
+        ])
+            .then(async ([fiscalPeriods, returns]) => {
+                setPeriods(fiscalPeriods);
+                if (scenario.controlDimensions.length === 0) {
+                    setGovernedCombinations([]);
+                    return;
+                }
+
+                const entriesByReturn = await Promise.all(returns.map(async budgetReturn => ({
+                    budgetReturn,
+                    entries: await budgetDataService.getEntries(budgetReturn.id),
+                })));
+                const combinations = new Map<string, GovernedCombinationOption>();
+                for (const { budgetReturn, entries } of entriesByReturn) {
+                    for (const entry of entries) {
+                        if (!entry.financeDimensionSetId || entry.dimensionAssignments.length === 0) continue;
+                        const key = `${budgetReturn.segmentValueId ?? 'general'}:${entry.financeDimensionSetId}`;
+                        if (combinations.has(key)) continue;
+                        const assignmentLabel = entry.dimensionAssignments
+                            .map(item => `${item.dimensionCode}: ${item.valueCode} - ${item.valueName}`)
+                            .join(' · ');
+                        combinations.set(key, {
+                            key,
+                            segmentValueId: budgetReturn.segmentValueId,
+                            financeDimensionSetId: entry.financeDimensionSetId,
+                            label: `${budgetReturn.segmentValueName ?? 'General'} · ${assignmentLabel}`,
+                            assignments: entry.dimensionAssignments,
+                        });
+                    }
+                }
+                setGovernedCombinations([...combinations.values()].sort((left, right) =>
+                    left.label.localeCompare(right.label)));
+            })
             .catch(error => {
-                console.error('Failed to load fiscal periods', error);
-                toast({ title: 'Unable to load fiscal periods', variant: 'destructive' });
+                console.error('Failed to load revision budget cells', error);
+                toast({ title: 'Unable to load revision budget cells', variant: 'destructive' });
             });
     }, [scenarios, sourceScenarioId, toast]);
 
@@ -88,6 +137,12 @@ export default function NewBudgetRevisionPage() {
         () => lines.reduce((sum, line) => sum + Number(line.adjustmentAmountBase || 0), 0),
         [lines]
     );
+    const sourceScenario = useMemo(
+        () => scenarios.find(item => item.id === sourceScenarioId),
+        [scenarios, sourceScenarioId]
+    );
+    const hasControlDimensions = (sourceScenario?.controlDimensions.length ?? 0) > 0;
+    const currencyCode = sourceScenario?.baseCurrencyCode ?? 'GHS';
 
     const updateLine = (index: number, patch: Partial<BudgetRevisionLineInput>) => {
         setLines(current => current.map((line, position) => position === index ? { ...line, ...patch } : line));
@@ -111,6 +166,14 @@ export default function NewBudgetRevisionPage() {
         }
         if (lines.some(line => !line.accountId || !line.fiscalPeriodId || Number(line.adjustmentAmountBase) === 0)) {
             toast({ title: 'Complete every adjustment line', variant: 'destructive' });
+            return;
+        }
+        if (hasControlDimensions && lines.some(line => !line.financeDimensionSetId)) {
+            toast({
+                title: 'Select the controlling dimensions for every line',
+                description: 'Each revision line must target one exact governed budget combination.',
+                variant: 'destructive',
+            });
             return;
         }
         if (revisionType === 'Virement' && Math.abs(netChange) > 0.005) {
@@ -184,6 +247,17 @@ export default function NewBudgetRevisionPage() {
                 </CardContent>
             </Card>
 
+            {hasControlDimensions && (
+                <Card className="border-primary/30 bg-primary/5">
+                    <CardHeader>
+                        <CardTitle className="text-base">Dimension-controlled revision</CardTitle>
+                        <CardDescription>
+                            Every adjustment must select the complete controlling combination from the official budget. The immutable combination is carried into the successor scenario.
+                        </CardDescription>
+                    </CardHeader>
+                </Card>
+            )}
+
             <Card>
                 <CardHeader>
                     <div className="flex items-center justify-between gap-3">
@@ -195,11 +269,31 @@ export default function NewBudgetRevisionPage() {
                     {lines.map((line, index) => (
                         <div key={index} className="grid gap-3 rounded-lg border p-4 md:grid-cols-12">
                             <div className="space-y-2 md:col-span-3">
-                                <Label>Cost centre</Label>
-                                <Select value={line.segmentValueId ?? 'general'} onValueChange={value => updateLine(index, { segmentValueId: value === 'general' ? undefined : value })}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent><SelectItem value="general">General</SelectItem>{segments.map(item => <SelectItem key={item.id} value={item.id}>{item.segmentValue} - {item.description}</SelectItem>)}</SelectContent>
-                                </Select>
+                                <Label>{hasControlDimensions ? 'Budget return & dimensions' : 'Cost centre'}</Label>
+                                {hasControlDimensions ? (
+                                    <Select
+                                        value={line.financeDimensionSetId
+                                            ? `${line.segmentValueId ?? 'general'}:${line.financeDimensionSetId}`
+                                            : undefined}
+                                        onValueChange={value => {
+                                            const option = governedCombinations.find(item => item.key === value);
+                                            if (option) updateLine(index, {
+                                                segmentValueId: option.segmentValueId,
+                                                financeDimensionSetId: option.financeDimensionSetId,
+                                            });
+                                        }}
+                                    >
+                                        <SelectTrigger><SelectValue placeholder="Select exact combination" /></SelectTrigger>
+                                        <SelectContent>{governedCombinations.map(item => (
+                                            <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>
+                                        ))}</SelectContent>
+                                    </Select>
+                                ) : (
+                                    <Select value={line.segmentValueId ?? 'general'} onValueChange={value => updateLine(index, { segmentValueId: value === 'general' ? undefined : value, financeDimensionSetId: undefined })}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent><SelectItem value="general">General</SelectItem>{segments.map(item => <SelectItem key={item.id} value={item.id}>{item.segmentValue} - {item.description}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                )}
                             </div>
                             <div className="space-y-2 md:col-span-3">
                                 <Label>GL account</Label>
@@ -215,14 +309,14 @@ export default function NewBudgetRevisionPage() {
                                     <SelectContent>{periods.map(item => <SelectItem key={item.id} value={item.id}>{item.periodCode}</SelectItem>)}</SelectContent>
                                 </Select>
                             </div>
-                            <div className="space-y-2 md:col-span-2"><Label>Adjustment (GHS)</Label><Input type="number" step="0.01" value={line.adjustmentAmountBase} onChange={event => updateLine(index, { adjustmentAmountBase: Number(event.target.value) })} /></div>
+                            <div className="space-y-2 md:col-span-2"><Label>Adjustment ({currencyCode})</Label><Input type="number" step="0.01" value={line.adjustmentAmountBase} onChange={event => updateLine(index, { adjustmentAmountBase: Number(event.target.value) })} /></div>
                             <div className="space-y-2 md:col-span-1"><Label>Line note</Label><Input value={line.notes ?? ''} onChange={event => updateLine(index, { notes: event.target.value })} /></div>
                             <div className="flex items-end md:col-span-1"><Button variant="ghost" size="icon" disabled={lines.length === 1} onClick={() => setLines(current => current.filter((_, position) => position !== index))}><Trash2 className="h-4 w-4" /></Button></div>
                         </div>
                     ))}
                     <div className="flex items-center justify-between rounded-lg bg-muted p-4">
                         <span className="font-medium">Net change to official budget</span>
-                        <span className={`text-lg font-bold ${revisionType === 'Virement' && Math.abs(netChange) > 0.005 ? 'text-destructive' : ''}`}>GHS {netChange.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className={`text-lg font-bold ${revisionType === 'Virement' && Math.abs(netChange) > 0.005 ? 'text-destructive' : ''}`}>{currencyCode} {netChange.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
                 </CardContent>
             </Card>

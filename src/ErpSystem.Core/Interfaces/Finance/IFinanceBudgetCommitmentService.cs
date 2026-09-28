@@ -61,6 +61,21 @@ public interface IFinanceBudgetCommitmentService
         Guid journalEntryId,
         Guid postingEventId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Appends immutable evidence that a posted budget actual was reversed by the central
+    /// Finance posting engine. The consumed reservation remains immutable; budget actuals
+    /// continue to be derived solely from posted ledger transactions.
+    /// </summary>
+    Task RecordActualReversalAsync(
+        Guid tenantId,
+        string sourceDocumentType,
+        Guid sourceDocumentId,
+        Guid originalJournalEntryId,
+        Guid originalPostingEventId,
+        Guid reversalJournalEntryId,
+        Guid reversalPostingEventId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class FinanceBudgetCommitmentValidationException(string code, string message)

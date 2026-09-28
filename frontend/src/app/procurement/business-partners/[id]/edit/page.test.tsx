@@ -141,13 +141,17 @@ describe('business partner governed finance setup', () => {
     vi.mocked(businessPartnerService.getPartnerById).mockResolvedValue({ ...saved, status });
     render(<EditBusinessPartnerPage />);
     await screen.findByLabelText('Company Name *');
+    expect(screen.getByText(status)).toBeInTheDocument();
+    expect(screen.getByText(/status changes only through submit, approval, suspension, and reactivation actions/i)).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /status/i })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Accounts Payable' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Accounts Receivable' })).not.toBeInTheDocument();
     await openTab('Finance Profiles');
     expect(screen.getByText('Governed profiles')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith('partner-1', expect.objectContaining({ status })));
+    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith('partner-1', expect.any(Object)));
     const request = vi.mocked(businessPartnerService.updatePartner).mock.calls[0][1];
+    expect(request).not.toHaveProperty('status');
     expect(request).not.toHaveProperty('postingDefaults');
     expect(request).not.toHaveProperty('receivablesDefaults');
   });

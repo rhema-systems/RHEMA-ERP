@@ -93,7 +93,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (account == null) return null;
 
             var balances = await _unitOfWork.Repository<UnitAccountBalance>()
-                .GetQueryable(b => b.UnitAccountId == id && !b.IsDeleted)
+                .GetQueryable(b => b.TenantId == TenantId && b.UnitAccountId == id && !b.IsDeleted)
                 .OrderByDescending(b => b.FiscalYear!.Year)
                 .ThenByDescending(b => b.FiscalPeriod!.PeriodNumber)
                 .Take(12)
@@ -262,7 +262,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             // Check for posted transactions
             var hasTransactions = await _unitOfWork.Repository<UnitJournalEntryLine>()
-                .GetQueryable(l => l.UnitAccountId == id && !l.IsDeleted)
+                .GetQueryable(l => l.TenantId == TenantId && l.UnitAccountId == id && !l.IsDeleted)
                 .AnyAsync(cancellationToken);
 
             if (hasTransactions)
@@ -270,7 +270,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
             // Check for child accounts
             var hasChildren = await _unitOfWork.Repository<UnitAccount>()
-                .GetQueryable(ua => ua.ParentAccountId == id && !ua.IsDeleted)
+                .GetQueryable(ua => ua.TenantId == TenantId && ua.ParentAccountId == id && !ua.IsDeleted)
                 .AnyAsync(cancellationToken);
 
             if (hasChildren)
@@ -295,9 +295,11 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (account == null)
                 throw new ArgumentException($"Unit account with ID '{id}' not found.");
 
-            // Sum all posted journal entry lines for this account
+            // Summary accounts carry the aggregate of every posting descendant. Rebuilding a
+            // summary from only its own (normally absent) lines would silently erase its balance.
+            var accountIds = await GetAccountAndDescendantIdsAsync(account.Id, cancellationToken);
             var totalBalance = await _unitOfWork.Repository<UnitJournalEntryLine>()
-                .GetQueryable(l => l.UnitAccountId == id && !l.IsDeleted)
+                .GetQueryable(l => l.TenantId == TenantId && accountIds.Contains(l.UnitAccountId) && !l.IsDeleted)
                 .Where(l => l.UnitJournalEntry!.TenantId == TenantId
                     && (l.UnitJournalEntry.Status == UnitJournalEntryStatus.Posted
                         || l.UnitJournalEntry.Status == UnitJournalEntryStatus.Reversed))
@@ -327,9 +329,15 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             Guid? fiscalYearId = null,
             CancellationToken cancellationToken = default)
         {
+            var ownsAccount = await _unitOfWork.Repository<UnitAccount>()
+                .GetQueryable(a => a.TenantId == TenantId && a.Id == id && !a.IsDeleted)
+                .AnyAsync(cancellationToken);
+            if (!ownsAccount)
+                throw new ArgumentException($"Unit account with ID '{id}' not found.");
+
             // Use IQueryable to avoid type mismatch with Include/Where chain
             IQueryable<UnitAccountBalance> query = _unitOfWork.Repository<UnitAccountBalance>()
-                .GetQueryable(b => b.UnitAccountId == id && !b.IsDeleted)
+                .GetQueryable(b => b.TenantId == TenantId && b.UnitAccountId == id && !b.IsDeleted)
                 .Include(b => b.FiscalYear)
                 .Include(b => b.FiscalPeriod);
 
@@ -352,6 +360,35 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 PeriodActivity = b.PeriodActivity,
                 ClosingBalance = b.ClosingBalance
             }).ToList();
+        }
+
+        private async Task<HashSet<Guid>> GetAccountAndDescendantIdsAsync(
+            Guid rootAccountId,
+            CancellationToken cancellationToken)
+        {
+            var hierarchy = await _unitOfWork.Repository<UnitAccount>()
+                .GetQueryable(a => a.TenantId == TenantId && !a.IsDeleted)
+                .Select(a => new { a.Id, a.ParentAccountId })
+                .ToListAsync(cancellationToken);
+
+            var result = new HashSet<Guid> { rootAccountId };
+            var pending = new Queue<Guid>();
+            pending.Enqueue(rootAccountId);
+
+            while (pending.Count > 0)
+            {
+                var parentId = pending.Dequeue();
+                foreach (var childId in hierarchy
+                    .Where(a => a.ParentAccountId == parentId)
+                    .Select(a => a.Id))
+                {
+                    if (!result.Add(childId))
+                        throw new InvalidOperationException("Unit account hierarchy contains a cycle.");
+                    pending.Enqueue(childId);
+                }
+            }
+
+            return result;
         }
 
         private UnitAccountDto MapToDto(UnitAccount account)

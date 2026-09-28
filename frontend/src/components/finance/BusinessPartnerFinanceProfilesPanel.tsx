@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/hooks/use-auth';
 import type { PaymentTermListDto } from '@/services/financeCommonService';
 import { businessPartnerService, type BusinessPartnerPostingOptions, type BusinessPartnerWithholdingTaxOption } from '@/services/businessPartnerService';
 import {
@@ -45,6 +46,7 @@ const newLine = (): WhtLineForm => ({
  * separate makes that ownership boundary visible to future module maintainers.
  */
 export function BusinessPartnerFinanceProfilesPanel({ businessPartnerId, paymentTerms, withholdingTaxes }: Props) {
+  const { user, hasPermission } = useAuth();
   const [data, setData] = useState<BusinessPartnerFinanceProfileSet | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -254,7 +256,9 @@ export function BusinessPartnerFinanceProfilesPanel({ businessPartnerId, payment
                 <Button type="button" variant="ghost" size="icon" aria-label="Remove WHT category" disabled={apReadOnly} onClick={() => setWhtLines((lines) => lines.filter((item) => item.key !== line.key))}><Trash2 className="h-4 w-4" /></Button>
               </div>)}
             </div>}
-            <ProfileActions ledger="ap" profile={apProfile} busy={busy || apRole?.status !== 'Active'} dirty={apDirty} reason={decisionReason} onReason={setDecisionReason} onSave={saveAp} onDecision={decision} />
+            <ProfileActions ledger="ap" profile={apProfile} busy={busy || apRole?.status !== 'Active'} dirty={apDirty} reason={decisionReason} onReason={setDecisionReason} onSave={saveAp} onDecision={decision}
+              canDecide={hasPermission('Finance.BusinessPartners.Profiles.Approve')}
+              isMaker={!!apProfile?.submittedById && !!user?.id && apProfile.submittedById.toLowerCase() === user.id.toLowerCase()} />
           </CardContent>
         </Card>
       )}
@@ -274,7 +278,9 @@ export function BusinessPartnerFinanceProfilesPanel({ businessPartnerId, payment
               <Field label="Credit limit"><Input type="number" min="0" step="0.01" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)} disabled={arReadOnly} /></Field>
               <div className="flex items-center gap-3"><Switch id="ar-agent" checked={isWithholdingAgent} onCheckedChange={setIsWithholdingAgent} disabled={arReadOnly} /><Label htmlFor="ar-agent">Customer is a withholding agent</Label></div>
             </div>
-            <ProfileActions ledger="ar" profile={arProfile} busy={busy || arRole?.status !== 'Active'} dirty={arDirty} reason={decisionReason} onReason={setDecisionReason} onSave={saveAr} onDecision={decision} />
+            <ProfileActions ledger="ar" profile={arProfile} busy={busy || arRole?.status !== 'Active'} dirty={arDirty} reason={decisionReason} onReason={setDecisionReason} onSave={saveAr} onDecision={decision}
+              canDecide={hasPermission('Finance.BusinessPartners.Profiles.Approve')}
+              isMaker={!!arProfile?.submittedById && !!user?.id && arProfile.submittedById.toLowerCase() === user.id.toLowerCase()} />
           </CardContent>
         </Card>
       )}
@@ -303,17 +309,20 @@ function PaymentTermSelect({ value, onChange, terms, disabled }: { value: string
   return <Select value={value || '__none__'} disabled={disabled} onValueChange={item => { if (item) onChange(item === '__none__' ? '' : item); }}><SelectTrigger><SelectValue placeholder="Select terms" /></SelectTrigger><SelectContent><SelectItem value="__none__">None</SelectItem>{terms.map((term) => <SelectItem key={term.id} value={term.id}>{term.code} — {term.name}</SelectItem>)}</SelectContent></Select>;
 }
 
-function ProfileActions({ ledger, profile, busy, dirty, reason, onReason, onSave, onDecision }: {
+function ProfileActions({ ledger, profile, busy, dirty, reason, onReason, onSave, onDecision, canDecide, isMaker }: {
   ledger: 'ap' | 'ar'; profile: BusinessPartnerApProfile | BusinessPartnerArProfile | null; busy: boolean; dirty: boolean;
   reason: string; onReason: (value: string) => void; onSave: () => void | Promise<unknown>;
   onDecision: (ledger: 'ap' | 'ar', profile: BusinessPartnerApProfile | BusinessPartnerArProfile, action: 'submit' | 'approve' | 'reject') => void;
+  canDecide: boolean; isMaker: boolean;
 }) {
   return <div className="flex flex-wrap items-end gap-2 border-t pt-4">
     <div className="mr-auto"><p className="text-sm font-medium">{profile ? `Version ${profile.versionNumber} — ${profile.status}` : 'No profile version yet'}</p>{profile?.decisionReason && <p className="text-xs text-muted-foreground">Decision: {profile.decisionReason}</p>}</div>
     {dirty && <p className="text-sm text-muted-foreground">Save draft changes before submitting.</p>}
-    {profile?.status === 'Submitted' && <Input className="max-w-xs" value={reason} onChange={(e) => onReason(e.target.value)} placeholder="Decision reason (required for rejection)" />}
+    {profile?.status === 'Submitted' && isMaker && <p role="status" className="max-w-md text-sm text-muted-foreground">Awaiting an independent Finance approver. You submitted this profile, so maker-checker control prevents you from approving or rejecting it.</p>}
+    {profile?.status === 'Submitted' && !isMaker && !canDecide && <p role="status" className="max-w-md text-sm text-muted-foreground">Awaiting a different user with the Approve Business Partner Finance Profiles permission.</p>}
+    {profile?.status === 'Submitted' && !isMaker && canDecide && <Input className="max-w-xs" value={reason} onChange={(e) => onReason(e.target.value)} placeholder="Decision reason (required for rejection)" />}
     {(!profile || profile.status === 'Draft' || profile.status === 'Rejected' || profile.status === 'Approved') && <Button type="button" variant="outline" disabled={busy} onClick={onSave}>{profile?.status === 'Draft' ? 'Save draft' : 'Create new draft'}</Button>}
     {profile?.status === 'Draft' && <Button type="button" disabled={busy || dirty} onClick={() => onDecision(ledger, profile, 'submit')}>Submit for approval</Button>}
-    {profile?.status === 'Submitted' && <><Button type="button" variant="outline" disabled={busy} onClick={() => onDecision(ledger, profile, 'reject')}>Reject</Button><Button type="button" disabled={busy} onClick={() => onDecision(ledger, profile, 'approve')}>Approve</Button></>}
+    {profile?.status === 'Submitted' && !isMaker && canDecide && <><Button type="button" variant="outline" disabled={busy} onClick={() => onDecision(ledger, profile, 'reject')}>Reject</Button><Button type="button" disabled={busy} onClick={() => onDecision(ledger, profile, 'approve')}>Approve</Button></>}
   </div>;
 }

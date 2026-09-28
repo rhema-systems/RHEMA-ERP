@@ -76,6 +76,24 @@ public sealed class FinanceDimensionAdministrationServiceTests
     }
 
     [Fact]
+    public async Task Definition_code_is_immutable_immediately_after_creation()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var definition = SeedDefinition(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var action = () => service.UpdateDefinitionAsync(definition.Id, new UpsertFinanceDimensionDefinitionDto
+        {
+            Code = "COST_CENTRE", Name = definition.Name, Classification = definition.Classification,
+            ValueSourceType = definition.ValueSourceType, IsActive = true
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*code is immutable*");
+    }
+
+    [Fact]
     public async Task Required_manual_journal_rule_fails_closed_when_value_is_missing()
     {
         await using var fixture = await Fixture.CreateAsync("Required");

@@ -154,7 +154,6 @@ const initialFormData: FormData = {
 };
 
 const partnerTypeOptions = [
-  { value: 'CustomerAndSupplier', label: 'Supplier & Customer', icon: Building2, description: 'One partner with separate payable and receivable accounts' },
   {
     value: 'Supplier',
     label: 'Supplier',
@@ -181,6 +180,7 @@ const partnerTypeOptions = [
 const projectLegacyPartnerType = (
   roles: CanonicalPartnerRole[]
 ): PartnerType => {
+  if (roles.includes('Supplier') && roles.includes('Customer')) return 'CustomerAndSupplier';
   if (roles.includes('Supplier') && roles.includes('Contractor')) return 'Both';
   if (roles.includes('Supplier')) return 'Supplier';
   if (roles.includes('Contractor')) return 'Contractor';
@@ -298,11 +298,16 @@ export default function NewBusinessPartnerPage() {
       return;
     }
 
+    // PartnerType is a compatibility projection for older Procurement consumers. It is not a
+    // user-maintained field: always derive it from the canonical role cards at submission time so
+    // a hidden/stale legacy value can never block creation.
+    const legacyPartnerType = projectLegacyPartnerType(formData.roleTypes);
+
     try {
       setSaving(true);
 
       const createData: CreateBusinessPartnerDto = {
-        partnerType: formData.partnerType,
+        partnerType: legacyPartnerType,
         roleTypes: formData.roleTypes,
         partnerName: formData.partnerName,
         tradingName: formData.tradingName || undefined,

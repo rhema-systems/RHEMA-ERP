@@ -953,6 +953,39 @@ public class WorkflowEngine : IWorkflowEngine
             config ??= new WorkflowStepConfigurationDto();
             config.ApprovalConfig = policyResolution.ApprovalConfig;
         }
+
+        // Explicit workflow-level maker-checker rules take precedence over a tenant's broader
+        // Procurement SOD toggle. Apply the guard to rejection as well as approval: returning
+        // one's own submission is still a checker decision and must remain independent.
+        var configuredSeparation = config?.ApprovalConfig is
+            { PreventInitiatorApproval: true } or { RequireDistinctApprovers: true };
+        var enforceSeparation = configuredSeparation || _sodPolicy is null ||
+            await _sodPolicy.IsRequiredForSourceAsync(
+                instance.TenantId, instance.EntityType?.Name ?? instance.EntityType?.Code, instance.EntityId);
+        var approvalGuardErrors = WorkflowApprovalGuardValidator.Validate(
+            config?.ApprovalConfig,
+            instance.InitiatedById,
+            approvals,
+            userId,
+            enforceSeparation);
+        if (approvalGuardErrors.Count > 0)
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                CurrentStepId = stepDefinition.Id,
+                Message = string.Join(" ", approvalGuardErrors),
+                Errors = approvalGuardErrors.Select(message => new WorkflowExecutionError
+                {
+                    Code = "ApprovalPolicyViolation",
+                    Message = message,
+                    StepId = stepDefinition.Id
+                }).ToList()
+            };
+        }
+
         if (action != WorkflowStepAction.Reject)
         {
             object? signatureResultData = resultData;
@@ -975,31 +1008,6 @@ public class WorkflowEngine : IWorkflowEngine
                     CurrentStepId = stepDefinition.Id, Message = string.Join(" ", signatureErrors),
                     Errors = signatureErrors.Select(message => new WorkflowExecutionError
                     { Code = "ElectronicSignatureRequired", Message = message, StepId = stepDefinition.Id }).ToList()
-                };
-            }
-
-            var enforceSeparation = _sodPolicy is null || await _sodPolicy.IsRequiredForSourceAsync(
-                instance.TenantId, instance.EntityType?.Name ?? instance.EntityType?.Code, instance.EntityId);
-            var approvalGuardErrors = WorkflowApprovalGuardValidator.Validate(
-                config?.ApprovalConfig,
-                instance.InitiatedById,
-                approvals,
-                userId, enforceSeparation);
-            if (approvalGuardErrors.Count > 0)
-            {
-                return new WorkflowExecutionResult
-                {
-                    Success = false,
-                    Status = instance.Status,
-                    WorkflowInstanceId = instance.Id,
-                    CurrentStepId = stepDefinition.Id,
-                    Message = string.Join(" ", approvalGuardErrors),
-                    Errors = approvalGuardErrors.Select(message => new WorkflowExecutionError
-                    {
-                        Code = "ApprovalPolicyViolation",
-                        Message = message,
-                        StepId = stepDefinition.Id
-                    }).ToList()
                 };
             }
 

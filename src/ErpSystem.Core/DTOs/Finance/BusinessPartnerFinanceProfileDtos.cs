@@ -114,3 +114,18 @@ public sealed class BusinessPartnerFinanceProfileDecisionRequest
 {
     public string? Reason { get; set; }
 }
+
+public sealed class BusinessPartnerFinanceProfileApprovalQueueItemDto
+{
+    public Guid BusinessPartnerId { get; set; }
+    public string PartnerCode { get; set; } = string.Empty;
+    public string PartnerName { get; set; } = string.Empty;
+    public Guid ProfileId { get; set; }
+    public string Ledger { get; set; } = string.Empty;
+    public int VersionNumber { get; set; }
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public Guid SubmittedById { get; set; }
+    public string? SubmittedBy { get; set; }
+    public DateTime SubmittedAtUtc { get; set; }
+}

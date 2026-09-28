@@ -69,7 +69,8 @@ public sealed class AccountClassificationService : IAccountClassificationService
                 && ids.Contains(item.AccountClassificationId.Value)
                 && !item.IsDeleted
                 && !item.FinancialStatementRow.IsDeleted
-                && item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+                && (item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+                    || item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Submitted)
                 && !item.FinancialStatementRow.FinancialStatementLayoutVersion.IsDeleted)
             .Select(item => new { ClassificationId = item.AccountClassificationId!.Value, item.IncludeClassificationDescendants })
             .Distinct()
@@ -115,7 +116,8 @@ public sealed class AccountClassificationService : IAccountClassificationService
                     || (item.IncludeClassificationDescendants && draftSelectorIds.Contains(item.AccountClassificationId.Value)))
                 && !item.IsDeleted
                 && !item.FinancialStatementRow.IsDeleted
-                && item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+                && (item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+                    || item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Submitted)
                 && !item.FinancialStatementRow.FinancialStatementLayoutVersion.IsDeleted)
             .Select(item => new AccountClassificationLayoutUsageDto
             {
@@ -124,7 +126,9 @@ public sealed class AccountClassificationService : IAccountClassificationService
                 LayoutName = item.FinancialStatementRow.FinancialStatementLayoutVersion.FinancialStatementLayout.Name,
                 VersionId = item.FinancialStatementRow.FinancialStatementLayoutVersionId,
                 VersionNumber = item.FinancialStatementRow.FinancialStatementLayoutVersion.VersionNumber,
-                VersionStatus = "Draft", RowCode = item.FinancialStatementRow.RowCode,
+                VersionStatus = item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Submitted
+                    ? "Submitted" : "Draft",
+                RowCode = item.FinancialStatementRow.RowCode,
                 IsHistoricalSnapshot = false
             }).ToListAsync(cancellationToken);
         var publishedReferenceRows = await _db.FinancialStatementPublicationAccounts.AsNoTracking()
@@ -317,11 +321,10 @@ public sealed class AccountClassificationService : IAccountClassificationService
                 "Classification code must start with an uppercase letter and contain only uppercase letters, numbers and underscores (maximum 50 characters).");
         if (await _db.AccountClassifications.AnyAsync(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && item.Code == code && !item.IsDeleted && item.Id != currentId, cancellationToken))
             throw new InvalidOperationException("Classification code already exists in this accounting book.");
-        if (role.HasValue && !IsRepeatableSystemRole(role.Value)
-            && await _db.AccountClassifications.AnyAsync(item => item.TenantId == TenantId
-                && item.AccountingBookId == book.Id && item.SystemRole == role && !item.IsDeleted
-                && item.Id != currentId, cancellationToken))
-            throw new InvalidOperationException($"System role {role} may be assigned only once in an accounting book.");
+        // A system role describes the semantic family of a posting classification; it is not an
+        // account selector. Modules that require an exact posting account keep that choice in their
+        // governed configuration (for example FixedAssetCategory, tax/WHT configuration and AP/AR
+        // profiles). Multiple category-, tax- or subledger-specific leaves may therefore share a role.
         if (request.ParentClassificationId.HasValue)
         {
             if (request.ParentClassificationId == currentId) throw new InvalidOperationException("A classification cannot be its own parent.");
@@ -360,9 +363,6 @@ public sealed class AccountClassificationService : IAccountClassificationService
         };
         if (!valid) throw new InvalidOperationException($"System role {role} is incompatible with core account type {accountType}.");
     }
-
-    private static bool IsRepeatableSystemRole(AccountClassificationSystemRole role) =>
-        role is AccountClassificationSystemRole.Cash or AccountClassificationSystemRole.Bank;
 
     private static void EnsureManualMaintenanceAllowed(AccountingBook book)
     {
@@ -434,7 +434,8 @@ public sealed class AccountClassificationService : IAccountClassificationService
                 || (item.IncludeClassificationDescendants && selectorIds.Contains(item.AccountClassificationId.Value)))
             && !item.IsDeleted
             && !item.FinancialStatementRow.IsDeleted
-            && item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+            && (item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Draft
+                || item.FinancialStatementRow.FinancialStatementLayoutVersion.Status == FinancialStatementLayoutVersionStatus.Submitted)
             && !item.FinancialStatementRow.FinancialStatementLayoutVersion.IsDeleted,
             cancellationToken);
     }

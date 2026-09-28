@@ -8551,10 +8551,6 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
-                    b.HasIndex("TenantId", "AccountingBookId", "SystemRole")
-                        .IsUnique()
-                        .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
-
                     b.HasIndex("TenantId", "AccountingBookId", "ParentClassificationId", "DisplayOrder");
 
                     b.ToTable("AccountClassifications", (string)null);
@@ -12345,6 +12341,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("FinanceDimensionSetId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("FiscalPeriodId")
                         .HasColumnType("uniqueidentifier");
 
@@ -12376,12 +12375,15 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("BudgetRevisionId");
 
+                    b.HasIndex("FinanceDimensionSetId");
+
                     b.HasIndex("FiscalPeriodId");
 
                     b.HasIndex("SegmentValueId");
 
-                    b.HasIndex("TenantId", "BudgetRevisionId", "SegmentValueId", "AccountId", "FiscalPeriodId")
+                    b.HasIndex("TenantId", "BudgetRevisionId", "SegmentValueId", "AccountId", "FiscalPeriodId", "FinanceDimensionSetId")
                         .IsUnique()
+                        .HasDatabaseName("UX_BudgetRevisionLines_Cell")
                         .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("BudgetRevisionLines");
@@ -18046,6 +18048,20 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<DateTime?>("LastDecisionAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("LastDecisionById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LastDecisionByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("LastDecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -18088,6 +18104,16 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("SubmittedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SubmittedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -186642,6 +186668,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSet", "FinanceDimensionSet")
+                        .WithMany()
+                        .HasForeignKey("FinanceDimensionSetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "FiscalPeriod")
                         .WithMany()
                         .HasForeignKey("FiscalPeriodId")
@@ -186661,6 +186692,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Account");
 
                     b.Navigation("BudgetRevision");
+
+                    b.Navigation("FinanceDimensionSet");
 
                     b.Navigation("FiscalPeriod");
 

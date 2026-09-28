@@ -46,6 +46,12 @@ import type {
 import {
   FixedAssetReportQuery,
   FixedAssetRegister,
+  FixedAssetAdditionsReport,
+  FixedAssetDepreciationReport,
+  FixedAssetAccumulatedDepreciationReport,
+  FixedAssetValuationMovementReport,
+  FixedAssetRollForwardReport,
+  FixedAssetGlReconciliationReport,
   AssetDisposalReportItem,
   AssetTransferReportItem
 } from '@/types/fixed-asset-reports';
@@ -55,10 +61,15 @@ class FixedAssetsDataService {
     const params = new URLSearchParams();
     if (query.fromDate) params.append('fromDate', query.fromDate);
     if (query.toDate) params.append('toDate', query.toDate);
+    if (query.assetId) params.append('assetId', query.assetId);
     if (query.categoryId) params.append('categoryId', query.categoryId);
+    if (query.accountId) params.append('accountId', query.accountId);
+    if (query.fiscalPeriodId) params.append('fiscalPeriodId', query.fiscalPeriodId);
     if (query.status !== undefined) params.append('status', query.status.toString());
     if (query.searchTerm) params.append('searchTerm', query.searchTerm);
     if (query.bookClassification) params.append('bookClassification', query.bookClassification);
+    if (query.location) params.append('location', query.location);
+    if (query.segmentString) params.append('segmentString', query.segmentString);
     const qs = params.toString();
     return qs ? `?${qs}` : '';
   }
@@ -320,6 +331,26 @@ class FixedAssetsDataService {
     return apiService.get<FixedAssetRegister>(`/finance/fixed-assets/reports/register${qs}`);
   }
 
+  async getAdditionsReport(query: FixedAssetReportQuery): Promise<FixedAssetAdditionsReport> {
+    const qs = this.buildQueryString(query);
+    return apiService.get<FixedAssetAdditionsReport>(`/finance/fixed-assets/reports/additions${qs}`);
+  }
+
+  async getDepreciationReport(query: FixedAssetReportQuery): Promise<FixedAssetDepreciationReport> {
+    const qs = this.buildQueryString(query);
+    return apiService.get<FixedAssetDepreciationReport>(`/finance/fixed-assets/reports/depreciation${qs}`);
+  }
+
+  async getAccumulatedDepreciationReport(query: FixedAssetReportQuery): Promise<FixedAssetAccumulatedDepreciationReport> {
+    const qs = this.buildQueryString(query);
+    return apiService.get<FixedAssetAccumulatedDepreciationReport>(`/finance/fixed-assets/reports/accumulated-depreciation${qs}`);
+  }
+
+  async getValuationReport(query: FixedAssetReportQuery): Promise<FixedAssetValuationMovementReport> {
+    const qs = this.buildQueryString(query);
+    return apiService.get<FixedAssetValuationMovementReport>(`/finance/fixed-assets/reports/valuations${qs}`);
+  }
+
   async getDisposalReport(query: FixedAssetReportQuery): Promise<AssetDisposalReportItem[]> {
     const qs = this.buildQueryString(query);
     return apiService.get<AssetDisposalReportItem[]>(`/finance/fixed-assets/reports/disposals${qs}`);
@@ -328,6 +359,16 @@ class FixedAssetsDataService {
   async getTransferReport(query: FixedAssetReportQuery): Promise<AssetTransferReportItem[]> {
     const qs = this.buildQueryString(query);
     return apiService.get<AssetTransferReportItem[]>(`/finance/fixed-assets/reports/transfers${qs}`);
+  }
+
+  async getRollForwardReport(query: FixedAssetReportQuery): Promise<FixedAssetRollForwardReport> {
+    const qs = this.buildQueryString(query);
+    return apiService.get<FixedAssetRollForwardReport>(`/finance/fixed-assets/reports/roll-forward${qs}`);
+  }
+
+  async getGlReconciliationReport(query: FixedAssetReportQuery): Promise<FixedAssetGlReconciliationReport> {
+    const qs = this.buildQueryString(query);
+    return apiService.get<FixedAssetGlReconciliationReport>(`/finance/fixed-assets/reports/gl-reconciliation${qs}`);
   }
 
   async downloadExcel(reportType: string, query: FixedAssetReportQuery): Promise<{ fileName: string; blob: Blob }> {

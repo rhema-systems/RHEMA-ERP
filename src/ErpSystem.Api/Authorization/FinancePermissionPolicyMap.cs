@@ -669,8 +669,10 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> FinancialStatementLayoutPolicy(string action)
         => action switch
         {
-            "PublishVersion" => One(FinancePermissions.PublishFinancialStatementLayouts),
+            "PublishVersion" or "GetApprovalQueue" or "DecideVersion" =>
+                One(FinancePermissions.PublishFinancialStatementLayouts),
             "CreateLayout" or "UpdateLayout" or "CreateDraftVersion" or "CloneProtectedStandard" or "ReplaceDraftRows"
+                or "InitializeFromStandards" or "DiscardUnusedDraft" or "SubmitVersion"
                 or "DownloadImportTemplate"
                 or "PreviewJsonImport" or "CommitJsonImport"
                 or "PreviewWorkbookImport" or "CommitWorkbookImport"

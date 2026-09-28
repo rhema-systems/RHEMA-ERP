@@ -934,6 +934,15 @@ public class BudgetController : ControllerBase
     // ========================================================================
 
     /// <summary>
+    /// Diagnoses reservation, posting, reversal, source-document, and primary-book
+    /// reconciliation exceptions without mutating accounting or workflow data.
+    /// </summary>
+    [HttpGet("reconciliation")]
+    public async Task<ActionResult<FinanceBudgetReconciliationReportDto>> GetBudgetReconciliation(
+        CancellationToken cancellationToken)
+        => Ok(await _budgetService.GetBudgetReconciliationAsync(cancellationToken));
+
+    /// <summary>
     /// Base-currency revenue/expense totals for a scenario, aggregated from approved returns.
     /// </summary>
     /// <response code="200">Scenario summary returned successfully.</response>

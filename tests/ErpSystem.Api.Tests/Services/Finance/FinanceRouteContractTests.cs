@@ -125,6 +125,20 @@ public sealed class FinanceRouteContractTests
             "book lifecycle decisions must run through AccountingBookService");
     }
 
+    [Theory]
+    [InlineData("BusinessPartner")]
+    [InlineData("business_partner")]
+    public void BusinessPartner_ShouldBeVisibleInFinanceInboxButUseItsOwnDecisionEndpoint(string entityType)
+    {
+        var partnerId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
+        FinanceApprovalsController.IsFinanceQueueEntity(entityType).Should().BeTrue();
+        FinanceApprovalsController.IsFinanceEntity(entityType).Should().BeFalse(
+            "Business Partner decisions must run through the Procurement status adapter");
+        FinanceApprovalsController.ResolveDetailHref(entityType, partnerId, null).Should().Be(
+            "/procurement/business-partners/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    }
+
     private sealed record FrontendCall(string Verb, string Route, string File);
 
     private static bool MatchesAnyBackendRoute(FrontendCall call, IReadOnlyList<(string Verb, string[] Segments)> backendRoutes)

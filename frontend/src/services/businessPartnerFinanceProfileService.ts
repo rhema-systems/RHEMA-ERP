@@ -78,6 +78,20 @@ export interface BusinessPartnerFinanceProfileSet {
   roles: BusinessPartnerFinanceRole[];
 }
 
+export interface BusinessPartnerFinanceProfileApprovalQueueItem {
+  businessPartnerId: string;
+  partnerCode: string;
+  partnerName: string;
+  profileId: string;
+  ledger: 'ap' | 'ar';
+  versionNumber: number;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  submittedById: string;
+  submittedBy?: string;
+  submittedAtUtc: string;
+}
+
 export interface SaveApProfile {
   businessPartnerRoleId: string;
   effectiveFrom: string;
@@ -109,6 +123,11 @@ export interface SaveArProfile {
 const root = `${API_BASE_URL}/finance/business-partner-profiles`;
 
 export const businessPartnerFinanceProfileService = {
+  async getPendingApprovals() {
+    return result<BusinessPartnerFinanceProfileApprovalQueueItem[]>(
+      await fetch(`${root}/pending-approvals`, { headers: authHeaders() })
+    );
+  },
   async get(partnerId: string) {
     return result<BusinessPartnerFinanceProfileSet>(
       await fetch(`${root}/${partnerId}`, { headers: authHeaders() })

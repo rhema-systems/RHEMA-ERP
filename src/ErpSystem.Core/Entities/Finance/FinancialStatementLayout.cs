@@ -67,6 +67,23 @@ public class FinancialStatementLayoutVersion : TenantEntity
     [MaxLength(200)]
     public string? PublishedByName { get; set; }
 
+    public DateTime? SubmittedAt { get; set; }
+
+    public Guid? SubmittedById { get; set; }
+
+    [MaxLength(200)]
+    public string? SubmittedByName { get; set; }
+
+    public DateTime? LastDecisionAt { get; set; }
+
+    public Guid? LastDecisionById { get; set; }
+
+    [MaxLength(200)]
+    public string? LastDecisionByName { get; set; }
+
+    [MaxLength(500)]
+    public string? LastDecisionReason { get; set; }
+
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
