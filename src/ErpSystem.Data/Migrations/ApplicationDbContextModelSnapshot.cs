@@ -12326,9 +12326,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("BudgetRevisionId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("FinanceDimensionSetId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -187990,11 +187987,6 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSet", "FinanceDimensionSet")
-                        .WithMany()
-                        .HasForeignKey("FinanceDimensionSetId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -188008,8 +188000,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("FinanceDimensionSet");
 
                     b.Navigation("FiscalPeriod");
-
-                    b.Navigation("FinanceDimensionSet");
 
                     b.Navigation("Tenant");
                 });
